@@ -796,7 +796,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_voice_corpus: {
+        Args: {
+          match_count?: number
+          min_confidence?: number
+          query_embedding: string
+          query_venue_id: string
+          source_type_filter?: string[]
+        }
+        Returns: {
+          chunk_text: string
+          confidence_score: number
+          corpus_id: string
+          id: string
+          similarity: number
+          source_type: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
