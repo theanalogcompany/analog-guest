@@ -55,5 +55,6 @@ Migrations live in `db/migrations/` numbered sequentially. Each migration is han
 
 - `001_initial_schema.sql` — 13 tables: venues, operators, operator_venues, venue_configs, guests, mechanics, transactions, messages, engagement_events, guest_states, voice_corpus, voice_embeddings, audit_log. Includes the shared `updated_at` trigger function.
 - `002_add_message_reactions.sql` — adds `reaction_type` column to `messages`, extends the category check to include `'reaction'`, updates the content constraint to allow rows with only a reaction_type, and adds a consistency check between `category` and `reaction_type`.
+- `003_ai_module_refinements.sql` — batches schema changes from AI module design: renames `messages.confidence_score` to `voice_fidelity` for terminology consistency; adds `review_reason` and `pending_until` columns to support routing audit trail and the hold-and-fallback workflow; extends `messages.category` check to include `'acknowledgment'` for fallback messages.
 
 RLS policies will be added in a future `003_enable_rls.sql` migration before any external user gets DB access.
