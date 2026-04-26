@@ -40,3 +40,20 @@ Treat the database, messaging, and LLM providers as swappable. Code should depen
 - For any new file, propose the path first
 - When unsure about product behavior, ask — do not guess
 - Commit messages: lowercase, imperative ("add inbound webhook handler"), no emoji
+
+## Scripts
+
+One-off scripts live in `scripts/` and run via `tsx` with env loading from `.env.local`.
+
+- `npm run send-test -- <phone> [body]` — sends a test message via the messaging module to the given E.164 phone number. Requires `TEST_VENUE_ID` in `.env.local` pointing to a venue row that has `messaging_phone_number` set. Used to validate the messaging pipeline end-to-end.
+
+To add a new script: drop the file in `scripts/`, add a `package.json` entry of the form `"<name>": "tsx --env-file=.env.local scripts/<file>.ts"`, run with `npm run <name> -- <args>`.
+
+## Database migrations
+
+Migrations live in `db/migrations/` numbered sequentially. Each migration is hand-written SQL, run against Supabase via the SQL Editor, then `npm run db:types` regenerates `db/types.ts`.
+
+- `001_initial_schema.sql` — 13 tables: venues, operators, operator_venues, venue_configs, guests, mechanics, transactions, messages, engagement_events, guest_states, voice_corpus, voice_embeddings, audit_log. Includes the shared `updated_at` trigger function.
+- `002_add_message_reactions.sql` — adds `reaction_type` column to `messages`, extends the category check to include `'reaction'`, updates the content constraint to allow rows with only a reaction_type, and adds a consistency check between `category` and `reaction_type`.
+
+RLS policies will be added in a future `003_enable_rls.sql` migration before any external user gets DB access.
