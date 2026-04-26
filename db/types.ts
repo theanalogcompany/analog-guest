@@ -202,9 +202,11 @@ export type Database = {
         Row: {
           created_at: string
           created_via: string
+          distance_to_venue_miles: number | null
           email: string | null
           first_contacted_at: string | null
           first_name: string | null
+          home_postal_code: string | null
           id: string
           last_inbound_at: string | null
           last_interaction_at: string | null
@@ -220,9 +222,11 @@ export type Database = {
         Insert: {
           created_at?: string
           created_via: string
+          distance_to_venue_miles?: number | null
           email?: string | null
           first_contacted_at?: string | null
           first_name?: string | null
+          home_postal_code?: string | null
           id?: string
           last_inbound_at?: string | null
           last_interaction_at?: string | null
@@ -238,9 +242,11 @@ export type Database = {
         Update: {
           created_at?: string
           created_via?: string
+          distance_to_venue_miles?: number | null
           email?: string | null
           first_contacted_at?: string | null
           first_name?: string | null
+          home_postal_code?: string | null
           id?: string
           last_inbound_at?: string | null
           last_interaction_at?: string | null
@@ -686,6 +692,7 @@ export type Database = {
       }
       voice_corpus: {
         Row: {
+          added_by_operator_id: string | null
           confidence_score: number | null
           content: string
           created_at: string
@@ -701,6 +708,7 @@ export type Database = {
           venue_id: string
         }
         Insert: {
+          added_by_operator_id?: string | null
           confidence_score?: number | null
           content: string
           created_at?: string
@@ -716,6 +724,7 @@ export type Database = {
           venue_id: string
         }
         Update: {
+          added_by_operator_id?: string | null
           confidence_score?: number | null
           content?: string
           created_at?: string
@@ -731,6 +740,13 @@ export type Database = {
           venue_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "voice_corpus_added_by_operator_id_fkey"
+            columns: ["added_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "voice_corpus_venue_id_fkey"
             columns: ["venue_id"]
@@ -749,7 +765,9 @@ export type Database = {
           embedding: string | null
           embedding_model: string
           id: string
+          last_retrieved_at: string | null
           metadata: Json
+          retrieval_count: number
           venue_id: string
         }
         Insert: {
@@ -760,7 +778,9 @@ export type Database = {
           embedding?: string | null
           embedding_model: string
           id?: string
+          last_retrieved_at?: string | null
           metadata?: Json
+          retrieval_count?: number
           venue_id: string
         }
         Update: {
@@ -771,7 +791,9 @@ export type Database = {
           embedding?: string | null
           embedding_model?: string
           id?: string
+          last_retrieved_at?: string | null
           metadata?: Json
+          retrieval_count?: number
           venue_id?: string
         }
         Relationships: [
