@@ -1,8 +1,9 @@
 import { createServerClient as createSupabaseServerClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import type { Database } from '@/db/types'
 
-export async function createServerClient(): Promise<SupabaseClient> {
+export async function createServerClient(): Promise<SupabaseClient<Database>> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   if (!url) throw new Error('Missing env var: NEXT_PUBLIC_SUPABASE_URL')
@@ -10,7 +11,7 @@ export async function createServerClient(): Promise<SupabaseClient> {
 
   const cookieStore = await cookies()
 
-  return createSupabaseServerClient(url, key, {
+  return createSupabaseServerClient<Database>(url, key, {
     cookies: {
       getAll() {
         return cookieStore.getAll()

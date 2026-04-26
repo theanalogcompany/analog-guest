@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:types": "npx supabase gen types typescript --project-id fudibprfkhvfdjesvbzl --schema public > db/types.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
