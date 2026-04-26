@@ -345,6 +345,7 @@ export type Database = {
           parent_draft_id: string | null
           prompt_version: string | null
           provider_message_id: string | null
+          reaction_type: string | null
           reply_to_message_id: string | null
           reviewed_at: string | null
           reviewed_by_operator_id: string | null
@@ -369,6 +370,7 @@ export type Database = {
           parent_draft_id?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
+          reaction_type?: string | null
           reply_to_message_id?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
@@ -393,6 +395,7 @@ export type Database = {
           parent_draft_id?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
+          reaction_type?: string | null
           reply_to_message_id?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
