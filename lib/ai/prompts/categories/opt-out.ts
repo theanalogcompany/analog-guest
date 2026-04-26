@@ -1,0 +1,1 @@
+export const OPT_OUT_INSTRUCTIONS = `The guest is asking to stop receiving messages, in any wording. Acknowledge gracefully and confirm you will stop, in one or two short lines. Do not apologize at length, do not try to retain them, and do not ask them why. The tone should be respectful and final — like a person quietly nodding, not a system reading a compliance script.`

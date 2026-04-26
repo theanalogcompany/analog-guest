@@ -1,0 +1,1 @@
+export const MANUAL_INSTRUCTIONS = `An operator at the venue has asked for a specific message to go out. The intent is in the additional context — treat it as the operator's note about what they want communicated, then write it in the venue's voice. Honor what the operator wants to say, but adapt the wording so it does not sound copy-pasted from a memo. Keep it short.`
