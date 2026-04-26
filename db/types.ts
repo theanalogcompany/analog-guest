@@ -332,7 +332,6 @@ export type Database = {
         Row: {
           body: string
           category: string | null
-          confidence_score: number | null
           created_at: string
           delivered_at: string | null
           direction: string
@@ -343,21 +342,23 @@ export type Database = {
           id: string
           media_urls: string[]
           parent_draft_id: string | null
+          pending_until: string | null
           prompt_version: string | null
           provider_message_id: string | null
           reaction_type: string | null
           reply_to_message_id: string | null
+          review_reason: string | null
           reviewed_at: string | null
           reviewed_by_operator_id: string | null
           sent_at: string | null
           status: string
           updated_at: string
           venue_id: string
+          voice_fidelity: number | null
         }
         Insert: {
           body?: string
           category?: string | null
-          confidence_score?: number | null
           created_at?: string
           delivered_at?: string | null
           direction: string
@@ -368,21 +369,23 @@ export type Database = {
           id?: string
           media_urls?: string[]
           parent_draft_id?: string | null
+          pending_until?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
+          review_reason?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
           status?: string
           updated_at?: string
           venue_id: string
+          voice_fidelity?: number | null
         }
         Update: {
           body?: string
           category?: string | null
-          confidence_score?: number | null
           created_at?: string
           delivered_at?: string | null
           direction?: string
@@ -393,16 +396,19 @@ export type Database = {
           id?: string
           media_urls?: string[]
           parent_draft_id?: string | null
+          pending_until?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
+          review_reason?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
           status?: string
           updated_at?: string
           venue_id?: string
+          voice_fidelity?: number | null
         }
         Relationships: [
           {
