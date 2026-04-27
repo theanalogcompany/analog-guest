@@ -59,4 +59,4 @@ Migrations live in `db/migrations/` numbered sequentially. Each migration is han
 - `004_match_voice_corpus_function.sql` — adds Postgres function `match_voice_corpus(venue_id, query_embedding, match_count, source_type_filter, min_confidence)` for pgvector cosine similarity search over a venue's voice corpus. Used by the RAG module's `retrieveContext` via Supabase RPC.
 - `005_post_recognition_refinements.sql` — batches schema changes from RAG/recognition module work: adds retrieval analytics columns to voice_embeddings, authorship column to voice_corpus, extends operator_venues permission_level to include 'analog_admin', adds home_postal_code and distance_to_venue_miles to guests for the recognition distance multiplier, extends engagement_events.event_type to include 'referral_converted'.
 
-RLS policies will be added in a future `003_enable_rls.sql` migration before any external user gets DB access.
+RLS policies will be added in a future migration before any external user gets DB access.
