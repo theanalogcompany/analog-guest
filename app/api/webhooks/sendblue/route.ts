@@ -38,11 +38,18 @@ async function handleInbound(
   payload: SendblueWebhookPayload,
   supabase: AdminSupabaseClient,
 ): Promise<Response> {
-  // Sendblue convention: payload.number is always the recipient,
-  // payload.from_number is always the sender. On inbound the venue is the
-  // recipient and the guest is the sender.
-  const venueNumber = payload.number
+  // Per Sendblue docs, on inbound webhooks `number` is the guest's end-user
+  // number and `from_number` is also the guest's number; the venue's dedicated
+  // Sendblue line appears in `to_number` (with `sendblue_number` as a fallback).
+  const venueNumber = payload.to_number ?? payload.sendblue_number
   const guestNumber = payload.from_number
+
+  if (!venueNumber) {
+    console.warn('webhook inbound: no venue number in payload', {
+      messageHandle: payload.message_handle,
+    })
+    return new Response('OK', { status: 200 })
+  }
 
   const { data: venue, error: venueError } = await supabase
     .from('venues')
