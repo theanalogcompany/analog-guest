@@ -8,13 +8,17 @@
     "start": "next start",
     "lint": "eslint",
     "db:types": "npx supabase gen types typescript --project-id fudibprfkhvfdjesvbzl --schema public > db/types.ts",
-    "send-test": "tsx --env-file=.env.local scripts/send-test-message.ts"
+    "send-test": "tsx --env-file=.env.local scripts/send-test-message.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.1",
     "ai": "^6.0.168",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -30,6 +34,7 @@
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.5"
   }
 }

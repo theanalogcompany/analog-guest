@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/db/admin'
 import type { RawSignals, RecognitionResult } from './types'
+import { dedupeVisitsByLocalDate } from './visit-dedupe'
 
 const VISIT_LOOKBACK_DAYS = 90
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -7,10 +8,11 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 /**
  * Internal: load all raw signals for a guest at a venue from the database.
  *
- * Server-only. Uses the admin DB client, which bypasses RLS. Issues four
- * SELECTs in parallel; on any DB error returns a failure result. Visits and
- * the visit-date list are deduplicated by calendar date (UTC) — multiple
- * transactions on the same day count as one visit.
+ * Server-only. Uses the admin DB client, which bypasses RLS. Issues five
+ * SELECTs in parallel (venue timezone, transactions, outbound/inbound
+ * message counts, engagement events). Visits and the visit-date list are
+ * deduplicated by calendar date in the venue's local timezone — multiple
+ * transactions on the same local day count as one visit.
  */
 export async function loadSignals({
   guestId,
@@ -23,11 +25,17 @@ export async function loadSignals({
   const lookbackIso = new Date(Date.now() - VISIT_LOOKBACK_DAYS * MS_PER_DAY).toISOString()
 
   const [
+    venueResult,
     transactionsResult,
     outboundMessagesResult,
     inboundMessagesResult,
     engagementEventsResult,
   ] = await Promise.all([
+    supabase
+      .from('venues')
+      .select('timezone')
+      .eq('id', venueId)
+      .maybeSingle(),
     supabase
       .from('transactions')
       .select('amount_cents, occurred_at')
@@ -53,6 +61,14 @@ export async function loadSignals({
       .eq('venue_id', venueId)
       .eq('guest_id', guestId),
   ])
+
+  if (venueResult.error) {
+    return { ok: false, error: venueResult.error.message, errorCode: 'load_venue_failed' }
+  }
+  if (!venueResult.data) {
+    return { ok: false, error: 'venue_not_found' }
+  }
+  const timezone = venueResult.data.timezone
 
   if (transactionsResult.error) {
     return {
@@ -83,15 +99,13 @@ export async function loadSignals({
     }
   }
 
-  const dateSet = new Set<string>()
   let totalSpentCents = 0
+  const occurredAtList: string[] = []
   for (const row of transactionsResult.data ?? []) {
     totalSpentCents += row.amount_cents
-    dateSet.add(row.occurred_at.slice(0, 10)) // 'YYYY-MM-DD' (UTC)
+    occurredAtList.push(row.occurred_at)
   }
-  const visitDateList = Array.from(dateSet)
-    .sort()
-    .map((d) => new Date(d))
+  const visitDateList = dedupeVisitsByLocalDate(occurredAtList, timezone)
 
   const visitsLast90Days = visitDateList.length
   const lastVisit = visitDateList[visitDateList.length - 1]
