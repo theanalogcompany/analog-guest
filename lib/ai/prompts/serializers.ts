@@ -117,7 +117,16 @@ export function venueInfoToProse(venueInfo: VenueInfo): string {
   const contactBlock = formatContact(venueInfo.contact)
   if (contactBlock) lines.push(`- Contact:\n${contactBlock}`)
 
-  return lines.join('\n')
+  let result = lines.join('\n')
+
+  if (venueInfo.currentContext.length > 0) {
+    const contextSection = `## Current context\n${venueInfo.currentContext
+      .map((n) => n.content)
+      .join('\n\n')}`
+    result = `${result}\n\n${contextSection}`
+  }
+
+  return result
 }
 
 export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
