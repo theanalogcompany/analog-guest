@@ -8,8 +8,8 @@ import {
 import { retrieveContext } from '@/lib/rag'
 import type { Classification, CorpusMatch, RuntimeContext } from './types'
 
-const STRONG_MATCH_SIMILARITY = 0.65
-const MIN_STRONG_MATCHES = 3
+const STRONG_MATCH_SIMILARITY = 0.3
+const MIN_STRONG_MATCHES = 1
 const SEND_FIDELITY_FLOOR = 0.4
 const CORPUS_RETRIEVE_LIMIT = 8
 
@@ -39,11 +39,13 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
 
 /**
  * Internal: retrieve voice-corpus matches and enforce the orchestrator's
- * threshold rule — at least MIN_STRONG_MATCHES (3) chunks scoring at or
- * above STRONG_MATCH_SIMILARITY (0.65). Below that, fail closed; the prompt
- * doesn't have enough venue voice to ground a generation.
+ * threshold rule — at least MIN_STRONG_MATCHES (1) chunk scoring at or above
+ * STRONG_MATCH_SIMILARITY (0.3). Below that, fail closed; the prompt doesn't
+ * have enough venue voice to ground a generation.
  *
- * TODO: calibrate against real corpus data after first 100 inbound messages.
+ * TODO(THE-158): per-category thresholds — generic messages like "hi"
+ * shouldn't need the same corpus depth as topic-specific ones. Calibrate
+ * against real corpus data after first 100 inbound messages.
  */
 export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMatch[]> {
   const query =
