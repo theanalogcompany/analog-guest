@@ -6,6 +6,10 @@
 // because Sendblue retries on 5xx and we only want retries on transient
 // infra failures, not on "venue not found" / "schema mismatch" / etc.
 
+import { waitUntil } from '@vercel/functions'
+// Aliased: this file already has a local `handleInbound` for webhook-payload
+// handling; the agent's handleInbound is the orchestrator we hand off to.
+import { handleInbound as runInboundAgent } from '@/lib/agent'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   SendblueWebhookPayloadSchema,
@@ -148,27 +152,33 @@ async function handleInbound(
     return new Response('OK', { status: 200 })
   }
 
-  const { error: insertMessageError } = await supabase.from('messages').insert({
-    venue_id: venue.id,
-    guest_id: guestId,
-    direction: 'inbound',
-    status: 'received',
-    body: payload.content ?? '',
-    media_urls: mediaUrls,
-    provider_message_id: payload.message_handle,
-  })
-  if (insertMessageError) {
+  const { data: insertedMessage, error: insertMessageError } = await supabase
+    .from('messages')
+    .insert({
+      venue_id: venue.id,
+      guest_id: guestId,
+      direction: 'inbound',
+      status: 'received',
+      body: payload.content ?? '',
+      media_urls: mediaUrls,
+      provider_message_id: payload.message_handle,
+    })
+    .select('id')
+    .single()
+  if (insertMessageError || !insertedMessage) {
     console.error('webhook inbound: message insert failed', {
       messageHandle: payload.message_handle,
       venueId: venue.id,
       guestId,
-      error: insertMessageError.message,
+      error: insertMessageError?.message ?? 'no row returned',
     })
     return new Response('OK', { status: 200 })
   }
 
-  // TODO(THE-122): call lib/agent's handleInbound here, wrapped in waitUntil()
-  // for async execution.
+  // Hand off to the agent orchestrator. waitUntil keeps the function alive
+  // long enough for the agent to run after we return 200, so the webhook
+  // ack stays fast and Sendblue doesn't see a stalled response.
+  waitUntil(runInboundAgent(insertedMessage.id))
 
   return new Response('OK', { status: 200 })
 }
