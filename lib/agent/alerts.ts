@@ -110,3 +110,30 @@ export async function fireRedAlert(context: AlertContext): Promise<void> {
     })
   }
 }
+
+/**
+ * Capture a non-failure PostHog event (success, skip, etc.). Same lazy-init
+ * client as fireRedAlert. Never throws — failures are logged via
+ * console.error so an analytics outage cannot cascade into the orchestrator.
+ *
+ * Used by lib/agent/handle-inbound and handle-followup for events like
+ * inbound_message_handled, inbound_message_skipped, followup_message_handled.
+ */
+export async function capturePostHogEvent(
+  event: string,
+  distinctId: string,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  try {
+    getPostHog().capture({
+      distinctId,
+      event,
+      properties: { ...properties, ts: new Date().toISOString() },
+    })
+  } catch (e) {
+    console.error(`alert: posthog capture failed for ${event}`, {
+      distinctId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}

@@ -49,6 +49,7 @@ export async function generateMessage(
   try {
     let lastResult: { body: string; voiceFidelity: number; reasoning: string } | null = null
     let attempts = 0
+    const attemptScores: number[] = []
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
@@ -60,6 +61,7 @@ export async function generateMessage(
         maxOutputTokens: 500,
       })
       lastResult = object
+      attemptScores.push(object.voiceFidelity)
       if (object.voiceFidelity >= MIN_VOICE_FIDELITY) break
     }
 
@@ -74,6 +76,7 @@ export async function generateMessage(
         voiceFidelity: lastResult.voiceFidelity,
         reasoning: lastResult.reasoning,
         attempts,
+        attemptScores,
         promptVersion: PROMPT_VERSION,
       },
     }

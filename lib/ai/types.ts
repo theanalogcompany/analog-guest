@@ -68,6 +68,10 @@ export type GenerateMessageResult = {
   voiceFidelity: number
   reasoning: string
   attempts: number
+  // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
+  // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
+  // a length-1 array means the first attempt was good enough.
+  attemptScores: number[]
   promptVersion: string
 }
 
