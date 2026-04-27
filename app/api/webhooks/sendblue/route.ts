@@ -17,7 +17,11 @@ type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 
 type InternalMessageStatus = 'sending' | 'sent' | 'delivered' | 'failed'
 
-function mapSendblueStatus(status: SendblueWebhookPayload['status']): InternalMessageStatus {
+// 'RECEIVED' is excluded here because it only appears on inbound webhooks
+// (is_outbound=false); the status-update path guards it out before calling.
+function mapSendblueStatus(
+  status: Exclude<SendblueWebhookPayload['status'], 'RECEIVED'>,
+): InternalMessageStatus {
   switch (status) {
     case 'QUEUED':
       return 'sending'
@@ -166,6 +170,15 @@ async function handleStatusUpdate(
   payload: SendblueWebhookPayload,
   supabase: AdminSupabaseClient,
 ): Promise<Response> {
+  if (payload.status === 'RECEIVED') {
+    // Shouldn't happen — RECEIVED is for inbound messages, but Sendblue's
+    // schema doesn't formally couple status to is_outbound, so guard it.
+    console.warn('webhook status: RECEIVED status on outbound webhook path; ignoring', {
+      messageHandle: payload.message_handle,
+    })
+    return new Response('OK', { status: 200 })
+  }
+
   const { data: message, error: lookupError } = await supabase
     .from('messages')
     .select('id, status')
@@ -199,7 +212,8 @@ async function handleStatusUpdate(
     update.delivered_at = new Date().toISOString()
   }
   if (newStatus === 'failed') {
-    update.failure_reason = payload.error_message ?? payload.error_code ?? 'unknown'
+    // error_code can be string or number per Sendblue docs; coerce to string.
+    update.failure_reason = String(payload.error_message ?? payload.error_code ?? 'unknown')
   }
 
   const { error: updateError } = await supabase
@@ -255,7 +269,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!result.success) {
       console.error('webhook: schema validation failed', {
         url: request.url,
-        issues: result.error.issues,
+        issues: JSON.stringify(result.error.issues, null, 2),
       })
       return new Response('Invalid payload', { status: 400 })
     }
