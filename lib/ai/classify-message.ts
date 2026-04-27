@@ -17,7 +17,13 @@ const ClassifiedMessageSchema = z.object({
     'manual',
     'acknowledgment',
   ]),
-  classifierConfidence: z.number().min(0).max(1),
+  // .refine() instead of .min(0).max(1) — Anthropic's structured-output
+  // validator rejects `minimum`/`maximum` constraints on JSON Schema number
+  // types. Refine runs as a post-parse predicate and isn't serialized into
+  // the schema sent to the model. See THE-157.
+  classifierConfidence: z
+    .number()
+    .refine((n) => n >= 0 && n <= 1, { message: 'must be between 0 and 1' }),
   reasoning: z.string(),
 })
 

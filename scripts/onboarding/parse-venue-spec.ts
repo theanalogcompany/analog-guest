@@ -43,6 +43,10 @@ const VoiceCorpusSchema = z.object({
   source_type: z.string().min(1),
   content: z.string().min(1),
   tags: z.array(z.string()).default([]),
+  // NOTE: .min/.max here is fine because this schema parses markdown,
+  // not structured-output from generateObject. If extract-venue-spec ever
+  // migrates from generateText (markdown) to generateObject (structured JSON),
+  // swap to .refine() to avoid the Anthropic schema bug. See THE-157.
   confidence_score: z.number().min(0).max(1).default(DEFAULT_CONFIDENCE_SCORE),
 })
 
