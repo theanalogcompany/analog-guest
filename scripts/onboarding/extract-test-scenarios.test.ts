@@ -38,6 +38,24 @@ describe('normalizeName', () => {
     expect(normalizeName('  -hello-  ')).toBe('hello')
     expect(normalizeName('___out of scope___')).toBe('out_of_scope')
   })
+
+  it('strips straight ASCII apostrophes (no orphan letter)', () => {
+    expect(normalizeName("Friend's First Drink")).toBe('friends_first_drink')
+  })
+
+  it('strips curly apostrophes (U+2019)', () => {
+    expect(normalizeName('Phoebe’s')).toBe('phoebes')
+  })
+
+  it('handles apostrophes alongside em-dashes and multiple words', () => {
+    expect(normalizeName("Phoebe's Open Mic — Regular Slot Priority")).toBe(
+      'phoebes_open_mic_regular_slot_priority',
+    )
+  })
+
+  it('collapses parens without leaving orphan underscores', () => {
+    expect(normalizeName('Test (Welcome Back)')).toBe('test_welcome_back')
+  })
 })
 
 describe('extractMechanicNames', () => {
@@ -76,6 +94,18 @@ more stuff
     const result = extractMechanicNames(md)
     expect(result.size).toBe(1)
     expect(result.has('free_drink')).toBe(true)
+  })
+
+  it('strips apostrophes from mechanic header names (regression for mock-central-perk)', () => {
+    const md = `
+## 5. mechanics
+
+### Mechanic 1: Friend's First Drink on the House
+### Mechanic 2: Phoebe’s Open Mic — Regular Slot Priority
+`
+    const result = extractMechanicNames(md)
+    expect(result.has('friends_first_drink_on_the_house')).toBe(true)
+    expect(result.has('phoebes_open_mic_regular_slot_priority')).toBe(true)
   })
 })
 

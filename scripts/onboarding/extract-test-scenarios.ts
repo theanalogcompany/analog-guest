@@ -29,19 +29,29 @@ export interface Scenario extends RawScenario {
 }
 
 /**
- * Normalize a category or mechanic name to snake_case ascii: lowercase,
- * replace runs of non-alphanumerics with `_`, trim leading/trailing `_`.
+ * Normalize a category or mechanic name to snake_case ascii: lowercase, strip
+ * apostrophes (so possessives like "Friend's" stitch into "friends" instead
+ * of "friend_s"), then replace runs of non-alphanumerics with `_`, then trim
+ * leading/trailing `_`.
+ *
+ * The apostrophe-strip pass comes BEFORE the run-to-underscore pass so a
+ * possessive doesn't introduce an orphan letter. Both ASCII (U+0027) and
+ * curly (U+2018, U+2019) apostrophes are handled.
  *
  * Contract for future maintainers (round-trip examples):
- *   'Couch Hold for Regulars'   → 'couch_hold_for_regulars'
- *   'menu fact'                 → 'menu_fact'
- *   'busy / wait times'         → 'busy_wait_times'
- *   'out of scope'              → 'out_of_scope'
- *   'event / mechanic-specific' → 'event_mechanic_specific'
+ *   'Couch Hold for Regulars'                 → 'couch_hold_for_regulars'
+ *   'menu fact'                               → 'menu_fact'
+ *   'busy / wait times'                       → 'busy_wait_times'
+ *   'out of scope'                            → 'out_of_scope'
+ *   'event / mechanic-specific'               → 'event_mechanic_specific'
+ *   "Friend's First Drink on the House"       → 'friends_first_drink_on_the_house'
+ *   'Phoebe’s Open Mic — Regular Slot'   → 'phoebes_open_mic_regular_slot'
+ *   'Complimentary Herbal Tea (Welcome Back)' → 'complimentary_herbal_tea_welcome_back'
  */
 export function normalizeName(name: string): string {
   return name
     .toLowerCase()
+    .replace(/['‘’]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
 }
@@ -149,6 +159,7 @@ For each mechanic in the venue-spec's "mechanics" section, generate two scenario
 
 For each mechanic-derived scenario:
 - Set \`category\` to \`mechanic_{normalized_mechanic_name}\` (snake_case). Use the mechanic's full name, snake-cased. E.g., a mechanic named "Couch Hold for Regulars" becomes category "mechanic_couch_hold_for_regulars".
+- When converting a mechanic name to snake_case for the category field: drop apostrophes entirely (so "Friend's" becomes "friends"), and collapse all other punctuation including em-dashes, parens, hyphens, and periods into a single underscore. Trim edge underscores.
 - Set \`is_mechanic_derived: true\`.
 - The \`scenario\` field describes the situation including which mechanic is being requested.
 
