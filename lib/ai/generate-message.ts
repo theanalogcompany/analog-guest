@@ -1,4 +1,4 @@
-import { generateObject } from 'ai'
+import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
@@ -52,9 +52,12 @@ export async function generateMessage(
 
   const { systemPrompt, userPrompt } = composePrompt(input)
 
+  // Hoisted out of the try so the catch's diagnostic log can include which
+  // attempt was in-flight when generateObject threw.
+  let attempts = 0
+
   try {
     let lastResult: { body: string; voiceFidelity: number; reasoning: string } | null = null
-    let attempts = 0
     const attemptScores: number[] = []
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
@@ -87,6 +90,35 @@ export async function generateMessage(
       },
     }
   } catch (e) {
+    // Diagnostic logging for THE-159 (will be replaced by structured alerts).
+    // When generateObject can't parse Sonnet's response into the schema, the
+    // top-level error message ("No object generated: response did not match
+    // schema") drops everything useful — raw text, cause, Zod issue paths.
+    // Walk the error to surface them so the next failure is debuggable from
+    // Vercel logs alone. Logs ARE in addition to the existing alert: we still
+    // return the failure result below, which the orchestrator turns into an
+    // AgentResult.failed and fires fireRedAlert.
+    if (NoObjectGeneratedError.isInstance(e)) {
+      const cause = e.cause
+      const causeName = cause instanceof Error ? cause.name : null
+      const causeMessage = cause instanceof Error ? cause.message : null
+      const innerCause =
+        cause instanceof Error ? (cause as Error & { cause?: unknown }).cause : undefined
+      const issues =
+        innerCause && typeof innerCause === 'object' && innerCause !== null && 'issues' in innerCause
+          ? (innerCause as { issues: unknown }).issues
+          : undefined
+      console.log('[agent] generation diagnostic', {
+        attempts,
+        text: e.text ? e.text.slice(0, 1000) : null,
+        finishReason: e.finishReason,
+        usage: e.usage,
+        message: e.message,
+        causeName,
+        causeMessage,
+        zodIssues: issues ?? null,
+      })
+    }
     const message = e instanceof Error ? e.message : String(e)
     return { ok: false, error: message, errorCode: 'ai_generation_failed' }
   }
