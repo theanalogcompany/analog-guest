@@ -155,11 +155,12 @@ For each mechanic, infer the minimum guest state required to access it from the 
 For each mechanic in the venue-spec's "mechanics" section, generate two scenarios:
 
 1. One scenario at the mechanic's inferred minimum state. The \`inbound_message\` should be a natural-sounding request for the mechanic in this venue's voice. Set \`expected_failure: null\` (the agent should honor the mechanic at this state).
-2. One scenario at \`guest_state: "new"\`, only if the mechanic's inferred minimum state is NOT already "new". The \`inbound_message\` should be the same kind of natural request, but at the new-guest state the agent should decline. Set \`expected_failure: "THE-170"\` because this tests min_state filtering which doesn't ship until that ticket lands.
+2. One additional scenario at \`guest_state: "new"\`, generated whenever the mechanic's inferred min_state is one of: returning, regular, or raving_fan. (Skip this scenario only when min_state is new.) The \`inbound_message\` should be the same kind of natural request, but at the new-guest state the agent should decline because the guest hasn't yet earned access. Set \`expected_failure: "THE-170"\` because this tests min_state filtering which doesn't ship until that ticket lands.
 
 For each mechanic-derived scenario:
 - Set \`category\` to \`mechanic_{normalized_mechanic_name}\` (snake_case). Use the mechanic's full name, snake-cased. E.g., a mechanic named "Couch Hold for Regulars" becomes category "mechanic_couch_hold_for_regulars".
 - When converting a mechanic name to snake_case for the category field: drop apostrophes entirely (so "Friend's" becomes "friends"), and collapse all other punctuation including em-dashes, parens, hyphens, and periods into a single underscore. Trim edge underscores.
+- Inbound messages should reflect how real guests would naturally text. Most should be requests phrased without knowledge of the mechanic's internal rules — a guest asks for what they want ("can i get the couch when i come in?") rather than referencing the mechanic by name. A minority of inbounds can explicitly invoke a perk where realistic ("isn't my first drink free?", "don't i get a free tea this time?"), but this should not be the default. Avoid phrasings that read as venue-insider awareness ("do regulars still get the better slots?") unless the guest would plausibly know the rule from prior conversation.
 - Set \`is_mechanic_derived: true\`.
 - The \`scenario\` field describes the situation including which mechanic is being requested.
 

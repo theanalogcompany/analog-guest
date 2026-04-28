@@ -18,7 +18,7 @@ import {
   validateUniversalCategories,
 } from './onboarding/extract-test-scenarios'
 
-const PROMPT_VERSION = 'extract-test-scenarios-v1'
+const PROMPT_VERSION = 'extract-test-scenarios-v2'
 
 interface ParsedArgs {
   slug: string
