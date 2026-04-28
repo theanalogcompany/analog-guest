@@ -11,6 +11,7 @@
     "send-test": "tsx --env-file=.env.local scripts/send-test-message.ts",
     "extract-venue-spec": "tsx --env-file=.env.local scripts/extract-venue-spec.ts",
     "extract-test-scenarios": "tsx --env-file=.env.local scripts/extract-test-scenarios.ts",
+    "run-test-scenarios": "tsx --env-file=.env.local scripts/run-test-scenarios.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",
     "test": "vitest run",
     "test:watch": "vitest"

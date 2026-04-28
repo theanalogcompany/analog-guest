@@ -171,6 +171,49 @@ export async function writeJsonFile(
 }
 
 /**
+ * Upsert a Google Sheet from CSV content. Same idempotency contract as
+ * writeMarkdownFile/writeJsonFile: matching name → update in place
+ * (preserves fileId + sharing); no match → create. Drive auto-converts the
+ * CSV upload to a native gsheet because the requestBody mimeType is
+ * application/vnd.google-apps.spreadsheet.
+ */
+export async function writeSheetFile(
+  drive: drive_v3.Drive,
+  folderId: string,
+  name: string,
+  csv: string,
+): Promise<{ id: string; created: boolean }> {
+  const existing = await drive.files.list({
+    q: `'${folderId}' in parents and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+    fields: 'files(id, name)',
+    pageSize: 5,
+  })
+  const matches = existing.data.files ?? []
+  if (matches.length > 1) {
+    throw new Error(`drive: multiple files match name="${name}" in folder — ambiguous`)
+  }
+  if (matches.length === 1 && matches[0].id) {
+    await drive.files.update({
+      fileId: matches[0].id,
+      requestBody: { mimeType: 'application/vnd.google-apps.spreadsheet' },
+      media: { mimeType: 'text/csv', body: csv },
+    })
+    return { id: matches[0].id, created: false }
+  }
+  const res = await drive.files.create({
+    requestBody: {
+      name,
+      parents: [folderId],
+      mimeType: 'application/vnd.google-apps.spreadsheet',
+    },
+    media: { mimeType: 'text/csv', body: csv },
+    fields: 'id',
+  })
+  if (!res.data.id) throw new Error(`drive: file create returned no id`)
+  return { id: res.data.id, created: true }
+}
+
+/**
  * Pick the single file in `files` whose name starts with the given numeric
  * prefix (e.g. '04-'). Useful for the deterministic 0N-{slug}- naming scheme.
  */

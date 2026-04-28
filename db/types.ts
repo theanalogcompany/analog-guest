@@ -208,6 +208,7 @@ export type Database = {
           first_name: string | null
           home_postal_code: string | null
           id: string
+          is_test_synthetic: boolean
           last_inbound_at: string | null
           last_interaction_at: string | null
           last_name: string | null
@@ -228,6 +229,7 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          is_test_synthetic?: boolean
           last_inbound_at?: string | null
           last_interaction_at?: string | null
           last_name?: string | null
@@ -248,6 +250,7 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          is_test_synthetic?: boolean
           last_inbound_at?: string | null
           last_interaction_at?: string | null
           last_name?: string | null
