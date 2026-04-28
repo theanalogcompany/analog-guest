@@ -1,4 +1,4 @@
-import type { BrandPersona, VenueInfo } from '@/lib/schemas'
+import type { BrandPersona, MenuItem, VenueInfo } from '@/lib/schemas'
 import type { MessageCategory, RuntimeContext, VoiceCorpusChunk } from '../types'
 
 const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
@@ -71,8 +71,62 @@ function formatHours(hours: VenueInfo['hours']): string | null {
     const value = hours[day]
     if (value) lines.push(`  - ${day[0].toUpperCase() + day.slice(1)}: ${value}`)
   }
-  if (hours.notes) lines.push(`  - Notes: ${hours.notes}`)
+  if (hours.notes) {
+    // Notes can be multi-line (operator may write several `- **<key>:** <val>`
+    // bullets, which the parser joins with \n). Indent each line under a
+    // single Notes: bullet so multi-line notes don't break the outer Hours:
+    // structure.
+    const noteLines = hours.notes.split('\n').filter((l) => l.trim().length > 0)
+    if (noteLines.length === 1) {
+      lines.push(`  - Notes: ${noteLines[0]}`)
+    } else if (noteLines.length > 1) {
+      lines.push(`  - Notes:`)
+      for (const noteLine of noteLines) {
+        lines.push(`    - ${noteLine}`)
+      }
+    }
+  }
   return lines.length > 0 ? lines.join('\n') : null
+}
+
+function formatMenuItemLine(item: MenuItem): string {
+  const parts: string[] = [item.name]
+  if (item.size) parts.push(item.size)
+  if (item.price !== undefined) {
+    parts.push(`$${item.price.toFixed(2)}`)
+  } else if (item.priceNote) {
+    parts.push(item.priceNote)
+  }
+  if (item.modifiers.length > 0) {
+    parts.push(`modifiers: ${item.modifiers.join(', ')}`)
+  }
+  if (item.dietary.length > 0) {
+    parts.push(`dietary: ${item.dietary.join(', ')}`)
+  }
+  return `- ${parts.join(' — ')}`
+}
+
+function compareItems(a: MenuItem, b: MenuItem): number {
+  const c = a.category.localeCompare(b.category)
+  if (c !== 0) return c
+  return a.name.localeCompare(b.name)
+}
+
+function formatMenuItems(items: readonly MenuItem[]): string | null {
+  if (items.length === 0) return null
+
+  const onMenu = items.filter((i) => !i.isOffMenu).slice().sort(compareItems)
+  const offMenu = items.filter((i) => i.isOffMenu).slice().sort(compareItems)
+
+  const sections: string[] = []
+  if (onMenu.length > 0) {
+    sections.push(`On-menu:\n${onMenu.map(formatMenuItemLine).join('\n')}`)
+  }
+  if (offMenu.length > 0) {
+    sections.push(`Off-menu (by request):\n${offMenu.map(formatMenuItemLine).join('\n')}`)
+  }
+
+  return `## Menu (structured)\n${sections.join('\n\n')}`
 }
 
 function formatAmenities(amenities: NonNullable<VenueInfo['amenities']>): string | null {
@@ -118,6 +172,14 @@ export function venueInfoToProse(venueInfo: VenueInfo): string {
   if (contactBlock) lines.push(`- Contact:\n${contactBlock}`)
 
   let result = lines.join('\n')
+
+  // Per THE-169: items = facts (structured table); notes = stories (already
+  // rendered above as prose). Rendering items as their own section near the
+  // menu prose gives Sonnet a clean per-item lookup surface.
+  const menuItemsBlock = formatMenuItems(venueInfo.menu.items)
+  if (menuItemsBlock) {
+    result = `${result}\n\n${menuItemsBlock}`
+  }
 
   if (venueInfo.currentContext.length > 0) {
     const contextSection = `## Current context\n${venueInfo.currentContext
