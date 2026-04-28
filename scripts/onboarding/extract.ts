@@ -28,6 +28,7 @@ export async function extractVenueSpec(input: ExtractInput): Promise<string> {
 The output MUST be a markdown document that exactly matches the structure of the EXAMPLE below. Every section must be present and filled. Do not add new sections. Do not omit sections — use placeholders like "*(not provided)*" if information is missing. Do not change section numbering or section titles.
 
 Hard rules:
+- The example below shows STRUCTURE only. Every value in the example is placeholder text in [BRACKETS]. Your output must replace EVERY placeholder with content drawn entirely from the venue's transcript, menu, and Airtable record. Do NOT copy any placeholder text verbatim. Do NOT invent content not supported by the source materials. If a venue's source materials don't cover something the example shows, use "*(not provided)*" or omit the optional field — never reach for the example's content.
 - All JSON code blocks must be valid JSON, parseable by JSON.parse(). String quotes must be straight ASCII quotes, not curly. Field names must match the example exactly.
 - The "Live" field in section 1 must always be "false" — the operator flips it manually after smoke test passes.
 - Do NOT include a "min_state" field on mechanics. Mechanics fire on operator action only for now.
@@ -35,9 +36,11 @@ Hard rules:
 - For mechanics: extract from explicit operator descriptions in the transcript. Each must include type, name, description, qualification, reward_description, expiration_rule, trigger (structured object), redemption (structured object).
 - Match the example's tone in section narratives — concrete, specific, free of marketing register.
 
-EXAMPLE FORMAT (mock-central-perk):
+EXAMPLE STRUCTURE (placeholders only — DO NOT copy values verbatim):
 
-${input.fixtureMarkdown}`
+${input.fixtureMarkdown}
+
+REMINDER: every [BRACKET] above must be replaced with content from the venue's transcript, menu, and Airtable record. Never copy bracket text verbatim. Never invent content not supported by source materials.`
 
   const userPrompt = `Slug to extract: ${input.slug}
 
