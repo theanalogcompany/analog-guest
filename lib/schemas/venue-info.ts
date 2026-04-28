@@ -16,6 +16,31 @@ export const VenueContextNoteSchema = z.object({
 
 export type VenueContextNote = z.infer<typeof VenueContextNoteSchema>
 
+// A single row from the venue's menu CSV (04-{slug}-menu in Drive). Items are
+// the source-of-truth for structured menu lookups by the agent (e.g. answering
+// "how much is the cappuccino?" or "do you have oat milk?"); the venue-spec
+// markdown's `menu.notes` and `menu.highlights` cover prose framing only.
+export const MenuItemSchema = z
+  .object({
+    name: z.string().min(1),
+    size: z.string().optional(),
+    // price is optional when priceNote is set (e.g. "by request" pricing).
+    price: z.number().optional(),
+    priceNote: z.string().optional(),
+    category: z.string().min(1),
+    modifiers: z.array(z.string()).default([]),
+    dietary: z.array(z.string()).default([]),
+    description: z.string().optional(),
+    availability: z.string().optional(),
+    isOffMenu: z.boolean(),
+  })
+  .refine(
+    (item) => item.price !== undefined || item.priceNote !== undefined,
+    { message: 'item must have either a price or a priceNote', path: ['price'] },
+  )
+
+export type MenuItem = z.infer<typeof MenuItemSchema>
+
 export const VenueInfoSchema = z.object({
   address: z.object({
     line1: z.string().min(1),
@@ -42,7 +67,8 @@ export const VenueInfoSchema = z.object({
   menu: z.object({
     highlights: z.array(z.string()).default([]),
     notes: z.string().optional(),
-  }).default({ highlights: [] }),
+    items: z.array(MenuItemSchema).default([]),
+  }).default({ highlights: [], items: [] }),
   staff: z.array(z.string()).default([]),
   amenities: z.object({
     wifi: z.boolean().optional(),

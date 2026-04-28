@@ -5,6 +5,7 @@ import {
   listVenueFiles,
   readDriveFileAsText,
 } from './onboarding/drive'
+import { parseMenuCsv } from './onboarding/menu-csv'
 import { parseVenueSpec } from './onboarding/parse-venue-spec'
 import { seedVenue } from './onboarding/seed-supabase'
 
@@ -42,6 +43,19 @@ async function main(): Promise<void> {
   console.log(`[seed] reading draft: ${draftFile.name}`)
   const draftMarkdown = await readDriveFileAsText(drive, draftFile)
 
+  // Menu CSV is the source-of-truth for structured menu items.
+  const menuFile = findByPrefix(files, '04-')
+  if (!menuFile) {
+    console.error(
+      `[seed] no file with prefix "04-" found in folder; menu CSV is required for structured menu lookups`,
+    )
+    process.exit(1)
+  }
+  console.log(`[seed] reading menu: ${menuFile.name}`)
+  const menuCsv = await readDriveFileAsText(drive, menuFile)
+  const menuItems = parseMenuCsv(menuCsv)
+  console.log(`[seed] parsed ${menuItems.length} menu items`)
+
   console.log(`[seed] parsing draft...`)
   const parsed = parseVenueSpec(draftMarkdown)
   console.log(
@@ -49,7 +63,7 @@ async function main(): Promise<void> {
   )
 
   console.log(`[seed] writing to Supabase...`)
-  const result = await seedVenue({ parsed, messagingPhoneNumber })
+  const result = await seedVenue({ parsed, messagingPhoneNumber, menuItems })
 
   const totalEmbedded = result.embeddedChunkCounts.reduce((a, b) => a + b, 0)
   console.log(`[seed] ✓ venue ${result.venueId} seeded`)

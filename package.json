@@ -21,6 +21,7 @@
     "@vercel/functions": "^3.4.4",
     "ai": "^6.0.168",
     "airtable": "^0.12.2",
+    "csv-parse": "^6.2.1",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "googleapis": "^171.4.0",

@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
 import { ingestCorpusEntry } from '@/lib/rag'
 import { DEFAULT_FORMULA, DEFAULT_STATE_THRESHOLDS } from '@/lib/recognition'
+import type { MenuItem } from '@/lib/schemas'
 import type { ParsedVenueSpec } from './parse-venue-spec'
 
 // Serialize through JSON.stringify/parse to coerce Date instances (from Zod's
@@ -24,6 +25,10 @@ const MESSAGING_CADENCE_DEFAULT = {
 export interface SeedVenueOptions {
   parsed: ParsedVenueSpec
   messagingPhoneNumber: string | null
+  // Parsed menu items from the 04-{slug} CSV. Merged into
+  // venue_info.menu.items before the venue_configs row is written; the spec
+  // markdown's menu.notes and menu.highlights stay as-is.
+  menuItems: MenuItem[]
 }
 
 export interface SeedVenueResult {
@@ -42,8 +47,19 @@ export interface SeedVenueResult {
  * Server-only. Uses the admin DB client.
  */
 export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueResult> {
-  const { parsed, messagingPhoneNumber } = options
+  const { parsed, messagingPhoneNumber, menuItems } = options
   const supabase = createAdminClient()
+
+  // Merge CSV-sourced menu items into the parsed spec's venue_info before
+  // writing. Items array is the source-of-truth for structured menu lookups;
+  // the spec markdown only carries prose (notes) and highlights.
+  const mergedVenueInfo = {
+    ...parsed.venueInfo,
+    menu: {
+      ...parsed.venueInfo.menu,
+      items: menuItems,
+    },
+  }
 
   // Idempotency: hard-fail if venue with this slug exists.
   const { data: existing, error: checkError } = await supabase
@@ -83,7 +99,7 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
   const { error: configError } = await supabase.from('venue_configs').insert({
     venue_id: venueId,
     brand_persona: toJson(parsed.brandPersona),
-    venue_info: toJson(parsed.venueInfo),
+    venue_info: toJson(mergedVenueInfo),
     relationship_strength_formula: toJson(DEFAULT_FORMULA),
     state_thresholds: toJson(DEFAULT_STATE_THRESHOLDS),
     messaging_cadence: toJson(MESSAGING_CADENCE_DEFAULT),

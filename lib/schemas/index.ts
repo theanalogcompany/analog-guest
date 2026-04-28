@@ -1,2 +1,9 @@
 export { BrandPersonaSchema, type BrandPersona } from './brand-persona'
-export { VenueInfoSchema, type VenueInfo } from './venue-info'
+export {
+  MenuItemSchema,
+  type MenuItem,
+  VenueContextNoteSchema,
+  type VenueContextNote,
+  VenueInfoSchema,
+  type VenueInfo,
+} from './venue-info'
