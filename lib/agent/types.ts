@@ -1,9 +1,11 @@
+import type { RecentMessage } from '@/lib/ai'
 import type { VoiceCorpusChunk } from '@/lib/rag'
 import type { RelationshipSignals } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 import type { AlertContext } from './alerts'
 
 export type { AlertContext }
+export type { RecentMessage }
 
 export type AgentRunId = string
 
@@ -70,9 +72,7 @@ export interface RuntimeContext {
   guest: GuestContext
   currentMessage: InboundMessage | null
   followupTrigger: FollowupTrigger | null
-  // NOTE: recentMessages intentionally omitted for v1. lib/ai's RuntimeContext
-  // doesn't accept message history today, so loading them would be dead weight.
-  // Bring back when lib/ai learns to accept history.
+  recentMessages: RecentMessage[]
   recognition: RecognitionSnapshot
   corpus: CorpusMatch[] | null
   classification: Classification | null

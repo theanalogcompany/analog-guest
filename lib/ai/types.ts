@@ -37,6 +37,12 @@ export type VoiceCorpusChunk = {
   relevanceScore?: number
 }
 
+export type RecentMessage = {
+  direction: 'inbound' | 'outbound'
+  body: string
+  createdAt: Date
+}
+
 export type RuntimeContext = {
   guestName?: string
   lastVisitDate?: string
@@ -53,6 +59,13 @@ export type RuntimeContext = {
     date: string
   }
   additionalContext?: string
+  today?: {
+    isoDate: string
+    dayOfWeek: string
+    venueLocalTime: string
+    venueTimezone: string
+  }
+  recentMessages?: RecentMessage[]
 }
 
 export type GenerateMessageInput = {

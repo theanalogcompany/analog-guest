@@ -6,10 +6,15 @@ import type {
   FollowupTrigger,
   GuestContext,
   InboundMessage,
+  RecentMessage,
   RecognitionSnapshot,
   RuntimeContext,
   VenueContext,
 } from './types'
+
+const MAX_HISTORY_MESSAGES = 30
+const MAX_HISTORY_DAYS = 14
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /**
  * Build the full RuntimeContext for an agent run by fetching venue + guest +
@@ -43,8 +48,25 @@ export async function buildRuntimeContext(input: {
 }): Promise<RuntimeContext> {
   const supabase = createAdminClient()
   const computedAt = new Date()
+  const historyCutoffIso = new Date(Date.now() - MAX_HISTORY_DAYS * MS_PER_DAY).toISOString()
 
-  const [venueResult, guestResult, recognitionResult] = await Promise.all([
+  // Exclude the current inbound row (it's already in the table by the time the
+  // agent runs, and gets rendered separately as `inboundMessage` in the prompt).
+  // For followups there's no currentMessage, so no exclusion.
+  let messagesQuery = supabase
+    .from('messages')
+    .select('id, direction, body, created_at')
+    .eq('venue_id', input.venueId)
+    .eq('guest_id', input.guestId)
+    .neq('body', '')
+    .gte('created_at', historyCutoffIso)
+    .order('created_at', { ascending: false })
+    .limit(MAX_HISTORY_MESSAGES)
+  if (input.currentMessage) {
+    messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
+  }
+
+  const [venueResult, guestResult, recognitionResult, messagesResult] = await Promise.all([
     supabase
       .from('venues')
       .select(
@@ -58,6 +80,7 @@ export async function buildRuntimeContext(input: {
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
+    messagesQuery,
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -77,6 +100,11 @@ export async function buildRuntimeContext(input: {
   if (!recognitionResult.ok) {
     throw new Error(
       `buildRuntimeContext: recognition compute failed: ${recognitionResult.error}`,
+    )
+  }
+  if (messagesResult.error) {
+    throw new Error(
+      `buildRuntimeContext: messages history load failed: ${messagesResult.error.message}`,
     )
   }
 
@@ -138,12 +166,23 @@ export async function buildRuntimeContext(input: {
     computedAt,
   }
 
+  // Query returns DESC; reverse for chronological order in the prompt.
+  const recentMessages: RecentMessage[] = (messagesResult.data ?? [])
+    .slice()
+    .reverse()
+    .map((row) => ({
+      direction: row.direction as RecentMessage['direction'],
+      body: row.body,
+      createdAt: new Date(row.created_at),
+    }))
+
   return {
     agentRunId: input.agentRunId,
     venue,
     guest,
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
+    recentMessages,
     recognition,
     corpus: null,
     classification: null,

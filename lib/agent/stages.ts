@@ -6,6 +6,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { retrieveContext } from '@/lib/rag'
+import { fireRedAlert } from './alerts'
 import type { Classification, CorpusMatch, RuntimeContext } from './types'
 
 const STRONG_MATCH_SIMILARITY = 0.3
@@ -126,6 +127,42 @@ export async function generateStage(
   return { status: 'success', result: r.data }
 }
 
+const FALLBACK_TIMEZONE = 'America/Los_Angeles'
+
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiRuntimeContext['today']> {
+  // Caller (buildAiRuntime) is responsible for passing a validated timezone —
+  // otherwise Intl.DateTimeFormat throws a RangeError mid-format.
+  // en-CA renders dates as YYYY-MM-DD; en-GB renders 24h HH:MM. Both are
+  // locale conventions we exploit to avoid manual formatting.
+  const isoDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+  const dayOfWeek = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'long',
+  }).format(now)
+  const venueLocalTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(now)
+
+  return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
+}
+
 function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   let additionalContext: string | undefined
   if (ctx.followupTrigger) {
@@ -134,9 +171,37 @@ function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       ? `Followup trigger: ${ctx.followupTrigger.reason} (${JSON.stringify(meta)})`
       : `Followup trigger: ${ctx.followupTrigger.reason}`
   }
+
+  // Validate venue timezone. On failure, log + fire a meta-alert (Slack
+  // surface so the broken venue config gets fixed) and proceed with a sane
+  // fallback. Fire-and-forget — fireRedAlert never throws, and we don't want
+  // generation to block on a webhook roundtrip.
+  let timezone = ctx.venue.timezone
+  if (!isValidTimezone(timezone)) {
+    console.warn(
+      `computeToday: invalid timezone "${timezone}" for venue ${ctx.venue.id}, falling back to ${FALLBACK_TIMEZONE}`,
+    )
+    void fireRedAlert({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      kind: ctx.currentMessage ? 'inbound' : 'followup',
+      stage: 'venue_config_integrity',
+      errorCode: 'invalid_timezone',
+      errorMessage: `invalid timezone string: "${timezone}"`,
+      extra: {
+        providedTimezone: timezone,
+        fallbackUsed: FALLBACK_TIMEZONE,
+      },
+    })
+    timezone = FALLBACK_TIMEZONE
+  }
+
   return {
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
     additionalContext,
+    today: computeToday(timezone),
+    recentMessages: ctx.recentMessages,
   }
 }

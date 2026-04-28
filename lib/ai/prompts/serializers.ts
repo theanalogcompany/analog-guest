@@ -1,5 +1,7 @@
 import type { BrandPersona, MenuItem, VenueInfo } from '@/lib/schemas'
-import type { MessageCategory, RuntimeContext, VoiceCorpusChunk } from '../types'
+import type { MessageCategory, RecentMessage, RuntimeContext, VoiceCorpusChunk } from '../types'
+
+const MAX_HISTORY_BODY_CHARS = 200
 
 const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
   casual: 'Use contractions; lowercase starts are fine; write the way you would text a friend.',
@@ -202,7 +204,58 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
   return `## Examples of how the venue actually communicates\n${blocks.join('\n\n')}`
 }
 
-export function runtimeToProse(runtime: RuntimeContext, category: MessageCategory): string {
+function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
+  return [
+    '## Right now',
+    `- Date: ${today.dayOfWeek}, ${today.isoDate}`,
+    `- Time at venue: ${today.venueLocalTime} (${today.venueTimezone})`,
+  ].join('\n')
+}
+
+function formatTimeDelta(then: Date, now: Date): string {
+  const diffMs = now.getTime() - then.getTime()
+  const minutes = Math.floor(diffMs / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  if (hours < 48) return 'yesterday'
+  const days = Math.floor(hours / 24)
+  return `${days} days ago`
+}
+
+function normalizeHistoryBody(body: string): string {
+  const collapsed = body.replace(/\s*\n\s*/g, ' ').trim()
+  if (collapsed.length <= MAX_HISTORY_BODY_CHARS) return collapsed
+  return `${collapsed.slice(0, MAX_HISTORY_BODY_CHARS)}…`
+}
+
+function formatRecentConversation(messages: readonly RecentMessage[], now: Date): string | null {
+  if (messages.length === 0) return null
+  const lines = messages.map((m) => {
+    const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
+    const delta = formatTimeDelta(m.createdAt, now)
+    const body = normalizeHistoryBody(m.body)
+    return `[${speaker}, ${delta}] ${body}`
+  })
+  return `## Recent conversation\n${lines.join('\n')}`
+}
+
+export function runtimeToProse(
+  runtime: RuntimeContext,
+  category: MessageCategory,
+  now: Date = new Date(),
+): string {
+  const blocks: string[] = []
+
+  if (runtime.today) {
+    blocks.push(formatRightNow(runtime.today))
+  }
+  if (runtime.recentMessages && runtime.recentMessages.length > 0) {
+    const recent = formatRecentConversation(runtime.recentMessages, now)
+    if (recent) blocks.push(recent)
+  }
+
   const lines: string[] = []
 
   if (runtime.guestName) {
@@ -260,9 +313,8 @@ export function runtimeToProse(runtime: RuntimeContext, category: MessageCategor
     lines.push(`Additional context: ${runtime.additionalContext}`)
   }
 
-  if (lines.length === 0) {
-    return `Generate a ${category} message now.`
-  }
+  const tail = lines.length === 0 ? `Generate a ${category} message now.` : `${lines.join('\n')}\n\nGenerate the message now.`
 
-  return `${lines.join('\n')}\n\nGenerate the message now.`
+  if (blocks.length === 0) return tail
+  return `${blocks.join('\n\n')}\n\n${tail}`
 }

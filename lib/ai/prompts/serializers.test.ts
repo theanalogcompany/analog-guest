@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
 import { type MenuItem, type VenueInfo, VenueInfoSchema } from '../../schemas'
-import { venueInfoToProse } from './serializers'
+import type { RecentMessage, RuntimeContext } from '../types'
+import { runtimeToProse, venueInfoToProse } from './serializers'
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -107,5 +108,131 @@ describe('venueInfoToProse — hours notes multiline fix', () => {
     // The bug we're fixing: the second line should NOT escape the indentation
     // (used to render as `Notes: Gunther...` at column 0).
     expect(out).not.toMatch(/^Notes: Gunther/m)
+  })
+})
+
+const today: NonNullable<RuntimeContext['today']> = {
+  isoDate: '2026-04-29',
+  dayOfWeek: 'Wednesday',
+  venueLocalTime: '14:30',
+  venueTimezone: 'America/New_York',
+}
+
+const NOW = new Date('2026-04-29T18:30:00Z') // matches today block (14:30 ET)
+
+const recent = (overrides: Partial<RecentMessage> = {}): RecentMessage => ({
+  direction: 'inbound',
+  body: 'hi',
+  createdAt: NOW,
+  ...overrides,
+})
+
+describe('runtimeToProse — today block', () => {
+  it('renders ## Right now at the top with date and venue-local time', () => {
+    const out = runtimeToProse({ today }, 'reply', NOW)
+    expect(out.startsWith('## Right now\n')).toBe(true)
+    expect(out).toContain('- Date: Wednesday, 2026-04-29')
+    expect(out).toContain('- Time at venue: 14:30 (America/New_York)')
+  })
+
+  it('renders today block before the inbound-message line', () => {
+    const out = runtimeToProse(
+      { today, inboundMessage: 'what time do you close?' },
+      'reply',
+      NOW,
+    )
+    expect(out.indexOf('## Right now')).toBeLessThan(
+      out.indexOf('The guest just sent:'),
+    )
+  })
+
+  it('omits today block when not provided', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
+    expect(out).not.toContain('## Right now')
+  })
+})
+
+describe('runtimeToProse — recent conversation block', () => {
+  it('renders chronological [speaker, delta] body lines', () => {
+    const out = runtimeToProse(
+      {
+        recentMessages: [
+          recent({ direction: 'inbound', body: 'hi', createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000) }),
+          recent({ direction: 'outbound', body: 'hey.', createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000 + 60_000) }),
+          recent({ direction: 'inbound', body: 'do you have oat milk?', createdAt: new Date(NOW.getTime() - 5 * 60 * 1000) }),
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## Recent conversation')
+    expect(out).toContain('[guest, 2 hours ago] hi')
+    expect(out).toContain('[venue, 1 hour ago] hey.')
+    expect(out).toContain('[guest, 5 minutes ago] do you have oat milk?')
+  })
+
+  it('renders time deltas at each threshold', () => {
+    const out = runtimeToProse(
+      {
+        recentMessages: [
+          recent({ body: 'now', createdAt: new Date(NOW.getTime() - 30_000) }), // 30s
+          recent({ body: 'oneMin', createdAt: new Date(NOW.getTime() - 60_000) }), // 1 min
+          recent({ body: 'manyMin', createdAt: new Date(NOW.getTime() - 30 * 60_000) }), // 30 min
+          recent({ body: 'oneHr', createdAt: new Date(NOW.getTime() - 60 * 60_000) }), // 1 h
+          recent({ body: 'manyHr', createdAt: new Date(NOW.getTime() - 5 * 60 * 60_000) }), // 5 h
+          recent({ body: 'yesterday', createdAt: new Date(NOW.getTime() - 30 * 60 * 60_000) }), // 30 h
+          recent({ body: 'multiDay', createdAt: new Date(NOW.getTime() - 5 * 24 * 60 * 60_000) }), // 5 d
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('] now')
+    expect(out).toContain('[guest, just now] now')
+    expect(out).toContain('[guest, 1 minute ago] oneMin')
+    expect(out).toContain('[guest, 30 minutes ago] manyMin')
+    expect(out).toContain('[guest, 1 hour ago] oneHr')
+    expect(out).toContain('[guest, 5 hours ago] manyHr')
+    expect(out).toContain('[guest, yesterday] yesterday')
+    expect(out).toContain('[guest, 5 days ago] multiDay')
+  })
+
+  it('omits the block entirely when recentMessages is empty', () => {
+    const out = runtimeToProse({ recentMessages: [] }, 'reply', NOW)
+    expect(out).not.toContain('## Recent conversation')
+  })
+
+  it('omits the block when recentMessages is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
+    expect(out).not.toContain('## Recent conversation')
+  })
+
+  it('collapses newlines in body and truncates long bodies to 200 chars with ellipsis', () => {
+    const longBody = 'a'.repeat(250)
+    const out = runtimeToProse(
+      {
+        recentMessages: [
+          recent({ body: 'line1\nline2\n  line3', createdAt: new Date(NOW.getTime() - 60_000) }),
+          recent({ body: longBody, createdAt: new Date(NOW.getTime() - 120_000) }),
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('] line1 line2 line3')
+    expect(out).toContain(`] ${'a'.repeat(200)}…`)
+    expect(out).not.toContain('a'.repeat(201))
+  })
+
+  it('renders today before recent conversation', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out.indexOf('## Right now')).toBeLessThan(out.indexOf('## Recent conversation'))
   })
 })

@@ -8,6 +8,7 @@ export type {
   GenerateMessageInput,
   GenerateMessageResult,
   MessageCategory,
+  RecentMessage,
   RuntimeContext,
   VoiceCorpusChunk,
 } from './types'

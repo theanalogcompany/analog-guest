@@ -5,7 +5,15 @@ export interface AlertContext {
   venueId: string
   guestId?: string
   kind: 'inbound' | 'followup'
-  stage: 'context_build' | 'classification' | 'corpus' | 'generation' | 'send' | 'persist'
+  stage:
+    | 'context_build'
+    | 'classification'
+    | 'corpus'
+    | 'generation'
+    | 'send'
+    | 'persist'
+    | 'venue_config_integrity'
+  errorCode?: string
   errorMessage?: string
   errorStack?: string
   extra?: Record<string, unknown>
@@ -34,6 +42,9 @@ function formatSlackMessage(context: AlertContext): string {
     `run: \`${context.agentRunId}\``,
     `error: ${context.errorMessage ?? '—'}`,
   ]
+  if (context.errorCode) {
+    lines.push(`code: \`${context.errorCode}\``)
+  }
   if (context.extra && Object.keys(context.extra).length > 0) {
     lines.push(`extra: \`${JSON.stringify(context.extra)}\``)
   }
@@ -69,6 +80,7 @@ export async function fireRedAlert(context: AlertContext): Promise<void> {
         guestId: context.guestId,
         kind: context.kind,
         stage: context.stage,
+        errorCode: context.errorCode,
         errorMessage: context.errorMessage,
         errorStack: context.errorStack,
         ...context.extra,
