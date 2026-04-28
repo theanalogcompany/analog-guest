@@ -134,6 +134,43 @@ export async function writeMarkdownFile(
 }
 
 /**
+ * Upsert a JSON file into a folder by name. Same idempotency contract as
+ * writeMarkdownFile: matching name → update in place; no match → create.
+ * Content is serialized with JSON.stringify(_, null, 2).
+ */
+export async function writeJsonFile(
+  drive: drive_v3.Drive,
+  folderId: string,
+  name: string,
+  content: unknown,
+): Promise<{ id: string; created: boolean }> {
+  const body = JSON.stringify(content, null, 2)
+  const existing = await drive.files.list({
+    q: `'${folderId}' in parents and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+    fields: 'files(id, name)',
+    pageSize: 5,
+  })
+  const matches = existing.data.files ?? []
+  if (matches.length > 1) {
+    throw new Error(`drive: multiple files match name="${name}" in folder — ambiguous`)
+  }
+  if (matches.length === 1 && matches[0].id) {
+    await drive.files.update({
+      fileId: matches[0].id,
+      media: { mimeType: 'application/json', body },
+    })
+    return { id: matches[0].id, created: false }
+  }
+  const res = await drive.files.create({
+    requestBody: { name, parents: [folderId], mimeType: 'application/json' },
+    media: { mimeType: 'application/json', body },
+    fields: 'id',
+  })
+  if (!res.data.id) throw new Error(`drive: file create returned no id`)
+  return { id: res.data.id, created: true }
+}
+
+/**
  * Pick the single file in `files` whose name starts with the given numeric
  * prefix (e.g. '04-'). Useful for the deterministic 0N-{slug}- naming scheme.
  */
