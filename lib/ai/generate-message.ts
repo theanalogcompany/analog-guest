@@ -8,6 +8,19 @@ import type { AIResult, GenerateMessageInput, GenerateMessageResult } from './ty
 const MIN_VOICE_FIDELITY = 0.7
 const MAX_ATTEMPTS = 3
 
+// THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
+// schema uses .refine() (per THE-157) so .min/.max don't get serialized into
+// JSON Schema; without this instruction Sonnet defaults to a 1–10 confidence
+// scale and returns e.g. 9 instead of 0.9, which then fails the [0,1] refine
+// check and rejects the entire structured-output response.
+const VOICE_FIDELITY_INSTRUCTION = `# Voice fidelity self-assessment (output field)
+voiceFidelity: a DECIMAL number between 0.0 and 1.0 (NOT a 1-10 score).
+  0.0 = does not match the venue's voice at all
+  0.5 = generic but acceptable, lacks distinctive voice markers
+  0.7 = good match, voice is recognizable
+  0.9 = excellent match, captures distinctive phrases and tone
+  1.0 = indistinguishable from how the operator would write`
+
 const GeneratedMessageSchema = z.object({
   body: z.string().min(1),
   // .refine() instead of .min(0).max(1) — Anthropic's structured-output
@@ -51,6 +64,7 @@ export async function generateMessage(
   }
 
   const { systemPrompt, userPrompt } = composePrompt(input)
+  const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
 
   // Hoisted out of the try so the catch's diagnostic log can include which
   // attempt was in-flight when generateObject threw.
@@ -64,7 +78,7 @@ export async function generateMessage(
       attempts++
       const { object } = await generateObject({
         model: getGenerationModel(),
-        system: systemPrompt,
+        system: augmentedSystemPrompt,
         prompt: userPrompt,
         schema: GeneratedMessageSchema,
         maxOutputTokens: 500,
