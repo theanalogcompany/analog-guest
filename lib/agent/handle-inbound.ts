@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import {
+  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  captureAgentLatencyHigh,
+} from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -78,9 +82,14 @@ async function findExistingReply(inboundMessageId: string): Promise<string | nul
  */
 export async function handleInbound(inboundMessageId: string): Promise<AgentResult> {
   const agentRunId = randomUUID()
+  const start = Date.now()
   let ctx: RuntimeContext | null = null
   let knownVenueId: string | null = null
   let knownGuestId: string | null = null
+  // Skipped on the duplicate-skip return path: that path is fast and not
+  // interesting for the latency signal. Other early returns (failed builds,
+  // refused generations, etc.) DO emit so we can see how long bad runs take.
+  let skipLatencyEmit = false
 
   try {
     console.log('[agent] inbound start', { agentRunId, inboundMessageId })
@@ -98,6 +107,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         inboundMessageId,
         reason: 'duplicate',
       })
+      skipLatencyEmit = true
       return { status: 'skipped_duplicate' }
     }
 
@@ -248,5 +258,18 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       errorStack: errStack,
     })
     return { status: 'failed', stage: 'context_build', error: errMsg }
+  } finally {
+    if (!skipLatencyEmit) {
+      const totalElapsedMs = Date.now() - start
+      if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+        await captureAgentLatencyHigh({
+          agentRunId,
+          venueId: ctx?.venue.id ?? knownVenueId ?? 'unknown',
+          guestId: ctx?.guest.id ?? knownGuestId ?? 'unknown',
+          totalElapsedMs,
+          kind: 'inbound',
+        })
+      }
+    }
   }
 }

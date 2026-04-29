@@ -1,4 +1,13 @@
 import {
+  captureClassificationLowConfidence,
+  captureCorpusRetrievalBelowThreshold,
+  captureRegenerationTriggered,
+  captureVoiceFidelityLow,
+  CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
+  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
+  VOICE_FIDELITY_LOW_THRESHOLD,
+} from '@/lib/analytics/posthog'
+import {
   classifyMessage,
   generateMessage,
   type GenerateMessageResult,
@@ -31,6 +40,19 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
   if (!r.ok) {
     throw new Error(`classifyStage: ${r.error}`)
   }
+
+  if (r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD) {
+    await captureClassificationLowConfidence({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category: r.data.category,
+      classifierConfidence: r.data.classifierConfidence,
+      inboundLength: ctx.currentMessage.body.length,
+      inboundBody: ctx.currentMessage.body,
+    })
+  }
+
   return {
     category: r.data.category,
     classifierConfidence: r.data.classifierConfidence,
@@ -71,6 +93,27 @@ export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMa
       `retrieveCorpusStage: insufficient_corpus_matches (got ${strongCount} above ${STRONG_MATCH_SIMILARITY}, need ${MIN_STRONG_MATCHES}; total ${r.data.length})`,
     )
   }
+
+  // Observability event: thin retrieval. Looser bar than the gate above —
+  // retrieval succeeded structurally but the best match is weak, suggesting
+  // the prompt may lack venue-voice grounding.
+  const topSimilarity = r.data.length > 0 ? Math.max(...r.data.map((m) => m.similarity)) : 0
+  if (topSimilarity < CORPUS_TOP_SIMILARITY_LOW_THRESHOLD) {
+    const topMatch = r.data.length > 0
+      ? r.data.reduce((a, b) => (a.similarity >= b.similarity ? a : b))
+      : null
+    await captureCorpusRetrievalBelowThreshold({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      totalMatches: r.data.length,
+      strongMatchCount: strongCount,
+      topSimilarity,
+      inboundBody: ctx.currentMessage?.body ?? null,
+      topMatchPreview: topMatch ? topMatch.text.slice(0, 200) : null,
+    })
+  }
+
   return r.data
 }
 
@@ -117,6 +160,35 @@ export async function generateStage(
     runtime: buildAiRuntime(ctx),
   })
   if (!r.ok) return { status: 'failed', error: r.error }
+
+  // Observability events: emit before the floor-check return so they fire
+  // for both refused (< 0.4) and below-0.5-but-above-0.4 sends.
+  if (r.data.voiceFidelity < VOICE_FIDELITY_LOW_THRESHOLD) {
+    await captureVoiceFidelityLow({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      voiceFidelity: r.data.voiceFidelity,
+      attempts: r.data.attempts,
+      attemptScores: r.data.attemptScores,
+      category,
+      inboundBody: ctx.currentMessage?.body ?? null,
+      generatedBody: r.data.body,
+    })
+  }
+  if (r.data.attempts > 1) {
+    await captureRegenerationTriggered({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      attempts: r.data.attempts,
+      attemptScores: r.data.attemptScores,
+      finalFidelity: r.data.voiceFidelity,
+      inboundBody: ctx.currentMessage?.body ?? null,
+      finalGeneratedBody: r.data.body,
+    })
+  }
+
   if (r.data.voiceFidelity < SEND_FIDELITY_FLOOR) {
     return {
       status: 'refused',

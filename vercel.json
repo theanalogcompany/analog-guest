@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/webhook-silence",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}

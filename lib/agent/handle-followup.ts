@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import {
+  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  captureAgentLatencyHigh,
+} from '@/lib/analytics/posthog'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
@@ -46,6 +50,7 @@ export async function handleFollowup(input: {
   trigger: FollowupTrigger
 }): Promise<AgentResult> {
   const agentRunId = randomUUID()
+  const start = Date.now()
   let ctx: RuntimeContext | null = null
 
   try {
@@ -188,5 +193,16 @@ export async function handleFollowup(input: {
       errorStack: errStack,
     })
     return { status: 'failed', stage: 'context_build', error: errMsg }
+  } finally {
+    const totalElapsedMs = Date.now() - start
+    if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+      await captureAgentLatencyHigh({
+        agentRunId,
+        venueId: ctx?.venue.id ?? input.venueId,
+        guestId: ctx?.guest.id ?? input.guestId,
+        totalElapsedMs,
+        kind: 'followup',
+      })
+    }
   }
 }

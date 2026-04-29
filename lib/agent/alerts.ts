@@ -1,4 +1,7 @@
-import { PostHog } from 'posthog-node'
+// PostHog primitive lives in lib/analytics/posthog.ts (the leaf module).
+// This file owns the agent-flavored failure surface: fireRedAlert pairs a
+// PostHog event with a Slack notification for on-call visibility.
+import { capturePostHogEvent } from '@/lib/analytics/posthog'
 
 export interface AlertContext {
   agentRunId: string
@@ -17,21 +20,6 @@ export interface AlertContext {
   errorMessage?: string
   errorStack?: string
   extra?: Record<string, unknown>
-}
-
-let postHogClient: PostHog | null = null
-
-function getPostHog(): PostHog {
-  if (postHogClient) return postHogClient
-  // PostHog project tokens are write-only and safe to expose in client bundles,
-  // so the project standardizes on the NEXT_PUBLIC_ prefix even for this
-  // server-side reader. Server reads via process.env still work as normal.
-  const apiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
-  if (!apiKey) throw new Error('Missing env var: NEXT_PUBLIC_POSTHOG_KEY')
-  postHogClient = new PostHog(apiKey, {
-    host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com',
-  })
-  return postHogClient
 }
 
 function formatSlackMessage(context: AlertContext): string {
@@ -70,29 +58,17 @@ export async function fireRedAlert(context: AlertContext): Promise<void> {
   const eventName =
     context.kind === 'followup' ? 'followup_message_failed' : 'inbound_message_failed'
 
-  try {
-    getPostHog().capture({
-      distinctId: context.guestId ?? context.agentRunId,
-      event: eventName,
-      properties: {
-        agentRunId: context.agentRunId,
-        venueId: context.venueId,
-        guestId: context.guestId,
-        kind: context.kind,
-        stage: context.stage,
-        errorCode: context.errorCode,
-        errorMessage: context.errorMessage,
-        errorStack: context.errorStack,
-        ...context.extra,
-        ts: new Date().toISOString(),
-      },
-    })
-  } catch (e) {
-    console.error('alert: posthog capture failed', {
-      agentRunId: context.agentRunId,
-      error: e instanceof Error ? e.message : String(e),
-    })
-  }
+  await capturePostHogEvent(eventName, context.guestId ?? context.agentRunId, {
+    agentRunId: context.agentRunId,
+    venueId: context.venueId,
+    guestId: context.guestId,
+    kind: context.kind,
+    stage: context.stage,
+    errorCode: context.errorCode,
+    errorMessage: context.errorMessage,
+    errorStack: context.errorStack,
+    ...context.extra,
+  })
 
   const webhookUrl = process.env.SLACK_ALERTS_WEBHOOK_URL
   if (!webhookUrl) {
@@ -123,29 +99,6 @@ export async function fireRedAlert(context: AlertContext): Promise<void> {
   }
 }
 
-/**
- * Capture a non-failure PostHog event (success, skip, etc.). Same lazy-init
- * client as fireRedAlert. Never throws — failures are logged via
- * console.error so an analytics outage cannot cascade into the orchestrator.
- *
- * Used by lib/agent/handle-inbound and handle-followup for events like
- * inbound_message_handled, inbound_message_skipped, followup_message_handled.
- */
-export async function capturePostHogEvent(
-  event: string,
-  distinctId: string,
-  properties: Record<string, unknown>,
-): Promise<void> {
-  try {
-    getPostHog().capture({
-      distinctId,
-      event,
-      properties: { ...properties, ts: new Date().toISOString() },
-    })
-  } catch (e) {
-    console.error(`alert: posthog capture failed for ${event}`, {
-      distinctId,
-      error: e instanceof Error ? e.message : String(e),
-    })
-  }
-}
+// Re-export so existing callers (handle-inbound / handle-followup) don't
+// need to import from two places.
+export { capturePostHogEvent } from '@/lib/analytics/posthog'
