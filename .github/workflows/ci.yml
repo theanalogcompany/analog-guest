@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel in-progress runs on the same branch when a new push lands. Saves
+# minutes on rapid review-feedback pushes; the latest run is the one we care
+# about.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Mock env vars. None of the unit tests reference process.env, and the
+      # codebase reads env vars lazily inside functions (not at module load),
+      # so neither vitest nor next build need real values. These placeholders
+      # protect against any future module-load env check; they're not
+      # secrets and are safe to inline here.
+      ANTHROPIC_API_KEY: ci-mock
+      VOYAGE_API_KEY: ci-mock
+      SENDBLUE_API_KEY_ID: ci-mock
+      SENDBLUE_API_SECRET_KEY: ci-mock
+      SENDBLUE_SIGNING_SECRET: ci-mock
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-mock.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-mock
+      SUPABASE_SECRET_KEY: ci-mock
+      NEXT_PUBLIC_POSTHOG_KEY: ci-mock
+      NEXT_PUBLIC_POSTHOG_HOST: https://ci-mock.posthog.com
+      SLACK_ALERTS_WEBHOOK_URL: ""
+      GOOGLE_DRIVE_VENUES_FOLDER_ID: ci-mock
+      AIRTABLE_API_KEY: ci-mock
+      AIRTABLE_BASE_ID: ci-mock
+      AIRTABLE_TABLE_ID: ci-mock
+      CRON_SECRET: ci-mock
+      TEST_VENUE_ID: ci-mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npx vitest run
+      - run: npm run build

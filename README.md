@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# analog-guest
 
-## Getting Started
+Messaging engine for the Analog guest recognition platform. Handles inbound
+and outbound messages between hospitality venues and their guests, plus AI
+generation, classification, and routing.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Environment variables: copy `.env.local.example` to `.env.local` and fill in
+real values (ask the operator for the secrets bundle).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pre-push checks
 
-## Learn More
+Before pushing, run the same checks CI runs:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npx tsc --noEmit && npm run lint && npx vitest run && npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## CI
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+GitHub Actions runs `tsc --noEmit`, `eslint`, `vitest run`, and `next build`
+on every pull request and push to `main`. Merge to `main` is blocked on red.
 
-## Deploy on Vercel
+The workflow lives at `.github/workflows/ci.yml`. To configure branch
+protection (one-time, after the first CI run):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Repo Settings → Branches → Branch protection rules → Add rule
+2. Branch name pattern: `main`
+3. Enable **Require status checks to pass before merging** and select
+   `CI / ci`
+4. Enable **Require branches to be up to date before merging**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Architecture
+
+See [CLAUDE.md](CLAUDE.md) for the project's product principles, tech stack,
+code conventions, and module layout.
