@@ -280,10 +280,9 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   const menuNotesSection = infoH3s.find((s) => /^menu\.notes/i.test(s.title))
   const menuNotes = menuNotesSection ? menuNotesSection.content.trim() : undefined
 
-  // currentContext: JSON array → adapt to VenueContextNoteSchema. The fixture
-  // has free-text source labels ('interview_section_9') and an expiresAt
-  // field that aren't in the current schema. Coerce source → 'text' and drop
-  // expiresAt for tonight; richer schema is a future extension.
+  // currentContext: JSON array → adapt to VenueContextNoteSchema. Pass through
+  // source and expiresAt verbatim; schema accepts free-form source strings and
+  // optional ISO expiresAt (THE-150).
   const currentContextSection = infoH3s.find((s) => /^currentcontext/i.test(s.title))
   let currentContextRaw: Array<Record<string, unknown>> = []
   if (currentContextSection) {
@@ -296,8 +295,9 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
     .map((entry) => ({
       id: String(entry.id ?? ''),
       content: String(entry.content ?? ''),
-      source: 'text' as const,
+      source: typeof entry.source === 'string' && entry.source.length > 0 ? entry.source : 'text',
       addedAt: entry.addedAt ?? new Date().toISOString(),
+      ...(typeof entry.expiresAt === 'string' ? { expiresAt: entry.expiresAt } : {}),
     }))
     .filter((e) => e.id.length > 0 && e.content.length > 0)
 

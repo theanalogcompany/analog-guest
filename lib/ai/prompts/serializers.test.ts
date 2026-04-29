@@ -93,6 +93,14 @@ describe('venueInfoToProse — menu items', () => {
   })
 })
 
+describe('venueInfoToProse — currentContext', () => {
+  it('omits the Current context section when currentContext is empty', () => {
+    const info = makeVenueInfo({ currentContext: [] })
+    const out = venueInfoToProse(info)
+    expect(out).not.toContain('## Current context')
+  })
+})
+
 describe('venueInfoToProse — hours notes multiline fix', () => {
   it('nests multi-line notes as sub-bullets so they stay inside the Hours block', () => {
     const info = makeVenueInfo({
