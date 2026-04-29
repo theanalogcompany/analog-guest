@@ -46,6 +46,7 @@ Treat the database, messaging, and LLM providers as swappable. Code should depen
 - `lib/rag/` — embedding (`ingestCorpusEntry`), retrieval, the `match_voice_corpus` RPC wrapper
 - `lib/recognition/` — relationship strength scoring, state machine logic (`computeGuestState`, `computeRelationshipStrength`, `loadSignals`, `normalize-signals`), threshold evaluation. `state-bands.ts` exposes `isStateAtLeast(current, min)` for ordered comparisons across the four bands. `eligibility.ts` exposes `isRedemptionActive` + `filterEligibleMechanics` for runtime mechanic eligibility filtering, plus `MechanicRedeemedDataSchema` documenting the `engagement_events.data` shape for `event_type='mechanic_redeemed'` rows.
 - `lib/agent/` — orchestration layer. `build-runtime-context.ts` (assembles RuntimeContext for a single agent run), `stages.ts` (classify → retrieve → generate stage functions), `handle-inbound.ts`, `handle-followup.ts`. The agent module owns the per-request lifecycle.
+- `lib/auth/` — JWT verification + operator lookup for analog-operator → analog-guest API calls. `verifyOperatorRequest(request)` returns `{ operatorId, allowedVenueIds }` or throws `AuthError`. `getCurrentOperator(request)` is the Response-returning wrapper for route handlers. Server-only; uses the admin DB client.
 - `lib/drive/` — Google Drive helpers used by the operator app side
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
 
@@ -236,7 +237,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 110 tests across 9 files as of THE-170 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 125 tests across 11 files as of THE-109 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 
@@ -281,6 +282,12 @@ These constraints are real and have caused bugs:
 - **Today's date in context:** `RuntimeContext.todayInVenueTimezone` is set from `new Date()` at runtime, formatted in the venue's timezone. THE-174 added this so the agent answers "are you open today?" correctly.
 - **Universal voice rules R1-R7:** live in `SYSTEM_TEMPLATE`. Apply to every agent on every venue. Don't reference actions the guest didn't take, give today's specific answer, no em dashes, don't reference physical artifacts the agent doesn't have, don't redirect to alt channels for things the venue can answer, yes/no questions get yes/no answers, don't restate context already in the conversation.
 - **Mechanic eligibility (THE-170):** mechanics with `min_state` set are filtered out of `RuntimeContext.mechanics` when the guest's recognition state is below the gate. Mechanics with active redemptions are also filtered (`one_time` policy blocks forever after any `mechanic_redeemed` event; `renewable` blocks within `redemption_window_days`). Helpers: `isStateAtLeast` and `filterEligibleMechanics` in `lib/recognition/`. The filter runs at load time in `build-runtime-context.ts` after `recognition.state` is computed, sharing `computedAt` so the filter timestamp matches the recognition snapshot. Empty list is meaningful — the serializer renders an explicit "do not offer perks of any kind" instruction when `mechanics: []`. Empty-list framing is load-bearing for closing the eligibility-leak failure case where Sonnet would otherwise improvise mechanic offers from voice corpus matches.
+
+---
+
+## Auth boundary (analog-operator → analog-guest)
+
+All internal API routes called from the operator dashboard verify the bearer token via `verifyOperatorRequest` (or its `getCurrentOperator` wrapper). The helper resolves the Supabase auth JWT to our internal `operatorId` plus an `allowedVenueIds` array. Route handlers do venue-mismatch checks themselves (`allowedVenueIds.includes(targetVenueId)`) and construct 403 responses; the helper itself only ever produces 401. RLS is the longer-term defense; the helper is the v1 enforcement point.
 
 ---
 
