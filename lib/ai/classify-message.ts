@@ -38,7 +38,13 @@ const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests o
 - event_invite: the guest is responding to or asking about an event
 - manual: best for cases that do not fit any other category cleanly, or that need an operator's attention
 
-Return your classification with a confidence score between 0 and 1 and a one-sentence reasoning. Be conservative with confidence — if the message is genuinely ambiguous, score lower so the operator can review it.`
+Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence — if the message is genuinely ambiguous, score lower so the operator can review it.
+
+  0.0 = no idea, pure guess
+  0.5 = ambiguous, multiple plausible categories
+  0.7 = clear category, minor uncertainty
+  0.9 = high confidence, distinctive signal in the message
+  1.0 = certain`
 
 /**
  * Classify an inbound message from a guest into one of the eight categories.
