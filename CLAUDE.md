@@ -44,7 +44,7 @@ Treat the database, messaging, and LLM providers as swappable. Code should depen
 - `lib/messaging/` — message send + receive + webhook verification (currently backed by Sendblue)
 - `lib/ai/` — AI SDK setup, prompts, classification, generation. Contains `classify-message.ts`, `generate-message.ts`, the `SYSTEM_TEMPLATE`, and the universal voice rules R1-R7.
 - `lib/rag/` — embedding (`ingestCorpusEntry`), retrieval, the `match_voice_corpus` RPC wrapper
-- `lib/recognition/` — relationship strength scoring, state machine logic (`computeGuestState`, `computeRelationshipStrength`, `loadSignals`, `normalize-signals`), threshold evaluation
+- `lib/recognition/` — relationship strength scoring, state machine logic (`computeGuestState`, `computeRelationshipStrength`, `loadSignals`, `normalize-signals`), threshold evaluation. `state-bands.ts` exposes `isStateAtLeast(current, min)` for ordered comparisons across the four bands. `eligibility.ts` exposes `isRedemptionActive` + `filterEligibleMechanics` for runtime mechanic eligibility filtering, plus `MechanicRedeemedDataSchema` documenting the `engagement_events.data` shape for `event_type='mechanic_redeemed'` rows.
 - `lib/agent/` — orchestration layer. `build-runtime-context.ts` (assembles RuntimeContext for a single agent run), `stages.ts` (classify → retrieve → generate stage functions), `handle-inbound.ts`, `handle-followup.ts`. The agent module owns the per-request lifecycle.
 - `lib/drive/` — Google Drive helpers used by the operator app side
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
@@ -164,9 +164,10 @@ Migrations live in `db/migrations/` numbered sequentially. Each is hand-written 
 - `003_ai_module_refinements.sql` — batches schema changes from AI module design: renames `messages.confidence_score` to `voice_fidelity` for terminology consistency; adds `review_reason` and `pending_until` columns to support routing audit trail and the hold-and-fallback workflow; extends `messages.category` check to include `'acknowledgment'` for fallback messages.
 - `004_match_voice_corpus_function.sql` — adds Postgres function `match_voice_corpus(venue_id, query_embedding, match_count, source_type_filter, min_confidence)` for pgvector cosine similarity search over a venue's voice corpus. Used by the RAG module's `retrieveContext` via Supabase RPC.
 - `005_post_recognition_refinements.sql` — batches schema changes from RAG/recognition module work: adds retrieval analytics columns to voice_embeddings, authorship column to voice_corpus, extends operator_venues permission_level to include 'analog_admin', adds home_postal_code and distance_to_venue_miles to guests for the recognition distance multiplier, extends engagement_events.event_type to include 'referral_converted'.
-- `006_idempotency_and_inbound_message_origin.sql` — adds unique constraint on `messages.provider_message_id` as last-line defense against duplicate orchestrator runs (replaces the prior regular index), and extends `guests.created_via` to include `'inbound_message'` for guests auto-created from unrecognized phone numbers texting in. Inbound→outbound message linking already exists via `messages.reply_to_message_id` from migration 001 — no schema change needed for that. Visit dedupe timezone fix and `venue_info.currentContext` are app-side changes, not migrations.
+- `006_idempotency_and_inbound_message_origin.sql` — adds unique constraint on `messages.provider_message_id` as last-line defense against duplicate orchestrator runs (replaces the prior regular index), and extends `guests.created_via` to include `'inbound_message'` for guests auto-created from unrecognized phone numbers texting in. Inbound→outbound message linking already exists via `messages.reply_to_message_id` from migration 001 — no schema change needed for that. Visit dedupe timezone fix and `venue_info.currentContext` are app-side changes, not migrations. THE-150 later added an optional `expiresAt` field to each `currentContext` entry — runtime filters expired entries via `filterActiveContext` in `lib/schemas/venue-info.ts` before they reach the prompt.
 - `007_test_synthetic_guests.sql` — adds `is_test_synthetic` boolean to `guests` (default false, not null) plus a partial index on `(venue_id, is_test_synthetic) WHERE is_test_synthetic = true`. Used by `run-test-scenarios` (THE-181) to mark synthetic guests seeded for Phase 5 testing so analytics can filter them out. Synthetic guests are still per-venue (schema-required); the deterministic phone numbers `+15550001000/100/200/300` are reused across venues but each venue gets its own four guest rows.
 - `008_voice_corpus_source_ref.sql` — adds `source_ref text` column to `voice_corpus`, extends the `source_type` check constraint to include `'operator_edit'`, and adds a partial unique index on `(venue_id, source_ref) WHERE source_ref IS NOT NULL`. Enables idempotent upsert-by-source-ref for `ingest-response-review` (THE-178), which keys voice corpus rows on `'08-review:{sample_id}'` so re-runs don't duplicate.
+- `009_mechanic_min_state_and_redemption.sql` — adds three columns to `mechanics`: `min_state` (NOT NULL DEFAULT 'new', check-constrained to the four guest states; gates eligibility by relationship band), `redemption_policy` (NOT NULL DEFAULT 'one_time', `'one_time' | 'renewable'`; named "policy" rather than "type" to avoid colliding with the existing `mechanics.redemption.type` jsonb field describing the redemption mechanism), and `redemption_window_days` (nullable integer; required when policy='renewable'). Adds composite CHECK constraint `mechanics_redemption_window_consistency` enforcing `(one_time + null) OR (renewable + non-null)`. Adds index `idx_mechanics_min_state` on `(venue_id, min_state)` for the runtime mechanics-load query. Extends `engagement_events.event_type` to include `'mechanic_redeemed'`. Legacy `'perk_redeemed'` and `'merch_redeemed'` event types stay in the constraint for back-compat but new code emits `'mechanic_redeemed'` only. THE-170.
 
 RLS policies will be added in a future migration before any external user gets DB access (THE-110).
 
@@ -235,7 +236,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 71 tests across 5 files as of THE-178 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 110 tests across 9 files as of THE-170 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 
@@ -279,6 +280,7 @@ These constraints are real and have caused bugs:
 - **Recent conversation block:** the last 14 days of messages between this guest and this venue are loaded into RuntimeContext. THE-173 added this; future changes to the window should consider impact on synthetic-guest seeding (`run-test-scenarios` seeds messages >30 days old to keep this block empty during testing).
 - **Today's date in context:** `RuntimeContext.todayInVenueTimezone` is set from `new Date()` at runtime, formatted in the venue's timezone. THE-174 added this so the agent answers "are you open today?" correctly.
 - **Universal voice rules R1-R7:** live in `SYSTEM_TEMPLATE`. Apply to every agent on every venue. Don't reference actions the guest didn't take, give today's specific answer, no em dashes, don't reference physical artifacts the agent doesn't have, don't redirect to alt channels for things the venue can answer, yes/no questions get yes/no answers, don't restate context already in the conversation.
+- **Mechanic eligibility (THE-170):** mechanics with `min_state` set are filtered out of `RuntimeContext.mechanics` when the guest's recognition state is below the gate. Mechanics with active redemptions are also filtered (`one_time` policy blocks forever after any `mechanic_redeemed` event; `renewable` blocks within `redemption_window_days`). Helpers: `isStateAtLeast` and `filterEligibleMechanics` in `lib/recognition/`. The filter runs at load time in `build-runtime-context.ts` after `recognition.state` is computed, sharing `computedAt` so the filter timestamp matches the recognition snapshot. Empty list is meaningful — the serializer renders an explicit "do not offer perks of any kind" instruction when `mechanics: []`. Empty-list framing is load-bearing for closing the eligibility-leak failure case where Sonnet would otherwise improvise mechanic offers from voice corpus matches.
 
 ---
 
@@ -303,8 +305,42 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
 
 - **`@/*` aliases in test files.** Vitest can't resolve them when transitive imports pull in heavy deps. Use the module-split pattern (see "Module split for testability").
 - **Zod `.min()`/`.max()` on LLM output number fields.** Anthropic's structured output rejects these. Use `.refine()` or post-LLM validation. (THE-157.)
+- **Permissive schema + filter-time validation pattern.** When the same field is validated at two boundaries (input parse + runtime), prefer strict at the offline boundary (parser/seed) and permissive-with-defensive-filter at the live boundary (runtime). Crashes during seed are catchable; crashes during agent runs hurt guests. Three instances: THE-157 (`.min()/.max()` rejected by Anthropic structured output, validate post-LLM), THE-150 (`expiresAt` stored as plain `z.string().optional()`; `filterActiveContext` parses + drops malformed entries with `console.warn` instead of failing the whole `venue_info` JSONB parse), THE-170 (mechanic `min_state` is strict `z.enum(GUEST_STATES)` at the parser boundary inside `parse-venue-spec.ts`, but `isStateAtLeast` at runtime treats unknown values defensively — drop the gated mechanic, log, don't crash).
+- **`filterActiveContext` (THE-150).** Pure helper at `lib/schemas/venue-info.ts`. Drops `currentContext` entries whose `expiresAt` is past or equal to `now`; entries with no `expiresAt` are permanent; malformed `expiresAt` logs and drops. Wired in `build-runtime-context.ts` via the same `computedAt` reused for the recognition snapshot (single "now" per agent run).
 - **Re-seeding via `seed-supabase.ts` for voice training.** Don't. Phase 5 voice training uses surgical updates via `ingest-response-review`. Re-seed only when the venue spec markdown itself changed structurally.
 - **Drive ADC re-auth.** Tokens expire. If you see `invalid_grant` / `invalid_rapt`, re-run `gcloud auth application-default login --client-id-file=... --scopes=...`.
 - **gcloud Python version.** Workspace install can break against newer Python. If `gcloud` errors with Python version mismatch, set `CLOUDSDK_PYTHON` to a specific Python 3.10-3.14 binary.
 - **Migration application order.** Always apply the migration in Supabase Studio BEFORE running scripts that depend on it locally. Hand-patches to `db/types.ts` are temporary; `npm run db:types` is the resolution.
 - **`venue_configs.brand_persona` vs `venues.brand_persona`.** It lives on `venue_configs`, not `venues`. Check `build-runtime-context.ts` for the canonical access pattern.
+- **In-place mechanic edits without re-seed (THE-170).** `seed-supabase` hard-fails on existing slugs and a full re-seed cascades through `venue_configs`/`mechanics`/`voice_corpus`/`voice_embeddings`/etc — destroying any Phase 5 voice corpus additions written by `ingest-response-review`. To update mechanic eligibility gates without losing voice training, run a SQL `UPDATE` directly in Supabase Studio:
+  ```sql
+  -- Set The Joey to regulars-only on mock-central-perk
+  update mechanics
+  set min_state = 'regular'
+  where venue_id = (select id from venues where slug = 'mock-central-perk')
+    and name = 'The Joey';
+
+  -- Renewable mechanic example (free first drink each month)
+  update mechanics
+  set redemption_policy = 'renewable',
+      redemption_window_days = 30
+  where venue_id = (select id from venues where slug = 'mock-central-perk')
+    and name = 'First Drink Free';
+
+  -- Mark a mechanic as redeemed for a specific guest. mechanic_id FK column is
+  -- the source of truth; the data jsonb mirrors it for self-describing rows.
+  insert into engagement_events (venue_id, guest_id, event_type, mechanic_id, data)
+  values (
+    (select id from venues where slug = 'mock-central-perk'),
+    '<guest_uuid>',
+    'mechanic_redeemed',
+    '<mechanic_uuid>',
+    jsonb_build_object(
+      'mechanic_id', '<mechanic_uuid>',
+      'source', 'operator_marked',
+      'recorded_by_operator_id', '<operator_uuid>',
+      'notes', 'Walk-in redemption on 2026-04-29'
+    )
+  );
+  ```
+  After updating, re-run `npm run run-test-scenarios mock-central-perk` to verify expected behavior. Per-guest data jsonb shape is documented by `MechanicRedeemedDataSchema` in `lib/recognition/eligibility.ts`. Proper upsert flow tracked in THE-196.

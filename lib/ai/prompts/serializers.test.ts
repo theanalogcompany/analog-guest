@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
+import type { EligibleMechanic } from '../../recognition/eligibility'
 import { type MenuItem, type VenueInfo, VenueInfoSchema } from '../../schemas'
 import type { RecentMessage, RuntimeContext } from '../types'
 import { runtimeToProse, venueInfoToProse } from './serializers'
@@ -242,5 +243,77 @@ describe('runtimeToProse — recent conversation block', () => {
       NOW,
     )
     expect(out.indexOf('## Right now')).toBeLessThan(out.indexOf('## Recent conversation'))
+  })
+})
+
+const mechanic = (overrides: Partial<EligibleMechanic> = {}): EligibleMechanic => ({
+  id: 'm-1',
+  type: 'perk',
+  name: 'The Joey',
+  description: null,
+  qualification: null,
+  rewardDescription: null,
+  minState: null,
+  ...overrides,
+})
+
+describe('runtimeToProse — eligibility block (THE-170)', () => {
+  it('renders the empty-list framing when mechanics is an empty array', () => {
+    const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
+    expect(out).toContain('## What this guest can access')
+    expect(out).toContain('Do not offer perks of any kind.')
+    expect(out).toContain("hasn't yet earned access to perks")
+  })
+
+  it('renders bullets with name + reward + qualification when mechanics has entries', () => {
+    const out = runtimeToProse(
+      {
+        mechanics: [
+          mechanic({
+            name: 'The Joey',
+            rewardDescription: 'free couch hold for 2 hours',
+            qualification: 'regulars only',
+          }),
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## What this guest can access')
+    expect(out).toContain('- The Joey — free couch hold for 2 hours (regulars only)')
+  })
+
+  it('renders bare name when reward and qualification are null', () => {
+    const out = runtimeToProse(
+      { mechanics: [mechanic({ name: 'Naked Mechanic' })] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('- Naked Mechanic')
+    expect(out).not.toContain('- Naked Mechanic —')
+    expect(out).not.toContain('- Naked Mechanic (')
+  })
+
+  it('omits the eligibility block entirely when mechanics is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
+    expect(out).not.toContain('## What this guest can access')
+  })
+
+  it('renders eligibility block after Right now and before Recent conversation', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+      },
+      'reply',
+      NOW,
+    )
+    const rightNowIdx = out.indexOf('## Right now')
+    const eligibilityIdx = out.indexOf('## What this guest can access')
+    const recentIdx = out.indexOf('## Recent conversation')
+    expect(rightNowIdx).toBeGreaterThanOrEqual(0)
+    expect(eligibilityIdx).toBeGreaterThan(rightNowIdx)
+    expect(recentIdx).toBeGreaterThan(eligibilityIdx)
   })
 })

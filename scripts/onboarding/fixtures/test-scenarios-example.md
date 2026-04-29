@@ -29,7 +29,7 @@ Each category has:
 In addition to the categories below, the extraction script derives extra scenarios from the venue-spec's mechanics. For each mechanic:
 
 - One scenario at `guest_state` = the mechanic's `min_state` → expect agent honors the mechanic
-- One scenario at `guest_state` = 'new' (if `min_state` ≠ 'new') → expect agent declines, marked `expected_failure: THE-170` until min_state filtering ships
+- One scenario at `guest_state` = 'new' (if `min_state` ≠ 'new') → expect agent declines because the guest hasn't earned access
 
 ---
 
@@ -140,10 +140,9 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 11: off-menu / regulars-only
 
-- **description**: Guest requests an off-menu item or regulars-only perk. Tests min_state eligibility on mechanics. Until THE-170 ships, the agent will commit to off-menu items for new guests — these rows produce `verdict=edit` until that fix lands.
+- **description**: Guest requests an off-menu item or regulars-only perk. Tests min_state eligibility on mechanics — `new`-state guests should be declined; `regular`-state guests should be honored.
 - **target_count**: 1
 - **guest_states**: `['new', 'regular']`
-- **expected_failure**: `THE-170`
 - **example_phrasings**:
   - "can i get the joey?"
   - "the usual?"

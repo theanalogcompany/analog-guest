@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { GUEST_STATES } from '@/lib/recognition'
 import {
   type BrandPersona,
   BrandPersonaSchema,
@@ -18,6 +19,16 @@ export interface MechanicSpec {
   trigger: Record<string, unknown>
   redemption?: Record<string, unknown>
   metadata?: Record<string, unknown>
+  // THE-170: gate eligibility by guest's relationship state. Strict enum at
+  // the parser boundary (offline; fail loud on typo). Runtime is permissive
+  // via isStateAtLeast.
+  min_state?: 'new' | 'returning' | 'regular' | 'raving_fan'
+  // THE-170: redemption policy. 'one_time' is the conservative default.
+  // 'renewable' requires redemption_window_days. The parser doesn't enforce
+  // the (policy, window) consistency — Postgres CHECK constraint does at
+  // insert time. Sonnet defaults to one_time + null when not present in spec.
+  redemption_policy?: 'one_time' | 'renewable'
+  redemption_window_days?: number
 }
 
 const MechanicSchema = z.object({
@@ -30,6 +41,9 @@ const MechanicSchema = z.object({
   trigger: z.record(z.string(), z.unknown()),
   redemption: z.record(z.string(), z.unknown()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  min_state: z.enum(GUEST_STATES).optional(),
+  redemption_policy: z.enum(['one_time', 'renewable']).optional(),
+  redemption_window_days: z.number().int().positive().optional(),
 })
 
 export interface VoiceCorpusSpec {
@@ -341,7 +355,6 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   const mechanics: MechanicSpec[] = []
   for (const raw of mechanicsRaw) {
     if (typeof raw !== 'object' || raw === null) continue
-    // Zod's z.object strips unknown keys (incl. `min_state` per locked decision).
     const parsed = MechanicSchema.safeParse(raw)
     if (!parsed.success) {
       throw new Error(
