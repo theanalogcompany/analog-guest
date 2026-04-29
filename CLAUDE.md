@@ -137,6 +137,17 @@ Ask. Do not guess product behavior. The plan-first rule exists so questions surf
 
 ---
 
+## Git workflow
+
+- Branch protection on `main` is active. Direct pushes to `main` are rejected.
+- All changes go through a pull request.
+- Branch naming: `jaipal/the-XXX-short-description` (keep it short — Linear's auto-generated branch names are often too long).
+- Open PR with `gh pr create`. Title format: `THE-XXX: <imperative subject>`.
+- Merge style: `gh pr merge <num> --squash --delete-branch`. Squash matches the linear single-commit-per-change history of `main`.
+- CI must be green before merge — `tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build` all enforced via `.github/workflows/ci.yml`.
+
+---
+
 ## Database migrations
 
 Migrations live in `db/migrations/` numbered sequentially. Each is hand-written SQL. Workflow:
