@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { computeGuestState } from '@/lib/recognition'
-import { BrandPersonaSchema, VenueInfoSchema } from '@/lib/schemas'
+import { BrandPersonaSchema, filterActiveContext, VenueInfoSchema } from '@/lib/schemas'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -141,11 +141,16 @@ export async function buildRuntimeContext(input: {
     )
   }
 
+  const venueInfo = {
+    ...venueInfoParsed.data,
+    currentContext: filterActiveContext(venueInfoParsed.data.currentContext, computedAt),
+  }
+
   const venue: VenueContext = {
     id: venueRow.id,
     slug: venueRow.slug,
     brandPersona: brandPersonaParsed.data,
-    venueInfo: venueInfoParsed.data,
+    venueInfo,
     timezone: venueRow.timezone,
     sendblueNumber: venueRow.messaging_phone_number,
   }

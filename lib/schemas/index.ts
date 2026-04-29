@@ -1,5 +1,6 @@
 export { BrandPersonaSchema, type BrandPersona } from './brand-persona'
 export {
+  filterActiveContext,
   MenuItemSchema,
   type MenuItem,
   VenueContextNoteSchema,
