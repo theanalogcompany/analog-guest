@@ -705,6 +705,7 @@ export type Database = {
           metadata: Json
           processed_at: string | null
           schema_version: number
+          source_ref: string | null
           source_type: string
           tags: string[]
           updated_at: string
@@ -721,6 +722,7 @@ export type Database = {
           metadata?: Json
           processed_at?: string | null
           schema_version?: number
+          source_ref?: string | null
           source_type: string
           tags?: string[]
           updated_at?: string
@@ -737,6 +739,7 @@ export type Database = {
           metadata?: Json
           processed_at?: string | null
           schema_version?: number
+          source_ref?: string | null
           source_type?: string
           tags?: string[]
           updated_at?: string
