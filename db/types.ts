@@ -358,6 +358,7 @@ export type Database = {
           generated_by: string | null
           guest_id: string
           id: string
+          langfuse_trace_id: string | null
           media_urls: string[]
           parent_draft_id: string | null
           pending_until: string | null
@@ -385,6 +386,7 @@ export type Database = {
           generated_by?: string | null
           guest_id: string
           id?: string
+          langfuse_trace_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
           pending_until?: string | null
@@ -412,6 +414,7 @@ export type Database = {
           generated_by?: string | null
           guest_id?: string
           id?: string
+          langfuse_trace_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
           pending_until?: string | null
@@ -516,6 +519,7 @@ export type Database = {
           email: string
           full_name: string | null
           id: string
+          is_analog_admin: boolean
           is_test: boolean
           job_title: string | null
           last_seen_at: string | null
@@ -529,6 +533,7 @@ export type Database = {
           email: string
           full_name?: string | null
           id?: string
+          is_analog_admin?: boolean
           is_test?: boolean
           job_title?: string | null
           last_seen_at?: string | null
@@ -542,6 +547,7 @@ export type Database = {
           email?: string
           full_name?: string | null
           id?: string
+          is_analog_admin?: boolean
           is_test?: boolean
           job_title?: string | null
           last_seen_at?: string | null

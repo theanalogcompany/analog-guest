@@ -169,6 +169,7 @@ Migrations live in `db/migrations/` numbered sequentially. Each is hand-written 
 - `007_test_synthetic_guests.sql` — adds `is_test_synthetic` boolean to `guests` (default false, not null) plus a partial index on `(venue_id, is_test_synthetic) WHERE is_test_synthetic = true`. Used by `run-test-scenarios` (THE-181) to mark synthetic guests seeded for Phase 5 testing so analytics can filter them out. Synthetic guests are still per-venue (schema-required); the deterministic phone numbers `+15550001000/100/200/300` are reused across venues but each venue gets its own four guest rows.
 - `008_voice_corpus_source_ref.sql` — adds `source_ref text` column to `voice_corpus`, extends the `source_type` check constraint to include `'operator_edit'`, and adds a partial unique index on `(venue_id, source_ref) WHERE source_ref IS NOT NULL`. Enables idempotent upsert-by-source-ref for `ingest-response-review` (THE-178), which keys voice corpus rows on `'08-review:{sample_id}'` so re-runs don't duplicate.
 - `009_mechanic_min_state_and_redemption.sql` — adds three columns to `mechanics`: `min_state` (NOT NULL DEFAULT 'new', check-constrained to the four guest states; gates eligibility by relationship band), `redemption_policy` (NOT NULL DEFAULT 'one_time', `'one_time' | 'renewable'`; named "policy" rather than "type" to avoid colliding with the existing `mechanics.redemption.type` jsonb field describing the redemption mechanism), and `redemption_window_days` (nullable integer; required when policy='renewable'). Adds composite CHECK constraint `mechanics_redemption_window_consistency` enforcing `(one_time + null) OR (renewable + non-null)`. Adds index `idx_mechanics_min_state` on `(venue_id, min_state)` for the runtime mechanics-load query. Extends `engagement_events.event_type` to include `'mechanic_redeemed'`. Legacy `'perk_redeemed'` and `'merch_redeemed'` event types stay in the constraint for back-compat but new code emits `'mechanic_redeemed'` only. THE-170.
+- `010_command_center_columns.sql` — adds two unrelated columns bundled atomically. `messages.langfuse_trace_id text` (nullable) links each agent-generated outbound message to its Langfuse trace, with partial index `idx_messages_langfuse_trace_id` for trace-ID lookup; populated by THE-200 instrumentation, existing rows stay null. `operators.is_analog_admin boolean NOT NULL DEFAULT false` gates access to `admin.theanalog.company` (admin routes colocated in this repo, served via a separate Vercel project). Default false so existing operators are unaffected; admin grants are explicit one-off SQL updates per the template under "Common gotchas". THE-199.
 
 RLS policies will be added in a future migration before any external user gets DB access (THE-110).
 
@@ -351,3 +352,13 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
   );
   ```
   After updating, re-run `npm run run-test-scenarios mock-central-perk` to verify expected behavior. Per-guest data jsonb shape is documented by `MechanicRedeemedDataSchema` in `lib/recognition/eligibility.ts`. Proper upsert flow tracked in THE-196.
+- **Granting analog admin access (THE-199).** `operators.is_analog_admin` defaults `false`. To grant access to `admin.theanalog.company`, run a SQL `UPDATE` directly in Supabase Studio:
+  ```sql
+  -- Grant admin access. Use the operator's email; do not interpolate the value
+  -- into the query — type it manually so this template can't be copy-pasted
+  -- against the wrong row.
+  update operators
+  set is_analog_admin = true
+  where email = '<email>';
+  ```
+  No app code automates this — it's one operator at a time, by hand, with someone reviewing. Mirrors the friction-by-placeholder pattern from the seed-supabase error template. Revoking is the same statement with `false`.
