@@ -25,7 +25,7 @@ This file is the source of truth for how the codebase works. When shipping a new
 - **Language:** TypeScript, strict mode
 - **App framework:** Next.js (App Router) deployed on Vercel
 - **Database:** Postgres with pgvector, plus Auth and Storage (Supabase as the current provider)
-- **Messaging:** iMessage + SMS fallback (Sendblue as the current provider). One dedicated number per venue.
+- **Messaging:** iMessage + SMS fallback (Sendblue as the current provider). One dedicated number per venue. Inbound webhook: `webhooks.theanalog.company/api/webhooks/sendblue` (configured Sendblue-side; route handler at `app/api/webhooks/sendblue/route.ts`). Future webhook integrations (Square, Stripe, Toast) inherit this subdomain convention.
 - **LLM:** Anthropic API via the Vercel AI SDK abstraction layer (model-agnostic from day one)
 - **Embeddings:** Voyage
 - **Drive integration:** Google Drive + Sheets API for the venue onboarding artifact pipeline (06-09 files described below)
