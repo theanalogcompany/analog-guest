@@ -65,6 +65,9 @@
  */
 
 import { PostHog } from 'posthog-node'
+import { postToSlack, truncate } from './slack'
+
+const SLACK_FIELD_TRUNCATE_CHARS = 300
 
 let postHogClient: PostHog | null = null
 
@@ -130,6 +133,23 @@ export interface VoiceFidelityLowProps {
 
 export async function captureVoiceFidelityLow(props: VoiceFidelityLowProps): Promise<void> {
   await capturePostHogEvent('voice_fidelity_low', props.guestId, { ...props })
+  await postToSlack(formatVoiceFidelityLow(props))
+}
+
+function formatVoiceFidelityLow(props: VoiceFidelityLowProps): string {
+  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
+  const lines = [
+    `*Voice fidelity low* — score \`${props.voiceFidelity.toFixed(2)}\` (${props.attempts} attempt${props.attempts === 1 ? '' : 's'}: ${scores})`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category}\``,
+  ]
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  lines.push(`generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  return lines.join('\n')
 }
 
 export interface RegenerationTriggeredProps {
@@ -147,6 +167,22 @@ export async function captureRegenerationTriggered(
   props: RegenerationTriggeredProps,
 ): Promise<void> {
   await capturePostHogEvent('regeneration_triggered', props.guestId, { ...props })
+  await postToSlack(formatRegenerationTriggered(props))
+}
+
+function formatRegenerationTriggered(props: RegenerationTriggeredProps): string {
+  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
+  const lines = [
+    `*Regeneration triggered* — ${props.attempts} attempts, final fidelity \`${props.finalFidelity.toFixed(2)}\` (scores: ${scores})`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+  ]
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  lines.push(`final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  return lines.join('\n')
 }
 
 export interface ClassificationLowConfidenceProps {
@@ -163,6 +199,17 @@ export async function captureClassificationLowConfidence(
   props: ClassificationLowConfidenceProps,
 ): Promise<void> {
   await capturePostHogEvent('classification_low_confidence', props.guestId, { ...props })
+  await postToSlack(formatClassificationLowConfidence(props))
+}
+
+function formatClassificationLowConfidence(props: ClassificationLowConfidenceProps): string {
+  return [
+    `*Classification low confidence* — \`${props.classifierConfidence.toFixed(2)}\` for category \`${props.category}\``,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `inbound (${props.inboundLength} chars): "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ].join('\n')
 }
 
 export interface CorpusRetrievalBelowThresholdProps {
@@ -180,6 +227,23 @@ export async function captureCorpusRetrievalBelowThreshold(
   props: CorpusRetrievalBelowThresholdProps,
 ): Promise<void> {
   await capturePostHogEvent('corpus_retrieval_below_threshold', props.guestId, { ...props })
+  await postToSlack(formatCorpusRetrievalBelowThreshold(props))
+}
+
+function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThresholdProps): string {
+  const lines = [
+    `*Corpus retrieval thin* — top similarity \`${props.topSimilarity.toFixed(2)}\` (${props.strongMatchCount} strong matches above 0.3, ${props.totalMatches} total)`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+  ]
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  if (props.topMatchPreview) {
+    lines.push(`top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  return lines.join('\n')
 }
 
 export interface AgentLatencyHighProps {
@@ -188,10 +252,33 @@ export interface AgentLatencyHighProps {
   guestId: string
   totalElapsedMs: number
   kind: 'inbound' | 'followup'
+  // Threaded through from the orchestrator's success path. inboundBody is
+  // null for followups (no inbound). generatedBody is null on failure paths
+  // that didn't reach a successful generation.
+  inboundBody: string | null
+  generatedBody: string | null
 }
 
 export async function captureAgentLatencyHigh(props: AgentLatencyHighProps): Promise<void> {
   await capturePostHogEvent('agent_latency_high', props.guestId, { ...props })
+  await postToSlack(formatAgentLatencyHigh(props))
+}
+
+function formatAgentLatencyHigh(props: AgentLatencyHighProps): string {
+  const seconds = (props.totalElapsedMs / 1000).toFixed(1)
+  const lines = [
+    `*Agent latency high* — ${seconds}s (${props.kind})`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+  ]
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  if (props.generatedBody) {
+    lines.push(`generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  return lines.join('\n')
 }
 
 export interface WebhookSilenceProps {
@@ -203,4 +290,12 @@ export async function captureWebhookSilence(props: WebhookSilenceProps): Promise
   // No guestId/venueId — system-level event. Use a stable distinctId so
   // aggregation in PostHog works.
   await capturePostHogEvent('webhook_silence', 'system:webhook-silence-cron', { ...props })
+  await postToSlack(formatWebhookSilence(props))
+}
+
+function formatWebhookSilence(props: WebhookSilenceProps): string {
+  return [
+    `*Webhook silence* — ${props.hoursWithoutWebhook} hours since last non-test inbound`,
+    `last webhook: \`${props.lastWebhookAt}\``,
+  ].join('\n')
 }

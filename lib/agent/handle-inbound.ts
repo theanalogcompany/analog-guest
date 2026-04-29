@@ -90,6 +90,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
   // interesting for the latency signal. Other early returns (failed builds,
   // refused generations, etc.) DO emit so we can see how long bad runs take.
   let skipLatencyEmit = false
+  // Threaded into the latency event payload. generatedBody stays null on
+  // failure paths that didn't reach a successful generation.
+  let generatedBody: string | null = null
 
   try {
     console.log('[agent] inbound start', { agentRunId, inboundMessageId })
@@ -212,6 +215,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
       return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
     }
+    generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
       agentRunId,
       voiceFidelity: gen.result.voiceFidelity,
@@ -268,6 +272,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           guestId: ctx?.guest.id ?? knownGuestId ?? 'unknown',
           totalElapsedMs,
           kind: 'inbound',
+          inboundBody: ctx?.currentMessage?.body ?? null,
+          generatedBody,
         })
       }
     }

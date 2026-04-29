@@ -1,7 +1,8 @@
-// PostHog primitive lives in lib/analytics/posthog.ts (the leaf module).
-// This file owns the agent-flavored failure surface: fireRedAlert pairs a
-// PostHog event with a Slack notification for on-call visibility.
+// PostHog + Slack primitives live in lib/analytics (the leaf modules). This
+// file owns the agent-flavored failure surface: fireRedAlert pairs a PostHog
+// event with a Slack notification for on-call visibility.
 import { capturePostHogEvent } from '@/lib/analytics/posthog'
+import { postToSlack } from '@/lib/analytics/slack'
 
 export interface AlertContext {
   agentRunId: string
@@ -51,8 +52,8 @@ function formatSlackMessage(context: AlertContext): string {
  *   - 'inbound'  → 'inbound_message_failed'
  *   - 'followup' → 'followup_message_failed'
  *
- * Slack delivery is best-effort: if SLACK_ALERTS_WEBHOOK_URL is not set, this
- * function logs a warning and skips Slack without throwing.
+ * Slack delivery is best-effort via lib/analytics/slack.postToSlack: if
+ * SLACK_ALERTS_WEBHOOK_URL is not set, postToSlack logs a warning and skips.
  */
 export async function fireRedAlert(context: AlertContext): Promise<void> {
   const eventName =
@@ -70,33 +71,7 @@ export async function fireRedAlert(context: AlertContext): Promise<void> {
     ...context.extra,
   })
 
-  const webhookUrl = process.env.SLACK_ALERTS_WEBHOOK_URL
-  if (!webhookUrl) {
-    console.warn('alert: SLACK_ALERTS_WEBHOOK_URL not set; skipping slack', {
-      agentRunId: context.agentRunId,
-      stage: context.stage,
-    })
-    return
-  }
-
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: formatSlackMessage(context) }),
-    })
-    if (!response.ok) {
-      console.error('alert: slack webhook returned non-2xx', {
-        agentRunId: context.agentRunId,
-        status: response.status,
-      })
-    }
-  } catch (e) {
-    console.error('alert: slack webhook failed', {
-      agentRunId: context.agentRunId,
-      error: e instanceof Error ? e.message : String(e),
-    })
-  }
+  await postToSlack(formatSlackMessage(context))
 }
 
 // Re-export so existing callers (handle-inbound / handle-followup) don't

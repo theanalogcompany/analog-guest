@@ -52,6 +52,10 @@ export async function handleFollowup(input: {
   const agentRunId = randomUUID()
   const start = Date.now()
   let ctx: RuntimeContext | null = null
+  // Threaded into the latency event payload. inboundBody stays null for
+  // followups (no inbound). generatedBody stays null on failure paths that
+  // didn't reach a successful generation.
+  let generatedBody: string | null = null
 
   try {
     console.log('[agent] followup start', {
@@ -147,6 +151,7 @@ export async function handleFollowup(input: {
       })
       return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
     }
+    generatedBody = gen.result.body
     console.log('[agent] followup generated', {
       agentRunId,
       voiceFidelity: gen.result.voiceFidelity,
@@ -202,6 +207,8 @@ export async function handleFollowup(input: {
         guestId: ctx?.guest.id ?? input.guestId,
         totalElapsedMs,
         kind: 'followup',
+        inboundBody: null,
+        generatedBody,
       })
     }
   }
