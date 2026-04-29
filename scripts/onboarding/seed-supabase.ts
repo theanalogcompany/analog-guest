@@ -123,6 +123,13 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       trigger: toJson(m.trigger),
       redemption: m.redemption ? toJson(m.redemption) : null,
       metadata: toJson(m.metadata ?? {}),
+      // THE-170: pass through eligibility + redemption-policy fields. Spec
+      // defaults at the DB layer ('new' / 'one_time' / null) when omitted.
+      ...(m.min_state !== undefined ? { min_state: m.min_state } : {}),
+      ...(m.redemption_policy !== undefined ? { redemption_policy: m.redemption_policy } : {}),
+      ...(m.redemption_window_days !== undefined
+        ? { redemption_window_days: m.redemption_window_days }
+        : {}),
     }))
     const { error: mechanicError } = await supabase.from('mechanics').insert(mechanicRows)
     if (mechanicError) {

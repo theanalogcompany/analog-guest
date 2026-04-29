@@ -1,14 +1,17 @@
 import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject } from 'ai'
 import { z } from 'zod'
+// Relative import: @/* doesn't resolve when vitest loads this module via the
+// test file. lib/recognition/types is leaf code (no DB deps); safe to import
+// directly. Per the module-split-for-testability convention in CLAUDE.md.
+import { GUEST_STATES, type GuestState } from '../../lib/recognition/types'
 
 const EXTRACTION_MODEL = 'claude-sonnet-4-6'
 const TEMPERATURE = 0.7
 
 const SYSTEM_PROMPT = 'You generate test scenarios for a hospitality messaging agent.'
 
-export const GUEST_STATES = ['new', 'returning', 'regular', 'raving_fan'] as const
-export type GuestState = (typeof GUEST_STATES)[number]
+export { GUEST_STATES, type GuestState }
 
 const ScenarioSchema = z.object({
   category: z.string().min(1),
@@ -155,7 +158,7 @@ For each mechanic, infer the minimum guest state required to access it from the 
 For each mechanic in the venue-spec's "mechanics" section, generate two scenarios:
 
 1. One scenario at the mechanic's inferred minimum state. The \`inbound_message\` should be a natural-sounding request for the mechanic in this venue's voice. Set \`expected_failure: null\` (the agent should honor the mechanic at this state).
-2. One additional scenario at \`guest_state: "new"\`, generated whenever the mechanic's inferred min_state is one of: returning, regular, or raving_fan. (Skip this scenario only when min_state is new.) The \`inbound_message\` should be the same kind of natural request, but at the new-guest state the agent should decline because the guest hasn't yet earned access. Set \`expected_failure: "THE-170"\` because this tests min_state filtering which doesn't ship until that ticket lands.
+2. One additional scenario at \`guest_state: "new"\`, generated whenever the mechanic's inferred min_state is one of: returning, regular, or raving_fan. (Skip this scenario only when min_state is new.) The \`inbound_message\` should be the same kind of natural request, but at the new-guest state the agent should decline because the guest hasn't yet earned access. Set \`expected_failure: null\` — THE-170's min_state filter ships the eligibility gate; the agent declines deterministically.
 
 For each mechanic-derived scenario:
 - Set \`category\` to \`mechanic_{normalized_mechanic_name}\` (snake_case). Use the mechanic's full name, snake-cased. E.g., a mechanic named "Couch Hold for Regulars" becomes category "mechanic_couch_hold_for_regulars".

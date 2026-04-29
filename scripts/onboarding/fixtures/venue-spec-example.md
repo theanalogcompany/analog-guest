@@ -211,10 +211,12 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 {
   "type": "[perk | referral | content_unlock | event_invite | merch]",
   "name": "[MECHANIC NAME]",
+  "min_state": "[new | returning | regular | raving_fan]",
   "qualification": "[QUALIFICATION RULE in operator's words — who gets this and why]",
   "description": "[2-3 sentences describing the mechanic in operator's voice]",
   "reward_description": "[what the guest receives, in concrete terms]",
   "expiration_rule": "[when/how it expires]",
+  "redemption_policy": "one_time",
   "trigger": {
     "type": "[trigger type — e.g., guest_initiated_request, manual_invite, date_match]",
     "method": "[delivery method or other trigger-specific field]"
@@ -231,10 +233,13 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 {
   "type": "[perk | referral | content_unlock | event_invite | merch]",
   "name": "[MECHANIC NAME]",
+  "min_state": "[new | returning | regular | raving_fan]",
   "qualification": "[QUALIFICATION RULE in operator's words]",
   "description": "[2-3 sentences describing the mechanic]",
   "reward_description": "[what the guest receives]",
   "expiration_rule": "[when/how it expires]",
+  "redemption_policy": "renewable",
+  "redemption_window_days": 30,
   "trigger": {
     "type": "[trigger type]",
     "cadence": "[e.g., monthly]",
@@ -245,6 +250,11 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
   }
 }
 ```
+
+> Notes on the new fields (THE-170):
+> - `min_state`: gates eligibility by the guest's relationship band. Mechanic does not appear in the agent's prompt for guests below this band.
+> - `redemption_policy`: `one_time` blocks future re-offers permanently after a single `mechanic_redeemed` event. `renewable` resets after `redemption_window_days` days (e.g. 30 = monthly, 7 = weekly). Most mechanics are `one_time`; renewable is for repeating perks like a free first drink each month.
+> - Omit `redemption_policy` and `redemption_window_days` to default to `one_time` / null. Renewable mechanics MUST set both.
 
 ---
 

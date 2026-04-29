@@ -1,3 +1,4 @@
+import type { EligibleMechanic } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 
 // Naming asymmetry: this module returns voiceFidelity (camelCase). It persists
@@ -66,6 +67,10 @@ export type RuntimeContext = {
     venueTimezone: string
   }
   recentMessages?: RecentMessage[]
+  // Mechanics this guest is currently eligible for. The serializer renders
+  // a "What this guest can access" block when this is provided. An empty
+  // array is meaningful — it tells Sonnet not to offer any perks (THE-170).
+  mechanics?: EligibleMechanic[]
 }
 
 export type GenerateMessageInput = {

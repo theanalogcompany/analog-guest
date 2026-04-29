@@ -1,11 +1,12 @@
 import type { RecentMessage } from '@/lib/ai'
 import type { VoiceCorpusChunk } from '@/lib/rag'
-import type { RelationshipSignals } from '@/lib/recognition'
+import type { EligibleMechanic, RelationshipSignals } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 import type { AlertContext } from './alerts'
 
 export type { AlertContext }
 export type { RecentMessage }
+export type { EligibleMechanic }
 
 export type AgentRunId = string
 
@@ -74,6 +75,11 @@ export interface RuntimeContext {
   followupTrigger: FollowupTrigger | null
   recentMessages: RecentMessage[]
   recognition: RecognitionSnapshot
+  // Mechanics this guest is currently eligible for. Filtered at load time in
+  // build-runtime-context.ts by guest's recognition state and redemption
+  // history (THE-170). Empty array means "do not offer perks" — the
+  // serializer renders that case explicitly so Sonnet sees the absence.
+  mechanics: EligibleMechanic[]
   corpus: CorpusMatch[] | null
   classification: Classification | null
 }

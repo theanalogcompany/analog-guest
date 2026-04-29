@@ -1,5 +1,12 @@
 import { createAdminClient } from '@/lib/db/admin'
-import { computeGuestState } from '@/lib/recognition'
+import {
+  computeGuestState,
+  type EligibilityCandidate,
+  filterEligibleMechanics,
+  type MechanicType,
+  type RedemptionPolicy,
+  type RedemptionRecord,
+} from '@/lib/recognition'
 import { BrandPersonaSchema, filterActiveContext, VenueInfoSchema } from '@/lib/schemas'
 import type {
   AgentRunId,
@@ -66,7 +73,14 @@ export async function buildRuntimeContext(input: {
     messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
   }
 
-  const [venueResult, guestResult, recognitionResult, messagesResult] = await Promise.all([
+  const [
+    venueResult,
+    guestResult,
+    recognitionResult,
+    messagesResult,
+    mechanicsResult,
+    redemptionsResult,
+  ] = await Promise.all([
     supabase
       .from('venues')
       .select(
@@ -81,6 +95,20 @@ export async function buildRuntimeContext(input: {
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
     messagesQuery,
+    supabase
+      .from('mechanics')
+      .select(
+        'id, type, name, description, qualification, reward_description, min_state, redemption_policy, redemption_window_days',
+      )
+      .eq('venue_id', input.venueId)
+      .eq('is_active', true),
+    supabase
+      .from('engagement_events')
+      .select('mechanic_id, created_at')
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId)
+      .eq('event_type', 'mechanic_redeemed')
+      .not('mechanic_id', 'is', null),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -105,6 +133,16 @@ export async function buildRuntimeContext(input: {
   if (messagesResult.error) {
     throw new Error(
       `buildRuntimeContext: messages history load failed: ${messagesResult.error.message}`,
+    )
+  }
+  if (mechanicsResult.error) {
+    throw new Error(
+      `buildRuntimeContext: mechanics load failed: ${mechanicsResult.error.message}`,
+    )
+  }
+  if (redemptionsResult.error) {
+    throw new Error(
+      `buildRuntimeContext: redemption events load failed: ${redemptionsResult.error.message}`,
     )
   }
 
@@ -181,6 +219,32 @@ export async function buildRuntimeContext(input: {
       createdAt: new Date(row.created_at),
     }))
 
+  const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
+    id: m.id,
+    type: m.type as MechanicType,
+    name: m.name,
+    description: m.description,
+    qualification: m.qualification,
+    rewardDescription: m.reward_description,
+    minState: m.min_state,
+    redemptionPolicy: m.redemption_policy as RedemptionPolicy,
+    redemptionWindowDays: m.redemption_window_days,
+  }))
+
+  const redemptions: RedemptionRecord[] = (redemptionsResult.data ?? [])
+    .filter((r): r is { mechanic_id: string; created_at: string } => r.mechanic_id !== null)
+    .map((r) => ({
+      mechanicId: r.mechanic_id,
+      createdAt: new Date(r.created_at),
+    }))
+
+  const mechanics = filterEligibleMechanics(
+    mechanicCandidates,
+    redemptions,
+    recognition.state,
+    computedAt,
+  )
+
   return {
     agentRunId: input.agentRunId,
     venue,
@@ -189,6 +253,7 @@ export async function buildRuntimeContext(input: {
     followupTrigger: input.followupTrigger ?? null,
     recentMessages,
     recognition,
+    mechanics,
     corpus: null,
     classification: null,
   }

@@ -1,11 +1,15 @@
 import { z } from 'zod'
 
-export type GuestState = 'new' | 'returning' | 'regular' | 'raving_fan'
+// Order is meaningful: state-bands ranking compares by index ('new' < 'returning'
+// < 'regular' < 'raving_fan'). See lib/recognition/state-bands.ts.
+export const GUEST_STATES = ['new', 'returning', 'regular', 'raving_fan'] as const
+export type GuestState = (typeof GUEST_STATES)[number]
 
 export type EngagementEventWeights = {
   first_visit: number
   perk_unlocked: number
   perk_redeemed: number
+  mechanic_redeemed: number
   event_attended: number
   merch_redeemed: number
   milestone_reached: number
@@ -20,10 +24,16 @@ export type EngagementEventWeights = {
 //   - community_join     → TODO: revisit weighting once community ships
 // Renamed from your original 'first_contact', which is not in the
 // engagement_events.event_type check constraint; the equivalent is 'first_visit'.
+//
+// 'mechanic_redeemed' (THE-170) is the unified redemption event for any
+// mechanic regardless of underlying type. Legacy 'perk_redeemed' /
+// 'merch_redeemed' weights are kept at parity for back-compat but new code
+// emits 'mechanic_redeemed' only.
 export const ENGAGEMENT_EVENT_WEIGHTS: EngagementEventWeights = {
   first_visit: 1,
   perk_unlocked: 0.5,
   perk_redeemed: 3,
+  mechanic_redeemed: 3,
   event_attended: 4,
   merch_redeemed: 3,
   milestone_reached: 2,
@@ -78,7 +88,7 @@ export const StateThresholdsSchema = z.object({
   schemaVersion: z.literal(1),
   thresholds: z.array(
     z.object({
-      state: z.enum(['new', 'returning', 'regular', 'raving_fan']),
+      state: z.enum(GUEST_STATES),
       minScore: z.number(),
       maxScore: z.number(),
     }),

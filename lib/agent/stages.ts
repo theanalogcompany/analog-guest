@@ -275,5 +275,6 @@ function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     additionalContext,
     today: computeToday(timezone),
     recentMessages: ctx.recentMessages,
+    mechanics: ctx.mechanics,
   }
 }

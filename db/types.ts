@@ -281,9 +281,12 @@ export type Database = {
           id: string
           is_active: boolean
           metadata: Json
+          min_state: string
           name: string
           qualification: string | null
           redemption: Json | null
+          redemption_policy: string
+          redemption_window_days: number | null
           reward_description: string | null
           schema_version: number
           trigger: Json
@@ -299,9 +302,12 @@ export type Database = {
           id?: string
           is_active?: boolean
           metadata?: Json
+          min_state?: string
           name: string
           qualification?: string | null
           redemption?: Json | null
+          redemption_policy?: string
+          redemption_window_days?: number | null
           reward_description?: string | null
           schema_version?: number
           trigger: Json
@@ -317,9 +323,12 @@ export type Database = {
           id?: string
           is_active?: boolean
           metadata?: Json
+          min_state?: string
           name?: string
           qualification?: string | null
           redemption?: Json | null
+          redemption_policy?: string
+          redemption_window_days?: number | null
           reward_description?: string | null
           schema_version?: number
           trigger?: Json

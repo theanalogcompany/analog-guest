@@ -1,3 +1,4 @@
+import type { EligibleMechanic } from '@/lib/recognition'
 import type { BrandPersona, MenuItem, VenueInfo } from '@/lib/schemas'
 import type { MessageCategory, RecentMessage, RuntimeContext, VoiceCorpusChunk } from '../types'
 
@@ -241,6 +242,24 @@ function formatRecentConversation(messages: readonly RecentMessage[], now: Date)
   return `## Recent conversation\n${lines.join('\n')}`
 }
 
+// THE-170: render a deterministic eligibility block. Empty array is meaningful
+// — the framing instructs Sonnet not to offer perks at all. Non-empty renders
+// the allowlist with name + reward + qualification context.
+function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): string {
+  const header = '## What this guest can access'
+  if (mechanics.length === 0) {
+    return `${header}\nNothing right now beyond the standard menu and answering questions. The guest hasn't yet earned access to perks. Do not offer perks of any kind.`
+  }
+  const intro =
+    'The list below is the complete set of perks, invites, and unlocks this guest is currently eligible for. Do not offer items that are not on this list. If the guest asks for something not listed, acknowledge naturally and decline without invoking the item by name.'
+  const bullets = mechanics.map((m) => {
+    const reward = m.rewardDescription ? ` — ${m.rewardDescription}` : ''
+    const qual = m.qualification ? ` (${m.qualification})` : ''
+    return `- ${m.name}${reward}${qual}`
+  })
+  return `${header}\n${intro}\n${bullets.join('\n')}`
+}
+
 export function runtimeToProse(
   runtime: RuntimeContext,
   category: MessageCategory,
@@ -250,6 +269,9 @@ export function runtimeToProse(
 
   if (runtime.today) {
     blocks.push(formatRightNow(runtime.today))
+  }
+  if (runtime.mechanics !== undefined) {
+    blocks.push(formatMechanicEligibility(runtime.mechanics))
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)
