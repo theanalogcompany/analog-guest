@@ -143,10 +143,26 @@ export type ComputeStateInput = {
   venueId: string
 }
 
+// Per-signal score-point contribution (signal value × weight) for each of the
+// seven relationship signals. The sum is the pre-rounding score. Surfaced for
+// trace observability (THE-216) so the Langfuse UI can show "what drove this
+// guest's score" without callers having to re-multiply.
+export type SignalContributions = {
+  recency: number
+  visitFrequency: number
+  engagementEvents: number
+  moneySpent: number
+  responseRate: number
+  percentMenuExplored: number
+  referrals: number
+}
+
 export type ComputeStateResult = {
   score: number
   state: GuestState
   signals: RelationshipSignals
+  weights: RelationshipStrengthFormula['weights']
+  contributions: SignalContributions
   stateChanged: boolean
 }
 

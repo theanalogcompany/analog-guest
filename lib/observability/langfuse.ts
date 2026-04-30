@@ -19,8 +19,8 @@ import { Langfuse } from 'langfuse'
 
 export interface AgentSpan {
   readonly id: string
-  span(name: string, input?: unknown): AgentSpan
-  generation(name: string, input?: unknown): AgentSpan
+  span(name: string, input?: unknown, content?: unknown): AgentSpan
+  generation(name: string, input?: unknown, content?: unknown): AgentSpan
   update(body: AgentSpanUpdate): void
   end(body?: AgentSpanUpdate): void
 }
@@ -28,9 +28,27 @@ export interface AgentSpan {
 export interface AgentTrace {
   /** Langfuse trace id, or '' when observability is disabled/no-op. */
   readonly id: string
-  span(name: string, input?: unknown): AgentSpan
-  update(body: { output?: unknown; metadata?: Record<string, unknown> }): void
+  /**
+   * True when LANGFUSE_CAPTURE_CONTENT !== 'false' (default-on per THE-216).
+   * Agent code can read this to skip pre-computing heavy content payloads
+   * that would just be dropped. Always false when the wrapper is no-op.
+   */
+  readonly captureContent: boolean
+  span(name: string, input?: unknown, content?: unknown): AgentSpan
+  update(body: AgentTraceUpdate): void
   flushAsync(): Promise<void>
+}
+
+export interface AgentTraceUpdate {
+  output?: unknown
+  metadata?: Record<string, unknown>
+  /**
+   * Heavy content (full bodies, prompts, corpus chunk text). Captured only
+   * when LANGFUSE_CAPTURE_CONTENT !== 'false'. Wrapper merges into the SDK
+   * call's output payload as `output.content` when on; drops entirely when
+   * off so capture-off shape matches THE-200 metadata-only exactly.
+   */
+  content?: unknown
 }
 
 export interface AgentSpanUpdate {
@@ -38,6 +56,8 @@ export interface AgentSpanUpdate {
   metadata?: Record<string, unknown>
   level?: 'DEBUG' | 'DEFAULT' | 'WARNING' | 'ERROR'
   statusMessage?: string
+  /** See AgentTraceUpdate.content. */
+  content?: unknown
 }
 
 export interface StartAgentTraceOptions {
@@ -58,6 +78,7 @@ const NOOP_SPAN: AgentSpan = {
 
 const NOOP_TRACE: AgentTrace = {
   id: '',
+  captureContent: false,
   span: () => NOOP_SPAN,
   update: () => {},
   flushAsync: async () => {},
@@ -84,6 +105,12 @@ function readConfig(): LangfuseConfig | null {
     process.env.LANGFUSE_BASE_URL?.trim() || process.env.LANGFUSE_HOST?.trim()
   if (!publicKey || !secretKey || !baseUrl) return null
   return { publicKey, secretKey, baseUrl }
+}
+
+// THE-216: read at module init (deploy-time decision). Default-on; only the
+// explicit string 'false' disables. Matches the LANGFUSE_ENABLED precedent.
+function readCaptureContent(): boolean {
+  return process.env.LANGFUSE_CAPTURE_CONTENT !== 'false'
 }
 
 let cachedClient: Langfuse | null | undefined
@@ -132,32 +159,73 @@ interface SdkSpanLike {
   id: string
   span: (body: { name: string; input?: unknown }) => SdkSpanLike
   generation: (body: { name: string; input?: unknown }) => SdkSpanLike
-  update: (body: AgentSpanUpdate) => unknown
-  end: (body?: AgentSpanUpdate) => unknown
+  update: (body: Record<string, unknown>) => unknown
+  end: (body?: Record<string, unknown>) => unknown
 }
 
 interface SdkTraceLike {
   id: string
   span: (body: { name: string; input?: unknown }) => SdkSpanLike
-  update: (body: { output?: unknown; metadata?: Record<string, unknown> }) => unknown
+  update: (body: Record<string, unknown>) => unknown
 }
 
-function wrapSpan(span: SdkSpanLike): AgentSpan {
+// Build a span-creation `input` payload. When capture-content is on, content
+// (when provided) is folded into the input object under a `content` key so it
+// renders next to the metadata input in the Langfuse UI. When off, content is
+// dropped.
+function buildSpanInput(input: unknown, content: unknown, captureContent: boolean): unknown {
+  if (!captureContent || content === undefined) return input
+  if (input === undefined) return { content }
+  if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+    return { ...(input as Record<string, unknown>), content }
+  }
+  // Non-object input (string/number/etc.) — wrap so we don't lose either side.
+  return { input, content }
+}
+
+// Build the SDK update/end payload from an AgentSpanUpdate. The `content` field
+// rides on `output.content` when on; dropped when off so the SDK call body is
+// byte-for-byte THE-200's metadata-only shape.
+function buildUpdateBody(
+  body: AgentSpanUpdate | AgentTraceUpdate | undefined,
+  captureContent: boolean,
+): Record<string, unknown> {
+  if (!body) return {}
+  const { content, output, ...rest } = body as AgentSpanUpdate
+  const finalOutput =
+    captureContent && content !== undefined
+      ? typeof output === 'object' && output !== null && !Array.isArray(output)
+        ? { ...(output as Record<string, unknown>), content }
+        : output === undefined
+          ? { content }
+          : { output, content }
+      : output
+  if (finalOutput === undefined) return { ...rest }
+  return { ...rest, output: finalOutput }
+}
+
+function wrapSpan(span: SdkSpanLike, captureContent: boolean): AgentSpan {
   return {
     get id() {
       return span.id
     },
-    span(name, input) {
+    span(name, input, content) {
       try {
-        return wrapSpan(span.span({ name, input }))
+        return wrapSpan(
+          span.span({ name, input: buildSpanInput(input, content, captureContent) }),
+          captureContent,
+        )
       } catch (e) {
         console.warn('[observability] span.span failed', e instanceof Error ? e.message : e)
         return NOOP_SPAN
       }
     },
-    generation(name, input) {
+    generation(name, input, content) {
       try {
-        return wrapSpan(span.generation({ name, input }))
+        return wrapSpan(
+          span.generation({ name, input: buildSpanInput(input, content, captureContent) }),
+          captureContent,
+        )
       } catch (e) {
         console.warn(
           '[observability] span.generation failed',
@@ -168,14 +236,14 @@ function wrapSpan(span: SdkSpanLike): AgentSpan {
     },
     update(body) {
       try {
-        span.update(body)
+        span.update(buildUpdateBody(body, captureContent))
       } catch (e) {
         console.warn('[observability] span.update failed', e instanceof Error ? e.message : e)
       }
     },
     end(body) {
       try {
-        span.end(body)
+        span.end(buildUpdateBody(body, captureContent))
       } catch (e) {
         console.warn('[observability] span.end failed', e instanceof Error ? e.message : e)
       }
@@ -186,6 +254,10 @@ function wrapSpan(span: SdkSpanLike): AgentSpan {
 export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
   const client = getClient()
   if (!client) return NOOP_TRACE
+
+  // Read once per trace. A redeploy is required to flip the toggle; per-call
+  // env reads buy nothing for what is fundamentally a deploy-time decision.
+  const captureContent = readCaptureContent()
 
   let trace: SdkTraceLike
   try {
@@ -206,9 +278,13 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
     get id() {
       return trace.id
     },
-    span(name, input) {
+    captureContent,
+    span(name, input, content) {
       try {
-        return wrapSpan(trace.span({ name, input }))
+        return wrapSpan(
+          trace.span({ name, input: buildSpanInput(input, content, captureContent) }),
+          captureContent,
+        )
       } catch (e) {
         console.warn('[observability] trace.span failed', e instanceof Error ? e.message : e)
         return NOOP_SPAN
@@ -216,7 +292,7 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
     },
     update(body) {
       try {
-        trace.update(body)
+        trace.update(buildUpdateBody(body, captureContent))
       } catch (e) {
         console.warn('[observability] trace.update failed', e instanceof Error ? e.message : e)
       }

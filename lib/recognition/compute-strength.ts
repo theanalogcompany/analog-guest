@@ -7,6 +7,7 @@ import {
   type RecognitionResult,
   type RelationshipSignals,
   type RelationshipStrengthFormula,
+  type SignalContributions,
 } from './types'
 
 async function loadFormula(
@@ -55,7 +56,14 @@ export async function computeRelationshipStrength({
 }: {
   guestId: string
   venueId: string
-}): Promise<RecognitionResult<{ score: number; signals: RelationshipSignals }>> {
+}): Promise<
+  RecognitionResult<{
+    score: number
+    signals: RelationshipSignals
+    weights: RelationshipStrengthFormula['weights']
+    contributions: SignalContributions
+  }>
+> {
   const formulaResult = await loadFormula(venueId)
   if (!formulaResult.ok) return formulaResult
   const formula = formulaResult.data
@@ -65,16 +73,28 @@ export async function computeRelationshipStrength({
 
   const signals = normalizeSignals(signalsResult.data, formula)
   const { weights } = formula
+  // Per-signal score-point contributions surfaced for trace observability
+  // (THE-216). Sum equals the pre-rounding `weightedSum`, so the score below
+  // is `Math.round(sum-of-contributions)` by construction.
+  const contributions: SignalContributions = {
+    recency: signals.recency * weights.recency,
+    visitFrequency: signals.visitFrequency * weights.visitFrequency,
+    engagementEvents: signals.engagementEvents * weights.engagementEvents,
+    moneySpent: signals.moneySpent * weights.moneySpent,
+    responseRate: signals.responseRate * weights.responseRate,
+    percentMenuExplored: signals.percentMenuExplored * weights.percentMenuExplored,
+    referrals: signals.referrals * weights.referrals,
+  }
   const weightedSum =
-    signals.recency * weights.recency +
-    signals.visitFrequency * weights.visitFrequency +
-    signals.engagementEvents * weights.engagementEvents +
-    signals.moneySpent * weights.moneySpent +
-    signals.responseRate * weights.responseRate +
-    signals.percentMenuExplored * weights.percentMenuExplored +
-    signals.referrals * weights.referrals
+    contributions.recency +
+    contributions.visitFrequency +
+    contributions.engagementEvents +
+    contributions.moneySpent +
+    contributions.responseRate +
+    contributions.percentMenuExplored +
+    contributions.referrals
 
   const score = Math.round(weightedSum)
 
-  return { ok: true, data: { score, signals } }
+  return { ok: true, data: { score, signals, weights, contributions } }
 }

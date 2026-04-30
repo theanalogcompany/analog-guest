@@ -34,5 +34,6 @@ export type {
   RecognitionResult,
   RelationshipSignals,
   RelationshipStrengthFormula,
+  SignalContributions,
   StateThresholds,
 } from './types'

@@ -8,6 +8,12 @@ import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
 import { generateStage, retrieveCorpusStage } from './stages'
+import {
+  buildCorpusContent,
+  buildGenerateAttemptContent,
+  buildGenerateContent,
+  buildRecognitionContent,
+} from './trace-content'
 import type {
   AgentResult,
   Classification,
@@ -101,6 +107,9 @@ export async function handleFollowup(input: {
           mechanicCount: ctx.mechanics.length,
           recentMessageCount: ctx.recentMessages.length,
         },
+        content: trace.captureContent
+          ? buildRecognitionContent(ctx.recognition)
+          : undefined,
       })
       console.log('[agent] followup context built', {
         agentRunId,
@@ -144,6 +153,7 @@ export async function handleFollowup(input: {
           matchCount: ctx.corpus.length,
           topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
         },
+        content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
       })
       console.log('[agent] followup corpus retrieved', {
         agentRunId,
@@ -202,7 +212,11 @@ export async function handleFollowup(input: {
     }
     gen.result.attemptScores.forEach((score, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
-      attemptSpan.end({ output: { voiceFidelity: score } })
+      const attempt = gen.result.attemptHistory[i]
+      attemptSpan.end({
+        output: { voiceFidelity: score },
+        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+      })
     })
     generateSpan.end({
       output: {
@@ -212,6 +226,7 @@ export async function handleFollowup(input: {
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
+      content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,
     })
     generatedBody = gen.result.body
     console.log('[agent] followup generated', {
@@ -224,7 +239,10 @@ export async function handleFollowup(input: {
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
-      sendSpan.end({ output: { outboundMessageId, providerMessageId } })
+      sendSpan.end({
+        output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
+        content: { body: gen.result.body },
+      })
       console.log('[agent] followup sent + persisted', {
         agentRunId,
         outboundMessageId,
@@ -249,6 +267,7 @@ export async function handleFollowup(input: {
           outboundMessageId,
           voiceFidelity: gen.result.voiceFidelity,
         },
+        content: { outboundDraft: gen.result.body },
       })
       return { status: 'sent', outboundMessageId }
     } catch (e) {

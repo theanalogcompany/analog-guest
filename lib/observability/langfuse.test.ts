@@ -268,3 +268,97 @@ describe('startAgentTrace — host env aliasing', () => {
     expect(langfuseCtor).not.toHaveBeenCalled()
   })
 })
+
+describe('startAgentTrace — content capture (THE-216)', () => {
+  // Verifies the LANGFUSE_CAPTURE_CONTENT flag wires through to trace.captureContent
+  // and that span.end({ output, content }) writes to SDK output.content when on,
+  // and drops content entirely when off (THE-200 metadata-only parity).
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-test')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-test')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
+    vi.stubEnv('LANGFUSE_ENABLED', '')
+  })
+
+  it('defaults captureContent to true when LANGFUSE_CAPTURE_CONTENT is unset', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-1' })
+    expect(trace.captureContent).toBe(true)
+  })
+
+  it('treats LANGFUSE_CAPTURE_CONTENT=true as on (any non-false value)', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'true')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-2' })
+    expect(trace.captureContent).toBe(true)
+  })
+
+  it('treats arbitrary values like "yes" as on (only "false" disables)', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'yes')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-3' })
+    expect(trace.captureContent).toBe(true)
+  })
+
+  it('disables when LANGFUSE_CAPTURE_CONTENT=false', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-4' })
+    expect(trace.captureContent).toBe(false)
+  })
+
+  it('with capture-on, span.end folds content into output.content', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-5' })
+    const span = trace.span('classify', { length: 10 }, { fullBody: 'hi there' })
+    span.end({ output: { category: 'reply' }, content: { reasoning: 'short greeting' } })
+    // SDK end() received output with content folded in.
+    const sdkSpan = lastTrace!.spans[0]
+    expect(sdkSpan.end).toHaveBeenCalledWith({
+      output: { category: 'reply', content: { reasoning: 'short greeting' } },
+    })
+    // SDK span() received input with content folded in too.
+    expect(lastClient!.trace.mock.results[0]?.value.span).toHaveBeenCalledWith({
+      name: 'classify',
+      input: { length: 10, content: { fullBody: 'hi there' } },
+    })
+  })
+
+  it('with capture-off, span.end drops content entirely (metadata-only parity)', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-6' })
+    const span = trace.span('classify', { length: 10 }, { fullBody: 'hi there' })
+    span.end({ output: { category: 'reply' }, content: { reasoning: 'short greeting' } })
+    const sdkSpan = lastTrace!.spans[0]
+    // No `content` key under output. Output is exactly the metadata.
+    expect(sdkSpan.end).toHaveBeenCalledWith({ output: { category: 'reply' } })
+    expect(lastClient!.trace.mock.results[0]?.value.span).toHaveBeenCalledWith({
+      name: 'classify',
+      input: { length: 10 },
+    })
+  })
+
+  it('with capture-off, trace.update drops content from the SDK call', async () => {
+    vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-7' })
+    trace.update({
+      metadata: { venueId: 'v1' },
+      content: { inboundBody: 'private text' },
+    })
+    expect(lastClient!.trace.mock.results[0]?.value.update).toHaveBeenCalledWith({
+      metadata: { venueId: 'v1' },
+    })
+  })
+})

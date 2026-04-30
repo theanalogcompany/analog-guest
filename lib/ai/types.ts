@@ -81,6 +81,12 @@ export type GenerateMessageInput = {
   runtime: RuntimeContext
 }
 
+export type GenerateMessageAttempt = {
+  body: string
+  voiceFidelity: number
+  reasoning: string
+}
+
 export type GenerateMessageResult = {
   body: string
   voiceFidelity: number
@@ -90,6 +96,18 @@ export type GenerateMessageResult = {
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
   // a length-1 array means the first attempt was good enough.
   attemptScores: number[]
+  // Per-attempt body + voiceFidelity + reasoning, in attempt order. Surfaced
+  // for trace observability (THE-216) so each `generate.attempt_N` span can
+  // carry the actual text Sonnet returned, not just the score. Length matches
+  // attemptScores. The final entry's body equals the top-level `body` field.
+  attemptHistory: GenerateMessageAttempt[]
+  // The full system + user prompt sent to the model (THE-216). The same prompt
+  // is sent on every attempt — there's no per-attempt prompt mutation today —
+  // so capturing once is sufficient. If the regen loop later mutates the
+  // prompt between attempts, this field becomes the parent prompt and per-
+  // attempt prompts would need to live on attemptHistory.
+  systemPrompt: string
+  userPrompt: string
   promptVersion: string
 }
 

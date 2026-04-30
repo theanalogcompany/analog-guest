@@ -9,6 +9,12 @@ import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
 import { classifyStage, generateStage, retrieveCorpusStage } from './stages'
+import {
+  buildCorpusContent,
+  buildGenerateAttemptContent,
+  buildGenerateContent,
+  buildRecognitionContent,
+} from './trace-content'
 import type { AgentResult, InboundMessage, RuntimeContext } from './types'
 
 async function loadInbound(messageId: string): Promise<{
@@ -133,7 +139,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     const inbound = await loadInbound(inboundMessageId)
     knownVenueId = inbound.venueId
     knownGuestId = inbound.guestId
-    trace.update({ metadata: { venueId: inbound.venueId, guestId: inbound.guestId } })
+    trace.update({
+      metadata: { venueId: inbound.venueId, guestId: inbound.guestId },
+      content: { inboundBody: inbound.message.body },
+    })
 
     // Build context
     const contextSpan = trace.span('context_build', {
@@ -155,6 +164,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           mechanicCount: ctx.mechanics.length,
           recentMessageCount: ctx.recentMessages.length,
         },
+        content: trace.captureContent
+          ? buildRecognitionContent(ctx.recognition)
+          : undefined,
       })
       console.log('[agent] inbound context built', {
         agentRunId,
@@ -179,9 +191,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
 
     // Classify
-    const classifySpan = trace.span('classify', {
-      inboundLength: ctx.currentMessage?.body.length ?? 0,
-    })
+    const classifySpan = trace.span(
+      'classify',
+      { inboundLength: ctx.currentMessage?.body.length ?? 0 },
+      { inboundBody: ctx.currentMessage?.body ?? null },
+    )
     try {
       ctx.classification = await classifyStage(ctx)
       classifySpan.end({
@@ -189,6 +203,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           category: ctx.classification.category,
           classifierConfidence: ctx.classification.classifierConfidence,
         },
+        content: { reasoning: ctx.classification.reasoning },
       })
       console.log('[agent] inbound classified', {
         agentRunId,
@@ -210,9 +225,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
 
     // Retrieve corpus
-    const retrieveSpan = trace.span('retrieve', {
-      query: ctx.currentMessage?.body ?? null,
-    })
+    const retrieveSpan = trace.span(
+      'retrieve',
+      { queryLength: ctx.currentMessage?.body.length ?? 0 },
+      { query: ctx.currentMessage?.body ?? null },
+    )
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
       retrieveSpan.end({
@@ -220,6 +237,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           matchCount: ctx.corpus.length,
           topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
         },
+        content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
       })
       console.log('[agent] inbound corpus retrieved', {
         agentRunId,
@@ -259,6 +277,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       // Synthesize per-attempt sub-spans from attemptScores. No real per-attempt
       // timing — see follow-up ticket THE-215. The sub-spans are still useful
       // because they enumerate the regen loop attempts in the trace UI.
+      // Refused-path note: lib/ai's generateStage doesn't surface attemptHistory
+      // on refusal (the AgentResult shape only carries scores). Per-attempt
+      // body content lives only on the success path; THE-215 will fix this
+      // when threading the trace into the regen loop directly.
       gen.attemptScores.forEach((score, i) => {
         const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
         attemptSpan.end({ output: { voiceFidelity: score } })
@@ -281,7 +303,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
     gen.result.attemptScores.forEach((score, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
-      attemptSpan.end({ output: { voiceFidelity: score } })
+      const attempt = gen.result.attemptHistory[i]
+      attemptSpan.end({
+        output: { voiceFidelity: score },
+        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+      })
     })
     generateSpan.end({
       output: {
@@ -291,6 +317,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
+      content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,
     })
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
@@ -303,7 +330,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
-      sendSpan.end({ output: { outboundMessageId, providerMessageId } })
+      sendSpan.end({
+        output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
+        content: { body: gen.result.body },
+      })
       console.log('[agent] inbound sent + persisted', {
         agentRunId,
         outboundMessageId,
@@ -327,6 +357,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           outboundMessageId,
           voiceFidelity: gen.result.voiceFidelity,
         },
+        content: { outboundDraft: gen.result.body },
       })
       return { status: 'sent', outboundMessageId }
     } catch (e) {
