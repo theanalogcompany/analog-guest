@@ -334,6 +334,19 @@ Brand language is canonical at `docs/brand/style-guide-v01.html`. Fonts load via
 
 Magic-link callback URL is constructed from `NEXT_PUBLIC_ADMIN_URL` (per environment) plus a fallback to `NEXT_PUBLIC_VERCEL_URL` so preview deploys self-resolve. Supabase project's "Site URL" + "Redirect URLs" allowlist must include all three: localhost, `*.vercel.app`, and `admin.theanalog.company`. Configure in Supabase Studio.
 
+### Conversations viewer (THE-201)
+
+`/admin/conversations` is the headline debugging surface — single-conversation focus, iMessage-style bubble thread, inline Langfuse trace render. Filters live in the URL (`?venue=&guest=`); reload preserves view, links are shareable.
+
+- **Routing:** server-component page (`page.tsx`) does all initial fetches in one render path. Client component (`conversations-client.tsx`) owns selection, trace cache, Realtime. Pre-filter / venue-only paths render `<EmptyState>` with a 5-row recent-activity list scoped to the operator's `allowedVenueIds`.
+- **Bubble palette:** real iMessage colors (#007AFF outbound / #E5E5EA inbound) on a paper-toned background. Inter Tight inside bubbles. Brand discipline yields to fitness-for-purpose on internal surfaces — same logic as health-page status colors.
+- **Trace fetch:** server prefetches the last 5 outbound messages' traces in parallel via `lib/observability/fetchTrace`; on-demand fetch for older messages via `app/admin/(authed)/conversations/api/trace/[traceId]/route.ts` (cookie-session auth, never exposes the Langfuse secret key client-side). `Promise.allSettled` so a Langfuse outage doesn't 500 the page.
+- **Trace panel shape:** linear stage stack matching the agent pipeline order (`context_build` → `classify` → `retrieve` → `generate` → `send`, with `generate.attempt_N` nested). `lib/select-trace-stages.ts` is the pure projection; unknown observations bucket into "Other" so future stages don't silently disappear before this code is updated.
+- **Realtime:** subscribes to `messages` filtered by `venue_id` (single-column server filter), refines by `guest_id` client-side. Uses `lib/db/browser.ts` (browser-side anon Supabase client). Subscribe on mount; tear down on unmount or filter change (filter changes navigate via `router.replace`, which remounts the client component cleanly).
+- **Recognition state:** read latest `guest_states` row directly. **Don't** call `computeGuestState` from the page — it's expensive and writes audit rows on transitions.
+- **StatusDot mapping for guest state:** `neutral` for `new`, `good` for `returning|regular|raving_fan`. `bad` is reserved for actually-wrong states (failed sends, errors), not "this guest is new."
+- **Message limit:** 200 rows per conversation load. Older history reachable via THE-202 (guest detail page) once that ships.
+
 ---
 
 ## Synthetic guests

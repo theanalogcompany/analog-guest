@@ -1,4 +1,5 @@
 export {
+  fetchTrace,
   langfuseInitFailed,
   startAgentTrace,
   _resetLangfuseClientForTest,
@@ -8,5 +9,6 @@ export type {
   AgentSpanUpdate,
   AgentTrace,
   AgentTraceUpdate,
+  ApiTraceWithFullDetails,
   StartAgentTraceOptions,
 } from './langfuse'
