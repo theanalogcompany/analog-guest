@@ -74,7 +74,14 @@ function readConfig(): LangfuseConfig | null {
   if (process.env.LANGFUSE_ENABLED === 'false') return null
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY?.trim()
   const secretKey = process.env.LANGFUSE_SECRET_KEY?.trim()
-  const baseUrl = process.env.LANGFUSE_BASE_URL?.trim()
+  // Accept LANGFUSE_HOST as a legacy alias for LANGFUSE_BASE_URL — Langfuse's
+  // own docs and Vercel integration use HOST, but THE-200 originally landed
+  // on BASE_URL (matches the SDK's `baseUrl` constructor field). BASE_URL
+  // takes precedence when both are set; either alone works. Slated for
+  // removal post-pilot once everyone has migrated to BASE_URL.
+  // `||` (not `??`) so an empty-string after .trim() falls through to the alias.
+  const baseUrl =
+    process.env.LANGFUSE_BASE_URL?.trim() || process.env.LANGFUSE_HOST?.trim()
   if (!publicKey || !secretKey || !baseUrl) return null
   return { publicKey, secretKey, baseUrl }
 }
