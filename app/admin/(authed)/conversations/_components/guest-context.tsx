@@ -48,7 +48,11 @@ export function GuestContext({
   const fullName = [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
 
   return (
-    <Card className="p-6 flex flex-col gap-4">
+    // h-full + overflow-y-auto so the card scrolls inside the 240px context
+    // row when recent engagement events accumulate. p-4 (vs reading-width
+    // p-6 used elsewhere) gives content more room within the 240px box
+    // without losing card weight.
+    <Card className="h-full overflow-y-auto p-4 flex flex-col gap-4">
       <div className="flex items-baseline justify-between gap-4">
         <div className="flex flex-col gap-1">
           <Eyebrow>Guest</Eyebrow>

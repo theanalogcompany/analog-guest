@@ -145,11 +145,24 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
 // ---------------------------------------------------------------------------
 
 function FullShell({ children }: { children: React.ReactNode }) {
-  // Negative margin undoes admin-shell <main>'s px-8 py-10 so conversations
-  // renders edge-to-edge within main's box. main's max-w-5xl cap stays — the
-  // conversation column + trace panel comfortably fit within 64rem. Other
-  // admin routes keep their padded layout because they apply this only here.
-  return <div className="-mx-8 -my-10">{children}</div>
+  // 4-region layout. Page itself never scrolls — each region owns its own
+  // overflow. Vertical model:
+  //   1. Filters (auto height, ~3.5rem from h-14)
+  //   2. Conversation thread + trace panel (flex-1, internally split 400px / 1fr)
+  //   3. Context cards (240px fixed, internally split 1/2 / 1/2)
+  //
+  // The wrapper bounds itself to viewport-minus-TopBar (h-14 = 3.5rem) so
+  // <main>'s overflow-auto never triggers a page-level scroll. Single magic
+  // number (3.5rem); update if TopBar height ever changes.
+  //
+  // -mx-8 -my-10 cancels admin-shell <main>'s default px-8 py-10 padding so
+  // the conversation viewer renders edge-to-edge within main's box. Other
+  // admin routes keep their padded layout because the negation is local here.
+  return (
+    <div className="h-[calc(100dvh-3.5rem)] -mx-8 -my-10 overflow-hidden flex flex-col bg-paper">
+      {children}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------

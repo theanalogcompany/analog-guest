@@ -34,17 +34,12 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
   }
 
   return (
-    // Sticky to the top of <main> so filters stay reachable while the page
-    // scrolls past the conversation row to expose the venue/guest context
-    // cards. z-20 stacks above the conversation row (z-10) so they don't
-    // visually overlap if rendering quirks ever push them past each other.
-    // Solid bg-paper masks scrolling content beneath the sticky band.
-    //
-    // Fixed h-14 (3.5rem) matches TopBar height for visual rhythm and gives
-    // the conversation row's sticky top offset a single magic number without
-    // measuring at runtime. items-center centers the label-above-select pair
-    // vertically within the bar.
-    <div className="sticky top-0 z-20 h-14 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
+    // First row of the conversations 4-region grid (FullShell in page.tsx).
+    // Fixed h-14 (3.5rem) matches TopBar height for visual rhythm; no sticky
+    // positioning needed because the page no longer page-scrolls — every
+    // region is bounded inside its grid cell. items-center centers the
+    // label-above-select pair vertically within the bar.
+    <div className="h-14 shrink-0 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
       <Field label="Venue">
         <select
           value={selectedVenueId ?? ''}

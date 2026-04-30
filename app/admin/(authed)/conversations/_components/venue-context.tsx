@@ -36,7 +36,11 @@ export function VenueContext({
   const topPhrases = persona.signaturePhrases.slice(0, 3)
 
   return (
-    <Card className="p-6 flex flex-col gap-4">
+    // h-full + overflow-y-auto so the card scrolls inside the 240px context
+    // row when persona + hours + mechanics + currentContext push past the
+    // available space. p-4 (vs the reading-width p-6 used elsewhere) gives
+    // content more room within the 240px box without losing card weight.
+    <Card className="h-full overflow-y-auto p-4 flex flex-col gap-4">
       <div className="flex items-baseline justify-between gap-4">
         <div className="flex flex-col gap-1">
           <Eyebrow>Venue</Eyebrow>
