@@ -194,22 +194,20 @@ export function ConversationsClient({
     return n || initialData.guest.phoneNumber
   }, [initialData.guest])
 
-  // Layout model: <main> in admin-shell is the scroll container (overflow-auto).
-  // Filters and the conversation row are both `sticky` within main so the page
-  // chrome stays put while the operator scrolls down to read the context cards.
-  //
-  // Heights:
-  //   - TopBar above main: 3.5rem (h-14)
-  //   - Filters band (sticky top-0, fixed h-14): 3.5rem (matches TopBar)
-  //   - Conversation row (sticky top-[3.5rem], height calc): fills the rest
-  //     of the viewport with a ~2rem slack so context cards "peek" before
-  //     the user scrolls. Total chrome subtracted = 9rem (3.5 TopBar +
-  //     3.5 Filters + 2 slack).
-  // The 9rem magic number is acceptable while these heights are stable;
-  // if either drifts, switch to a CSS variable.
+  // Layout: ConversationsClient occupies the flex-1 slot of FullShell's
+  // flex-col, and itself splits into:
+  //   - conversation/trace row (flex-1 min-h-0): grid-cols-[400px_1fr] with
+  //     each child owning overflow-y-auto.
+  //   - context row (h-[240px]): grid-cols-2; each card scrolls inside the
+  //     fixed 240px slot if its content is taller.
+  // No sticky positioning. No chrome-offset math. Page never scrolls.
+  // min-h-0 on the wrapper + the conversation row lets the flex/grid
+  // children's overflow-y-auto respect the bounded heights (default min-h
+  // is auto, which would let intrinsic content push the parent past its
+  // intended size).
   return (
-    <>
-      <div className="sticky top-[3.5rem] z-10 h-[calc(100dvh-9rem)] bg-paper grid grid-cols-1 lg:grid-cols-[400px_1fr]">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}
@@ -228,7 +226,7 @@ export function ConversationsClient({
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 border-t border-stone-light/60 bg-parchment">
+      <div className="h-[240px] grid grid-cols-1 lg:grid-cols-2 border-t border-stone-light/60 bg-parchment">
         {initialData.persona && initialData.venueInfo ? (
           <VenueContext
             venue={initialData.venue}
@@ -252,7 +250,7 @@ export function ConversationsClient({
           venueTimezone={initialData.venue.timezone}
         />
       </div>
-    </>
+    </div>
   )
 }
 
