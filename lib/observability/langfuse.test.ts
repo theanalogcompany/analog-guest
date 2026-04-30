@@ -214,3 +214,57 @@ describe('startAgentTrace — live mode', () => {
     expect(langfuseCtor).toHaveBeenCalledOnce()
   })
 })
+
+describe('startAgentTrace — host env aliasing', () => {
+  // Verifies LANGFUSE_HOST is accepted as a legacy alias for LANGFUSE_BASE_URL,
+  // and BASE_URL wins when both are set. See readConfig() in langfuse.ts.
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-test')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-test')
+    vi.stubEnv('LANGFUSE_ENABLED', '')
+  })
+
+  it('reads LANGFUSE_BASE_URL when only BASE_URL is set', async () => {
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
+    vi.stubEnv('LANGFUSE_HOST', '')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h1' })
+    expect(langfuseCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: 'https://us.cloud.langfuse.com' }),
+    )
+  })
+
+  it('reads LANGFUSE_HOST when only HOST is set (legacy alias)', async () => {
+    vi.stubEnv('LANGFUSE_BASE_URL', '')
+    vi.stubEnv('LANGFUSE_HOST', 'https://cloud.langfuse.com')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h2' })
+    expect(langfuseCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: 'https://cloud.langfuse.com' }),
+    )
+  })
+
+  it('prefers LANGFUSE_BASE_URL when both are set', async () => {
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
+    vi.stubEnv('LANGFUSE_HOST', 'https://cloud.langfuse.com')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h3' })
+    expect(langfuseCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: 'https://us.cloud.langfuse.com' }),
+    )
+  })
+
+  it('no-ops when neither BASE_URL nor HOST is set', async () => {
+    vi.stubEnv('LANGFUSE_BASE_URL', '')
+    vi.stubEnv('LANGFUSE_HOST', '')
+    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h4' })
+    expect(trace.id).toBe('')
+    expect(langfuseCtor).not.toHaveBeenCalled()
+  })
+})

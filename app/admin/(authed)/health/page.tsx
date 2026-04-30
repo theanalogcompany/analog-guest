@@ -1,24 +1,19 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
+import { checkLangfuse } from './check-langfuse'
 
 // /admin/health — three-row status panel. Server component; runs all
 // checks at request time. Direct register throughout.
 //
 // Rows:
 //   1. DB connectivity:  `select 1` via admin client.
-//   2. Langfuse:         env-presence + cloud-host sanity + SDK init probe.
-//                        The SDK has no synchronous ping endpoint — see
-//                        comment on checkLangfuse below.
+//   2. Langfuse:         four-state env-presence + host check. See
+//                        check-langfuse.ts for state semantics.
 //   3. Current admin:    signed-in operator's email + admin status.
 //                        Implicit sanity-check on the auth chain — if you
 //                        see your email here, the cookie session resolved
 //                        all the way through the gate.
-
-const KNOWN_LANGFUSE_HOSTS = [
-  'https://us.cloud.langfuse.com',
-  'https://cloud.langfuse.com',
-]
 
 interface CheckRow {
   label: string
@@ -37,53 +32,6 @@ async function checkDatabase(): Promise<CheckRow> {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { label: 'Database', detail: message, tone: 'bad' }
-  }
-}
-
-function checkLangfuse(): CheckRow {
-  // The langfuse SDK has no synchronous ping endpoint — traces are batch-
-  // flushed asynchronously and flushAsync succeeds even when the keys are
-  // wrong (it queues silently). And probing on every request would pollute
-  // the trace stream with /admin/health hits.
-  //
-  // What we verify cheaply, with no network call:
-  //   1. Required env vars are present.
-  //   2. The configured host matches one of the known Langfuse cloud values.
-  //      Catches the common misconfiguration "EU keys against US host" or
-  //      vice-versa, which otherwise causes silent trace loss.
-  //
-  // What this does NOT verify: that the keys are valid for the project, that
-  // the network path is open, or that traces are arriving. Operators should
-  // confirm a live trace appears in Langfuse after a real iMessage exchange.
-  const publicKey = process.env.LANGFUSE_PUBLIC_KEY?.trim() ?? ''
-  const secretKey = process.env.LANGFUSE_SECRET_KEY?.trim() ?? ''
-  const baseUrl = process.env.LANGFUSE_BASE_URL?.trim() ?? ''
-
-  if (!publicKey || !secretKey || !baseUrl) {
-    const missing: string[] = []
-    if (!publicKey) missing.push('LANGFUSE_PUBLIC_KEY')
-    if (!secretKey) missing.push('LANGFUSE_SECRET_KEY')
-    if (!baseUrl) missing.push('LANGFUSE_BASE_URL')
-    return {
-      label: 'Langfuse',
-      detail: `Not configured (missing: ${missing.join(', ')})`,
-      tone: 'neutral',
-    }
-  }
-
-  if (!KNOWN_LANGFUSE_HOSTS.includes(baseUrl)) {
-    return {
-      label: 'Langfuse',
-      detail: `Unknown host (${baseUrl}) — expected one of ${KNOWN_LANGFUSE_HOSTS.join(', ')}`,
-      tone: 'bad',
-    }
-  }
-
-  const keyPrefix = publicKey.slice(0, 8)
-  return {
-    label: 'Langfuse',
-    detail: `${baseUrl} (${keyPrefix}…) — host verified, traces unconfirmed`,
-    tone: 'good',
   }
 }
 
