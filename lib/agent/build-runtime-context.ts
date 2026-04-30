@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import type { AgentTrace } from '@/lib/observability'
 import {
   computeGuestState,
   type EligibilityCandidate,
@@ -50,6 +51,7 @@ export async function buildRuntimeContext(input: {
   agentRunId: AgentRunId
   guestId: string
   venueId: string
+  trace: AgentTrace
   currentMessage?: InboundMessage
   followupTrigger?: FollowupTrigger
 }): Promise<RuntimeContext> {
@@ -256,5 +258,6 @@ export async function buildRuntimeContext(input: {
     mechanics,
     corpus: null,
     classification: null,
+    trace: input.trace,
   }
 }

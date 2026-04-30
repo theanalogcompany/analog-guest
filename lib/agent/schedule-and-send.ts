@@ -131,7 +131,10 @@ export async function scheduleAndSend(
 
   const providerMessageId = sendResult.data.providerMessageId
 
-  // PERSIST — failures fire alert with providerMessageId + throw
+  // PERSIST — failures fire alert with providerMessageId + throw.
+  // langfuse_trace_id (THE-200) is empty-string when observability is no-op;
+  // null out at insert time so the partial index `WHERE langfuse_trace_id IS
+  // NOT NULL` only includes real traces.
   const supabase = createAdminClient()
   const insertResult = await persistOutbound(supabase, {
     venue_id: ctx.venue.id,
@@ -146,6 +149,7 @@ export async function scheduleAndSend(
     reply_to_message_id: ctx.currentMessage?.id ?? null,
     provider_message_id: providerMessageId,
     sent_at: new Date().toISOString(),
+    langfuse_trace_id: ctx.trace.id || null,
   })
 
   if (!insertResult.ok) {

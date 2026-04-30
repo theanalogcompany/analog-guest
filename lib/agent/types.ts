@@ -1,4 +1,5 @@
 import type { RecentMessage } from '@/lib/ai'
+import type { AgentTrace } from '@/lib/observability'
 import type { VoiceCorpusChunk } from '@/lib/rag'
 import type { EligibleMechanic, RelationshipSignals } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
@@ -82,6 +83,11 @@ export interface RuntimeContext {
   mechanics: EligibleMechanic[]
   corpus: CorpusMatch[] | null
   classification: Classification | null
+  // Observability handle for the current agent run (THE-200). Always present;
+  // a no-op trace (`trace.id === ''`) when Langfuse isn't configured. Stages
+  // open sub-spans off it; schedule-and-send writes `trace.id` to the
+  // outbound row's langfuse_trace_id column.
+  trace: AgentTrace
 }
 
 export type AgentResult =
