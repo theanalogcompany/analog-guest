@@ -66,7 +66,10 @@ export function ConversationThread({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 min-h-0 overflow-y-auto bg-paper py-4 flex flex-col gap-1"
+      // 400px column caps thread width to iPhone-realistic dimensions; the
+      // surrounding grid leaves the rest of the page for the trace panel.
+      // gap-0.5 (2px) between bubbles matches iMessage chain density.
+      className="w-full max-w-[400px] h-full overflow-y-auto bg-paper py-4 flex flex-col gap-0.5"
     >
       {messages.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-sm text-ink-soft">

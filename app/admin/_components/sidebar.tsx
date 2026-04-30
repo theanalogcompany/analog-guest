@@ -1,4 +1,3 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import { Eyebrow } from '@/lib/ui'
 
@@ -28,12 +27,17 @@ const NAV: ReadonlyArray<{ section: string; items: ReadonlyArray<NavItem> }> = [
 export function Sidebar() {
   return (
     <nav className="w-56 shrink-0 border-r border-stone-light/60 px-6 py-8 flex flex-col gap-8">
-      <Image
+      {/* Plain <img> instead of next/image: the asset is small (200KB,
+          rendered at 144x33) and the Next image-optimization pipeline was
+          intermittently failing to serve it on prod. Direct <img> is
+          cheaper to render and removes a layer that can fail or get cached
+          in a bad state. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
         src="/brand/analog-full-ink.png"
         alt="The Analog Company"
         width={144}
         height={33}
-        priority
       />
       <div className="flex flex-col gap-6">
         {NAV.map((group) => (

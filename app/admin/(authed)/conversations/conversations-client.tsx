@@ -194,9 +194,22 @@ export function ConversationsClient({
     return n || initialData.guest.phoneNumber
   }, [initialData.guest])
 
+  // Layout model: <main> in admin-shell is the scroll container (overflow-auto).
+  // Filters and the conversation row are both `sticky` within main so the page
+  // chrome stays put while the operator scrolls down to read the context cards.
+  //
+  // Heights:
+  //   - TopBar above main: 3.5rem (h-14)
+  //   - Filters band (sticky top-0, fixed h-16): 4rem
+  //   - Conversation row (sticky top-[4rem], height calc): fills the rest of
+  //     the viewport with a ~2.5rem slack at the bottom so context cards
+  //     "peek" before the user scrolls. Total chrome subtracted = 10rem
+  //     (3.5 TopBar + 4 Filters + 2.5 slack).
+  // The 10rem magic number is acceptable while these heights are stable;
+  // if either drifts, switch to a CSS variable.
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_28rem] flex-1 min-h-0">
+    <>
+      <div className="sticky top-[4rem] z-10 h-[calc(100dvh-10rem)] bg-paper grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}
@@ -239,7 +252,7 @@ export function ConversationsClient({
           venueTimezone={initialData.venue.timezone}
         />
       </div>
-    </div>
+    </>
   )
 }
 
