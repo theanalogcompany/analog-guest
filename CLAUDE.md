@@ -35,6 +35,21 @@ Treat the database, messaging, and LLM providers as swappable. Code should depen
 
 ---
 
+## Brand & design
+
+The Analog visual language is documented in `docs/brand/style-guide-v01.html`. Open in a browser to view rendered. It defines:
+
+- Color tokens (clay, paper, parchment, ink variants, stone variants) with hex values in the `:root` CSS block
+- Typography stack: **Fraunces** (variable serif — display + italic-display, with brand-default `opsz/SOFT/WONK` variation settings in `--fraunces` and `--fraunces-text`) and **Inter Tight** (variable sans — body, UI, eyebrows with `letter-spacing: 0.22em`, captions). No script face — every italic-display moment resolves through Fraunces.
+- Voice register guidance ("Tone continuum" section — Composed / Direct / Quiet, with surface-by-surface mapping)
+- Layout primitives (eyebrows, section headers, hairline borders, tabular nums for receipt-shaped data)
+
+The file is reference material, not code. Do not modify it. Brand updates land as a new versioned file (v02, v03, etc.) so the canonical reference for any given moment is pinned.
+
+Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `tailwind.config.ts` (utility references) — set up during THE-198 (Command Center scaffold).
+
+---
+
 ## Folder layout
 
 ### App and library code
