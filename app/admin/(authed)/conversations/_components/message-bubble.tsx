@@ -87,9 +87,13 @@ export function MessageBubble({
         title={tooltipTime}
         className={[
           cornerClasses,
-          'max-w-[min(70%,32rem)]',
-          'px-4 py-2',
-          'text-base leading-snug',
+          // 75% of the 400px column ≈ 300px; matches iMessage's typical bubble
+          // width within an iPhone-realistic viewport. The column itself caps
+          // total width, so no absolute pixel ceiling needed here.
+          'max-w-[75%]',
+          // iOS body text is ~15px / 1.3. Tailwind has no token for either,
+          // so explicit values keep the iMessage feel intact.
+          'px-3.5 py-2 text-[15px] leading-[1.3]',
           'transition-transform',
           'cursor-pointer',
           'text-left',

@@ -136,7 +136,11 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
 // ---------------------------------------------------------------------------
 
 function FullShell({ children }: { children: React.ReactNode }) {
-  return <div className="flex-1 flex flex-col min-h-0">{children}</div>
+  // Negative margin undoes admin-shell <main>'s px-8 py-10 so conversations
+  // renders edge-to-edge within main's box. main's max-w-5xl cap stays — the
+  // conversation column + trace panel comfortably fit within 64rem. Other
+  // admin routes keep their padded layout because they apply this only here.
+  return <div className="-mx-8 -my-10">{children}</div>
 }
 
 // ---------------------------------------------------------------------------
