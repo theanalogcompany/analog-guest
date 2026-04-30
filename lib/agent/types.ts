@@ -1,7 +1,12 @@
 import type { RecentMessage } from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
 import type { VoiceCorpusChunk } from '@/lib/rag'
-import type { EligibleMechanic, RelationshipSignals } from '@/lib/recognition'
+import type {
+  EligibleMechanic,
+  RelationshipSignals,
+  RelationshipStrengthFormula,
+  SignalContributions,
+} from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 import type { AlertContext } from './alerts'
 
@@ -45,6 +50,12 @@ export interface RecognitionSnapshot {
   score: number
   state: 'new' | 'returning' | 'regular' | 'raving_fan'
   signals: RelationshipSignals
+  // Per-signal weights from the venue formula and per-signal score-point
+  // contributions (signal × weight). Optional so callers that don't go through
+  // the full agent path (e.g. run-test-scenarios) don't have to populate them.
+  // Surfaced for trace observability (THE-216).
+  weights?: RelationshipStrengthFormula['weights']
+  contributions?: SignalContributions
   computedAt: Date
 }
 

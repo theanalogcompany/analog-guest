@@ -3,7 +3,12 @@ import { z } from 'zod'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { PROMPT_VERSION } from './prompts/system-template'
-import type { AIResult, GenerateMessageInput, GenerateMessageResult } from './types'
+import type {
+  AIResult,
+  GenerateMessageAttempt,
+  GenerateMessageInput,
+  GenerateMessageResult,
+} from './types'
 
 const MIN_VOICE_FIDELITY = 0.7
 const MAX_ATTEMPTS = 3
@@ -73,6 +78,7 @@ export async function generateMessage(
   try {
     let lastResult: { body: string; voiceFidelity: number; reasoning: string } | null = null
     const attemptScores: number[] = []
+    const attemptHistory: GenerateMessageAttempt[] = []
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
@@ -85,6 +91,11 @@ export async function generateMessage(
       })
       lastResult = object
       attemptScores.push(object.voiceFidelity)
+      attemptHistory.push({
+        body: object.body,
+        voiceFidelity: object.voiceFidelity,
+        reasoning: object.reasoning,
+      })
       if (object.voiceFidelity >= MIN_VOICE_FIDELITY) break
     }
 
@@ -100,6 +111,12 @@ export async function generateMessage(
         reasoning: lastResult.reasoning,
         attempts,
         attemptScores,
+        attemptHistory,
+        // System prompt sent to the model is the augmented one — what THE-160's
+        // voice-fidelity instruction tacks on is part of what the model saw,
+        // so the trace should match.
+        systemPrompt: augmentedSystemPrompt,
+        userPrompt,
         promptVersion: PROMPT_VERSION,
       },
     }

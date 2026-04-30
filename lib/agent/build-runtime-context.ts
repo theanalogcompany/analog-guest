@@ -208,6 +208,8 @@ export async function buildRuntimeContext(input: {
     score: recognitionResult.data.score,
     state: recognitionResult.data.state,
     signals: recognitionResult.data.signals,
+    weights: recognitionResult.data.weights,
+    contributions: recognitionResult.data.contributions,
     computedAt,
   }
 
