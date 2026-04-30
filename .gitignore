@@ -30,8 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (can opt-in for committing if needed). Templates ending in
+# .example are tracked so README's "copy .env.local.example to .env.local"
+# instruction works out of the box.
 .env*
+!.env*.example
 
 # vercel
 .vercel

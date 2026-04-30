@@ -11,10 +11,23 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000. The Command Center is at `/admin` (sign-in via
+magic link).
 
 Environment variables: copy `.env.local.example` to `.env.local` and fill in
 real values (ask the operator for the secrets bundle).
+
+## Deployments
+
+This repo deploys to two Vercel projects from the same branch:
+
+- `analog-guest` — guest host (webhooks, public surfaces). Middleware 404s
+  `/admin/*` here.
+- `analog-admin` — `admin.theanalog.company`. Middleware 404s everything
+  except `/admin/*` here.
+
+Local dev and `*.vercel.app` previews serve everything for QA. See
+[CLAUDE.md](CLAUDE.md) "Admin scaffold" for the full setup.
 
 ## Pre-push checks
 

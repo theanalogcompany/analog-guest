@@ -61,7 +61,9 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 - `lib/rag/` — embedding (`ingestCorpusEntry`), retrieval, the `match_voice_corpus` RPC wrapper
 - `lib/recognition/` — relationship strength scoring, state machine logic (`computeGuestState`, `computeRelationshipStrength`, `loadSignals`, `normalize-signals`), threshold evaluation. `state-bands.ts` exposes `isStateAtLeast(current, min)` for ordered comparisons across the four bands. `eligibility.ts` exposes `isRedemptionActive` + `filterEligibleMechanics` for runtime mechanic eligibility filtering, plus `MechanicRedeemedDataSchema` documenting the `engagement_events.data` shape for `event_type='mechanic_redeemed'` rows.
 - `lib/agent/` — orchestration layer. `build-runtime-context.ts` (assembles RuntimeContext for a single agent run), `stages.ts` (classify → retrieve → generate stage functions), `handle-inbound.ts`, `handle-followup.ts`. The agent module owns the per-request lifecycle.
-- `lib/auth/` — JWT verification + operator lookup for analog-operator → analog-guest API calls. `verifyOperatorRequest(request)` returns `{ operatorId, allowedVenueIds }` or throws `AuthError`. `getCurrentOperator(request)` is the Response-returning wrapper for route handlers. Server-only; uses the admin DB client.
+- `lib/auth/` — JWT verification + operator lookup for analog-operator → analog-guest API calls. `verifyOperatorRequest(request)` returns `{ operatorId, allowedVenueIds }` or throws `AuthError`. `getCurrentOperator(request)` is the Response-returning wrapper for route handlers. `verifyAnalogAdminRequest(request)` and `verifyAnalogAdminAccess(authUserId)` are sibling helpers that compose operator verification with an `is_analog_admin = true` check (THE-198). Server-only; uses the admin DB client.
+- `lib/ui/` — Brand primitives consumed by `app/admin/*`: `<Eyebrow>`, `<SectionHeader>`, `<HairlineRow>`, `<Card>`, `<StatusDot>`. RSC-compatible. Sourced from the brand language at `docs/brand/style-guide-v01.html` — do not introduce decorative variants without updating the style guide first.
+- `app/admin/` — Command Center routes. Auth-gated by `verifyAnalogAdminAccess` in `app/admin/(authed)/layout.tsx`. Served on `admin.theanalog.company` in production via root `middleware.ts` host gating. **Direct** register per the style guide tone continuum.
 - `lib/drive/` — Google Drive helpers used by the operator app side
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
 
@@ -253,7 +255,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 125 tests across 11 files as of THE-109 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 135 tests across 12 files as of THE-198 ship (2026-04-29). Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 
@@ -304,6 +306,25 @@ These constraints are real and have caused bugs:
 ## Auth boundary (analog-operator → analog-guest)
 
 All internal API routes called from the operator dashboard verify the bearer token via `verifyOperatorRequest` (or its `getCurrentOperator` wrapper). The helper resolves the Supabase auth JWT to our internal `operatorId` plus an `allowedVenueIds` array. Route handlers do venue-mismatch checks themselves (`allowedVenueIds.includes(targetVenueId)`) and construct 403 responses; the helper itself only ever produces 401. RLS is the longer-term defense; the helper is the v1 enforcement point.
+
+---
+
+## Admin scaffold
+
+The Command Center lives at `app/admin/*` inside this repo and is served via a separate Vercel project (`analog-admin`) on `admin.theanalog.company`. Production middleware at `middleware.ts` (root) host-gates: admin host serves only `/admin/*`; guest host 404s `/admin/*`. Local dev (`localhost`/`127.0.0.1`) and `*.vercel.app` previews allow everything for QA.
+
+Auth is magic-link via Supabase (`signInWithOtp`). The protected tree lives under `app/admin/(authed)/` — its layout reads the cookie session via `createServerClient` and calls `verifyAnalogAdminAccess(session.user.id)`. Sign-in (`/admin/sign-in`) and the OAuth callback (`/admin/auth/callback`) are siblings outside the route group so they bypass the gate without redirect loops.
+
+Three states at the gate:
+- No session → redirect to `/admin/sign-in`.
+- Session, not analog admin → render `<NotAuthorized>` in place (don't redirect; the user has identity, just not authorization).
+- Session + analog admin → render `<AdminShell>` (sidebar + topbar + content).
+
+To grant admin access: SQL template under "Common gotchas" (the THE-199 entry).
+
+Brand language is canonical at `docs/brand/style-guide-v01.html`. Fonts load via `next/font/google` in `app/layout.tsx` (Fraunces with `opsz/SOFT/WONK` axes + Inter Tight). Tokens live in `app/globals.css` under `@theme inline` — Tailwind v4, no separate config file. Copy register: **Direct** per the style guide. No emoji, no checkmarks; status indicators use `<StatusDot>`.
+
+Magic-link callback URL is constructed from `NEXT_PUBLIC_ADMIN_URL` (per environment) plus a fallback to `NEXT_PUBLIC_VERCEL_URL` so preview deploys self-resolve. Supabase project's "Site URL" + "Redirect URLs" allowlist must include all three: localhost, `*.vercel.app`, and `admin.theanalog.company`. Configure in Supabase Studio.
 
 ---
 
