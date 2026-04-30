@@ -66,6 +66,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 - `app/admin/` — Command Center routes. Auth-gated by `verifyAnalogAdminAccess` in `app/admin/(authed)/layout.tsx`. Served on `admin.theanalog.company` in production via root `middleware.ts` host gating. **Direct** register per the style guide tone continuum.
 - `lib/drive/` — Google Drive helpers used by the operator app side
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
+- `lib/observability/` — Langfuse SDK wrapper (THE-200). `startAgentTrace(opts)` returns an `AgentTrace` with `span() / update() / flushAsync()`; spans expose `span()`, `generation()`, `update()`, `end()`. No-op when env vars missing or `NODE_ENV=test`. Wrapper never throws — SDK errors are swallowed with `console.warn`. Use this from `lib/agent/` only; never import `langfuse` directly from app code.
 
 ### Scripts
 
@@ -286,7 +287,14 @@ Three layers, each filling a different gap. Don't conflate them.
 
 - **PostHog events.** Product/event analytics. Captures inbound/outbound events, fidelity scores, classification outputs, etc. Configured to fire to Slack on certain event filters. Today only fires on errors; THE-187 expands coverage to silent failures (low fidelity, empty corpus, classification confidence drops, latency spikes, regeneration cycles, webhook silence). PostHog event emission is wrapped in try/catch — failures must not crash the agent path.
 - **Slack alerts** (THE-159). Diagnostic-rich alert content for fired alerts. Narrow scope: improves what existing alerts say, doesn't change what fires.
-- **Trace-level observability.** Per-run visibility into the agent's reasoning (corpus retrieval scores, prompt content, fidelity self-rating, etc.). Currently scattered across console.log calls. The right answer is probably Langfuse self-hosted; spike ticket pending.
+- **Trace-level observability.** Per-run visibility into the agent's reasoning (corpus retrieval scores, prompt content, fidelity self-rating, etc.). Wired up via Langfuse Cloud (THE-200). `lib/observability/langfuse.ts` is a thin wrapper exposing `startAgentTrace` returning an `AgentTrace` (`span()`, `update()`, `flushAsync()`); spans expose `span()` / `generation()` / `update()` / `end()`. Wrapper invariants:
+  - Never throws. SDK errors are caught at the wrapper boundary and logged via `console.warn` — observability is diagnostic, not load-bearing.
+  - No-op fallback when `NODE_ENV=test`, `LANGFUSE_ENABLED=false`, any of the three env vars (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`) are missing, or SDK init throws. In no-op mode `trace.id === ''`, all methods are silent no-ops, and agent code runs unchanged.
+  - Trace ID is available synchronously the moment `startAgentTrace` returns. `schedule-and-send.ts` writes `trace.id || null` to `messages.langfuse_trace_id` at insert time so traces are queryable from the row.
+  - Span tree per agent run: `agent.inbound` (or `agent.followup`) → `context_build` → `classify` (inbound only) → `retrieve` → `generate` → `send`. The `generate` span has post-hoc `generate.attempt_N` sub-spans synthesized from `attemptScores` — these have no real per-attempt timing; threading the trace into `lib/ai`'s regen loop for true timing is tracked in THE-215.
+  - Span inputs/outputs carry metadata only (counts, scores, IDs) — never the full inbound body, full generated body, or corpus chunk content. Keeps traces small and the trace surface stable when prompts change.
+  - `flushAsync` is awaited in the `finally` block of each handler. Both handlers run inside a `waitUntil` keep-alive window from their callers (webhook route, cron) so the flush completes before the function returns.
+  - `/admin/health` verifies env-var presence and that `LANGFUSE_BASE_URL` matches a known cloud host (US or EU), but does not actively probe — the SDK has no synchronous ping, and probing on every health-page load would pollute the trace stream.
 
 ---
 

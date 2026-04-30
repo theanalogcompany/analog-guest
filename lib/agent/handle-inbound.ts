@@ -4,6 +4,7 @@ import {
   captureAgentLatencyHigh,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
@@ -79,10 +80,23 @@ async function findExistingReply(inboundMessageId: string): Promise<string | nul
  * Catastrophic / unhandled throws are caught at the top, alerted under
  * stage='context_build' (most common implicit failure shape), and returned
  * as AgentResult.failed.
+ *
+ * THE-200: every run opens a Langfuse trace named 'agent.inbound' and
+ * tracks each stage as a child span. The trace ID is written to the
+ * outbound row's langfuse_trace_id column at insert time. The wrapper is
+ * no-op when Langfuse isn't configured, so callers see no behavior change.
+ * `flushAsync` runs in the finally block — handleInbound already executes
+ * inside the webhook's `waitUntil` keep-alive window, so the flush
+ * completes before the function ends.
  */
 export async function handleInbound(inboundMessageId: string): Promise<AgentResult> {
   const agentRunId = randomUUID()
   const start = Date.now()
+  const trace = startAgentTrace({
+    name: 'agent.inbound',
+    agentRunId,
+    metadata: { inboundMessageId },
+  })
   let ctx: RuntimeContext | null = null
   let knownVenueId: string | null = null
   let knownGuestId: string | null = null
@@ -95,7 +109,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
   let generatedBody: string | null = null
 
   try {
-    console.log('[agent] inbound start', { agentRunId, inboundMessageId })
+    console.log('[agent] inbound start', { agentRunId, inboundMessageId, traceId: trace.id })
 
     // Idempotency
     const existing = await findExistingReply(inboundMessageId)
@@ -110,6 +124,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         inboundMessageId,
         reason: 'duplicate',
       })
+      trace.update({ output: { status: 'skipped_duplicate', existingReplyId: existing } })
       skipLatencyEmit = true
       return { status: 'skipped_duplicate' }
     }
@@ -118,14 +133,28 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     const inbound = await loadInbound(inboundMessageId)
     knownVenueId = inbound.venueId
     knownGuestId = inbound.guestId
+    trace.update({ metadata: { venueId: inbound.venueId, guestId: inbound.guestId } })
 
     // Build context
+    const contextSpan = trace.span('context_build', {
+      venueId: inbound.venueId,
+      guestId: inbound.guestId,
+    })
     try {
       ctx = await buildRuntimeContext({
         agentRunId,
         guestId: inbound.guestId,
         venueId: inbound.venueId,
         currentMessage: inbound.message,
+        trace,
+      })
+      contextSpan.end({
+        output: {
+          recognitionState: ctx.recognition.state,
+          recognitionScore: ctx.recognition.score,
+          mechanicCount: ctx.mechanics.length,
+          recentMessageCount: ctx.recentMessages.length,
+        },
       })
       console.log('[agent] inbound context built', {
         agentRunId,
@@ -136,6 +165,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
       const errStack = e instanceof Error ? e.stack : undefined
+      contextSpan.end({ level: 'ERROR', statusMessage: errMsg })
       await fireRedAlert({
         agentRunId,
         venueId: inbound.venueId,
@@ -149,8 +179,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
 
     // Classify
+    const classifySpan = trace.span('classify', {
+      inboundLength: ctx.currentMessage?.body.length ?? 0,
+    })
     try {
       ctx.classification = await classifyStage(ctx)
+      classifySpan.end({
+        output: {
+          category: ctx.classification.category,
+          classifierConfidence: ctx.classification.classifierConfidence,
+        },
+      })
       console.log('[agent] inbound classified', {
         agentRunId,
         category: ctx.classification.category,
@@ -158,6 +197,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
+      classifySpan.end({ level: 'ERROR', statusMessage: errMsg })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -170,14 +210,24 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
 
     // Retrieve corpus
+    const retrieveSpan = trace.span('retrieve', {
+      query: ctx.currentMessage?.body ?? null,
+    })
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
+      retrieveSpan.end({
+        output: {
+          matchCount: ctx.corpus.length,
+          topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
+        },
+      })
       console.log('[agent] inbound corpus retrieved', {
         agentRunId,
         matchCount: ctx.corpus.length,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
+      retrieveSpan.end({ level: 'ERROR', statusMessage: errMsg })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -191,8 +241,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     }
 
     // Generate
+    const generateSpan = trace.span('generate', { category: ctx.classification.category })
     const gen = await generateStage(ctx, ctx.classification.category)
     if (gen.status === 'failed') {
+      generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -204,6 +256,18 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
     if (gen.status === 'refused') {
+      // Synthesize per-attempt sub-spans from attemptScores. No real per-attempt
+      // timing — see follow-up ticket THE-215. The sub-spans are still useful
+      // because they enumerate the regen loop attempts in the trace UI.
+      gen.attemptScores.forEach((score, i) => {
+        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+        attemptSpan.end({ output: { voiceFidelity: score } })
+      })
+      generateSpan.end({
+        level: 'WARNING',
+        statusMessage: 'fidelity_loop_exhausted',
+        output: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
+      })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -215,6 +279,19 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
       return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
     }
+    gen.result.attemptScores.forEach((score, i) => {
+      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+      attemptSpan.end({ output: { voiceFidelity: score } })
+    })
+    generateSpan.end({
+      output: {
+        voiceFidelity: gen.result.voiceFidelity,
+        attempts: gen.result.attempts,
+        attemptScores: gen.result.attemptScores,
+        promptVersion: gen.result.promptVersion,
+        bodyLength: gen.result.body.length,
+      },
+    })
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
       agentRunId,
@@ -223,8 +300,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     })
 
     // Send + persist
+    const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
+      sendSpan.end({ output: { outboundMessageId, providerMessageId } })
       console.log('[agent] inbound sent + persisted', {
         agentRunId,
         outboundMessageId,
@@ -242,16 +321,25 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         attemptScores: gen.result.attemptScores,
         matchCount: ctx.corpus.length,
       })
+      trace.update({
+        output: {
+          status: 'sent',
+          outboundMessageId,
+          voiceFidelity: gen.result.voiceFidelity,
+        },
+      })
       return { status: 'sent', outboundMessageId }
     } catch (e) {
       // scheduleAndSend already fired the appropriate stage-specific alert.
       const errMsg = e instanceof Error ? e.message : String(e)
       const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
+      sendSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
       return { status: 'failed', stage, error: errMsg }
     }
   } catch (unexpected) {
     const errMsg = unexpected instanceof Error ? unexpected.message : String(unexpected)
     const errStack = unexpected instanceof Error ? unexpected.stack : undefined
+    trace.update({ output: { status: 'failed', error: errMsg } })
     await fireRedAlert({
       agentRunId,
       venueId: ctx?.venue.id ?? knownVenueId ?? 'unknown',
@@ -277,5 +365,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         })
       }
     }
+    // Flush trace events. Wrapper swallows errors. Caller (webhook route) is
+    // already inside a `waitUntil` keep-alive window so the flush completes.
+    await trace.flushAsync()
   }
 }

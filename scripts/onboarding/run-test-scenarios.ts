@@ -10,6 +10,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
+import { startAgentTrace } from '@/lib/observability'
 import { computeGuestState, type GuestState } from '@/lib/recognition'
 
 type TransactionInsert = Database['public']['Tables']['transactions']['Insert']
@@ -394,10 +395,16 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
   }
 
   try {
+    const agentRunId = randomUUID()
     const ctx = await buildRuntimeContext({
-      agentRunId: randomUUID(),
+      agentRunId,
       guestId,
       venueId,
+      // Synthetic-guest tuning runs aren't real agent flows — no need to write
+      // to Langfuse. startAgentTrace returns a no-op trace when LANGFUSE_*
+      // env vars are unset (and these scripts run with .env.local, which we
+      // expect to leave the keys blank locally).
+      trace: startAgentTrace({ name: 'agent.test-scenario', agentRunId }),
       currentMessage: {
         id: randomUUID(),
         providerMessageId: `synthetic-${scenario.sample_id}`,

@@ -3,6 +3,7 @@ import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
 } from '@/lib/analytics/posthog'
+import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
@@ -43,6 +44,11 @@ function triggerToCategory(reason: FollowupTrigger['reason']): Classification['c
  *
  * Same fail-closed behaviour as handleInbound, with kind='followup' on every
  * alert and followup_message_handled / followup_message_failed PostHog events.
+ *
+ * THE-200: instrumented identically to handleInbound (root trace 'agent.followup'
+ * with child spans for each stage) minus the classify span. flushAsync runs
+ * in finally; followup callers must invoke this inside a `waitUntil` window
+ * so the flush completes.
  */
 export async function handleFollowup(input: {
   venueId: string
@@ -51,6 +57,15 @@ export async function handleFollowup(input: {
 }): Promise<AgentResult> {
   const agentRunId = randomUUID()
   const start = Date.now()
+  const trace = startAgentTrace({
+    name: 'agent.followup',
+    agentRunId,
+    metadata: {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      triggerReason: input.trigger.reason,
+    },
+  })
   let ctx: RuntimeContext | null = null
   // Threaded into the latency event payload. inboundBody stays null for
   // followups (no inbound). generatedBody stays null on failure paths that
@@ -63,15 +78,29 @@ export async function handleFollowup(input: {
       venueId: input.venueId,
       guestId: input.guestId,
       triggerReason: input.trigger.reason,
+      traceId: trace.id,
     })
 
     // Build context
+    const contextSpan = trace.span('context_build', {
+      venueId: input.venueId,
+      guestId: input.guestId,
+    })
     try {
       ctx = await buildRuntimeContext({
         agentRunId,
         guestId: input.guestId,
         venueId: input.venueId,
         followupTrigger: input.trigger,
+        trace,
+      })
+      contextSpan.end({
+        output: {
+          recognitionState: ctx.recognition.state,
+          recognitionScore: ctx.recognition.score,
+          mechanicCount: ctx.mechanics.length,
+          recentMessageCount: ctx.recentMessages.length,
+        },
       })
       console.log('[agent] followup context built', {
         agentRunId,
@@ -82,6 +111,7 @@ export async function handleFollowup(input: {
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
       const errStack = e instanceof Error ? e.stack : undefined
+      contextSpan.end({ level: 'ERROR', statusMessage: errMsg })
       await fireRedAlert({
         agentRunId,
         venueId: input.venueId,
@@ -106,14 +136,22 @@ export async function handleFollowup(input: {
     }
 
     // Retrieve corpus
+    const retrieveSpan = trace.span('retrieve', { triggerReason: input.trigger.reason })
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
+      retrieveSpan.end({
+        output: {
+          matchCount: ctx.corpus.length,
+          topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
+        },
+      })
       console.log('[agent] followup corpus retrieved', {
         agentRunId,
         matchCount: ctx.corpus.length,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
+      retrieveSpan.end({ level: 'ERROR', statusMessage: errMsg })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -127,8 +165,10 @@ export async function handleFollowup(input: {
     }
 
     // Generate
+    const generateSpan = trace.span('generate', { category })
     const gen = await generateStage(ctx, category)
     if (gen.status === 'failed') {
+      generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -140,6 +180,15 @@ export async function handleFollowup(input: {
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
     if (gen.status === 'refused') {
+      gen.attemptScores.forEach((score, i) => {
+        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+        attemptSpan.end({ output: { voiceFidelity: score } })
+      })
+      generateSpan.end({
+        level: 'WARNING',
+        statusMessage: 'fidelity_loop_exhausted',
+        output: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
+      })
       await fireRedAlert({
         agentRunId,
         venueId: ctx.venue.id,
@@ -151,6 +200,19 @@ export async function handleFollowup(input: {
       })
       return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
     }
+    gen.result.attemptScores.forEach((score, i) => {
+      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+      attemptSpan.end({ output: { voiceFidelity: score } })
+    })
+    generateSpan.end({
+      output: {
+        voiceFidelity: gen.result.voiceFidelity,
+        attempts: gen.result.attempts,
+        attemptScores: gen.result.attemptScores,
+        promptVersion: gen.result.promptVersion,
+        bodyLength: gen.result.body.length,
+      },
+    })
     generatedBody = gen.result.body
     console.log('[agent] followup generated', {
       agentRunId,
@@ -159,8 +221,10 @@ export async function handleFollowup(input: {
     })
 
     // Send + persist
+    const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
+      sendSpan.end({ output: { outboundMessageId, providerMessageId } })
       console.log('[agent] followup sent + persisted', {
         agentRunId,
         outboundMessageId,
@@ -179,15 +243,24 @@ export async function handleFollowup(input: {
         attemptScores: gen.result.attemptScores,
         matchCount: ctx.corpus.length,
       })
+      trace.update({
+        output: {
+          status: 'sent',
+          outboundMessageId,
+          voiceFidelity: gen.result.voiceFidelity,
+        },
+      })
       return { status: 'sent', outboundMessageId }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
       const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
+      sendSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
       return { status: 'failed', stage, error: errMsg }
     }
   } catch (unexpected) {
     const errMsg = unexpected instanceof Error ? unexpected.message : String(unexpected)
     const errStack = unexpected instanceof Error ? unexpected.stack : undefined
+    trace.update({ output: { status: 'failed', error: errMsg } })
     await fireRedAlert({
       agentRunId,
       venueId: ctx?.venue.id ?? input.venueId,
@@ -211,5 +284,6 @@ export async function handleFollowup(input: {
         generatedBody,
       })
     }
+    await trace.flushAsync()
   }
 }
