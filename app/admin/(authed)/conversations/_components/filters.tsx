@@ -40,10 +40,11 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
     // visually overlap if rendering quirks ever push them past each other.
     // Solid bg-paper masks scrolling content beneath the sticky band.
     //
-    // Fixed h-16 (4rem) so the conversation row's sticky top offset can be a
-    // single magic number without measuring at runtime. items-center centers
-    // the label-above-select pair vertically within the bar.
-    <div className="sticky top-0 z-20 h-16 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
+    // Fixed h-14 (3.5rem) matches TopBar height for visual rhythm and gives
+    // the conversation row's sticky top offset a single magic number without
+    // measuring at runtime. items-center centers the label-above-select pair
+    // vertically within the bar.
+    <div className="sticky top-0 z-20 h-14 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
       <Field label="Venue">
         <select
           value={selectedVenueId ?? ''}

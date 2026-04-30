@@ -29,11 +29,11 @@ export function TraceStageCard({ stage, defaultOpen = true }: TraceStageCardProp
   const { headlineFields, content } = splitOutput(observation.output)
 
   return (
-    <Card className="!p-0">
+    <Card>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left cursor-pointer"
+        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left cursor-pointer"
         aria-expanded={open}
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -56,7 +56,7 @@ export function TraceStageCard({ stage, defaultOpen = true }: TraceStageCardProp
       </button>
 
       {open ? (
-        <div className="px-4 pb-4 flex flex-col gap-3 border-t border-stone-light/60 pt-3">
+        <div className="px-3 pb-3 flex flex-col gap-2.5 border-t border-stone-light/60 pt-2.5">
           {observation.statusMessage ? (
             <div className="text-sm text-clay whitespace-pre-wrap">
               {observation.statusMessage}
