@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import Link from 'next/link'
 import { Eyebrow } from '@/lib/ui'
 
@@ -24,12 +25,13 @@ const NAV: ReadonlyArray<{ section: string; items: ReadonlyArray<NavItem> }> = [
 export function Sidebar() {
   return (
     <nav className="w-56 shrink-0 border-r border-stone-light/60 px-6 py-8 flex flex-col gap-8">
-      <div
-        className="text-2xl font-fraunces text-ink leading-none"
-        style={{ fontVariationSettings: 'var(--fraunces)' }}
-      >
-        Analog
-      </div>
+      <Image
+        src="/brand/analog-full-ink.png"
+        alt="The Analog Company"
+        width={144}
+        height={33}
+        priority
+      />
       <div className="flex flex-col gap-6">
         {NAV.map((group) => (
           <div key={group.section} className="flex flex-col gap-2">
