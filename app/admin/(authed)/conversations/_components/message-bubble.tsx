@@ -4,8 +4,10 @@ import { formatInTimeZone } from 'date-fns-tz'
 
 // iMessage-style bubble. Brand discipline yields to fitness-for-purpose on
 // internal debugging surfaces — operator should see the conversation the way
-// the guest sees it. Real iMessage palette (#007AFF / #E5E5EA), Inter Tight
-// inside (don't load San Francisco for one component).
+// the guest sees it. Real iMessage palette: GUEST messages render in iMessage
+// blue (#007AFF), AGENT messages in gray (#E5E5EA). The conversation viewer
+// frames "what the guest sees," and in iMessage your own messages are blue —
+// so blue = guest matches that frame. Inter Tight inside (no SF font load).
 //
 // Sequence collapsing: when this bubble is part of a chain (same direction,
 // within 60s of the previous), the outer corner gets squared off so the chain
@@ -65,9 +67,10 @@ export function MessageBubble({
       : `${base} rounded-tl-[4px]`
   })()
 
+  // Outbound (agent) gray; inbound (guest) blue. See file-top comment for why.
   const colorStyles: React.CSSProperties = isOutbound
-    ? { backgroundColor: '#007AFF', color: '#FFFFFF' }
-    : { backgroundColor: '#E5E5EA', color: 'var(--color-ink, #1F1B16)' }
+    ? { backgroundColor: '#E5E5EA', color: 'var(--color-ink, #1F1B16)' }
+    : { backgroundColor: '#007AFF', color: '#FFFFFF' }
 
   const align = isOutbound ? 'justify-end' : 'justify-start'
 
@@ -91,9 +94,10 @@ export function MessageBubble({
           // width within an iPhone-realistic viewport. The column itself caps
           // total width, so no absolute pixel ceiling needed here.
           'max-w-[75%]',
-          // iOS body text is ~15px / 1.3. Tailwind has no token for either,
-          // so explicit values keep the iMessage feel intact.
-          'px-3.5 py-2 text-[15px] leading-[1.3]',
+          // 14px matches Mac Messages.app body text — denser than the iOS
+          // 15px we'd use on a phone, but this is a desktop debug surface
+          // so legibility wins over phone-fidelity. leading-[1.3] kept.
+          'px-3 py-1.5 text-[14px] leading-[1.3]',
           'transition-transform',
           'cursor-pointer',
           'text-left',

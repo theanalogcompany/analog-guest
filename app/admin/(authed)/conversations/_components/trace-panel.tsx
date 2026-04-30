@@ -1,6 +1,6 @@
 'use client'
 
-import { Eyebrow, SectionHeader } from '@/lib/ui'
+import { Eyebrow } from '@/lib/ui'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import { selectTraceStages } from '../lib/select-trace-stages'
 import { TraceStageCard } from './trace-stage-card'
@@ -52,17 +52,31 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
   return (
     <PanelChrome>
-      <div className="flex flex-col gap-2">
-        <Eyebrow>Trace</Eyebrow>
-        <SectionHeader title={rootName} subtitle={subtitle} />
+      {/* Compact header: Eyebrow + Fraunces rootName + metadata on one
+          baseline-aligned row. SectionHeader (Fraunces text-3xl + hairline
+          border + pb-4) was too dominant for a side panel and ate ~3rem of
+          vertical space we'd rather hand to stage cards. */}
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-3 min-w-0">
+          <Eyebrow>Trace</Eyebrow>
+          <span
+            className="font-fraunces text-base text-ink leading-tight truncate"
+            style={{ fontVariationSettings: 'var(--fraunces)' }}
+          >
+            {rootName}
+          </span>
+        </div>
+        <span className="text-xs text-ink-soft tabular-nums whitespace-nowrap">
+          {subtitle}
+        </span>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {stages.map((stage) => (
           <TraceStageCard key={stage.observation.id} stage={stage} />
         ))}
         {other.length > 0 ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
             <Eyebrow>Other</Eyebrow>
             {other.map((obs) => (
               <TraceStageCard
@@ -91,7 +105,7 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
 function PanelChrome({ children }: { children: React.ReactNode }) {
   return (
-    <aside className="w-full flex flex-col gap-6 p-6 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
+    <aside className="w-full flex flex-col gap-3 p-4 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
       {children}
     </aside>
   )

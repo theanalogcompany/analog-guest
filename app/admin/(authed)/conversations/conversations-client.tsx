@@ -200,16 +200,16 @@ export function ConversationsClient({
   //
   // Heights:
   //   - TopBar above main: 3.5rem (h-14)
-  //   - Filters band (sticky top-0, fixed h-16): 4rem
-  //   - Conversation row (sticky top-[4rem], height calc): fills the rest of
-  //     the viewport with a ~2.5rem slack at the bottom so context cards
-  //     "peek" before the user scrolls. Total chrome subtracted = 10rem
-  //     (3.5 TopBar + 4 Filters + 2.5 slack).
-  // The 10rem magic number is acceptable while these heights are stable;
+  //   - Filters band (sticky top-0, fixed h-14): 3.5rem (matches TopBar)
+  //   - Conversation row (sticky top-[3.5rem], height calc): fills the rest
+  //     of the viewport with a ~2rem slack so context cards "peek" before
+  //     the user scrolls. Total chrome subtracted = 9rem (3.5 TopBar +
+  //     3.5 Filters + 2 slack).
+  // The 9rem magic number is acceptable while these heights are stable;
   // if either drifts, switch to a CSS variable.
   return (
     <>
-      <div className="sticky top-[4rem] z-10 h-[calc(100dvh-10rem)] bg-paper grid grid-cols-1 lg:grid-cols-[400px_1fr]">
+      <div className="sticky top-[3.5rem] z-10 h-[calc(100dvh-9rem)] bg-paper grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}

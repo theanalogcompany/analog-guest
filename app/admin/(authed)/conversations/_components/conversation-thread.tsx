@@ -68,8 +68,10 @@ export function ConversationThread({
       ref={scrollRef}
       // 400px column caps thread width to iPhone-realistic dimensions; the
       // surrounding grid leaves the rest of the page for the trace panel.
-      // gap-0.5 (2px) between bubbles matches iMessage chain density.
-      className="w-full max-w-[400px] h-full overflow-y-auto bg-paper py-4 flex flex-col gap-0.5"
+      // gap-0.5 (2px) between bubbles matches iMessage chain density. py-3
+      // saves vertical space vs py-4 without making the top bubble feel
+      // glued to the filter bar.
+      className="w-full max-w-[400px] h-full overflow-y-auto bg-paper py-3 flex flex-col gap-0.5"
     >
       {messages.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-sm text-ink-soft">

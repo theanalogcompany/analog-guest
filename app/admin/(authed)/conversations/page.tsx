@@ -124,7 +124,16 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   return (
     <FullShell>
       <Filters venues={venues} guests={guests} selectedVenueId={venueId} selectedGuestId={guestId} />
+      {/* key forces a fresh mount on every (venue, guest) change so the
+          client component's useState initializers re-run with the new
+          initialData. Without this, App Router soft-navigation can reuse
+          the prior instance and useState (which only consults its initial
+          value once) keeps stale messages — observed as "conversation
+          empty until refresh" on first filter selection. Trace cache
+          resets on remount; acceptable trade-off given how rare guest
+          switching is mid-debug. */}
       <ConversationsClient
+        key={`${venueId}:${guestId}`}
         venueId={venueId}
         guestId={guestId}
         initialData={initialData}
