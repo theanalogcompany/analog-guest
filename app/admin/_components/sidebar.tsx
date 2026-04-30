@@ -14,7 +14,10 @@ interface NavItem {
 const NAV: ReadonlyArray<{ section: string; items: ReadonlyArray<NavItem> }> = [
   {
     section: 'Overview',
-    items: [{ href: '/admin', label: 'Home' }],
+    items: [
+      { href: '/admin', label: 'Home' },
+      { href: '/admin/conversations', label: 'Conversations' },
+    ],
   },
   {
     section: 'System',

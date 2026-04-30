@@ -1,4 +1,4 @@
-import { Langfuse } from 'langfuse'
+import { type ApiTraceWithFullDetails, Langfuse } from 'langfuse'
 
 // Thin wrapper around the langfuse SDK so the agent code never touches the
 // SDK directly — keeps lib/agent provider-agnostic and lets the rest of the
@@ -248,6 +248,38 @@ function wrapSpan(span: SdkSpanLike, captureContent: boolean): AgentSpan {
         console.warn('[observability] span.end failed', e instanceof Error ? e.message : e)
       }
     },
+  }
+}
+
+export type { ApiTraceWithFullDetails } from 'langfuse'
+
+/**
+ * Server-only. Fetch a single trace by ID from Langfuse Cloud's read API.
+ * Used by the conversation viewer admin route (THE-201) to render the
+ * agent's reasoning inline next to its outbound message.
+ *
+ * Returns null on:
+ *   - empty/blank traceId (don't bother calling the SDK)
+ *   - wrapper in no-op mode (no client configured)
+ *   - SDK throw (network failure, 404, auth failure, anything)
+ *
+ * Same never-throw discipline as the rest of the wrapper. Callers render
+ * "trace unavailable" UI on null. No retry — the API route handler issues
+ * fresh fetches per click, so transient failures self-heal on user retry.
+ */
+export async function fetchTrace(traceId: string): Promise<ApiTraceWithFullDetails | null> {
+  const trimmed = traceId.trim()
+  if (!trimmed) return null
+  const client = getClient()
+  if (!client) return null
+  try {
+    return await client.api.traceGet(trimmed)
+  } catch (e) {
+    console.warn(
+      '[observability] fetchTrace failed',
+      e instanceof Error ? e.message : String(e),
+    )
+    return null
   }
 }
 

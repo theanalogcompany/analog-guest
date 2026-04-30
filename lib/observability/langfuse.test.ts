@@ -9,11 +9,13 @@ vi.mock('langfuse', () => ({
   Langfuse: class MockLangfuse {
     trace: ReturnType<typeof vi.fn>
     flushAsync: ReturnType<typeof vi.fn>
+    api: { traceGet: ReturnType<typeof vi.fn> }
     constructor(opts: unknown) {
       langfuseCtor(opts)
       const fake = makeFakeClient()
       this.trace = fake.trace
       this.flushAsync = fake.flushAsync
+      this.api = fake.api
     }
   },
 }))
@@ -29,6 +31,7 @@ interface FakeSpan {
 interface FakeClient {
   trace: ReturnType<typeof vi.fn>
   flushAsync: ReturnType<typeof vi.fn>
+  api: { traceGet: ReturnType<typeof vi.fn> }
 }
 
 let lastClient: FakeClient | null = null
@@ -64,6 +67,7 @@ function makeFakeClient(): FakeClient {
   const client = {
     trace,
     flushAsync: vi.fn().mockResolvedValue(undefined),
+    api: { traceGet: vi.fn() },
   }
   lastClient = client
   return client
@@ -360,5 +364,56 @@ describe('startAgentTrace — content capture (THE-216)', () => {
     expect(lastClient!.trace.mock.results[0]?.value.update).toHaveBeenCalledWith({
       metadata: { venueId: 'v1' },
     })
+  })
+})
+
+describe('fetchTrace (THE-201)', () => {
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-test')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-test')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
+    vi.stubEnv('LANGFUSE_ENABLED', '')
+  })
+
+  it('calls SDK api.traceGet and returns the result', async () => {
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    // Triggers client construction.
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-1' })
+    const fakeTrace = { id: 'tr_xyz', observations: [], scores: [] }
+    lastClient!.api.traceGet.mockResolvedValueOnce(fakeTrace)
+    const result = await fetchTrace('tr_xyz')
+    expect(lastClient!.api.traceGet).toHaveBeenCalledWith('tr_xyz')
+    expect(result).toBe(fakeTrace)
+  })
+
+  it('returns null on empty trace ID without calling the SDK', async () => {
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-2' })
+    expect(await fetchTrace('')).toBeNull()
+    expect(await fetchTrace('   ')).toBeNull()
+    expect(lastClient!.api.traceGet).not.toHaveBeenCalled()
+  })
+
+  it('returns null when SDK throws (404, network, etc.)', async () => {
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-3' })
+    lastClient!.api.traceGet.mockRejectedValueOnce(new Error('not found'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await fetchTrace('tr_missing')
+    expect(result).toBeNull()
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('returns null when wrapper is in no-op mode', async () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', '')
+    const { fetchTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const result = await fetchTrace('tr_xyz')
+    expect(result).toBeNull()
   })
 })
