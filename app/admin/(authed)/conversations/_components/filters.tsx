@@ -34,12 +34,14 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
   }
 
   return (
-    // First row of the conversations 4-region grid (FullShell in page.tsx).
-    // Fixed h-14 (3.5rem) matches TopBar height for visual rhythm; no sticky
-    // positioning needed because the page no longer page-scrolls — every
-    // region is bounded inside its grid cell. items-center centers the
-    // label-above-select pair vertically within the bar.
-    <div className="h-14 shrink-0 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
+    // First row of the conversations layout (FullShell in page.tsx).
+    // Fixed h-14 (3.5rem) matches TopBar height for visual rhythm. Sticky
+    // top-0 keeps filters reachable as the page scrolls past the
+    // conversation block to reveal context cards + transactions (PR-5);
+    // z-20 stacks over content scrolling beneath. Solid bg-paper masks
+    // anything passing under the band during scroll. items-center centers
+    // the label-above-select pair vertically within the bar.
+    <div className="sticky top-0 z-20 h-14 shrink-0 bg-paper flex items-center gap-4 px-6 border-b border-stone-light/60">
       <Field label="Venue">
         <select
           value={selectedVenueId ?? ''}

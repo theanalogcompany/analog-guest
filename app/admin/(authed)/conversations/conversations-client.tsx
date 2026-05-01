@@ -9,6 +9,8 @@ import { ConversationThread, type ThreadMessage } from './_components/conversati
 import { GuestContext } from './_components/guest-context'
 import { InboundDetail } from './_components/inbound-detail'
 import { TracePanel } from './_components/trace-panel'
+import { type Transaction } from './_components/transaction-row'
+import { TransactionsList } from './_components/transactions-list'
 import { VenueContext } from './_components/venue-context'
 
 // Client surface that owns selection, the trace fetch cache, and the
@@ -60,6 +62,10 @@ export interface InitialData {
   messages: Array<ThreadMessage & { providerMessageId: string | null }>
   traceMap: Record<string, ApiTraceWithFullDetails | null>
   todayLocalIso: string
+  /** Last 50 transactions in the lookback window, newest-first. */
+  transactions: Transaction[]
+  /** Window the transactions were filtered against (server uses 90 days). */
+  transactionsWindowDays: number
 }
 
 interface ConversationsClientProps {
@@ -213,20 +219,24 @@ export function ConversationsClient({
     return n || initialData.guest.phoneNumber
   }, [initialData.guest])
 
-  // Layout: ConversationsClient occupies the flex-1 slot of FullShell's
-  // flex-col, and itself splits into:
-  //   - conversation/trace row (flex-1 min-h-0): grid-cols-[400px_1fr] with
-  //     each child owning overflow-y-auto.
-  //   - context row (h-[240px]): grid-cols-2; each card scrolls inside the
-  //     fixed 240px slot if its content is taller.
-  // No sticky positioning. No chrome-offset math. Page never scrolls.
-  // min-h-0 on the wrapper + the conversation row lets the flex/grid
-  // children's overflow-y-auto respect the bounded heights (default min-h
-  // is auto, which would let intrinsic content push the parent past its
-  // intended size).
+  // Layout: ConversationsClient occupies the post-Filters slot of
+  // FullShell's flex-col, and stacks vertically into:
+  //   - conversation/trace block (h-[calc(100dvh-7rem)]): fills viewport-
+  //     minus-(TopBar 3.5rem + Filters 3.5rem). 400px / 1fr split with each
+  //     child owning overflow-y-auto.
+  //   - context cards row (h-[240px]): grid-cols-2; each card scrolls
+  //     inside the fixed 240px slot if its content is taller.
+  //   - transactions section (natural height, full-width): scrolls into
+  //     view as the page scrolls past the conversation block.
+  //
+  // PR-5: page-level scroll re-introduced. Filters row above stays sticky
+  // (in page.tsx) so the operator's orientation isn't lost. The
+  // conversation block keeps its internal scroll behavior — the chrome-
+  // height calc is bounded so the conversation+trace fill viewport on
+  // first paint and the operator scrolls past to reveal the rest.
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[400px_1fr]">
+    <div className="flex flex-col">
+      <div className="h-[calc(100dvh-7rem)] grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}
@@ -269,6 +279,14 @@ export function ConversationsClient({
           avgPerVisitCents={initialData.avgPerVisitCents}
           totalMessageCount={initialData.totalMessageCount}
           responseRatePct={initialData.responseRatePct}
+          venueTimezone={initialData.venue.timezone}
+        />
+      </div>
+
+      <div className="border-t border-stone-light/60 bg-parchment p-4">
+        <TransactionsList
+          transactions={initialData.transactions}
+          windowDays={initialData.transactionsWindowDays}
           venueTimezone={initialData.venue.timezone}
         />
       </div>

@@ -28,6 +28,7 @@ const RECENT_GUESTS_LIMIT = 50
 const TRACE_PREFETCH_LIMIT = 5
 const VISIT_LOOKBACK_DAYS = 90
 const RECENT_EVENTS_LIMIT = 3
+const TRANSACTIONS_LIMIT = 50
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 interface PageProps {
@@ -146,21 +147,23 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
 // ---------------------------------------------------------------------------
 
 function FullShell({ children }: { children: React.ReactNode }) {
-  // 4-region layout. Page itself never scrolls — each region owns its own
-  // overflow. Vertical model:
-  //   1. Filters (auto height, ~3.5rem from h-14)
-  //   2. Conversation thread + trace panel (flex-1, internally split 400px / 1fr)
+  // 5-region layout (PR-5). Page-level scroll is now allowed — the
+  // transactions section at the bottom needs room to grow. Vertical model:
+  //   1. Filters (sticky top-0, h-14, z-20 — stays accessible during scroll)
+  //   2. Conversation thread + trace panel (h-[calc(100dvh-7rem)], internally
+  //      split 400px / 1fr) — fills first viewport on initial paint
   //   3. Context cards (240px fixed, internally split 1/2 / 1/2)
+  //   4. Transactions section (natural height, full-width)
   //
-  // The wrapper bounds itself to viewport-minus-TopBar (h-14 = 3.5rem) so
-  // <main>'s overflow-auto never triggers a page-level scroll. Single magic
-  // number (3.5rem); update if TopBar height ever changes.
+  // The wrapper has min-h instead of h so content longer than the viewport
+  // can grow the page. Filters stay reachable via sticky top-0 within
+  // <main> (admin-shell's overflow-auto is the scroll container).
   //
   // -mx-8 -my-10 cancels admin-shell <main>'s default px-8 py-10 padding so
   // the conversation viewer renders edge-to-edge within main's box. Other
   // admin routes keep their padded layout because the negation is local here.
   return (
-    <div className="h-[calc(100dvh-3.5rem)] -mx-8 -my-10 overflow-hidden flex flex-col bg-paper">
+    <div className="min-h-[calc(100dvh-3.5rem)] -mx-8 -my-10 flex flex-col bg-paper">
       {children}
     </div>
   )
@@ -208,6 +211,7 @@ async function loadConversationData({
     messageCountResult,
     earliestMessageResult,
     earliestTransactionResult,
+    transactionsListResult,
   ] = await Promise.all([
     supabase
       .from('messages')
@@ -281,6 +285,19 @@ async function loadConversationData({
       .order('occurred_at', { ascending: true })
       .limit(1)
       .maybeSingle(),
+    // Full transaction rows for the bottom Transactions section (PR-5).
+    // 50-row cap is a default; if a guest has >50 in 90 days the section
+    // header reflects "showing 50 of N" via a caveat in copy. Real-pilot
+    // guests shouldn't hit this cap; if/when they do, "show all" is a
+    // separate ticket.
+    supabase
+      .from('transactions')
+      .select('id, occurred_at, amount_cents, item_count, raw_data, source')
+      .eq('venue_id', venueRow.id)
+      .eq('guest_id', guestId)
+      .gte('occurred_at', lookbackIso)
+      .order('occurred_at', { ascending: false })
+      .limit(TRANSACTIONS_LIMIT),
   ])
 
   if (messagesResult.error) throw new Error(`messages load failed: ${messagesResult.error.message}`)
@@ -297,6 +314,9 @@ async function loadConversationData({
   }
   if (earliestTransactionResult.error) {
     throw new Error(`earliest transaction load failed: ${earliestTransactionResult.error.message}`)
+  }
+  if (transactionsListResult.error) {
+    throw new Error(`transactions list load failed: ${transactionsListResult.error.message}`)
   }
 
   // Defensive parse — bad JSONB at this seam shouldn't fail the page; log and
@@ -379,6 +399,15 @@ async function loadConversationData({
   // conversation array is truncated.
   const totalMessageCount = messageCountResult.count ?? 0
 
+  const transactions = (transactionsListResult.data ?? []).map((t) => ({
+    id: t.id,
+    occurredAt: new Date(t.occurred_at),
+    amountCents: t.amount_cents,
+    itemCount: t.item_count,
+    rawData: t.raw_data,
+    source: t.source,
+  }))
+
   return {
     venue: {
       id: venueRow.id,
@@ -422,6 +451,8 @@ async function loadConversationData({
     messages,
     traceMap,
     todayLocalIso,
+    transactions,
+    transactionsWindowDays: VISIT_LOOKBACK_DAYS,
   }
 }
 
