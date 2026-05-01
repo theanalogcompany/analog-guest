@@ -6,14 +6,14 @@ import { extractRecognition } from '../lib/extract-recognition'
 import { type TraceStage, selectTraceStages } from '../lib/select-trace-stages'
 import { PipelineCard } from './pipeline-card'
 import { RecognitionCard } from './recognition-card'
-import { TraceStageCard } from './trace-stage-card'
 
-// Renders a single trace as a top-down linear stage stack: root header,
-// then context_build → classify → retrieve → generate → send (with attempts
-// nested), then any unrecognized stages under "Other". The shape is fixed
-// because the agent pipeline is fixed; tracing UIs that try to be generic
-// across arbitrary code (Langfuse Cloud's UI included) do worse on this
-// shape than something tailored.
+// Trace panel: one trace, top-down — header (root name + total) → recognition
+// hero (PR-1) → pipeline rows with per-stage drill-down (PR-2 + PR-3). The
+// shape is fixed because the agent pipeline is fixed; tracing UIs that try
+// to be generic across arbitrary code do worse on this shape than something
+// tailored.
+
+const LANGFUSE_BASE_URL = 'https://us.cloud.langfuse.com'
 
 interface TracePanelProps {
   trace: ApiTraceWithFullDetails | null
@@ -51,20 +51,27 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
   }
 
   const { rootName, stages, other } = selectTraceStages(trace)
-  const subtitle = `${stages.length} stage${stages.length === 1 ? '' : 's'} · ${formatLatency(trace.latency)}`
-  const recognition = extractRecognition(trace)
   // Hoist signals into the standalone Recognition card. The same data lives
   // in context_build's THE-216 content; rendering it twice (once at top-level
   // and once nested in the drill-down) is friction. Strip it here so the
   // drill-down shows non-recognition context_build outputs only.
   const stagesForDrilldown = stripRecognitionSignals(stages)
+  // Merge "Other" observations (top-level spans not in KNOWN_STAGE_ORDER)
+  // into the pipeline list as additional rows. They render with the same
+  // chrome and use UnknownStageDetail when expanded — forward-compat for
+  // any future stage that isn't yet in the dispatcher.
+  const allStages: TraceStage[] = [
+    ...stagesForDrilldown,
+    ...other.map((obs) => ({ name: obs.name ?? '(unnamed)', observation: obs })),
+  ]
+  const recognition = extractRecognition(trace)
+  const subtitle = `${stages.length} stage${stages.length === 1 ? '' : 's'} · ${formatLatency(trace.latency)}`
+  const langfuseUrl = trace.htmlPath ? `${LANGFUSE_BASE_URL}${trace.htmlPath}` : null
 
   return (
     <PanelChrome>
       {/* Compact header: Eyebrow + Fraunces rootName + metadata on one
-          baseline-aligned row. SectionHeader (Fraunces text-3xl + hairline
-          border + pb-4) was too dominant for a side panel and ate ~3rem of
-          vertical space we'd rather hand to stage cards. */}
+          baseline-aligned row. */}
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-3 min-w-0">
           <Eyebrow>Trace</Eyebrow>
@@ -82,31 +89,7 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
       {recognition ? <RecognitionCard data={recognition} /> : null}
 
-      <PipelineCard stages={stagesForDrilldown} />
-
-      {other.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <Eyebrow>Other</Eyebrow>
-          {other.map((obs) => (
-            <TraceStageCard
-              key={obs.id}
-              stage={{ name: obs.name ?? '(unnamed)', observation: obs }}
-              defaultOpen={false}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      {trace.htmlPath ? (
-        <a
-          href={`https://us.cloud.langfuse.com${trace.htmlPath}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-ink-soft hover:text-clay underline self-start"
-        >
-          Open in Langfuse Cloud ↗
-        </a>
-      ) : null}
+      <PipelineCard stages={allStages} langfuseUrl={langfuseUrl} />
     </PanelChrome>
   )
 }
