@@ -2,7 +2,9 @@
 
 import { Eyebrow } from '@/lib/ui'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
-import { selectTraceStages } from '../lib/select-trace-stages'
+import { extractRecognition } from '../lib/extract-recognition'
+import { type TraceStage, selectTraceStages } from '../lib/select-trace-stages'
+import { RecognitionCard } from './recognition-card'
 import { TraceStageCard } from './trace-stage-card'
 
 // Renders a single trace as a top-down linear stage stack: root header,
@@ -49,6 +51,12 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
   const { rootName, stages, other } = selectTraceStages(trace)
   const subtitle = `${stages.length} stage${stages.length === 1 ? '' : 's'} · ${formatLatency(trace.latency)}`
+  const recognition = extractRecognition(trace)
+  // Hoist signals into the standalone Recognition card. The same data lives
+  // in context_build's THE-216 content; rendering it twice (once at top-level
+  // and once nested in the drill-down) is friction. Strip it here so the
+  // drill-down shows non-recognition context_build outputs only.
+  const stagesForDrilldown = stripRecognitionSignals(stages)
 
   return (
     <PanelChrome>
@@ -71,8 +79,10 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
         </span>
       </div>
 
+      {recognition ? <RecognitionCard data={recognition} /> : null}
+
       <div className="flex flex-col gap-2">
-        {stages.map((stage) => (
+        {stagesForDrilldown.map((stage) => (
           <TraceStageCard key={stage.observation.id} stage={stage} />
         ))}
         {other.length > 0 ? (
@@ -115,4 +125,36 @@ function formatLatency(seconds: number | undefined): string {
   if (seconds === undefined || Number.isNaN(seconds)) return '—'
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
   return `${seconds.toFixed(2)}s`
+}
+
+// Returns a copy of the stages where the context_build observation has its
+// `output.content.signals` stripped. Recognition is rendered at the top of
+// the panel (RecognitionCard), so the drill-down shows non-signal
+// context_build outputs only — preserves what's interesting (mechanic count,
+// recent message count, etc.) without duplicating the hero card. The original
+// trace object is not mutated.
+function stripRecognitionSignals(stages: TraceStage[]): TraceStage[] {
+  return stages.map((stage) => {
+    if (stage.name !== 'context_build') return stage
+    const output = stage.observation.output
+    if (typeof output !== 'object' || output === null || Array.isArray(output)) return stage
+    const outputRecord = output as Record<string, unknown>
+    const content = outputRecord.content
+    if (typeof content !== 'object' || content === null || Array.isArray(content)) return stage
+    const nextContent: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(content as Record<string, unknown>)) {
+      if (k !== 'signals') nextContent[k] = v
+    }
+    const nextOutput: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(outputRecord)) {
+      if (k !== 'content') nextOutput[k] = v
+    }
+    if (Object.keys(nextContent).length > 0) {
+      nextOutput.content = nextContent
+    }
+    return {
+      ...stage,
+      observation: { ...stage.observation, output: nextOutput },
+    }
+  })
 }
