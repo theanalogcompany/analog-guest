@@ -17,9 +17,20 @@ import type { TraceObservation, TraceStage } from '../lib/select-trace-stages'
 interface TraceStageCardProps {
   stage: TraceStage
   defaultOpen?: boolean
+  /**
+   * Skip the outer Card chrome and the toggle button; render only the body
+   * (always open). Used by `<PipelineCard>` (PR-2) when the pipeline row
+   * owns the toggle and the row itself sits inside its own card. PR-3 will
+   * replace this whole component with a per-stage dispatcher.
+   */
+  chromeless?: boolean
 }
 
-export function TraceStageCard({ stage, defaultOpen = true }: TraceStageCardProps) {
+export function TraceStageCard({
+  stage,
+  defaultOpen = true,
+  chromeless = false,
+}: TraceStageCardProps) {
   const [open, setOpen] = useState(defaultOpen)
   const { observation, attempts } = stage
   const isError = observation.level === 'ERROR'
@@ -27,6 +38,53 @@ export function TraceStageCard({ stage, defaultOpen = true }: TraceStageCardProp
   const latencyMs = computeLatencyMs(observation)
 
   const { headlineFields, content } = splitOutput(observation.output)
+
+  const body =
+    observation.statusMessage ||
+    headlineFields.length > 0 ||
+    content !== undefined ||
+    (observation.input !== undefined && observation.input !== null) ||
+    (attempts && attempts.length > 0) ? (
+      <div
+        className={
+          chromeless
+            ? 'flex flex-col gap-2.5'
+            : 'px-3 pb-3 flex flex-col gap-2.5 border-t border-stone-light/60 pt-2.5'
+        }
+      >
+        {observation.statusMessage ? (
+          <div className="text-sm text-clay whitespace-pre-wrap">
+            {observation.statusMessage}
+          </div>
+        ) : null}
+
+        {headlineFields.length > 0 ? <KeyValueList entries={headlineFields} /> : null}
+
+        {content !== undefined ? (
+          <CollapsibleBlock heading="Captured content">
+            <ContentRender value={content} />
+          </CollapsibleBlock>
+        ) : null}
+
+        {observation.input !== undefined && observation.input !== null ? (
+          <CollapsibleBlock heading="Input" defaultOpen={false}>
+            <ContentRender value={observation.input} />
+          </CollapsibleBlock>
+        ) : null}
+
+        {attempts && attempts.length > 0 ? (
+          <CollapsibleBlock heading={`Attempts (${attempts.length})`}>
+            <div className="flex flex-col gap-2">
+              {attempts.map((a, i) => (
+                <AttemptCard key={a.id} attempt={a} index={i + 1} />
+              ))}
+            </div>
+          </CollapsibleBlock>
+        ) : null}
+      </div>
+    ) : null
+
+  if (chromeless) return body
 
   return (
     <Card>
@@ -55,41 +113,7 @@ export function TraceStageCard({ stage, defaultOpen = true }: TraceStageCardProp
         ) : null}
       </button>
 
-      {open ? (
-        <div className="px-3 pb-3 flex flex-col gap-2.5 border-t border-stone-light/60 pt-2.5">
-          {observation.statusMessage ? (
-            <div className="text-sm text-clay whitespace-pre-wrap">
-              {observation.statusMessage}
-            </div>
-          ) : null}
-
-          {headlineFields.length > 0 ? (
-            <KeyValueList entries={headlineFields} />
-          ) : null}
-
-          {content !== undefined ? (
-            <CollapsibleBlock heading="Captured content">
-              <ContentRender value={content} />
-            </CollapsibleBlock>
-          ) : null}
-
-          {observation.input !== undefined && observation.input !== null ? (
-            <CollapsibleBlock heading="Input" defaultOpen={false}>
-              <ContentRender value={observation.input} />
-            </CollapsibleBlock>
-          ) : null}
-
-          {attempts && attempts.length > 0 ? (
-            <CollapsibleBlock heading={`Attempts (${attempts.length})`}>
-              <div className="flex flex-col gap-2">
-                {attempts.map((a, i) => (
-                  <AttemptCard key={a.id} attempt={a} index={i + 1} />
-                ))}
-              </div>
-            </CollapsibleBlock>
-          ) : null}
-        </div>
-      ) : null}
+      {open ? body : null}
     </Card>
   )
 }

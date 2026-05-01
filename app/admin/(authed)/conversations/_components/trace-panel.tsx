@@ -4,6 +4,7 @@ import { Eyebrow } from '@/lib/ui'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import { extractRecognition } from '../lib/extract-recognition'
 import { type TraceStage, selectTraceStages } from '../lib/select-trace-stages'
+import { PipelineCard } from './pipeline-card'
 import { RecognitionCard } from './recognition-card'
 import { TraceStageCard } from './trace-stage-card'
 
@@ -81,23 +82,20 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
       {recognition ? <RecognitionCard data={recognition} /> : null}
 
-      <div className="flex flex-col gap-2">
-        {stagesForDrilldown.map((stage) => (
-          <TraceStageCard key={stage.observation.id} stage={stage} />
-        ))}
-        {other.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            <Eyebrow>Other</Eyebrow>
-            {other.map((obs) => (
-              <TraceStageCard
-                key={obs.id}
-                stage={{ name: obs.name ?? '(unnamed)', observation: obs }}
-                defaultOpen={false}
-              />
-            ))}
-          </div>
-        ) : null}
-      </div>
+      <PipelineCard stages={stagesForDrilldown} />
+
+      {other.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <Eyebrow>Other</Eyebrow>
+          {other.map((obs) => (
+            <TraceStageCard
+              key={obs.id}
+              stage={{ name: obs.name ?? '(unnamed)', observation: obs }}
+              defaultOpen={false}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {trace.htmlPath ? (
         <a
