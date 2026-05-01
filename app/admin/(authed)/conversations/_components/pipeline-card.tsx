@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Eyebrow } from '@/lib/ui'
 import type { TraceStage } from '../lib/select-trace-stages'
-import { TraceStageCard } from './trace-stage-card'
+import { StageDetail } from '../stage-detail'
 
 // Pipeline card: one row per stage in canonical pipeline order, each with a
 // duration-proportional bar. The dominator (longest stage, typically `send`)
@@ -13,9 +13,8 @@ import { TraceStageCard } from './trace-stage-card'
 //
 // Each row is independently expandable. Multiple rows can be open at the
 // same time (operator workflow involves comparing data across stages).
-// Expanded row renders the existing `<TraceStageCard>` body in chromeless
-// mode below the row — transitional state until PR-3 replaces it with a
-// per-stage dispatcher.
+// Expanded row renders the per-stage <StageDetail> dispatcher (PR-3) below
+// the row, in a clay-left-rule detail block.
 
 // Display-rename map. Identifier stays underscore (matches agent-side spans
 // + Langfuse traces); UI shows dot notation per the PR-2 decision. Only
@@ -26,9 +25,11 @@ const STAGE_DISPLAY_NAME: Record<string, string> = {
 
 interface PipelineCardProps {
   stages: TraceStage[]
+  /** Full URL to the trace in Langfuse Cloud. Pre-computed in TracePanel. */
+  langfuseUrl: string | null
 }
 
-export function PipelineCard({ stages }: PipelineCardProps) {
+export function PipelineCard({ stages, langfuseUrl }: PipelineCardProps) {
   const rows = stages.map((stage) => ({
     stage,
     durationMs: computeLatencyMs(stage.observation),
@@ -55,6 +56,7 @@ export function PipelineCard({ stages }: PipelineCardProps) {
               durationMs !== null && durationMs > 0 && durationMs === maxMs
             }
             totalMs={totalMs}
+            langfuseUrl={langfuseUrl}
           />
         ))}
       </div>
@@ -67,9 +69,16 @@ interface PipelineRowProps {
   durationMs: number | null
   isDominator: boolean
   totalMs: number
+  langfuseUrl: string | null
 }
 
-function PipelineRow({ stage, durationMs, isDominator, totalMs }: PipelineRowProps) {
+function PipelineRow({
+  stage,
+  durationMs,
+  isDominator,
+  totalMs,
+  langfuseUrl,
+}: PipelineRowProps) {
   const [open, setOpen] = useState(false)
   const widthPct =
     totalMs > 0 && durationMs !== null ? (durationMs / totalMs) * 100 : 0
@@ -81,13 +90,26 @@ function PipelineRow({ stage, durationMs, isDominator, totalMs }: PipelineRowPro
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 text-left cursor-pointer"
+        // Open state: subtle white wash background, slight font-weight bump
+        // on label + duration, clay chevron + clay name text. The wash
+        // (bg-white/35) is just enough to anchor "this row is the open
+        // one" without competing with the bar's clay highlight.
+        className={[
+          'w-full flex items-center gap-3 text-left cursor-pointer rounded',
+          'px-1.5 py-0.5 -mx-1.5 -my-0.5',  // Hit area expansion + bg padding without affecting layout
+          open ? 'bg-white/35' : '',
+        ].join(' ')}
         aria-expanded={open}
       >
-        <span className="text-ink-faint text-xs w-3 shrink-0">
-          {open ? '▼' : '▶'}
+        <span className={`text-xs w-3 shrink-0 ${open ? 'text-clay' : 'text-ink-faint'}`}>
+          {open ? '▾' : '▸'}
         </span>
-        <span className="text-sm text-ink-soft w-[100px] shrink-0 truncate">
+        <span
+          className={[
+            'text-sm w-[100px] shrink-0 truncate',
+            open ? 'text-ink font-medium' : 'text-ink-soft',
+          ].join(' ')}
+        >
           {displayName}
         </span>
         <div className="flex-1 h-2 rounded-full bg-stone-light/60 relative overflow-hidden">
@@ -97,19 +119,17 @@ function PipelineRow({ stage, durationMs, isDominator, totalMs }: PipelineRowPro
             aria-hidden
           />
         </div>
-        <span className="text-xs text-ink-soft tabular-nums w-[60px] text-right shrink-0">
+        <span
+          className={[
+            'text-xs tabular-nums w-[60px] text-right shrink-0',
+            open ? 'text-ink font-medium' : 'text-ink-soft',
+          ].join(' ')}
+        >
           {durationMs !== null ? formatDuration(durationMs) : '—'}
         </span>
       </button>
 
-      {open ? (
-        // Indent matches the chevron + name columns above so the expanded
-        // body lines up with the bar's left edge. Subtle bg shift signals
-        // "this is the open state" without competing with the row.
-        <div className="pl-7 pr-1 pb-1">
-          <TraceStageCard stage={stage} chromeless />
-        </div>
-      ) : null}
+      {open ? <StageDetail stage={stage} langfuseUrl={langfuseUrl} /> : null}
     </div>
   )
 }
