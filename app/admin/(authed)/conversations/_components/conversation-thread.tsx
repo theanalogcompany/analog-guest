@@ -85,7 +85,7 @@ export function ConversationThread({
               key={`ts-${item.atIso}`}
               className="text-center text-xs text-ink-soft py-2"
             >
-              {formatInTimeZone(new Date(item.atIso), venueTimezone, 'h:mm a · EEE MMM d')}
+              {formatClusterTimestamp(item.atIso, venueTimezone)}
             </div>
           )
         }
@@ -109,6 +109,28 @@ export function ConversationThread({
 type ThreadItem =
   | { kind: 'timestamp'; atIso: string }
   | { kind: 'bubble'; message: ThreadMessage; position: BubblePosition }
+
+// Format a cluster timestamp as "EEE MMM d · period" in the venue's local
+// timezone. Period buckets the local hour into morning/afternoon/evening/
+// night so two clusters on the same day with different time-of-day still
+// read distinctly. iMessage shows time-of-day on first message of the day +
+// at long gaps; we adopt the same intent at cluster granularity.
+function formatClusterTimestamp(iso: string, tz: string): string {
+  const date = new Date(iso)
+  const dayLabel = formatInTimeZone(date, tz, 'EEE MMM d')
+  const hourStr = formatInTimeZone(date, tz, 'H')
+  const hour = Number.parseInt(hourStr, 10)
+  if (!Number.isFinite(hour)) return dayLabel
+  const period =
+    hour >= 5 && hour < 12
+      ? 'morning'
+      : hour >= 12 && hour < 17
+        ? 'afternoon'
+        : hour >= 17 && hour < 21
+          ? 'evening'
+          : 'night'
+  return `${dayLabel} · ${period}`
+}
 
 function computeItems(messages: ThreadMessage[]): ThreadItem[] {
   const items: ThreadItem[] = []
