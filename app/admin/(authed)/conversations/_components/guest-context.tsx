@@ -1,16 +1,16 @@
+import { differenceInCalendarDays } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
-import { Card, Eyebrow, HairlineRow, StatusDot } from '@/lib/ui'
+import { Card, Eyebrow, StatePill } from '@/lib/ui'
 import type { GuestState } from '@/lib/recognition'
 
-// Read-only guest context. Pulls from latest guest_states row + lightweight
-// rollups. NOT a live recompute — that's expensive and writes audit rows.
-// THE-202 owns the full guest detail view; this card is just enough to ground
-// the conversation you're looking at.
+// Compact guest context. Densified for the 240px context-row slot. Pulls
+// from latest guest_states + lightweight rollups + the loaded conversation
+// messages (for response rate). NOT a live recognition recompute.
 //
-// StatusDot mapping is intentionally narrow per project decision: 'new' is
-// neutral (not bad — every guest starts here), 'returning'/'regular'/
-// 'raving_fan' are good. 'bad' tone is reserved for actually-wrong states
-// (failed sends, errors). See THE-201 PR thread for context.
+// Color discipline (PR-3 lesson): inline `style` for any state-dependent
+// color. StatePill encapsulates its own color logic — don't pass tokens
+// through. Default text color inherits ink from body; only muted labels
+// override.
 
 interface GuestContextProps {
   guest: {
@@ -22,114 +22,140 @@ interface GuestContextProps {
     createdVia: string
   }
   state: GuestState | null
-  recognitionScore: number | null
+  /** From guests.last_visit_at (matched-transaction or operator-edited). Null when guest has zero visits. */
   lastVisitAt: Date | null
+  /** Earliest signal we have on this guest at this venue (min message or transaction). */
+  sinceAt: Date | null
   visitCountLast90Days: number
-  recentEvents: Array<{ eventType: string; createdAt: Date }>
+  spendCents90d: number
+  /** Total spend / visit count in cents. Null when visits = 0. */
+  avgPerVisitCents: number | null
+  /** All-time message count for this venue+guest pair. */
+  totalMessageCount: number
+  /** 0–100. Computed from the loaded conversation; window documented in compute-message-stats.ts. */
+  responseRatePct: number
   venueTimezone: string
-}
-
-const STATE_TONE: Record<GuestState, 'good' | 'neutral'> = {
-  new: 'neutral',
-  returning: 'good',
-  regular: 'good',
-  raving_fan: 'good',
 }
 
 export function GuestContext({
   guest,
   state,
-  recognitionScore,
   lastVisitAt,
+  sinceAt,
   visitCountLast90Days,
-  recentEvents,
+  spendCents90d,
+  avgPerVisitCents,
+  totalMessageCount,
+  responseRatePct,
   venueTimezone,
 }: GuestContextProps) {
   const fullName = [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
+  const formattedPhone = formatPhone(guest.phoneNumber)
+  const sinceLabel = sinceAt ? formatInTimeZone(sinceAt, venueTimezone, 'MMM d') : null
+
+  const lastVisitLabel = lastVisitAt
+    ? formatRelativeVisit(lastVisitAt, venueTimezone, new Date())
+    : null
+
+  const spendLabel =
+    visitCountLast90Days > 0 && avgPerVisitCents !== null
+      ? `${formatDollars(spendCents90d)} · avg ${formatDollars(avgPerVisitCents)}`
+      : formatDollars(spendCents90d)
+
+  const messagesLabel = `${totalMessageCount} · ${responseRatePct}% response rate`
 
   return (
-    // h-full + overflow-y-auto so the card scrolls inside the 240px context
-    // row when recent engagement events accumulate. p-4 (vs reading-width
-    // p-6 used elsewhere) gives content more room within the 240px box
-    // without losing card weight.
-    <Card className="h-full overflow-y-auto p-4 flex flex-col gap-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <Eyebrow>Guest</Eyebrow>
-          <h3
-            className="font-fraunces text-xl text-ink leading-tight"
-            style={{ fontVariationSettings: 'var(--fraunces)' }}
-          >
-            {fullName}
-          </h3>
-          <span className="text-xs text-ink-soft tabular-nums">{guest.phoneNumber}</span>
+    <Card variant="trace" className="h-full overflow-y-auto p-4 flex flex-col gap-3">
+      <header className="flex items-center justify-between gap-3">
+        <Eyebrow>Guest</Eyebrow>
+        {state ? <StatePill state={state} /> : null}
+      </header>
+
+      <div className="flex flex-col gap-1">
+        <h3
+          className="font-fraunces text-xl text-ink leading-tight italic"
+          style={{ fontVariationSettings: 'var(--fraunces-text)' }}
+        >
+          {fullName}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-ink-soft">
+          <span className="tabular-nums">{formattedPhone}</span>
+          {sinceLabel ? (
+            <>
+              <span aria-hidden>·</span>
+              <span>since {sinceLabel}</span>
+            </>
+          ) : null}
         </div>
-        {state ? (
-          <div className="flex items-center gap-2">
-            <StatusDot tone={STATE_TONE[state]} label={`recognition state: ${state}`} />
-            <span className="text-sm text-ink">{state}</span>
-            {recognitionScore !== null ? (
-              <span className="text-xs text-ink-soft tabular-nums">({recognitionScore})</span>
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-xs text-ink-soft italic">no state yet</span>
-        )}
       </div>
 
-      <div className="flex flex-col">
-        <HairlineRow>
-          <Row label="Last visit">
-            {lastVisitAt
-              ? formatInTimeZone(lastVisitAt, venueTimezone, 'MMM d, yyyy')
-              : '—'}
-          </Row>
-        </HairlineRow>
-        <HairlineRow>
-          <Row label="Visits (90d)">{visitCountLast90Days}</Row>
-        </HairlineRow>
-        <HairlineRow>
-          <Row label="Distance">
-            {guest.distanceMiles !== null
-              ? `${guest.distanceMiles.toFixed(1)} mi`
-              : '—'}
-          </Row>
-        </HairlineRow>
-        <HairlineRow last={recentEvents.length === 0}>
-          <Row label="Created via">{guest.createdVia}</Row>
-        </HairlineRow>
-      </div>
+      <dl className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1.5 text-sm">
+        <Label>Last visit</Label>
+        <Value>{lastVisitLabel ?? <Empty />}</Value>
 
-      {recentEvents.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <Eyebrow>Recent engagement</Eyebrow>
-          <div className="flex flex-col">
-            {recentEvents.map((e, i) => (
-              <HairlineRow key={`${e.eventType}-${e.createdAt.toISOString()}`} last={i === recentEvents.length - 1}>
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-sm text-ink">{e.eventType}</span>
-                  <span className="text-xs text-ink-soft">
-                    {formatInTimeZone(e.createdAt, venueTimezone, 'MMM d')}
-                  </span>
-                </div>
-              </HairlineRow>
-            ))}
-          </div>
-        </div>
-      ) : null}
+        <Label>Visits 90d</Label>
+        <Value>{visitCountLast90Days}</Value>
 
-      <span className="text-xs text-ink-soft italic">
-        View guest detail (THE-202) — coming soon.
-      </span>
+        <Label>Spend 90d</Label>
+        <Value>{spendLabel}</Value>
+
+        <Label>Messages</Label>
+        <Value>{messagesLabel}</Value>
+      </dl>
     </Card>
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+// ---------------------------------------------------------------------------
+
+function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-sm text-ink-soft">{label}</span>
-      <span className="text-sm text-ink text-right max-w-[60%]">{children}</span>
-    </div>
+    <dt className="text-ink-faint" style={{ fontWeight: 500 }}>
+      {children}
+    </dt>
   )
+}
+
+function Value({ children }: { children: React.ReactNode }) {
+  return <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+}
+
+function Empty() {
+  return (
+    <span className="text-ink-faint" style={{ fontStyle: 'italic' }}>
+      —
+    </span>
+  )
+}
+
+// "yesterday · 8:15 am" / "today · 8:15 am" / "Mon · 8:15 am" (within last week) /
+// "Mar 8 · 8:15 am" (older). Calendar-day diff uses the venue's local timezone
+// so "today" matches the operator's intuition for a venue on a different
+// timezone than the operator's browser.
+function formatRelativeVisit(date: Date, tz: string, now: Date): string {
+  const time = formatInTimeZone(date, tz, 'h:mm a').toLowerCase()
+  // Calendar-day diff in venue tz: format both dates as YYYY-MM-DD in venue
+  // tz, then compute the day delta from those wall-clock days.
+  const dateLocal = formatInTimeZone(date, tz, 'yyyy-MM-dd')
+  const nowLocal = formatInTimeZone(now, tz, 'yyyy-MM-dd')
+  const days = differenceInCalendarDays(new Date(`${nowLocal}T00:00:00Z`), new Date(`${dateLocal}T00:00:00Z`))
+  if (days === 0) return `today · ${time}`
+  if (days === 1) return `yesterday · ${time}`
+  if (days >= 2 && days <= 6) {
+    return `${formatInTimeZone(date, tz, 'EEE')} · ${time}`
+  }
+  return `${formatInTimeZone(date, tz, 'MMM d')} · ${time}`
+}
+
+// "+17869530853" → "+1 786 953 0853" for legibility. Falls back to the raw
+// string when the format doesn't match (international numbers etc).
+function formatPhone(phone: string): string {
+  const m = phone.match(/^\+1(\d{3})(\d{3})(\d{4})$/)
+  if (!m) return phone
+  return `+1 ${m[1]} ${m[2]} ${m[3]}`
+}
+
+function formatDollars(cents: number): string {
+  const dollars = cents / 100
+  return `$${dollars.toFixed(2)}`
 }

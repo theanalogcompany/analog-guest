@@ -10,6 +10,7 @@ import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
 import type { RecentActivityRow } from './_components/recent-activity'
+import { computeMessageStats } from './lib/compute-message-stats'
 
 // Server orchestrator. Fetches everything the client needs in one render path
 // so initial paint is one network round trip. The client is responsible for
@@ -58,7 +59,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   // operator_venues. The allowlist matters for non-admin operators (future).
   const { data: venuesRaw, error: venuesErr } = await supabase
     .from('venues')
-    .select('id, slug, name, timezone, messaging_phone_number')
+    .select('id, slug, name, timezone, messaging_phone_number, status, is_test')
     .order('name', { ascending: true })
   if (venuesErr) throw new Error(`venues load failed: ${venuesErr.message}`)
   const venues = (venuesRaw ?? []).filter((v) => allowedVenueIds.length === 0 || allowedVenueIds.includes(v.id))
@@ -169,7 +170,15 @@ function FullShell({ children }: { children: React.ReactNode }) {
 
 interface LoadConversationArgs {
   supabase: ReturnType<typeof createAdminClient>
-  venueRow: { id: string; slug: string; name: string; timezone: string; messaging_phone_number: string | null }
+  venueRow: {
+    id: string
+    slug: string
+    name: string
+    timezone: string
+    messaging_phone_number: string | null
+    status: string
+    is_test: boolean
+  }
   guestId: string
 }
 
@@ -196,6 +205,9 @@ async function loadConversationData({
     stateResult,
     transactionsResult,
     eventsResult,
+    messageCountResult,
+    earliestMessageResult,
+    earliestTransactionResult,
   ] = await Promise.all([
     supabase
       .from('messages')
@@ -227,7 +239,7 @@ async function loadConversationData({
       .maybeSingle(),
     supabase
       .from('transactions')
-      .select('occurred_at')
+      .select('occurred_at, amount_cents')
       .eq('guest_id', guestId)
       .eq('venue_id', venueRow.id)
       .gte('occurred_at', lookbackIso),
@@ -238,6 +250,37 @@ async function loadConversationData({
       .eq('venue_id', venueRow.id)
       .order('created_at', { ascending: false })
       .limit(RECENT_EVENTS_LIMIT),
+    // Total message count for the venue/guest pair, all-time. Separate from
+    // the 200-row messages array because that's display-windowed; this is
+    // the headline number on the guest card.
+    supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('venue_id', venueRow.id)
+      .eq('guest_id', guestId)
+      .neq('body', ''),
+    // Earliest message timestamp — for the "since" date on the guest card.
+    // ASC + limit 1 is cheaper than min() across a potentially-large table
+    // and gives the same answer.
+    supabase
+      .from('messages')
+      .select('created_at')
+      .eq('venue_id', venueRow.id)
+      .eq('guest_id', guestId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    // Earliest transaction timestamp — also for "since". Together with the
+    // earliest message, the smaller of the two is the operator's "first
+    // signal we had on this guest at this venue."
+    supabase
+      .from('transactions')
+      .select('occurred_at')
+      .eq('venue_id', venueRow.id)
+      .eq('guest_id', guestId)
+      .order('occurred_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   if (messagesResult.error) throw new Error(`messages load failed: ${messagesResult.error.message}`)
@@ -246,6 +289,15 @@ async function loadConversationData({
   if (stateResult.error) throw new Error(`guest_states load failed: ${stateResult.error.message}`)
   if (transactionsResult.error) throw new Error(`transactions load failed: ${transactionsResult.error.message}`)
   if (eventsResult.error) throw new Error(`engagement_events load failed: ${eventsResult.error.message}`)
+  if (messageCountResult.error) {
+    throw new Error(`message count load failed: ${messageCountResult.error.message}`)
+  }
+  if (earliestMessageResult.error) {
+    throw new Error(`earliest message load failed: ${earliestMessageResult.error.message}`)
+  }
+  if (earliestTransactionResult.error) {
+    throw new Error(`earliest transaction load failed: ${earliestTransactionResult.error.message}`)
+  }
 
   // Defensive parse — bad JSONB at this seam shouldn't fail the page; log and
   // render a placeholder so the operator can still browse the conversation.
@@ -263,11 +315,33 @@ async function loadConversationData({
     }
   }
 
-  // Visit count: distinct calendar days in venue tz.
+  // Visit count: distinct calendar days in venue tz. Spend total: sum of
+  // amount_cents across the 90-day window. Avg per visit derives in JS and
+  // is left null when visit count is 0 (UI omits the "avg" clause).
   const visitDates = new Set<string>()
+  let spendCents90d = 0
   for (const t of transactionsResult.data ?? []) {
     visitDates.add(formatInTimeZone(new Date(t.occurred_at), venueRow.timezone, 'yyyy-MM-dd'))
+    spendCents90d += t.amount_cents ?? 0
   }
+  const visitCount90d = visitDates.size
+  const avgPerVisitCents = visitCount90d > 0 ? Math.round(spendCents90d / visitCount90d) : null
+
+  // "Since" = earliest signal we have on this guest at this venue, considering
+  // both transactions and messages. A guest may have texted before transacting
+  // (NFC tap → inbound message, no purchase yet) or vice versa.
+  const earliestMessageAt = earliestMessageResult.data?.created_at
+    ? new Date(earliestMessageResult.data.created_at)
+    : null
+  const earliestTransactionAt = earliestTransactionResult.data?.occurred_at
+    ? new Date(earliestTransactionResult.data.occurred_at)
+    : null
+  const sinceAt: Date | null =
+    earliestMessageAt && earliestTransactionAt
+      ? earliestMessageAt < earliestTransactionAt
+        ? earliestMessageAt
+        : earliestTransactionAt
+      : earliestMessageAt ?? earliestTransactionAt
 
   // Pre-fetch last 5 outbound traces in parallel. allSettled so one Langfuse
   // hiccup doesn't 500 the whole page.
@@ -287,6 +361,24 @@ async function loadConversationData({
 
   const todayLocalIso = formatInTimeZone(new Date(), venueRow.timezone, 'yyyy-MM-dd')
 
+  const messages = (messagesResult.data ?? []).map((m) => ({
+    id: m.id,
+    body: m.body,
+    direction: (m.direction === 'outbound' ? 'outbound' : 'inbound') as 'inbound' | 'outbound',
+    createdAt: new Date(m.created_at),
+    langfuseTraceId: m.langfuse_trace_id,
+    replyToMessageId: m.reply_to_message_id,
+    providerMessageId: m.provider_message_id,
+  }))
+  // Response rate computed from the loaded conversation messages (200-row
+  // cap). For high-volume guests the count would under-count; Jaipal's run
+  // (~38 messages) fits well within the cap so this is exact in practice.
+  const responseStats = computeMessageStats(messages)
+  // Total messages is from the dedicated count query (all-time, not capped),
+  // so the headline number on the guest card stays accurate even when the
+  // conversation array is truncated.
+  const totalMessageCount = messageCountResult.count ?? 0
+
   return {
     venue: {
       id: venueRow.id,
@@ -294,6 +386,8 @@ async function loadConversationData({
       name: venueRow.name,
       timezone: venueRow.timezone,
       messagingPhone: venueRow.messaging_phone_number ?? '',
+      status: venueRow.status,
+      isTest: venueRow.is_test,
     },
     persona,
     venueInfo,
@@ -314,20 +408,18 @@ async function loadConversationData({
     },
     state: (stateResult.data?.state ?? null) as GuestState | null,
     lastVisitAt: guestRow.last_visit_at ? new Date(guestRow.last_visit_at) : null,
-    visitCountLast90Days: visitDates.size,
+    sinceAt,
+    visitCountLast90Days: visitCount90d,
+    spendCents90d,
+    avgPerVisitCents,
+    totalMessageCount,
+    responseRatePct: responseStats.responseRatePct,
+    responseWindowHours: responseStats.responseWindowHours,
     recentEvents: (eventsResult.data ?? []).map((e) => ({
       eventType: e.event_type,
       createdAt: new Date(e.created_at),
     })),
-    messages: (messagesResult.data ?? []).map((m) => ({
-      id: m.id,
-      body: m.body,
-      direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
-      createdAt: new Date(m.created_at),
-      langfuseTraceId: m.langfuse_trace_id,
-      replyToMessageId: m.reply_to_message_id,
-      providerMessageId: m.provider_message_id,
-    })),
+    messages,
     traceMap,
     todayLocalIso,
   }

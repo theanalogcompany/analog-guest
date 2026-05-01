@@ -16,7 +16,15 @@ import { VenueContext } from './_components/venue-context'
 // InitialData and we go from there.
 
 export interface InitialData {
-  venue: { id: string; slug: string; name: string; timezone: string; messagingPhone: string }
+  venue: {
+    id: string
+    slug: string
+    name: string
+    timezone: string
+    messagingPhone: string
+    status: string
+    isTest: boolean
+  }
   persona: BrandPersona | null
   venueInfo: VenueInfo | null
   mechanics: Array<{
@@ -36,7 +44,18 @@ export interface InitialData {
   }
   state: GuestState | null
   lastVisitAt: Date | null
+  /** Earliest of (min message.created_at, min transaction.occurred_at) for guest+venue. */
+  sinceAt: Date | null
   visitCountLast90Days: number
+  /** Sum of transactions.amount_cents over the last 90 days. */
+  spendCents90d: number
+  /** Total spend / visit count, rounded to cents. Null when there are no visits. */
+  avgPerVisitCents: number | null
+  /** All-time message count for venue+guest pair. Independent of the 200-row messages array. */
+  totalMessageCount: number
+  /** 0–100, rounded. Computed from the loaded messages within responseWindowHours. */
+  responseRatePct: number
+  responseWindowHours: number
   recentEvents: Array<{ eventType: string; createdAt: Date }>
   messages: Array<ThreadMessage & { providerMessageId: string | null }>
   traceMap: Record<string, ApiTraceWithFullDetails | null>
@@ -243,10 +262,13 @@ export function ConversationsClient({
         <GuestContext
           guest={initialData.guest}
           state={initialData.state}
-          recognitionScore={null}
           lastVisitAt={initialData.lastVisitAt}
+          sinceAt={initialData.sinceAt}
           visitCountLast90Days={initialData.visitCountLast90Days}
-          recentEvents={initialData.recentEvents}
+          spendCents90d={initialData.spendCents90d}
+          avgPerVisitCents={initialData.avgPerVisitCents}
+          totalMessageCount={initialData.totalMessageCount}
+          responseRatePct={initialData.responseRatePct}
           venueTimezone={initialData.venue.timezone}
         />
       </div>
