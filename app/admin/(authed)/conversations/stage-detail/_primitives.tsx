@@ -84,18 +84,25 @@ interface SubSectionProps {
 
 export function SubSection({ title, defaultOpen = true, children }: SubSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
+  // Color set inline on the button (not via Tailwind classes) so it survives
+  // any layout-level cascade and the inner spans inherit via currentColor.
+  // Production prod showed the className-based approach (`text-clay` /
+  // `text-ink-faint` on inner spans + `hover:text-clay` on the button)
+  // rendering near-white against the white-wash detail block — the
+  // standalone HTML preview rendered correctly. Inline style has higher
+  // specificity than any class rule, eliminates the drift, and matches
+  // exactly how the preview was authored.
   return (
     <div className="flex flex-col gap-2">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-[11px] uppercase font-medium tracking-[var(--tracking-eyebrow)] cursor-pointer hover:text-clay transition-colors"
+        style={{ color: open ? 'var(--clay)' : 'var(--ink-faint)' }}
+        className="flex items-center gap-2 text-[11px] uppercase font-medium tracking-[var(--tracking-eyebrow)] cursor-pointer hover:opacity-80 transition-opacity"
         aria-expanded={open}
       >
-        <span className={open ? 'text-clay' : 'text-ink-faint'}>
-          {open ? '▾' : '▸'}
-        </span>
-        <span className={open ? 'text-clay' : 'text-ink-faint'}>{title}</span>
+        <span aria-hidden>{open ? '▾' : '▸'}</span>
+        <span>{title}</span>
       </button>
       {open ? <div className="pl-4 flex flex-col gap-2">{children}</div> : null}
     </div>
