@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Eyebrow } from '@/lib/ui'
+import { Card, Eyebrow } from '@/lib/ui'
 import type { TraceStage } from '../lib/select-trace-stages'
 import { StageDetail } from '../stage-detail'
 
@@ -41,7 +41,7 @@ export function PipelineCard({ stages, langfuseUrl }: PipelineCardProps) {
   const maxMs = rows.reduce((acc, r) => Math.max(acc, r.durationMs ?? 0), 0)
 
   return (
-    <section className="bg-parchment border border-stone-light/60 rounded-md p-3 flex flex-col gap-3">
+    <Card variant="trace" className="p-3 flex flex-col gap-3">
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>Pipeline</Eyebrow>
         <span className="text-xs text-ink-soft tabular-nums">{formatDuration(totalMs)}</span>
@@ -60,7 +60,7 @@ export function PipelineCard({ stages, langfuseUrl }: PipelineCardProps) {
           />
         ))}
       </div>
-    </section>
+    </Card>
   )
 }
 

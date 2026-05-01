@@ -1,13 +1,24 @@
-import { Card, Eyebrow, HairlineRow } from '@/lib/ui'
+import { Card, Eyebrow, StatusDot } from '@/lib/ui'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 
-// Read-only venue context shown alongside the conversation. Surface only
-// what's most useful for debugging an active conversation — persona, today's
-// hours, currently-eligible mechanics, active context notes. Editing lives in
-// THE-203; that link is a placeholder until the route exists.
+// Compact venue context. Densified for the 240px context-row slot. Shows the
+// fields most useful for debugging an active conversation: today's hours,
+// timezone, persona tone, mechanic counts. Editing lives in THE-203.
+//
+// Color discipline (PR-3 lesson): inline `style` for any state-dependent
+// color. No `hover:text-{token}` without a base color. Default text color
+// inherits ink from body; only muted labels override.
 
 interface VenueContextProps {
-  venue: { id: string; slug: string; name: string; timezone: string; messagingPhone: string }
+  venue: {
+    id: string
+    slug: string
+    name: string
+    timezone: string
+    messagingPhone: string
+    status: string
+    isTest: boolean
+  }
   persona: BrandPersona
   venueInfo: VenueInfo
   mechanics: Array<{
@@ -21,6 +32,15 @@ interface VenueContextProps {
 }
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
+// Short three-letter day labels for the "Hours · Fri" header line. Matches
+// the mockup's compact form.
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+const STATUS_TONE: Record<string, 'good' | 'neutral' | 'bad'> = {
+  active: 'good',
+  pending: 'neutral',
+  inactive: 'bad',
+}
 
 export function VenueContext({
   venue,
@@ -29,116 +49,94 @@ export function VenueContext({
   mechanics,
   todayLocalIso,
 }: VenueContextProps) {
-  const todayDayKey = DAY_KEYS[new Date(todayLocalIso + 'T12:00:00').getDay()]
+  const dayIndex = new Date(`${todayLocalIso}T12:00:00`).getDay()
+  const todayDayKey = DAY_KEYS[dayIndex]
+  const todayShort = DAY_SHORT[dayIndex]
   const todayHours = venueInfo.hours[todayDayKey] ?? 'Not set'
   const phoneTail = venue.messagingPhone.slice(-4)
-  const activeContext = venueInfo.currentContext.slice(0, 3)
-  const topPhrases = persona.signaturePhrases.slice(0, 3)
+  const tone = firstSentenceOrPhrase(persona.tone)
+
+  const activeMechanicCount = mechanics.length
+  const gatedMechanicCount = mechanics.filter((m) => m.minState !== 'new').length
+  const mechanicsLabel =
+    activeMechanicCount === 0
+      ? 'none active'
+      : gatedMechanicCount > 0
+        ? `${activeMechanicCount} active · ${gatedMechanicCount} regulars-only`
+        : `${activeMechanicCount} active`
+
+  const statusTone = STATUS_TONE[venue.status] ?? 'neutral'
 
   return (
-    // h-full + overflow-y-auto so the card scrolls inside the 240px context
-    // row when persona + hours + mechanics + currentContext push past the
-    // available space. p-4 (vs the reading-width p-6 used elsewhere) gives
-    // content more room within the 240px box without losing card weight.
-    <Card className="h-full overflow-y-auto p-4 flex flex-col gap-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <Eyebrow>Venue</Eyebrow>
-          <h3
-            className="font-fraunces text-xl text-ink leading-tight"
-            style={{ fontVariationSettings: 'var(--fraunces)' }}
-          >
-            {venue.name}
-          </h3>
-          <span className="text-xs text-ink-soft">{venue.slug}</span>
-        </div>
-        <span className="text-xs text-ink-soft tabular-nums">···{phoneTail}</span>
-      </div>
-
-      <div className="flex flex-col">
-        <HairlineRow>
-          <Row label="Timezone">{venue.timezone}</Row>
-        </HairlineRow>
-        <HairlineRow>
-          <Row label={`Hours · ${capitalize(todayDayKey)}`}>{todayHours}</Row>
-        </HairlineRow>
-        <HairlineRow>
-          <Row label="Tone">{persona.tone}</Row>
-        </HairlineRow>
-        <HairlineRow>
-          <Row label="Formality">{persona.formality}</Row>
-        </HairlineRow>
-        <HairlineRow last={topPhrases.length === 0 && mechanics.length === 0 && activeContext.length === 0}>
-          <Row label="Speaker framing">
-            {persona.speakerFraming === 'named_person' && persona.speakerName
-              ? `${persona.speakerName} (named person)`
-              : persona.speakerFraming}
-          </Row>
-        </HairlineRow>
-        {topPhrases.length > 0 ? (
-          <HairlineRow last={mechanics.length === 0 && activeContext.length === 0}>
-            <Row label="Signature phrases">
-              <ul className="flex flex-col gap-0.5 text-right">
-                {topPhrases.map((p) => (
-                  <li key={p} className="italic">&ldquo;{p}&rdquo;</li>
-                ))}
-              </ul>
-            </Row>
-          </HairlineRow>
+    <Card variant="trace" className="h-full overflow-y-auto p-4 flex flex-col gap-3">
+      <header className="flex items-baseline justify-between gap-3">
+        <Eyebrow>Venue</Eyebrow>
+        {phoneTail ? (
+          <span className="text-xs text-ink-soft tabular-nums">···{phoneTail}</span>
         ) : null}
+      </header>
+
+      <div className="flex flex-col gap-1">
+        <h3
+          className="font-fraunces text-xl text-ink leading-tight italic"
+          style={{ fontVariationSettings: 'var(--fraunces-text)' }}
+        >
+          {venue.name}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-ink-soft">
+          <span>{venue.slug}</span>
+          <span aria-hidden>·</span>
+          <span className="flex items-center gap-1.5">
+            <StatusDot tone={statusTone} label={`status: ${venue.status}`} />
+            <span>{venue.status}</span>
+          </span>
+          {venue.isTest ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="italic">is_test</span>
+            </>
+          ) : null}
+        </div>
       </div>
 
-      {mechanics.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <Eyebrow>Active mechanics</Eyebrow>
-          <div className="flex flex-col">
-            {mechanics.map((m, i) => (
-              <HairlineRow key={m.id} last={i === mechanics.length - 1}>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm text-ink">{m.name}</span>
-                  <span className="text-xs text-ink-soft">
-                    Gate: {m.minState} · {m.redemptionPolicy}
-                    {m.redemptionWindowDays !== null ? ` · ${m.redemptionWindowDays}d window` : ''}
-                  </span>
-                </div>
-              </HairlineRow>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      <dl className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1.5 text-sm">
+        <Label>{`Hours · ${todayShort}`}</Label>
+        <Value>{todayHours}</Value>
 
-      {activeContext.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <Eyebrow>Active context</Eyebrow>
-          <div className="flex flex-col">
-            {activeContext.map((c, i) => (
-              <HairlineRow key={c.id} last={i === activeContext.length - 1}>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm text-ink">{c.content}</span>
-                  <span className="text-xs text-ink-soft">{c.source}</span>
-                </div>
-              </HairlineRow>
-            ))}
-          </div>
-        </div>
-      ) : null}
+        <Label>Timezone</Label>
+        <Value>{venue.timezone}</Value>
 
-      <span className="text-xs text-ink-soft italic">
-        Edit venue (THE-203) — coming soon.
-      </span>
+        <Label>Tone</Label>
+        <Value>
+          <span className="italic text-ink-soft">{tone}</span>
+        </Value>
+
+        <Label>Mechanics</Label>
+        <Value>{mechanicsLabel}</Value>
+      </dl>
     </Card>
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-sm text-ink-soft">{label}</span>
-      <span className="text-sm text-ink text-right max-w-[60%]">{children}</span>
-    </div>
+    <dt className="text-ink-faint" style={{ fontWeight: 500 }}>
+      {children}
+    </dt>
   )
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
+function Value({ children }: { children: React.ReactNode }) {
+  return <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+}
+
+// Trim a free-form persona tone string to its first sentence (or first ~80
+// chars if no period). Avoids the card growing taller when a venue has a
+// multi-paragraph tone description.
+function firstSentenceOrPhrase(s: string): string {
+  if (!s) return ''
+  const periodIdx = s.indexOf('.')
+  if (periodIdx > 0 && periodIdx < 120) return s.slice(0, periodIdx).trim()
+  if (s.length <= 80) return s.trim()
+  return `${s.slice(0, 77).trim()}…`
 }
