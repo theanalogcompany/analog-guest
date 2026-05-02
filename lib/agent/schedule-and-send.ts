@@ -55,55 +55,66 @@ async function persistOutbound(
  *
  * No retries. v1 is fail-fast. The thrown error is mapped to AgentResult by
  * the caller (handle-inbound / handle-followup).
+ *
+ * `options.skipHumanFeelDelay`: when true, all sleeps + the typing indicator
+ * are bypassed. Send + persist still happen. Used by the Command Center
+ * Follow Up button — operator clicked "send" expecting a fast result, and
+ * a manual outbound is by definition not a "natural" reply where typing-
+ * indicator theatre belongs.
  */
 export async function scheduleAndSend(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
+  options: { skipHumanFeelDelay?: boolean } = {},
 ): Promise<{ outboundMessageId: string; providerMessageId: string }> {
-  const plan = sampleTiming()
+  const skipDelay = options.skipHumanFeelDelay === true
 
-  await sleep(plan.markAsReadGapMs)
+  if (!skipDelay) {
+    const plan = sampleTiming()
 
-  if (ctx.currentMessage) {
-    const r = await markAsRead({
-      venueId: ctx.venue.id,
-      to: ctx.guest.phoneNumber,
-      messageHandle: ctx.currentMessage.providerMessageId,
-    }).catch((e: unknown) => ({
-      ok: false as const,
-      error: e instanceof Error ? e.message : String(e),
-      errorCode: 'unexpected_throw' as const,
-    }))
-    if (!r.ok) {
-      console.warn('scheduleAndSend: markAsRead failed (cosmetic)', {
-        agentRunId: ctx.agentRunId,
-        error: r.error,
-        errorCode: r.errorCode,
-      })
+    await sleep(plan.markAsReadGapMs)
+
+    if (ctx.currentMessage) {
+      const r = await markAsRead({
+        venueId: ctx.venue.id,
+        to: ctx.guest.phoneNumber,
+        messageHandle: ctx.currentMessage.providerMessageId,
+      }).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : String(e),
+        errorCode: 'unexpected_throw' as const,
+      }))
+      if (!r.ok) {
+        console.warn('scheduleAndSend: markAsRead failed (cosmetic)', {
+          agentRunId: ctx.agentRunId,
+          error: r.error,
+          errorCode: r.errorCode,
+        })
+      }
     }
-  }
 
-  await sleep(plan.preTypingPauseMs)
+    await sleep(plan.preTypingPauseMs)
 
-  {
-    const r = await sendTypingIndicator({
-      venueId: ctx.venue.id,
-      to: ctx.guest.phoneNumber,
-    }).catch((e: unknown) => ({
-      ok: false as const,
-      error: e instanceof Error ? e.message : String(e),
-      errorCode: 'unexpected_throw' as const,
-    }))
-    if (!r.ok) {
-      console.warn('scheduleAndSend: sendTypingIndicator failed (cosmetic)', {
-        agentRunId: ctx.agentRunId,
-        error: r.error,
-        errorCode: r.errorCode,
-      })
+    {
+      const r = await sendTypingIndicator({
+        venueId: ctx.venue.id,
+        to: ctx.guest.phoneNumber,
+      }).catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : String(e),
+        errorCode: 'unexpected_throw' as const,
+      }))
+      if (!r.ok) {
+        console.warn('scheduleAndSend: sendTypingIndicator failed (cosmetic)', {
+          agentRunId: ctx.agentRunId,
+          error: r.error,
+          errorCode: r.errorCode,
+        })
+      }
     }
-  }
 
-  await sleep(plan.typingDurationMs)
+    await sleep(plan.typingDurationMs)
+  }
 
   // SEND — failures fire alert + throw
   const sendResult = await sendMessage({

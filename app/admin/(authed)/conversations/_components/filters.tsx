@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
+import { FollowUpButton } from './follow-up-button'
 
 // Venue + guest pickers. Filter state lives in the URL (?venue=&guest=) so
 // reload preserves view and links are shareable. Native <select> elements —
@@ -77,6 +78,14 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
           ))}
         </select>
       </Field>
+
+      {/* Manual outbound trigger. Only meaningful with both filters set —
+          requires a {venueId, guestId} for the API call. Aligned to the
+          right via ml-auto inside the button so the bar stays balanced
+          when the button is hidden (pre-filter / venue-only states). */}
+      {selectedVenueId && selectedGuestId && (
+        <FollowUpButton venueId={selectedVenueId} guestId={selectedGuestId} />
+      )}
     </div>
   )
 }

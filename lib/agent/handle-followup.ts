@@ -60,6 +60,14 @@ export async function handleFollowup(input: {
   venueId: string
   guestId: string
   trigger: FollowupTrigger
+  /**
+   * When true, scheduleAndSend skips all human-feel sleeps + the typing
+   * indicator. Used by the Command Center Follow Up button — operator
+   * clicked "send" expecting fast response, and a manual outbound isn't
+   * the kind of "natural" reply where typing theatre belongs. Defaults
+   * to false (cron-triggered followups keep the existing cadence).
+   */
+  skipHumanFeelDelay?: boolean
 }): Promise<AgentResult> {
   const agentRunId = randomUUID()
   const start = Date.now()
@@ -238,7 +246,11 @@ export async function handleFollowup(input: {
     // Send + persist
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
+      const { outboundMessageId, providerMessageId } = await scheduleAndSend(
+        ctx,
+        gen.result,
+        { skipHumanFeelDelay: input.skipHumanFeelDelay === true },
+      )
       sendSpan.end({
         output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
         content: { body: gen.result.body },
