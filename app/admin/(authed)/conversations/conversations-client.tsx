@@ -236,13 +236,14 @@ export function ConversationsClient({
   // first paint and the operator scrolls past to reveal the rest.
   return (
     <div className="flex flex-col">
-      {/* overflow-hidden makes the height a hard cap — without it the
-          grid grows to fit intrinsic content and the inner overflow-y-auto
-          on the thread + side panel never engages. min-h-0 lets grid
-          children shrink below their content size (default min-height
-          on grid items is auto, which would let content push the grid
-          taller than the calc height). */}
-      <div className="h-[calc(100dvh-7rem)] min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[400px_1fr]">
+      {/* Conv+trace region. min(50vh, 600px) keeps the thread + trace
+          comfortable on most laptops without dominating the page —
+          context cards now peek above the fold on a typical viewport and
+          full-page scroll reveals transactions below. overflow-hidden +
+          min-h-0 enforce the height cap (without them, grid items'
+          intrinsic content escapes and the inner overflow-y-auto on the
+          thread + side panel never engages). */}
+      <div className="h-[min(50vh,600px)] min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}
