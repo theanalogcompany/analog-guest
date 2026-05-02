@@ -32,7 +32,7 @@ export function InboundDetail({
   onSelectOutbound,
 }: InboundDetailProps) {
   return (
-    <aside className="w-full flex flex-col gap-6 p-6 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
+    <aside className="w-full h-full min-h-0 flex flex-col gap-6 p-6 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
       <div className="flex flex-col gap-2">
         <Eyebrow>Inbound message</Eyebrow>
         <SectionHeader
