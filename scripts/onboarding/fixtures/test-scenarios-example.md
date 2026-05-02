@@ -2,17 +2,20 @@
 
 This file is consumed by `extract-test-scenarios` (THE-180) during venue onboarding. The extraction script reads this fixture along with the venue-spec and generates a list of venue-tailored test scenarios written to `07-{slug}-test-scenarios.json`. The runner script `run-test-scenarios` (THE-181) then executes those scenarios against the agent and writes results to `08-{slug}-response-review` (gsheet) for owner review.
 
-## Universal voice rules (referenced as R1–R7 below)
+## Universal voice rules (referenced as R1–R10 below)
 
-These rules live in `SYSTEM_TEMPLATE` (PROMPT_VERSION v1.1.0+) and apply to every agent on every venue. Test categories below cite the rules they exercise so reviewers can quickly identify which rule a failure violates.
+These rules live in `SYSTEM_TEMPLATE` (PROMPT_VERSION v1.2.0+) and apply to every agent on every venue. Test categories below cite the rules they exercise so reviewers can quickly identify which rule a failure violates.
 
 - **R1**: Don't reference actions the guest didn't take
 - **R2**: Default to today's specific answer when guests ask about "now"
-- **R3**: Never use em dashes — use periods, commas, or shorter sentences (universal across all categories — not re-cited per category)
+- **R3**: Never use em dashes or en dashes. Use periods, commas, or shorter sentences (universal across all categories. Not re-cited per category. THE-225 also adds a regex backstop in the regen loop)
 - **R4**: Never reference physical artifacts the agent doesn't have ("in front of me")
 - **R5**: Don't refer guests to alternative channels for things the venue can answer
-- **R6**: Answer yes/no questions with yes/no — don't enumerate
-- **R7**: Don't restate context already covered in the conversation (atomic v1 scenarios test this only partially — true R7 testing requires multi-turn flows, deferred)
+- **R6**: Answer yes/no questions with yes/no. Don't enumerate
+- **R7**: Don't restate context already covered in the conversation (atomic v1 scenarios test this only partially. True R7 testing requires multi-turn flows, deferred)
+- **R8**: Never invent details beyond what your runtime context documents (sourcing stories, line/weather/staff specifics, agent's "current location"). Terse and accurate beats colorful and wrong
+- **R9**: When you don't have a confident answer, say so plainly. Don't pivot to unrelated venue info, events, or perks as deflection
+- **R10**: When recommending other places, only name venues explicitly documented in the venue spec, voice corpus, or recommendations data. No invented or conflated names
 
 ## Format
 
@@ -58,7 +61,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 3: recommendation
 
-- **description**: Guest asks for a recommendation. Tests recommendation hygiene — agent should recommend without bloating the response with sourcing detail or enumeration. Stays in venue voice rather than defaulting to marketing copy. Often pairs with venue-specific anti-patterns ("don't include sourcing detail"). Tested across `new`, `returning`, and `regular` because the agent should plausibly lean on visit history at higher relationship states.
+- **description**: Guest asks for a recommendation. Tests recommendation hygiene — agent should recommend without bloating the response with sourcing detail or enumeration. Stays in venue voice rather than defaulting to marketing copy. Often pairs with venue-specific anti-patterns ("don't include sourcing detail"). Tests **R10** when the guest steers toward "what else nearby" / "where else should I go" — agent should only name venues documented in the venue spec or recommendations data, never invent. Tested across `new`, `returning`, and `regular` because the agent should plausibly lean on visit history at higher relationship states.
 - **target_count**: 2
 - **guest_states**: `['new', 'returning', 'regular']`
 - **example_phrasings**:
@@ -119,7 +122,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 9: allergy / dietary
 
-- **description**: Guest asks about allergens, dietary restrictions, or ingredients. Tests **R6** (most are yes/no — "is the bread vegan?"). Tests **R4** (don't claim to check ingredient lists you can't physically see). When unsure, tests **R5** (don't redirect to "ask the chef" if the agent should be able to answer from venue-info).
+- **description**: Guest asks about allergens, dietary restrictions, or ingredients. Tests **R6** (most are yes/no — "is the bread vegan?"). Tests **R4** (don't claim to check ingredient lists you can't physically see). Tests **R8** (don't invent ingredient detail or sourcing stories the venue spec doesn't document — agents are tempted to "color in" what they don't know). When unsure, tests **R5** (don't redirect to "ask the chef" if the agent should be able to answer from venue-info).
 - **target_count**: 2
 - **guest_states**: `['any']`
 - **example_phrasings**:
@@ -201,7 +204,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 17: out of scope
 
-- **description**: Guest asks something outside the venue's scope. Tests scope discipline — agent declines or redirects without overreaching. Tests **R5** (don't redirect blindly to "Google it" — there's a difference between "outside our scope" and "I won't help"). Includes both clearly out-of-scope cases and venue-adjacent cases (where the agent might be tempted to help).
+- **description**: Guest asks something outside the venue's scope. Tests scope discipline — agent declines or redirects without overreaching. Tests **R5** (don't redirect blindly to "Google it" — there's a difference between "outside our scope" and "I won't help"). Tests **R9** (don't pivot to unrelated venue info, events, or perks as a deflection. Saying "no idea" or "let me find out" is the right move, not "but our open mic is Saturday"). Includes both clearly out-of-scope cases and venue-adjacent cases (where the agent might be tempted to help).
 - **target_count**: 3
 - **guest_states**: `['any']`
 - **example_phrasings**:

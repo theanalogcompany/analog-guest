@@ -12,6 +12,13 @@ import type {
 
 const MIN_VOICE_FIDELITY = 0.7
 const MAX_ATTEMPTS = 3
+// THE-225: hard-block regex companion to the R3 voice rule. Em dash (U+2014)
+// or en dash (U+2013) anywhere in the body forces a regen even if voice
+// fidelity passes. Sonnet still occasionally emits dashes despite the rule
+// text; this is the deterministic backstop.
+const DASH_REGEX = /[—–]/
+const DASH_REGEN_FEEDBACK =
+  'Your previous attempt contained a dash character (— or –). Rewrite without it, using a period or comma instead.'
 
 // THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
 // schema uses .refine() (per THE-157) so .min/.max don't get serialized into
@@ -79,13 +86,22 @@ export async function generateMessage(
     let lastResult: { body: string; voiceFidelity: number; reasoning: string } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
+    // THE-225: when the previous attempt tripped the dash regex, append a
+    // rewrite directive to the next attempt's user prompt. Reset to null when
+    // the previous attempt was clean (so a fidelity-only retry doesn't carry
+    // stale dash feedback). null on the first attempt — parent userPrompt is
+    // sent verbatim.
+    let regenFeedback: string | null = null
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
+      const userPromptForAttempt = regenFeedback
+        ? `${userPrompt}\n\n${regenFeedback}`
+        : userPrompt
       const { object } = await generateObject({
         model: getGenerationModel(),
         system: augmentedSystemPrompt,
-        prompt: userPrompt,
+        prompt: userPromptForAttempt,
         schema: GeneratedMessageSchema,
         maxOutputTokens: 500,
       })
@@ -95,8 +111,17 @@ export async function generateMessage(
         body: object.body,
         voiceFidelity: object.voiceFidelity,
         reasoning: object.reasoning,
+        userPromptOverride:
+          userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
-      if (object.voiceFidelity >= MIN_VOICE_FIDELITY) break
+      const hasDash = DASH_REGEX.test(object.body)
+      const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
+      if (fidelityPass && !hasDash) break
+      // Set feedback for the next iteration. Dash always wins — even if
+      // fidelity also failed, the rewrite directive is the more actionable
+      // signal. When neither dash nor a fidelity-specific feedback message
+      // applies, clear so a stale dash directive doesn't carry forward.
+      regenFeedback = hasDash ? DASH_REGEN_FEEDBACK : null
     }
 
     if (lastResult === null) {
@@ -118,6 +143,9 @@ export async function generateMessage(
         systemPrompt: augmentedSystemPrompt,
         userPrompt,
         promptVersion: PROMPT_VERSION,
+        // THE-225: recompute on the final shipped body rather than threading
+        // loop state. Equivalent and lets us drop the variable.
+        dashViolationPersisted: DASH_REGEX.test(lastResult.body),
       },
     }
   } catch (e) {
