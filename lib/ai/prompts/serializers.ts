@@ -329,6 +329,32 @@ export function runtimeToProse(
         lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
       }
       break
+    case 'comp_complaint':
+      // Complaints often reference a recent visit. Surface the same visit
+      // metadata the reply / follow_up paths get so the agent can ground a
+      // response without inventing context.
+      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+      if (runtime.lastVisitDate) lines.push(`Last visit: ${runtime.lastVisitDate}`)
+      if (runtime.daysSinceLastVisit !== undefined) {
+        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
+      }
+      break
+    case 'mechanic_request':
+      // Eligibility list is rendered separately by formatMechanicEligibility
+      // ("## What this guest can access"). Don't duplicate it here.
+      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+      break
+    case 'recommendation_request':
+      // Returning guests get a slightly different framing — daysSinceLastVisit
+      // lets the agent decide whether to lean on history.
+      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+      if (runtime.daysSinceLastVisit !== undefined) {
+        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
+      }
+      break
+    case 'casual_chatter':
+      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+      break
   }
 
   if (runtime.additionalContext) {

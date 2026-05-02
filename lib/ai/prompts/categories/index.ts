@@ -1,11 +1,15 @@
 import type { MessageCategory } from '../../types'
 import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
+import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
+import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
 import { EVENT_INVITE_INSTRUCTIONS } from './event-invite'
 import { FOLLOW_UP_INSTRUCTIONS } from './follow-up'
 import { MANUAL_INSTRUCTIONS } from './manual'
+import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
 import { PERK_UNLOCK_INSTRUCTIONS } from './perk-unlock'
+import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
@@ -29,5 +33,13 @@ export function getCategoryInstructions(category: MessageCategory): string {
       return MANUAL_INSTRUCTIONS
     case 'acknowledgment':
       return ACKNOWLEDGMENT_INSTRUCTIONS
+    case 'comp_complaint':
+      return COMP_COMPLAINT_INSTRUCTIONS
+    case 'mechanic_request':
+      return MECHANIC_REQUEST_INSTRUCTIONS
+    case 'recommendation_request':
+      return RECOMMENDATION_REQUEST_INSTRUCTIONS
+    case 'casual_chatter':
+      return CASUAL_CHATTER_INSTRUCTIONS
   }
 }

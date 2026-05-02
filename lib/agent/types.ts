@@ -1,4 +1,4 @@
-import type { RecentMessage } from '@/lib/ai'
+import type { MessageCategory, RecentMessage } from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
 import type { VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -64,17 +64,11 @@ export interface RecognitionSnapshot {
 export type CorpusMatch = VoiceCorpusChunk
 
 export interface Classification {
-  // Keep in sync with lib/ai's MessageCategory enum and messages.category DB constraint.
-  category:
-    | 'welcome'
-    | 'follow_up'
-    | 'reply'
-    | 'new_question'
-    | 'opt_out'
-    | 'perk_unlock'
-    | 'event_invite'
-    | 'acknowledgment'
-    | 'manual'
+  // Aliased to lib/ai's MessageCategory so this can't drift — adding a new
+  // classifier category in lib/ai/types.ts widens this without a code change
+  // here. THE-228: previously a hand-maintained union that lagged the AI
+  // module by 4 categories.
+  category: MessageCategory
   classifierConfidence: number
   reasoning: string
 }

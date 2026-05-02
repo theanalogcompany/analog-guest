@@ -62,6 +62,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 3: recommendation
 
 - **description**: Guest asks for a recommendation. Tests recommendation hygiene — agent should recommend without bloating the response with sourcing detail or enumeration. Stays in venue voice rather than defaulting to marketing copy. Often pairs with venue-specific anti-patterns ("don't include sourcing detail"). Tests **R10** when the guest steers toward "what else nearby" / "where else should I go" — agent should only name venues documented in the venue spec or recommendations data, never invent. Tested across `new`, `returning`, and `regular` because the agent should plausibly lean on visit history at higher relationship states.
+- **classifier_category**: `recommendation_request` (THE-228)
 - **target_count**: 2
 - **guest_states**: `['new', 'returning', 'regular']`
 - **example_phrasings**:
@@ -113,6 +114,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 8: reservations / hold for me
 
 - **description**: Guest asks the venue to save, hold, or reserve something for them. Tests graduated authority (THE-91) — `new` guest declined per venue policy, `regular` may be accommodated, `raving_fan` may be granted with more latitude. Multi-turn risk if guest persists also exercises **R7** (don't restate context).
+- **classifier_category**: `mechanic_request` (THE-228 — holds are mechanics by way of authority gating)
 - **target_count**: 1
 - **guest_states**: `['new', 'regular', 'raving_fan']`
 - **example_phrasings**:
@@ -144,6 +146,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 11: off-menu / regulars-only
 
 - **description**: Guest requests an off-menu item or regulars-only perk. Tests min_state eligibility on mechanics — `new`-state guests should be declined; `regular`-state guests should be honored.
+- **classifier_category**: `mechanic_request` (THE-228)
 - **target_count**: 1
 - **guest_states**: `['new', 'regular']`
 - **example_phrasings**:
@@ -154,6 +157,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 12: comp / complaint
 
 - **description**: Guest reports a quality issue or complaint. Tests softener discipline (no "I'll be honest" or other apologetic openers — venue-specific anti-patterns from Phase 5). Tests authority discipline (don't over-commit to comping without operator approval). Tested across all four states because authority to comp and apology tone scale with relationship strength.
+- **classifier_category**: `comp_complaint` (THE-228)
 - **target_count**: 1
 - **guest_states**: `['new', 'returning', 'regular', 'raving_fan']`
 - **example_phrasings**:
@@ -164,6 +168,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 13: casual chatter
 
 - **description**: Social, non-transactional message. Tests voice-register discipline — should match the venue's casual tone, not slip into marketing copy or scripted responses. Tests brevity. Tested across `new`, `returning`, and `regular` because familiarity tone scales with relationship strength.
+- **classifier_category**: `casual_chatter` (THE-228)
 - **target_count**: 1
 - **guest_states**: `['new', 'returning', 'regular']`
 - **example_phrasings**:
@@ -184,6 +189,7 @@ In addition to the categories below, the extraction script derives extra scenari
 ### Category 15: event / mechanic-specific
 
 - **description**: Guest asks about a venue event, workshop, open mic, or scheduled mechanic. Tests **R2** (when phrased "is the workshop tonight" or "what time is open mic"). Currently the mechanics flow doesn't reliably surface event-specific responses — these rows produce `verdict=edit` until that infrastructure matures.
+- **classifier_category**: `mechanic_request` (THE-228 — event slots are mechanics; the existing `event_invite` category is reserved for outbound)
 - **target_count**: 2
 - **guest_states**: `['any']`
 - **expected_failure**: `mechanics_flow_immature`

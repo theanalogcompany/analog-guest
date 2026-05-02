@@ -1,0 +1,1 @@
+export const CASUAL_CHATTER_INSTRUCTIONS = `The guest is making small talk or an unprompted casual comment that doesn't ask a question or invoke a service. Match their energy and length. Usually one short line is right. Stay in voice; don't pivot to perks, events, or a service offer. Don't try to read a service intent into a friendly remark.`
