@@ -7,7 +7,9 @@ import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 // TODO: rename messages.confidence_score → messages.voice_fidelity in a future
 // migration to align with this module's naming.
 
-// TODO: 'acknowledgment' category requires DB migration to extend messages.category check constraint — currently in deferred batch.
+// THE-228 added comp_complaint / mechanic_request / recommendation_request /
+// casual_chatter to the inbound classifier surface. Migration 011 widens the
+// messages.category check constraint to match.
 export type MessageCategory =
   | 'welcome'
   | 'follow_up'
@@ -18,6 +20,10 @@ export type MessageCategory =
   | 'event_invite'
   | 'manual'
   | 'acknowledgment'
+  | 'comp_complaint'
+  | 'mechanic_request'
+  | 'recommendation_request'
+  | 'casual_chatter'
 
 export type VoiceCorpusSourceType =
   | 'sample_text'

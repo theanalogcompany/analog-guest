@@ -317,3 +317,101 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     expect(recentIdx).toBeGreaterThan(eligibilityIdx)
   })
 })
+
+// THE-228: per-category runtimeToProse rendering for the four new classifier
+// categories. Each block asserts the fields that case is supposed to push.
+describe('runtimeToProse — comp_complaint', () => {
+  it('renders inboundMessage + lastVisitDate + daysSinceLastVisit', () => {
+    const out = runtimeToProse(
+      {
+        inboundMessage: 'muffin was stale',
+        lastVisitDate: '2026-04-30',
+        daysSinceLastVisit: 2,
+      },
+      'comp_complaint',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "muffin was stale"')
+    expect(out).toContain('Last visit: 2026-04-30')
+    expect(out).toContain('Days since last visit: 2')
+  })
+
+  it('omits visit fields when not provided', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'waited too long' },
+      'comp_complaint',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "waited too long"')
+    expect(out).not.toContain('Last visit:')
+    expect(out).not.toContain('Days since last visit:')
+  })
+})
+
+describe('runtimeToProse — mechanic_request', () => {
+  it('renders inboundMessage line only', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'can you hold the couch' },
+      'mechanic_request',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "can you hold the couch"')
+    // Mechanics list comes from the separate "## What this guest can access"
+    // block — case must not duplicate it inline.
+    expect(out).not.toContain('Last visit:')
+    expect(out).not.toContain('Days since last visit:')
+  })
+
+  it('does not duplicate the eligibility block when mechanics are present', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'can i get the joey', mechanics: [] },
+      'mechanic_request',
+      NOW,
+    )
+    // The eligibility block IS rendered (by formatMechanicEligibility), but
+    // the per-category case must not re-emit it. Asserting the block appears
+    // exactly once.
+    const matches = out.match(/## What this guest can access/g) ?? []
+    expect(matches.length).toBe(1)
+  })
+})
+
+describe('runtimeToProse — recommendation_request', () => {
+  it('renders inboundMessage + daysSinceLastVisit when set', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'what\'s good here', daysSinceLastVisit: 14 },
+      'recommendation_request',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "what\'s good here"')
+    expect(out).toContain('Days since last visit: 14')
+  })
+
+  it('omits days-since field when not set', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'what should i try' },
+      'recommendation_request',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "what should i try"')
+    expect(out).not.toContain('Days since last visit:')
+  })
+})
+
+describe('runtimeToProse — casual_chatter', () => {
+  it('renders inboundMessage line only', () => {
+    const out = runtimeToProse(
+      {
+        inboundMessage: 'love this couch',
+        // These should NOT appear for casual_chatter even when set.
+        lastVisitDate: '2026-04-30',
+        daysSinceLastVisit: 2,
+      },
+      'casual_chatter',
+      NOW,
+    )
+    expect(out).toContain('The guest just sent: "love this couch"')
+    expect(out).not.toContain('Last visit:')
+    expect(out).not.toContain('Days since last visit:')
+  })
+})
