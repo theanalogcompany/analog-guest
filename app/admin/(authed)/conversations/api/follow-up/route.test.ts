@@ -102,10 +102,13 @@ function makeRequest(body: unknown, opts: { rawBody?: string } = {}): Request {
     headers: { 'content-type': 'application/json' },
     body: opts.rawBody ?? JSON.stringify(body),
   }
-  return new Request('https://admin.example.test/api/admin/follow-up', init)
+  return new Request(
+    'https://admin.example.test/admin/conversations/api/follow-up',
+    init,
+  )
 }
 
-describe('POST /api/admin/follow-up', () => {
+describe('POST /admin/conversations/api/follow-up', () => {
   beforeEach(() => {
     vi.mocked(handleFollowup).mockReset()
     vi.mocked(verifyAnalogAdminAccess).mockReset()
