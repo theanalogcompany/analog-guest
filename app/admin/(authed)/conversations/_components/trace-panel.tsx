@@ -96,7 +96,7 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
 
 function PanelChrome({ children }: { children: React.ReactNode }) {
   return (
-    <aside className="w-full flex flex-col gap-3 p-4 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
+    <aside className="w-full h-full min-h-0 flex flex-col gap-3 p-4 bg-paper/50 border-l border-stone-light/60 overflow-y-auto">
       {children}
     </aside>
   )

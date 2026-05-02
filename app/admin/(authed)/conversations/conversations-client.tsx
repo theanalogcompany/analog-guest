@@ -236,7 +236,13 @@ export function ConversationsClient({
   // first paint and the operator scrolls past to reveal the rest.
   return (
     <div className="flex flex-col">
-      <div className="h-[calc(100dvh-7rem)] grid grid-cols-1 lg:grid-cols-[400px_1fr]">
+      {/* overflow-hidden makes the height a hard cap — without it the
+          grid grows to fit intrinsic content and the inner overflow-y-auto
+          on the thread + side panel never engages. min-h-0 lets grid
+          children shrink below their content size (default min-height
+          on grid items is auto, which would let content push the grid
+          taller than the calc height). */}
+      <div className="h-[calc(100dvh-7rem)] min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[400px_1fr]">
         <ConversationThread
           messages={messages}
           venueTimezone={initialData.venue.timezone}
@@ -319,7 +325,7 @@ function SidePanel({
 }: SidePanelProps) {
   if (!selected) {
     return (
-      <aside className="w-full p-6 bg-paper/50 border-l border-stone-light/60 text-sm text-ink-soft">
+      <aside className="w-full h-full overflow-y-auto p-6 bg-paper/50 border-l border-stone-light/60 text-sm text-ink-soft">
         Select a message to see its trace or details.
       </aside>
     )
