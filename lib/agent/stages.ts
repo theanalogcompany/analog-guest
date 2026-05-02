@@ -238,10 +238,24 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
 function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   let additionalContext: string | undefined
   if (ctx.followupTrigger) {
-    const meta = ctx.followupTrigger.metadata
-    additionalContext = meta
-      ? `Followup trigger: ${ctx.followupTrigger.reason} (${JSON.stringify(meta)})`
-      : `Followup trigger: ${ctx.followupTrigger.reason}`
+    if (ctx.followupTrigger.reason === 'manual') {
+      // Operator-initiated follow-up via the Command Center button. The
+      // hint (if any) is content guidance only — the agent still speaks in
+      // the venue persona; we do not let operator phrasing leak into the
+      // outbound voice.
+      const rawHint = ctx.followupTrigger.metadata?.hint
+      const hint =
+        typeof rawHint === 'string' && rawHint.trim().length > 0 ? rawHint.trim() : null
+      additionalContext = hint
+        ? `The venue operator has asked you to follow up with this guest. Their note: "${hint}". Use this as guidance for what to address; keep your usual voice.`
+        : `The venue operator has asked you to follow up with this guest. Use your judgment about what to say based on the conversation history and guest context.`
+    } else {
+      // Cron-triggered follow-ups (day_1/day_3/etc., event). Existing path.
+      const meta = ctx.followupTrigger.metadata
+      additionalContext = meta
+        ? `Followup trigger: ${ctx.followupTrigger.reason} (${JSON.stringify(meta)})`
+        : `Followup trigger: ${ctx.followupTrigger.reason}`
+    }
   }
 
   // Validate venue timezone. On failure, log + fire a meta-alert (Slack
