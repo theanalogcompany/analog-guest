@@ -21,7 +21,10 @@ import { useEffect, useRef, useState } from 'react'
 //   Cmd/Ctrl+Enter → send (when textarea focused).
 //
 // HTTP contract:
-//   POST /api/admin/follow-up { venueId, guestId, hint }
+//   POST /admin/conversations/api/follow-up { venueId, guestId, hint }
+//   (Colocated under /admin/* so the host-gating middleware lets it through
+//   on admin.theanalog.company. Mirrors the existing trace fetch route at
+//   /admin/conversations/api/trace/[traceId].)
 //   200 → { success: true, messageId }
 //   422 → { error: 'refused', detail, attemptScores }   — voice fidelity floor
 //   429 → { error: 'rate limited', detail }             — 1/5min rate limit
@@ -108,7 +111,7 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
     setErrorText(null)
     const trimmed = hint.trim()
     try {
-      const res = await fetch('/api/admin/follow-up', {
+      const res = await fetch('/admin/conversations/api/follow-up', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

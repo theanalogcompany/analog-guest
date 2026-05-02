@@ -5,10 +5,14 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 
-// POST /api/admin/follow-up — operator-initiated manual outbound from the
-// Command Center conversations surface. Activates the dormant handleFollowup
-// scaffolding (FollowupTrigger.reason='manual'), with a small targeted set
-// of guards that don't exist in the agent pipeline today:
+// POST /admin/conversations/api/follow-up — operator-initiated manual outbound
+// from the Command Center conversations surface. Colocated under /admin/* so
+// it passes the host-gating middleware on admin.theanalog.company (which 404s
+// non-/admin paths on that host). Mirrors the trace fetch route's location.
+//
+// Activates the dormant handleFollowup scaffolding
+// (FollowupTrigger.reason='manual'), with a small targeted set of guards that
+// don't exist in the agent pipeline today:
 //
 //   1. Auth: cookie-session resolved to an analog admin operator.
 //   2. Allowlist: venueId must be in the operator's allowedVenueIds.
