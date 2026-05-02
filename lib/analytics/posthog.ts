@@ -39,6 +39,15 @@
  *     Properties: { agentRunId, venueId, guestId, attempts, attemptScores,
  *                   finalFidelity, inboundBody, finalGeneratedBody }
  *
+ * - dash_violation_persisted
+ *     Fires when generateMessage exhausted MAX_ATTEMPTS regenerations and
+ *     the shipped body still contains an em (—) or en (–) dash. The dash
+ *     regex check (THE-225) is a deterministic backstop on top of the R3
+ *     voice rule; persisted failures ship anyway and surface here.
+ *     Properties: { agentRunId, venueId, guestId, category, attempts,
+ *                   attemptScores, finalFidelity, inboundBody,
+ *                   finalGeneratedBody }
+ *
  * - classification_low_confidence
  *     Fires when classifierConfidence < 0.7.
  *     Properties: { agentRunId, venueId, guestId, category,
@@ -177,6 +186,47 @@ function formatRegenerationTriggered(props: RegenerationTriggeredProps): string 
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
+  ]
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  lines.push(`final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  return lines.join('\n')
+}
+
+// THE-225: dash regex check inside generateMessage's regen loop forces a
+// rewrite when an em or en dash sneaks past R3 in the system prompt. If
+// MAX_ATTEMPTS exhaust without a clean reply, we ship the final body anyway
+// (refusing on punctuation would be worse than violating it) and emit this
+// event so the failure is visible in the silent-failure surfaces alongside
+// voice_fidelity_low / regeneration_triggered.
+export interface DashViolationPersistedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string
+  attempts: number
+  attemptScores: number[]
+  finalFidelity: number
+  inboundBody: string | null
+  finalGeneratedBody: string
+}
+
+export async function captureDashViolationPersisted(
+  props: DashViolationPersistedProps,
+): Promise<void> {
+  await capturePostHogEvent('dash_violation_persisted', props.guestId, { ...props })
+  await postToSlack(formatDashViolationPersisted(props))
+}
+
+function formatDashViolationPersisted(props: DashViolationPersistedProps): string {
+  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
+  const lines = [
+    `*Dash violation persisted* — shipped after ${props.attempts} attempts (scores: ${scores}), final fidelity \`${props.finalFidelity.toFixed(2)}\``,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category}\``,
   ]
   if (props.inboundBody) {
     lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)

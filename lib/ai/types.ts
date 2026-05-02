@@ -85,6 +85,11 @@ export type GenerateMessageAttempt = {
   body: string
   voiceFidelity: number
   reasoning: string
+  // Populated only when the user prompt for this attempt differed from the
+  // top-level userPrompt — i.e., a regeneration with explicit feedback (e.g.
+  // a dash-violation rewrite request). First-attempt prompts equal the parent
+  // userPrompt and leave this undefined to keep the trace lean. THE-225.
+  userPromptOverride?: string
 }
 
 export type GenerateMessageResult = {
@@ -101,14 +106,22 @@ export type GenerateMessageResult = {
   // carry the actual text Sonnet returned, not just the score. Length matches
   // attemptScores. The final entry's body equals the top-level `body` field.
   attemptHistory: GenerateMessageAttempt[]
-  // The full system + user prompt sent to the model (THE-216). The same prompt
-  // is sent on every attempt — there's no per-attempt prompt mutation today —
-  // so capturing once is sufficient. If the regen loop later mutates the
-  // prompt between attempts, this field becomes the parent prompt and per-
-  // attempt prompts would need to live on attemptHistory.
+  // The full system + user prompt sent to the model (THE-216). The system
+  // prompt is invariant across attempts. The userPrompt here is the *parent*
+  // (initial) one; regen attempts that append feedback (e.g. dash-rewrite
+  // request, THE-225) record their varied prompt on
+  // attemptHistory[i].userPromptOverride. Span content surfaces the override
+  // when present and falls back to this parent.
   systemPrompt: string
   userPrompt: string
   promptVersion: string
+  // True when the final shipped body still contains an em dash (—) or en dash
+  // (–) after MAX_ATTEMPTS regenerations — the dash regex check (THE-225) was
+  // unable to coax a clean reply but we ship anyway rather than refuse. The
+  // orchestrator (lib/agent/stages.ts) emits dash_violation_persisted to
+  // PostHog when this is true so the failure is visible without blocking the
+  // send path.
+  dashViolationPersisted: boolean
 }
 
 export type ClassifyMessageInput = {

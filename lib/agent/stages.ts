@@ -1,6 +1,7 @@
 import {
   captureClassificationLowConfidence,
   captureCorpusRetrievalBelowThreshold,
+  captureDashViolationPersisted,
   captureRegenerationTriggered,
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
@@ -181,6 +182,23 @@ export async function generateStage(
       agentRunId: ctx.agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
+      attempts: r.data.attempts,
+      attemptScores: r.data.attemptScores,
+      finalFidelity: r.data.voiceFidelity,
+      inboundBody: ctx.currentMessage?.body ?? null,
+      finalGeneratedBody: r.data.body,
+    })
+  }
+  // THE-225: dash check exhausted regen attempts and the body still has a
+  // dash. Ship anyway (refusing on punctuation would be worse than violating
+  // it) and surface the failure on PostHog + Slack alongside the other
+  // generation-stage silent failures.
+  if (r.data.dashViolationPersisted) {
+    await captureDashViolationPersisted({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category,
       attempts: r.data.attempts,
       attemptScores: r.data.attemptScores,
       finalFidelity: r.data.voiceFidelity,
