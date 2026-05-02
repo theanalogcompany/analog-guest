@@ -321,6 +321,8 @@ All internal API routes called from the operator dashboard verify the bearer tok
 
 The Command Center lives at `app/admin/*` inside this repo and is served via a separate Vercel project (`analog-admin`) on `admin.theanalog.company`. Production middleware at `middleware.ts` (root) host-gates: admin host serves only `/admin/*`; guest host 404s `/admin/*`. Local dev (`localhost`/`127.0.0.1`) and `*.vercel.app` previews allow everything for QA.
 
+**Admin API routes live under `/admin/{surface}/api/{thing}`, not `/api/admin/...`.** The host gate above 404s anything not starting with `/admin` on the admin apex. Routes placed at `/api/admin/...` work locally and on `*.vercel.app` previews (which bypass the gate for QA) but 404 in production. Existing pattern to match: `/admin/conversations/api/trace/[traceId]`. Failure signature: route works locally, deploys cleanly, prod fetches return 404 with the correct request URL — first thing to check is whether the path starts with `/admin/`. (THE-203 hotfix #29.)
+
 Auth is magic-link via Supabase (`signInWithOtp`). The protected tree lives under `app/admin/(authed)/` — its layout reads the cookie session via `createServerClient` and calls `verifyAnalogAdminAccess(session.user.id)`. Sign-in (`/admin/sign-in`) and the OAuth callback (`/admin/auth/callback`) are siblings outside the route group so they bypass the gate without redirect loops.
 
 Three states at the gate:
