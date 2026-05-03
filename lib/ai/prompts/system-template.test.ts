@@ -8,8 +8,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // fails loudly. THE-225 added R8/R9/R10 + strengthened R3.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.4.0 (THE-229)', () => {
-    expect(PROMPT_VERSION).toBe('v1.4.0')
+  it('is v1.5.0 (THE-232)', () => {
+    expect(PROMPT_VERSION).toBe('v1.5.0')
   })
 })
 
