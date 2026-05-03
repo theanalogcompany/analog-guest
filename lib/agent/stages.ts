@@ -89,7 +89,15 @@ export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMa
     throw new Error(`retrieveCorpusStage: ${r.error}`)
   }
   const strongCount = r.data.filter((m) => m.similarity >= STRONG_MATCH_SIMILARITY).length
-  if (strongCount < MIN_STRONG_MATCHES) {
+  // THE-231: only fail closed on the inbound path. Followups are operator-
+  // initiated (cron trigger or Command Center button); the synthetic followup
+  // query — "Followup manual for {firstName}" — rarely embeds anywhere near
+  // the venue's actual voice corpus, so the strong-match gate was failing
+  // every Follow Up button click. Proceed with whatever surfaced (even zero);
+  // generateStage handles an empty corpus gracefully (ragChunksToProse drops
+  // the block entirely). The captureCorpusRetrievalBelowThreshold event below
+  // still fires on both paths so the visibility doesn't change.
+  if (ctx.currentMessage && strongCount < MIN_STRONG_MATCHES) {
     throw new Error(
       `retrieveCorpusStage: insufficient_corpus_matches (got ${strongCount} above ${STRONG_MATCH_SIMILARITY}, need ${MIN_STRONG_MATCHES}; total ${r.data.length})`,
     )

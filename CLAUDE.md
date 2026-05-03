@@ -98,7 +98,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 
 ### Module split for testability
 
-Vitest can't always resolve `@/*` aliases when test files transitively import application code that pulls in heavy dependencies (Voyage SDK, Supabase admin client, etc.). When this happens, split the helper module:
+Vitest resolves `@/*` aliases via `vitest.config.ts` (THE-231). The remaining failure mode is **module-load-time SDK init** — importing a module that constructs a Voyage / Supabase admin client at the top level will run that init in the test process, even with `vi.mock` (mocks intercept resolution, not transitive eager init). When this happens, split the helper module:
 
 - `scripts/onboarding/<name>-pure.ts` — pure helpers, no `@/*` imports. Tests import from here.
 - `scripts/onboarding/<name>.ts` — DB-touching code. Re-exports everything from `-pure` so the CLI can keep a single import.
@@ -257,7 +257,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 334 tests across 25 files as of THE-229 ship (2026-05-02). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 341 tests across 26 files as of THE-231 ship (2026-05-03). Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 
@@ -371,7 +371,7 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
 
 ## Common gotchas
 
-- **`@/*` aliases in test files.** Vitest can't resolve them when transitive imports pull in heavy deps. Use the module-split pattern (see "Module split for testability").
+- **`@/*` aliases in tests.** Resolved via `vitest.config.ts` (THE-231); previously a recurring cause of test-side import failures. Module-split pattern is still required when a transitively-imported module runs heavy SDK init at module load (see "Module split for testability").
 - **Zod `.min()`/`.max()` on LLM output number fields.** Anthropic's structured output rejects these. Use `.refine()` or post-LLM validation. (THE-157.)
 - **Permissive schema + filter-time validation pattern.** When the same field is validated at two boundaries (input parse + runtime), prefer strict at the offline boundary (parser/seed) and permissive-with-defensive-filter at the live boundary (runtime). Crashes during seed are catchable; crashes during agent runs hurt guests. Three instances: THE-157 (`.min()/.max()` rejected by Anthropic structured output, validate post-LLM), THE-150 (`expiresAt` stored as plain `z.string().optional()`; `filterActiveContext` parses + drops malformed entries with `console.warn` instead of failing the whole `venue_info` JSONB parse), THE-170 (mechanic `min_state` is strict `z.enum(GUEST_STATES)` at the parser boundary inside `parse-venue-spec.ts`, but `isStateAtLeast` at runtime treats unknown values defensively — drop the gated mechanic, log, don't crash).
 - **`filterActiveContext` (THE-150).** Pure helper at `lib/schemas/venue-info.ts`. Drops `currentContext` entries whose `expiresAt` is past or equal to `now`; entries with no `expiresAt` are permanent; malformed `expiresAt` logs and drops. Wired in `build-runtime-context.ts` via the same `computedAt` reused for the recognition snapshot (single "now" per agent run).
