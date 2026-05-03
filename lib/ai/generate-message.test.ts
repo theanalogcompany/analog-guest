@@ -249,11 +249,11 @@ describe('generateMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
   })
 
-  it('exposes promptVersion v1.3.0 on a successful result', async () => {
+  it('exposes promptVersion v1.4.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.3.0')
+    expect(r.data.promptVersion).toBe('v1.4.0')
   })
 })

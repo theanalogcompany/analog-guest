@@ -9,6 +9,7 @@ import {
   type RedemptionRecord,
 } from '@/lib/recognition'
 import { BrandPersonaSchema, filterActiveContext, VenueInfoSchema } from '@/lib/schemas'
+import { extractLastVisit } from './extract-last-visit'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -23,6 +24,11 @@ import type {
 const MAX_HISTORY_MESSAGES = 30
 const MAX_HISTORY_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+// THE-229: hard cap on how far back we'll surface a guest's most recent
+// transaction. Older visits aren't relevant context to reference in
+// conversation. Recognition uses 90 days for visit-frequency scoring; this
+// stricter cutoff is for "should the agent talk about it."
+const LAST_VISIT_CUTOFF_DAYS = 60
 
 /**
  * Build the full RuntimeContext for an agent run by fetching venue + guest +
@@ -75,6 +81,10 @@ export async function buildRuntimeContext(input: {
     messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
   }
 
+  const lastVisitCutoffIso = new Date(
+    Date.now() - LAST_VISIT_CUTOFF_DAYS * MS_PER_DAY,
+  ).toISOString()
+
   const [
     venueResult,
     guestResult,
@@ -82,6 +92,7 @@ export async function buildRuntimeContext(input: {
     messagesResult,
     mechanicsResult,
     redemptionsResult,
+    lastVisitResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -111,6 +122,19 @@ export async function buildRuntimeContext(input: {
       .eq('guest_id', input.guestId)
       .eq('event_type', 'mechanic_redeemed')
       .not('mechanic_id', 'is', null),
+    // THE-229: most recent transaction within LAST_VISIT_CUTOFF_DAYS.
+    // Single-row indexed lookup; runs in parallel with the other six queries
+    // so it adds no serial latency. extractLastVisit handles the projection
+    // and the "no parseable items → null" rule.
+    supabase
+      .from('transactions')
+      .select('occurred_at, raw_data')
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId)
+      .gte('occurred_at', lastVisitCutoffIso)
+      .order('occurred_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -145,6 +169,11 @@ export async function buildRuntimeContext(input: {
   if (redemptionsResult.error) {
     throw new Error(
       `buildRuntimeContext: redemption events load failed: ${redemptionsResult.error.message}`,
+    )
+  }
+  if (lastVisitResult.error) {
+    throw new Error(
+      `buildRuntimeContext: last visit load failed: ${lastVisitResult.error.message}`,
     )
   }
 
@@ -249,6 +278,12 @@ export async function buildRuntimeContext(input: {
     computedAt,
   )
 
+  // THE-229: project the most recent transaction (if any) into the agent-
+  // facing LastVisit shape. extractLastVisit returns null when the row is
+  // null, beyond the cutoff, has no parseable items, or has a malformed
+  // timestamp.
+  const lastVisit = extractLastVisit(lastVisitResult.data, computedAt, LAST_VISIT_CUTOFF_DAYS)
+
   return {
     agentRunId: input.agentRunId,
     venue,
@@ -258,6 +293,7 @@ export async function buildRuntimeContext(input: {
     recentMessages,
     recognition,
     mechanics,
+    lastVisit,
     corpus: null,
     classification: null,
     trace: input.trace,

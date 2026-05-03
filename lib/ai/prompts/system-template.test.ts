@@ -8,8 +8,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // fails loudly. THE-225 added R8/R9/R10 + strengthened R3.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.3.0 (THE-228)', () => {
-    expect(PROMPT_VERSION).toBe('v1.3.0')
+  it('is v1.4.0 (THE-229)', () => {
+    expect(PROMPT_VERSION).toBe('v1.4.0')
   })
 })
 
@@ -161,5 +161,36 @@ describe('SYSTEM_TEMPLATE — R10: only documented venue recommendations (THE-22
   it('offers natural-decline fallbacks for undocumented asks', () => {
     expect(SYSTEM_TEMPLATE).toContain('I\'d ask around')
     expect(SYSTEM_TEMPLATE).toContain('I don\'t go out much past here')
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R11: Last Visit block usage (THE-229)', () => {
+  it('introduces the Last Visit block', () => {
+    expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you what the guest most recently ordered')
+  })
+
+  it('directs the agent to reference items naturally, not recite', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Refer to what they had')
+    expect(SYSTEM_TEMPLATE).toContain('Do not recite the data back')
+  })
+
+  it('forbids volunteering the date unless asked', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Do not volunteer the date unless the guest asks about timing')
+  })
+
+  it('caps references at one item', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Do not list multiple items if you reference at all')
+    expect(SYSTEM_TEMPLATE).toContain('Pick one')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // Slice from R11's opening clause to end-of-template; assert dash-free.
+    const start = SYSTEM_TEMPLATE.indexOf('The Last Visit block tells you')
+    expect(start).toBeGreaterThan(-1)
+    const r11Body = SYSTEM_TEMPLATE.slice(start)
+    // The R11 body runs to the next # heading (the "# Voice imperative" block).
+    const end = r11Body.indexOf('\n# ')
+    const slice = end === -1 ? r11Body : r11Body.slice(0, end)
+    expect(slice).not.toMatch(/[—–]/)
   })
 })

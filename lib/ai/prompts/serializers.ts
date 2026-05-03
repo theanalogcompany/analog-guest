@@ -213,7 +213,10 @@ function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   ].join('\n')
 }
 
-function formatTimeDelta(then: Date, now: Date): string {
+// Exported (THE-229) so formatLastVisit below shares the same delta vocabulary
+// the recent-conversation block uses ("yesterday" / "N days ago" / etc.).
+// Module-private otherwise.
+export function formatTimeDelta(then: Date, now: Date): string {
   const diffMs = now.getTime() - then.getTime()
   const minutes = Math.floor(diffMs / 60_000)
   if (minutes < 1) return 'just now'
@@ -240,6 +243,27 @@ function formatRecentConversation(messages: readonly RecentMessage[], now: Date)
     return `[${speaker}, ${delta}] ${body}`
   })
   return `## Recent conversation\n${lines.join('\n')}`
+}
+
+// THE-229: render the most recent transaction's items + relative time.
+// Format intentionally terse — "3 days ago: cappuccino, blueberry muffin" —
+// because R11 (in SYSTEM_TEMPLATE) instructs the agent NOT to recite the
+// data back at the guest. We're feeding the model context, not a script.
+function formatLastVisit(
+  lastVisit: NonNullable<RuntimeContext['lastVisit']>,
+  now: Date,
+): string {
+  const delta = formatTimeDelta(lastVisit.visitedAt, now)
+  const items = lastVisit.items.join(', ')
+  return `## Last visit\n${delta}: ${items}`
+}
+
+// Category gate for the Last Visit block (THE-229). Welcome is the first-
+// contact NFC-tap reply (no prior visits to reference by definition); opt_out
+// is a stop-messaging acknowledgment where prior orders aren't relevant.
+// All other categories render the block when lastVisit is set.
+function shouldRenderLastVisit(category: MessageCategory): boolean {
+  return category !== 'welcome' && category !== 'opt_out'
 }
 
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
@@ -272,6 +296,13 @@ export function runtimeToProse(
   }
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics))
+  }
+  // THE-229: Last Visit block sits between mechanics and recent conversation.
+  // Reading order: who they are → what they can get → what they recently
+  // bought → what was recently said. Skipped at the block level (not per
+  // category) for welcome and opt_out.
+  if (runtime.lastVisit && shouldRenderLastVisit(category)) {
+    blocks.push(formatLastVisit(runtime.lastVisit, now))
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)
