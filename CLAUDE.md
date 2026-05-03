@@ -257,7 +257,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 305 tests across 24 files as of THE-230 ship (2026-05-02). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 334 tests across 25 files as of THE-229 ship (2026-05-02). Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 

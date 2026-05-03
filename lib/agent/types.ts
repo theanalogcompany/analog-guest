@@ -9,10 +9,12 @@ import type {
 } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 import type { AlertContext } from './alerts'
+import type { LastVisit } from './extract-last-visit'
 
 export type { AlertContext }
 export type { RecentMessage }
 export type { EligibleMechanic }
+export type { LastVisit }
 
 export type AgentRunId = string
 
@@ -86,6 +88,11 @@ export interface RuntimeContext {
   // history (THE-170). Empty array means "do not offer perks" — the
   // serializer renders that case explicitly so Sonnet sees the absence.
   mechanics: EligibleMechanic[]
+  // Most recent transaction within the freshness cutoff (default 60 days),
+  // projected to { items, visitedAt }. Null when guest has no transactions
+  // on file, the most recent is too old, or items couldn't be parsed from
+  // raw_data. THE-229.
+  lastVisit: LastVisit | null
   corpus: CorpusMatch[] | null
   classification: Classification | null
   // Observability handle for the current agent run (THE-200). Always present;

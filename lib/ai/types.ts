@@ -77,6 +77,15 @@ export type RuntimeContext = {
   // a "What this guest can access" block when this is provided. An empty
   // array is meaningful — it tells Sonnet not to offer any perks (THE-170).
   mechanics?: EligibleMechanic[]
+  // Most recent transaction within the freshness cutoff. The serializer
+  // renders a "## Last visit" block (with relative time + comma-joined
+  // item names) when this is set and the category is not welcome / opt_out.
+  // THE-229. Shape mirrors lib/agent/types.ts's LastVisit; defined inline
+  // here to keep lib/ai self-contained (same convention as RecentMessage).
+  lastVisit?: {
+    items: string[]
+    visitedAt: Date
+  }
 }
 
 export type GenerateMessageInput = {

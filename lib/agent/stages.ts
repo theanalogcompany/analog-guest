@@ -308,5 +308,9 @@ function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     today: computeToday(timezone),
     recentMessages: ctx.recentMessages,
     mechanics: ctx.mechanics,
+    // THE-229: thread the LastVisit projection from the orchestrator's
+    // RuntimeContext to the AI module's RuntimeContext. The serializer
+    // gates rendering by category (welcome / opt_out skip the block).
+    lastVisit: ctx.lastVisit ?? undefined,
   }
 }

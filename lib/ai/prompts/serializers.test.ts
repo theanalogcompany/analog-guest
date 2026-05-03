@@ -415,3 +415,103 @@ describe('runtimeToProse — casual_chatter', () => {
     expect(out).not.toContain('Days since last visit:')
   })
 })
+
+// THE-229: Last Visit block. Renders at block level (between mechanics and
+// recent conversation), gated on category — welcome and opt_out skip it.
+describe('runtimeToProse — ## Last visit block', () => {
+  const visitedAt = new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+
+  it('renders the block with relative time and comma-joined items', () => {
+    const out = runtimeToProse(
+      {
+        lastVisit: { items: ['cappuccino', 'blueberry muffin'], visitedAt },
+        inboundMessage: 'hey',
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## Last visit\n3 days ago: cappuccino, blueberry muffin')
+  })
+
+  it('renders "yesterday" for a 25-hour-old visit', () => {
+    const yesterday = new Date(NOW.getTime() - 25 * 60 * 60 * 1000)
+    const out = runtimeToProse(
+      { lastVisit: { items: ['latte'], visitedAt: yesterday } },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## Last visit\nyesterday: latte')
+  })
+
+  it('omits the block when lastVisit is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hey' }, 'reply', NOW)
+    expect(out).not.toContain('## Last visit')
+  })
+
+  it('omits the block for welcome', () => {
+    const out = runtimeToProse(
+      { lastVisit: { items: ['cappuccino'], visitedAt } },
+      'welcome',
+      NOW,
+    )
+    expect(out).not.toContain('## Last visit')
+  })
+
+  it('omits the block for opt_out', () => {
+    const out = runtimeToProse(
+      {
+        lastVisit: { items: ['cappuccino'], visitedAt },
+        inboundMessage: 'stop',
+      },
+      'opt_out',
+      NOW,
+    )
+    expect(out).not.toContain('## Last visit')
+  })
+
+  it('renders the block for every other category', () => {
+    const includedCategories = [
+      'follow_up',
+      'reply',
+      'new_question',
+      'perk_unlock',
+      'event_invite',
+      'manual',
+      'acknowledgment',
+      'comp_complaint',
+      'mechanic_request',
+      'recommendation_request',
+      'casual_chatter',
+    ] as const
+
+    for (const cat of includedCategories) {
+      const out = runtimeToProse(
+        { lastVisit: { items: ['cappuccino'], visitedAt } },
+        cat,
+        NOW,
+      )
+      expect(out, `category ${cat} should render Last Visit block`).toContain(
+        '## Last visit',
+      )
+    }
+  })
+
+  it('places the block after mechanics and before recent conversation', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        lastVisit: { items: ['cappuccino'], visitedAt },
+        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+      },
+      'reply',
+      NOW,
+    )
+    const eligibilityIdx = out.indexOf('## What this guest can access')
+    const lastVisitIdx = out.indexOf('## Last visit')
+    const recentIdx = out.indexOf('## Recent conversation')
+    expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
+    expect(lastVisitIdx).toBeGreaterThan(eligibilityIdx)
+    expect(recentIdx).toBeGreaterThan(lastVisitIdx)
+  })
+})
