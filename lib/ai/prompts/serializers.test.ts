@@ -515,3 +515,66 @@ describe('runtimeToProse — ## Last visit block', () => {
     expect(recentIdx).toBeGreaterThan(lastVisitIdx)
   })
 })
+
+// THE-232: Operator instruction block. Renders at the top of the prompt
+// (above mechanics + last visit + recent conversation) when the operator's
+// note flowed through buildAiRuntime.
+describe('runtimeToProse — ## Operator instruction block', () => {
+  it('renders the block with the operator\'s note verbatim', () => {
+    const out = runtimeToProse(
+      { operatorInstruction: 'remind them about open mic this saturday' },
+      'manual',
+      NOW,
+    )
+    expect(out).toContain('## Operator instruction')
+    expect(out).toContain(
+      'The operator wants you to follow up with this guest about: remind them about open mic this saturday',
+    )
+    expect(out).toContain('Draft a message that addresses this directly, in the venue\'s voice.')
+  })
+
+  it('omits the block when operatorInstruction is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'manual', NOW)
+    expect(out).not.toContain('## Operator instruction')
+  })
+
+  it('omits the block when operatorInstruction is the empty string', () => {
+    const out = runtimeToProse({ operatorInstruction: '' }, 'manual', NOW)
+    expect(out).not.toContain('## Operator instruction')
+  })
+
+  it('places the block above mechanics, last visit, and recent conversation', () => {
+    const visitedAt = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000)
+    const out = runtimeToProse(
+      {
+        today,
+        operatorInstruction: 'follow up on their recent visit',
+        mechanics: [],
+        lastVisit: { items: ['cappuccino'], visitedAt },
+        recentMessages: [recent({ body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) })],
+      },
+      'manual',
+      NOW,
+    )
+    const opIdx = out.indexOf('## Operator instruction')
+    const eligibilityIdx = out.indexOf('## What this guest can access')
+    const lastVisitIdx = out.indexOf('## Last visit')
+    const recentIdx = out.indexOf('## Recent conversation')
+    expect(opIdx).toBeGreaterThanOrEqual(0)
+    expect(eligibilityIdx).toBeGreaterThan(opIdx)
+    expect(lastVisitIdx).toBeGreaterThan(opIdx)
+    expect(recentIdx).toBeGreaterThan(opIdx)
+  })
+
+  it('places the block after Right now (orientation stays first)', () => {
+    const out = runtimeToProse(
+      { today, operatorInstruction: 'check in on their recent visit' },
+      'manual',
+      NOW,
+    )
+    const rightNowIdx = out.indexOf('## Right now')
+    const opIdx = out.indexOf('## Operator instruction')
+    expect(rightNowIdx).toBeGreaterThanOrEqual(0)
+    expect(opIdx).toBeGreaterThan(rightNowIdx)
+  })
+})

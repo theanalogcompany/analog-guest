@@ -266,6 +266,21 @@ function shouldRenderLastVisit(category: MessageCategory): boolean {
   return category !== 'welcome' && category !== 'opt_out'
 }
 
+// THE-232: render the operator's note from the Command Center Follow Up
+// modal as a prominent top-level block. The note is the dominant signal
+// for what the message should say; surrounding runtime context (mechanics,
+// last visit, recent conversation) informs how to say it. The agent still
+// speaks in the venue's voice — the note is content guidance only, not
+// phrasing to mimic. This guardrail is reinforced in the manual-category
+// instructions.
+function formatOperatorInstruction(instruction: string): string {
+  return [
+    '## Operator instruction',
+    `The operator wants you to follow up with this guest about: ${instruction}`,
+    'Draft a message that addresses this directly, in the venue\'s voice.',
+  ].join('\n')
+}
+
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
 // — the framing instructs Sonnet not to offer perks at all. Non-empty renders
 // the allowlist with name + reward + qualification context.
@@ -293,6 +308,14 @@ export function runtimeToProse(
 
   if (runtime.today) {
     blocks.push(formatRightNow(runtime.today))
+  }
+  // THE-232: Operator instruction block sits above runtime context
+  // (mechanics, last visit, recent conversation) so Sonnet treats it as the
+  // primary intent. Only fires when the operator typed a note in the Follow
+  // Up modal — note-less manual sends and cron-triggered followups skip the
+  // block.
+  if (runtime.operatorInstruction) {
+    blocks.push(formatOperatorInstruction(runtime.operatorInstruction))
   }
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics))

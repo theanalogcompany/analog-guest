@@ -66,6 +66,13 @@ export type RuntimeContext = {
     date: string
   }
   additionalContext?: string
+  // THE-232: the operator's note from the Command Center Follow Up button.
+  // Surfaced as a top-level "## Operator instruction" block in the prompt
+  // — distinct from additionalContext, which carries system-level framing
+  // (cron trigger reasons, etc.). Only populated on the manual followup
+  // path when the operator typed a note; absent for note-less manual sends
+  // and for cron triggers.
+  operatorInstruction?: string
   today?: {
     isoDate: string
     dayOfWeek: string

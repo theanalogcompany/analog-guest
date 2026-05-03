@@ -140,3 +140,40 @@ describe('casual-chatter instructions (THE-228)', () => {
     expect(CASUAL_CHATTER_INSTRUCTIONS).not.toMatch(/[—–]/)
   })
 })
+
+// THE-232: Operator instruction reinforcement. The block is rendered by
+// the serializer and lives in two category files: `manual` (the actual
+// category for Command Center Follow Up button sends per
+// triggerToCategory) and `follow_up` (defensive — if cron paths ever
+// inherit operator notes in the future, the directive is already in place).
+describe('manual instructions — Operator instruction reinforcement (THE-232)', () => {
+  it('points at the Operator instruction block', () => {
+    expect(MANUAL_INSTRUCTIONS).toContain(
+      'When an "Operator instruction" block is present in the prompt',
+    )
+  })
+
+  it('treats the instruction as the primary intent', () => {
+    expect(MANUAL_INSTRUCTIONS).toContain('treat it as the primary intent')
+  })
+
+  it('directs grounding via runtime context', () => {
+    expect(MANUAL_INSTRUCTIONS).toContain('Use runtime context')
+  })
+
+  it('no longer references the stale "additional context" framing', () => {
+    expect(MANUAL_INSTRUCTIONS).not.toContain('The intent is in the additional context')
+  })
+})
+
+describe('follow-up instructions — Operator instruction reinforcement (THE-232)', () => {
+  it('points at the Operator instruction block', () => {
+    expect(FOLLOW_UP_INSTRUCTIONS).toContain(
+      'When an "Operator instruction" block is present in the prompt',
+    )
+  })
+
+  it('treats the instruction as the primary intent', () => {
+    expect(FOLLOW_UP_INSTRUCTIONS).toContain('treat it as the primary intent')
+  })
+})

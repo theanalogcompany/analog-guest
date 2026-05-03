@@ -147,7 +147,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.4.0')
+      expect(r.data.promptVersion).toBe('v1.5.0')
     })
   }
 })

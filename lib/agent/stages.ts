@@ -263,18 +263,32 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
 
 function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   let additionalContext: string | undefined
+  let operatorInstruction: string | undefined
   if (ctx.followupTrigger) {
     if (ctx.followupTrigger.reason === 'manual') {
-      // Operator-initiated follow-up via the Command Center button. The
-      // hint (if any) is content guidance only — the agent still speaks in
-      // the venue persona; we do not let operator phrasing leak into the
-      // outbound voice.
+      // Operator-initiated follow-up via the Command Center button. THE-232
+      // splits the operator's note out of additionalContext into its own
+      // dedicated field, which the serializer renders as a prominent
+      // top-level "## Operator instruction" block. This makes the note the
+      // dominant signal rather than an easy-to-miss line at the bottom of
+      // the user prompt.
+      //
+      // The note still travels as content guidance, not voice mimicry — the
+      // agent speaks in the venue persona regardless of how the operator
+      // phrased their note. That voice discipline is reinforced in the
+      // manual-category instructions and the new prompt block.
       const rawHint = ctx.followupTrigger.metadata?.hint
       const hint =
         typeof rawHint === 'string' && rawHint.trim().length > 0 ? rawHint.trim() : null
-      additionalContext = hint
-        ? `The venue operator has asked you to follow up with this guest. Their note: "${hint}". Use this as guidance for what to address; keep your usual voice.`
-        : `The venue operator has asked you to follow up with this guest. Use your judgment about what to say based on the conversation history and guest context.`
+      if (hint) {
+        operatorInstruction = hint
+      } else {
+        // No note — fall back to the generic framing as before, via
+        // additionalContext. Without the block firing, Sonnet still needs
+        // to know this was operator-initiated.
+        additionalContext =
+          'The venue operator has asked you to follow up with this guest. Use your judgment about what to say based on the conversation history and guest context.'
+      }
     } else {
       // Cron-triggered follow-ups (day_1/day_3/etc., event). Existing path.
       const meta = ctx.followupTrigger.metadata
@@ -313,6 +327,7 @@ function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
     additionalContext,
+    operatorInstruction,
     today: computeToday(timezone),
     recentMessages: ctx.recentMessages,
     mechanics: ctx.mechanics,

@@ -1,7 +1,7 @@
 // Bump PROMPT_VERSION when SYSTEM_TEMPLATE, the serializers, or any category
 // instruction file changes. Used for observability so a stored message can be
 // traced back to the prompt version that produced it.
-export const PROMPT_VERSION = 'v1.4.0'
+export const PROMPT_VERSION = 'v1.5.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
