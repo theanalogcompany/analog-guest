@@ -103,12 +103,27 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
     expect(prompt).toContain('Distinct from reply')
   })
 
+  it('lists personal_history_question with own-history framing (THE-233)', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain('- personal_history_question:')
+    expect(prompt).toContain('own past interactions with the venue')
+    expect(prompt).toContain('what did I get last time')
+    expect(prompt).toContain('do you remember me')
+  })
+
   it('includes the disambiguation paragraph (THE-228 Q4)', async () => {
     const prompt = await getCapturedSystemPrompt()
     expect(prompt).toContain('When a message could fit multiple categories')
     expect(prompt).toContain('comp_complaint even if phrased as a reply')
     expect(prompt).toContain('opinion-shaped')
     expect(prompt).toContain('Use manual only when the message genuinely needs operator attention')
+  })
+
+  it('includes the personal-history disambiguation clause (THE-233)', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain(
+      'Personal-history questions ("what did I get last time", "do you remember me") route to personal_history_question, NOT to manual or new_question.',
+    )
   })
 
   it('keeps the confidence-scale anchor block', async () => {
@@ -137,6 +152,7 @@ describe('classifyMessage — schema accepts new categories', () => {
     'mechanic_request',
     'recommendation_request',
     'casual_chatter',
+    'personal_history_question',
   ] as const) {
     it(`accepts category=${cat}`, async () => {
       generateObjectMock.mockResolvedValueOnce({
@@ -147,7 +163,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.5.0')
+      expect(r.data.promptVersion).toBe('v1.6.0')
     })
   }
 })

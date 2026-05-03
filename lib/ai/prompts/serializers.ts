@@ -409,6 +409,15 @@ export function runtimeToProse(
     case 'casual_chatter':
       if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
       break
+    case 'personal_history_question':
+      // THE-233: factual question framing matches new_question. The
+      // ## Last visit block above does the real work of surfacing what the
+      // guest can be told. Don't propagate the dead lastVisitDate /
+      // daysSinceLastVisit lines from THE-229.
+      if (runtime.inboundMessage) {
+        lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
+      }
+      break
   }
 
   if (runtime.additionalContext) {

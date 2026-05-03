@@ -578,3 +578,49 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     expect(opIdx).toBeGreaterThan(rightNowIdx)
   })
 })
+
+// THE-233: personal_history_question routes the inbound through the
+// "just asked" framing (questions deserve question framing, not "just sent")
+// and relies on the ## Last visit block above for the actual content.
+describe('runtimeToProse — personal_history_question', () => {
+  it('renders the inbound message under "just asked" framing', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'what did i get last time' },
+      'personal_history_question',
+      NOW,
+    )
+    expect(out).toContain('The guest just asked: "what did i get last time"')
+    // Don't accidentally fall back to the "just sent" framing.
+    expect(out).not.toContain('The guest just sent: "what did i get last time"')
+  })
+
+  it('renders the ## Last visit block when lastVisit is set (regression for shouldRenderLastVisit)', () => {
+    const visitedAt = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000)
+    const out = runtimeToProse(
+      {
+        inboundMessage: 'what did i get last time',
+        lastVisit: { items: ['cappuccino', 'blueberry muffin'], visitedAt },
+      },
+      'personal_history_question',
+      NOW,
+    )
+    expect(out).toContain('## Last visit')
+    expect(out).toContain('2 days ago: cappuccino, blueberry muffin')
+  })
+
+  it('does not push dead lastVisitDate / daysSinceLastVisit lines', () => {
+    // THE-229 finding: those lines are unpopulated dead code. New category
+    // case must not propagate the bug.
+    const out = runtimeToProse(
+      {
+        inboundMessage: 'what did i get last time',
+        lastVisitDate: '2026-04-30',
+        daysSinceLastVisit: 3,
+      },
+      'personal_history_question',
+      NOW,
+    )
+    expect(out).not.toContain('Last visit: 2026-04-30')
+    expect(out).not.toContain('Days since last visit:')
+  })
+})

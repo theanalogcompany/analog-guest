@@ -9,6 +9,7 @@ import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
 import { PERK_UNLOCK_INSTRUCTIONS } from './perk-unlock'
+import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-question'
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { WELCOME_INSTRUCTIONS } from './welcome'
@@ -41,5 +42,7 @@ export function getCategoryInstructions(category: MessageCategory): string {
       return RECOMMENDATION_REQUEST_INSTRUCTIONS
     case 'casual_chatter':
       return CASUAL_CHATTER_INSTRUCTIONS
+    case 'personal_history_question':
+      return PERSONAL_HISTORY_QUESTION_INSTRUCTIONS
   }
 }
