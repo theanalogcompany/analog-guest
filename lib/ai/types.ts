@@ -24,6 +24,7 @@ export type MessageCategory =
   | 'mechanic_request'
   | 'recommendation_request'
   | 'casual_chatter'
+  | 'personal_history_question'
 
 export type VoiceCorpusSourceType =
   | 'sample_text'

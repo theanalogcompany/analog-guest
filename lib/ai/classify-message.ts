@@ -20,6 +20,7 @@ const ClassifiedMessageSchema = z.object({
     'mechanic_request',
     'recommendation_request',
     'casual_chatter',
+    'personal_history_question',
   ]),
   // .refine() instead of .min(0).max(1) — Anthropic's structured-output
   // validator rejects `minimum`/`maximum` constraints on JSON Schema number
@@ -46,8 +47,9 @@ const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests o
 - mechanic_request: the guest is asking about, invoking, or requesting a perk, hold, event slot, or other venue mechanic (e.g., "can you hold the couch", "is the tea on the house", "can i get on the open mic list")
 - recommendation_request: the guest is asking the venue for a recommendation on what to order, try, or pair (e.g., "what's good here", "what do you pair with the latte", "anything worth trying"). Distinct from new_question, which is factual.
 - casual_chatter: the guest is making small talk or an unprompted casual comment without asking a question or invoking a service (e.g., "this neighborhood is wild", "love this couch", "hope you have a good day"). Distinct from reply, which is in conversational response to something the venue sent.
+- personal_history_question: the guest is asking about their own past interactions with the venue: what they ordered, when they visited, whether they've been here before, or anything about their own history (e.g., "what did I get last time", "do you remember me", "have I been here before", "what was that thing I tried")
 
-When a message could fit multiple categories, prefer the more specific one: a complaint about service is comp_complaint even if phrased as a reply; a question that is opinion-shaped ("what's good") is recommendation_request rather than new_question; an unprompted casual remark is casual_chatter rather than reply. Use manual only when the message genuinely needs operator attention rather than as a fallback for ambiguous classification.
+When a message could fit multiple categories, prefer the more specific one: a complaint about service is comp_complaint even if phrased as a reply; a question that is opinion-shaped ("what's good") is recommendation_request rather than new_question; an unprompted casual remark is casual_chatter rather than reply. Personal-history questions ("what did I get last time", "do you remember me") route to personal_history_question, NOT to manual or new_question. Use manual only when the message genuinely needs operator attention rather than as a fallback for ambiguous classification.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 

@@ -12,6 +12,7 @@ import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
 import { PERK_UNLOCK_INSTRUCTIONS } from './perk-unlock'
+import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-question'
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { WELCOME_INSTRUCTIONS } from './welcome'
@@ -36,6 +37,7 @@ const ROUND_TRIP_TABLE: Array<[MessageCategory, string]> = [
   ['mechanic_request', MECHANIC_REQUEST_INSTRUCTIONS],
   ['recommendation_request', RECOMMENDATION_REQUEST_INSTRUCTIONS],
   ['casual_chatter', CASUAL_CHATTER_INSTRUCTIONS],
+  ['personal_history_question', PERSONAL_HISTORY_QUESTION_INSTRUCTIONS],
 ]
 
 describe('getCategoryInstructions — round-trip', () => {
@@ -175,5 +177,37 @@ describe('follow-up instructions — Operator instruction reinforcement (THE-232
 
   it('treats the instruction as the primary intent', () => {
     expect(FOLLOW_UP_INSTRUCTIONS).toContain('treat it as the primary intent')
+  })
+})
+
+describe('personal-history-question instructions (THE-233)', () => {
+  it('points the agent at the ## Last visit block', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('"## Last visit" block')
+  })
+
+  it('forbids reciting the data back', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      'Do not recite ("I see you got X on Y at Z")',
+    )
+  })
+
+  it('forbids fabrication of items / drinks / visit details', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      'Do not fabricate items, drinks, or visit details under any circumstance',
+    )
+  })
+
+  it('provides admit-no-record fallbacks in the venue voice', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('haven\'t seen you in here yet')
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      'no record of you in the system, when were you in?',
+    )
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      'first time meeting you, what brought you in?',
+    )
+  })
+
+  it('contains no em or en dashes', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).not.toMatch(/[—–]/)
   })
 })

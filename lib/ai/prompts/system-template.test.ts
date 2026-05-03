@@ -8,8 +8,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // fails loudly. THE-225 added R8/R9/R10 + strengthened R3.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.5.0 (THE-232)', () => {
-    expect(PROMPT_VERSION).toBe('v1.5.0')
+  it('is v1.6.0 (THE-233)', () => {
+    expect(PROMPT_VERSION).toBe('v1.6.0')
   })
 })
 
@@ -107,6 +107,17 @@ describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
     expect(SYSTEM_TEMPLATE).toContain('\'not sure,\'')
     expect(SYSTEM_TEMPLATE).toContain('\'no idea,\'')
     expect(SYSTEM_TEMPLATE).toContain('\'let me find out.\'')
+  })
+
+  // THE-233 tightened R8 with explicit named-product coverage.
+  it('explicitly forbids naming undocumented menu items / drinks / dishes / perks / events / off-menu', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'any named menu item, drink, dish, perk, event, or off-menu item that isn\'t documented in the venue spec or runtime context',
+    )
+  })
+
+  it('lands the punch line: if the name isn\'t there, don\'t name it', () => {
+    expect(SYSTEM_TEMPLATE).toContain('If a product name isn\'t there, don\'t name it.')
   })
 })
 
