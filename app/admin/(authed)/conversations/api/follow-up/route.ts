@@ -16,20 +16,24 @@ import { createServerClient } from '@/lib/db/server'
 //
 //   1. Auth: cookie-session resolved to an analog admin operator.
 //   2. Allowlist: venueId must be in the operator's allowedVenueIds.
-//   3. Opt-out: the agent pipeline doesn't pre-send-check
+//   3. Venue + messaging_phone_number: surface misconfiguration as a clean
+//      400 here instead of letting the pipeline 502 from a deeper failure
+//      when scheduleAndSend has nothing to dial.
+//   4. Opt-out: the agent pipeline doesn't pre-send-check
 //      guests.opted_out_at — we add that here so the manual button can't
 //      be the path that violates it. (THE-todo: hoist into the pipeline
 //      itself once a regular sender has the same need.)
-//   4. Rate limit: at most one manual outbound per venue+guest per
-//      RATE_LIMIT_WINDOW_MINUTES. Cheap, no Redis — looks at messages
-//      table for a recent category='manual' outbound row.
+//
+// Rate limiting: previously a 5-min cap on prior category='manual' outbounds
+// per venue+guest. Removed — demo / dry-run flows need to fire the button
+// repeatedly without waiting. In-flight disable on the client is the v1
+// idempotency stance; revisit if abuse becomes a real concern.
 //
 // On approval, invokes handleFollowup synchronously with
 // skipHumanFeelDelay=true so the operator gets a real result (sent /
 // refused / failed) within ~5s instead of waiting through the typing-
 // indicator theatre. Returns 200 with the outbound message id on success.
 
-const RATE_LIMIT_WINDOW_MINUTES = 5
 const MAX_HINT_LENGTH = 500
 
 const BodySchema = z.object({
@@ -85,6 +89,34 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const supabase = createAdminClient()
 
+  // ---- venue + messaging_phone_number ----
+  // Surface a misconfigured venue (no Sendblue number assigned) as a clean
+  // 400 here. Without this guard the pipeline still reaches scheduleAndSend
+  // and fails deep in the send stage with a less actionable error.
+  const { data: venueRow, error: venueErr } = await supabase
+    .from('venues')
+    .select('id, messaging_phone_number')
+    .eq('id', body.venueId)
+    .maybeSingle()
+  if (venueErr) {
+    return NextResponse.json(
+      { error: 'venue lookup failed', detail: venueErr.message },
+      { status: 500 },
+    )
+  }
+  if (!venueRow) {
+    return NextResponse.json({ error: 'venue not found' }, { status: 404 })
+  }
+  if (!venueRow.messaging_phone_number) {
+    return NextResponse.json(
+      {
+        error: 'venue not configured',
+        detail: 'venue has no messaging_phone_number; assign a Sendblue number before sending',
+      },
+      { status: 400 },
+    )
+  }
+
   // ---- opt-out check ----
   // The agent pipeline doesn't currently pre-send-check opted_out_at; we
   // do it here so the manual button can't be the path that violates it.
@@ -107,34 +139,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (guestRow.opted_out_at !== null) {
     return NextResponse.json({ error: 'guest opted out' }, { status: 403 })
-  }
-
-  // ---- rate limit ----
-  const cutoffIso = new Date(
-    Date.now() - RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
-  ).toISOString()
-  const { count: recentManualCount, error: rateErr } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('venue_id', body.venueId)
-    .eq('guest_id', body.guestId)
-    .eq('direction', 'outbound')
-    .eq('category', 'manual')
-    .gte('created_at', cutoffIso)
-  if (rateErr) {
-    return NextResponse.json(
-      { error: 'rate limit check failed', detail: rateErr.message },
-      { status: 500 },
-    )
-  }
-  if ((recentManualCount ?? 0) > 0) {
-    return NextResponse.json(
-      {
-        error: 'rate limited',
-        detail: `at most one manual follow-up per guest per ${RATE_LIMIT_WINDOW_MINUTES} minutes`,
-      },
-      { status: 429 },
-    )
   }
 
   // ---- invoke pipeline ----
