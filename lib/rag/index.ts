@@ -1,5 +1,5 @@
 export { retrieveContext } from './retrieve'
-export { ingestCorpusEntry } from './ingest'
+export { ingestCorpusEntry, ingestKnowledgeCorpusEntry } from './ingest'
 export { embedText } from './embed'
 
 export type {

@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
-import { ingestCorpusEntry } from '@/lib/rag'
+import { ingestCorpusEntry, ingestKnowledgeCorpusEntry } from '@/lib/rag'
 import { DEFAULT_FORMULA, DEFAULT_STATE_THRESHOLDS } from '@/lib/recognition'
 import type { MenuItem } from '@/lib/schemas'
 import type { ParsedVenueSpec } from './parse-venue-spec'
@@ -35,6 +35,8 @@ export interface SeedVenueResult {
   venueId: string
   insertedCorpusIds: string[]
   embeddedChunkCounts: number[]
+  insertedKnowledgeCorpusIds: string[]
+  knowledgeEmbeddedChunkCounts: number[]
   mechanicsInsertedCount: number
 }
 
@@ -209,10 +211,47 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
     }
   }
 
+  // 6. knowledge_corpus rows + embeddings (mirrors the voice block above).
+  // Empty knowledgeCorpus is fine — older 06-specs predate this section
+  // (parser returns []), no rows get inserted.
+  const insertedKnowledgeCorpusIds: string[] = []
+  const knowledgeEmbeddedChunkCounts: number[] = []
+  if (parsed.knowledgeCorpus.length > 0) {
+    const knowledgeRows = parsed.knowledgeCorpus.map((c) => ({
+      venue_id: venueId,
+      source_type: c.source_type,
+      content: c.content,
+      tags: c.tags,
+      confidence_score: c.confidence_score,
+    }))
+    const { data: knowledgeInserted, error: knowledgeError } = await supabase
+      .from('knowledge_corpus')
+      .insert(knowledgeRows)
+      .select('id')
+    if (knowledgeError) {
+      throw new Error(`seed: knowledge_corpus insert failed: ${knowledgeError.message}`)
+    }
+    insertedKnowledgeCorpusIds.push(...(knowledgeInserted ?? []).map((r) => r.id))
+
+    for (const id of insertedKnowledgeCorpusIds) {
+      const result = await ingestKnowledgeCorpusEntry(id)
+      if (!result.ok) {
+        console.warn(
+          `[seed] knowledge corpus ingest failed for id=${id}: ${result.error} (errorCode=${result.errorCode})`,
+        )
+        knowledgeEmbeddedChunkCounts.push(0)
+      } else {
+        knowledgeEmbeddedChunkCounts.push(result.data.embeddedChunkCount)
+      }
+    }
+  }
+
   return {
     venueId,
     insertedCorpusIds,
     embeddedChunkCounts,
+    insertedKnowledgeCorpusIds,
+    knowledgeEmbeddedChunkCounts,
     mechanicsInsertedCount: parsed.mechanics.length,
   }
 }
