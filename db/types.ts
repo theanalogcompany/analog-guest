@@ -272,6 +272,132 @@ export type Database = {
           },
         ]
       }
+      knowledge_corpus: {
+        Row: {
+          added_by_operator_id: string | null
+          confidence_score: number
+          content: string
+          created_at: string
+          id: string
+          is_processed: boolean
+          language: string
+          metadata: Json
+          processed_at: string | null
+          schema_version: number
+          source_ref: string | null
+          source_type: string
+          tags: string[]
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          added_by_operator_id?: string | null
+          confidence_score?: number
+          content: string
+          created_at?: string
+          id?: string
+          is_processed?: boolean
+          language?: string
+          metadata?: Json
+          processed_at?: string | null
+          schema_version?: number
+          source_ref?: string | null
+          source_type: string
+          tags?: string[]
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          added_by_operator_id?: string | null
+          confidence_score?: number
+          content?: string
+          created_at?: string
+          id?: string
+          is_processed?: boolean
+          language?: string
+          metadata?: Json
+          processed_at?: string | null
+          schema_version?: number
+          source_ref?: string | null
+          source_type?: string
+          tags?: string[]
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_corpus_added_by_operator_id_fkey"
+            columns: ["added_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_corpus_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_embeddings: {
+        Row: {
+          chunk_index: number
+          chunk_text: string
+          corpus_id: string
+          created_at: string
+          embedding: string | null
+          embedding_model: string
+          id: string
+          last_retrieved_at: string | null
+          metadata: Json
+          retrieval_count: number
+          venue_id: string
+        }
+        Insert: {
+          chunk_index?: number
+          chunk_text: string
+          corpus_id: string
+          created_at?: string
+          embedding?: string | null
+          embedding_model: string
+          id?: string
+          last_retrieved_at?: string | null
+          metadata?: Json
+          retrieval_count?: number
+          venue_id: string
+        }
+        Update: {
+          chunk_index?: number
+          chunk_text?: string
+          corpus_id?: string
+          created_at?: string
+          embedding?: string | null
+          embedding_model?: string
+          id?: string
+          last_retrieved_at?: string | null
+          metadata?: Json
+          retrieval_count?: number
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_embeddings_corpus_id_fkey"
+            columns: ["corpus_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_corpus"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_embeddings_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mechanics: {
         Row: {
           created_at: string
@@ -839,6 +965,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      match_knowledge_corpus: {
+        Args: {
+          match_count?: number
+          min_confidence?: number
+          query_embedding: string
+          query_venue_id: string
+          source_type_filter?: string[]
+          tag_filter?: string[]
+        }
+        Returns: {
+          chunk_text: string
+          confidence_score: number
+          corpus_id: string
+          id: string
+          similarity: number
+          source_type: string
+          tags: string[]
+        }[]
+      }
       match_voice_corpus: {
         Args: {
           match_count?: number
