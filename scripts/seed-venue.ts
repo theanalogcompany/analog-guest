@@ -59,19 +59,24 @@ async function main(): Promise<void> {
   console.log(`[seed] parsing draft...`)
   const parsed = parseVenueSpec(draftMarkdown)
   console.log(
-    `[seed] parsed: ${parsed.mechanics.length} mechanics, ${parsed.voiceCorpus.length} corpus entries`,
+    `[seed] parsed: ${parsed.mechanics.length} mechanics, ${parsed.voiceCorpus.length} voice_corpus entries, ${parsed.knowledgeCorpus.length} knowledge_corpus entries`,
   )
 
   console.log(`[seed] writing to Supabase...`)
   const result = await seedVenue({ parsed, messagingPhoneNumber, menuItems })
 
-  const totalEmbedded = result.embeddedChunkCounts.reduce((a, b) => a + b, 0)
+  const totalVoiceEmbedded = result.embeddedChunkCounts.reduce((a, b) => a + b, 0)
+  const totalKnowledgeEmbedded = result.knowledgeEmbeddedChunkCounts.reduce((a, b) => a + b, 0)
   console.log(`[seed] ✓ venue ${result.venueId} seeded`)
   console.log(`[seed]   slug: ${parsed.slug}`)
   console.log(`[seed]   messaging_phone_number: ${messagingPhoneNumber ?? '(null)'}`)
   console.log(`[seed]   mechanics inserted: ${result.mechanicsInsertedCount}`)
-  console.log(`[seed]   corpus rows inserted: ${result.insertedCorpusIds.length}`)
-  console.log(`[seed]   total embedded chunks: ${totalEmbedded}`)
+  console.log(
+    `[seed]   voice_corpus rows inserted: ${result.insertedCorpusIds.length} (${totalVoiceEmbedded} chunks embedded)`,
+  )
+  console.log(
+    `[seed]   knowledge_corpus rows inserted: ${result.insertedKnowledgeCorpusIds.length} (${totalKnowledgeEmbedded} chunks embedded)`,
+  )
   console.log(`[seed] note: status='pending', is_test=true. Flip to 'active' manually after spot-check.`)
 }
 
