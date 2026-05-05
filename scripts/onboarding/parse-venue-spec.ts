@@ -64,6 +64,25 @@ const VoiceCorpusSchema = z.object({
   confidence_score: z.number().min(0).max(1).default(DEFAULT_CONFIDENCE_SCORE),
 })
 
+export interface KnowledgeCorpusSpec {
+  source_type: string
+  content: string
+  tags: string[]
+  confidence_score: number
+}
+
+// Mirrors VoiceCorpusSchema exactly — knowledge_corpus and voice_corpus share
+// column shape (see migration 013). The conceptual split is what the LLM
+// extracts into each: voice = HOW the venue speaks (texting exemplars, tone),
+// knowledge = WHAT IS TRUE (sourcing, staff, ceremony, mechanics). Same .min/.max
+// caveat as VoiceCorpusSchema applies.
+const KnowledgeCorpusSchema = z.object({
+  source_type: z.string().min(1),
+  content: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+  confidence_score: z.number().min(0).max(1).default(DEFAULT_CONFIDENCE_SCORE),
+})
+
 export interface ParsedVenueSpec {
   slug: string
   name: string
@@ -72,6 +91,7 @@ export interface ParsedVenueSpec {
   venueInfo: VenueInfo
   mechanics: MechanicSpec[]
   voiceCorpus: VoiceCorpusSpec[]
+  knowledgeCorpus: KnowledgeCorpusSpec[]
 }
 
 function splitByHeading(markdown: string, level: 2 | 3): Array<{ title: string; content: string }> {
@@ -387,5 +407,23 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
     )
   }
 
-  return { slug, name, timezone, brandPersona, venueInfo, mechanics, voiceCorpus }
+  // ── Section 7: knowledge_corpus (optional; older specs may omit) ─────────
+  // No min-count enforcement: retrieval against knowledge_corpus isn't wired
+  // up yet, and older 06-specs predate this section entirely.
+  const sectionKnowledge = h2s.find((s) => /^7\.\s*knowledge_corpus/i.test(s.title))
+  const knowledgeCorpus: KnowledgeCorpusSpec[] = []
+  if (sectionKnowledge) {
+    const knowledgeRaw = extractJsonBlocks(sectionKnowledge.content)
+    for (const raw of knowledgeRaw) {
+      const parsed = KnowledgeCorpusSchema.safeParse(raw)
+      if (!parsed.success) {
+        throw new Error(
+          `parse-venue-spec: knowledge_corpus entry invalid: ${parsed.error.message}\nRaw: ${JSON.stringify(raw)}`,
+        )
+      }
+      knowledgeCorpus.push(parsed.data)
+    }
+  }
+
+  return { slug, name, timezone, brandPersona, venueInfo, mechanics, voiceCorpus, knowledgeCorpus }
 }
