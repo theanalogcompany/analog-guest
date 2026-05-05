@@ -8,11 +8,18 @@ import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
-import { classifyStage, generateStage, retrieveCorpusStage } from './stages'
+import {
+  classifyStage,
+  generateStage,
+  retrieveCorpusStage,
+  retrieveKnowledgeStage,
+  shouldRetrieveKnowledge,
+} from './stages'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
   buildGenerateContent,
+  buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
 import type { AgentResult, InboundMessage, RuntimeContext } from './types'
@@ -256,6 +263,34 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         extra: { matchCount: ctx.corpus?.length ?? 0 },
       })
       return { status: 'failed', stage: 'corpus', error: errMsg }
+    }
+
+    // Retrieve knowledge (conditional). Inbound always fires per
+    // shouldRetrieveKnowledge; degrades gracefully on Voyage / DB error so
+    // the run can proceed without grounding.
+    if (shouldRetrieveKnowledge(ctx)) {
+      const knowledgeSpan = trace.span('retrieve_knowledge', {
+        queryLength: ctx.currentMessage?.body.length ?? 0,
+      })
+      ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx)
+      knowledgeSpan.end({
+        output: {
+          matchCount: ctx.knowledgeCorpus.length,
+          topSimilarity:
+            ctx.knowledgeCorpus.length > 0
+              ? Math.max(...ctx.knowledgeCorpus.map((c) => c.similarity))
+              : 0,
+        },
+        content: trace.captureContent
+          ? buildKnowledgeCorpusContent(ctx.knowledgeCorpus)
+          : undefined,
+      })
+      console.log('[agent] inbound knowledge retrieved', {
+        agentRunId,
+        matchCount: ctx.knowledgeCorpus.length,
+      })
+    } else {
+      ctx.knowledgeCorpus = []
     }
 
     // Generate

@@ -295,6 +295,7 @@ export async function buildRuntimeContext(input: {
     mechanics,
     lastVisit,
     corpus: null,
+    knowledgeCorpus: null,
     classification: null,
     trace: input.trace,
   }

@@ -1,6 +1,6 @@
 import type { MessageCategory, RecentMessage } from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
-import type { VoiceCorpusChunk } from '@/lib/rag'
+import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
   EligibleMechanic,
   RelationshipSignals,
@@ -64,6 +64,7 @@ export interface RecognitionSnapshot {
 // Alias of lib/rag's chunk type. The agent doesn't need a separate DTO —
 // reusing keeps field names consistent across module boundaries.
 export type CorpusMatch = VoiceCorpusChunk
+export type KnowledgeMatch = KnowledgeCorpusChunk
 
 export interface Classification {
   // Aliased to lib/ai's MessageCategory so this can't drift — adding a new
@@ -94,6 +95,11 @@ export interface RuntimeContext {
   // raw_data. THE-229.
   lastVisit: LastVisit | null
   corpus: CorpusMatch[] | null
+  // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
+  // when shouldRetrieveKnowledge fires (always for inbound; followups
+  // gated to event/manual). Otherwise stays []. Distinct from voice
+  // `corpus`: voice failure fails closed, knowledge degrades to [].
+  knowledgeCorpus: KnowledgeMatch[] | null
   classification: Classification | null
   // Observability handle for the current agent run (THE-200). Always present;
   // a no-op trace (`trace.id === ''`) when Langfuse isn't configured. Stages

@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
 import type { EligibleMechanic } from '../../recognition/eligibility'
 import { type MenuItem, type VenueInfo, VenueInfoSchema } from '../../schemas'
-import type { RecentMessage, RuntimeContext } from '../types'
-import { runtimeToProse, venueInfoToProse } from './serializers'
+import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../types'
+import { knowledgeChunksToProse, runtimeToProse, venueInfoToProse } from './serializers'
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -622,5 +622,55 @@ describe('runtimeToProse — personal_history_question', () => {
     )
     expect(out).not.toContain('Last visit: 2026-04-30')
     expect(out).not.toContain('Days since last visit:')
+  })
+})
+
+describe('knowledgeChunksToProse', () => {
+  const makeChunk = (overrides: Partial<KnowledgeCorpusChunk> = {}): KnowledgeCorpusChunk => ({
+    id: 'k1',
+    text: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
+    sourceType: 'voicenote_transcript',
+    tags: ['sourcing', 'ethiopia'],
+    relevanceScore: 0.82,
+    ...overrides,
+  })
+
+  it('returns empty string for empty chunks (composer skips block)', () => {
+    expect(knowledgeChunksToProse([])).toBe('')
+  })
+
+  it('renders the section header and the canonical voice/content disclaimer', () => {
+    const out = knowledgeChunksToProse([makeChunk()])
+    expect(out).toContain('## Venue knowledge')
+    expect(out).toContain('Facts about the venue you can ground replies in')
+    expect(out).toContain("speak in the venue's voice")
+  })
+
+  it('renders tags as a bracketed comma-separated list above each quoted body', () => {
+    const out = knowledgeChunksToProse([makeChunk()])
+    expect(out).toContain('[sourcing, ethiopia]')
+    expect(out).toContain('> Our flagship blend is two Ethiopian coffees roasted by a friend.')
+  })
+
+  it('separates multiple chunks with a blank line', () => {
+    const out = knowledgeChunksToProse([
+      makeChunk({ id: 'k1', tags: ['sourcing'], text: 'fact one' }),
+      makeChunk({ id: 'k2', tags: ['staff_rayan'], text: 'fact two' }),
+    ])
+    expect(out).toMatch(/\[sourcing\]\n> fact one\n\n\[staff_rayan\]\n> fact two/)
+  })
+
+  it('falls back to sourceType in the bracket line when tags is empty', () => {
+    // Defensive: knowledge entries should always have tags per the parser
+    // boundary, but the runtime helper shouldn't break on an empty array.
+    const out = knowledgeChunksToProse([makeChunk({ tags: [], sourceType: 'manual_entry' })])
+    expect(out).toContain('[manual_entry]')
+  })
+
+  it('quotes multi-line chunks line by line', () => {
+    const out = knowledgeChunksToProse([
+      makeChunk({ text: 'first line\nsecond line', tags: ['ceremony'] }),
+    ])
+    expect(out).toContain('> first line\n> second line')
   })
 })

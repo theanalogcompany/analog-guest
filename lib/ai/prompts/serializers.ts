@@ -1,6 +1,12 @@
 import type { EligibleMechanic } from '@/lib/recognition'
 import type { BrandPersona, MenuItem, VenueInfo } from '@/lib/schemas'
-import type { MessageCategory, RecentMessage, RuntimeContext, VoiceCorpusChunk } from '../types'
+import type {
+  KnowledgeCorpusChunk,
+  MessageCategory,
+  RecentMessage,
+  RuntimeContext,
+  VoiceCorpusChunk,
+} from '../types'
 
 const MAX_HISTORY_BODY_CHARS = 200
 
@@ -203,6 +209,23 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
   })
 
   return `## Examples of how the venue actually communicates\n${blocks.join('\n\n')}`
+}
+
+// Render retrieved knowledge_corpus chunks as a `## Venue knowledge` block.
+// Mirrors ragChunksToProse's quote-block format with one addition: a topical
+// tag list in `[bracket, list]` form replacing voice's `[sourceType]` line.
+// Knowledge is content (what's true) — voice is style (how to say it). Sonnet
+// is told the difference in the system template's voice imperative.
+export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
+  if (chunks.length === 0) return ''
+
+  const blocks = chunks.map((c) => {
+    const tagList = c.tags.length > 0 ? c.tags.join(', ') : c.sourceType
+    const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
+    return `[${tagList}]\n${quoted}`
+  })
+
+  return `## Venue knowledge\nFacts about the venue you can ground replies in. This is content, not voice — speak in the venue's voice regardless of how these are phrased.\n\n${blocks.join('\n\n')}`
 }
 
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {

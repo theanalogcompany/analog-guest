@@ -1,5 +1,6 @@
 import { getCategoryInstructions } from './prompts/categories'
 import {
+  knowledgeChunksToProse,
   personaToProse,
   ragChunksToProse,
   runtimeToProse,
@@ -21,7 +22,7 @@ export function composePrompt(input: GenerateMessageInput): {
   systemPrompt: string
   userPrompt: string
 } {
-  const { category, persona, venueInfo, ragChunks, runtime } = input
+  const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } = input
 
   const sections: string[] = [
     SYSTEM_TEMPLATE,
@@ -31,6 +32,12 @@ export function composePrompt(input: GenerateMessageInput): {
 
   const ragBlock = ragChunksToProse(ragChunks)
   if (ragBlock.length > 0) sections.push(ragBlock)
+
+  // Knowledge block sits beside voice examples — voice is style, knowledge is
+  // content. Block omitted when retrieval was gated off (knowledgeChunks
+  // undefined) or returned empty.
+  const knowledgeBlock = knowledgeChunksToProse(knowledgeChunks ?? [])
+  if (knowledgeBlock.length > 0) sections.push(knowledgeBlock)
 
   sections.push(`## Category-specific instructions: ${category}\n${getCategoryInstructions(category)}`)
 
