@@ -372,7 +372,46 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 
 ---
 
-## 7. Pre-seed validation checklist
+## 7. knowledge_corpus
+
+Topical content the agent retrieves when grounding answers to substantive guest questions. Distinct from voice_corpus: these are **what is true** about the venue (origin, sourcing, staff, mechanics, philosophy, recommendations), not **how the venue texts**. Tags are topical, not situational.
+
+### Entry 1
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[NARRATIVE CHUNK — sourcing or supplier relationship in the operator's words: where a key ingredient comes from, the relationship behind it, why it matters. Self-contained — readable on its own without surrounding context.]",
+  "tags": ["sourcing", "[origin tag]"],
+  "confidence_score": 0.9
+}
+```
+
+### Entry 2
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[NARRATIVE CHUNK — a named staff member's personality, what they're known for, how guests experience them. E.g., who's behind the bar, what they tell first-timers, their character.]",
+  "tags": ["staff_[name]", "personality"],
+  "confidence_score": 0.9
+}
+```
+
+### Entry 3
+
+```json
+{
+  "source_type": "manual_entry",
+  "content": "[SYNTHESIZED CHUNK — explanation of how a specific mechanic works in plain language, suitable for grounding the agent when a guest asks about it. Pulled from the operator's qualification + reward_description + expiration_rule fields, restated as a self-contained explanation.]",
+  "tags": ["mechanic_[slug]", "explanation"],
+  "confidence_score": 0.85
+}
+```
+
+---
+
+## 8. Pre-seed validation checklist
 
 Before running `npm run seed [venue-slug]`, verify:
 
@@ -381,12 +420,13 @@ Before running `npm run seed [venue-slug]`, verify:
 - [x] All required VenueInfoSchema fields populated
 - [x] At least 1 mechanic with structured trigger + redemption
 - [x] At least 5 voice_corpus entries
+- [x] At least 5 knowledge_corpus entries (substantive topical content for grounding)
 - [x] At least 1 currentContext entry
 - [x] Menu CSV referenced and exists in Drive
 
 ---
 
-## 8. Notes for processing admin
+## 9. Notes for processing admin
 
 Things flagged during synthesis worth knowing:
 
@@ -395,6 +435,6 @@ Things flagged during synthesis worth knowing:
 
 ---
 
-## 9. Revision history
+## 10. Revision history
 
 - **v01** ([YYYY-MM-DD]) — initial extraction from transcript + menu CSV + Airtable record.
