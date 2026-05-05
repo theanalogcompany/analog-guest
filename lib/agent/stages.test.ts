@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { retrieveCorpusStage } from './stages'
+import { retrieveCorpusStage, shouldRetrieveKnowledge } from './stages'
 import type { CorpusMatch, RuntimeContext } from './types'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
@@ -43,6 +43,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     mechanics: [],
     lastVisit: null,
     corpus: null,
+    knowledgeCorpus: null,
     classification: null,
     trace: { id: '' } as RuntimeContext['trace'],
     ...overrides,
@@ -171,5 +172,42 @@ describe('retrieveCorpusStage — followup path (THE-231)', () => {
   it('still throws on missing query (neither inbound nor followup)', async () => {
     const ctx = makeCtx({})
     await expect(retrieveCorpusStage(ctx)).rejects.toThrow(/no query available/)
+  })
+})
+
+describe('shouldRetrieveKnowledge', () => {
+  it('returns true on the inbound path (currentMessage present)', () => {
+    const ctx = makeCtx({
+      currentMessage: { id: 'm1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+    })
+    expect(shouldRetrieveKnowledge(ctx)).toBe(true)
+  })
+
+  it('returns true for followup reason="event" (substantive outbound)', () => {
+    const ctx = makeCtx({
+      followupTrigger: { reason: 'event', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+    })
+    expect(shouldRetrieveKnowledge(ctx)).toBe(true)
+  })
+
+  it('returns true for followup reason="manual" (operator-authored)', () => {
+    const ctx = makeCtx({
+      followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+    })
+    expect(shouldRetrieveKnowledge(ctx)).toBe(true)
+  })
+
+  it('returns false for routine cron followups (day_1/day_3/day_7/day_14)', () => {
+    for (const reason of ['day_1', 'day_3', 'day_7', 'day_14'] as const) {
+      const ctx = makeCtx({
+        followupTrigger: { reason, triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      })
+      expect(shouldRetrieveKnowledge(ctx)).toBe(false)
+    }
+  })
+
+  it('returns false when neither inbound nor followup is present', () => {
+    const ctx = makeCtx({})
+    expect(shouldRetrieveKnowledge(ctx)).toBe(false)
   })
 })

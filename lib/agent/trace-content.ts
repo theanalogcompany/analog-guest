@@ -1,5 +1,5 @@
 import type { GenerateMessageResult } from '@/lib/ai'
-import type { CorpusMatch, RecognitionSnapshot } from './types'
+import type { CorpusMatch, KnowledgeMatch, RecognitionSnapshot } from './types'
 
 // Pure helpers that pack agent stage outputs into the structured `content`
 // payloads consumed by Langfuse spans (THE-216). Centralized so handle-inbound
@@ -81,6 +81,40 @@ export function buildCorpusContent(corpus: CorpusMatch[]): CorpusContent {
       sourceType: c.sourceType,
       confidence: c.confidence,
       similarity: c.similarity,
+    })),
+  }
+}
+
+export type KnowledgeCorpusContent = {
+  chunks: Array<{
+    id: string
+    knowledgeCorpusId: string
+    text: string
+    sourceType: string
+    confidence: number
+    similarity: number
+    tags: string[]
+  }>
+}
+
+/**
+ * Pack retrieved knowledge_corpus chunks for the conditional
+ * `retrieve_knowledge` span. Same content-gated capture pattern as
+ * buildCorpusContent — only built when trace.captureContent is true so the
+ * heavy text payload is dropped at the call site when capture is off.
+ */
+export function buildKnowledgeCorpusContent(
+  knowledge: KnowledgeMatch[],
+): KnowledgeCorpusContent {
+  return {
+    chunks: knowledge.map((c) => ({
+      id: c.id,
+      knowledgeCorpusId: c.knowledgeCorpusId,
+      text: c.text,
+      sourceType: c.sourceType,
+      confidence: c.confidence,
+      similarity: c.similarity,
+      tags: c.tags,
     })),
   }
 }

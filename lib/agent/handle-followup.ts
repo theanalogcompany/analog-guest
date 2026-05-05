@@ -7,11 +7,17 @@ import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { scheduleAndSend } from './schedule-and-send'
-import { generateStage, retrieveCorpusStage } from './stages'
+import {
+  generateStage,
+  retrieveCorpusStage,
+  retrieveKnowledgeStage,
+  shouldRetrieveKnowledge,
+} from './stages'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
   buildGenerateContent,
+  buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
 import type {
@@ -180,6 +186,34 @@ export async function handleFollowup(input: {
         extra: { matchCount: ctx.corpus?.length ?? 0 },
       })
       return { status: 'failed', stage: 'corpus', error: errMsg }
+    }
+
+    // Retrieve knowledge (conditional). For followups: only fires for
+    // event/manual triggers (substantive). day_* skips. Degrades gracefully
+    // on Voyage / DB error — generation proceeds without grounding.
+    if (shouldRetrieveKnowledge(ctx)) {
+      const knowledgeSpan = trace.span('retrieve_knowledge', {
+        triggerReason: input.trigger.reason,
+      })
+      ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx)
+      knowledgeSpan.end({
+        output: {
+          matchCount: ctx.knowledgeCorpus.length,
+          topSimilarity:
+            ctx.knowledgeCorpus.length > 0
+              ? Math.max(...ctx.knowledgeCorpus.map((c) => c.similarity))
+              : 0,
+        },
+        content: trace.captureContent
+          ? buildKnowledgeCorpusContent(ctx.knowledgeCorpus)
+          : undefined,
+      })
+      console.log('[agent] followup knowledge retrieved', {
+        agentRunId,
+        matchCount: ctx.knowledgeCorpus.length,
+      })
+    } else {
+      ctx.knowledgeCorpus = []
     }
 
     // Generate

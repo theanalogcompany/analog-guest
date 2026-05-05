@@ -7,6 +7,7 @@ export type {
   ClassifyMessageResult,
   GenerateMessageInput,
   GenerateMessageResult,
+  KnowledgeCorpusChunk,
   MessageCategory,
   RecentMessage,
   RuntimeContext,

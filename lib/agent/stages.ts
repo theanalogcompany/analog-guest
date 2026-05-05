@@ -12,17 +12,19 @@ import {
   classifyMessage,
   generateMessage,
   type GenerateMessageResult,
+  type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
-import { retrieveContext } from '@/lib/rag'
+import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
-import type { Classification, CorpusMatch, RuntimeContext } from './types'
+import type { Classification, CorpusMatch, KnowledgeMatch, RuntimeContext } from './types'
 
 const STRONG_MATCH_SIMILARITY = 0.3
 const MIN_STRONG_MATCHES = 1
 const SEND_FIDELITY_FLOOR = 0.4
 const CORPUS_RETRIEVE_LIMIT = 8
+const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
  * Internal: classify the inbound message via lib/ai. Throws on AI failure
@@ -126,6 +128,58 @@ export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMa
   return r.data
 }
 
+/**
+ * Pure predicate: should knowledge_corpus retrieval fire for this run?
+ *
+ *   - inbound (currentMessage present)         → true (every reply benefits
+ *     from grounding; the agent doesn't know in advance whether the guest's
+ *     question is substantive)
+ *   - followup with reason='event' or 'manual' → true (substantive outbound:
+ *     event invites raise follow-up questions; manual notes are operator-
+ *     authored and typically content-heavy)
+ *   - followup with reason='day_*'             → false (routine cron-triggered
+ *     "thinking of you" message; pure voice exercise)
+ *
+ * Voice retrieval is always-on; this predicate gates only knowledge.
+ */
+export function shouldRetrieveKnowledge(ctx: RuntimeContext): boolean {
+  if (ctx.currentMessage !== null) return true
+  const reason = ctx.followupTrigger?.reason
+  return reason === 'event' || reason === 'manual'
+}
+
+/**
+ * Internal: retrieve knowledge_corpus matches for grounding. Degrades
+ * gracefully on Voyage / DB failure — logs the error and returns []. The
+ * generation can still proceed (without knowledge grounding); knowledge is
+ * opportunistic context, not structural.
+ *
+ * Asymmetric to retrieveCorpusStage on purpose. Voice failure breaks voice
+ * fidelity (the whole point of the message). Knowledge failure means the
+ * reply lacks topical grounding — still a coherent message in the venue's
+ * voice, just less specific. Different roles, different policies.
+ */
+export async function retrieveKnowledgeStage(ctx: RuntimeContext): Promise<KnowledgeMatch[]> {
+  const query =
+    ctx.currentMessage?.body ??
+    (ctx.followupTrigger
+      ? `Followup ${ctx.followupTrigger.reason} for ${ctx.guest.firstName ?? 'guest'}`
+      : '')
+  if (!query) return []
+  const r = await retrieveKnowledgeContext({
+    venueId: ctx.venue.id,
+    query,
+    limit: KNOWLEDGE_RETRIEVE_LIMIT,
+  })
+  if (!r.ok) {
+    console.warn(
+      `[agent] knowledge retrieval degraded for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    return []
+  }
+  return r.data
+}
+
 export type GenerateOutcome =
   | { status: 'success'; result: GenerateMessageResult }
   | { status: 'refused'; attemptScores: number[]; finalScore: number }
@@ -161,11 +215,23 @@ export async function generateStage(
     // expects `relevanceScore?`. Same semantics — pass through.
     relevanceScore: c.similarity,
   }))
+  // knowledgeCorpus is null when retrieval was gated off, [] when it fired
+  // and returned nothing (or degraded). Both render the same — no knowledge
+  // block in the prompt. Pass through with the same similarity → relevanceScore
+  // mapping voice uses.
+  const knowledgeChunks: AiKnowledgeCorpusChunk[] = (ctx.knowledgeCorpus ?? []).map((c) => ({
+    id: c.id,
+    text: c.text,
+    sourceType: c.sourceType,
+    tags: c.tags,
+    relevanceScore: c.similarity,
+  }))
   const r = await generateMessage({
     category,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
     ragChunks,
+    knowledgeChunks,
     runtime: buildAiRuntime(ctx),
   })
   if (!r.ok) return { status: 'failed', error: r.error }

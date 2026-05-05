@@ -45,6 +45,20 @@ export type VoiceCorpusChunk = {
   relevanceScore?: number
 }
 
+// Mirror of VoiceCorpusChunk for knowledge_corpus retrieval results. Adds a
+// topical `tags` array that the prompt serializer renders alongside each
+// chunk so Sonnet can disambiguate which topic was matched (sourcing,
+// staff_<name>, mechanic_<slug>, ceremony, etc.). source_type is the open
+// string the DB stores — knowledge entries don't share voice's check
+// constraint enum.
+export type KnowledgeCorpusChunk = {
+  id: string
+  text: string
+  sourceType: string
+  tags: string[]
+  relevanceScore?: number
+}
+
 export type RecentMessage = {
   direction: 'inbound' | 'outbound'
   body: string
@@ -101,6 +115,10 @@ export type GenerateMessageInput = {
   persona: BrandPersona
   venueInfo: VenueInfo
   ragChunks: VoiceCorpusChunk[]
+  // Optional. When the orchestrator's shouldRetrieveKnowledge gate fires for a
+  // run, retrieved knowledge_corpus chunks land here and the system prompt
+  // gains a `## Venue knowledge` block. Empty array or undefined → block omitted.
+  knowledgeChunks?: KnowledgeCorpusChunk[]
   runtime: RuntimeContext
 }
 
