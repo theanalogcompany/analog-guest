@@ -44,27 +44,41 @@ const GUEST_ID = '22222222-2222-4222-8222-222222222222'
 const OTHER_VENUE_ID = '33333333-3333-4333-8333-333333333333'
 
 type GuestRow = { id: string; opted_out_at: string | null }
+type VenueRow = { id: string; messaging_phone_number: string | null }
 
 interface AdminMockOpts {
+  // Defaults to a venue with messaging_phone_number set so the happy-path
+  // tests don't have to spell it out. Pass null explicitly to simulate a
+  // missing venue; pass a row with messaging_phone_number=null to simulate
+  // a misconfigured one.
+  venueRow?: VenueRow | null
+  venueError?: { message: string } | null
   guestRow?: GuestRow | null
   guestError?: { message: string } | null
-  recentManualCount?: number
-  rateError?: { message: string } | null
 }
 
 // Builds the chained-builder shape used by both supabase reads in the route:
+//   .from('venues').select(...).eq(...).maybeSingle()
 //   .from('guests').select(...).eq(...).eq(...).maybeSingle()
-//   .from('messages').select(..., {count, head}).eq(...)... .gte(...)
-// .gte() is the terminal call on the messages chain — it must be thenable so
-// the route's `await ... gte(...)` resolves directly.
+// .maybeSingle() is the terminal call on each chain — it must be thenable so
+// the route's `await ... maybeSingle()` resolves directly.
 function makeAdminMock(opts: AdminMockOpts) {
+  const venueResult = {
+    data:
+      opts.venueRow === undefined
+        ? { id: VENUE_ID, messaging_phone_number: '+15551234567' }
+        : opts.venueRow,
+    error: opts.venueError ?? null,
+  }
   const guestResult = {
     data: opts.guestRow ?? null,
     error: opts.guestError ?? null,
   }
-  const messagesResult = {
-    count: opts.recentManualCount ?? 0,
-    error: opts.rateError ?? null,
+
+  const venueBuilder = {
+    select: () => venueBuilder,
+    eq: () => venueBuilder,
+    maybeSingle: () => Promise.resolve(venueResult),
   }
 
   const guestBuilder = {
@@ -73,16 +87,10 @@ function makeAdminMock(opts: AdminMockOpts) {
     maybeSingle: () => Promise.resolve(guestResult),
   }
 
-  const messagesBuilder = {
-    select: () => messagesBuilder,
-    eq: () => messagesBuilder,
-    gte: () => Promise.resolve(messagesResult),
-  }
-
   return {
     from: vi.fn((table: string) => {
+      if (table === 'venues') return venueBuilder
       if (table === 'guests') return guestBuilder
-      if (table === 'messages') return messagesBuilder
       throw new Error(`unexpected table in test: ${table}`)
     }),
   }
@@ -288,7 +296,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     expect(handleFollowup).not.toHaveBeenCalled()
   })
 
-  it('returns 429 when a manual outbound exists in the rate-limit window', async () => {
+  it('returns 404 when the venue does not exist', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
       makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
     )
@@ -298,23 +306,18 @@ describe('POST /admin/conversations/api/follow-up', () => {
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock({
-        guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 1,
-      }) as never,
+      makeAdminMock({ venueRow: null }) as never,
     )
 
     const res = await POST(
       makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
     )
-    expect(res.status).toBe(429)
-    const body = await res.json()
-    expect(body.error).toBe('rate limited')
-    expect(body.detail).toContain('5 minutes')
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'venue not found' })
     expect(handleFollowup).not.toHaveBeenCalled()
   })
 
-  it('returns 500 when the rate limit query errors', async () => {
+  it('returns 400 when the venue has no messaging_phone_number', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
       makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
     )
@@ -325,16 +328,18 @@ describe('POST /admin/conversations/api/follow-up', () => {
     })
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
-        guestRow: { id: GUEST_ID, opted_out_at: null },
-        rateError: { message: 'timeout' },
+        venueRow: { id: VENUE_ID, messaging_phone_number: null },
       }) as never,
     )
 
     const res = await POST(
       makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
     )
-    expect(res.status).toBe(500)
-    expect((await res.json()).error).toBe('rate limit check failed')
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe('venue not configured')
+    expect(body.detail).toContain('messaging_phone_number')
+    expect(handleFollowup).not.toHaveBeenCalled()
   })
 
   it('returns 200 with messageId on the happy path with no hint', async () => {
@@ -349,7 +354,6 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 0,
       }) as never,
     )
     vi.mocked(handleFollowup).mockResolvedValue({
@@ -385,7 +389,6 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 0,
       }) as never,
     )
     vi.mocked(handleFollowup).mockResolvedValue({
@@ -418,7 +421,6 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 0,
       }) as never,
     )
     vi.mocked(handleFollowup).mockResolvedValue({
@@ -444,7 +446,6 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 0,
       }) as never,
     )
     vi.mocked(handleFollowup).mockResolvedValue({
@@ -474,7 +475,6 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         guestRow: { id: GUEST_ID, opted_out_at: null },
-        recentManualCount: 0,
       }) as never,
     )
     vi.mocked(handleFollowup).mockResolvedValue({
