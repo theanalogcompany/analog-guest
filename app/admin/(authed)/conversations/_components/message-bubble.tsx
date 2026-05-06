@@ -4,10 +4,11 @@ import { formatInTimeZone } from 'date-fns-tz'
 
 // iMessage-style bubble. Brand discipline yields to fitness-for-purpose on
 // internal debugging surfaces — operator should see the conversation the way
-// the guest sees it. Real iMessage palette: GUEST messages render in iMessage
-// blue (#007AFF), AGENT messages in gray (#E5E5EA). The conversation viewer
-// frames "what the guest sees," and in iMessage your own messages are blue —
-// so blue = guest matches that frame. Inter Tight inside (no SF font load).
+// they would if holding the venue's phone: their own (venue/agent) messages
+// in iMessage blue (#007AFF), the other party's (guest) messages in iMessage
+// incoming gray (#E9E9EB). The earlier flip (THE-223) had the colors reversed
+// and used #E5E5EA for the gray, which reads as a lavender tint on most
+// displays. Inter Tight inside (no SF font load).
 //
 // Sequence collapsing: when this bubble is part of a chain (same direction,
 // within 60s of the previous), the outer corner gets squared off so the chain
@@ -67,10 +68,12 @@ export function MessageBubble({
       : `${base} rounded-tl-[4px]`
   })()
 
-  // Outbound (agent) gray; inbound (guest) blue. See file-top comment for why.
+  // Outbound (venue/agent = self) blue; inbound (guest = other) gray. See
+  // file-top comment for the framing. Hex values are Apple's iMessage palette
+  // verbatim — not brand tokens.
   const colorStyles: React.CSSProperties = isOutbound
-    ? { backgroundColor: '#E5E5EA', color: 'var(--color-ink, #1F1B16)' }
-    : { backgroundColor: '#007AFF', color: '#FFFFFF' }
+    ? { backgroundColor: '#007AFF', color: '#FFFFFF' }
+    : { backgroundColor: '#E9E9EB', color: '#000000' }
 
   const align = isOutbound ? 'justify-end' : 'justify-start'
 
