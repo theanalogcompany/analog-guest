@@ -20,7 +20,7 @@ import type { ApiTraceWithFullDetails } from '@/lib/observability'
 export type TraceObservation = ApiTraceWithFullDetails['observations'][number]
 
 export interface TraceStage {
-  name: string                     // 'context_build' | 'classify' | 'retrieve' | 'generate' | 'send' | <unknown>
+  name: string                     // 'context_build' | 'classify' | 'retrieve' | 'retrieve_knowledge' | 'generate' | 'send' | <unknown>
   observation: TraceObservation
   attempts?: TraceObservation[]    // generate.attempt_N children, ordered by name suffix
 }
@@ -31,10 +31,16 @@ export interface SelectedTraceStages {
   other: TraceObservation[]        // top-level observations that don't match any known stage
 }
 
+// retrieve_knowledge sits between retrieve (voice) and generate per the agent
+// pipeline. It's gated by shouldRetrieveKnowledge in lib/agent/stages.ts —
+// always fires for inbound; for followups, only on event/manual triggers and
+// skips for day_* cron triggers. Absent from the trace simply means the gate
+// was off; the selector tolerates the missing stage like any other.
 const KNOWN_STAGE_ORDER = [
   'context_build',
   'classify',
   'retrieve',
+  'retrieve_knowledge',
   'generate',
   'send',
 ] as const

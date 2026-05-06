@@ -36,6 +36,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except Next.js internals + favicon.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Run on everything except Next.js internals + favicon + cross-host public
+  // assets. /brand/* serves the same logo on both admin and guest surfaces;
+  // bypassing the host gate here lets admin.theanalog.company load the asset
+  // without a 404. Add new public-asset prefixes as cross-host needs arise.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|brand/).*)'],
 }

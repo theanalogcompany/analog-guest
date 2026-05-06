@@ -41,6 +41,7 @@ describe('selectTraceStages', () => {
       obs('o3', 'retrieve'),
       obs('o1', 'context_build'),
       obs('o4', 'generate'),
+      obs('oK', 'retrieve_knowledge'),
       obs('o2', 'classify'),
     ])
     const result = selectTraceStages(trace)
@@ -48,6 +49,50 @@ describe('selectTraceStages', () => {
     expect(result.stages.map((s) => s.name)).toEqual([
       'context_build',
       'classify',
+      'retrieve',
+      'retrieve_knowledge',
+      'generate',
+      'send',
+    ])
+  })
+
+  it('places retrieve_knowledge between retrieve and generate when present', () => {
+    // Regression guard: retrieve_knowledge previously fell into `other` and
+    // rendered after `send` because it was missing from KNOWN_STAGE_ORDER.
+    const trace = makeTrace('agent.inbound', [
+      obs('o1', 'context_build'),
+      obs('o2', 'classify'),
+      obs('o3', 'retrieve'),
+      obs('oK', 'retrieve_knowledge'),
+      obs('o4', 'generate'),
+      obs('o5', 'send'),
+    ])
+    const result = selectTraceStages(trace)
+    const order = result.stages.map((s) => s.name)
+    const retrieveIdx = order.indexOf('retrieve')
+    const knowledgeIdx = order.indexOf('retrieve_knowledge')
+    const generateIdx = order.indexOf('generate')
+    expect(retrieveIdx).toBeGreaterThan(-1)
+    expect(knowledgeIdx).toBeGreaterThan(-1)
+    expect(generateIdx).toBeGreaterThan(-1)
+    expect(retrieveIdx).toBeLessThan(knowledgeIdx)
+    expect(knowledgeIdx).toBeLessThan(generateIdx)
+    // Not bucketed into `other` — that path renders after `send`.
+    expect(result.other.map((o) => o.name)).not.toContain('retrieve_knowledge')
+  })
+
+  it('omits retrieve_knowledge when the trace lacks it (followup with day_* trigger)', () => {
+    // shouldRetrieveKnowledge gates day_* off; the trace just doesn't
+    // contain a retrieve_knowledge span. Selector should not emit it.
+    const trace = makeTrace('agent.followup', [
+      obs('o1', 'context_build'),
+      obs('o3', 'retrieve'),
+      obs('o4', 'generate'),
+      obs('o5', 'send'),
+    ])
+    const result = selectTraceStages(trace)
+    expect(result.stages.map((s) => s.name)).toEqual([
+      'context_build',
       'retrieve',
       'generate',
       'send',

@@ -2,9 +2,10 @@ import { Card, Eyebrow, SignalBar, StatePill } from '@/lib/ui'
 import type { RecognitionData } from '../lib/extract-recognition'
 
 // Hero summary at the top of the trace panel: one row per recognition signal,
-// each rendered as a SignalBar showing allocated weight (faint clay) vs.
-// realized contribution (solid clay). Replaces the buried-in-context_build
-// signals breakdown with a glanceable view.
+// each rendered as a SignalBar showing the signal's 0–100 normalized score as
+// a proportional fill, with the realized score-point contribution as the
+// right-aligned numeric. Replaces the buried-in-context_build signals
+// breakdown with a glanceable view.
 //
 // Header: "Recognition" eyebrow + state pill on the left; score "XX /100" on
 // the right with the "/100" muted in ink-faint to keep the actual number
@@ -36,7 +37,7 @@ export function RecognitionCard({ data }: RecognitionCardProps) {
           <SignalBar
             key={s.signal}
             name={s.signal}
-            weight={s.weight}
+            normalized={s.normalized}
             contribution={s.contribution}
           />
         ))}
