@@ -2,7 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateText } from 'ai'
 
 const EXTRACTION_MODEL = 'claude-sonnet-4-6'
-const MAX_OUTPUT_TOKENS = 8000
+const MAX_OUTPUT_TOKENS = 64000
 
 export interface ExtractInput {
   slug: string

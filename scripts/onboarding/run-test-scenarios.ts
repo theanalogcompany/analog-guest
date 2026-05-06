@@ -395,6 +395,7 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
   }
 
   try {
+    console.log(`  [runScenario:${scenario.sample_id}] start`)
     const agentRunId = randomUUID()
     const ctx = await buildRuntimeContext({
       agentRunId,
@@ -412,8 +413,11 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
         receivedAt: new Date(),
       },
     })
+    console.log(`  [runScenario:${scenario.sample_id}] context built`)
     ctx.classification = await classifyStage(ctx)
+    console.log(`  [runScenario:${scenario.sample_id}] classified: ${ctx.classification.category}`)
     ctx.corpus = await retrieveCorpusStage(ctx)
+    console.log(`  [runScenario:${scenario.sample_id}] corpus retrieved: ${ctx.corpus.length} chunks`)
 
     const aiRuntime = inlineBuildAiRuntime(ctx)
     const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
@@ -423,6 +427,7 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
       relevanceScore: c.similarity,
     }))
 
+    console.log(`  [runScenario:${scenario.sample_id}] calling generateMessage...`)
     const result = await generateMessage({
       category: ctx.classification.category,
       persona: ctx.venue.brandPersona,
@@ -430,6 +435,7 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
       ragChunks,
       runtime: aiRuntime,
     })
+    console.log(`  [runScenario:${scenario.sample_id}] generateMessage returned: ok=${result.ok}`)
     if (!result.ok) {
       return {
         ...baseRow,
