@@ -1,13 +1,9 @@
 import type { TimingPlan } from './types'
 
-const TOTAL_DELAY_MIN_MS = 12_000
-// THE-230: tightened the upper bound from 120_000 (2 min) to 60_000 (1 min).
-// Two minutes felt long enough that guests would re-text or refresh before the
-// reply landed; a one-minute ceiling still reads as "the venue is busy" but
-// stays within text-response patience.
-const TOTAL_DELAY_MAX_MS = 20_000
+const TOTAL_DELAY_MIN_MS = 500
+const TOTAL_DELAY_MAX_MS = 1_000
 const MARK_AS_READ_GAP_MIN_MS = 5_000
-const MARK_AS_READ_GAP_MAX_MS = 15_000
+const MARK_AS_READ_GAP_MAX_MS = 8_000
 
 function randIntInclusive(minInclusive: number, maxInclusive: number): number {
   return Math.floor(Math.random() * (maxInclusive - minInclusive + 1)) + minInclusive
