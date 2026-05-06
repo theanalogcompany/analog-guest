@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { extractMenuExploration } from './extract-menu-exploration'
 import type { RawSignals, RecognitionResult } from './types'
 import { dedupeVisitsByLocalDate } from './visit-dedupe'
 
@@ -9,10 +10,18 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * Internal: load all raw signals for a guest at a venue from the database.
  *
  * Server-only. Uses the admin DB client, which bypasses RLS. Issues five
- * SELECTs in parallel (venue timezone, transactions, outbound/inbound
- * message counts, engagement events). Visits and the visit-date list are
- * deduplicated by calendar date in the venue's local timezone — multiple
- * transactions on the same local day count as one visit.
+ * SELECTs in parallel (venue + venue_configs embed for timezone and menu;
+ * transactions; outbound/inbound message counts; engagement events). Visits
+ * and the visit-date list are deduplicated by calendar date in the venue's
+ * local timezone — multiple transactions on the same local day count as
+ * one visit.
+ *
+ * The venue SELECT embeds venue_configs(venue_info) so percentMenuExplored
+ * has the menu universe to intersect against. We do defensive shallow
+ * extraction rather than VenueInfoSchema.safeParse: a malformed venue_info
+ * here should degrade percentMenuExplored to 0, not crash the whole
+ * recognition computation. buildRuntimeContext fails closed on the same
+ * blob for prompt-assembly reasons; recognition has no such constraint.
  */
 export async function loadSignals({
   guestId,
@@ -33,12 +42,12 @@ export async function loadSignals({
   ] = await Promise.all([
     supabase
       .from('venues')
-      .select('timezone')
+      .select('timezone, venue_configs(venue_info)')
       .eq('id', venueId)
       .maybeSingle(),
     supabase
       .from('transactions')
-      .select('amount_cents, occurred_at')
+      .select('amount_cents, occurred_at, raw_data')
       .eq('venue_id', venueId)
       .eq('guest_id', guestId)
       .gte('occurred_at', lookbackIso),
@@ -120,6 +129,12 @@ export async function loadSignals({
   }
   const referralsMade = engagementEventsByType['referral_made'] ?? 0
 
+  const menuItems = extractMenuItemsFromVenueRow(venueResult.data.venue_configs)
+  const { uniqueMenuItemsOrdered, totalMenuItems } = extractMenuExploration(
+    transactionsResult.data ?? [],
+    menuItems,
+  )
+
   return {
     ok: true,
     data: {
@@ -130,9 +145,14 @@ export async function loadSignals({
       // TODO: refine to per-message reply attribution when message threading is wired up.
       repliedMessageCount: inboundMessagesResult.count ?? 0,
       engagementEventsByType,
-      // TODO: populate from POS line items once THE-125 ships.
-      uniqueMenuItemsOrdered: 0,
-      totalMenuItems: 0,
+      // Exact-match-after-normalization (lowercase + trim) against the venue
+      // menu universe. Fuzzy matching / a name-mapping table is the next
+      // iteration when real POS data introduces noise that exact match can't
+      // handle. `availability` field is freeform text today — TODO: filter
+      // archived/seasonal entries from the universe once the schema gains a
+      // clean active flag.
+      uniqueMenuItemsOrdered,
+      totalMenuItems,
       referralsMade,
       // TODO: source 'referral_converted' once that event_type is added to the engagement_events check constraint.
       referralsConverted: 0,
@@ -141,4 +161,45 @@ export async function loadSignals({
       visitDateList,
     },
   }
+}
+
+// PostgREST returns `venue_configs` as either an object or a single-element
+// array depending on relationship cardinality (same shape note as
+// build-runtime-context.ts). Defensive read: if anything is missing or
+// malformed, return [] so percentMenuExplored degrades to 0 rather than
+// crashing recognition.
+function extractMenuItemsFromVenueRow(
+  venueConfigs: unknown,
+): Array<{ name: string }> {
+  const config = unwrapVenueConfig(venueConfigs)
+  if (config === null) return []
+  const venueInfo = config.venue_info
+  if (typeof venueInfo !== 'object' || venueInfo === null) return []
+  const menu = (venueInfo as Record<string, unknown>).menu
+  if (typeof menu !== 'object' || menu === null) return []
+  const items = (menu as Record<string, unknown>).items
+  if (!Array.isArray(items)) return []
+  const result: Array<{ name: string }> = []
+  for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue
+    const name = (item as Record<string, unknown>).name
+    if (typeof name !== 'string') continue
+    result.push({ name })
+  }
+  return result
+}
+
+function unwrapVenueConfig(
+  venueConfigs: unknown,
+): Record<string, unknown> | null {
+  if (Array.isArray(venueConfigs)) {
+    const first = venueConfigs[0]
+    return typeof first === 'object' && first !== null
+      ? (first as Record<string, unknown>)
+      : null
+  }
+  if (typeof venueConfigs === 'object' && venueConfigs !== null) {
+    return venueConfigs as Record<string, unknown>
+  }
+  return null
 }
