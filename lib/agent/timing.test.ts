@@ -16,8 +16,8 @@ describe('sampleTiming', () => {
   it('totalDelayMs always falls in [30s, 60s]', () => {
     for (let i = 0; i < 1000; i++) {
       const plan = sampleTiming()
-      expect(plan.totalDelayMs).toBeGreaterThanOrEqual(12_000)
-      expect(plan.totalDelayMs).toBeLessThanOrEqual(20_000)
+      expect(plan.totalDelayMs).toBeGreaterThanOrEqual(500)
+      expect(plan.totalDelayMs).toBeLessThanOrEqual(1_000)
     }
   })
 
