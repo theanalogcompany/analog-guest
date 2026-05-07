@@ -1,0 +1,39 @@
+-- ============================================================================
+-- migration 014: messages.response_review
+-- ============================================================================
+-- Adds messages.response_review (jsonb, nullable) for per-message reviews
+-- captured from the Command Center conversation viewer (THE-235). Mirrors
+-- the 08-flow's onboarding ingestion contract — same destinations
+-- (voice_corpus row keyed on source_ref='cc-review:{message_id}', dedupe-
+-- append into venue_configs.brand_persona.voiceAntiPatterns) — applied
+-- forward-only to live production messages.
+--
+-- Persisted shape (validated at the API boundary by MessageReviewSchema):
+--   {
+--     verdict: 'approve' | 'edit',
+--     editedMessage?: string,         // required when verdict='edit'
+--     comment?: string,
+--     ruleText?: string,              // anti-pattern verbatim, including 'rule:' prefix
+--     category: string,               // MessageCategory at review time
+--     reviewerOperatorId: uuid,
+--     reviewedAt: ISO timestamp,
+--     corpusSourceRef?: string        // set when a corpus row was written ('cc-review:{message_id}')
+--   }
+--
+-- Latest-only (column, not separate review-history table). Re-edits replace
+-- the JSONB stamp and replace-in-place the matching voice_corpus row via
+-- partial unique index on (venue_id, source_ref) from migration 008. If
+-- review history per message becomes a need later, accept the migration
+-- cost then.
+--
+-- Inbound messages cannot be reviewed — direction guard lives in the API
+-- layer rather than a CHECK constraint, since the JSONB shape carries no
+-- direction-aware constraint of its own.
+--
+-- No partial index. The only query path is "load review for this message"
+-- (goes through messages PK) and "list reviewed messages for venue+guest"
+-- (the conversations viewer already filters by venue_id+guest_id and
+-- inspects the JSONB in-memory across the 200-row window).
+
+alter table messages
+  add column response_review jsonb;

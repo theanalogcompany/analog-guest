@@ -492,6 +492,7 @@ export type Database = {
           provider_message_id: string | null
           reaction_type: string | null
           reply_to_message_id: string | null
+          response_review: Json | null
           review_reason: string | null
           reviewed_at: string | null
           reviewed_by_operator_id: string | null
@@ -520,6 +521,7 @@ export type Database = {
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
+          response_review?: Json | null
           review_reason?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
@@ -548,6 +550,7 @@ export type Database = {
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
+          response_review?: Json | null
           review_reason?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
