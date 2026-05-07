@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Json } from '@/db/types'
 import { createBrowserClient } from '@/lib/db/browser'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import type { GuestState } from '@/lib/recognition'
@@ -8,6 +9,7 @@ import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 import { ConversationThread, type ThreadMessage } from './_components/conversation-thread'
 import { GuestContext } from './_components/guest-context'
 import { InboundDetail } from './_components/inbound-detail'
+import { ReviewForm } from './_components/review-form'
 import { TracePanel } from './_components/trace-panel'
 import { type Transaction } from './_components/transaction-row'
 import { TransactionsList } from './_components/transactions-list'
@@ -66,6 +68,8 @@ export interface InitialData {
   transactions: Transaction[]
   /** Window the transactions were filtered against (server uses 90 days). */
   transactionsWindowDays: number
+  /** uuid → email-local-part. Used by the review form to display "reviewed by …". */
+  operatorMap: Record<string, string>
 }
 
 interface ConversationsClientProps {
@@ -82,6 +86,8 @@ interface MessageRow {
   langfuse_trace_id: string | null
   reply_to_message_id: string | null
   provider_message_id: string | null
+  category: string | null
+  response_review: Json | null
   venue_id: string
   guest_id: string
 }
@@ -174,6 +180,8 @@ export function ConversationsClient({
                   langfuseTraceId: m.langfuse_trace_id,
                   replyToMessageId: m.reply_to_message_id,
                   providerMessageId: m.provider_message_id,
+                  category: m.category,
+                  responseReview: m.response_review,
                 },
               ]
             })
@@ -187,6 +195,11 @@ export function ConversationsClient({
                       body: m.body || x.body,
                       langfuseTraceId: m.langfuse_trace_id ?? x.langfuseTraceId,
                       replyToMessageId: m.reply_to_message_id ?? x.replyToMessageId,
+                      // response_review is the THE-235 surface — UPDATE
+                      // payloads from the review API land here. Last-write-
+                      // wins; idempotent on self-echo since the JSONB
+                      // value matches what the route just wrote.
+                      responseReview: m.response_review ?? x.responseReview,
                     }
                   : x,
               ),
@@ -258,6 +271,7 @@ export function ConversationsClient({
           guestPhone={initialData.guest.phoneNumber}
           venueTimezone={initialData.venue.timezone}
           triggeredByMap={triggeredByMap}
+          operatorMap={initialData.operatorMap}
           onSelectMessage={onSelectMessage}
         />
       </div>
@@ -311,6 +325,7 @@ interface SidePanelProps {
   guestPhone: string
   venueTimezone: string
   triggeredByMap: Map<string, string>
+  operatorMap: Record<string, string>
   onSelectMessage: (id: string) => void
 }
 
@@ -322,6 +337,7 @@ function SidePanel({
   guestPhone,
   venueTimezone,
   triggeredByMap,
+  operatorMap,
   onSelectMessage,
 }: SidePanelProps) {
   if (!selected) {
@@ -350,11 +366,36 @@ function SidePanel({
   }
   const trace = selected.id in traceCache ? traceCache[selected.id] : null
   const loading = traceLoading && !(selected.id in traceCache)
+  // Vertical split (THE-235): trace on top (flex-1, variable height), review
+  // form on bottom (h-72 fixed, ~288px). Trace owns its own scroll inside
+  // PanelChrome; the form's container provides scroll for its own
+  // overflow. Border on the form's top divides the two halves.
   return (
-    <TracePanel
-      trace={trace}
-      loading={loading}
-      langfuseTraceId={selected.langfuseTraceId}
-    />
+    <div className="w-full h-full flex flex-col">
+      <div className="flex-1 min-h-0">
+        <TracePanel
+          trace={trace}
+          loading={loading}
+          langfuseTraceId={selected.langfuseTraceId}
+        />
+      </div>
+      <div className="h-72 flex-shrink-0 overflow-y-auto border-t border-stone-light/60 bg-paper/50">
+        {/* key forces a remount when the selected message changes so the
+            form's lazy useState initializers re-run with fresh
+            responseReview / messageBody. Same pattern conversations/page.tsx
+            uses for ConversationsClient on (venue, guest) changes —
+            sidesteps the setState-in-effect lint rule and is genuinely
+            cleaner than a re-prefill useEffect. */}
+        <ReviewForm
+          key={selected.id}
+          messageId={selected.id}
+          messageBody={selected.body}
+          messageCategory={selected.category}
+          responseReview={selected.responseReview}
+          operatorMap={operatorMap}
+          venueTimezone={venueTimezone}
+        />
+      </div>
+    </div>
   )
 }

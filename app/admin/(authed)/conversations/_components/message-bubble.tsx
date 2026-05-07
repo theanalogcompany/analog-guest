@@ -1,6 +1,7 @@
 'use client'
 
 import { formatInTimeZone } from 'date-fns-tz'
+import { StatusDot } from '@/lib/ui'
 
 // iMessage-style bubble. Brand discipline yields to fitness-for-purpose on
 // internal debugging surfaces — operator should see the conversation the way
@@ -14,6 +15,13 @@ import { formatInTimeZone } from 'date-fns-tz'
 // within 60s of the previous), the outer corner gets squared off so the chain
 // reads as a single block. Tail/non-tail decisions live on the parent thread
 // component — this component just receives `position`.
+//
+// Reviewed indicator (THE-235): a small green StatusDot sibling sits to the
+// right of outbound bubbles when response_review is non-null. Outside-the-
+// bubble placement is deliberate — overlay marks fight the iMessage palette.
+// Distinct from the selection ring (which is a clay focus ring on the bubble
+// itself) so an operator can tell at a glance which messages have been
+// reviewed AND which one they're currently inspecting.
 
 export type BubblePosition = 'first' | 'middle' | 'last' | 'only'
 export type BubbleDirection = 'inbound' | 'outbound'
@@ -25,6 +33,8 @@ interface MessageBubbleProps {
   venueTimezone: string
   position: BubblePosition
   selected: boolean
+  /** True when messages.response_review is non-null. Outbound only — the form doesn't render for inbound, so the dot doesn't either. */
+  reviewed: boolean
   // Why disabled: outbound rows without langfuse_trace_id (pre-THE-200 history,
   // capture-off venues, etc.) have nothing to render in the trace panel. We
   // still let the operator click — the panel renders a "no trace available"
@@ -39,6 +49,7 @@ export function MessageBubble({
   venueTimezone,
   position,
   selected,
+  reviewed,
   onSelect,
 }: MessageBubbleProps) {
   const isOutbound = direction === 'outbound'
@@ -85,8 +96,11 @@ export function MessageBubble({
     'h:mm a · EEE MMM d',
   )
 
+  // gap-1.5 (6px) puts a hair of breathing room between the bubble's tail
+  // edge and the reviewed dot without crowding. items-end aligns the dot
+  // with the bubble's tail-corner so it tracks the chain visually.
   return (
-    <div className={`flex ${align} px-2`}>
+    <div className={`flex items-end gap-1.5 ${align} px-2`}>
       <button
         type="button"
         onClick={onSelect}
@@ -118,6 +132,15 @@ export function MessageBubble({
       >
         {body}
       </button>
+      {/* Outbound-only. Inbound bubbles never get a review (form doesn't
+          render on inbound) so we don't allocate space for the dot there.
+          Padded down 4px so the dot aligns with the lower third of the
+          bubble rather than the absolute baseline. */}
+      {direction === 'outbound' && reviewed ? (
+        <span className="pb-1" data-testid="reviewed-indicator">
+          <StatusDot tone="good" label="Reviewed" />
+        </span>
+      ) : null}
     </div>
   )
 }
