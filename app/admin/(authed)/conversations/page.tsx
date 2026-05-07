@@ -212,11 +212,12 @@ async function loadConversationData({
     earliestMessageResult,
     earliestTransactionResult,
     transactionsListResult,
+    operatorsResult,
   ] = await Promise.all([
     supabase
       .from('messages')
       .select(
-        'id, body, direction, created_at, langfuse_trace_id, reply_to_message_id, voice_fidelity, category, status, provider_message_id',
+        'id, body, direction, created_at, langfuse_trace_id, reply_to_message_id, voice_fidelity, category, status, provider_message_id, response_review',
       )
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
@@ -298,6 +299,11 @@ async function loadConversationData({
       .gte('occurred_at', lookbackIso)
       .order('occurred_at', { ascending: false })
       .limit(TRANSACTIONS_LIMIT),
+    // Operators table is small (single-digit rows in the analog admin pool).
+    // Loading the whole list once per page render is fine — the alternative
+    // (per-message lookup) burns more round trips. Used to map the JSONB's
+    // reviewedBy uuid to a display name in the review form's status row.
+    supabase.from('operators').select('id, email'),
   ])
 
   if (messagesResult.error) throw new Error(`messages load failed: ${messagesResult.error.message}`)
@@ -317,6 +323,9 @@ async function loadConversationData({
   }
   if (transactionsListResult.error) {
     throw new Error(`transactions list load failed: ${transactionsListResult.error.message}`)
+  }
+  if (operatorsResult.error) {
+    throw new Error(`operators load failed: ${operatorsResult.error.message}`)
   }
 
   // Defensive parse — bad JSONB at this seam shouldn't fail the page; log and
@@ -389,7 +398,19 @@ async function loadConversationData({
     langfuseTraceId: m.langfuse_trace_id,
     replyToMessageId: m.reply_to_message_id,
     providerMessageId: m.provider_message_id,
+    category: m.category,
+    responseReview: m.response_review,
   }))
+
+  // Build operator display-name map. email local-part (jaipal@x → jaipal) is
+  // the cheapest stable display label since the operators table has no
+  // separate name column. Falls back to full email if the address is
+  // malformed (no '@'). Used by the review form's "reviewed by …" status row.
+  const operatorMap: Record<string, string> = {}
+  for (const op of operatorsResult.data ?? []) {
+    const at = op.email.indexOf('@')
+    operatorMap[op.id] = at > 0 ? op.email.slice(0, at) : op.email
+  }
   // Response rate computed from the loaded conversation messages (200-row
   // cap). For high-volume guests the count would under-count; Jaipal's run
   // (~38 messages) fits well within the cap so this is exact in practice.
@@ -453,6 +474,7 @@ async function loadConversationData({
     todayLocalIso,
     transactions,
     transactionsWindowDays: VISIT_LOOKBACK_DAYS,
+    operatorMap,
   }
 }
 

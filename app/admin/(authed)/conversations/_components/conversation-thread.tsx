@@ -2,6 +2,7 @@
 
 import { formatInTimeZone } from 'date-fns-tz'
 import { useEffect, useRef } from 'react'
+import type { Json } from '@/db/types'
 import { type BubblePosition, MessageBubble } from './message-bubble'
 
 // iMessage-style thread layout. Bubbles are clickable; the parent owns the
@@ -26,6 +27,10 @@ export interface ThreadMessage {
   createdAt: Date
   langfuseTraceId: string | null
   replyToMessageId: string | null
+  /** messages.category at row write time. Form pre-fills the dropdown from this. */
+  category: string | null
+  /** messages.response_review JSONB. Parsed by the form via MessageReviewSchema.safeParse. */
+  responseReview: Json | null
 }
 
 interface ConversationThreadProps {
@@ -98,6 +103,7 @@ export function ConversationThread({
             venueTimezone={venueTimezone}
             position={item.position}
             selected={item.message.id === selectedMessageId}
+            reviewed={item.message.responseReview !== null}
             onSelect={() => onSelectMessage(item.message.id)}
           />
         )
