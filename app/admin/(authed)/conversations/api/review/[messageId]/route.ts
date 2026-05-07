@@ -43,7 +43,7 @@ const PutBodySchema = z.object({
   editedMessage: z.string().optional(),
   comment: z.string().optional(),
   rule: z.string().optional(),
-  expectedFailure: z.boolean().optional(),
+  expectedFailure: z.string().optional(),
 })
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -125,9 +125,11 @@ export async function PUT(
   }
 
   // expectedFailure short-circuits ingestion. Mirrors the 08-flow's
-  // expected_failure: comment-prefix branch — JSONB still stamped (we
-  // looked at this) but corpus/antipattern aren't touched.
-  const ingestSuppressed = body.expectedFailure === true
+  // expected_failure: REASON comment encoding — JSONB still stamped (we
+  // looked at this, here's why it's an acceptable failure) but
+  // corpus/antipattern aren't touched. Truthy check covers both undefined
+  // and empty-string cases — empty string is treated as "not flagged."
+  const ingestSuppressed = !!body.expectedFailure?.trim()
 
   // ---- 1. corpus replace (when editedMessage present) ----
   const editedMessage = body.editedMessage?.trim()

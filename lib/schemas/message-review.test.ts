@@ -23,7 +23,7 @@ describe('MessageReviewSchema', () => {
       editedMessage: 'try a refund of the cortado.',
       comment: 'too defensive in the original',
       rule: "rule: don't apologize twice",
-      expectedFailure: false,
+      expectedFailure: 'classifier confidence dipped below threshold here',
     })
     expect(parsed.success).toBe(true)
   })
@@ -44,11 +44,10 @@ describe('MessageReviewSchema', () => {
     expect(parsed.success).toBe(true)
   })
 
-  it('accepts expectedFailure=true (short-circuits ingestion at the route)', () => {
+  it('accepts expectedFailure with a reason string (short-circuits ingestion at the route)', () => {
     const parsed = MessageReviewSchema.safeParse({
       ...baseRequired,
-      expectedFailure: true,
-      comment: 'known false positive in classifier confidence',
+      expectedFailure: 'known false positive in classifier confidence',
     })
     expect(parsed.success).toBe(true)
   })
@@ -83,10 +82,10 @@ describe('MessageReviewSchema', () => {
     }
   })
 
-  it('rejects non-boolean expectedFailure', () => {
+  it('rejects non-string expectedFailure (e.g. legacy boolean)', () => {
     const parsed = MessageReviewSchema.safeParse({
       ...baseRequired,
-      expectedFailure: 'true',
+      expectedFailure: true,
     })
     expect(parsed.success).toBe(false)
   })

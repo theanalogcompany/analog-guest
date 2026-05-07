@@ -9,9 +9,11 @@ import { z } from 'zod'
 //     route writes a voice_corpus row
 //   - rule present and non-empty → operator captured an anti-pattern,
 //     route dedupe-appends to brand_persona.voiceAntiPatterns
-//   - expectedFailure true → operator flagged a known acceptable failure,
-//     route skips corpus + antipattern entirely (mirrors the 08-flow's
-//     `expected_failure:` comment-prefix branch in classifyRow)
+//   - expectedFailure present and non-empty → operator flagged a known
+//     acceptable failure with a reason; route skips corpus + antipattern
+//     entirely (mirrors the 08-flow's `expected_failure: REASON` comment
+//     encoding). Stored as a string so the reason itself is captured as
+//     structured data — symmetric with `rule` carrying its own body.
 //
 // category is optional — the form auto-prefills from messages.category and
 // the operator may leave it as-is. Persisted as a permissive string so
@@ -30,7 +32,7 @@ export const MessageReviewSchema = z.object({
   editedMessage: z.string().optional(),
   comment: z.string().optional(),
   rule: z.string().optional(),
-  expectedFailure: z.boolean().optional(),
+  expectedFailure: z.string().optional(),
 })
 
 export type MessageReview = z.infer<typeof MessageReviewSchema>

@@ -343,7 +343,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
     expect(state.updateCalls).toHaveLength(1)
   })
 
-  it('expectedFailure=true short-circuits ingestion (skip corpus + antipattern, stamp only)', async () => {
+  it('expectedFailure with a reason short-circuits ingestion (skip corpus + antipattern, stamp only)', async () => {
     const state = newAdminState()
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
@@ -352,8 +352,8 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
     const res = await PUT(
       buildRequest({
         editedMessage: 'should not be ingested',
-        rule: "rule: should not be appended",
-        expectedFailure: true,
+        rule: 'rule: should not be appended',
+        expectedFailure: 'classifier confidence below threshold; reviewing as accepted miss',
       }),
       buildParams(MESSAGE_ID),
     )
@@ -363,10 +363,32 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
     expect(dedupeAndAppendAntiPatterns).not.toHaveBeenCalled()
     expect(state.updateCalls).toHaveLength(1)
     const stamped = state.updateCalls[0].payload.response_review as Record<string, unknown>
-    expect(stamped.expectedFailure).toBe(true)
+    expect(stamped.expectedFailure).toBe(
+      'classifier confidence below threshold; reviewing as accepted miss',
+    )
     // The submitted edit/rule are still recorded in the JSONB even though
     // they didn't drive ingestion — operator audit value.
     expect(stamped.editedMessage).toBe('should not be ingested')
+  })
+
+  it('empty-string expectedFailure does not suppress ingestion (treated as not flagged)', async () => {
+    const state = newAdminState()
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    vi.mocked(upsertCorpusEdit).mockResolvedValue({
+      ok: true,
+      corpusId: 'new-corpus-id',
+      outcome: 'inserted',
+    })
+
+    const res = await PUT(
+      buildRequest({ editedMessage: 'a real edit', expectedFailure: '   ' }),
+      buildParams(MESSAGE_ID),
+    )
+
+    expect(res.status).toBe(200)
+    expect(upsertCorpusEdit).toHaveBeenCalled()
   })
 })
 
