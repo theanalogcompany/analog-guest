@@ -370,8 +370,16 @@ function SidePanel({
   // form on bottom (h-72 fixed, ~288px). Trace owns its own scroll inside
   // PanelChrome; the form's container provides scroll for its own
   // overflow. Border on the form's top divides the two halves.
+  //
+  // min-h-0 + overflow-hidden on the root flex-col are load-bearing. Without
+  // them, the form's `flex-shrink-0 h-72` refuses to shrink AND its visual
+  // box extends past the grid cell's `h-full` boundary into Region 3's
+  // (venue + guest cards) space, where Region 3's opaque `bg-parchment`
+  // paints over the form's lower half. min-h-0 lets the parent participate
+  // in its grid cell's height constraint; overflow-hidden clips any
+  // remaining visual escape on viewports too short for h-72 + min trace.
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full min-h-0 overflow-hidden flex flex-col">
       <div className="flex-1 min-h-0">
         <TracePanel
           trace={trace}
