@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { dedupeAndAppendAntiPatterns, upsertCorpusEdit } from '@/lib/voice-training'
 import {
   findByPrefix,
   findVenueFolder,
@@ -12,11 +13,10 @@ import {
   buildPhase5Subsection,
   classifyRow,
   type CorpusEntrySummary,
-  dedupeAndAppendAntiPatterns,
   parseReviewSheet,
   rulePayloadFromComment,
-  upsertCorpusEdit,
-} from './onboarding/ingest-response-review'
+  tagsForRow,
+} from './onboarding/ingest-response-review-pure'
 
 interface ParsedArgs {
   slug: string
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   // Per-row processing.
   const newCorpusEntries: CorpusEntrySummary[] = []
   const candidateRules: string[] = []
-  const embedFailures: Array<{ corpusId: string; sample_id: string; category: string }> = []
+  const embedFailures: Array<{ sample_id: string; category: string }> = []
   let approveCount = 0
   let expectedFailureCount = 0
   let corpusInsertedCount = 0
@@ -136,16 +136,31 @@ async function main(): Promise<void> {
           `[ingest-response-review] ${row.sample_id}: verdict=edit but edited_message is empty. Operator must fill the edited_message cell or change verdict to approve.`,
         )
       }
-      const result = await upsertCorpusEdit(venueId, row)
-      if (result.inserted) {
-        corpusInsertedCount++
-        if (result.embedFailed) {
-          embedFailures.push({
-            corpusId: result.corpusId,
-            sample_id: row.sample_id,
-            category: row.category,
-          })
+      const result = await upsertCorpusEdit(
+        {
+          venueId,
+          sourceRef: `08-review:${row.sample_id}`,
+          editedMessage: row.edited_message,
+          tags: tagsForRow(row),
+        },
+        'skip-existing',
+      )
+      if (!result.ok) {
+        if (result.errorCode === 'embed_failed') {
+          // Helper auto-deletes the corpus row on embed failure (no orphan).
+          // Skip the markdown summary entry for this row and surface in the
+          // tail warning so the operator knows to re-run.
+          embedFailures.push({ sample_id: row.sample_id, category: row.category })
+          console.error(
+            `[ingest-response-review] ${row.sample_id}: embed failed (${result.error}). Row not added.`,
+          )
+        } else {
+          throw new Error(
+            `[ingest-response-review] ${row.sample_id}: ${result.error}`,
+          )
         }
+      } else if (result.outcome === 'inserted') {
+        corpusInsertedCount++
         newCorpusEntries.push({
           sample_id: row.sample_id,
           category: row.category,
@@ -153,7 +168,7 @@ async function main(): Promise<void> {
           generated_message: row.generated_message,
           edited_message: row.edited_message,
         })
-      } else {
+      } else if (result.outcome === 'skipped_existing') {
         corpusExistingCount++
       }
     }
@@ -220,13 +235,13 @@ async function main(): Promise<void> {
   console.log(`  markdown updated: ${markdownStatus}`)
   if (embedFailures.length > 0) {
     console.warn(
-      `[ingest-response-review] WARNING: ${embedFailures.length} corpus rows inserted but embedding failed:`,
+      `[ingest-response-review] WARNING: ${embedFailures.length} edit rows skipped due to embed failure:`,
     )
     for (const f of embedFailures) {
-      console.warn(`  - voice_corpus.id = ${f.corpusId} (sample_id ${f.sample_id}, category ${f.category})`)
+      console.warn(`  - sample_id ${f.sample_id} (category ${f.category})`)
     }
     console.warn(
-      `These rows have no embeddings and won't be retrieved by RAG. To recover: delete these rows in Supabase Studio and re-run.`,
+      `No corpus rows were created for these (helper auto-deletes on embed failure). Re-run to retry.`,
     )
   }
 }
