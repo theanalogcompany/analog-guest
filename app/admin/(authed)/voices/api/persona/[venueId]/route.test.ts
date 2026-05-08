@@ -1,27 +1,23 @@
+// Mock signatures mirror the supabase-js fluent builder; column names +
+// filter args we don't inspect inside the test.
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
+import { NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/db/server', () => ({
-  createServerClient: vi.fn(),
+vi.mock('@/lib/auth', () => ({
+  requireVenueAdmin: vi.fn(),
 }))
-vi.mock('@/lib/auth', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
-  return { ...actual, verifyAnalogAdminAccess: vi.fn() }
-})
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
 }))
 
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { requireVenueAdmin } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
-import { createServerClient } from '@/lib/db/server'
 import { PATCH } from './route'
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222'
-const AUTH_USER_ID = '33333333-3333-4333-8333-333333333333'
 
 const validPersona = {
   tone: 'warm and direct',
@@ -73,14 +69,6 @@ function makeAdminMock(state: AdminMockState) {
   }
 }
 
-function makeSessionMock(session: { user: { id: string } } | null) {
-  return {
-    auth: {
-      getSession: async () => ({ data: { session }, error: null }),
-    },
-  }
-}
-
 function buildRequest(body: unknown): Request {
   return new Request('http://test/admin/voices/api/persona/x', {
     method: 'PATCH',
@@ -94,66 +82,28 @@ function buildParams(venueId: string) {
 }
 
 beforeEach(() => {
-  vi.mocked(createServerClient).mockReset()
+  vi.mocked(requireVenueAdmin).mockReset()
   vi.mocked(createAdminClient).mockReset()
-  vi.mocked(verifyAnalogAdminAccess).mockReset()
 })
 
 describe('PATCH /admin/voices/api/persona/[venueId] — auth', () => {
-  it('401 when no session', async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock(null) as unknown as Awaited<ReturnType<typeof createServerClient>>,
-    )
-    const res = await PATCH(buildRequest({ tone: 'x' }), buildParams(VENUE_ID))
-    expect(res.status).toBe(401)
-  })
-
-  it('403 when operator is not an analog admin', async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock({ user: { id: AUTH_USER_ID } }) as unknown as Awaited<
-        ReturnType<typeof createServerClient>
-      >,
-    )
-    vi.mocked(verifyAnalogAdminAccess).mockRejectedValue(
-      new AuthError(403, 'not an analog admin'),
-    )
-    const res = await PATCH(buildRequest({ tone: 'x' }), buildParams(VENUE_ID))
-    expect(res.status).toBe(403)
-  })
-
-  it('403 when venue is not in operator allowlist', async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock({ user: { id: AUTH_USER_ID } }) as unknown as Awaited<
-        ReturnType<typeof createServerClient>
-      >,
-    )
-    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
-      operatorId: OPERATOR_ID,
-      allowedVenueIds: ['44444444-4444-4444-8444-444444444444'],
-      isAnalogAdmin: true,
+  it('returns the auth helper response when auth fails', async () => {
+    vi.mocked(requireVenueAdmin).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
     })
     const res = await PATCH(buildRequest({ tone: 'x' }), buildParams(VENUE_ID))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
   })
 })
 
 describe('PATCH /admin/voices/api/persona/[venueId] — body validation', () => {
   beforeEach(() => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock({ user: { id: AUTH_USER_ID } }) as unknown as Awaited<
-        ReturnType<typeof createServerClient>
-      >,
-    )
-    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+    vi.mocked(requireVenueAdmin).mockResolvedValue({
+      ok: true,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
-      isAnalogAdmin: true,
+      venueId: VENUE_ID,
     })
-  })
-
-  it('400 on invalid venueId', async () => {
-    const res = await PATCH(buildRequest({ tone: 'x' }), buildParams('not-a-uuid'))
-    expect(res.status).toBe(400)
   })
 
   it('400 on invalid emojiPolicy enum value', async () => {
@@ -167,15 +117,10 @@ describe('PATCH /admin/voices/api/persona/[venueId] — body validation', () => 
 
 describe('PATCH /admin/voices/api/persona/[venueId] — happy path', () => {
   beforeEach(() => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock({ user: { id: AUTH_USER_ID } }) as unknown as Awaited<
-        ReturnType<typeof createServerClient>
-      >,
-    )
-    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+    vi.mocked(requireVenueAdmin).mockResolvedValue({
+      ok: true,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
-      isAnalogAdmin: true,
+      venueId: VENUE_ID,
     })
   })
 

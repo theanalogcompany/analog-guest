@@ -2,57 +2,40 @@
 
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Database } from '@/db/types'
 import { createBrowserClient } from '@/lib/db/browser'
 import { PlaygroundShell } from './_components/playground-shell'
 import { Rail } from './_components/rail'
 import { ThreadPane } from './_components/thread-pane'
 import { ThreadsList } from './_components/threads-list'
 import { Topbar } from './_components/topbar'
-import type {
-  VoicePageData,
-  VoicePageMessage,
-} from './_lib/load-voice-page'
+import type { VoicePageData } from './_lib/load-voice-page'
 
-// THE-237 (PR-B): client orchestrator for the per-voice workbench. Owns
-// selection (which guest's thread is loaded, which outbound bubble is
-// "flagged"), Realtime subscription on `messages` for the venue, and the
-// top-level wiring between the threads list, thread pane, playground
-// shell, and right rail.
-//
-// Mutations live in their respective rail-* components and the topbar
-// voice-name editor. Each calls fetch(...) → router.refresh() to invalidate
-// the server-rendered persona/corpus/threads/lastRefinedAt props. See
-// page.tsx for the propagation pattern.
+// Client orchestrator for the per-voice workbench. Owns the flagged-bubble
+// selection (`selectedMessageId`) and the realtime subscription. Messages
+// themselves come straight from the server prop — realtime events trigger
+// a router.refresh() so the server stays canonical and we don't have to
+// reconcile a local state shadow with the next render.
 
 interface VoicesClientProps {
   data: VoicePageData
 }
 
-interface MessageRow {
-  id: string
-  guest_id: string
-  body: string
-  direction: string
-  created_at: string
-  reply_to_message_id: string | null
-  venue_id: string
-}
+type MessageRow = Database['public']['Tables']['messages']['Row']
 
 export function VoicesClient({ data }: VoicesClientProps) {
   const router = useRouter()
-  const [messages, setMessages] = useState<VoicePageMessage[]>(
-    data.selectedMessages,
-  )
+  const messages = data.selectedMessages
+
   // Default-select the most recent outbound — matches the mockup's
-  // "click an agent message" framing. If there are no outbounds yet, no
-  // selection.
+  // "click an agent message" framing. If the selected id ever drops out of
+  // the messages array (rare; effectively never on this surface), the
+  // useMemo below resolves to null and the playground falls back to the
+  // unselected state cleanly. The page-level key={selectedGuestId} on the
+  // parent forces a fresh mount on guest change, re-running the
+  // initializer.
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(
-    () => {
-      const lastOut = [...data.selectedMessages]
-        .reverse()
-        .find((m) => m.direction === 'outbound')
-      return lastOut?.id ?? null
-    },
+    () => mostRecentOutboundId(messages),
   )
 
   const selectedMessage = useMemo(
@@ -60,8 +43,8 @@ export function VoicesClient({ data }: VoicesClientProps) {
     [messages, selectedMessageId],
   )
 
-  // For the playground shell — find the inbound that triggered the selected
-  // outbound (via reply_to_message_id) so we can render the in/out pair.
+  // Find the inbound that triggered the selected outbound (via
+  // reply_to_message_id) so the playground can render the in/out pair.
   const flaggedPair = useMemo(() => {
     if (!selectedMessage || selectedMessage.direction !== 'outbound') return null
     if (!selectedMessage.replyToMessageId) return null
@@ -70,64 +53,36 @@ export function VoicesClient({ data }: VoicesClientProps) {
     return { inbound, outbound: selectedMessage }
   }, [selectedMessage, messages])
 
-  // Realtime subscription — duplicates the conversations-viewer pattern as
-  // agreed. Extract once we have a second instance.
+  // Realtime: any insert/update for this venue+guest triggers a server
+  // re-fetch. Avoids local-state-shadow drift; the operator is staring at
+  // the screen so a ~150ms revalidation hop is fine. Same trade-off the
+  // conversations viewer makes for the rail mutations.
+  const venueId = data.venue.id
+  const selectedGuestId = data.selectedGuest?.id ?? null
   useEffect(() => {
-    if (!data.selectedGuest) return
-    const guestId = data.selectedGuest.id
+    if (!selectedGuestId) return
     const supabase = createBrowserClient()
     const channel = supabase
-      .channel(`voices:${data.venue.id}:${guestId}`)
+      .channel(`voices:${venueId}:${selectedGuestId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'messages',
-          filter: `venue_id=eq.${data.venue.id}`,
+          filter: `venue_id=eq.${venueId}`,
         },
         (payload) => {
           const row = (payload.new ?? payload.old) as MessageRow | undefined
-          if (!row || row.guest_id !== guestId) return
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const m = payload.new as MessageRow
-            if (!m.body) return
-            setMessages((prev) => {
-              if (prev.some((x) => x.id === m.id)) return prev
-              return [
-                ...prev,
-                {
-                  id: m.id,
-                  body: m.body,
-                  direction:
-                    m.direction === 'outbound' ? 'outbound' : 'inbound',
-                  createdAt: new Date(m.created_at),
-                  replyToMessageId: m.reply_to_message_id,
-                },
-              ]
-            })
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const m = payload.new as MessageRow
-            setMessages((prev) =>
-              prev.map((x) =>
-                x.id === m.id
-                  ? {
-                      ...x,
-                      body: m.body || x.body,
-                      replyToMessageId:
-                        m.reply_to_message_id ?? x.replyToMessageId,
-                    }
-                  : x,
-              ),
-            )
-          }
+          if (!row || row.guest_id !== selectedGuestId) return
+          router.refresh()
         },
       )
       .subscribe()
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [data.venue.id, data.selectedGuest])
+  }, [venueId, selectedGuestId, router])
 
   const onSelectGuest = useCallback(
     (guestId: string) => {
@@ -149,14 +104,11 @@ export function VoicesClient({ data }: VoicesClientProps) {
     rules: data.persona.voiceAntiPatterns.length,
   }
 
-  const displayLabel = data.persona.voiceName ?? data.venue.name
-
   return (
     <div className="flex flex-col h-full bg-paper">
       <Topbar
         venueName={data.venue.name}
         voiceName={data.persona.voiceName ?? null}
-        displayLabel={displayLabel}
         lastRefinedAt={data.lastRefinedAt}
         counts={counts}
       />
@@ -172,7 +124,7 @@ export function VoicesClient({ data }: VoicesClientProps) {
       <div className="flex-1 grid grid-cols-[280px_1fr_400px] min-h-0">
         <ThreadsList
           threads={data.threads}
-          selectedGuestId={data.selectedGuest?.id ?? null}
+          selectedGuestId={selectedGuestId}
           onSelectGuest={onSelectGuest}
           venueName={data.venue.name}
           voiceName={data.persona.voiceName ?? null}
@@ -189,7 +141,7 @@ export function VoicesClient({ data }: VoicesClientProps) {
         </div>
 
         <Rail
-          venueId={data.venue.id}
+          venueId={venueId}
           persona={data.persona}
           corpus={data.corpus}
           counts={counts}
@@ -198,4 +150,13 @@ export function VoicesClient({ data }: VoicesClientProps) {
       </div>
     </div>
   )
+}
+
+function mostRecentOutboundId(
+  messages: ReadonlyArray<{ id: string; direction: 'inbound' | 'outbound' }>,
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'outbound') return messages[i].id
+  }
+  return null
 }

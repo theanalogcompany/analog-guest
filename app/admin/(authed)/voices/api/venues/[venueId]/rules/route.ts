@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
+import { requireVenueAdmin } from '@/lib/auth'
 import { dedupeAndAppendAntiPatterns, removeAntiPattern } from '@/lib/voice-training'
 
-// POST/DELETE /admin/voices/api/rules/[venueId] — venue anti-pattern adds
-// and exact-text removes from the rail's Rules pane. THE-237.
+// POST/DELETE /admin/voices/api/venues/[venueId]/rules — venue anti-pattern
+// adds and exact-text removes from the rail's Rules pane.
 //
 // Adds use dedupeAndAppendAntiPatterns with source='manual' and the operator
 // UUID, matching the cc-review path. Removes are exact-text matches —
 // operators delete what they see (see remove-anti-pattern.ts for rationale).
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const PostBodySchema = z.object({
   // Trim outer whitespace per agreed convention; inner text stays as typed.
@@ -24,45 +21,13 @@ const DeleteBodySchema = z.object({
 
 export const dynamic = 'force-dynamic'
 
-async function auth(
-  request: Request,
-  venueId: string,
-): Promise<
-  | { ok: true; operatorId: string }
-  | { ok: false; status: number; body: Record<string, unknown> }
-> {
-  const supabaseSession = await createServerClient()
-  const {
-    data: { session },
-  } = await supabaseSession.auth.getSession()
-  if (!session) {
-    return { ok: false, status: 401, body: { error: 'unauthorized' } }
-  }
-  let op
-  try {
-    op = await verifyAnalogAdminAccess(session.user.id)
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return { ok: false, status: e.status, body: { error: e.message } }
-    }
-    return { ok: false, status: 500, body: { error: 'auth check failed' } }
-  }
-  if (!UUID_RE.test(venueId)) {
-    return { ok: false, status: 400, body: { error: 'invalid venueId' } }
-  }
-  if (op.allowedVenueIds.length > 0 && !op.allowedVenueIds.includes(venueId)) {
-    return { ok: false, status: 403, body: { error: 'venue not allowed' } }
-  }
-  return { ok: true, operatorId: op.operatorId }
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ venueId: string }> },
 ): Promise<NextResponse> {
   const { venueId } = await params
-  const a = await auth(request, venueId)
-  if (!a.ok) return NextResponse.json(a.body, { status: a.status })
+  const auth = await requireVenueAdmin(venueId)
+  if (!auth.ok) return auth.response
 
   let body: z.infer<typeof PostBodySchema>
   try {
@@ -89,7 +54,7 @@ export async function POST(
   try {
     const result = await dedupeAndAppendAntiPatterns(venueId, [body.ruleText], {
       source: 'manual',
-      authorOperatorId: a.operatorId,
+      authorOperatorId: auth.operatorId,
     })
     return NextResponse.json({ success: true, added: result.added })
   } catch (e) {
@@ -106,8 +71,8 @@ export async function DELETE(
   { params }: { params: Promise<{ venueId: string }> },
 ): Promise<NextResponse> {
   const { venueId } = await params
-  const a = await auth(request, venueId)
-  if (!a.ok) return NextResponse.json(a.body, { status: a.status })
+  const auth = await requireVenueAdmin(venueId)
+  if (!auth.ok) return auth.response
 
   let body: z.infer<typeof DeleteBodySchema>
   try {

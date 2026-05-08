@@ -1,56 +1,21 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
+import { NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/db/server', () => ({
-  createServerClient: vi.fn(),
+vi.mock('@/lib/auth', () => ({
+  requireCorpusEntryAdmin: vi.fn(),
 }))
-vi.mock('@/lib/auth', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
-  return { ...actual, verifyAnalogAdminAccess: vi.fn() }
-})
-vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: vi.fn(),
-}))
-// Don't use importActual here — `@/lib/voice-training` transitively loads the
-// Voyage SDK at module init, which trips ERR_UNSUPPORTED_DIR_IMPORT under
-// vitest's ESM resolution.
 vi.mock('@/lib/voice-training', () => ({
   editCorpusEntry: vi.fn(),
   removeCorpusEntry: vi.fn(),
 }))
 
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createAdminClient } from '@/lib/db/admin'
-import { createServerClient } from '@/lib/db/server'
+import { requireCorpusEntryAdmin } from '@/lib/auth'
 import { editCorpusEntry, removeCorpusEntry } from '@/lib/voice-training'
 import { DELETE, PATCH } from './route'
 
 const ENTRY_ID = '11111111-1111-4111-8111-111111111111'
 const VENUE_ID = '22222222-2222-4222-8222-222222222222'
-const OTHER_VENUE_ID = '33333333-3333-4333-8333-333333333333'
 const OPERATOR_ID = '44444444-4444-4444-8444-444444444444'
-
-function makeSessionMock(session: { user: { id: string } } | null) {
-  return {
-    auth: {
-      getSession: async () => ({ data: { session }, error: null }),
-    },
-  }
-}
-
-function makeAdminMock(row: { id: string; venue_id: string } | null) {
-  return {
-    from: (_table: string) => ({
-      select: (_cols: string) => ({
-        eq: (_f: string, _v: unknown) => ({
-          maybeSingle: async () => ({ data: row, error: null }),
-        }),
-      }),
-    }),
-  }
-}
 
 function buildRequest(method: 'PATCH' | 'DELETE', body: unknown): Request {
   return new Request('http://test/admin/voices/api/corpus/x', {
@@ -65,26 +30,15 @@ function buildParams(entryId: string) {
 }
 
 beforeEach(() => {
-  vi.mocked(createServerClient).mockReset()
-  vi.mocked(verifyAnalogAdminAccess).mockReset()
-  vi.mocked(createAdminClient).mockReset()
+  vi.mocked(requireCorpusEntryAdmin).mockReset()
   vi.mocked(editCorpusEntry).mockReset()
   vi.mocked(removeCorpusEntry).mockReset()
-  vi.mocked(createServerClient).mockResolvedValue(
-    makeSessionMock({ user: { id: 'auth' } }) as unknown as Awaited<
-      ReturnType<typeof createServerClient>
-    >,
-  )
-  vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+  vi.mocked(requireCorpusEntryAdmin).mockResolvedValue({
+    ok: true,
     operatorId: OPERATOR_ID,
-    allowedVenueIds: [],
-    isAnalogAdmin: true,
+    venueId: VENUE_ID,
+    entryId: ENTRY_ID,
   })
-  vi.mocked(createAdminClient).mockReturnValue(
-    makeAdminMock({ id: ENTRY_ID, venue_id: VENUE_ID }) as unknown as ReturnType<
-      typeof createAdminClient
-    >,
-  )
 })
 
 describe('PATCH /admin/voices/api/corpus/[entryId]', () => {
@@ -136,10 +90,11 @@ describe('PATCH /admin/voices/api/corpus/[entryId]', () => {
     expect(res.status).toBe(400)
   })
 
-  it('404 when corpus entry does not exist', async () => {
-    vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(null) as unknown as ReturnType<typeof createAdminClient>,
-    )
+  it('passes through 404 from auth helper when entry not found', async () => {
+    vi.mocked(requireCorpusEntryAdmin).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'corpus entry not found' }, { status: 404 }),
+    })
     const res = await PATCH(
       buildRequest('PATCH', { content: 'x' }),
       buildParams(ENTRY_ID),
@@ -147,11 +102,10 @@ describe('PATCH /admin/voices/api/corpus/[entryId]', () => {
     expect(res.status).toBe(404)
   })
 
-  it('403 when entry belongs to a different venue than allowlist permits', async () => {
-    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
-      operatorId: OPERATOR_ID,
-      allowedVenueIds: [OTHER_VENUE_ID],
-      isAnalogAdmin: true,
+  it('passes through 403 from auth helper when entry venue is out of scope', async () => {
+    vi.mocked(requireCorpusEntryAdmin).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
     })
     const res = await PATCH(
       buildRequest('PATCH', { content: 'x' }),

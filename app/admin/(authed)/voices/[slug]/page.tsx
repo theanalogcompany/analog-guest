@@ -4,7 +4,7 @@ import { createServerClient } from '@/lib/db/server'
 import { VoicesClient } from './voices-client'
 import { loadVoicePage } from './_lib/load-voice-page'
 
-// THE-237 (PR-B): per-voice workbench. Server orchestrator pulls everything
+// Per-voice workbench. Server orchestrator pulls everything
 // the client needs in one round trip — venue, persona, corpus, threads,
 // optionally a selected guest's full bubble thread.
 //
@@ -62,10 +62,14 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   }
 
   return (
-    // -mx-8 -my-10 cancels admin-shell's default px-8 py-10 padding so the
-    // workbench renders edge-to-edge inside <main>'s box, matching the
-    // mockup. Same pattern the conversations viewer uses.
-    <div className="-mx-8 -my-10 h-[calc(100dvh-3.5rem)]">
+    // Full-bleed wrapper: `position: fixed` escapes the admin shell's
+    // `<main>` max-w-5xl container so the 280/1fr/400 workbench can use
+    // the full viewport width. `left-56` mirrors the sidebar's `w-56` and
+    // `top-14` mirrors the topbar's `h-14`; if either changes in
+    // admin-shell, this wrapper has to follow. Tracked as a follow-up to
+    // extract `--admin-sidebar-width` / `--admin-topbar-height` CSS vars
+    // when there's a second consumer to amortize the refactor.
+    <div className="fixed left-56 top-14 right-0 bottom-0 bg-paper">
       <VoicesClient
         key={`${data.venue.id}:${data.selectedGuest?.id ?? 'none'}`}
         data={data}

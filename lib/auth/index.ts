@@ -1,4 +1,9 @@
 export { getCurrentOperator } from './get-current-operator'
+export {
+  type RequireAdminResult,
+  requireCorpusEntryAdmin,
+  requireVenueAdmin,
+} from './require-admin'
 export { AuthError } from './types'
 export {
   verifyAnalogAdminAccess,

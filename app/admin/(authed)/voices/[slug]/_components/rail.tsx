@@ -7,9 +7,8 @@ import { RailPersona } from './rail-persona'
 import { RailRules } from './rail-rules'
 import type { VoicePageCorpusRow } from '../_lib/load-voice-page'
 
-// Right-rail tab strip + tab routing. Three panes — Rules / Corpus /
-// Persona — all editable in PR-B (THE-237). The active-tab clay underline
-// matches the mockup.
+// Right-rail tab strip + tab routing. Three panes — Rules, Corpus,
+// Persona — all editable. Active-tab clay underline matches the mockup.
 
 interface RailProps {
   venueId: string
@@ -77,12 +76,11 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 py-3 text-[10.5px] uppercase font-semibold text-center transition-colors border-b-2 ${
+      className={`flex-1 py-3 text-[10.5px] uppercase font-semibold tracking-eyebrow text-center transition-colors border-b-2 ${
         active
           ? 'text-ink border-clay'
           : 'text-ink-faint border-transparent hover:text-ink-soft'
       }`}
-      style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
     >
       {children}
     </button>

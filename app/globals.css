@@ -61,3 +61,18 @@ body {
 }
 
 ::selection { background: var(--clay); color: var(--paper); }
+
+/* Brand utility classes. Tailwind v4 has no first-class hook for arbitrary
+   font-feature/variation-settings or letter-spacing tokens, so the eyebrow
+   tracking and Fraunces variation-settings ship as utility classes here.
+   Use these instead of repeating inline `style={{...}}` blocks across
+   components — keeps the brand defaults in one source of truth. */
+.tracking-eyebrow {
+  letter-spacing: var(--tracking-eyebrow);
+}
+.font-fraunces-display {
+  font-variation-settings: var(--fraunces);
+}
+.font-fraunces-text {
+  font-variation-settings: var(--fraunces-text);
+}

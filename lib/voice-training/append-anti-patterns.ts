@@ -20,16 +20,16 @@
 // silently underrepresent the legacy half. Track this when fleet analytics
 // land — either backfill on first read or run a one-shot migration script.
 //
-// TODO(Voices commit endpoint, PR-B): the AntiPatternUpdateResult shape
-// returns `existing` and `added` as `string[]` because today's callers
-// (08-flow CLI, cc-review API) only count or stringify them for markdown
-// summaries. The Voices commit endpoint will want the full struct (source,
-// addedAt, authorOperatorId) to render attribution back in the UI without a
+// TODO: the AntiPatternUpdateResult shape returns `existing` and `added` as
+// `string[]` because today's callers (08-flow CLI, cc-review API) only count
+// or stringify them for markdown summaries. The Voices commit endpoint
+// (when it lands) will want the full struct (source, addedAt,
+// authorOperatorId) to render attribution back in the UI without a
 // re-read. Widen the return type then; don't widen now and force unused
 // fields through every caller.
 
-import type { Json } from '@/db/types'
 import { createAdminClient } from '@/lib/db/admin'
+import { toJson } from '@/lib/db/json'
 import {
   type AntiPatternSource,
   BrandPersonaSchema,
@@ -55,10 +55,6 @@ export interface AntiPatternUpdateResult {
  */
 export function normalizeAntiPattern(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-function toJson<T>(value: T): Json {
-  return JSON.parse(JSON.stringify(value)) as Json
 }
 
 /**

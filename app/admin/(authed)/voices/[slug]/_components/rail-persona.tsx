@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { BrandPersona } from '@/lib/schemas'
 
 // Persona pane — every editable BrandPersona field. voiceName lives at the
@@ -46,18 +46,39 @@ function toForm(p: BrandPersona): PersonaForm {
   }
 }
 
-function hasDiff(a: PersonaForm, b: BrandPersona): boolean {
-  if (a.voiceName !== (b.voiceName ?? '')) return true
-  if (a.tone !== b.tone) return true
-  if (a.formality !== b.formality) return true
-  if (a.speakerFraming !== b.speakerFraming) return true
-  if (a.speakerName !== (b.speakerName ?? '')) return true
-  if (a.emojiPolicy !== b.emojiPolicy) return true
-  if (a.lengthGuide !== b.lengthGuide) return true
-  if (JSON.stringify(a.signaturePhrases) !== JSON.stringify(b.signaturePhrases)) return true
-  if (JSON.stringify(a.bannedTopics) !== JSON.stringify(b.bannedTopics)) return true
-  if (JSON.stringify(a.voiceTouchstones) !== JSON.stringify(b.voiceTouchstones)) return true
-  return false
+function shallowEqual(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function diffPersona(form: PersonaForm, persona: BrandPersona): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  // voiceName: empty form value means "no change" rather than "clear it" —
+  // the schema rejects empty strings, and there's no clear-name affordance
+  // yet. Sending no key leaves the stored value untouched.
+  if (form.voiceName !== (persona.voiceName ?? '')) {
+    if (form.voiceName.trim().length > 0) out.voiceName = form.voiceName.trim()
+  }
+  if (form.tone !== persona.tone) out.tone = form.tone
+  if (form.formality !== persona.formality) out.formality = form.formality
+  if (form.speakerFraming !== persona.speakerFraming) out.speakerFraming = form.speakerFraming
+  if (form.speakerName !== (persona.speakerName ?? '')) out.speakerName = form.speakerName
+  if (form.emojiPolicy !== persona.emojiPolicy) out.emojiPolicy = form.emojiPolicy
+  if (form.lengthGuide !== persona.lengthGuide) out.lengthGuide = form.lengthGuide
+  if (!shallowEqual(form.signaturePhrases, persona.signaturePhrases)) {
+    out.signaturePhrases = form.signaturePhrases
+  }
+  if (!shallowEqual(form.bannedTopics, persona.bannedTopics)) {
+    out.bannedTopics = form.bannedTopics
+  }
+  if (!shallowEqual(form.voiceTouchstones, persona.voiceTouchstones)) {
+    out.voiceTouchstones = form.voiceTouchstones
+  }
+  return out
 }
 
 export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
@@ -65,39 +86,15 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const dirty = hasDiff(form, persona)
+  // Single source of truth for both the dirty flag and the save payload.
+  const partial = useMemo(() => diffPersona(form, persona), [form, persona])
+  const dirty = Object.keys(partial).length > 0
 
   async function save() {
     setBusy(true)
     setError(null)
     try {
-      // Build a partial — only changed fields. The route's Zod schema is
-      // permissive (.optional() everywhere) so untouched fields stay
-      // untouched server-side.
-      const body: Record<string, unknown> = {}
-      if (form.voiceName !== (persona.voiceName ?? '')) {
-        // Empty string clears voiceName — but the schema rejects empty. Send
-        // null-equivalent by omitting; future PR can add a clear affordance
-        // if the operator wants to remove a name.
-        if (form.voiceName.trim().length > 0) body.voiceName = form.voiceName.trim()
-      }
-      if (form.tone !== persona.tone) body.tone = form.tone
-      if (form.formality !== persona.formality) body.formality = form.formality
-      if (form.speakerFraming !== persona.speakerFraming) body.speakerFraming = form.speakerFraming
-      if (form.speakerName !== (persona.speakerName ?? '')) {
-        body.speakerName = form.speakerName
-      }
-      if (form.emojiPolicy !== persona.emojiPolicy) body.emojiPolicy = form.emojiPolicy
-      if (form.lengthGuide !== persona.lengthGuide) body.lengthGuide = form.lengthGuide
-      if (JSON.stringify(form.signaturePhrases) !== JSON.stringify(persona.signaturePhrases)) {
-        body.signaturePhrases = form.signaturePhrases
-      }
-      if (JSON.stringify(form.bannedTopics) !== JSON.stringify(persona.bannedTopics)) {
-        body.bannedTopics = form.bannedTopics
-      }
-      if (JSON.stringify(form.voiceTouchstones) !== JSON.stringify(persona.voiceTouchstones)) {
-        body.voiceTouchstones = form.voiceTouchstones
-      }
+      const body = partial
 
       const res = await fetch(`/admin/voices/api/persona/${venueId}`, {
         method: 'PATCH',
@@ -129,10 +126,7 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
         />
       </PersonaField>
 
-      <div
-        className="my-1 px-2.5 py-2 bg-clay-soft/15 border-l-2 border-clay rounded-r-[3px] text-[11px] text-ink-soft italic font-fraunces leading-relaxed"
-        style={{ fontVariationSettings: 'var(--fraunces-text)' }}
-      >
+      <div className="my-1 px-2.5 py-2 bg-clay-soft/15 border-l-2 border-clay rounded-r-[3px] text-[11px] text-ink-soft italic font-fraunces font-fraunces-text leading-relaxed">
         The configurational layer sits upstream of rules and corpus. If <em>tone</em>{' '}
         or <em>length guide</em> read as polished prose, the agent will return polished
         prose to match — even with strong rules.
@@ -244,8 +238,7 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
         <button
           onClick={save}
           disabled={!dirty || busy}
-          className="bg-clay text-white px-4 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] hover:bg-clay-deep disabled:opacity-50"
-          style={{ letterSpacing: '0.05em' }}
+          className="bg-clay text-white px-4 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
         >
           {busy ? 'Saving…' : dirty ? 'Save persona' : 'Saved'}
         </button>
@@ -271,17 +264,11 @@ function PersonaField({
   return (
     <div className="flex flex-col gap-1.5 py-2 border-b border-stone-light/60 last:border-b-0">
       <div className="flex items-baseline justify-between">
-        <span
-          className="text-[9.5px] uppercase font-semibold text-ink"
-          style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-        >
+        <span className="text-[9.5px] uppercase font-semibold tracking-eyebrow text-ink">
           {label}
         </span>
         {help && (
-          <span
-            className="text-[11px] text-ink-faint italic font-fraunces leading-snug max-w-[60%] text-right"
-            style={{ fontVariationSettings: 'var(--fraunces-text)' }}
-          >
+          <span className="text-[11px] text-ink-faint italic font-fraunces font-fraunces-text leading-snug max-w-[60%] text-right">
             {help}
           </span>
         )}
