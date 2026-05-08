@@ -67,7 +67,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 - `lib/drive/` — Google Drive helpers used by the operator app side
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
 - `lib/observability/` — Langfuse SDK wrapper (THE-200). `startAgentTrace(opts)` returns an `AgentTrace` with `span() / update() / flushAsync()`; spans expose `span()`, `generation()`, `update()`, `end()`. No-op when env vars missing or `NODE_ENV=test`. Wrapper never throws — SDK errors are swallowed with `console.warn`. Use this from `lib/agent/` only; never import `langfuse` directly from app code.
-- `lib/voice-training/` — Shared corpus-write + anti-pattern dedupe-append helpers used by both the 08-flow onboarding script (`scripts/ingest-response-review.ts`) and the cc-review live-edit API route. `upsertCorpusEdit({...}, 'skip-existing' | 'replace')` handles voice_corpus upsert + Voyage embed with embed-failure rollback (no orphaned un-embedded rows). `dedupeAndAppendAntiPatterns(venueId, rules, { source, authorOperatorId? })` does read-modify-write on `venue_configs.brand_persona.voiceAntiPatterns` with case + whitespace normalization. THE-236 reshaped the persisted entries from `string[]` to `Array<{ text, source: 'auto' | 'manual', authorOperatorId?, addedAt? }>` so the Voices command-center surface can attribute and date each rule; `BrandPersonaSchema` accepts both legacy strings and the struct shape and normalizes string entries to `{text, source: 'manual'}` on parse. Anti-corpus-poisoning rule lives here: only the operator-edited message text is embedded — never the rejected generation. THE-235.
+- `lib/voice-training/` — Shared voice-data write helpers used by the 08-flow onboarding script (`scripts/ingest-response-review.ts`), the cc-review live-edit API route, and the Voices command-center rail (THE-237). Channels: `upsertCorpusEdit({...}, 'skip-existing' \| 'replace')` for source-ref-keyed cc-review/08-review/voices-commit writes (anti-corpus-poisoning rule applies — only the operator-edited message text is embedded). `addCorpusEntry({venueId, content, sourceType, tags, addedByOperatorId?})` for ad-hoc rail additions (`source_type` ∈ `manual_entry` \| `sample_text` \| `past_message`). `editCorpusEntry({corpusId, content?, tags?})` re-embeds only on content change. `removeCorpusEntry(corpusId)` straight delete + FK cascade on voice_embeddings. `dedupeAndAppendAntiPatterns(venueId, rules, { source, authorOperatorId? })` does read-modify-write on `venue_configs.brand_persona.voiceAntiPatterns` with case + whitespace normalization. `removeAntiPattern(venueId, ruleText)` removes by exact text match (operators delete what they see). THE-236 reshaped the persisted anti-pattern entries from `string[]` to `Array<{ text, source: 'auto' \| 'manual', authorOperatorId?, addedAt? }>`; `BrandPersonaSchema` accepts both legacy strings and the struct shape and normalizes string entries to `{text, source: 'manual'}` on parse. **Asymmetry to know about (TODO):** the cc-review path doesn't currently populate `voice_corpus.added_by_operator_id`; only `addCorpusEntry` does. Track for backfill in a future ticket.
 
 ### Scripts
 
@@ -356,6 +356,26 @@ Magic-link callback URL is constructed from `NEXT_PUBLIC_ADMIN_URL` (per environ
 - **Message limit:** 200 rows per conversation load. Older history reachable via THE-202 (guest detail page) once that ships.
 
 ---
+
+### Voices command center (THE-237, PR-B)
+
+`/admin/voices` (list) and `/admin/voices/[slug]` (per-voice workbench) are the surface for refining a venue's agent voice — direct edits to rules, corpus, and persona; threads list + bubble thread + flagged-block playground for visual review. PR-B ships the layout + direct CRUD only; the regen → critique → commit loop and pattern detection land in PR-C.
+
+**Routes** (under `/admin/voices/api/...` per the host-gating convention):
+- `PATCH /admin/voices/api/persona/[venueId]` — single writer for all `BrandPersona` fields (voiceName, tone, formality, lengthGuide, emojiPolicy, signaturePhrases, bannedTopics, voiceTouchstones, speakerFraming, speakerName). Anti-patterns are excluded; they have their own endpoints.
+- `POST /admin/voices/api/venues/[venueId]/corpus` — ad-hoc corpus add (uses `addCorpusEntry`).
+- `PATCH /admin/voices/api/corpus/[entryId]` — content/tags update; re-embeds only on content change.
+- `DELETE /admin/voices/api/corpus/[entryId]` — delete + FK-cascade voice_embeddings.
+- `POST /admin/voices/api/venues/[venueId]/rules` — anti-pattern add via `dedupeAndAppendAntiPatterns({source:'manual', authorOperatorId})`. Outer whitespace trimmed at the boundary.
+- `DELETE /admin/voices/api/venues/[venueId]/rules` — exact-text remove via `removeAntiPattern`.
+
+**Why two parameter shapes:** `/corpus/[entryId]` and `/venues/[venueId]/corpus` live at different path depths because Next.js's dynamic-route disambiguator can't distinguish two `[param]` siblings at the same depth. Venue-scoped collection routes nest under `venues/[venueId]/...` to keep entry-scoped routes clean. Same pattern applied to rules. Persona stays at `/persona/[venueId]` since there's no entry-scoped sibling.
+
+**`router.refresh()` propagation pattern.** All mutation handlers in the rail components do `await fetch(...)` → on success call `router.refresh()`. The refresh re-runs the `(authed)` layout (which re-fetches the sidebar's voice list) and the per-voice page (which re-fetches persona, corpus, threads, tab counts, and last-refined). Optimistic local form state can ride on top — server is source of truth, refresh is what reconciles. Specifically: voiceName changes are visible in the topbar + sidebar + voice list page after a single refresh. No client-side store, no duplicated fetch, no stale-while-revalidate concerns.
+
+**Universal rules display vs SYSTEM_TEMPLATE.** The locked R1–R10 panel in the Rules tab reads from `app/admin/(authed)/voices/[slug]/_lib/universal-rules.ts` — a hardcoded `UNIVERSAL_RULES_DISPLAY` constant. The corresponding rules live in `lib/ai/prompts/system-template.ts` under "# Universal voice rules". **The two are dual sources of truth and must move in lockstep.** When a universal rule is added, removed, renumbered, or substantially reworded in `SYSTEM_TEMPLATE`, update `UNIVERSAL_RULES_DISPLAY` in the same commit. Tracking follow-up to extract a structured rules registry so this coupling goes away (THE-237 follow-up: structured rules registry).
+
+**Realtime on the per-voice page.** The threads list + thread pane subscribe to `messages` rows for the venue using the same `createBrowserClient` + `postgres_changes` pattern as the conversations viewer ([conversations-client.tsx:153-214](app/admin/(authed)/conversations/conversations-client.tsx#L153-L214)). Duplicated inline this round; extract a shared `useVenueMessagesSubscription(venueId)` hook in a follow-up if drift becomes real.
 
 ## Synthetic guests
 
