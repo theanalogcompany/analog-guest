@@ -2,9 +2,20 @@ import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
 import type { EligibleMechanic } from '../../recognition/eligibility'
-import { type MenuItem, type VenueInfo, VenueInfoSchema } from '../../schemas'
+import {
+  type BrandPersona,
+  BrandPersonaSchema,
+  type MenuItem,
+  type VenueInfo,
+  VenueInfoSchema,
+} from '../../schemas'
 import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../types'
-import { knowledgeChunksToProse, runtimeToProse, venueInfoToProse } from './serializers'
+import {
+  knowledgeChunksToProse,
+  personaToProse,
+  runtimeToProse,
+  venueInfoToProse,
+} from './serializers'
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -672,5 +683,53 @@ describe('knowledgeChunksToProse', () => {
       makeChunk({ text: 'first line\nsecond line', tags: ['ceremony'] }),
     ])
     expect(out).toContain('> first line\n> second line')
+  })
+})
+
+// THE-236: voiceAntiPatterns reshape — serializer must read `.text` from
+// each struct entry instead of rendering the entry directly. Legacy string
+// entries are still accepted at the schema boundary and normalized to struct
+// shape before reaching this code path.
+describe('personaToProse — voice anti-patterns', () => {
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  it('renders the anti-patterns block from struct entries', () => {
+    const persona = makePersona({
+      voiceAntiPatterns: [
+        { text: 'no marketing flourishes', source: 'manual' },
+        {
+          text: 'no closing acknowledgments',
+          source: 'auto',
+          addedAt: '2026-05-08T12:00:00.000Z',
+        },
+      ],
+    })
+    const out = personaToProse(persona)
+    expect(out).toContain('## Anti-patterns (what NOT to sound like)')
+    expect(out).toContain('- no marketing flourishes')
+    expect(out).toContain('- no closing acknowledgments')
+    // Metadata stays in storage; the prompt sees text only.
+    expect(out).not.toMatch(/source|addedAt|manual|auto/)
+  })
+
+  it('renders the same block from legacy string entries normalized at parse time', () => {
+    const persona = makePersona({
+      voiceAntiPatterns: ['no marketing flourishes'] as unknown as BrandPersona['voiceAntiPatterns'],
+    })
+    expect(personaToProse(persona)).toContain('- no marketing flourishes')
+  })
+
+  it('omits the block entirely when voiceAntiPatterns is empty', () => {
+    const out = personaToProse(makePersona({ voiceAntiPatterns: [] }))
+    expect(out).not.toContain('## Anti-patterns')
   })
 })

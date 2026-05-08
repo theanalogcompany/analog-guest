@@ -186,8 +186,12 @@ async function main(): Promise<void> {
     console.log(`[ingest-response-review] ${row.sample_id}: ${tag}`)
   }
 
-  // One read-modify-write for anti-patterns.
-  const apResult = await dedupeAndAppendAntiPatterns(venueId, candidateRules)
+  // One read-modify-write for anti-patterns. The 08-flow runs unattended
+  // from a CLI; no operator UUID to attribute to. source='manual' since the
+  // rules originate from operator-typed comments in the review sheet.
+  const apResult = await dedupeAndAppendAntiPatterns(venueId, candidateRules, {
+    source: 'manual',
+  })
 
   // Markdown append: skip entirely if zero net new ingestions.
   const netNewCorpus = newCorpusEntries.length
