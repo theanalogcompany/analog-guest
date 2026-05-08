@@ -54,7 +54,7 @@ export function personaToProse(persona: BrandPersona): string {
   }
   if (persona.voiceAntiPatterns.length > 0) {
     sections.push(
-      `## Anti-patterns (what NOT to sound like)\n${persona.voiceAntiPatterns.map((a) => `- ${a}`).join('\n')}`,
+      `## Anti-patterns (what NOT to sound like)\n${persona.voiceAntiPatterns.map((a) => `- ${a.text}`).join('\n')}`,
     )
   }
   if (persona.voiceTouchstones.length > 0) {

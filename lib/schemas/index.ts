@@ -1,4 +1,10 @@
-export { BrandPersonaSchema, type BrandPersona } from './brand-persona'
+export {
+  type AntiPatternSource,
+  BrandPersonaSchema,
+  type BrandPersona,
+  type VoiceAntiPattern,
+  VoiceAntiPatternSchema,
+} from './brand-persona'
 export {
   MESSAGE_REVIEW_SCHEMA_VERSION,
   type MessageReview,

@@ -6,15 +6,46 @@
 // Read-modify-write: single-operator at the moment; no concurrent writers.
 // If/when concurrent admin edits become real, swap for a Postgres function
 // using jsonb_path_query / jsonb_array_append — for now the round trip is fine.
+//
+// THE-236: writes the struct shape {text, source, authorOperatorId?, addedAt}
+// to voiceAntiPatterns. Legacy string entries already in storage get
+// normalized at parse time (BrandPersonaSchema accepts both forms) and
+// rewritten as structs whenever this helper touches the row.
+//
+// TODO(THE-236 follow-up): the in-place migration is lazy — venues whose
+// persona is never written by this helper or another writer stay in the
+// legacy `string[]` shape indefinitely. That's fine for runtime behavior
+// (the schema normalizes on read) but means fleet-level analytics that
+// query `voice_antipattern_meta` (source mix, recency, authorship) will
+// silently underrepresent the legacy half. Track this when fleet analytics
+// land — either backfill on first read or run a one-shot migration script.
+//
+// TODO(Voices commit endpoint, PR-B): the AntiPatternUpdateResult shape
+// returns `existing` and `added` as `string[]` because today's callers
+// (08-flow CLI, cc-review API) only count or stringify them for markdown
+// summaries. The Voices commit endpoint will want the full struct (source,
+// addedAt, authorOperatorId) to render attribution back in the UI without a
+// re-read. Widen the return type then; don't widen now and force unused
+// fields through every caller.
 
 import type { Json } from '@/db/types'
 import { createAdminClient } from '@/lib/db/admin'
-import { BrandPersonaSchema } from '@/lib/schemas'
+import {
+  type AntiPatternSource,
+  BrandPersonaSchema,
+  type VoiceAntiPattern,
+} from '@/lib/schemas'
+
+export interface AntiPatternUpdateOpts {
+  source: AntiPatternSource
+  /** Operator UUID. Omit for unattended writers (CLI scripts, cron). */
+  authorOperatorId?: string
+}
 
 export interface AntiPatternUpdateResult {
-  /** voiceAntiPatterns array as it was before this call. */
+  /** Texts of voiceAntiPatterns as they were before this call. */
   existing: string[]
-  /** Net-new entries appended (post-dedupe, including intra-batch dedupe). */
+  /** Texts of net-new entries appended (post-dedupe, including intra-batch dedupe). */
   added: string[]
 }
 
@@ -33,7 +64,8 @@ function toJson<T>(value: T): Json {
 /**
  * Read venue_configs.brand_persona, dedupe candidates against the existing
  * voiceAntiPatterns (whitespace + case normalized comparison), append the
- * net-new entries, and write back. Returns the diff for caller logging.
+ * net-new entries with source/author/addedAt metadata, and write back.
+ * Returns the diff for caller logging.
  *
  * Throws on DB or schema-validation failure. Callers in route handlers
  * should wrap in try/catch and translate to a 500.
@@ -41,6 +73,7 @@ function toJson<T>(value: T): Json {
 export async function dedupeAndAppendAntiPatterns(
   venueId: string,
   candidateRules: string[],
+  opts: AntiPatternUpdateOpts,
 ): Promise<AntiPatternUpdateResult> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
@@ -61,7 +94,8 @@ export async function dedupeAndAppendAntiPatterns(
     )
   }
   const persona = personaParsed.data
-  const existingNormalized = new Set(persona.voiceAntiPatterns.map(normalizeAntiPattern))
+  const existingTexts = persona.voiceAntiPatterns.map((p) => p.text)
+  const existingNormalized = new Set(existingTexts.map(normalizeAntiPattern))
 
   // Dedupe candidates against existing AND against each other (in case the
   // same rule appears multiple times in one batch).
@@ -76,12 +110,20 @@ export async function dedupeAndAppendAntiPatterns(
   }
 
   if (added.length === 0) {
-    return { existing: persona.voiceAntiPatterns, added: [] }
+    return { existing: existingTexts, added: [] }
   }
+
+  const addedAt = new Date().toISOString()
+  const newEntries: VoiceAntiPattern[] = added.map((text) => ({
+    text,
+    source: opts.source,
+    addedAt,
+    ...(opts.authorOperatorId ? { authorOperatorId: opts.authorOperatorId } : {}),
+  }))
 
   const updatedPersona = {
     ...persona,
-    voiceAntiPatterns: [...persona.voiceAntiPatterns, ...added],
+    voiceAntiPatterns: [...persona.voiceAntiPatterns, ...newEntries],
   }
   const { error: updateError } = await supabase
     .from('venue_configs')
@@ -92,5 +134,5 @@ export async function dedupeAndAppendAntiPatterns(
       `dedupeAndAppendAntiPatterns: update failed for ${venueId}: ${updateError.message}`,
     )
   }
-  return { existing: persona.voiceAntiPatterns, added }
+  return { existing: existingTexts, added }
 }

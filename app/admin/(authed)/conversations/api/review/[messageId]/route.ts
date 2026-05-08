@@ -163,7 +163,10 @@ export async function PUT(
   const rule = body.rule?.trim()
   if (!ingestSuppressed && rule !== undefined && rule.length > 0) {
     try {
-      await dedupeAndAppendAntiPatterns(message.venue_id, [rule])
+      await dedupeAndAppendAntiPatterns(message.venue_id, [rule], {
+        source: 'manual',
+        authorOperatorId: operatorId,
+      })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
       return NextResponse.json(
