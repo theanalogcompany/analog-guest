@@ -103,3 +103,29 @@ describe('BrandPersonaSchema voiceAntiPatterns', () => {
     expect(parsed.voiceAntiPatterns).toEqual([])
   })
 })
+
+// THE-237: voiceName field — human-readable label rendered in the topbar +
+// sidebar voice list. Optional, fall-back-to-venue-name in the UI when
+// absent.
+describe('BrandPersonaSchema voiceName', () => {
+  it('accepts a non-empty voiceName', () => {
+    const parsed = BrandPersonaSchema.parse({
+      ...validPersonaBase,
+      voiceName: 'Sana',
+    })
+    expect(parsed.voiceName).toBe('Sana')
+  })
+
+  it('accepts personas without voiceName (legacy + new venues)', () => {
+    const parsed = BrandPersonaSchema.parse(validPersonaBase)
+    expect(parsed.voiceName).toBeUndefined()
+  })
+
+  it('rejects empty-string voiceName', () => {
+    const result = BrandPersonaSchema.safeParse({
+      ...validPersonaBase,
+      voiceName: '',
+    })
+    expect(result.success).toBe(false)
+  })
+})

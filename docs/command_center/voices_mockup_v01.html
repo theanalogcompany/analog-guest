@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>analog command center — voices</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,100..900,0..100,0..1;1,9..144,100..900,0..100,0..1&family=Inter+Tight:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --clay: #C66A4A;
+  --clay-deep: #A85638;
+  --clay-soft: #E5B19C;
+  --paper: #F7F1E3;
+  --parchment: #EFE7D2;
+  --highlight: #FAF5EC;
+  --ink: #1C1814;
+  --ink-soft: #4A4339;
+  --ink-faint: #857A6A;
+  --stone-light: #E5DDC9;
+  --stone: #C5BBA3;
+  --stone-dark: #857A6A;
+
+  --hairline: rgba(133, 122, 106, 0.22);
+  --hairline-strong: rgba(133, 122, 106, 0.4);
+
+  --imessage-blue: #007AFF;
+  --imessage-gray: #E9E9EB;
+
+  --fraunces: "opsz" 144, "SOFT" 50, "WONK" 1;
+  --fraunces-text: "opsz" 14, "SOFT" 50, "WONK" 1;
+  --tracking-eyebrow: 0.22em;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: "Inter Tight", sans-serif;
+  font-weight: 400;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  line-height: 1.4;
+  font-feature-settings: "tnum" 0, "onum" 1;
+}
+::selection { background: var(--clay); color: var(--paper); }
+input, textarea, button, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+
+/* ==============================================================
+   APP SHELL
+   ============================================================== */
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100vh;
+}
+
+/* SIDEBAR */
+.sidebar {
+  background: var(--paper);
+  border-right: 0.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 14px;
+  gap: 36px;
+  overflow-y: auto;
+}
+.sidebar-logo {
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces);
+  font-weight: 300;
+  font-size: 24px;
+  color: var(--ink);
+  letter-spacing: -0.025em;
+  padding: 0 8px;
+  display: flex;
+  align-items: baseline;
+}
+.sidebar-logo .dot { color: var(--clay); }
+
+.nav-group { display: flex; flex-direction: column; gap: 1px; }
+.nav-eyebrow {
+  font-weight: 600;
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  padding: 0 8px 8px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  border-radius: 3px;
+  text-decoration: none;
+  font-weight: 400;
+}
+.nav-item:hover { background: var(--parchment); color: var(--ink); }
+.nav-item.active {
+  background: var(--ink);
+  color: var(--paper);
+}
+.nav-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--stone);
+  flex-shrink: 0;
+}
+.nav-item.active .nav-dot { background: var(--clay); }
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border-radius: 3px;
+  text-decoration: none;
+}
+.voice-row:hover { background: var(--parchment); }
+.voice-row.active { background: var(--parchment); }
+.voice-row.active .voice-row-name { color: var(--ink); }
+.voice-row-name {
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--ink-soft);
+  line-height: 1.1;
+}
+.voice-row-venue {
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+}
+
+/* MAIN */
+.main {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 0.5px solid var(--hairline);
+  background: var(--paper);
+}
+.topbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.topbar-eyebrow {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+.topbar-name {
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces);
+  font-weight: 300;
+  font-size: 22px;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+}
+.topbar-name em {
+  font-style: italic;
+  color: var(--ink-soft);
+}
+.topbar-meta {
+  font-size: 11px;
+  color: var(--ink-faint);
+  padding-left: 14px;
+  border-left: 0.5px solid var(--hairline);
+  letter-spacing: 0.01em;
+}
+
+/* WORKBENCH */
+.workbench {
+  display: grid;
+  grid-template-columns: 280px 1fr 400px;
+  min-height: 0;
+}
+
+/* THREADS COLUMN */
+.threads {
+  border-right: 0.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper);
+}
+.threads-header {
+  padding: 12px 14px;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.threads-search {
+  width: 100%;
+  background: var(--highlight);
+  border: 0.5px solid var(--hairline);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.threads-search::placeholder { color: var(--ink-faint); }
+.threads-list { overflow-y: auto; flex: 1; }
+.thread-row {
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--hairline);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+.thread-row:hover { background: var(--highlight); }
+.thread-row.active { background: var(--parchment); }
+.thread-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--clay);
+}
+.thread-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.thread-row-name {
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.thread-row-time {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+.thread-row-preview {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-row-state {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.thread-row-state.regular { color: var(--clay); }
+
+/* CENTER COLUMN */
+.center {
+  display: grid;
+  grid-template-rows: 45% 55%;
+  min-height: 0;
+  background: var(--paper);
+}
+
+/* THREAD PANE */
+.thread-pane {
+  overflow-y: auto;
+  padding: 22px 32px;
+  border-bottom: 0.5px solid var(--hairline-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thread-meta {
+  text-align: center;
+  padding: 6px 0 14px;
+  font-size: 10px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.bubble-row {
+  display: flex;
+  margin-bottom: 3px;
+}
+.bubble-row.in { justify-content: flex-start; }
+.bubble-row.out { justify-content: flex-end; }
+.bubble {
+  max-width: 78%;
+  padding: 8px 13px;
+  font-size: 13px;
+  line-height: 1.42;
+  border-radius: 18px;
+  position: relative;
+}
+.bubble.in {
+  background: var(--imessage-gray);
+  color: var(--ink);
+  border-bottom-left-radius: 4px;
+}
+.bubble.out {
+  background: var(--imessage-blue);
+  color: white;
+  border-bottom-right-radius: 4px;
+  cursor: pointer;
+}
+.bubble.out:hover {
+  box-shadow: 0 0 0 2px var(--clay-soft);
+}
+.bubble.out.selected {
+  box-shadow: 0 0 0 2px var(--clay);
+}
+
+/* PLAYGROUND PANE */
+.playground {
+  background: var(--highlight);
+  overflow-y: auto;
+  padding: 18px 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.playground-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.playground-eyebrow {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--clay);
+  text-transform: uppercase;
+}
+.playground-context {
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+
+.flagged-block {
+  background: var(--paper);
+  border-left: 2px solid var(--clay);
+  padding: 12px 14px;
+  border-radius: 0 4px 4px 0;
+}
+.flagged-label {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-faint);
+  margin-bottom: 4px;
+}
+.flagged-label.bad { color: var(--clay); }
+.flagged-text {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.flagged-text:last-child { margin-bottom: 0; }
+.flagged-text.muted { color: var(--ink-soft); }
+
+.critique-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.critique-label {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink);
+}
+.critique-textarea {
+  width: 100%;
+  min-height: 64px;
+  background: var(--paper);
+  border: 0.5px solid var(--hairline);
+  border-radius: 3px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  resize: vertical;
+  font-family: inherit;
+}
+.critique-textarea:focus {
+  outline: none;
+  border-color: var(--clay);
+  box-shadow: 0 0 0 1px var(--clay-soft);
+}
+
+.regen-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.regen-meta {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-style: italic;
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces-text);
+}
+.regen-button {
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 3px;
+}
+.regen-button:hover { background: var(--clay-deep); }
+
+.attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attempt {
+  background: var(--paper);
+  border: 0.5px solid var(--hairline);
+  border-radius: 4px;
+  padding: 9px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.attempt:hover { border-color: var(--stone-dark); }
+.attempt.selected {
+  border: 1px solid var(--clay);
+  background: rgba(198, 106, 74, 0.04);
+}
+.attempt-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.attempt-num {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+.attempt.selected .attempt-num { color: var(--clay); }
+.attempt-time {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.attempt-text {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+/* COMMIT FOOTER */
+.commit-footer {
+  background: var(--paper);
+  border: 0.5px solid var(--hairline);
+  border-radius: 4px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.commit-classification {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--parchment);
+  border-radius: 3px;
+}
+.commit-classification-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.commit-classification-label {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+.commit-classification-verdict {
+  color: var(--clay-deep);
+  font-weight: 600;
+}
+.commit-classification-note {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.commit-rule-text {
+  font-style: italic;
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces-text);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 7px 11px;
+  background: var(--paper);
+  border-radius: 3px;
+  border-left: 2px solid var(--clay);
+  line-height: 1.5;
+}
+.commit-toggles {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+}
+.commit-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.commit-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.commit-cancel {
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+.commit-cancel:hover { color: var(--ink); }
+.commit-button {
+  background: var(--clay);
+  color: white;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 3px;
+}
+.commit-button:hover { background: var(--clay-deep); }
+
+/* RIGHT RAIL */
+.rail {
+  border-left: 0.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper);
+}
+.rail-tabs {
+  display: flex;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.rail-tab {
+  flex: 1;
+  padding: 13px 8px;
+  font-size: 10.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink-faint);
+  border-bottom: 2px solid transparent;
+  text-align: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+.rail-tab:hover { color: var(--ink-soft); }
+.rail-tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--clay);
+}
+.rail-tab .count {
+  color: var(--ink-faint);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.rail-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+.rail-pane { display: none; }
+.rail-pane.active { display: block; }
+
+/* RULES PANE */
+.rule-section { margin-bottom: 24px; }
+.rule-section:last-child { margin-bottom: 0; }
+.rule-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.rule-section-title {
+  font-size: 10.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rule-add {
+  font-size: 11px;
+  color: var(--clay);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.rule-add:hover { color: var(--clay-deep); }
+
+.rule-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 0;
+  border-bottom: 0.5px solid var(--hairline);
+}
+.rule-row:last-child { border-bottom: none; }
+.rule-text {
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.rule-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  font-weight: 600;
+  align-items: center;
+}
+.source-pill {
+  padding: 2px 6px;
+  background: var(--parchment);
+  border-radius: 2px;
+  font-size: 9.5px;
+}
+.source-pill.manual { background: var(--stone-light); }
+.source-pill.auto {
+  background: rgba(198, 106, 74, 0.12);
+  color: var(--clay-deep);
+}
+.source-pill.universal {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* CORPUS PANE */
+.corpus-row {
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.corpus-row:last-child { border-bottom: none; }
+.corpus-cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.corpus-cat {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--clay);
+}
+.corpus-edit {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+}
+.corpus-edit:hover { color: var(--ink); }
+.corpus-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.corpus-line {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.corpus-line-label {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+  flex-shrink: 0;
+  padding-top: 3px;
+  width: 22px;
+}
+.corpus-line-text { color: var(--ink); }
+
+/* PERSONA PANE */
+.persona-field {
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.persona-field:last-child { border-bottom: none; }
+.persona-field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.persona-label {
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--ink);
+}
+.persona-help {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-style: italic;
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces-text);
+  line-height: 1.45;
+}
+.persona-input,
+.persona-textarea,
+.persona-select {
+  background: var(--highlight);
+  border: 0.5px solid var(--hairline);
+  border-radius: 3px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  font-family: inherit;
+  width: 100%;
+}
+.persona-textarea {
+  min-height: 48px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.persona-input:focus,
+.persona-textarea:focus,
+.persona-select:focus {
+  outline: none;
+  border-color: var(--clay);
+  background: var(--paper);
+}
+.persona-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+.persona-pill {
+  background: var(--parchment);
+  border: 0.5px solid var(--hairline);
+  border-radius: 12px;
+  padding: 3px 5px 3px 10px;
+  font-size: 11.5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+}
+.persona-pill .x {
+  color: var(--ink-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.persona-pill .x:hover { color: var(--clay); }
+.persona-pill-add {
+  background: transparent;
+  border: 0.5px dashed var(--stone-dark);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.persona-pill-add:hover { color: var(--clay); border-color: var(--clay); }
+
+.persona-warning {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(198, 106, 74, 0.08);
+  border-left: 2px solid var(--clay);
+  border-radius: 0 3px 3px 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-family: "Fraunces", serif;
+  font-variation-settings: var(--fraunces-text);
+  line-height: 1.5;
+}
+
+/* utility */
+.tnum { font-variant-numeric: tabular-nums; }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============================== SIDEBAR ============================== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">analog<span class="dot">.</span></div>
+
+    <div class="nav-group">
+      <div class="nav-eyebrow">Surfaces</div>
+      <a class="nav-item" href="#"><span class="nav-dot"></span>Conversations</a>
+      <a class="nav-item active" href="#"><span class="nav-dot"></span>Voices</a>
+      <a class="nav-item" href="#"><span class="nav-dot"></span>Guests</a>
+      <a class="nav-item" href="#"><span class="nav-dot"></span>Venues</a>
+      <a class="nav-item" href="#"><span class="nav-dot"></span>Health</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-eyebrow">Voices · 2</div>
+      <a class="voice-row active" href="#">
+        <span class="nav-dot" style="background: var(--clay);"></span>
+        <span style="display: flex; flex-direction: column;">
+          <span class="voice-row-name">Sana</span>
+          <span class="voice-row-venue">Sextant Coffee</span>
+        </span>
+      </a>
+      <a class="voice-row" href="#">
+        <span class="nav-dot"></span>
+        <span style="display: flex; flex-direction: column;">
+          <span class="voice-row-name">Gunther</span>
+          <span class="voice-row-venue">Central Perk</span>
+        </span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- ============================== MAIN ============================== -->
+  <div class="main">
+
+    <div class="topbar">
+      <div class="topbar-title">
+        <span class="topbar-eyebrow">Voice</span>
+        <span class="topbar-name"><em>Sana</em></span>
+        <span class="topbar-meta">Sextant Coffee Roasters · 47 corpus · 12 rules</span>
+      </div>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <span style="font-size: 11px; color: var(--ink-faint);">Last refined 2h ago</span>
+      </div>
+    </div>
+
+    <div class="workbench">
+
+      <!-- THREADS -->
+      <div class="threads">
+        <div class="threads-header">
+          <input class="threads-search" placeholder="search guests, messages..." />
+        </div>
+        <div class="threads-list">
+
+          <div class="thread-row active">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Liam Chen</span>
+              <span class="thread-row-time tnum">2h</span>
+            </div>
+            <div class="thread-row-preview">do you have oat milk today</div>
+            <div class="thread-row-state regular">Regular · 14 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Mira Foster</span>
+              <span class="thread-row-time tnum">5h</span>
+            </div>
+            <div class="thread-row-preview">whats new on the menu</div>
+            <div class="thread-row-state">Returning · 4 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Taro Kim</span>
+              <span class="thread-row-time tnum">1d</span>
+            </div>
+            <div class="thread-row-preview">are you guys open on sundays</div>
+            <div class="thread-row-state">New · 1 visit</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Jess Aldana</span>
+              <span class="thread-row-time tnum">2d</span>
+            </div>
+            <div class="thread-row-preview">that ethiopia is incredible</div>
+            <div class="thread-row-state regular">Regular · 22 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Henry Park</span>
+              <span class="thread-row-time tnum">3d</span>
+            </div>
+            <div class="thread-row-preview">is the cortado oat or whole today?</div>
+            <div class="thread-row-state">Returning · 6 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Sasha Vega</span>
+              <span class="thread-row-time tnum">3d</span>
+            </div>
+            <div class="thread-row-preview">do u have decaf?</div>
+            <div class="thread-row-state">New · 1 visit</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Daria Nilsen</span>
+              <span class="thread-row-time tnum">4d</span>
+            </div>
+            <div class="thread-row-preview">whens the latest you serve pour overs</div>
+            <div class="thread-row-state regular">Raving fan · 38 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Andre Boucher</span>
+              <span class="thread-row-time tnum">5d</span>
+            </div>
+            <div class="thread-row-preview">any beans coming in this week</div>
+            <div class="thread-row-state regular">Regular · 11 visits</div>
+          </div>
+
+          <div class="thread-row">
+            <div class="thread-row-top">
+              <span class="thread-row-name">Pia Reyes</span>
+              <span class="thread-row-time tnum">6d</span>
+            </div>
+            <div class="thread-row-preview">my cup was cold today</div>
+            <div class="thread-row-state">Returning · 3 visits</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- CENTER -->
+      <div class="center">
+
+        <!-- THREAD PANE -->
+        <div class="thread-pane">
+          <div class="thread-meta">Liam Chen · regular · +1 (415) 555 0142</div>
+
+          <div class="bubble-row in"><div class="bubble in">morning. do you have oat milk today</div></div>
+          <div class="bubble-row out">
+            <div class="bubble out selected">Hi Liam! Yes, we have oat milk available — it pairs beautifully with our espresso drinks. Just let our team know when you order. We're so glad you stopped by!</div>
+          </div>
+
+          <div class="bubble-row in"><div class="bubble in">cool ty</div></div>
+          <div class="bubble-row out"><div class="bubble out">anytime.</div></div>
+
+          <div class="thread-meta" style="padding-top: 18px;">2 hours ago</div>
+
+          <div class="bubble-row in"><div class="bubble in">also do you guys still do the friday tastings</div></div>
+          <div class="bubble-row out">
+            <div class="bubble out">friday at 4. small batch ethiopia this week. couch's open if you wanna land early.</div>
+          </div>
+
+          <div class="bubble-row in"><div class="bubble in">nice. ill see if i can swing by</div></div>
+          <div class="bubble-row out"><div class="bubble out">sounds good.</div></div>
+        </div>
+
+        <!-- PLAYGROUND -->
+        <div class="playground">
+          <div class="playground-header">
+            <div class="playground-eyebrow">▸ Refining response</div>
+            <div class="playground-context">Liam Chen · regular · 14 visits</div>
+          </div>
+
+          <div class="flagged-block">
+            <div class="flagged-label">Inbound</div>
+            <div class="flagged-text muted">morning. do you have oat milk today</div>
+            <div class="flagged-label bad">Original response · flagged</div>
+            <div class="flagged-text">Hi Liam! Yes, we have oat milk available — it pairs beautifully with our espresso drinks. Just let our team know when you order. We're so glad you stopped by!</div>
+          </div>
+
+          <div class="critique-block">
+            <div class="critique-label">Why this is wrong</div>
+            <textarea class="critique-textarea" placeholder="What's bad about this? Be specific.">sounds like marketing copy. drop "pairs beautifully" — nobody talks like that. skip the closing flourish, we're not glad they stopped by, they texted. and the "Hi Liam!" opener is too eager. lowercase fragment is fine.</textarea>
+          </div>
+
+          <div class="regen-bar">
+            <div class="regen-meta">3 attempts · using current rules + corpus</div>
+            <button class="regen-button">↻ Regenerate</button>
+          </div>
+
+          <div class="attempts">
+            <div class="attempt">
+              <div class="attempt-meta">
+                <span class="attempt-num">Attempt 1</span>
+                <span class="attempt-time tnum">11:42</span>
+              </div>
+              <div class="attempt-text">Yes, we have oat milk today. Just ask the bar when you order.</div>
+            </div>
+            <div class="attempt">
+              <div class="attempt-meta">
+                <span class="attempt-num">Attempt 2</span>
+                <span class="attempt-time tnum">11:43</span>
+              </div>
+              <div class="attempt-text">yeah, oat is on. ask the bar when you're up.</div>
+            </div>
+            <div class="attempt selected">
+              <div class="attempt-meta">
+                <span class="attempt-num">Attempt 3 · selected</span>
+                <span class="attempt-time tnum">11:44</span>
+              </div>
+              <div class="attempt-text">yeah. oat's on the bar.</div>
+            </div>
+          </div>
+
+          <div class="commit-footer">
+            <div class="commit-classification">
+              <div class="commit-classification-row">
+                <span class="commit-classification-label">Auto-classified</span>
+                <span class="commit-classification-verdict">Edit + rule</span>
+                <span class="commit-classification-note">— critique generalizes beyond this message</span>
+              </div>
+              <div class="commit-rule-text">Do not open with greetings like "Hi [name]!" or use marketing flourishes ("pairs beautifully," "we're so glad"); lowercase fragments are fine and preferred.</div>
+            </div>
+            <div class="commit-toggles">
+              <label><input type="checkbox" checked /> Save as venue rule</label>
+              <label><input type="checkbox" checked /> Add corrected response to corpus</label>
+            </div>
+            <div class="commit-bar">
+              <button class="commit-cancel">Cancel</button>
+              <button class="commit-button">Commit to Sana</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- RIGHT RAIL -->
+      <div class="rail">
+
+        <div class="rail-tabs">
+          <button class="rail-tab active" data-tab="rules">Rules <span class="count">· 12</span></button>
+          <button class="rail-tab" data-tab="corpus">Corpus <span class="count">· 47</span></button>
+          <button class="rail-tab" data-tab="persona">Persona</button>
+        </div>
+
+        <div class="rail-content">
+
+          <!-- =========== RULES PANE =========== -->
+          <div class="rail-pane active" data-pane="rules">
+
+            <div class="rule-section">
+              <div class="rule-section-header">
+                <div class="rule-section-title">Sextant rules · 6</div>
+                <button class="rule-add">+ Add rule</button>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Do not open with greetings like "Hi [name]!" or use marketing flourishes; lowercase fragments are fine and preferred.</div>
+                <div class="rule-meta">
+                  <span class="source-pill auto">Auto · 2h</span>
+                  <span>From critique</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Avoid triadic structure (X, Y, and Z) in casual replies. Cut to one or two specifics.</div>
+                <div class="rule-meta">
+                  <span class="source-pill manual">Manual · 4d</span>
+                  <span>Jaipal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">No service-industry filler — "happy to," "feel free to," "let our team know." Just say the thing.</div>
+                <div class="rule-meta">
+                  <span class="source-pill auto">Auto · 1d</span>
+                  <span>From critique</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">No closing acknowledgments ("hope that helps," "let me know if you have questions"). End where the answer ends.</div>
+                <div class="rule-meta">
+                  <span class="source-pill auto">Auto · 3d</span>
+                  <span>From critique</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Refer to specifics, not abstractions. Not "your favorite drink" — "the cortado." Not "the neighborhood" — "Mission Street."</div>
+                <div class="rule-meta">
+                  <span class="source-pill manual">Manual · 6d</span>
+                  <span>Jaipal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Sentence rhythm shouldn't be balanced. Fragments okay. Run-ons okay. Real texts have weird pauses.</div>
+                <div class="rule-meta">
+                  <span class="source-pill auto">Auto · 2d</span>
+                  <span>From critique</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rule-section">
+              <div class="rule-section-header">
+                <div class="rule-section-title">Universal · 6 (locked)</div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Never use em dashes. Use periods, commas, or shorter sentences instead.</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R3</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Don't reference actions the guest didn't take ("you stopped by," "thanks for visiting").</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R1</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Answer yes/no questions with yes/no first; don't enumerate options.</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R6</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Don't fabricate proper-noun product names. Only reference items in the menu corpus.</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R8</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Default to today's specific answer when guests ask about "now" — don't generalize.</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R2</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+
+              <div class="rule-row">
+                <div class="rule-text">Don't reference physical artifacts the agent doesn't have ("in front of me," "looking at it").</div>
+                <div class="rule-meta">
+                  <span class="source-pill universal">R4</span>
+                  <span>Universal</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- =========== CORPUS PANE =========== -->
+          <div class="rail-pane" data-pane="corpus">
+
+            <div class="rule-section">
+              <div class="rule-section-header">
+                <div class="rule-section-title">Voice corpus · 47 entries</div>
+                <button class="rule-add">+ Add entry</button>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">menu_fact</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">do you have oat milk today</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">yeah. oat's on the bar.</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">menu_fact</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">whats on the espresso bar today</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">house blend and the colombia. ethiopia comes back friday.</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">recommendation_request</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">first time, what should i try</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">cortado is a good first move. or the colombia pour over if you have ten minutes.</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">greeting</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">hey</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">morning. anything we can have ready</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">casual_chatter</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">that ethiopia is incredible</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">yeah. the lot's almost gone. friday's the last batch.</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">comp_complaint</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">my cup was cold today</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">that's on us. next one's already comped, just come up to the bar.</span></div>
+                </div>
+              </div>
+
+              <div class="corpus-row">
+                <div class="corpus-cat-row">
+                  <span class="corpus-cat">hours_question</span>
+                  <button class="corpus-edit">edit</button>
+                </div>
+                <div class="corpus-pair">
+                  <div class="corpus-line"><span class="corpus-line-label">in</span><span class="corpus-line-text">whens the latest you serve pour overs</span></div>
+                  <div class="corpus-line"><span class="corpus-line-label">out</span><span class="corpus-line-text">we cut pour overs at 4. espresso runs til close.</span></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- =========== PERSONA PANE =========== -->
+          <div class="rail-pane" data-pane="persona">
+
+            <div class="persona-warning">
+              The configurational layer sits upstream of rules and corpus. If <em style="font-style: italic; font-family: 'Fraunces', serif;">tone</em> or <em style="font-style: italic; font-family: 'Fraunces', serif;">length guide</em> read as polished prose, the agent will return polished prose to match — even with strong rules.
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Tone</span>
+                <span class="persona-help">Free text · the voice in one or two breaths</span>
+              </div>
+              <textarea class="persona-textarea">deadpan but warm. the kind of host who's been doing this long enough not to oversell. fragments fine. lowercase starts fine. specifics over abstractions, always — the cortado, not "your favorite drink." restraint is the punchline.</textarea>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Formality</span>
+              </div>
+              <select class="persona-select">
+                <option>casual — contractions, lowercase starts okay</option>
+                <option selected>warm — conversational, no stiffness</option>
+                <option>formal — complete sentences, proper caps</option>
+              </select>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Length guide</span>
+                <span class="persona-help">How long replies should run</span>
+              </div>
+              <textarea class="persona-textarea">short. one or two sentences. fragments are fine. cut anything that doesn't earn its place.</textarea>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Speaker framing</span>
+              </div>
+              <select class="persona-select">
+                <option selected>venue — "we" / unnamed</option>
+                <option>named person — sign as a specific person</option>
+                <option>owner — first person, owner's voice</option>
+              </select>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Emoji policy</span>
+              </div>
+              <select class="persona-select">
+                <option selected>never</option>
+                <option>sparingly</option>
+                <option>frequent</option>
+              </select>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Signature phrases</span>
+                <span class="persona-help">Phrases the venue actually uses · don't stuff</span>
+              </div>
+              <div class="persona-pills">
+                <span class="persona-pill">the bar<span class="x">×</span></span>
+                <span class="persona-pill">on the bar<span class="x">×</span></span>
+                <span class="persona-pill">come up<span class="x">×</span></span>
+                <span class="persona-pill">friday at 4<span class="x">×</span></span>
+                <span class="persona-pill">small batch<span class="x">×</span></span>
+                <button class="persona-pill-add">+ add</button>
+              </div>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Banned topics</span>
+                <span class="persona-help">Subjects to deflect or refuse</span>
+              </div>
+              <div class="persona-pills">
+                <span class="persona-pill">competitor cafes<span class="x">×</span></span>
+                <span class="persona-pill">staff personal info<span class="x">×</span></span>
+                <span class="persona-pill">political opinions<span class="x">×</span></span>
+                <button class="persona-pill-add">+ add</button>
+              </div>
+            </div>
+
+            <div class="persona-field">
+              <div class="persona-field-row">
+                <span class="persona-label">Voice touchstones</span>
+                <span class="persona-help">Reference points · how the voice should land</span>
+              </div>
+              <div class="persona-pills">
+                <span class="persona-pill">a regular barista at shift change<span class="x">×</span></span>
+                <span class="persona-pill">a chef texting back<span class="x">×</span></span>
+                <span class="persona-pill">the bar at a small wine bar<span class="x">×</span></span>
+                <button class="persona-pill-add">+ add</button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // tab switching for the right rail
+  document.querySelectorAll('.rail-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      document.querySelectorAll('.rail-tab').forEach(t => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('.rail-pane').forEach(p => {
+        p.classList.toggle('active', p.dataset.pane === target);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
