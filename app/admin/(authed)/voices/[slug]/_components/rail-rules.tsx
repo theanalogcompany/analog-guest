@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { BrandPersona } from '@/lib/schemas'
 import { UNIVERSAL_RULES_DISPLAY } from '../_lib/universal-rules'
+import { PatternsBanner } from './patterns-banner'
 import { SourcePill } from './source-pill'
 
 interface RailRulesProps {
@@ -87,6 +88,8 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
 
   return (
     <div className="flex flex-col gap-6">
+      <PatternsBanner venueId={venueId} />
+
       {/* Venue rules section */}
       <section>
         <header className="flex items-baseline justify-between pb-1.5 mb-2 border-b border-stone-light/60">

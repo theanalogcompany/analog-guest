@@ -327,7 +327,15 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
   return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
 }
 
-function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
+/**
+ * Map orchestrator RuntimeContext → lib/ai's RuntimeContext shape.
+ * Exported so the Voices regen helper can reuse the same mapping without
+ * duplicating timezone validation, follow-up framing, or the lastVisit
+ * threading. Regen post-injects `critiqueToIncorporate` on top of the
+ * returned object — this function deliberately doesn't know about that
+ * field so the standard agent paths stay identical.
+ */
+export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   let additionalContext: string | undefined
   let operatorInstruction: string | undefined
   if (ctx.followupTrigger) {

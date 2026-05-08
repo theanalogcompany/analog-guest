@@ -81,6 +81,13 @@ export type RuntimeContext = {
     date: string
   }
   additionalContext?: string
+  // The operator's free-text critique of a flagged outbound, threaded
+  // through the Voices regen path. Rendered as a top-level
+  // `## Critique to incorporate` block at the head of the user prompt so
+  // Sonnet treats it as the dominant signal. Only populated by the regen
+  // endpoint — production agent runs (handle-inbound, handle-followup)
+  // never pass this.
+  critiqueToIncorporate?: string
   // THE-232: the operator's note from the Command Center Follow Up button.
   // Surfaced as a top-level "## Operator instruction" block in the prompt
   // — distinct from additionalContext, which carries system-level framing

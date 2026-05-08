@@ -60,6 +60,15 @@ export async function buildRuntimeContext(input: {
   trace: AgentTrace
   currentMessage?: InboundMessage
   followupTrigger?: FollowupTrigger
+  /**
+   * Upper bound for the recent-conversation history query — when set,
+   * filters `messages.created_at < historyEndIso`. Used by the Voices
+   * regen path to pin history to the moment of the original outbound
+   * (regenerating a historical message shouldn't see messages that came
+   * after it). Production agent paths leave this undefined and get the
+   * default unbounded-upward behavior.
+   */
+  historyEndIso?: string
 }): Promise<RuntimeContext> {
   const supabase = createAdminClient()
   const computedAt = new Date()
@@ -79,6 +88,9 @@ export async function buildRuntimeContext(input: {
     .limit(MAX_HISTORY_MESSAGES)
   if (input.currentMessage) {
     messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
+  }
+  if (input.historyEndIso) {
+    messagesQuery = messagesQuery.lt('created_at', input.historyEndIso)
   }
 
   const lastVisitCutoffIso = new Date(

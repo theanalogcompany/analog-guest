@@ -99,6 +99,16 @@ export function VoicesClient({ data }: VoicesClientProps) {
     router.refresh()
   }, [router])
 
+  // After a successful commit, clear the bubble selection so the
+  // playground falls back to the unselected state and refresh server
+  // data so the topbar counts, last-refined, and pattern banner reload.
+  // The patternClusterDetected flag is forwarded for any future toast,
+  // but the rail-rules banner re-fetches on its own via router.refresh.
+  const onCommitted = useCallback(() => {
+    setSelectedMessageId(null)
+    router.refresh()
+  }, [router])
+
   const counts = {
     corpus: data.corpus.length,
     rules: data.persona.voiceAntiPatterns.length,
@@ -137,7 +147,11 @@ export function VoicesClient({ data }: VoicesClientProps) {
             selectedMessageId={selectedMessageId}
             onSelectMessage={onSelectMessage}
           />
-          <PlaygroundShell flaggedPair={flaggedPair} />
+          <PlaygroundShell
+            venueId={venueId}
+            flaggedPair={flaggedPair}
+            onCommitted={onCommitted}
+          />
         </div>
 
         <Rail

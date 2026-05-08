@@ -733,3 +733,45 @@ describe('personaToProse — voice anti-patterns', () => {
     expect(out).not.toContain('## Anti-patterns')
   })
 })
+
+// PR-C: `## Critique to incorporate` block fires only when the regen path
+// passes runtime.critiqueToIncorporate. Production agent runs never set
+// this. The block sits above `## Right now` so the model treats it as the
+// dominant signal.
+describe('runtimeToProse — critique block', () => {
+  it('renders the critique block above the Right now block', () => {
+    const out = runtimeToProse(
+      {
+        critiqueToIncorporate: 'too eager — drop the exclamation',
+        today: {
+          isoDate: '2026-05-08',
+          dayOfWeek: 'Friday',
+          venueLocalTime: '10:00',
+          venueTimezone: 'America/Los_Angeles',
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Critique to incorporate')
+    expect(out).toContain('too eager — drop the exclamation')
+    const critiqueIdx = out.indexOf('## Critique to incorporate')
+    const rightNowIdx = out.indexOf('## Right now')
+    expect(critiqueIdx).toBeGreaterThanOrEqual(0)
+    expect(rightNowIdx).toBeGreaterThan(critiqueIdx)
+  })
+
+  it('omits the block when critiqueToIncorporate is undefined', () => {
+    const out = runtimeToProse(
+      {
+        today: {
+          isoDate: '2026-05-08',
+          dayOfWeek: 'Friday',
+          venueLocalTime: '10:00',
+          venueTimezone: 'America/Los_Angeles',
+        },
+      },
+      'reply',
+    )
+    expect(out).not.toContain('## Critique to incorporate')
+  })
+})
