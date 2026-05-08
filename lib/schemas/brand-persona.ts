@@ -36,12 +36,12 @@ export const VoiceAntiPatternSchema = z
 export type VoiceAntiPattern = z.output<typeof VoiceAntiPatternSchema>
 
 export const BrandPersonaSchema = z.object({
-  // THE-237: human-readable label for the voice. Editable from the Voices
+  // Human-readable label for the voice. Editable from the Voices
   // command-center persona pane; rendered in the topbar + sidebar voice
-  // list. Optional to stay backward compatible — venues onboarded before
-  // PR-B fall back to the venue display name in the UI. JSONB-additive so
-  // no migration; will move to a `voices` table whenever the 1-voice-per-
-  // venue assumption finally breaks.
+  // list. Optional — venues onboarded before this field landed fall back
+  // to the venue display name in the UI. JSONB-additive so no migration;
+  // will move to a `voices` table whenever the 1-voice-per-venue
+  // assumption finally breaks.
   voiceName: z.string().min(1).optional(),
   tone: z.string().min(1),
   formality: z.enum(['casual', 'warm', 'formal']),

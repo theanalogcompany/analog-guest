@@ -1,4 +1,6 @@
+import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
+import { firstOrNull } from '@/lib/db/postgrest'
 import { BrandPersonaSchema } from '@/lib/schemas'
 
 // THE-237: shared loader for the Voices command-center surface. Used by the
@@ -30,8 +32,14 @@ export interface VoiceListRow {
  * Server-only. Never throws — returns [] on DB error after logging, so a
  * malformed venue config can't break sidebar rendering for every other
  * admin page. Per-row parse errors fall back to venueName.
+ *
+ * Wrapped in React.cache so concurrent calls within a single RSC render
+ * (sidebar via the layout, voice list page, etc.) dedup to one DB query.
+ * Cache is per-request — no cross-request leak.
  */
-export async function loadVoices(allowedVenueIds: string[]): Promise<VoiceListRow[]> {
+export const loadVoices = cache(_loadVoices)
+
+async function _loadVoices(allowedVenueIds: string[]): Promise<VoiceListRow[]> {
   const supabase = createAdminClient()
   let query = supabase
     .from('venues')
@@ -48,10 +56,7 @@ export async function loadVoices(allowedVenueIds: string[]): Promise<VoiceListRo
 
   const rows: VoiceListRow[] = []
   for (const v of data ?? []) {
-    // venue_configs is an embedded relation; PostgREST returns it as a nested
-    // object or array depending on cardinality inference.
-    const configRaw = v.venue_configs
-    const config = Array.isArray(configRaw) ? configRaw[0] ?? null : configRaw
+    const config = firstOrNull(v.venue_configs)
     let voiceName: string | null = null
     if (config) {
       const parsed = BrandPersonaSchema.safeParse(config.brand_persona)

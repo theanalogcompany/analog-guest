@@ -1,7 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { ADD_CORPUS_SOURCE_TYPES, type AddCorpusSourceType } from '@/lib/voice-training'
+import {
+  ADD_CORPUS_SOURCE_TYPES,
+  type AddCorpusSourceType,
+  CORPUS_CHANNEL_TAGS,
+  isReplyPairedSourceRef,
+} from '@/lib/voice-training'
 import type { VoicePageCorpusRow } from '../_lib/load-voice-page'
 
 interface RailCorpusProps {
@@ -10,28 +15,12 @@ interface RailCorpusProps {
   onMutate: () => void
 }
 
-// Reply-paired entries (cc-review, voices-commit, 08-review) get the in/out
-// pair display; standalone entries render content-only.
-function isReplyPaired(sourceRef: string | null): boolean {
-  if (!sourceRef) return false
-  return (
-    sourceRef.startsWith('cc-review:') ||
-    sourceRef.startsWith('voices-commit:') ||
-    sourceRef.startsWith('08-review:')
-  )
-}
-
+// Pull the first non-channel-marker tag as the displayed category. Storage
+// markers (cc_review, phase_5_review, voices_commit) signal which channel
+// the row came in from; operators care about the topical category that
+// sits alongside them (menu_fact, recommendation_request, etc.).
 function categoryLabel(row: VoicePageCorpusRow): string {
-  // Pull the first non-channel-marker tag as the displayed category. Channel
-  // markers like 'cc_review', 'phase_5_review', 'voices_commit' are storage
-  // metadata; the category that operators care about (menu_fact,
-  // recommendation_request, casual_chatter, etc.) lives alongside them.
-  const channelMarkers = new Set([
-    'cc_review',
-    'phase_5_review',
-    'voices_commit',
-  ])
-  const cat = row.tags.find((t) => !channelMarkers.has(t))
+  const cat = row.tags.find((t) => !CORPUS_CHANNEL_TAGS.has(t))
   return cat ?? row.sourceType
 }
 
@@ -143,10 +132,7 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
   return (
     <section className="flex flex-col gap-3">
       <header className="flex items-baseline justify-between pb-1.5 border-b border-stone-light/60">
-        <h3
-          className="text-[10.5px] uppercase font-semibold text-ink"
-          style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-        >
+        <h3 className="text-[10.5px] uppercase font-semibold tracking-eyebrow text-ink">
           Voice corpus · {corpus.length} entries
         </h3>
         {!adding && (
@@ -202,8 +188,7 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
             <button
               onClick={submitAdd}
               disabled={busy}
-              className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] hover:bg-clay-deep disabled:opacity-50"
-              style={{ letterSpacing: '0.05em' }}
+              className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
             >
               {busy ? 'Adding…' : 'Add'}
             </button>
@@ -219,17 +204,14 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
 
       {corpus.map((row) => {
         const isEditing = editingId === row.id
-        const paired = isReplyPaired(row.sourceRef)
+        const paired = isReplyPairedSourceRef(row.sourceRef)
         return (
           <div
             key={row.id}
             className="flex flex-col gap-1.5 py-3 border-b border-stone-light/60 last:border-b-0"
           >
             <div className="flex items-baseline justify-between">
-              <span
-                className="text-[9.5px] uppercase font-semibold text-clay"
-                style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-              >
+              <span className="text-[9.5px] uppercase font-semibold tracking-eyebrow text-clay">
                 {categoryLabel(row)}
               </span>
               <div className="flex items-center gap-3 text-[10.5px]">
@@ -276,8 +258,7 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
                   <button
                     onClick={() => submitEdit(row.id)}
                     disabled={busy}
-                    className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] hover:bg-clay-deep disabled:opacity-50"
-                    style={{ letterSpacing: '0.05em' }}
+                    className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
                   >
                     {busy ? 'Saving…' : 'Save'}
                   </button>
@@ -285,14 +266,11 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
               </div>
             ) : paired ? (
               // Reply-paired entries display the body as the "out" half.
-              // Without a back-link to the inbound (PR-C territory), we
-              // can only render the embedded content as `out`.
+              // The triggering inbound isn't joined into the row today, so
+              // only the embedded content renders here.
               <div className="flex flex-col gap-1">
                 <div className="flex gap-2 text-[12.5px] leading-snug">
-                  <span
-                    className="text-[9px] uppercase font-semibold text-ink-faint pt-[3px] w-5 shrink-0"
-                    style={{ letterSpacing: '0.06em' }}
-                  >
+                  <span className="text-[9px] uppercase font-semibold tracking-wider text-ink-faint pt-[3px] w-5 shrink-0">
                     out
                   </span>
                   <span className="text-ink">{row.content}</span>

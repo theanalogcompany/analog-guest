@@ -1,25 +1,15 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
+import { NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/db/server', () => ({
-  createServerClient: vi.fn(),
+vi.mock('@/lib/auth', () => ({
+  requireVenueAdmin: vi.fn(),
 }))
-vi.mock('@/lib/auth', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
-  return { ...actual, verifyAnalogAdminAccess: vi.fn() }
-})
-// Don't use importActual here — `@/lib/voice-training` transitively loads the
-// Voyage SDK at module init, which trips ERR_UNSUPPORTED_DIR_IMPORT under
-// vitest's ESM resolution.
 vi.mock('@/lib/voice-training', () => ({
   dedupeAndAppendAntiPatterns: vi.fn(),
   removeAntiPattern: vi.fn(),
 }))
 
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
+import { requireVenueAdmin } from '@/lib/auth'
 import {
   dedupeAndAppendAntiPatterns,
   removeAntiPattern,
@@ -29,16 +19,8 @@ import { DELETE, POST } from './route'
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222'
 
-function makeSessionMock(session: { user: { id: string } } | null) {
-  return {
-    auth: {
-      getSession: async () => ({ data: { session }, error: null }),
-    },
-  }
-}
-
 function buildRequest(method: 'POST' | 'DELETE', body: unknown): Request {
-  return new Request('http://test/admin/voices/api/rules/x', {
+  return new Request('http://test/admin/voices/api/venues/x/rules', {
     method,
     body: JSON.stringify(body),
     headers: { 'content-type': 'application/json' },
@@ -50,23 +32,17 @@ function buildParams(venueId: string) {
 }
 
 beforeEach(() => {
-  vi.mocked(createServerClient).mockReset()
-  vi.mocked(verifyAnalogAdminAccess).mockReset()
+  vi.mocked(requireVenueAdmin).mockReset()
   vi.mocked(dedupeAndAppendAntiPatterns).mockReset()
   vi.mocked(removeAntiPattern).mockReset()
-  vi.mocked(createServerClient).mockResolvedValue(
-    makeSessionMock({ user: { id: 'auth' } }) as unknown as Awaited<
-      ReturnType<typeof createServerClient>
-    >,
-  )
-  vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+  vi.mocked(requireVenueAdmin).mockResolvedValue({
+    ok: true,
     operatorId: OPERATOR_ID,
-    allowedVenueIds: [],
-    isAnalogAdmin: true,
+    venueId: VENUE_ID,
   })
 })
 
-describe('POST /admin/voices/api/rules/[venueId]', () => {
+describe('POST /admin/voices/api/venues/[venueId]/rules', () => {
   it('200 + added on happy path; passes operatorId + source=manual', async () => {
     vi.mocked(dedupeAndAppendAntiPatterns).mockResolvedValue({
       existing: [],
@@ -120,10 +96,11 @@ describe('POST /admin/voices/api/rules/[venueId]', () => {
     expect(res.status).toBe(500)
   })
 
-  it('401 when no session', async () => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock(null) as unknown as Awaited<ReturnType<typeof createServerClient>>,
-    )
+  it('passes through 401 from auth helper', async () => {
+    vi.mocked(requireVenueAdmin).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
+    })
     const res = await POST(
       buildRequest('POST', { ruleText: 'x' }),
       buildParams(VENUE_ID),
@@ -132,7 +109,7 @@ describe('POST /admin/voices/api/rules/[venueId]', () => {
   })
 })
 
-describe('DELETE /admin/voices/api/rules/[venueId]', () => {
+describe('DELETE /admin/voices/api/venues/[venueId]/rules', () => {
   it('200 + removed on happy path', async () => {
     vi.mocked(removeAntiPattern).mockResolvedValue({
       ok: true,

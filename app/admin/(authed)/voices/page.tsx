@@ -56,10 +56,7 @@ export default async function VoicesIndexPage() {
                 className="flex items-baseline justify-between py-4 border-b border-stone-light/60 hover:bg-highlight transition-colors group"
               >
                 <span className="flex items-baseline gap-3">
-                  <span
-                    className="font-fraunces italic text-2xl text-ink leading-none"
-                    style={{ fontVariationSettings: 'var(--fraunces)' }}
-                  >
+                  <span className="font-fraunces font-fraunces-display italic text-2xl text-ink leading-none">
                     {v.displayLabel}
                   </span>
                   {v.fallbackToVenueName && (

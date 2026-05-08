@@ -12,17 +12,13 @@
 // Read-modify-write through BrandPersonaSchema; legacy string entries get
 // in-place migrated to struct shape on the same write.
 
-import type { Json } from '@/db/types'
 import { createAdminClient } from '@/lib/db/admin'
+import { toJson } from '@/lib/db/json'
 import { BrandPersonaSchema } from '@/lib/schemas'
 
 export type RemoveAntiPatternResult =
   | { ok: true; removed: true; remainingCount: number }
   | { ok: false; error: string; errorCode: 'not_found' | 'db_error' }
-
-function toJson<T>(value: T): Json {
-  return JSON.parse(JSON.stringify(value)) as Json
-}
 
 export async function removeAntiPattern(
   venueId: string,

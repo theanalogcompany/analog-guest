@@ -4,7 +4,7 @@ import { createServerClient } from '@/lib/db/server'
 import { VoicesClient } from './voices-client'
 import { loadVoicePage } from './_lib/load-voice-page'
 
-// THE-237 (PR-B): per-voice workbench. Server orchestrator pulls everything
+// Per-voice workbench. Server orchestrator pulls everything
 // the client needs in one round trip — venue, persona, corpus, threads,
 // optionally a selected guest's full bubble thread.
 //

@@ -90,10 +90,7 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
       {/* Venue rules section */}
       <section>
         <header className="flex items-baseline justify-between pb-1.5 mb-2 border-b border-stone-light/60">
-          <h3
-            className="text-[10.5px] uppercase font-semibold text-ink"
-            style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-          >
+          <h3 className="text-[10.5px] uppercase font-semibold tracking-eyebrow text-ink">
             Venue rules · {persona.voiceAntiPatterns.length}
           </h3>
           {!adding && (
@@ -129,8 +126,7 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
               </button>
               <button
                 onClick={submit}
-                className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] hover:bg-clay-deep disabled:opacity-50"
-                style={{ letterSpacing: '0.05em' }}
+                className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
                 disabled={busy}
               >
                 {busy ? 'Adding…' : 'Add'}
@@ -163,7 +159,7 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
                 ×
               </button>
             </div>
-            <div className="flex items-center gap-2 text-[9.5px] uppercase font-semibold text-ink-faint" style={{ letterSpacing: '0.05em' }}>
+            <div className="flex items-center gap-2 text-[9.5px] uppercase font-semibold tracking-wider text-ink-faint">
               <SourcePill variant={rule.source}>
                 {rule.source === 'auto' ? 'Auto' : 'Manual'}
                 {rule.addedAt ? ` · ${formatAddedAt(rule.addedAt)}` : ''}
@@ -182,10 +178,7 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
       {/* Universal rules — locked */}
       <section>
         <header className="pb-1.5 mb-2 border-b border-stone-light/60">
-          <h3
-            className="text-[10.5px] uppercase font-semibold text-ink"
-            style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-          >
+          <h3 className="text-[10.5px] uppercase font-semibold tracking-eyebrow text-ink">
             Universal · {UNIVERSAL_RULES_DISPLAY.length} (locked)
           </h3>
         </header>
@@ -197,7 +190,7 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
             <p className="text-[12.5px] text-ink leading-snug">{r.summary}</p>
             <div className="flex items-center gap-2">
               <SourcePill variant="universal">{r.id}</SourcePill>
-              <span className="text-[9.5px] uppercase font-semibold text-ink-faint" style={{ letterSpacing: '0.05em' }}>
+              <span className="text-[9.5px] uppercase font-semibold tracking-wider text-ink-faint">
                 Universal
               </span>
             </div>

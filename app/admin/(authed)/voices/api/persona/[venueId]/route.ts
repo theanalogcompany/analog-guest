@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import type { Json } from '@/db/types'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { requireVenueAdmin } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
-import { createServerClient } from '@/lib/db/server'
+import { toJson } from '@/lib/db/json'
 import { BrandPersonaSchema } from '@/lib/schemas'
 
 // PATCH /admin/voices/api/persona/[venueId] — write through to
@@ -12,19 +11,15 @@ import { BrandPersonaSchema } from '@/lib/schemas'
 // signature phrases, banned topics, voice touchstones. Anti-patterns are
 // edited via the dedicated rules endpoints.
 //
-// THE-237. Read-modify-write through BrandPersonaSchema so the dual-shape
-// state from THE-236 doesn't leak — every field present in the request body
-// is merged onto the parsed persona and the whole thing is re-validated
-// before write. Legacy string anti-pattern entries get in-place migrated
-// to struct shape on the same write.
+// Read-modify-write through BrandPersonaSchema so the dual-shape state from
+// THE-236 doesn't leak — every field present in the request body is merged
+// onto the parsed persona and the whole thing is re-validated before write.
+// Legacy string anti-pattern entries get in-place migrated to struct shape
+// on the same write.
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-// Partial body — operator may PATCH any subset of editable fields. Each
-// field reuses the BrandPersonaSchema's per-field constraint (emoji enum,
-// formality enum, etc.) by inlining; we don't `.partial()` BrandPersonaSchema
-// directly because the union/transform on voiceAntiPatterns interacts
-// poorly with .partial() at the top-level shape.
+// Partial body — operator may PATCH any subset of editable fields. Per-field
+// constraints are inlined; .partial() on BrandPersonaSchema interacts poorly
+// with the union/transform on voiceAntiPatterns.
 const PatchBodySchema = z.object({
   voiceName: z.string().min(1).optional(),
   tone: z.string().min(1).optional(),
@@ -38,43 +33,15 @@ const PatchBodySchema = z.object({
   voiceTouchstones: z.array(z.string()).optional(),
 })
 
-function toJson<T>(value: T): Json {
-  return JSON.parse(JSON.stringify(value)) as Json
-}
-
 export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ venueId: string }> },
 ): Promise<NextResponse> {
-  // ---- auth ----
-  let allowedVenueIds: string[]
-  try {
-    const supabaseSession = await createServerClient()
-    const {
-      data: { session },
-    } = await supabaseSession.auth.getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-    }
-    const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status })
-    }
-    return NextResponse.json({ error: 'auth check failed' }, { status: 500 })
-  }
-
-  // ---- params + body ----
   const { venueId } = await params
-  if (!UUID_RE.test(venueId)) {
-    return NextResponse.json({ error: 'invalid venueId' }, { status: 400 })
-  }
-  if (allowedVenueIds.length > 0 && !allowedVenueIds.includes(venueId)) {
-    return NextResponse.json({ error: 'venue not allowed' }, { status: 403 })
-  }
+  const auth = await requireVenueAdmin(venueId)
+  if (!auth.ok) return auth.response
 
   let body: z.infer<typeof PatchBodySchema>
   try {
@@ -91,7 +58,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  // ---- read-modify-write ----
   const supabase = createAdminClient()
   const { data: row, error: readErr } = await supabase
     .from('venue_configs')

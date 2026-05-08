@@ -1,5 +1,6 @@
 'use client'
 
+import { guestNameWithPhone } from '../../../_lib/guest-name'
 import type {
   VoicePageData,
   VoicePageMessage,
@@ -18,12 +19,6 @@ interface ThreadPaneProps {
   selectedGuest: VoicePageData['selectedGuest']
   selectedMessageId: string | null
   onSelectMessage: (id: string) => void
-}
-
-function guestHeader(g: VoicePageData['selectedGuest']): string {
-  if (!g) return ''
-  const name = [g.firstName, g.lastName].filter(Boolean).join(' ').trim()
-  return name ? `${name} · ${g.phoneNumber}` : g.phoneNumber
 }
 
 export function ThreadPane({
@@ -50,11 +45,8 @@ export function ThreadPane({
 
   return (
     <div className="overflow-y-auto px-8 py-5 border-b border-stone-light/60 flex flex-col gap-1.5">
-      <div
-        className="text-center text-[10px] text-ink-faint font-semibold uppercase pb-3"
-        style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
-      >
-        {guestHeader(selectedGuest)}
+      <div className="text-center text-[10px] text-ink-faint font-semibold uppercase tracking-eyebrow pb-3">
+        {guestNameWithPhone(selectedGuest)}
       </div>
       {messages.map((m) => {
         const isOut = m.direction === 'outbound'

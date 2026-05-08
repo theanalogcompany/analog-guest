@@ -1,15 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { guestDisplayName } from '../../../_lib/guest-name'
 import { Eyebrow } from '@/lib/ui'
 import type { VoicePageThread } from '../_lib/load-voice-page'
 
 // Threads column — venue-scoped recent guests list with state pill +
-// 90-day visit count. Matches the mockup's 280px first column.
-//
-// THE-237 (PR-B): client search is in-memory across the prefetched 50-row
-// window. No server round trip — the filter operates over what's already
-// rendered.
+// 90-day visit count. Matches the mockup's 280px first column. Search
+// runs in-memory over the prefetched 50-row window — no server round trip.
 
 interface ThreadsListProps {
   threads: VoicePageThread[]
@@ -35,11 +33,6 @@ function formatThreadTime(when: Date, now: Date = new Date()): string {
   if (hours < 24) return `${hours}h`
   const days = Math.floor(hours / 24)
   return `${days}d`
-}
-
-function guestDisplayName(t: VoicePageThread): string {
-  const name = [t.firstName, t.lastName].filter(Boolean).join(' ').trim()
-  return name || t.phoneNumber
 }
 
 export function ThreadsList({
@@ -119,10 +112,9 @@ export function ThreadsList({
                   {t.lastMessagePreview}
                 </div>
                 <div
-                  className={`text-[9.5px] uppercase font-semibold ${
+                  className={`text-[9.5px] uppercase font-semibold tracking-eyebrow ${
                     isRegular ? 'text-clay' : 'text-ink-faint'
                   }`}
-                  style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
                 >
                   {t.state ? STATE_LABEL[t.state] : 'Unknown'}
                   {t.visitCount90d > 0 ? ` · ${t.visitCount90d} visits` : ''}
