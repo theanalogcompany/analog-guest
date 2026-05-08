@@ -289,6 +289,20 @@ function shouldRenderLastVisit(category: MessageCategory): boolean {
   return category !== 'welcome' && category !== 'opt_out'
 }
 
+// Voices regen-loop block. The operator's free-text critique of the
+// flagged outbound is rendered as the very first block in the user prompt
+// (above `## Right now`) so Sonnet treats it as the dominant signal.
+// Only populated by the regen endpoint; production agent runs never pass
+// this.
+function formatCritiqueToIncorporate(critique: string): string {
+  return [
+    '## Critique to incorporate',
+    'A previous attempt at this message was flagged. The operator wrote:',
+    critique,
+    'Take this critique seriously. Generate a new message that addresses it directly while still speaking in the venue\'s voice.',
+  ].join('\n')
+}
+
 // THE-232: render the operator's note from the Command Center Follow Up
 // modal as a prominent top-level block. The note is the dominant signal
 // for what the message should say; surrounding runtime context (mechanics,
@@ -329,6 +343,11 @@ export function runtimeToProse(
 ): string {
   const blocks: string[] = []
 
+  // Critique block sits above everything — when present it's the
+  // dominant signal Sonnet should attend to. Voices regen path only.
+  if (runtime.critiqueToIncorporate) {
+    blocks.push(formatCritiqueToIncorporate(runtime.critiqueToIncorporate))
+  }
   if (runtime.today) {
     blocks.push(formatRightNow(runtime.today))
   }

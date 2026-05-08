@@ -84,6 +84,14 @@ const NOOP_TRACE: AgentTrace = {
   flushAsync: async () => {},
 }
 
+/**
+ * Public no-op trace for callers that need a runtime that wires through
+ * lib/agent without firing real telemetry — the Voices regen path is the
+ * canonical consumer (regen runs 5-20× per session and would flood the
+ * trace stream if every one started a real trace).
+ */
+export const noopAgentTrace: AgentTrace = NOOP_TRACE
+
 interface LangfuseConfig {
   publicKey: string
   secretKey: string

@@ -1,6 +1,7 @@
 export {
   fetchTrace,
   langfuseInitFailed,
+  noopAgentTrace,
   startAgentTrace,
   _resetLangfuseClientForTest,
 } from './langfuse'

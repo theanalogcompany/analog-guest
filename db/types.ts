@@ -906,6 +906,67 @@ export type Database = {
           },
         ]
       }
+      voice_critiques: {
+        Row: {
+          created_at: string
+          created_by_operator_id: string | null
+          critique_text: string
+          dismissed_at: string | null
+          embedding: string
+          id: string
+          kind: string
+          message_id: string
+          promoted_at: string | null
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_operator_id?: string | null
+          critique_text: string
+          dismissed_at?: string | null
+          embedding: string
+          id?: string
+          kind: string
+          message_id: string
+          promoted_at?: string | null
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by_operator_id?: string | null
+          critique_text?: string
+          dismissed_at?: string | null
+          embedding?: string
+          id?: string
+          kind?: string
+          message_id?: string
+          promoted_at?: string | null
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_critiques_created_by_operator_id_fkey"
+            columns: ["created_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_critiques_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_critiques_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_embeddings: {
         Row: {
           chunk_index: number
@@ -968,6 +1029,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_similar_critiques: {
+        Args: {
+          exclude_id?: string
+          match_count?: number
+          query_embedding: string
+          query_venue_id: string
+          similarity_threshold?: number
+        }
+        Returns: {
+          critique_text: string
+          id: string
+          message_id: string
+          similarity: number
+        }[]
+      }
       match_knowledge_corpus: {
         Args: {
           match_count?: number
