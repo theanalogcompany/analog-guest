@@ -5,16 +5,19 @@ import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
 import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
 import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
 import { EVENT_INVITE_INSTRUCTIONS } from './event-invite'
+import { EVENT_QUESTION_INSTRUCTIONS } from './event-question'
 import { FOLLOW_UP_INSTRUCTIONS } from './follow-up'
 import { getCategoryInstructions } from './index'
 import { MANUAL_INSTRUCTIONS } from './manual'
 import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
+import { PERK_INQUIRY_INSTRUCTIONS } from './perk-inquiry'
 import { PERK_UNLOCK_INSTRUCTIONS } from './perk-unlock'
 import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-question'
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
+import { UNKNOWN_INSTRUCTIONS } from './unknown'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 // THE-228 added 4 new categories. Below the round-trip table makes the
@@ -38,6 +41,9 @@ const ROUND_TRIP_TABLE: Array<[MessageCategory, string]> = [
   ['recommendation_request', RECOMMENDATION_REQUEST_INSTRUCTIONS],
   ['casual_chatter', CASUAL_CHATTER_INSTRUCTIONS],
   ['personal_history_question', PERSONAL_HISTORY_QUESTION_INSTRUCTIONS],
+  ['perk_inquiry', PERK_INQUIRY_INSTRUCTIONS],
+  ['event_question', EVENT_QUESTION_INSTRUCTIONS],
+  ['unknown', UNKNOWN_INSTRUCTIONS],
 ]
 
 describe('getCategoryInstructions — round-trip', () => {
@@ -209,5 +215,136 @@ describe('personal-history-question instructions (THE-233)', () => {
 
   it('contains no em or en dashes', () => {
     expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+})
+
+describe('em-dash hygiene across category instructions (R3 self-consistency)', () => {
+  it('reply has no em or en dashes', () => {
+    expect(REPLY_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('welcome has no em or en dashes', () => {
+    expect(WELCOME_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('follow-up has no em or en dashes', () => {
+    expect(FOLLOW_UP_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('new-question has no em or en dashes', () => {
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('opt-out has no em or en dashes', () => {
+    expect(OPT_OUT_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('event-invite has no em or en dashes', () => {
+    expect(EVENT_INVITE_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('acknowledgment has no em or en dashes', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('perk-unlock has no em or en dashes', () => {
+    expect(PERK_UNLOCK_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+
+  it('manual has no em or en dashes', () => {
+    expect(MANUAL_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+})
+
+describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', () => {
+  it('frames the guest as wrapping up the thread', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      'wrapping up the thread or signing off',
+    )
+  })
+
+  it('directs the agent to mirror with a short close', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Mirror their energy with a short close')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('one to three words')
+  })
+
+  it('forbids pivoting or starting a new thread', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not start a new thread')
+  })
+
+  it('no longer references "venue cannot respond" framing', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('venue cannot respond')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('owner is busy')
+  })
+})
+
+describe('unknown instructions — inbound catch-all (v1.10.0)', () => {
+  it('frames the case as classifier failure or operator-attention needed', () => {
+    expect(UNKNOWN_INSTRUCTIONS).toContain('classifier could not confidently categorize')
+  })
+
+  it('directs the agent to send a brief holding response', () => {
+    expect(UNKNOWN_INSTRUCTIONS).toContain('brief, warm holding response')
+  })
+
+  it('directs the agent to reference what they asked', () => {
+    expect(UNKNOWN_INSTRUCTIONS).toContain('Reference what they asked or said')
+  })
+
+  it('forbids invention or guessing', () => {
+    expect(UNKNOWN_INSTRUCTIONS).toContain('Do not invent or guess')
+  })
+
+  it('contains no em or en dashes', () => {
+    expect(UNKNOWN_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+})
+
+describe('perk-inquiry instructions (v1.10.0)', () => {
+  it('frames as inbound asking about perks (distinct from perk_unlock)', () => {
+    expect(PERK_INQUIRY_INSTRUCTIONS).toContain(
+      'inbound side of perks, distinct from perk_unlock',
+    )
+  })
+
+  it('points the agent at the eligibility block', () => {
+    expect(PERK_INQUIRY_INSTRUCTIONS).toContain(
+      '"What this guest can access" block above',
+    )
+  })
+
+  it('forbids transactional language', () => {
+    expect(PERK_INQUIRY_INSTRUCTIONS).toContain('"earned"')
+    expect(PERK_INQUIRY_INSTRUCTIONS).toContain('"redeem"')
+  })
+
+  it('lands the principle: recognition not points', () => {
+    expect(PERK_INQUIRY_INSTRUCTIONS).toContain('recognition, not points')
+  })
+
+  it('contains no em or en dashes', () => {
+    expect(PERK_INQUIRY_INSTRUCTIONS).not.toMatch(/[—–]/)
+  })
+})
+
+describe('event-question instructions (v1.10.0)', () => {
+  it('frames as inbound asking about events (distinct from event_invite)', () => {
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain(
+      'inbound side of events, distinct from event_invite',
+    )
+  })
+
+  it('directs the agent to pull from documented events', () => {
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('documented events')
+  })
+
+  it('forbids inventing or pivoting', () => {
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('rather than inventing one')
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot')
+  })
+
+  it('contains no em or en dashes', () => {
+    expect(EVENT_QUESTION_INSTRUCTIONS).not.toMatch(/[—–]/)
   })
 })

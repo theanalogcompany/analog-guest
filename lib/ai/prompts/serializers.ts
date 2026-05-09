@@ -460,6 +460,15 @@ export function runtimeToProse(
         lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
       }
       break
+    case 'perk_inquiry':
+      if (runtime.inboundMessage) lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
+      break
+    case 'event_question':
+      if (runtime.inboundMessage) lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
+      break
+    case 'unknown':
+      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+      break
   }
 
   if (runtime.additionalContext) {

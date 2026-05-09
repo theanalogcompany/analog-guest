@@ -51,20 +51,36 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
     return callArgs!.system as string
   }
 
-  it('lists every pre-existing category with its definition', async () => {
+  it('lists every inbound classifier category with its definition', async () => {
     const prompt = await getCapturedSystemPrompt()
     for (const name of [
-      'welcome',
-      'follow_up',
       'reply',
       'new_question',
       'opt_out',
-      'perk_unlock',
-      'event_invite',
       'manual',
+      'acknowledgment',
+      'comp_complaint',
+      'mechanic_request',
+      'recommendation_request',
+      'casual_chatter',
+      'personal_history_question',
+      'perk_inquiry',
+      'event_question',
+      'unknown',
     ]) {
       expect(prompt).toContain(`- ${name}:`)
     }
+  })
+
+  it('does not list outbound-only categories in the inbound classifier prompt', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    // welcome / follow_up / perk_unlock / event_invite are outbound triggers,
+    // not inbound classifications. They remain in MessageCategory for outbound
+    // paths but the classifier should never return them.
+    expect(prompt).not.toMatch(/^- welcome:/m)
+    expect(prompt).not.toMatch(/^- follow_up:/m)
+    expect(prompt).not.toMatch(/^- perk_unlock:/m)
+    expect(prompt).not.toMatch(/^- event_invite:/m)
   })
 
   it('lists acknowledgment with sign-off / closing examples (THE-228 fix)', async () => {
@@ -116,7 +132,10 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
     expect(prompt).toContain('When a message could fit multiple categories')
     expect(prompt).toContain('comp_complaint even if phrased as a reply')
     expect(prompt).toContain('opinion-shaped')
-    expect(prompt).toContain('Use manual only when the message genuinely needs operator attention')
+    // v1.10.0: rephrased to distinguish manual (operator's eyes needed) from
+    // unknown (no clear path to respond). The previous wording was conflating
+    // the two.
+    expect(prompt).toContain('Use manual only when the message contains content that genuinely needs an operator\'s eyes')
   })
 
   it('includes the personal-history disambiguation clause (THE-233)', async () => {
@@ -153,6 +172,9 @@ describe('classifyMessage — schema accepts new categories', () => {
     'recommendation_request',
     'casual_chatter',
     'personal_history_question',
+    'perk_inquiry',
+    'event_question',
+    'unknown',
   ] as const) {
     it(`accepts category=${cat}`, async () => {
       generateObjectMock.mockResolvedValueOnce({
@@ -163,9 +185,56 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.8.0')
+      expect(r.data.promptVersion).toBe('v1.10.0')
     })
   }
+})
+
+describe('CLASSIFY_SYSTEM_PROMPT — new inbound categories (v1.10.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+      },
+    })
+  })
+
+  async function getCapturedSystemPrompt(): Promise<string> {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { system?: string }
+      | undefined
+    expect(callArgs?.system).toBeDefined()
+    return callArgs!.system as string
+  }
+
+  it('lists perk_inquiry with asking-about-system framing', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain('- perk_inquiry:')
+    expect(prompt).toContain('what they unlock')
+    expect(prompt).toContain('Distinct from mechanic_request')
+  })
+
+  it('lists event_question with asking-about-events framing', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain('- event_question:')
+    expect(prompt).toContain("when's the next open mic")
+  })
+
+  it('lists unknown with catch-all framing', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain('- unknown:')
+    expect(prompt).toContain('does not fit any other category cleanly')
+  })
+
+  it('updated disambiguation distinguishes manual from unknown', async () => {
+    const prompt = await getCapturedSystemPrompt()
+    expect(prompt).toContain('Use unknown only when the message genuinely doesn\'t fit')
+    expect(prompt).toContain('genuinely needs an operator\'s eyes')
+  })
 })
 
 describe('classifyMessage — basic shape', () => {

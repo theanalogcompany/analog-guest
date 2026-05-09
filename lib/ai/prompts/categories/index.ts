@@ -3,15 +3,18 @@ import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
 import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
 import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
 import { EVENT_INVITE_INSTRUCTIONS } from './event-invite'
+import { EVENT_QUESTION_INSTRUCTIONS } from './event-question'
 import { FOLLOW_UP_INSTRUCTIONS } from './follow-up'
 import { MANUAL_INSTRUCTIONS } from './manual'
 import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
+import { PERK_INQUIRY_INSTRUCTIONS } from './perk-inquiry'
 import { PERK_UNLOCK_INSTRUCTIONS } from './perk-unlock'
 import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-question'
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
+import { UNKNOWN_INSTRUCTIONS } from './unknown'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 export function getCategoryInstructions(category: MessageCategory): string {
@@ -28,8 +31,12 @@ export function getCategoryInstructions(category: MessageCategory): string {
       return OPT_OUT_INSTRUCTIONS
     case 'perk_unlock':
       return PERK_UNLOCK_INSTRUCTIONS
+    case 'perk_inquiry':
+      return PERK_INQUIRY_INSTRUCTIONS
     case 'event_invite':
       return EVENT_INVITE_INSTRUCTIONS
+    case 'event_question':
+      return EVENT_QUESTION_INSTRUCTIONS
     case 'manual':
       return MANUAL_INSTRUCTIONS
     case 'acknowledgment':
@@ -44,5 +51,7 @@ export function getCategoryInstructions(category: MessageCategory): string {
       return CASUAL_CHATTER_INSTRUCTIONS
     case 'personal_history_question':
       return PERSONAL_HISTORY_QUESTION_INSTRUCTIONS
+    case 'unknown':
+      return UNKNOWN_INSTRUCTIONS
   }
 }

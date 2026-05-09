@@ -9,7 +9,11 @@ import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 
 // THE-228 added comp_complaint / mechanic_request / recommendation_request /
 // casual_chatter to the inbound classifier surface. Migration 011 widens the
-// messages.category check constraint to match.
+// messages.category check constraint to match. v1.10.0 adds perk_inquiry +
+// event_question (inbound counterparts to the outbound perk_unlock /
+// event_invite triggers) and unknown (inbound catch-all that replaces the
+// old practice of routing ambiguous inbounds to manual). Migration 016
+// widens the constraint.
 export type MessageCategory =
   | 'welcome'
   | 'follow_up'
@@ -17,7 +21,9 @@ export type MessageCategory =
   | 'new_question'
   | 'opt_out'
   | 'perk_unlock'
+  | 'perk_inquiry'
   | 'event_invite'
+  | 'event_question'
   | 'manual'
   | 'acknowledgment'
   | 'comp_complaint'
@@ -25,6 +31,7 @@ export type MessageCategory =
   | 'recommendation_request'
   | 'casual_chatter'
   | 'personal_history_question'
+  | 'unknown'
 
 export type VoiceCorpusSourceType =
   | 'sample_text'
