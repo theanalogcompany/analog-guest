@@ -1,6 +1,6 @@
 # analog-guest
 
-This is the messaging engine for Analog — a guest recognition platform for independent cafes, bakeries, and restaurants. This repo handles inbound and outbound messages between venues and their guests, plus the AI generation, classification, and routing logic. The operator-facing dashboard lives in a separate repo (`analog-operator`) and calls into this repo's API.
+This is the messaging engine for Analog — a guest recognition platform for independent cafes, bakeries, and restaurants. This repo handles inbound and outbound messages between venues and their guests, plus the AI generation, classification, and routing logic. It also hosts the internal Command Center (`app/admin/*`) — the Analog-staff debugging surface served on `admin.theanalog.company`. A separate venue-operator dashboard (`analog-operator`) is planned but not yet built; bearer-token auth scaffolding for that future repo lives in `lib/auth/` (see "Auth boundary" below).
 
 ---
 
@@ -61,7 +61,7 @@ Token extraction into runtime code happens in `app/globals.css` under `@theme in
 - `lib/rag/` — embedding (`ingestCorpusEntry`), retrieval, the `match_voice_corpus` RPC wrapper
 - `lib/recognition/` — relationship strength scoring, state machine logic (`computeGuestState`, `computeRelationshipStrength`, `loadSignals`, `normalize-signals`), threshold evaluation. `state-bands.ts` exposes `isStateAtLeast(current, min)` for ordered comparisons across the four bands. `eligibility.ts` exposes `isRedemptionActive` + `filterEligibleMechanics` for runtime mechanic eligibility filtering, plus `MechanicRedeemedDataSchema` documenting the `engagement_events.data` shape for `event_type='mechanic_redeemed'` rows.
 - `lib/agent/` — orchestration layer. `build-runtime-context.ts` (assembles RuntimeContext for a single agent run), `stages.ts` (classify → retrieve → generate stage functions), `handle-inbound.ts`, `handle-followup.ts`. The agent module owns the per-request lifecycle.
-- `lib/auth/` — JWT verification + operator lookup for analog-operator → analog-guest API calls. `verifyOperatorRequest(request)` returns `{ operatorId, allowedVenueIds }` or throws `AuthError`. `getCurrentOperator(request)` is the Response-returning wrapper for route handlers. `verifyAnalogAdminRequest(request)` and `verifyAnalogAdminAccess(authUserId)` are sibling helpers that compose operator verification with an `is_analog_admin = true` check (THE-198). Server-only; uses the admin DB client.
+- `lib/auth/` — auth helpers. `verifyAnalogAdminAccess(authUserId)` is the only helper with active app callers today: the admin layout (`app/admin/(authed)/layout.tsx`) calls it to gate `/admin/*` access via cookie-session (THE-198). The bearer-token helpers — `verifyOperatorRequest(request)` (returns `{ operatorId, allowedVenueIds }` or throws `AuthError`), `getCurrentOperator(request)` (Response-returning wrapper), and `verifyAnalogAdminRequest(request)` (bearer path composed with `is_analog_admin = true`) — are forward-scaffolding for the future `analog-operator` repo and have zero app/route callers today; they exist with full test coverage so the venue-operator dashboard can drop in cleanly. Server-only; uses the admin DB client.
 - `lib/ui/` — Brand primitives consumed by `app/admin/*`: `<Eyebrow>`, `<SectionHeader>`, `<HairlineRow>`, `<Card>`, `<StatusDot>`. RSC-compatible. Sourced from the brand language at `docs/brand/style-guide-v01.html` — do not introduce decorative variants without updating the style guide first.
 - `app/admin/` — Command Center routes. Auth-gated by `verifyAnalogAdminAccess` in `app/admin/(authed)/layout.tsx`. Served on `admin.theanalog.company` in production via root `middleware.ts` host gating. **Direct** register per the style guide tone continuum.
 - `lib/schemas/` — Zod schemas for venue-shaped JSONB fields. `BrandPersonaSchema` (handles dual-shape `voiceAntiPatterns`, see gotchas), `MessageReviewSchema` (the `response_review` shape from migration 014), `VenueInfoSchema` (with `filterActiveContext` per THE-150). Read JSONB fields through these — never directly via SQL paths.
@@ -331,9 +331,11 @@ These constraints are real and have caused bugs:
 
 ---
 
-## Auth boundary (analog-operator → analog-guest)
+## Auth boundary (forward-scaffolding for analog-operator)
 
-All internal API routes called from the operator dashboard verify the bearer token via `verifyOperatorRequest` (or its `getCurrentOperator` wrapper). The helper resolves the Supabase auth JWT to our internal `operatorId` plus an `allowedVenueIds` array. Route handlers do venue-mismatch checks themselves (`allowedVenueIds.includes(targetVenueId)`) and construct 403 responses; the helper itself only ever produces 401. RLS is the longer-term defense; the helper is the v1 enforcement point.
+When the venue-operator dashboard (`analog-operator`) ships, its API calls into this repo will be bearer-token authenticated via `verifyOperatorRequest` (or its `getCurrentOperator` wrapper). The helper resolves the Supabase auth JWT to our internal `operatorId` plus an `allowedVenueIds` array. Route handlers will be expected to do venue-mismatch checks themselves (`allowedVenueIds.includes(targetVenueId)`) and construct 403 responses; the helper itself only ever produces 401. RLS is the longer-term defense; the helper is the v1 enforcement point.
+
+**Status today:** no app code calls these helpers — they exist as forward-scaffolding with test coverage so the future repo can drop in cleanly. Active admin auth for `app/admin/(authed)/*` uses the cookie-session path via `verifyAnalogAdminAccess(authUserId)`, documented in "Admin scaffold" below. Don't conflate the two — the cookie path is for Analog staff in the Command Center; the bearer path is for venue operators in the future dashboard.
 
 ---
 
