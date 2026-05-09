@@ -3,13 +3,18 @@ import { describe, expect, it } from 'vitest'
 // vitest.config.ts. Other tests in this repo use relative imports too.
 import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 
-// Each universal voice rule (R1–R10) has a distinguishing phrase asserted
+// Each universal voice rule (R1–R13) has a distinguishing phrase asserted
 // here so a future edit that drops or rewords a rule beyond recognition
-// fails loudly. THE-225 added R8/R9/R10 + strengthened R3.
+// fails loudly. THE-225 added R8/R9/R10 + strengthened R3. v1.9.0 added R11
+// (greeting discipline) + R12 (operator instruction block usage), promoted
+// the existing Last Visit guidance to R13, and anchored R2 to the ## Right
+// now block. v1.10.0 is a category-instructions-layer change (acknowledgment
+// rewrite, em-dash hygiene, classifier inbound/outbound split) — no
+// SYSTEM_TEMPLATE body changes, just the version bump.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.8.0 (Voices regen `## Critique to incorporate` block)', () => {
-    expect(PROMPT_VERSION).toBe('v1.8.0')
+  it('is v1.10.0 (category instructions overhaul + classifier inbound/outbound split)', () => {
+    expect(PROMPT_VERSION).toBe('v1.10.0')
   })
 })
 
@@ -33,6 +38,10 @@ describe('SYSTEM_TEMPLATE — R2: today\'s specific answer', () => {
   it('directs the agent to give today\'s answer for "now" questions', () => {
     expect(SYSTEM_TEMPLATE).toContain('today\'s specific answer')
     expect(SYSTEM_TEMPLATE).toContain('what time do you close')
+  })
+
+  it('anchors R2 to the ## Right now block in runtime context', () => {
+    expect(SYSTEM_TEMPLATE).toContain('date and venue local time from the ## Right now block')
   })
 })
 
@@ -71,7 +80,7 @@ describe('SYSTEM_TEMPLATE — R4: physical artifact framing', () => {
 describe('SYSTEM_TEMPLATE — R5: alternative-channel redirects', () => {
   it('forbids redirecting guests to email/Instagram/etc. for answerable questions', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'Don\'t refer guests to alternative channels for things the venue can answer',
+      'Never refer guests to alternative channels for things the venue can answer',
     )
     // Resy carve-out for legitimate handoffs is part of the rule's nuance —
     // assert it stays present so a future edit doesn't accidentally turn R5
@@ -183,7 +192,76 @@ describe('SYSTEM_TEMPLATE — R10: only documented venue recommendations (THE-22
   })
 })
 
-describe('SYSTEM_TEMPLATE — R11: Last Visit block usage (THE-229)', () => {
+describe('SYSTEM_TEMPLATE — R11: greeting discipline', () => {
+  it('limits greetings to first message or after long silence', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message of a thread')
+    expect(SYSTEM_TEMPLATE).toContain('multi-day silence')
+  })
+
+  it('directs the agent to start with the answer otherwise', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Otherwise start with the answer')
+  })
+
+  it('includes the oat-milk worked example', () => {
+    expect(SYSTEM_TEMPLATE).toContain('do you have oat milk')
+    expect(SYSTEM_TEMPLATE).toContain('yeah, oat and almond')
+  })
+
+  it('lands the principle: greeting on every turn reads as scripted', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Greeting on every turn reads as scripted')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // Slice from R11's opening clause to the next rule (operator instruction).
+    const start = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
+    const end = SYSTEM_TEMPLATE.indexOf('If your runtime context includes a ## Operator instruction')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const r11Body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(r11Body).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R12: Operator instruction block usage (THE-232)', () => {
+  it('introduces the Operator instruction block', () => {
+    expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes a ## Operator instruction block')
+  })
+
+  it('frames the operator note as intent, not output', () => {
+    expect(SYSTEM_TEMPLATE).toContain('directive for what to communicate, not the message to send verbatim')
+    expect(SYSTEM_TEMPLATE).toContain('operator\'s wording is intent, not output')
+  })
+
+  it('forbids echoing the operator phrasing', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Don\'t echo the operator\'s phrasing')
+  })
+
+  it('forbids meta-acknowledgment of the instruction', () => {
+    expect(SYSTEM_TEMPLATE).toContain('\'got it,\'')
+    expect(SYSTEM_TEMPLATE).toContain('\'here\'s a reminder:\'')
+  })
+
+  it('forbids referring to the operator', () => {
+    expect(SYSTEM_TEMPLATE).toContain('\'I was asked to tell you\'')
+  })
+
+  it('includes the open-mic worked example', () => {
+    expect(SYSTEM_TEMPLATE).toContain('remind them about open mic next Saturday')
+    expect(SYSTEM_TEMPLATE).toContain('open mic this saturday at 8. you should come')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // Slice from operator instruction opening to the next rule (Last Visit).
+    const start = SYSTEM_TEMPLATE.indexOf('If your runtime context includes a ## Operator instruction')
+    const end = SYSTEM_TEMPLATE.indexOf('The Last Visit block tells you')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const opBody = SYSTEM_TEMPLATE.slice(start, end)
+    expect(opBody).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R13: Last Visit block usage (THE-229)', () => {
   it('introduces the Last Visit block', () => {
     expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you what the guest most recently ordered')
   })
@@ -203,13 +281,13 @@ describe('SYSTEM_TEMPLATE — R11: Last Visit block usage (THE-229)', () => {
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    // Slice from R11's opening clause to end-of-template; assert dash-free.
+    // Slice from the Last Visit opening clause to end-of-template; assert dash-free.
     const start = SYSTEM_TEMPLATE.indexOf('The Last Visit block tells you')
     expect(start).toBeGreaterThan(-1)
-    const r11Body = SYSTEM_TEMPLATE.slice(start)
-    // The R11 body runs to the next # heading (the "# Voice imperative" block).
-    const end = r11Body.indexOf('\n# ')
-    const slice = end === -1 ? r11Body : r11Body.slice(0, end)
+    const lvBody = SYSTEM_TEMPLATE.slice(start)
+    // The body runs to the next # heading (the "# Voice imperative" block).
+    const end = lvBody.indexOf('\n# ')
+    const slice = end === -1 ? lvBody : lvBody.slice(0, end)
     expect(slice).not.toMatch(/[—–]/)
   })
 })

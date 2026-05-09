@@ -49,7 +49,9 @@ const CATEGORY_OPTIONS: MessageCategory[] = [
   'new_question',
   'opt_out',
   'perk_unlock',
+  'perk_inquiry',
   'event_invite',
+  'event_question',
   'manual',
   'acknowledgment',
   'comp_complaint',
@@ -57,6 +59,7 @@ const CATEGORY_OPTIONS: MessageCategory[] = [
   'recommendation_request',
   'casual_chatter',
   'personal_history_question',
+  'unknown',
 ]
 
 const EMPTY_STATE: ReviewFormState = {
