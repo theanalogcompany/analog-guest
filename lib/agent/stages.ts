@@ -20,11 +20,11 @@ import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import type { Classification, CorpusMatch, KnowledgeMatch, RuntimeContext } from './types'
 
-const STRONG_MATCH_SIMILARITY = 0.3
-const MIN_STRONG_MATCHES = 1
-const SEND_FIDELITY_FLOOR = 0.4
-const CORPUS_RETRIEVE_LIMIT = 8
-const KNOWLEDGE_RETRIEVE_LIMIT = 4
+export const STRONG_MATCH_SIMILARITY = 0.3
+export const MIN_STRONG_MATCHES = 1
+export const SEND_FIDELITY_FLOOR = 0.4
+export const CORPUS_RETRIEVE_LIMIT = 8
+export const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
  * Internal: classify the inbound message via lib/ai. Throws on AI failure

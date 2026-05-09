@@ -21,14 +21,14 @@ import type {
   VenueContext,
 } from './types'
 
-const MAX_HISTORY_MESSAGES = 30
-const MAX_HISTORY_DAYS = 14
+export const MAX_HISTORY_MESSAGES = 30
+export const MAX_HISTORY_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 // THE-229: hard cap on how far back we'll surface a guest's most recent
 // transaction. Older visits aren't relevant context to reference in
 // conversation. Recognition uses 90 days for visit-frequency scoring; this
 // stricter cutoff is for "should the agent talk about it."
-const LAST_VISIT_CUTOFF_DAYS = 60
+export const LAST_VISIT_CUTOFF_DAYS = 60
 
 /**
  * Build the full RuntimeContext for an agent run by fetching venue + guest +

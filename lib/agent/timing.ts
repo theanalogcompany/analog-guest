@@ -1,9 +1,9 @@
 import type { TimingPlan } from './types'
 
-const TOTAL_DELAY_MIN_MS = 500
-const TOTAL_DELAY_MAX_MS = 1_000
-const MARK_AS_READ_GAP_MIN_MS = 5_000
-const MARK_AS_READ_GAP_MAX_MS = 8_000
+export const TOTAL_DELAY_MIN_MS = 500
+export const TOTAL_DELAY_MAX_MS = 1_000
+export const MARK_AS_READ_GAP_MIN_MS = 5_000
+export const MARK_AS_READ_GAP_MAX_MS = 8_000
 
 function randIntInclusive(minInclusive: number, maxInclusive: number): number {
   return Math.floor(Math.random() * (maxInclusive - minInclusive + 1)) + minInclusive

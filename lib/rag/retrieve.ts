@@ -8,9 +8,9 @@ import type {
   VoiceCorpusChunk,
 } from './types'
 
-const DEFAULT_LIMIT = 5
-const KNOWLEDGE_DEFAULT_LIMIT = 5
-const SIMILARITY_FLOOR = 0.3
+export const DEFAULT_LIMIT = 5
+export const KNOWLEDGE_DEFAULT_LIMIT = 5
+export const SIMILARITY_FLOOR = 0.3
 
 function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.join(',')}]`

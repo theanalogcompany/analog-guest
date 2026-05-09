@@ -37,8 +37,8 @@ interface CritiqueLite {
   messageId: string
 }
 
-const SIMILARITY_THRESHOLD = 0.85
-const MATCH_LIMIT = 20
+export const SIMILARITY_THRESHOLD = 0.85
+export const MATCH_LIMIT = 20
 
 function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.join(',')}]`

@@ -8,10 +8,14 @@
 // `lib/agent/stages.ts` (classifyStage → retrieveCorpusStage →
 // retrieveKnowledgeStage → generateStage) but skips the analytics
 // emissions those stages own — every regen would otherwise flood
-// PostHog and Langfuse with operator-driven noise. If the agent
-// retrieval thresholds, knowledge gating, or post-generation logic
-// change in stages.ts, mirror them here. The two paths are tested in
-// isolation and don't share runtime code.
+// PostHog and Langfuse with operator-driven noise.
+//
+// Analytics isolation means: don't invoke each other's telemetry paths.
+// Sharing _values_ via imports is fine and preferred — TAC-183 dedupes
+// the four retrieval thresholds by importing them from stages.ts so
+// silent drift is structurally impossible. If gating logic (e.g.
+// shouldRetrieveKnowledge) or post-generation behavior changes there,
+// mirror it here. The two paths still don't share runtime code.
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -21,15 +25,16 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildAiRuntime } from '@/lib/agent/stages'
+import {
+  buildAiRuntime,
+  CORPUS_RETRIEVE_LIMIT,
+  KNOWLEDGE_RETRIEVE_LIMIT,
+  MIN_STRONG_MATCHES,
+  STRONG_MATCH_SIMILARITY,
+} from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
-
-const STRONG_MATCH_SIMILARITY = 0.3
-const MIN_STRONG_MATCHES = 1
-const CORPUS_RETRIEVE_LIMIT = 8
-const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 export interface RegenerateWithCritiqueInput {
   venueId: string

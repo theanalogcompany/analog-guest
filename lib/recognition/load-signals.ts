@@ -3,7 +3,7 @@ import { extractMenuExploration } from './extract-menu-exploration'
 import type { RawSignals, RecognitionResult } from './types'
 import { dedupeVisitsByLocalDate } from './visit-dedupe'
 
-const VISIT_LOOKBACK_DAYS = 90
+export const VISIT_LOOKBACK_DAYS = 90
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /**
