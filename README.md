@@ -14,6 +14,11 @@ npm run dev
 Open http://localhost:3000. The Command Center is at `/admin` (sign-in via
 magic link).
 
+`npm install` also wires up the git pre-commit hook (via husky's `prepare`
+script). The hook runs `eslint --fix` on staged `.ts/.tsx` files, then
+`tsc --noEmit` against the full project, then `vitest related --run` on the
+staged files. Any failure rejects the commit.
+
 Environment variables: copy `.env.local.example` to `.env.local` and fill in
 real values (ask the operator for the secrets bundle).
 
