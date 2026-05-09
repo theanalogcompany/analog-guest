@@ -48,6 +48,22 @@
   --tracking-eyebrow: 0.22em;
 }
 
+/* Per-surface palette override for the Command Center. Re-binds the
+   warm-beige tokens to a neutral grayscale inside /admin/* without
+   touching :root — canonical brand stays cream everywhere else. The
+   wrapping data-attribute is set by app/admin/layout.tsx (TAC-237).
+   Hierarchy invariant: --parchment must be darker than --highlight,
+   since threads-list (and a few other surfaces) use bg-parchment for
+   the active state and hover:bg-highlight for the hover state. The
+   gap between them governs how distinguishable active is from hover
+   on an off-white shell. */
+[data-surface="admin"] {
+  --paper: #FFFFFF;
+  --parchment: #EAEAE8;
+  --highlight: #F5F5F3;
+  --stone-light: #E5E3DE;
+}
+
 body {
   background: var(--paper);
   color: var(--ink);

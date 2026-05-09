@@ -356,6 +356,8 @@ To grant admin access: SQL template under "Common gotchas" (the THE-199 entry).
 
 Brand language is canonical at `docs/brand/style-guide-v01.html`. Fonts load via `next/font/google` in `app/layout.tsx` (Fraunces with `opsz/SOFT/WONK` axes + Inter Tight). Tokens live in `app/globals.css` under `@theme inline` — Tailwind v4, no separate config file. Copy register: **Direct** per the style guide. No emoji, no checkmarks; status indicators use `<StatusDot>`.
 
+**Per-surface palette overrides (TAC-237).** Admin renders on white, not the canonical cream — implemented as a `[data-surface="admin"]` block in `app/globals.css` that re-binds `--paper`, `--parchment`, `--highlight`, and `--stone-light` to a neutral grayscale, scoped via `app/admin/layout.tsx` setting `data-surface="admin"` on its root div. The cascade lets every admin component keep its existing `bg-paper` / `bg-parchment` / `bg-highlight` Tailwind classes unchanged. **Don't mutate `:root` tokens for surface-specific tweaks** — scope them via `[data-surface="..."]` so canonical brand stays canonical and other surfaces (operator dashboard, future repos) can opt into their own palette without drift.
+
 Magic-link callback URL is constructed from `NEXT_PUBLIC_ADMIN_URL` (per environment) plus a fallback to `NEXT_PUBLIC_VERCEL_URL` so preview deploys self-resolve. Supabase project's "Site URL" + "Redirect URLs" allowlist must include all three: localhost, `*.vercel.app`, and `admin.theanalog.company`. Configure in Supabase Studio.
 
 ### Conversations viewer (THE-201)
