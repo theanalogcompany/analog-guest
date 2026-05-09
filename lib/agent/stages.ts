@@ -5,6 +5,7 @@ import {
   captureRegenerationTriggered,
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
+  CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
   CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
   VOICE_FIDELITY_LOW_THRESHOLD,
 } from '@/lib/analytics/posthog'
@@ -39,10 +40,17 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
     inboundBody: ctx.currentMessage.body,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
+    recentMessages: ctx.recentMessages,
+    guestState: ctx.recognition.state,
   })
   if (!r.ok) {
     throw new Error(`classifyStage: ${r.error}`)
   }
+
+  // 3-tier routing: < 0.3 → `unknown` (holding ack); 0.3..0.7 → classifier's
+  // pick + observation event; >= 0.7 → classifier's pick + silent.
+  const autoRoutedToUnknown =
+    r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD
 
   if (r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD) {
     await captureClassificationLowConfidence({
@@ -53,11 +61,12 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
       classifierConfidence: r.data.classifierConfidence,
       inboundLength: ctx.currentMessage.body.length,
       inboundBody: ctx.currentMessage.body,
+      autoRoutedToUnknown,
     })
   }
 
   return {
-    category: r.data.category,
+    category: autoRoutedToUnknown ? 'unknown' : r.data.category,
     classifierConfidence: r.data.classifierConfidence,
     reasoning: r.data.reasoning,
   }

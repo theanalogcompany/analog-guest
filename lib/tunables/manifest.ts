@@ -29,10 +29,12 @@ import {
   TOTAL_DELAY_MAX_MS,
   TOTAL_DELAY_MIN_MS,
 } from '@/lib/agent/timing'
+import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
 import { MAX_ATTEMPTS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
+  CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
   CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
   VOICE_FIDELITY_LOW_THRESHOLD,
   WEBHOOK_SILENCE_THRESHOLD_HOURS,
@@ -164,7 +166,7 @@ export const TUNABLES = [
   },
 
   // ---------------------------------------------------------------------------
-  // classification (1)
+  // classification (3)
   // ---------------------------------------------------------------------------
   {
     name: 'classification_confidence_low_threshold',
@@ -173,6 +175,24 @@ export const TUNABLES = [
     category: 'classification',
     source: 'lib/analytics/posthog.ts',
     description: 'Classifier confidence below this fires a low-confidence alert.',
+  },
+  {
+    name: 'classification_confidence_reroute_threshold',
+    value: CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
+    type: 'number',
+    category: 'classification',
+    source: 'lib/analytics/posthog.ts',
+    description: 'Classifier confidence below this auto-routes the returned category to `unknown`; the agent ships a holding response instead of proceeding with the low-confidence pick. Original category preserved on the PostHog event.',
+    relatedTickets: ['TAC-240'],
+  },
+  {
+    name: 'max_classifier_input_chars',
+    value: MAX_CLASSIFIER_INPUT_CHARS,
+    type: 'number',
+    category: 'classification',
+    source: 'lib/ai/classify-message.ts',
+    description: 'Inbound length cap sent to the classifier; longer messages are truncated with a `[...truncated]` suffix. Generation still receives the full body.',
+    relatedTickets: ['TAC-240'],
   },
 
   // ---------------------------------------------------------------------------

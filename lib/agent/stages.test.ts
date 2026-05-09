@@ -1,28 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { retrieveCorpusStage, shouldRetrieveKnowledge } from './stages'
+import { classifyStage, retrieveCorpusStage, shouldRetrieveKnowledge } from './stages'
 import type { CorpusMatch, RuntimeContext } from './types'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
 // captureCorpusRetrievalBelowThreshold is fire-and-forget observability —
 // we mock it to assert it still fires on the followup path (regression
-// guard for THE-231's "observability stays useful" invariant).
+// guard for THE-231's "observability stays useful" invariant). classifyMessage
+// (lib/ai) is mocked for the classifyStage routing tests added in TAC-240.
 const retrieveContextMock = vi.fn()
 const captureLowMock = vi.fn()
+const captureClassificationLowMock = vi.fn()
+const classifyMessageMock = vi.fn()
 
 vi.mock('@/lib/rag', () => ({
   retrieveContext: (...args: unknown[]) => retrieveContextMock(...args),
 }))
 
+vi.mock('@/lib/ai', () => ({
+  classifyMessage: (...args: unknown[]) => classifyMessageMock(...args),
+  // generateMessage is referenced at module load by stages.ts; stub so the
+  // import doesn't pull in real SDK init.
+  generateMessage: vi.fn(),
+}))
+
 vi.mock('@/lib/analytics/posthog', () => ({
   // Real module exports several helpers + threshold constants. We need the
-  // threshold here because retrieveCorpusStage compares against it; the rest
-  // are stubs since stages.ts imports them at module load.
-  captureClassificationLowConfidence: vi.fn(),
+  // thresholds here because retrieveCorpusStage and classifyStage compare
+  // against them; the rest are stubs since stages.ts imports them at module
+  // load.
+  captureClassificationLowConfidence: (...args: unknown[]) =>
+    captureClassificationLowMock(...args),
   captureCorpusRetrievalBelowThreshold: (...args: unknown[]) => captureLowMock(...args),
   captureDashViolationPersisted: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
+  CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
   CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
@@ -209,5 +222,129 @@ describe('shouldRetrieveKnowledge', () => {
   it('returns false when neither inbound nor followup is present', () => {
     const ctx = makeCtx({})
     expect(shouldRetrieveKnowledge(ctx)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// classifyStage — 3-tier confidence routing (TAC-240)
+// ---------------------------------------------------------------------------
+
+describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
+  beforeEach(() => {
+    classifyMessageMock.mockReset()
+    captureClassificationLowMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function makeClassifyCtx(
+    overrides: Partial<RuntimeContext> = {},
+  ): RuntimeContext {
+    return makeCtx({
+      currentMessage: {
+        id: 'm1',
+        body: 'do you have oat milk?',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
+      recentMessages: [],
+      recognition: { state: 'regular' } as RuntimeContext['recognition'],
+      ...overrides,
+    })
+  }
+
+  it('auto-routes to unknown when classifier confidence is below 0.3', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'recommendation_request',
+        classifierConfidence: 0.25,
+        reasoning: 'too ambiguous',
+        promptVersion: 'v1.11.0',
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    // Reroute: shipped category becomes 'unknown'.
+    expect(out.category).toBe('unknown')
+    // Original confidence + reasoning preserved on the result for observability.
+    expect(out.classifierConfidence).toBe(0.25)
+    expect(out.reasoning).toBe('too ambiguous')
+    // Event fires with the classifier's ORIGINAL pick + autoRoutedToUnknown:true.
+    expect(captureClassificationLowMock).toHaveBeenCalledTimes(1)
+    const props = captureClassificationLowMock.mock.calls[0][0] as {
+      category: string
+      classifierConfidence: number
+      autoRoutedToUnknown: boolean
+    }
+    expect(props.category).toBe('recommendation_request')
+    expect(props.classifierConfidence).toBe(0.25)
+    expect(props.autoRoutedToUnknown).toBe(true)
+  })
+
+  it('keeps classifier pick when confidence is between 0.3 and 0.7', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'recommendation_request',
+        classifierConfidence: 0.5,
+        reasoning: 'ambiguous but defensible',
+        promptVersion: 'v1.11.0',
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.category).toBe('recommendation_request')
+    expect(captureClassificationLowMock).toHaveBeenCalledTimes(1)
+    const props = captureClassificationLowMock.mock.calls[0][0] as {
+      autoRoutedToUnknown: boolean
+    }
+    expect(props.autoRoutedToUnknown).toBe(false)
+  })
+
+  it('keeps classifier pick and fires no event at confidence 0.7+', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'recommendation_request',
+        classifierConfidence: 0.85,
+        reasoning: 'clear',
+        promptVersion: 'v1.11.0',
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.category).toBe('recommendation_request')
+    expect(captureClassificationLowMock).not.toHaveBeenCalled()
+  })
+
+  it('passes recentMessages and guestState through to classifyMessage', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        promptVersion: 'v1.11.0',
+      },
+    })
+    const recent = [
+      {
+        direction: 'inbound' as const,
+        body: 'hi',
+        createdAt: new Date('2026-05-08T09:55:00Z'),
+      },
+    ]
+    await classifyStage(
+      makeClassifyCtx({
+        recentMessages: recent,
+        recognition: { state: 'raving_fan' } as RuntimeContext['recognition'],
+      }),
+    )
+    expect(classifyMessageMock).toHaveBeenCalledTimes(1)
+    const callArg = classifyMessageMock.mock.calls[0][0] as {
+      recentMessages: typeof recent
+      guestState: string
+    }
+    expect(callArg.recentMessages).toBe(recent)
+    expect(callArg.guestState).toBe('raving_fan')
   })
 })

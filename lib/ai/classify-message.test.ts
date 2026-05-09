@@ -185,7 +185,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.10.0')
+      expect(r.data.promptVersion).toBe('v1.11.0')
     })
   }
 })
@@ -249,5 +249,144 @@ describe('classifyMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
     // The model should never have been called.
     expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v1.11.0: classifier surface improvements (TAC-240).
+// ---------------------------------------------------------------------------
+
+// Capture the user prompt arg passed to generateObject. Mirrors the existing
+// getCapturedSystemPrompt pattern but reads `prompt` instead of `system`.
+async function getCapturedUserPrompt(): Promise<string> {
+  const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+    | { prompt?: string }
+    | undefined
+  expect(callArgs?.prompt).toBeDefined()
+  return callArgs!.prompt as string
+}
+
+describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+    })
+  })
+
+  it('renders recent conversation block when recentMessages provided', async () => {
+    const now = Date.now()
+    await classifyMessage({
+      inboundBody: 'do you have oat milk?',
+      recentMessages: [
+        { direction: 'inbound', body: 'hi', createdAt: new Date(now - 5 * 60_000) },
+        { direction: 'outbound', body: "hey, what's up", createdAt: new Date(now - 4 * 60_000) },
+      ],
+    })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('Recent conversation (most recent at the bottom):')
+    expect(prompt).toContain('[guest, 5 minutes ago] hi')
+    expect(prompt).toContain("[venue, 4 minutes ago] hey, what's up")
+  })
+
+  it('omits recent conversation block when recentMessages is empty', async () => {
+    await classifyMessage({
+      inboundBody: 'hi',
+      recentMessages: [],
+    })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).not.toContain('Recent conversation')
+  })
+
+  it('omits recent conversation block when recentMessages is undefined', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).not.toContain('Recent conversation')
+  })
+})
+
+describe('classifyMessage — guest state rendering (v1.11.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+    })
+  })
+
+  it('renders Guest relationship line when guestState is provided', async () => {
+    await classifyMessage({ inboundBody: 'hi', guestState: 'regular' })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('Guest relationship: regular')
+  })
+
+  it('omits Guest relationship line when guestState is undefined', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).not.toContain('Guest relationship:')
+  })
+})
+
+describe('classifyMessage — temperature (v1.11.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+    })
+  })
+
+  it('passes temperature=0.2 to generateObject', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { temperature?: number }
+      | undefined
+    expect(callArgs?.temperature).toBe(0.2)
+  })
+})
+
+describe('classifyMessage — inbound truncation (v1.11.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+    })
+  })
+
+  it('truncates inbound at 1000 chars before classification', async () => {
+    const longBody = 'a'.repeat(1500)
+    await classifyMessage({ inboundBody: longBody })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain(' [...truncated]')
+    // Original 1500-char run should not appear; the truncated form is 1000
+    // chars + suffix. Asserting absence of a 1100-char run is sufficient.
+    expect(prompt).not.toContain('a'.repeat(1100))
+    expect(prompt).toContain('a'.repeat(1000))
+  })
+
+  it('does not truncate inbound under 1000 chars', async () => {
+    const normalBody = 'do you have oat milk?'
+    await classifyMessage({ inboundBody: normalBody })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain(normalBody)
+    expect(prompt).not.toContain('[...truncated]')
+  })
+})
+
+describe('CLASSIFY_SYSTEM_PROMPT — outbound exclusion reinforcement (v1.11.0)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+    })
+  })
+
+  it('explicitly notes welcome / follow_up / perk_unlock / event_invite are absent', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { system?: string }
+      | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('welcome, follow_up, perk_unlock, and event_invite')
+    expect(prompt).toContain('venue-initiated outbound triggers')
+    expect(prompt).toContain('Never select them when classifying an inbound')
   })
 })

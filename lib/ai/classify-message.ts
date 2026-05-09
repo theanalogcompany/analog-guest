@@ -2,8 +2,12 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
 import { PROMPT_VERSION } from './prompts/system-template'
-import { personaToProse, venueInfoToProse } from './prompts/serializers'
-import type { AIResult, ClassifyMessageInput, ClassifyMessageResult } from './types'
+import { formatTimeDelta, personaToProse, venueInfoToProse } from './prompts/serializers'
+import type { AIResult, ClassifyMessageInput, ClassifyMessageResult, RecentMessage } from './types'
+
+// Cap inbound length sent to the classifier. Generation still gets the full body.
+// Exported so the tunables manifest (TAC-183) can surface the cap to operators.
+export const MAX_CLASSIFIER_INPUT_CHARS = 1000
 
 const ClassifiedMessageSchema = z.object({
   category: z.enum([
@@ -49,6 +53,8 @@ const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests o
 
 When a message could fit multiple categories, prefer the more specific one: a complaint about service is comp_complaint even if phrased as a reply; a question that is opinion-shaped ("what's good") is recommendation_request rather than new_question; an unprompted casual remark is casual_chatter rather than reply. Personal-history questions ("what did I get last time", "do you remember me") route to personal_history_question, NOT to manual or new_question. Use unknown only when the message genuinely doesn't fit any other category and the agent has no clear path to respond. Use manual only when the message contains content that genuinely needs an operator's eyes, not as a fallback for ambiguous classification.
 
+The categories welcome, follow_up, perk_unlock, and event_invite are venue-initiated outbound triggers and are intentionally absent from this list. Never select them when classifying an inbound. If a guest's first contact looks like an opening pleasantry, route to casual_chatter or new_question depending on what they're saying. If a guest's message looks like a response to an event invite or perk offer, route to reply (or event_question / perk_inquiry if they're asking ABOUT an event or perk).
+
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
   0.0 = no idea, pure guess
@@ -56,6 +62,18 @@ Return your classification with a confidence score (DECIMAL between 0.0 and 1.0,
   0.7 = clear category, minor uncertainty
   0.9 = high confidence, distinctive signal in the message
   1.0 = certain`
+
+// Reuses formatTimeDelta from generation so phrasing stays consistent. Header
+// is plain (not `##`-prefixed) since the classifier user prompt isn't markdown.
+function formatClassifierRecentConversation(messages: readonly RecentMessage[]): string {
+  const now = new Date()
+  const lines = messages.map((m) => {
+    const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
+    const delta = formatTimeDelta(m.createdAt, now)
+    return `[${speaker}, ${delta}] ${m.body}`
+  })
+  return `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
+}
 
 /**
  * Classify an inbound message from a guest into one of the supported
@@ -73,6 +91,11 @@ export async function classifyMessage(
     return { ok: false, error: 'invalid_input' }
   }
 
+  const inboundForClassifier =
+    input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
+      ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]'
+      : input.inboundBody
+
   const contextSections: string[] = []
   if (input.persona) contextSections.push(personaToProse(input.persona))
   if (input.venueInfo) contextSections.push(venueInfoToProse(input.venueInfo))
@@ -81,7 +104,13 @@ export async function classifyMessage(
   if (contextSections.length > 0) {
     userPromptParts.push(`Context about the venue:\n\n${contextSections.join('\n\n')}`)
   }
-  userPromptParts.push(`Inbound message from guest:\n"${input.inboundBody}"`)
+  if (input.recentMessages && input.recentMessages.length > 0) {
+    userPromptParts.push(formatClassifierRecentConversation(input.recentMessages))
+  }
+  if (input.guestState) {
+    userPromptParts.push(`Guest relationship: ${input.guestState}`)
+  }
+  userPromptParts.push(`Inbound message from guest:\n"${inboundForClassifier}"`)
   userPromptParts.push('Classify this message.')
   const userPrompt = userPromptParts.join('\n\n')
 
@@ -91,6 +120,9 @@ export async function classifyMessage(
       system: CLASSIFY_SYSTEM_PROMPT,
       prompt: userPrompt,
       schema: ClassifiedMessageSchema,
+      // Analytical task — keep determinism high. Default of 1.0 lets the same
+      // message flip categories run-to-run.
+      temperature: 0.2,
       maxOutputTokens: 200,
     })
 

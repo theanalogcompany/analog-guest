@@ -193,11 +193,16 @@ export async function regenerateWithCritique(
     return { ok: false, errorCode: 'context_build_failed', error: errMsg }
   }
 
-  // 3. Classify (raw lib/ai — no PostHog)
+  // 3. Classify (raw lib/ai — no PostHog). Same context fields stages.ts
+  // passes; ctx.recentMessages is already pinned to the moment of the
+  // original outbound's triggering inbound via historyEndIso above. No
+  // reroute logic on this path — operator iterates on the regen output.
   const classification = await classifyMessage({
     inboundBody: load.data.inbound.body,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
+    recentMessages: ctx.recentMessages,
+    guestState: ctx.recognition.state,
   })
   if (!classification.ok) {
     return {
