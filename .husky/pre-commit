@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -e
+
+# 1. eslint --fix on staged .ts/.tsx files (via lint-staged — handles stash/restage)
+npx lint-staged
+
+# 2. tsc --noEmit on the full project — catches cross-file contract breaks
+npx tsc --noEmit
+
+# 3. vitest related --run on staged .ts/.tsx files
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)
+if [ -n "$STAGED_TS" ]; then
+  npx vitest related --run $STAGED_TS
+fi
