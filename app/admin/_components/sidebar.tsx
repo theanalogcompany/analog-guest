@@ -24,7 +24,10 @@ const NAV: ReadonlyArray<{ section: string; items: ReadonlyArray<NavItem> }> = [
   },
   {
     section: 'System',
-    items: [{ href: '/admin/health', label: 'Health' }],
+    items: [
+      { href: '/admin/tunables', label: 'Tunables' },
+      { href: '/admin/health', label: 'Health' },
+    ],
   },
 ]
 

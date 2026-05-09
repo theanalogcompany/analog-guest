@@ -10,6 +10,10 @@ vi.mock('@/lib/agent/build-runtime-context', () => ({
 }))
 vi.mock('@/lib/agent/stages', () => ({
   buildAiRuntime: vi.fn(),
+  STRONG_MATCH_SIMILARITY: 0.3,
+  MIN_STRONG_MATCHES: 1,
+  CORPUS_RETRIEVE_LIMIT: 8,
+  KNOWLEDGE_RETRIEVE_LIMIT: 4,
 }))
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),

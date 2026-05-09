@@ -10,8 +10,8 @@ import type {
   GenerateMessageResult,
 } from './types'
 
-const MIN_VOICE_FIDELITY = 0.7
-const MAX_ATTEMPTS = 3
+export const MIN_VOICE_FIDELITY = 0.7
+export const MAX_ATTEMPTS = 3
 // THE-225: hard-block regex companion to the R3 voice rule. Em dash (U+2014)
 // or en dash (U+2013) anywhere in the body forces a regen even if voice
 // fidelity passes. Sonnet still occasionally emits dashes despite the rule

@@ -7,7 +7,7 @@ import {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-const RECENCY_BANDS: Array<{ maxDays: number; score: number }> = [
+export const RECENCY_BANDS: Array<{ maxDays: number; score: number }> = [
   { maxDays: 0, score: 100 },
   { maxDays: 7, score: 90 },
   { maxDays: 30, score: 60 },
@@ -15,11 +15,11 @@ const RECENCY_BANDS: Array<{ maxDays: number; score: number }> = [
   { maxDays: Number.POSITIVE_INFINITY, score: 0 },
 ]
 
-const VISIT_FREQ_MAX_VISITS = 12         // 12+ unique-day visits in 90d → 100 (pre-multiplier)
-const MONEY_MAX_DOLLARS = 300            // $300 in 90d → 100
+export const VISIT_FREQ_MAX_VISITS = 12         // 12+ unique-day visits in 90d → 100 (pre-multiplier)
+export const MONEY_MAX_DOLLARS = 300            // $300 in 90d → 100
 const REFERRAL_MADE_PTS = 5
 const REFERRAL_CONVERTED_PTS = 20
-const RESPONSE_MIN_SAMPLE = 3
+export const RESPONSE_MIN_SAMPLE = 3
 const ENGAGEMENT_MAX_WEIGHTED_SUM = Object.values(ENGAGEMENT_EVENT_WEIGHTS).reduce(
   (acc, w) => acc + w,
   0,
