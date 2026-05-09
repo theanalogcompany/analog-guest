@@ -46,7 +46,7 @@ The Analog visual language is documented in `docs/brand/style-guide-v01.html`. O
 
 The file is reference material, not code. Do not modify it. Brand updates land as a new versioned file (v02, v03, etc.) so the canonical reference for any given moment is pinned.
 
-Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `tailwind.config.ts` (utility references) — set up during THE-198 (Command Center scaffold).
+Token extraction into runtime code happens in `app/globals.css` under `@theme inline` (Tailwind v4 — no separate config file) — set up during THE-198 (Command Center scaffold).
 
 ---
 
@@ -64,7 +64,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 - `lib/auth/` — JWT verification + operator lookup for analog-operator → analog-guest API calls. `verifyOperatorRequest(request)` returns `{ operatorId, allowedVenueIds }` or throws `AuthError`. `getCurrentOperator(request)` is the Response-returning wrapper for route handlers. `verifyAnalogAdminRequest(request)` and `verifyAnalogAdminAccess(authUserId)` are sibling helpers that compose operator verification with an `is_analog_admin = true` check (THE-198). Server-only; uses the admin DB client.
 - `lib/ui/` — Brand primitives consumed by `app/admin/*`: `<Eyebrow>`, `<SectionHeader>`, `<HairlineRow>`, `<Card>`, `<StatusDot>`. RSC-compatible. Sourced from the brand language at `docs/brand/style-guide-v01.html` — do not introduce decorative variants without updating the style guide first.
 - `app/admin/` — Command Center routes. Auth-gated by `verifyAnalogAdminAccess` in `app/admin/(authed)/layout.tsx`. Served on `admin.theanalog.company` in production via root `middleware.ts` host gating. **Direct** register per the style guide tone continuum.
-- `lib/drive/` — Google Drive helpers used by the operator app side
+- `lib/schemas/` — Zod schemas for venue-shaped JSONB fields. `BrandPersonaSchema` (handles dual-shape `voiceAntiPatterns`, see gotchas), `MessageReviewSchema` (the `response_review` shape from migration 014), `VenueInfoSchema` (with `filterActiveContext` per THE-150). Read JSONB fields through these — never directly via SQL paths.
 - `lib/analytics/` — PostHog event emission helpers (events fire and forget; failures must not crash the agent path)
 - `lib/observability/` — Langfuse SDK wrapper (THE-200). `startAgentTrace(opts)` returns an `AgentTrace` with `span() / update() / flushAsync()`; spans expose `span()`, `generation()`, `update()`, `end()`. No-op when env vars missing or `NODE_ENV=test`. Wrapper never throws — SDK errors are swallowed with `console.warn`. Use this from `lib/agent/` only; never import `langfuse` directly from app code.
 - `lib/voice-training/` — Shared voice-data write helpers used by the 08-flow onboarding script (`scripts/ingest-response-review.ts`), the cc-review live-edit API route, and the Voices command-center rail (THE-237). Channels: `upsertCorpusEdit({...}, 'skip-existing' \| 'replace')` for source-ref-keyed cc-review/08-review/voices-commit writes (anti-corpus-poisoning rule applies — only the operator-edited message text is embedded). `addCorpusEntry({venueId, content, sourceType, tags, addedByOperatorId?})` for ad-hoc rail additions (`source_type` ∈ `manual_entry` \| `sample_text` \| `past_message`). `editCorpusEntry({corpusId, content?, tags?})` re-embeds only on content change. `removeCorpusEntry(corpusId)` straight delete + FK cascade on voice_embeddings. `dedupeAndAppendAntiPatterns(venueId, rules, { source, authorOperatorId? })` does read-modify-write on `venue_configs.brand_persona.voiceAntiPatterns` with case + whitespace normalization. `removeAntiPattern(venueId, ruleText)` removes by exact text match (operators delete what they see). THE-236 reshaped the persisted anti-pattern entries from `string[]` to `Array<{ text, source: 'auto' \| 'manual', authorOperatorId?, addedAt? }>`; `BrandPersonaSchema` accepts both legacy strings and the struct shape and normalizes string entries to `{text, source: 'manual'}` on parse. **Asymmetry to know about (TODO):** the cc-review path doesn't currently populate `voice_corpus.added_by_operator_id`; only `addCorpusEntry` does. Track for backfill in a future ticket.
@@ -73,7 +73,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 ### Scripts
 
 - `scripts/` — top-level CLI entry points. Each is a thin orchestrator that reads args, sets up clients, calls helpers, logs progress.
-- `scripts/onboarding/` — helpers used by the onboarding pipeline scripts. One helper module per pipeline step. Helpers may be split into `<name>-pure.ts` (no `@/*` imports, vitest-loadable) and `<name>.ts` (DB-touching wrapper) when tests need to load the pure logic — see "Module split for testability" below.
+- `scripts/onboarding/` — helpers used by the onboarding pipeline scripts. One helper module per pipeline step. Helpers may be split into `<name>-pure.ts` (no `@/*` imports, vitest-loadable) and `<name>.ts` (DB-touching wrapper) when tests need to load the pure logic — see "Module split for testability" below. Modules: `airtable.ts` (transcript fetch), `menu-csv.ts` (CSV parser), `parse-venue-spec.ts` (Zod-strict venue-spec parser; the offline boundary referenced in the permissive-schema gotcha), `seed-supabase.ts` (helper imported by `scripts/seed-venue.ts`), `extract.ts` (LLM-extraction orchestrator), plus `extract-test-scenarios.ts`, `run-test-scenarios.ts`, and `ingest-response-review-pure.ts`.
 - `scripts/onboarding/fixtures/` — repo-resident input fixtures consumed by extraction scripts (e.g., `venue-spec-example.md`, `test-scenarios-example.md`)
 - `scripts/onboarding/drive.ts` — shared Drive integration. Exports `getDrive`, `findVenueFolder`, `listVenueFiles`, `findByPrefix`, `readDriveFileAsText`, `writeMarkdownFile`, `writeJsonFile`, `writeSheetFile`. Use these instead of inlining Drive calls.
 
@@ -95,7 +95,7 @@ Token extraction into runtime code happens in `app/globals.css` (CSS vars) and `
 - Async/await over `.then()`
 - Zod for runtime validation at all API boundaries
 - No `any` types. Use `unknown` and narrow.
-- Errors are values for internal functions: return `{ ok: true, data }` or `{ ok: false, error }`. Throw only at outer boundaries (route handlers, scripts).
+- Errors are values for internal functions: return `{ ok: true, data }` or `{ ok: false, error }`. Throw only at outer boundaries (route handlers, scripts). Domain-specific aliases formalize the contract: `RAGResult<T>` (`lib/rag/types.ts`), `AIResult<T>` (`lib/ai/types.ts`), `RequireAdminResult<T>` (`lib/auth/`). New helpers should reuse one of these or define a parallel alias rather than inlining the discriminated union.
 - Imports use the `@/*` alias for repo-relative paths in app/lib code. Scripts may use either `@/*` or relative imports; see "Module split for testability" for when relative imports are required.
 
 ### Module split for testability
@@ -120,6 +120,10 @@ Example: `ingest-response-review-pure.ts` (parsing, classification, dedupe) + `i
 
 These are not aspirations. They are hard rules. Following them produces good work; skipping them produces drift.
 
+### Linear-first
+
+All work starts from a Linear ticket. If a request arrives without a ticket ID, ask for one before planning. Drive-by changes without an audit trail are not allowed.
+
 ### Audit-first
 
 Before writing any code for a new ticket, read:
@@ -130,12 +134,18 @@ Before writing any code for a new ticket, read:
 
 Cite specific file paths and existing patterns in your plan. Don't infer architecture from filenames; read the actual code.
 
+**High-stakes changes require explicit human review.** Any change touching auth (`lib/auth/`, `verifyAnalogAdminAccess`, RLS policies), payment/Stripe code, Sendblue webhook handlers, the agent runtime contract (voice fidelity floor, retrieval floors, universal voice rules R1–R7), or migrations against `messages` / `engagement_events` / `voice_corpus` cannot proceed via `[NEEDS-INPUT]` clarifying questions. Post a `[HUMAN-REVIEW-REQUIRED]` comment on the Linear ticket and stop. Do not propose alternatives, do not partial-implement. Wait.
+
 ### Plan → review → build → review → commit
 
 1. **Plan only on the first request.** Output a written plan covering scope, file paths, function decomposition, sequence of operations, existing patterns to reuse, edge cases, what you intentionally chose NOT to do, and open questions. Stop and wait for review.
 2. **Build only after the plan is approved.** A second prompt will explicitly authorize the build per the approved plan.
 3. **Verify and report.** After building, run `npx tsc --noEmit` and `npx vitest run`. Report file changes, test count, deviations from the plan, and anything you'd push back on.
 4. **Commit only after review.** Don't commit until the human says go.
+
+### Comment protocol
+
+When a clarifying question surfaces during work, post a Linear comment prefixed `[NEEDS-INPUT]` with each question numbered. Set ticket status to "Awaiting Input" and stop. When resuming, look for the most recent `[DESIGN-ANSWERS]` comment for the user's response. For high-stakes changes (per "Audit-first" above), use `[HUMAN-REVIEW-REQUIRED]` instead — never `[NEEDS-INPUT]`.
 
 ### Never just acknowledge
 
@@ -209,7 +219,7 @@ One-off scripts live in `scripts/` and run via `tsx` with env loading from `.env
 - `npm run send-test -- <phone> [body]` — sends a test message via the messaging module to the given E.164 phone number. Requires `TEST_VENUE_ID` in `.env.local` pointing to a venue row that has `messaging_phone_number` set.
 - `npm run extract-venue-spec -- <slug>` — reads the venue's onboarding transcript + Airtable record + menu CSV from Drive, calls Sonnet to extract a structured venue spec, writes `06-{slug}-venue-spec-draft.md` to the venue's Drive folder.
 - `npm run extract-test-scenarios -- <slug> [--force]` — reads the venue spec + the categories fixture, calls Sonnet to generate venue-tailored test scenarios (THE-180), writes `07-{slug}-test-scenarios.json` to Drive. `--force` overwrites an existing 07-file.
-- `npm run seed-supabase -- <slug>` — reads the 06-spec markdown from Drive, parses it via Zod schemas, ingests into the database (venue, venue_configs, mechanics, voice_corpus + embeddings via Voyage). Idempotent guards against accidental re-seed.
+- `npm run seed-venue -- <slug> [--messaging-phone <e164>]` — reads the 06-spec markdown from Drive, parses it via Zod schemas, ingests into the database (venue, venue_configs, mechanics, voice_corpus + embeddings via Voyage). Optional `--messaging-phone` sets `venues.messaging_phone_number` at seed time. Idempotent guards against accidental re-seed. CLI entry point is `scripts/seed-venue.ts`; the heavy lifting lives in `scripts/onboarding/seed-supabase.ts`.
 - `npm run run-test-scenarios -- <slug> [--force]` — seeds the four synthetic guests for the venue (deterministic phones per state), runs each scenario from the 07-file through the agent runtime synchronously (no Sendblue, no human-feel delay, no fidelity gate), writes `08-{slug}-response-review` as a native Google Sheet to Drive (THE-181). Throws after logging all four synthetic-guest tuning outcomes if any state landed in the wrong band.
 - `npm run ingest-response-review -- <slug>` — reads the 08-Sheet, ingests `verdict=edit` rows into `voice_corpus` (Voyage embedding on `edited_message` text only, source_ref upsert key for idempotency), appends `rule:`-prefixed comments to `brand_persona.voiceAntiPatterns`, appends a dated `## Phase 5 review additions` subsection to the 06-spec markdown in Drive (THE-178). Skips rows with `expected_failure:` markers entirely. Skips the markdown append if zero net new ingestions.
 - `npm run db:types` — regenerates `db/types.ts` from the live Supabase schema. Run after applying any migration.
@@ -309,8 +319,10 @@ Three layers, each filling a different gap. Don't conflate them.
 
 These constraints are real and have caused bugs:
 
-- **Voice fidelity floor:** the agent self-rates voice fidelity. Below 0.4, regenerate. Above 0.4 send. (THE-187 will alert on the 0.4-0.5 band as "low but sent.")
-- **Corpus retrieval floor:** retrieval is fail-closed. Need at least 3 matches above 0.65 similarity to proceed; otherwise the agent bails to a fallback acknowledgment.
+- **Voice fidelity floor:** the agent self-rates voice fidelity. Below `SEND_FIDELITY_FLOOR` (0.4) → regenerate. Above 0.4 → send. (THE-187 will alert on the 0.4-0.5 band as "low but sent.") Defined in `lib/agent/stages.ts`.
+- **Corpus retrieval floor:** retrieval is fail-closed *on the inbound path*. Need at least `MIN_STRONG_MATCHES` (1) chunk scoring at or above `STRONG_MATCH_SIMILARITY` (0.3); below that, the agent bails to a fallback acknowledgment. Followup path skips the gate entirely (THE-231) — operator-initiated sends shouldn't be blocked by sparse corpus retrieval. Defined in `lib/agent/stages.ts`.
+- **Em-dash hard-block (THE-225):** R3 in `SYSTEM_TEMPLATE` says no em dashes, but Sonnet still emits them occasionally even at high voice fidelity. After regen attempts exhaust, a regex hard-blocks remaining `—` and rewrites the offending text; voice fidelity is recomputed on the final shipped body, not the original LLM output. Lives in `lib/ai/generate-message.ts`.
+- **Last visit in context (THE-229):** `RuntimeContext.lastVisit` projects the guest's most recent transaction within `LAST_VISIT_CUTOFF_DAYS` (`lib/agent/extract-last-visit.ts`) into the prompt. Older visits stay invisible — surfacing "you came in 14 months ago" reads worse than not knowing. Returns null when no qualifying transaction exists; the prompt-serializer omits the section in that case.
 - **Recent conversation block:** the last 14 days of messages between this guest and this venue are loaded into RuntimeContext. THE-173 added this; future changes to the window should consider impact on synthetic-guest seeding (`run-test-scenarios` seeds messages >30 days old to keep this block empty during testing).
 - **Today's date in context:** `RuntimeContext.todayInVenueTimezone` is set from `new Date()` at runtime, formatted in the venue's timezone. THE-174 added this so the agent answers "are you open today?" correctly.
 - **Universal voice rules R1-R7:** live in `SYSTEM_TEMPLATE`. Apply to every agent on every venue. Don't reference actions the guest didn't take, give today's specific answer, no em dashes, don't reference physical artifacts the agent doesn't have, don't redirect to alt channels for things the venue can answer, yes/no questions get yes/no answers, don't restate context already in the conversation.
@@ -356,6 +368,10 @@ Magic-link callback URL is constructed from `NEXT_PUBLIC_ADMIN_URL` (per environ
 - **Recognition state:** read latest `guest_states` row directly. **Don't** call `computeGuestState` from the page — it's expensive and writes audit rows on transitions.
 - **StatusDot mapping for guest state:** `neutral` for `new`, `good` for `returning|regular|raving_fan`. `bad` is reserved for actually-wrong states (failed sends, errors), not "this guest is new."
 - **Message limit:** 200 rows per conversation load. Older history reachable via THE-202 (guest detail page) once that ships.
+- **Routes:**
+  - `GET /admin/conversations/api/trace/[traceId]` — on-demand Langfuse trace fetch (cookie-session auth, server-side secret).
+  - `POST /admin/conversations/api/follow-up` — operator-initiated manual outbound. Calls `handleFollowup` with `reason='manual'`; the operator's note becomes a top-level block in the system prompt (THE-232).
+  - `PUT /admin/conversations/api/review/[messageId]` — captures per-message review (THE-235); writes `messages.response_review` and mirrors the 08-flow destinations (`voice_corpus` row keyed on `cc-review:{message_id}`, anti-pattern dedupe-append).
 
 ---
 
@@ -406,13 +422,31 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
 
 ---
 
+## Environment variables
+
+One line per var, grouped by purpose. This section is the index — defaults and behavior live in the relevant sections (Observability, Drive integration, Admin scaffold) and are not duplicated here.
+
+- **LLM:** `ANTHROPIC_API_KEY`.
+- **Embeddings:** `VOYAGE_API_KEY`.
+- **Database (Supabase):** `SUPABASE_SECRET_KEY` (service role, `lib/db/admin.ts`); `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (browser client `lib/db/browser.ts`).
+- **Messaging (Sendblue):** `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY` (outbound), `SENDBLUE_SIGNING_SECRET` (inbound webhook verification).
+- **Drive:** `GOOGLE_DRIVE_VENUES_FOLDER_ID` (parent folder for venue artifact files 04–09).
+- **Onboarding (Airtable):** `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_ID` — read by `extract-venue-spec`.
+- **Observability (Langfuse):** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`; host as `LANGFUSE_BASE_URL` (preferred) or `LANGFUSE_HOST` (legacy alias); `LANGFUSE_ENABLED` (explicit kill-switch); `LANGFUSE_CAPTURE_CONTENT` (THE-216, default on).
+- **Analytics (PostHog):** `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`.
+- **Admin auth callback:** `NEXT_PUBLIC_ADMIN_URL` (per environment); `NEXT_PUBLIC_VERCEL_URL` (preview-deploy fallback).
+- **Cron:** `CRON_SECRET` (bearer auth for Vercel cron handlers).
+- **Scripts / dev:** `TEST_VENUE_ID` (used by `npm run send-test`); `NODE_ENV` (switches Langfuse + other dev/test branches).
+
+---
+
 ## Common gotchas
 
 - **`@/*` aliases in tests.** Resolved via `vitest.config.ts` (THE-231); previously a recurring cause of test-side import failures. Module-split pattern is still required when a transitively-imported module runs heavy SDK init at module load (see "Module split for testability").
 - **Zod `.min()`/`.max()` on LLM output number fields.** Anthropic's structured output rejects these. Use `.refine()` or post-LLM validation. (THE-157.)
 - **Permissive schema + filter-time validation pattern.** When the same field is validated at two boundaries (input parse + runtime), prefer strict at the offline boundary (parser/seed) and permissive-with-defensive-filter at the live boundary (runtime). Crashes during seed are catchable; crashes during agent runs hurt guests. Three instances: THE-157 (`.min()/.max()` rejected by Anthropic structured output, validate post-LLM), THE-150 (`expiresAt` stored as plain `z.string().optional()`; `filterActiveContext` parses + drops malformed entries with `console.warn` instead of failing the whole `venue_info` JSONB parse), THE-170 (mechanic `min_state` is strict `z.enum(GUEST_STATES)` at the parser boundary inside `parse-venue-spec.ts`, but `isStateAtLeast` at runtime treats unknown values defensively — drop the gated mechanic, log, don't crash).
 - **`filterActiveContext` (THE-150).** Pure helper at `lib/schemas/venue-info.ts`. Drops `currentContext` entries whose `expiresAt` is past or equal to `now`; entries with no `expiresAt` are permanent; malformed `expiresAt` logs and drops. Wired in `build-runtime-context.ts` via the same `computedAt` reused for the recognition snapshot (single "now" per agent run).
-- **Re-seeding via `seed-supabase.ts` for voice training.** Don't. Phase 5 voice training uses surgical updates via `ingest-response-review`. Re-seed only when the venue spec markdown itself changed structurally.
+- **Re-seeding via `npm run seed-venue` for voice training.** Don't. Phase 5 voice training uses surgical updates via `ingest-response-review`. Re-seed only when the venue spec markdown itself changed structurally.
 - **Drive ADC re-auth.** Tokens expire. If you see `invalid_grant` / `invalid_rapt`, re-run `gcloud auth application-default login --client-id-file=... --scopes=...`.
 - **gcloud Python version.** Workspace install can break against newer Python. If `gcloud` errors with Python version mismatch, set `CLOUDSDK_PYTHON` to a specific Python 3.10-3.14 binary.
 - **Migration application order.** Always apply the migration in Supabase Studio BEFORE running scripts that depend on it locally. Hand-patches to `db/types.ts` are temporary; `npm run db:types` is the resolution.
@@ -421,7 +455,8 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
   - **Always go through `BrandPersonaSchema`.** Reading `venue_configs.brand_persona->'voiceAntiPatterns'` directly via SQL or a JSONB path expression breaks on the legacy half of the fleet — `jsonb_array_elements_text` works on legacy rows, `... ->> 'text'` works on migrated rows, neither works on both. If you need a SQL query that touches anti-patterns, write the union explicitly (`CASE WHEN jsonb_typeof(elem) = 'string' THEN elem #>> '{}' ELSE elem ->> 'text' END`) or load the row in app code and parse with the schema.
   - **Readers must reach for `.text` on each entry.** Code that previously rendered the entry directly (`${a}`) prints `[object Object]` after parse; the serializer is updated, any new UI is not exempt.
   - **Writers must take a `{ source, authorOperatorId? }` opts arg.** `dedupeAndAppendAntiPatterns` is the only current writer; any new helper that mutates this field must stamp the metadata so the migrated rows don't lose attribution.
-- **In-place mechanic edits without re-seed (THE-170).** `seed-supabase` hard-fails on existing slugs and a full re-seed cascades through `venue_configs`/`mechanics`/`voice_corpus`/`voice_embeddings`/etc — destroying any Phase 5 voice corpus additions written by `ingest-response-review`. To update mechanic eligibility gates without losing voice training, run a SQL `UPDATE` directly in Supabase Studio:
+- **Loyalty-program language is forbidden.** Points / rewards / tier / earn / badges / progress-bars in operator-facing or guest-facing surfaces violates the product principles at the top of this file. The voice critique system (THE-237/238) catches some drift; do not rely on it. Guests are *recognized*, not *enrolled*. If you write "this perk has been earned," the framing is wrong.
+- **In-place mechanic edits without re-seed (THE-170).** `seed-venue` hard-fails on existing slugs and a full re-seed cascades through `venue_configs`/`mechanics`/`voice_corpus`/`voice_embeddings`/etc — destroying any Phase 5 voice corpus additions written by `ingest-response-review`. To update mechanic eligibility gates without losing voice training, run a SQL `UPDATE` directly in Supabase Studio:
   ```sql
   -- Set The Joey to regulars-only on mock-central-perk
   update mechanics
@@ -462,4 +497,4 @@ THE-184 tracks the alternative of fixture-based synthetic guests (skip the DB en
   set is_analog_admin = true
   where email = '<email>';
   ```
-  No app code automates this — it's one operator at a time, by hand, with someone reviewing. Mirrors the friction-by-placeholder pattern from the seed-supabase error template. Revoking is the same statement with `false`.
+  No app code automates this — it's one operator at a time, by hand, with someone reviewing. Mirrors the friction-by-placeholder pattern from the seed-venue error template. Revoking is the same statement with `false`.
