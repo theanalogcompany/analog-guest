@@ -16,8 +16,17 @@
 // Classifier enum subsetted to inbound-only categories (welcome, follow_up,
 // perk_unlock, event_invite removed from classifier; remain in MessageCategory
 // for outbound triggers).
+//
+// v1.11.0: classifier surface improvements. Recent conversation history
+// + guest state passed into the classifier user prompt. Temperature set to
+// 0.2 (analytical-task standard, was inheriting Anthropic API default of
+// 1.0). Inbound truncated to 1000 chars before classification (full body
+// still flows to generation). 3-tier confidence handling: < 0.3 auto-routes
+// to `unknown` (corrective), 0.3..0.7 fires observation event (current
+// behavior), >= 0.7 silent. CLASSIFY_SYSTEM_PROMPT gains a sentence
+// explaining why outbound categories are absent.
 
-export const PROMPT_VERSION = 'v1.10.0'
+export const PROMPT_VERSION = 'v1.11.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

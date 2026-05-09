@@ -118,8 +118,10 @@ const baseCtx = {
     sendblueNumber: '+15555550000',
   },
   guest: { id: GUEST_ID },
-  recentMessages: [],
-  recognition: {},
+  recentMessages: [
+    { direction: 'inbound' as const, body: 'hi', createdAt: new Date('2026-05-08T09:55:00Z') },
+  ],
+  recognition: { state: 'returning' as const },
   mechanics: [],
   lastVisit: null,
   corpus: null,
@@ -282,6 +284,18 @@ describe('regenerateWithCritique — happy path', () => {
     expect(generateMessage).toHaveBeenCalled()
     const genCall = vi.mocked(generateMessage).mock.calls[0][0]
     expect(genCall.runtime.critiqueToIncorporate).toBe('too eager — drop the exclamation')
+  })
+
+  it('forwards recentMessages and guestState to classifyMessage (TAC-240)', async () => {
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(classifyMessage).toHaveBeenCalledTimes(1)
+    const call = vi.mocked(classifyMessage).mock.calls[0][0]
+    expect(call.recentMessages).toEqual(baseCtx.recentMessages)
+    expect(call.guestState).toBe('returning')
   })
 
   it('returns the slim projection (body, fidelity, attempts, attemptScores)', async () => {

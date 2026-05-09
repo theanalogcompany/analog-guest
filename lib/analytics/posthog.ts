@@ -49,9 +49,15 @@
  *                   finalGeneratedBody }
  *
  * - classification_low_confidence
- *     Fires when classifierConfidence < 0.7.
+ *     Fires when classifierConfidence < 0.7. The `category` field carries the
+ *     classifier's original pick (preserved even when the orchestrator
+ *     auto-routed to `unknown` for confidence < 0.3 — see
+ *     CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD). `autoRoutedToUnknown`
+ *     distinguishes the two bands so dashboards can filter on routing
+ *     behavior without losing the original signal.
  *     Properties: { agentRunId, venueId, guestId, category,
- *                   classifierConfidence, inboundLength, inboundBody }
+ *                   classifierConfidence, inboundLength, inboundBody,
+ *                   autoRoutedToUnknown }
  *
  * - corpus_retrieval_below_threshold
  *     Fires when the best-match similarity is below 0.5 (looser bar than the
@@ -120,6 +126,10 @@ export async function capturePostHogEvent(
 
 export const VOICE_FIDELITY_LOW_THRESHOLD = 0.5
 export const CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD = 0.7
+// Below this confidence, classifyStage rewrites the returned category to
+// `unknown` so the agent ships a holding response. Original pick is preserved
+// on the PostHog event payload for triage. Sits below the 0.7 LOW threshold.
+export const CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD = 0.3
 export const CORPUS_TOP_SIMILARITY_LOW_THRESHOLD = 0.5
 export const AGENT_LATENCY_HIGH_THRESHOLD_MS = 10_000
 export const WEBHOOK_SILENCE_THRESHOLD_HOURS = 24
@@ -243,6 +253,11 @@ export interface ClassificationLowConfidenceProps {
   classifierConfidence: number
   inboundLength: number
   inboundBody: string
+  // True when classifyStage rerouted the classification to `unknown`
+  // (confidence < CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD). The
+  // `category` field still carries the classifier's original pick — this
+  // flag is the routing signal layered on top.
+  autoRoutedToUnknown: boolean
 }
 
 export async function captureClassificationLowConfidence(
@@ -253,13 +268,20 @@ export async function captureClassificationLowConfidence(
 }
 
 function formatClassificationLowConfidence(props: ClassificationLowConfidenceProps): string {
-  return [
+  const lines = [
     `*Classification low confidence* — \`${props.classifierConfidence.toFixed(2)}\` for category \`${props.category}\``,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
     `inbound (${props.inboundLength} chars): "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-  ].join('\n')
+  ]
+  // Two operator workflows: 0.3..0.7 = agent shipped at the classifier's pick,
+  // operator should check; < 0.3 = agent shipped a holding ack, operator
+  // decides if a real reply is needed. Spell out the action in the Slack copy.
+  if (props.autoRoutedToUnknown) {
+    lines.push('auto-routed to: `unknown` — agent shipped holding ack; decide if a real reply is needed')
+  }
+  return lines.join('\n')
 }
 
 export interface CorpusRetrievalBelowThresholdProps {

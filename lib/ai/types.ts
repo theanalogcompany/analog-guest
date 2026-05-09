@@ -1,4 +1,4 @@
-import type { EligibleMechanic } from '@/lib/recognition'
+import type { EligibleMechanic, GuestState } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 
 // Naming asymmetry: this module returns voiceFidelity (camelCase). It persists
@@ -183,6 +183,17 @@ export type ClassifyMessageInput = {
   inboundBody: string
   persona?: BrandPersona
   venueInfo?: VenueInfo
+  // Recent conversation history (excluding the current inbound). Rendered as
+  // a `Recent conversation` block in the user prompt so one-word inbounds
+  // ("yes", "iced", "sounds good") can be classified in context. Same shape
+  // generation consumes; orchestrator passes ctx.recentMessages directly.
+  // Mirrors the hybrid 30-message-or-14-day cap that buildRuntimeContext
+  // already applies — no separate cap here.
+  recentMessages?: RecentMessage[]
+  // Guest's current relationship band. Disambiguates category pairs that
+  // depend on relationship (a regular asking "anything new" reads as
+  // recommendation_request; a new guest's same phrasing is more ambiguous).
+  guestState?: GuestState
 }
 
 export type ClassifyMessageResult = {

@@ -10,11 +10,14 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // the existing Last Visit guidance to R13, and anchored R2 to the ## Right
 // now block. v1.10.0 is a category-instructions-layer change (acknowledgment
 // rewrite, em-dash hygiene, classifier inbound/outbound split) — no
-// SYSTEM_TEMPLATE body changes, just the version bump.
+// SYSTEM_TEMPLATE body changes, just the version bump. v1.11.0 is a
+// classifier-surface change (recent-conversation + guest-state context,
+// temperature, 1000-char input cap, 3-tier confidence routing) — again
+// no SYSTEM_TEMPLATE body changes, just the version bump.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.10.0 (category instructions overhaul + classifier inbound/outbound split)', () => {
-    expect(PROMPT_VERSION).toBe('v1.10.0')
+  it('is v1.11.0 (classifier context + temperature + 3-tier confidence routing)', () => {
+    expect(PROMPT_VERSION).toBe('v1.11.0')
   })
 })
 
