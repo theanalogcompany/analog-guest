@@ -329,155 +329,263 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
   })
 })
 
-// THE-228: per-category runtimeToProse rendering for the four new classifier
-// categories. Each block asserts the fields that case is supposed to push.
-describe('runtimeToProse — comp_complaint', () => {
-  it('renders inboundMessage + lastVisitDate + daysSinceLastVisit', () => {
+// TAC-234: runtimeToProse field-presence rendering replaces the per-category
+// switch. Tests assert what each independent emitter renders given a runtime
+// shape, regardless of which category it pairs with.
+
+describe('runtimeToProse — inbound framing line (TAC-234)', () => {
+  // One consistent line for any inbound-driven category. Carve-outs ("just
+  // asked", "(opt-out request)") collapsed — category instructions in the
+  // system prompt convey question vs statement intent already.
+  const inboundCategories = [
+    'reply',
+    'new_question',
+    'opt_out',
+    'acknowledgment',
+    'comp_complaint',
+    'mechanic_request',
+    'recommendation_request',
+    'casual_chatter',
+    'personal_history_question',
+    'perk_inquiry',
+    'event_question',
+    'unknown',
+  ] as const
+
+  for (const cat of inboundCategories) {
+    it(`renders the unified inbound line for ${cat}`, () => {
+      const out = runtimeToProse({ inboundMessage: 'hey there' }, cat, NOW)
+      expect(out).toContain('The guest just sent: "hey there"')
+    })
+  }
+
+  it('omits the line when inboundMessage is undefined', () => {
+    const out = runtimeToProse({}, 'follow_up', NOW)
+    expect(out).not.toContain('The guest just sent:')
+  })
+
+  it('does NOT use the legacy "just asked" framing for question categories', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'whats good' },
+      'new_question',
+      NOW,
+    )
+    expect(out).not.toContain('The guest just asked:')
+  })
+
+  it('does NOT use the legacy "(opt-out request)" suffix', () => {
+    const out = runtimeToProse({ inboundMessage: 'stop' }, 'opt_out', NOW)
+    expect(out).not.toContain('(opt-out request)')
+    expect(out).toContain('The guest just sent: "stop"')
+  })
+})
+
+describe('runtimeToProse — perk_unlock outbound block (TAC-234)', () => {
+  it('renders Perk / Why qualified / What offered when perkBeingUnlocked is set', () => {
     const out = runtimeToProse(
       {
-        inboundMessage: 'muffin was stale',
-        lastVisitDate: '2026-04-30',
-        daysSinceLastVisit: 2,
+        perkBeingUnlocked: {
+          name: 'The Joey',
+          qualification: '5+ visits in 30 days',
+          rewardDescription: 'free drink on the house',
+        },
       },
-      'comp_complaint',
+      'perk_unlock',
       NOW,
     )
-    expect(out).toContain('The guest just sent: "muffin was stale"')
-    expect(out).toContain('Last visit: 2026-04-30')
-    expect(out).toContain('Days since last visit: 2')
+    expect(out).toContain('Perk: The Joey')
+    expect(out).toContain('Why they qualified: 5+ visits in 30 days')
+    expect(out).toContain("What they're being offered: free drink on the house")
   })
 
-  it('omits visit fields when not provided', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'waited too long' },
-      'comp_complaint',
-      NOW,
-    )
-    expect(out).toContain('The guest just sent: "waited too long"')
-    expect(out).not.toContain('Last visit:')
-    expect(out).not.toContain('Days since last visit:')
+  it('omits the block entirely when perkBeingUnlocked is undefined', () => {
+    const out = runtimeToProse({}, 'perk_unlock', NOW)
+    expect(out).not.toContain('Perk:')
+    expect(out).not.toContain('Why they qualified:')
   })
 })
 
-describe('runtimeToProse — mechanic_request', () => {
-  it('renders inboundMessage line only', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'can you hold the couch' },
-      'mechanic_request',
-      NOW,
-    )
-    expect(out).toContain('The guest just sent: "can you hold the couch"')
-    // Mechanics list comes from the separate "## What this guest can access"
-    // block — case must not duplicate it inline.
-    expect(out).not.toContain('Last visit:')
-    expect(out).not.toContain('Days since last visit:')
-  })
-
-  it('does not duplicate the eligibility block when mechanics are present', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'can i get the joey', mechanics: [] },
-      'mechanic_request',
-      NOW,
-    )
-    // The eligibility block IS rendered (by formatMechanicEligibility), but
-    // the per-category case must not re-emit it. Asserting the block appears
-    // exactly once.
-    const matches = out.match(/## What this guest can access/g) ?? []
-    expect(matches.length).toBe(1)
-  })
-})
-
-describe('runtimeToProse — recommendation_request', () => {
-  it('renders inboundMessage + daysSinceLastVisit when set', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'what\'s good here', daysSinceLastVisit: 14 },
-      'recommendation_request',
-      NOW,
-    )
-    expect(out).toContain('The guest just sent: "what\'s good here"')
-    expect(out).toContain('Days since last visit: 14')
-  })
-
-  it('omits days-since field when not set', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'what should i try' },
-      'recommendation_request',
-      NOW,
-    )
-    expect(out).toContain('The guest just sent: "what should i try"')
-    expect(out).not.toContain('Days since last visit:')
-  })
-})
-
-describe('runtimeToProse — casual_chatter', () => {
-  it('renders inboundMessage line only', () => {
+describe('runtimeToProse — event_invite outbound block (TAC-234)', () => {
+  it('renders Event / Description / Date when eventBeingInvited is set', () => {
     const out = runtimeToProse(
       {
-        inboundMessage: 'love this couch',
-        // These should NOT appear for casual_chatter even when set.
-        lastVisitDate: '2026-04-30',
-        daysSinceLastVisit: 2,
+        eventBeingInvited: {
+          name: 'Open Mic',
+          description: 'monthly community night',
+          date: 'Saturday, May 9 at 8pm',
+        },
       },
-      'casual_chatter',
+      'event_invite',
       NOW,
     )
-    expect(out).toContain('The guest just sent: "love this couch"')
-    expect(out).not.toContain('Last visit:')
-    expect(out).not.toContain('Days since last visit:')
+    expect(out).toContain('Event: Open Mic')
+    expect(out).toContain('Description: monthly community night')
+    expect(out).toContain('Date: Saturday, May 9 at 8pm')
+  })
+
+  it('omits the block entirely when eventBeingInvited is undefined', () => {
+    const out = runtimeToProse({}, 'event_invite', NOW)
+    expect(out).not.toContain('Event:')
+    expect(out).not.toContain('Description:')
   })
 })
 
-// THE-229: Last Visit block. Renders at block level (between mechanics and
-// recent conversation), gated on category — welcome and opt_out skip it.
-describe('runtimeToProse — ## Last visit block', () => {
-  const visitedAt = new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+describe('runtimeToProse — guest relationship line (TAC-234)', () => {
+  it('renders the line when recognition.state is set', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'hey', recognition: { state: 'regular' } },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('Guest relationship: regular')
+  })
 
-  it('renders the block with relative time and comma-joined items', () => {
+  it('renders all four state values', () => {
+    for (const state of ['new', 'returning', 'regular', 'raving_fan'] as const) {
+      const out = runtimeToProse(
+        { inboundMessage: 'hi', recognition: { state } },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain(`Guest relationship: ${state}`)
+    }
+  })
+
+  it('omits the line when recognition is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
+    expect(out).not.toContain('Guest relationship:')
+  })
+
+  it('positions the line directly after the inbound framing line', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'hey', recognition: { state: 'raving_fan' } },
+      'reply',
+      NOW,
+    )
+    const inboundIdx = out.indexOf('The guest just sent: "hey"')
+    const relIdx = out.indexOf('Guest relationship: raving_fan')
+    expect(inboundIdx).toBeGreaterThanOrEqual(0)
+    expect(relIdx).toBeGreaterThan(inboundIdx)
+    // No other lines between them.
+    const between = out.slice(inboundIdx, relIdx).split('\n').filter(Boolean)
+    expect(between).toHaveLength(1)
+  })
+
+  it('also renders the line on outbound paths (no inbound framing to anchor to)', () => {
+    // Mutual exclusion is invariant-by-orchestrator: outbound paths don't
+    // populate inboundMessage. The serializer renders the recognition line
+    // standalone in that case — locking current behavior so a future change
+    // is observable. (TAC-243 will tighten the type system itself.)
     const out = runtimeToProse(
       {
-        lastVisit: { items: ['cappuccino', 'blueberry muffin'], visitedAt },
-        inboundMessage: 'hey',
+        perkBeingUnlocked: {
+          name: 'The Joey',
+          qualification: '5 visits',
+          rewardDescription: 'free drink',
+        },
+        recognition: { state: 'regular' },
+      },
+      'perk_unlock',
+      NOW,
+    )
+    expect(out).toContain('Guest relationship: regular')
+    expect(out).toContain('Perk: The Joey')
+    expect(out).not.toContain('The guest just sent:')
+  })
+})
+
+// TAC-234: ## Visit history block. Renders at block level (between mechanics
+// and recent conversation), gated on category — welcome and opt_out skip it.
+// Replaces THE-229's single-transaction ## Last visit block.
+describe('runtimeToProse — ## Visit history block (TAC-234)', () => {
+  const visitedAt3 = new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+  const visitedAt7 = new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000) // 7 days ago
+  const visitedAt30 = new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000) // 30 days ago
+
+  it('renders multiple visits as a bulleted, most-recent-first list', () => {
+    const out = runtimeToProse(
+      {
+        recentVisits: [
+          { items: ['latte'], visitedAt: visitedAt3 },
+          { items: ['cappuccino', 'blueberry muffin'], visitedAt: visitedAt7 },
+          { items: ['cortado'], visitedAt: visitedAt30 },
+        ],
       },
       'reply',
       NOW,
     )
-    expect(out).toContain('## Last visit\n3 days ago: cappuccino, blueberry muffin')
+    expect(out).toContain('## Visit history')
+    expect(out).toContain('- [3 days ago] latte')
+    expect(out).toContain('- [7 days ago] cappuccino, blueberry muffin')
+    expect(out).toContain('- [30 days ago] cortado')
+    // Order check: most-recent-first.
+    const i3 = out.indexOf('- [3 days ago]')
+    const i7 = out.indexOf('- [7 days ago]')
+    const i30 = out.indexOf('- [30 days ago]')
+    expect(i3).toBeLessThan(i7)
+    expect(i7).toBeLessThan(i30)
+  })
+
+  it('renders a single visit as one bullet (most common case at low traffic)', () => {
+    const out = runtimeToProse(
+      { recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## Visit history')
+    expect(out).toContain('- [3 days ago] cappuccino')
+  })
+
+  it('renders the canonical pattern-recognition intro line', () => {
+    const out = runtimeToProse(
+      { recentVisits: [{ items: ['latte'], visitedAt: visitedAt3 }] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain(
+      "Recent transactions, most recent first. Use this to recognize patterns and offer relevant suggestions — don't recite history back at the guest.",
+    )
   })
 
   it('renders "yesterday" for a 25-hour-old visit', () => {
     const yesterday = new Date(NOW.getTime() - 25 * 60 * 60 * 1000)
     const out = runtimeToProse(
-      { lastVisit: { items: ['latte'], visitedAt: yesterday } },
+      { recentVisits: [{ items: ['latte'], visitedAt: yesterday }] },
       'reply',
       NOW,
     )
-    expect(out).toContain('## Last visit\nyesterday: latte')
+    expect(out).toContain('- [yesterday] latte')
   })
 
-  it('omits the block when lastVisit is undefined', () => {
+  it('omits the block when recentVisits is undefined', () => {
     const out = runtimeToProse({ inboundMessage: 'hey' }, 'reply', NOW)
-    expect(out).not.toContain('## Last visit')
+    expect(out).not.toContain('## Visit history')
+  })
+
+  it('omits the block when recentVisits is an empty array (skip-on-empty parallels recent conversation)', () => {
+    const out = runtimeToProse({ recentVisits: [] }, 'reply', NOW)
+    expect(out).not.toContain('## Visit history')
   })
 
   it('omits the block for welcome', () => {
     const out = runtimeToProse(
-      { lastVisit: { items: ['cappuccino'], visitedAt } },
+      { recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }] },
       'welcome',
       NOW,
     )
-    expect(out).not.toContain('## Last visit')
+    expect(out).not.toContain('## Visit history')
   })
 
   it('omits the block for opt_out', () => {
     const out = runtimeToProse(
       {
-        lastVisit: { items: ['cappuccino'], visitedAt },
+        recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }],
         inboundMessage: 'stop',
       },
       'opt_out',
       NOW,
     )
-    expect(out).not.toContain('## Last visit')
+    expect(out).not.toContain('## Visit history')
   })
 
   it('renders the block for every other category', () => {
@@ -493,16 +601,20 @@ describe('runtimeToProse — ## Last visit block', () => {
       'mechanic_request',
       'recommendation_request',
       'casual_chatter',
+      'personal_history_question',
+      'perk_inquiry',
+      'event_question',
+      'unknown',
     ] as const
 
     for (const cat of includedCategories) {
       const out = runtimeToProse(
-        { lastVisit: { items: ['cappuccino'], visitedAt } },
+        { recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }] },
         cat,
         NOW,
       )
-      expect(out, `category ${cat} should render Last Visit block`).toContain(
-        '## Last visit',
+      expect(out, `category ${cat} should render Visit history block`).toContain(
+        '## Visit history',
       )
     }
   })
@@ -512,23 +624,23 @@ describe('runtimeToProse — ## Last visit block', () => {
       {
         today,
         mechanics: [],
-        lastVisit: { items: ['cappuccino'], visitedAt },
+        recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }],
         recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
       },
       'reply',
       NOW,
     )
     const eligibilityIdx = out.indexOf('## What this guest can access')
-    const lastVisitIdx = out.indexOf('## Last visit')
+    const visitHistoryIdx = out.indexOf('## Visit history')
     const recentIdx = out.indexOf('## Recent conversation')
     expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
-    expect(lastVisitIdx).toBeGreaterThan(eligibilityIdx)
-    expect(recentIdx).toBeGreaterThan(lastVisitIdx)
+    expect(visitHistoryIdx).toBeGreaterThan(eligibilityIdx)
+    expect(recentIdx).toBeGreaterThan(visitHistoryIdx)
   })
 })
 
 // THE-232: Operator instruction block. Renders at the top of the prompt
-// (above mechanics + last visit + recent conversation) when the operator's
+// (above mechanics + visit history + recent conversation) when the operator's
 // note flowed through buildAiRuntime.
 describe('runtimeToProse — ## Operator instruction block', () => {
   it('renders the block with the operator\'s note verbatim', () => {
@@ -554,14 +666,14 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     expect(out).not.toContain('## Operator instruction')
   })
 
-  it('places the block above mechanics, last visit, and recent conversation', () => {
+  it('places the block above mechanics, visit history, and recent conversation', () => {
     const visitedAt = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000)
     const out = runtimeToProse(
       {
         today,
         operatorInstruction: 'follow up on their recent visit',
         mechanics: [],
-        lastVisit: { items: ['cappuccino'], visitedAt },
+        recentVisits: [{ items: ['cappuccino'], visitedAt }],
         recentMessages: [recent({ body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) })],
       },
       'manual',
@@ -569,11 +681,11 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     )
     const opIdx = out.indexOf('## Operator instruction')
     const eligibilityIdx = out.indexOf('## What this guest can access')
-    const lastVisitIdx = out.indexOf('## Last visit')
+    const visitHistoryIdx = out.indexOf('## Visit history')
     const recentIdx = out.indexOf('## Recent conversation')
     expect(opIdx).toBeGreaterThanOrEqual(0)
     expect(eligibilityIdx).toBeGreaterThan(opIdx)
-    expect(lastVisitIdx).toBeGreaterThan(opIdx)
+    expect(visitHistoryIdx).toBeGreaterThan(opIdx)
     expect(recentIdx).toBeGreaterThan(opIdx)
   })
 
@@ -587,52 +699,6 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     const opIdx = out.indexOf('## Operator instruction')
     expect(rightNowIdx).toBeGreaterThanOrEqual(0)
     expect(opIdx).toBeGreaterThan(rightNowIdx)
-  })
-})
-
-// THE-233: personal_history_question routes the inbound through the
-// "just asked" framing (questions deserve question framing, not "just sent")
-// and relies on the ## Last visit block above for the actual content.
-describe('runtimeToProse — personal_history_question', () => {
-  it('renders the inbound message under "just asked" framing', () => {
-    const out = runtimeToProse(
-      { inboundMessage: 'what did i get last time' },
-      'personal_history_question',
-      NOW,
-    )
-    expect(out).toContain('The guest just asked: "what did i get last time"')
-    // Don't accidentally fall back to the "just sent" framing.
-    expect(out).not.toContain('The guest just sent: "what did i get last time"')
-  })
-
-  it('renders the ## Last visit block when lastVisit is set (regression for shouldRenderLastVisit)', () => {
-    const visitedAt = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000)
-    const out = runtimeToProse(
-      {
-        inboundMessage: 'what did i get last time',
-        lastVisit: { items: ['cappuccino', 'blueberry muffin'], visitedAt },
-      },
-      'personal_history_question',
-      NOW,
-    )
-    expect(out).toContain('## Last visit')
-    expect(out).toContain('2 days ago: cappuccino, blueberry muffin')
-  })
-
-  it('does not push dead lastVisitDate / daysSinceLastVisit lines', () => {
-    // THE-229 finding: those lines are unpopulated dead code. New category
-    // case must not propagate the bug.
-    const out = runtimeToProse(
-      {
-        inboundMessage: 'what did i get last time',
-        lastVisitDate: '2026-04-30',
-        daysSinceLastVisit: 3,
-      },
-      'personal_history_question',
-      NOW,
-    )
-    expect(out).not.toContain('Last visit: 2026-04-30')
-    expect(out).not.toContain('Days since last visit:')
   })
 })
 

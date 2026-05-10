@@ -18,8 +18,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.12.0 (knowledge_corpus tag split + tag-aware retrieval)', () => {
-    expect(PROMPT_VERSION).toBe('v1.12.0')
+  it('is v1.13.0 (TAC-234 runtime context blocks: visit history, recognition, field-presence rendering)', () => {
+    expect(PROMPT_VERSION).toBe('v1.13.0')
   })
 })
 

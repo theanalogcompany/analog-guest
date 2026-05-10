@@ -9,7 +9,7 @@ import {
   type RedemptionRecord,
 } from '@/lib/recognition'
 import { BrandPersonaSchema, filterActiveContext, VenueInfoSchema } from '@/lib/schemas'
-import { extractLastVisit } from './extract-last-visit'
+import { extractRecentVisits } from './extract-recent-visits'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -24,11 +24,12 @@ import type {
 export const MAX_HISTORY_MESSAGES = 30
 export const MAX_HISTORY_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-// THE-229: hard cap on how far back we'll surface a guest's most recent
-// transaction. Older visits aren't relevant context to reference in
-// conversation. Recognition uses 90 days for visit-frequency scoring; this
-// stricter cutoff is for "should the agent talk about it."
-export const LAST_VISIT_CUTOFF_DAYS = 60
+// TAC-234: visit history loaded into RuntimeContext.recentVisits. Cap
+// guards against prompt bloat on chatty regulars; window matches recognition's
+// visit-frequency scoring window so "what we surface" and "what counts toward
+// state" stay aligned.
+export const MAX_VISIT_HISTORY_TRANSACTIONS = 20
+export const MAX_VISIT_HISTORY_DAYS = 90
 
 /**
  * Build the full RuntimeContext for an agent run by fetching venue + guest +
@@ -93,8 +94,8 @@ export async function buildRuntimeContext(input: {
     messagesQuery = messagesQuery.lt('created_at', input.historyEndIso)
   }
 
-  const lastVisitCutoffIso = new Date(
-    Date.now() - LAST_VISIT_CUTOFF_DAYS * MS_PER_DAY,
+  const visitHistoryCutoffIso = new Date(
+    Date.now() - MAX_VISIT_HISTORY_DAYS * MS_PER_DAY,
   ).toISOString()
 
   const [
@@ -104,7 +105,7 @@ export async function buildRuntimeContext(input: {
     messagesResult,
     mechanicsResult,
     redemptionsResult,
-    lastVisitResult,
+    visitHistoryResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -134,19 +135,18 @@ export async function buildRuntimeContext(input: {
       .eq('guest_id', input.guestId)
       .eq('event_type', 'mechanic_redeemed')
       .not('mechanic_id', 'is', null),
-    // THE-229: most recent transaction within LAST_VISIT_CUTOFF_DAYS.
-    // Single-row indexed lookup; runs in parallel with the other six queries
-    // so it adds no serial latency. extractLastVisit handles the projection
-    // and the "no parseable items → null" rule.
+    // TAC-234: up to MAX_VISIT_HISTORY_TRANSACTIONS within the past
+    // MAX_VISIT_HISTORY_DAYS, most-recent-first. Runs in parallel with the
+    // other six queries so it adds no serial latency. extractRecentVisits
+    // applies the per-row freshness + line-item parseability filters.
     supabase
       .from('transactions')
       .select('occurred_at, raw_data')
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
-      .gte('occurred_at', lastVisitCutoffIso)
+      .gte('occurred_at', visitHistoryCutoffIso)
       .order('occurred_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(MAX_VISIT_HISTORY_TRANSACTIONS),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -183,9 +183,9 @@ export async function buildRuntimeContext(input: {
       `buildRuntimeContext: redemption events load failed: ${redemptionsResult.error.message}`,
     )
   }
-  if (lastVisitResult.error) {
+  if (visitHistoryResult.error) {
     throw new Error(
-      `buildRuntimeContext: last visit load failed: ${lastVisitResult.error.message}`,
+      `buildRuntimeContext: visit history load failed: ${visitHistoryResult.error.message}`,
     )
   }
 
@@ -290,11 +290,16 @@ export async function buildRuntimeContext(input: {
     computedAt,
   )
 
-  // THE-229: project the most recent transaction (if any) into the agent-
-  // facing LastVisit shape. extractLastVisit returns null when the row is
-  // null, beyond the cutoff, has no parseable items, or has a malformed
-  // timestamp.
-  const lastVisit = extractLastVisit(lastVisitResult.data, computedAt, LAST_VISIT_CUTOFF_DAYS)
+  // TAC-234: project the recent transactions into the agent-facing Visit[]
+  // shape. extractRecentVisits drops rows whose raw_data has no parseable
+  // items or whose timestamp is malformed. Empty array is meaningful — it
+  // means "no qualifying visits to surface" and the serializer omits the
+  // ## Visit history block entirely.
+  const recentVisits = extractRecentVisits(
+    visitHistoryResult.data,
+    computedAt,
+    MAX_VISIT_HISTORY_DAYS,
+  )
 
   return {
     agentRunId: input.agentRunId,
@@ -305,7 +310,7 @@ export async function buildRuntimeContext(input: {
     recentMessages,
     recognition,
     mechanics,
-    lastVisit,
+    recentVisits,
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

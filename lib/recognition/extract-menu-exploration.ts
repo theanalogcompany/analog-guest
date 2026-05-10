@@ -9,7 +9,7 @@
 // Defensive parsing: any field missing or wrong-typed is dropped silently.
 // `raw_data` shape is owned by POS integrations (mock / Square / Toast); we
 // don't want a malformed line item to crash the recognition computation.
-// Same defensive style as lib/agent/extract-last-visit.ts.
+// Same defensive style as lib/agent/extract-recent-visits.ts.
 //
 // Matching is exact-after-normalization (lowercase + trim) on item names.
 // POS line item names will get noisier as real venues onboard; fuzzy

@@ -187,8 +187,8 @@ describe('follow-up instructions — Operator instruction reinforcement (THE-232
 })
 
 describe('personal-history-question instructions (THE-233)', () => {
-  it('points the agent at the ## Last visit block', () => {
-    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('"## Last visit" block')
+  it('points the agent at the ## Visit history block (TAC-234 rename)', () => {
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('"## Visit history" block')
   })
 
   it('forbids reciting the data back', () => {

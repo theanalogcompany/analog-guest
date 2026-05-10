@@ -5,6 +5,7 @@ import type {
   MessageCategory,
   RecentMessage,
   RuntimeContext,
+  Visit,
   VoiceCorpusChunk,
 } from '../types'
 
@@ -250,7 +251,7 @@ function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   ].join('\n')
 }
 
-// Exported (THE-229) so formatLastVisit below shares the same delta vocabulary
+// Exported so formatVisitHistory below shares the same delta vocabulary
 // the recent-conversation block uses ("yesterday" / "N days ago" / etc.).
 // Module-private otherwise.
 export function formatTimeDelta(then: Date, now: Date): string {
@@ -282,24 +283,32 @@ function formatRecentConversation(messages: readonly RecentMessage[], now: Date)
   return `## Recent conversation\n${lines.join('\n')}`
 }
 
-// THE-229: render the most recent transaction's items + relative time.
-// Format intentionally terse — "3 days ago: cappuccino, blueberry muffin" —
-// because R11 (in SYSTEM_TEMPLATE) instructs the agent NOT to recite the
-// data back at the guest. We're feeding the model context, not a script.
-function formatLastVisit(
-  lastVisit: NonNullable<RuntimeContext['lastVisit']>,
+// TAC-234: render the recent transactions as a bulleted list. Bracketed
+// time-delta matches the ## Recent conversation block style. The intro
+// line tells Sonnet how to use the data — pattern recognition for
+// recommendations, NOT reciting it back at the guest (R11 reinforces).
+function formatVisitHistory(
+  visits: readonly Visit[],
   now: Date,
-): string {
-  const delta = formatTimeDelta(lastVisit.visitedAt, now)
-  const items = lastVisit.items.join(', ')
-  return `## Last visit\n${delta}: ${items}`
+): string | null {
+  if (visits.length === 0) return null
+  const lines = visits.map((v) => {
+    const delta = formatTimeDelta(v.visitedAt, now)
+    const items = v.items.join(', ')
+    return `- [${delta}] ${items}`
+  })
+  return [
+    '## Visit history',
+    "Recent transactions, most recent first. Use this to recognize patterns and offer relevant suggestions — don't recite history back at the guest.",
+    lines.join('\n'),
+  ].join('\n')
 }
 
-// Category gate for the Last Visit block (THE-229). Welcome is the first-
-// contact NFC-tap reply (no prior visits to reference by definition); opt_out
-// is a stop-messaging acknowledgment where prior orders aren't relevant.
-// All other categories render the block when lastVisit is set.
-function shouldRenderLastVisit(category: MessageCategory): boolean {
+// Category gate for the Visit History block. Welcome is the first-contact
+// NFC-tap reply (no prior visits to reference by definition); opt_out is a
+// stop-messaging acknowledgment where prior orders aren't relevant. All
+// other categories render the block when recentVisits is non-empty.
+function shouldRenderVisitHistory(category: MessageCategory): boolean {
   return category !== 'welcome' && category !== 'opt_out'
 }
 
@@ -320,9 +329,9 @@ function formatCritiqueToIncorporate(critique: string): string {
 // THE-232: render the operator's note from the Command Center Follow Up
 // modal as a prominent top-level block. The note is the dominant signal
 // for what the message should say; surrounding runtime context (mechanics,
-// last visit, recent conversation) informs how to say it. The agent still
-// speaks in the venue's voice — the note is content guidance only, not
-// phrasing to mimic. This guardrail is reinforced in the manual-category
+// visit history, recent conversation) informs how to say it. The agent
+// still speaks in the venue's voice — the note is content guidance only,
+// not phrasing to mimic. This guardrail is reinforced in the manual-category
 // instructions.
 function formatOperatorInstruction(instruction: string): string {
   return [
@@ -376,12 +385,17 @@ export function runtimeToProse(
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics))
   }
-  // THE-229: Last Visit block sits between mechanics and recent conversation.
-  // Reading order: who they are → what they can get → what they recently
-  // bought → what was recently said. Skipped at the block level (not per
-  // category) for welcome and opt_out.
-  if (runtime.lastVisit && shouldRenderLastVisit(category)) {
-    blocks.push(formatLastVisit(runtime.lastVisit, now))
+  // TAC-234: ## Visit history block sits between mechanics and recent
+  // conversation. Reading order: who they are → what they can get → what
+  // they've recently bought → what was recently said. Skipped at the block
+  // level (not per category) for welcome and opt_out.
+  if (
+    runtime.recentVisits &&
+    runtime.recentVisits.length > 0 &&
+    shouldRenderVisitHistory(category)
+  ) {
+    const block = formatVisitHistory(runtime.recentVisits, now)
+    if (block) blocks.push(block)
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)
@@ -394,95 +408,25 @@ export function runtimeToProse(
     lines.push(`Guest name: ${runtime.guestName}`)
   }
 
-  switch (category) {
-    case 'welcome':
-      break
-    case 'follow_up':
-      if (runtime.lastVisitDate) lines.push(`Last visit: ${runtime.lastVisitDate}`)
-      if (runtime.daysSinceLastVisit !== undefined) {
-        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
-      }
-      break
-    case 'reply':
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      if (runtime.lastVisitDate) lines.push(`Last visit: ${runtime.lastVisitDate}`)
-      if (runtime.daysSinceLastVisit !== undefined) {
-        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
-      }
-      break
-    case 'new_question':
-      if (runtime.inboundMessage) lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
-      break
-    case 'opt_out':
-      if (runtime.inboundMessage) {
-        lines.push(`The guest sent (opt-out request): "${runtime.inboundMessage}"`)
-      }
-      break
-    case 'perk_unlock':
-      if (runtime.perkBeingUnlocked) {
-        lines.push(`Perk: ${runtime.perkBeingUnlocked.name}`)
-        lines.push(`Why they qualified: ${runtime.perkBeingUnlocked.qualification}`)
-        lines.push(`What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`)
-      }
-      break
-    case 'event_invite':
-      if (runtime.eventBeingInvited) {
-        lines.push(`Event: ${runtime.eventBeingInvited.name}`)
-        lines.push(`Description: ${runtime.eventBeingInvited.description}`)
-        lines.push(`Date: ${runtime.eventBeingInvited.date}`)
-      }
-      break
-    case 'manual':
-      break
-    case 'acknowledgment':
-      if (runtime.inboundMessage) {
-        lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      }
-      break
-    case 'comp_complaint':
-      // Complaints often reference a recent visit. Surface the same visit
-      // metadata the reply / follow_up paths get so the agent can ground a
-      // response without inventing context.
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      if (runtime.lastVisitDate) lines.push(`Last visit: ${runtime.lastVisitDate}`)
-      if (runtime.daysSinceLastVisit !== undefined) {
-        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
-      }
-      break
-    case 'mechanic_request':
-      // Eligibility list is rendered separately by formatMechanicEligibility
-      // ("## What this guest can access"). Don't duplicate it here.
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      break
-    case 'recommendation_request':
-      // Returning guests get a slightly different framing — daysSinceLastVisit
-      // lets the agent decide whether to lean on history.
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      if (runtime.daysSinceLastVisit !== undefined) {
-        lines.push(`Days since last visit: ${runtime.daysSinceLastVisit}`)
-      }
-      break
-    case 'casual_chatter':
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      break
-    case 'personal_history_question':
-      // THE-233: factual question framing matches new_question. The
-      // ## Last visit block above does the real work of surfacing what the
-      // guest can be told. Don't propagate the dead lastVisitDate /
-      // daysSinceLastVisit lines from THE-229.
-      if (runtime.inboundMessage) {
-        lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
-      }
-      break
-    case 'perk_inquiry':
-      if (runtime.inboundMessage) lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
-      break
-    case 'event_question':
-      if (runtime.inboundMessage) lines.push(`The guest just asked: "${runtime.inboundMessage}"`)
-      break
-    case 'unknown':
-      if (runtime.inboundMessage) lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-      break
+  // TAC-234: field-presence rendering. The orchestrator (handleInbound vs
+  // handleFollowup) enforces mutual exclusion between inbound flow
+  // (inboundMessage set) and outbound flow (perkBeingUnlocked or
+  // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
+  if (runtime.inboundMessage) {
+    lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+  }
+  if (runtime.recognition?.state) {
+    lines.push(`Guest relationship: ${runtime.recognition.state}`)
+  }
+  if (runtime.perkBeingUnlocked) {
+    lines.push(`Perk: ${runtime.perkBeingUnlocked.name}`)
+    lines.push(`Why they qualified: ${runtime.perkBeingUnlocked.qualification}`)
+    lines.push(`What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`)
+  }
+  if (runtime.eventBeingInvited) {
+    lines.push(`Event: ${runtime.eventBeingInvited.name}`)
+    lines.push(`Description: ${runtime.eventBeingInvited.description}`)
+    lines.push(`Date: ${runtime.eventBeingInvited.date}`)
   }
 
   if (runtime.additionalContext) {

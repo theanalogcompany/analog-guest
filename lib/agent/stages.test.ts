@@ -61,7 +61,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     recentMessages: [],
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
-    lastVisit: null,
+    recentVisits: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -268,7 +268,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.25,
         reasoning: 'too ambiguous',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -296,7 +296,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.5,
         reasoning: 'ambiguous but defensible',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -315,7 +315,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.85,
         reasoning: 'clear',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -330,7 +330,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     const recent = [
