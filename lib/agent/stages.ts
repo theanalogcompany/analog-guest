@@ -374,7 +374,7 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
 /**
  * Map orchestrator RuntimeContext → lib/ai's RuntimeContext shape.
  * Exported so the Voices regen helper can reuse the same mapping without
- * duplicating timezone validation, follow-up framing, or the lastVisit
+ * duplicating timezone validation, follow-up framing, or the recentVisits
  * threading. Regen post-injects `critiqueToIncorporate` on top of the
  * returned object — this function deliberately doesn't know about that
  * field so the standard agent paths stay identical.
@@ -449,9 +449,11 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     today: computeToday(timezone),
     recentMessages: ctx.recentMessages,
     mechanics: ctx.mechanics,
-    // THE-229: thread the LastVisit projection from the orchestrator's
-    // RuntimeContext to the AI module's RuntimeContext. The serializer
-    // gates rendering by category (welcome / opt_out skip the block).
-    lastVisit: ctx.lastVisit ?? undefined,
+    // TAC-234: thread the recent transactions through to the AI module's
+    // RuntimeContext. The serializer gates rendering by category (welcome /
+    // opt_out skip) and on non-emptiness. recognition state is surfaced as
+    // a `Guest relationship: <state>` line near the inbound framing.
+    recentVisits: ctx.recentVisits,
+    recognition: { state: ctx.recognition.state },
   }
 }

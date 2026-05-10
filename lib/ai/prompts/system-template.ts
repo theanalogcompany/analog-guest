@@ -36,8 +36,18 @@
 // explicit no-match framing makes R9 fire reliably). Confidence floor
 // (default 0.7) excludes low-confidence chunks. Constants unified
 // (KNOWLEDGE_RETRIEVE_LIMIT only).
+//
+// v1.13.0 (TAC-234): runtime context block hardening. Single-transaction
+// `## Last visit` replaced by multi-transaction `## Visit history`
+// (up to MAX_VISIT_HISTORY_TRANSACTIONS=20 over MAX_VISIT_HISTORY_DAYS=90,
+// mirrors the recent-conversation shape). Legacy `lastVisitDate` /
+// `daysSinceLastVisit` removed entirely. Per-category switch in
+// runtimeToProse collapsed to field-presence rendering: one consistent
+// inbound framing line, plus dedicated blocks for perk_unlock + event_invite.
+// Recognition state surfaced as a `Guest relationship: <state>` line near
+// the inbound framing.
 
-export const PROMPT_VERSION = 'v1.12.0'
+export const PROMPT_VERSION = 'v1.13.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

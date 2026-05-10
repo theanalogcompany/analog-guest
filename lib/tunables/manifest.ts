@@ -12,9 +12,10 @@
 // capped by what rag returned anyway. Asserted in manifest.test.ts.
 
 import {
-  LAST_VISIT_CUTOFF_DAYS,
   MAX_HISTORY_DAYS,
   MAX_HISTORY_MESSAGES,
+  MAX_VISIT_HISTORY_DAYS,
+  MAX_VISIT_HISTORY_TRANSACTIONS,
 } from '@/lib/agent/build-runtime-context'
 import {
   CORPUS_RETRIEVE_LIMIT,
@@ -100,13 +101,22 @@ export const TUNABLES = [
     description: 'Top-match cosine score below which a thin-retrieval alert fires.',
   },
   {
-    name: 'last_visit_cutoff_days',
-    value: LAST_VISIT_CUTOFF_DAYS,
+    name: 'max_visit_history_days',
+    value: MAX_VISIT_HISTORY_DAYS,
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/build-runtime-context.ts',
-    description: 'Maximum age of a transaction allowed to surface as the guest’s lastVisit context.',
-    relatedTickets: ['THE-229'],
+    description: 'Lookback window for the ## Visit history block — transactions older than this are not surfaced to the agent.',
+    relatedTickets: ['TAC-234'],
+  },
+  {
+    name: 'max_visit_history_transactions',
+    value: MAX_VISIT_HISTORY_TRANSACTIONS,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/agent/build-runtime-context.ts',
+    description: 'Cap on transactions loaded into RuntimeContext.recentVisits; guards against prompt bloat for chatty regulars.',
+    relatedTickets: ['TAC-234'],
   },
   {
     name: 'max_attempts',

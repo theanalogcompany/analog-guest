@@ -122,6 +122,7 @@ const baseCtx = {
     { direction: 'inbound' as const, body: 'hi', createdAt: new Date('2026-05-08T09:55:00Z') },
   ],
   recognition: { state: 'returning' as const },
+  recentVisits: [],
   mechanics: [],
   lastVisit: null,
   corpus: null,
@@ -358,7 +359,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         attemptHistory: [],
         systemPrompt: '',
         userPrompt: '',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
         dashViolationPersisted: false,
       },
     })
@@ -371,7 +372,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         category: 'mechanic_request',
         classifierConfidence: 0.9,
         reasoning: 'r',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
@@ -404,7 +405,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
-        promptVersion: 'v1.12.0',
+        promptVersion: 'v1.13.0',
       },
     })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({ ok: true, data: [] })

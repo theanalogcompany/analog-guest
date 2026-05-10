@@ -75,10 +75,17 @@ export type RecentMessage = {
   createdAt: Date
 }
 
+// One transaction projected for the agent prompt (TAC-234). Replaces the
+// single `lastVisit` shape from THE-229 with a per-row entry; the serializer
+// renders these as bullets in the `## Visit history` block. Same fields as
+// the prior LastVisit type — only the multiplicity changes.
+export type Visit = {
+  items: string[]
+  visitedAt: Date
+}
+
 export type RuntimeContext = {
   guestName?: string
-  lastVisitDate?: string
-  daysSinceLastVisit?: number
   inboundMessage?: string
   perkBeingUnlocked?: {
     name: string
@@ -116,15 +123,16 @@ export type RuntimeContext = {
   // a "What this guest can access" block when this is provided. An empty
   // array is meaningful — it tells Sonnet not to offer any perks (THE-170).
   mechanics?: EligibleMechanic[]
-  // Most recent transaction within the freshness cutoff. The serializer
-  // renders a "## Last visit" block (with relative time + comma-joined
-  // item names) when this is set and the category is not welcome / opt_out.
-  // THE-229. Shape mirrors lib/agent/types.ts's LastVisit; defined inline
-  // here to keep lib/ai self-contained (same convention as RecentMessage).
-  lastVisit?: {
-    items: string[]
-    visitedAt: Date
-  }
+  // Recent transactions within the freshness window, most-recent-first.
+  // Serializer renders a "## Visit history" block (one bullet per visit)
+  // when this is set non-empty and the category is not welcome / opt_out.
+  // TAC-234 (replaces THE-229's single-transaction lastVisit). Empty array
+  // means "no qualifying visits"; undefined means "not loaded on this path."
+  recentVisits?: Visit[]
+  // Guest's recognition band, surfaced as a `Guest relationship: <state>`
+  // line near the inbound framing (TAC-234). Mirrors what TAC-240 added on
+  // the classifier side — same single source of truth.
+  recognition?: { state: GuestState }
 }
 
 export type GenerateMessageInput = {
