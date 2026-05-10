@@ -19,3 +19,8 @@ export {
   VenueInfoSchema,
   type VenueInfo,
 } from './venue-info'
+export {
+  isCanonicalPrimaryTag,
+  KNOWLEDGE_PRIMARY_TAGS,
+  type KnowledgePrimaryTag,
+} from './knowledge-tags'

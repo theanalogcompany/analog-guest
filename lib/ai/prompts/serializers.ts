@@ -212,20 +212,34 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
 }
 
 // Render retrieved knowledge_corpus chunks as a `## Venue knowledge` block.
-// Mirrors ragChunksToProse's quote-block format with one addition: a topical
-// tag list in `[bracket, list]` form replacing voice's `[sourceType]` line.
-// Knowledge is content (what's true) — voice is style (how to say it). Sonnet
-// is told the difference in the system template's voice imperative.
+// Each chunk renders with two bracketed tag lines: [primary: ...] (closed-enum
+// routing tags) and [secondary: ...] (free-form descriptive tags), then the
+// quoted body. Empty primaryTags falls back to sourceType for parity with
+// pre-TAC-242 behavior.
+//
+// On empty chunks the block is still emitted with explicit "no venue knowledge
+// matched" framing so the agent knows it lacked grounding (R9 fires reliably
+// instead of relying on the agent to detect absence-of-block). The composer
+// (lib/ai/compose-prompt.ts) chooses whether to call this at all based on
+// whether retrieval was gated off (undefined) vs ran-and-matched-nothing ([]).
 export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
-  if (chunks.length === 0) return ''
+  const header =
+    "## Venue knowledge\nFacts about the venue you can ground replies in. This is content, not voice — speak in the venue's voice regardless of how these are phrased."
+
+  if (chunks.length === 0) {
+    return `${header}\n\nNo specific venue knowledge matched this query. If the guest's question requires venue-specific grounding (sourcing, staff details, mechanic explanations, history, etc.), defer or admit you'll find out — do not invent specifics. The venue's persona, voice, and structured facts above still apply.`
+  }
 
   const blocks = chunks.map((c) => {
-    const tagList = c.tags.length > 0 ? c.tags.join(', ') : c.sourceType
+    const primaryLine =
+      c.primaryTags.length > 0 ? `[primary: ${c.primaryTags.join(', ')}]` : `[primary: ${c.sourceType}]`
+    const secondaryLine =
+      c.secondaryTags.length > 0 ? `\n[secondary: ${c.secondaryTags.join(', ')}]` : ''
     const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
-    return `[${tagList}]\n${quoted}`
+    return `${primaryLine}${secondaryLine}\n${quoted}`
   })
 
-  return `## Venue knowledge\nFacts about the venue you can ground replies in. This is content, not voice — speak in the venue's voice regardless of how these are phrased.\n\n${blocks.join('\n\n')}`
+  return `${header}\n\n${blocks.join('\n\n')}`
 }
 
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {

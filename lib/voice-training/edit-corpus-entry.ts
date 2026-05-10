@@ -2,9 +2,10 @@
 // center). Two fields are editable from the rail: content + tags.
 //
 // Re-embed only when content changed — tags-only updates skip Voyage. The
-// chunk text and embeddings are content-derived; tag changes have no
-// retrieval implication beyond the optional tag_filter on the RPC (which
-// the runtime doesn't use today for voice retrieval, only knowledge).
+// chunk text and embeddings are content-derived; voice corpus tags carry
+// no runtime routing (voice retrieval is cosine-only). Knowledge corpus
+// uses tag-aware routing as of TAC-242, but that's a separate table with
+// its own edit path — this helper is voice-only.
 
 import { createAdminClient } from '@/lib/db/admin'
 import { ingestCorpusEntry } from '@/lib/rag'

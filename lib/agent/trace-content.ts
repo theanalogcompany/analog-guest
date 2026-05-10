@@ -93,7 +93,8 @@ export type KnowledgeCorpusContent = {
     sourceType: string
     confidence: number
     similarity: number
-    tags: string[]
+    primaryTags: string[]
+    secondaryTags: string[]
   }>
 }
 
@@ -114,7 +115,8 @@ export function buildKnowledgeCorpusContent(
       sourceType: c.sourceType,
       confidence: c.confidence,
       similarity: c.similarity,
-      tags: c.tags,
+      primaryTags: c.primaryTags,
+      secondaryTags: c.secondaryTags,
     })),
   }
 }

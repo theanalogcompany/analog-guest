@@ -3,6 +3,8 @@ import { GUEST_STATES } from '@/lib/recognition'
 import {
   type BrandPersona,
   BrandPersonaSchema,
+  isCanonicalPrimaryTag,
+  KNOWLEDGE_PRIMARY_TAGS,
   type VenueInfo,
   VenueInfoSchema,
 } from '@/lib/schemas'
@@ -67,19 +69,35 @@ const VoiceCorpusSchema = z.object({
 export interface KnowledgeCorpusSpec {
   source_type: string
   content: string
-  tags: string[]
+  primary_tags: string[]
+  secondary_tags: string[]
   confidence_score: number
 }
 
-// Mirrors VoiceCorpusSchema exactly — knowledge_corpus and voice_corpus share
-// column shape (see migration 013). The conceptual split is what the LLM
-// extracts into each: voice = HOW the venue speaks (texting exemplars, tone),
-// knowledge = WHAT IS TRUE (sourcing, staff, ceremony, mechanics). Same .min/.max
-// caveat as VoiceCorpusSchema applies.
+// Mirrors VoiceCorpusSchema for the shared columns. TAC-242 splits tags:
+// primary_tags (closed enum, validated via isCanonicalPrimaryTag — fail-loud
+// on non-canonical so extraction drift surfaces at the parse boundary) and
+// secondary_tags (free-form, no validation). Same .min/.max caveat as
+// VoiceCorpusSchema applies. New venues must use this shape; legacy specs
+// with a single `tags:` field are not supported — re-extract first.
 const KnowledgeCorpusSchema = z.object({
   source_type: z.string().min(1),
   content: z.string().min(1),
-  tags: z.array(z.string()).default([]),
+  primary_tags: z
+    .array(z.string())
+    .default([])
+    .superRefine((tags, ctx) => {
+      for (const t of tags) {
+        if (isCanonicalPrimaryTag(t) === null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `primary_tags contains a non-canonical tag: "${t}". Allowed: ${KNOWLEDGE_PRIMARY_TAGS.join(', ')} (or namespaced like 'staff_phoebe', 'mechanic_perk_card').`,
+          })
+          return
+        }
+      }
+    }),
+  secondary_tags: z.array(z.string()).default([]),
   confidence_score: z.number().min(0).max(1).default(DEFAULT_CONFIDENCE_SCORE),
 })
 
@@ -408,8 +426,11 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   }
 
   // ── Section 7: knowledge_corpus (optional; older specs may omit) ─────────
-  // No min-count enforcement: retrieval against knowledge_corpus isn't wired
-  // up yet, and older 06-specs predate this section entirely.
+  // No min-count enforcement — sparse corpora are valid and the agent
+  // degrades to the explicit no-match block (TAC-242). Retrieval IS wired up
+  // (knowledge fires for inbound + event/manual followups; tag-aware routing
+  // for the four mapped categories). New specs use the primary/secondary tag
+  // shape — fail-loud at the schema below on legacy single-tag entries.
   const sectionKnowledge = h2s.find((s) => /^7\.\s*knowledge_corpus/i.test(s.title))
   const knowledgeCorpus: KnowledgeCorpusSpec[] = []
   if (sectionKnowledge) {

@@ -52,17 +52,20 @@ export type VoiceCorpusChunk = {
   relevanceScore?: number
 }
 
-// Mirror of VoiceCorpusChunk for knowledge_corpus retrieval results. Adds a
-// topical `tags` array that the prompt serializer renders alongside each
-// chunk so Sonnet can disambiguate which topic was matched (sourcing,
-// staff_<name>, mechanic_<slug>, ceremony, etc.). source_type is the open
-// string the DB stores — knowledge entries don't share voice's check
-// constraint enum.
+// Mirror of VoiceCorpusChunk for knowledge_corpus retrieval results. The
+// tag split (TAC-242) carries two arrays: primaryTags is the closed-enum
+// routing signal (lib/schemas/knowledge-tags) used to disambiguate which
+// topic was matched (sourcing, staff_<name>, mechanic_<slug>, etc.);
+// secondaryTags is free-form descriptive context (e.g., 'seasonal',
+// 'philly', 'weekend'). Both render in the prompt for grounding; only
+// primary is used by retrieval routing. source_type is the open string the
+// DB stores — knowledge entries don't share voice's check constraint enum.
 export type KnowledgeCorpusChunk = {
   id: string
   text: string
   sourceType: string
-  tags: string[]
+  primaryTags: string[]
+  secondaryTags: string[]
   relevanceScore?: number
 }
 
@@ -131,7 +134,9 @@ export type GenerateMessageInput = {
   ragChunks: VoiceCorpusChunk[]
   // Optional. When the orchestrator's shouldRetrieveKnowledge gate fires for a
   // run, retrieved knowledge_corpus chunks land here and the system prompt
-  // gains a `## Venue knowledge` block. Empty array or undefined → block omitted.
+  // gains a `## Venue knowledge` block. undefined → retrieval was gated off,
+  // block omitted. [] → retrieval ran but matched nothing, block renders the
+  // explicit no-match framing (TAC-242).
   knowledgeChunks?: KnowledgeCorpusChunk[]
   runtime: RuntimeContext
 }

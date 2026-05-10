@@ -41,7 +41,7 @@ import {
 } from '@/lib/analytics/posthog'
 import {
   DEFAULT_LIMIT,
-  KNOWLEDGE_DEFAULT_LIMIT,
+  KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT,
   SIMILARITY_FLOOR,
 } from '@/lib/rag/retrieve'
 import { VISIT_LOOKBACK_DAYS } from '@/lib/recognition/load-signals'
@@ -319,12 +319,13 @@ export const TUNABLES = [
     description: 'Fallback voice corpus retrieval limit when the caller passes none.',
   },
   {
-    name: 'knowledge_default_limit',
-    value: KNOWLEDGE_DEFAULT_LIMIT,
+    name: 'knowledge_confidence_floor_default',
+    value: KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT,
     type: 'number',
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
-    description: 'Fallback knowledge corpus retrieval limit when the caller passes none.',
+    description: 'Default min_confidence applied to match_knowledge_corpus when the caller does not override. Excludes low-confidence chunks from the prompt; matches the classifier low-confidence threshold for symmetry.',
+    relatedTickets: ['TAC-242'],
   },
   {
     name: 'knowledge_retrieve_limit',

@@ -374,7 +374,12 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 
 ## 7. knowledge_corpus
 
-Topical content the agent retrieves when grounding answers to substantive guest questions. Distinct from voice_corpus: these are **what is true** about the venue (origin, sourcing, staff, mechanics, philosophy, recommendations), not **how the venue texts**. Tags are topical, not situational.
+Narrative content the agent retrieves when grounding answers to substantive guest questions. Distinct from voice_corpus (style examples) and from venue_info (structured facts like hours/menu/staff list): these are the **stories, explanations, and context** behind the venue — origin, sourcing relationships, staff personalities, mechanic explanations, philosophy, opinionated recommendations.
+
+Each entry has TWO tag arrays:
+
+- **`primary_tags`** — closed enum, used for retrieval routing. Choose one or more from: `sourcing`, `staff`, `mechanic`, `menu`, `philosophy`, `recommendations`, `events`, `history`, `space`, `policies`, `logistics`, `other`. Namespacing allowed: `staff_phoebe` (matches `staff`), `mechanic_perk_card` (matches `mechanic`). A chunk that spans topics carries multiple primary tags.
+- **`secondary_tags`** — free-form, descriptive. 2–5 typical. Doesn't drive routing; helps the agent contextualize what was matched.
 
 ### Entry 1
 
@@ -382,7 +387,8 @@ Topical content the agent retrieves when grounding answers to substantive guest 
 {
   "source_type": "voicenote_transcript",
   "content": "[NARRATIVE CHUNK — sourcing or supplier relationship in the operator's words: where a key ingredient comes from, the relationship behind it, why it matters. Self-contained — readable on its own without surrounding context.]",
-  "tags": ["sourcing", "[origin tag]"],
+  "primary_tags": ["sourcing"],
+  "secondary_tags": ["[origin region]", "[supplier name]"],
   "confidence_score": 0.9
 }
 ```
@@ -393,7 +399,8 @@ Topical content the agent retrieves when grounding answers to substantive guest 
 {
   "source_type": "voicenote_transcript",
   "content": "[NARRATIVE CHUNK — a named staff member's personality, what they're known for, how guests experience them. E.g., who's behind the bar, what they tell first-timers, their character.]",
-  "tags": ["staff_[name]", "personality"],
+  "primary_tags": ["staff_[name]"],
+  "secondary_tags": ["personality", "[role]"],
   "confidence_score": 0.9
 }
 ```
@@ -404,8 +411,21 @@ Topical content the agent retrieves when grounding answers to substantive guest 
 {
   "source_type": "manual_entry",
   "content": "[SYNTHESIZED CHUNK — explanation of how a specific mechanic works in plain language, suitable for grounding the agent when a guest asks about it. Pulled from the operator's qualification + reward_description + expiration_rule fields, restated as a self-contained explanation.]",
-  "tags": ["mechanic_[slug]", "explanation"],
+  "primary_tags": ["mechanic_[slug]"],
+  "secondary_tags": ["explanation"],
   "confidence_score": 0.85
+}
+```
+
+### Entry 4 (multi-primary example)
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[NARRATIVE CHUNK — a chunk that spans topics, e.g., a story about a named staff member's seasonal drink experiments. Belongs to BOTH `menu` (it's about a drink) AND `staff_<name>` (it's about who makes it). Carry both primary tags so retrieval surfaces it for either routing path.]",
+  "primary_tags": ["menu", "staff_[name]"],
+  "secondary_tags": ["seasonal", "[drink type]"],
+  "confidence_score": 0.9
 }
 ```
 
@@ -420,7 +440,8 @@ Before running `npm run seed [venue-slug]`, verify:
 - [x] All required VenueInfoSchema fields populated
 - [x] At least 1 mechanic with structured trigger + redemption
 - [x] At least 5 voice_corpus entries
-- [x] At least 5 knowledge_corpus entries (substantive topical content for grounding)
+- [x] At least 5 knowledge_corpus entries (substantive narrative chunks for grounding)
+- [x] Every knowledge_corpus entry has at least one canonical `primary_tags` value (drawn from the 12 allowed tags or namespaced like `staff_<name>` / `mechanic_<slug>`); parser fails loud on non-canonical primary tags
 - [x] At least 1 currentContext entry
 - [x] Menu CSV referenced and exists in Drive
 

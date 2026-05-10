@@ -11,11 +11,10 @@ export type VoiceCorpusChunk = {
   voiceCorpusId: string
 }
 
-// Mirror of VoiceCorpusChunk with one addition: knowledge_corpus rows carry a
-// topical `tags` array (sourcing, staff_<name>, mechanic_<slug>, etc.) that
-// match_knowledge_corpus returns alongside the chunk. Voice corpus tags exist
-// at the row level but aren't surfaced to the agent prompt — knowledge tags
-// are, since topic disambiguation is part of grounding.
+// Mirror of VoiceCorpusChunk plus the knowledge_corpus tag split (TAC-242):
+// `primaryTags` is a closed-enum routing signal (lib/schemas/knowledge-tags),
+// `secondaryTags` is free-form descriptive context. Both render in the prompt
+// for grounding; only primary is used by retrieval routing.
 export type KnowledgeCorpusChunk = {
   id: string
   text: string
@@ -23,7 +22,8 @@ export type KnowledgeCorpusChunk = {
   confidence: number
   similarity: number
   knowledgeCorpusId: string
-  tags: string[]
+  primaryTags: string[]
+  secondaryTags: string[]
 }
 
 export type RetrieveContextInput = {
@@ -40,9 +40,11 @@ export type RetrieveKnowledgeContextInput = {
   limit?: number
   sourceTypeFilter?: string[]
   minConfidence?: number
-  // Optional topical filter (mechanic_<slug>, staff_<name>, etc.). Available
-  // on the RPC but unused at the call sites today — let cosine similarity gate.
-  tagFilter?: string[]
+  // Routing preference for primary_tag_filter on the RPC (TAC-242). Array
+  // overlap (&&) — a chunk qualifies if it has ANY of the listed primary
+  // tags. Derived from the inbound's classification category via
+  // lib/agent/knowledge-tag-mapping. Omit for cosine-only retrieval.
+  primaryTagPreference?: string[]
 }
 
 export type IngestResult = {

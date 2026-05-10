@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { classifyStage, retrieveCorpusStage, shouldRetrieveKnowledge } from './stages'
+import {
+  classifyStage,
+  retrieveCorpusStage,
+  retrieveKnowledgeStage,
+  shouldRetrieveKnowledge,
+} from './stages'
 import type { CorpusMatch, RuntimeContext } from './types'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
@@ -11,9 +16,11 @@ const retrieveContextMock = vi.fn()
 const captureLowMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
+const retrieveKnowledgeContextMock = vi.fn()
 
 vi.mock('@/lib/rag', () => ({
   retrieveContext: (...args: unknown[]) => retrieveContextMock(...args),
+  retrieveKnowledgeContext: (...args: unknown[]) => retrieveKnowledgeContextMock(...args),
 }))
 
 vi.mock('@/lib/ai', () => ({
@@ -261,7 +268,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.25,
         reasoning: 'too ambiguous',
-        promptVersion: 'v1.11.0',
+        promptVersion: 'v1.12.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -289,7 +296,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.5,
         reasoning: 'ambiguous but defensible',
-        promptVersion: 'v1.11.0',
+        promptVersion: 'v1.12.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -308,7 +315,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'recommendation_request',
         classifierConfidence: 0.85,
         reasoning: 'clear',
-        promptVersion: 'v1.11.0',
+        promptVersion: 'v1.12.0',
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -323,7 +330,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
-        promptVersion: 'v1.11.0',
+        promptVersion: 'v1.12.0',
       },
     })
     const recent = [
@@ -346,5 +353,125 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
     }
     expect(callArg.recentMessages).toBe(recent)
     expect(callArg.guestState).toBe('raving_fan')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// retrieveKnowledgeStage — tag-aware routing + zero-result fallback (TAC-242)
+// ---------------------------------------------------------------------------
+
+describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
+  beforeEach(() => {
+    retrieveKnowledgeContextMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function makeKnowledgeCtx(): RuntimeContext {
+    return makeCtx({
+      currentMessage: {
+        id: 'm1',
+        body: 'do you have any free drink perks?',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
+    })
+  }
+
+  function row(id: string, primary: string[]) {
+    return {
+      id,
+      knowledgeCorpusId: `kc-${id}`,
+      text: `chunk ${id}`,
+      sourceType: 'voicenote_transcript',
+      confidence: 0.9,
+      similarity: 0.55,
+      primaryTags: primary,
+      secondaryTags: [],
+    }
+  }
+
+  it('passes the mapped primaryTagPreference for mechanic_request', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValueOnce({
+      ok: true,
+      data: [row('k1', ['mechanic'])],
+    })
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
+    const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
+      primaryTagPreference?: string[]
+    }
+    expect(args.primaryTagPreference).toEqual(['mechanic'])
+  })
+
+  it('passes undefined preference for an unmapped category (cosine-only)', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+    const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
+      primaryTagPreference?: string[]
+    }
+    expect(args.primaryTagPreference).toBeUndefined()
+  })
+
+  it('passes undefined preference when category is null', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), null)
+    const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
+      primaryTagPreference?: string[]
+    }
+    expect(args.primaryTagPreference).toBeUndefined()
+  })
+
+  it('falls back to a no-filter retry when preference returns zero matches', async () => {
+    // First call (with preference) returns []; second call (no preference)
+    // returns a fallback row. The stage should return the fallback rows.
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [] })
+      .mockResolvedValueOnce({ ok: true, data: [row('fallback', ['menu'])] })
+
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
+
+    const firstArgs = retrieveKnowledgeContextMock.mock.calls[0][0] as {
+      primaryTagPreference?: string[]
+    }
+    const secondArgs = retrieveKnowledgeContextMock.mock.calls[1][0] as {
+      primaryTagPreference?: string[]
+    }
+    expect(firstArgs.primaryTagPreference).toEqual(['mechanic'])
+    expect(secondArgs.primaryTagPreference).toBeUndefined()
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe('fallback')
+  })
+
+  it('does NOT fall back when no preference was set even on zero matches', async () => {
+    // No preference → no fallback retry. One call total.
+    retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
+    expect(out).toEqual([])
+  })
+
+  it('returns [] and logs warn when the preferenced retrieval errors', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    retrieveKnowledgeContextMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'voyage timeout',
+      errorCode: 'embedding_failed',
+    })
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    expect(out).toEqual([])
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('returns [] and logs warn when the fallback retrieval errors', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [] })
+      .mockResolvedValueOnce({ ok: false, error: 'voyage timeout' })
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    expect(out).toEqual([])
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 })

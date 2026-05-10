@@ -67,8 +67,8 @@ function buildSpec(section7: string): string {
   ].join('\n')
 }
 
-describe('parseVenueSpec — knowledge_corpus', () => {
-  it('parses multiple valid entries with topical tags', () => {
+describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
+  it('parses entries with primary_tags + secondary_tags', () => {
     const section7 = [
       '## 7. knowledge_corpus',
       '',
@@ -76,7 +76,8 @@ describe('parseVenueSpec — knowledge_corpus', () => {
       JSON.stringify({
         source_type: 'voicenote_transcript',
         content: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
-        tags: ['sourcing', 'ethiopia'],
+        primary_tags: ['sourcing'],
+        secondary_tags: ['ethiopia', 'roaster'],
         confidence_score: 0.9,
       }),
       '```',
@@ -85,7 +86,8 @@ describe('parseVenueSpec — knowledge_corpus', () => {
       JSON.stringify({
         source_type: 'manual_entry',
         content: 'The Joey is offered to regulars on quiet weekday afternoons.',
-        tags: ['mechanic_the_joey', 'explanation'],
+        primary_tags: ['mechanic_the_joey'],
+        secondary_tags: ['explanation'],
         confidence_score: 0.85,
       }),
       '```',
@@ -96,16 +98,72 @@ describe('parseVenueSpec — knowledge_corpus', () => {
     expect(parsed.knowledgeCorpus).toHaveLength(2)
     expect(parsed.knowledgeCorpus[0]).toMatchObject({
       source_type: 'voicenote_transcript',
-      tags: ['sourcing', 'ethiopia'],
+      primary_tags: ['sourcing'],
+      secondary_tags: ['ethiopia', 'roaster'],
       confidence_score: 0.9,
     })
-    expect(parsed.knowledgeCorpus[1].tags).toEqual(['mechanic_the_joey', 'explanation'])
+    expect(parsed.knowledgeCorpus[1].primary_tags).toEqual(['mechanic_the_joey'])
+    expect(parsed.knowledgeCorpus[1].secondary_tags).toEqual(['explanation'])
+  })
+
+  it('accepts a chunk with multiple primary_tags spanning topics', () => {
+    const section7 = [
+      '## 7. knowledge_corpus',
+      '',
+      '```json',
+      JSON.stringify({
+        source_type: 'voicenote_transcript',
+        content: "Phoebe's seasonal matcha experiments draw the morning regulars.",
+        primary_tags: ['menu', 'staff_phoebe'],
+        secondary_tags: ['seasonal', 'matcha'],
+        confidence_score: 0.9,
+      }),
+      '```',
+    ].join('\n')
+
+    const parsed = parseVenueSpec(buildSpec(section7))
+    expect(parsed.knowledgeCorpus[0].primary_tags).toEqual(['menu', 'staff_phoebe'])
+  })
+
+  it('defaults primary_tags + secondary_tags to [] when omitted', () => {
+    const section7 = [
+      '## 7. knowledge_corpus',
+      '',
+      '```json',
+      JSON.stringify({
+        source_type: 'manual_entry',
+        content: 'A bare entry with neither tag array.',
+        confidence_score: 0.85,
+      }),
+      '```',
+    ].join('\n')
+
+    const parsed = parseVenueSpec(buildSpec(section7))
+    expect(parsed.knowledgeCorpus[0].primary_tags).toEqual([])
+    expect(parsed.knowledgeCorpus[0].secondary_tags).toEqual([])
+  })
+
+  it('throws fail-loud on a non-canonical primary_tag', () => {
+    const section7 = [
+      '## 7. knowledge_corpus',
+      '',
+      '```json',
+      JSON.stringify({
+        source_type: 'voicenote_transcript',
+        content: 'something',
+        primary_tags: ['personality'],
+        secondary_tags: [],
+        confidence_score: 0.9,
+      }),
+      '```',
+    ].join('\n')
+
+    expect(() => parseVenueSpec(buildSpec(section7))).toThrow(/non-canonical/)
   })
 
   it('returns an empty array when section 7 is absent (older specs)', () => {
     const parsed = parseVenueSpec(buildSpec(''))
     expect(parsed.knowledgeCorpus).toEqual([])
-    // The other sections still parse as expected — knowledge_corpus is purely additive.
     expect(parsed.voiceCorpus).toHaveLength(5)
     expect(parsed.mechanics).toHaveLength(1)
   })
@@ -115,7 +173,7 @@ describe('parseVenueSpec — knowledge_corpus', () => {
       '## 7. knowledge_corpus',
       '',
       '```json',
-      JSON.stringify({ source_type: 'manual_entry', tags: ['sourcing'] }),
+      JSON.stringify({ source_type: 'manual_entry', primary_tags: ['sourcing'] }),
       '```',
     ].join('\n')
 

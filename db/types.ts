@@ -282,8 +282,10 @@ export type Database = {
           is_processed: boolean
           language: string
           metadata: Json
+          primary_tags: string[]
           processed_at: string | null
           schema_version: number
+          secondary_tags: string[]
           source_ref: string | null
           source_type: string
           tags: string[]
@@ -299,8 +301,10 @@ export type Database = {
           is_processed?: boolean
           language?: string
           metadata?: Json
+          primary_tags?: string[]
           processed_at?: string | null
           schema_version?: number
+          secondary_tags?: string[]
           source_ref?: string | null
           source_type: string
           tags?: string[]
@@ -316,8 +320,10 @@ export type Database = {
           is_processed?: boolean
           language?: string
           metadata?: Json
+          primary_tags?: string[]
           processed_at?: string | null
           schema_version?: number
+          secondary_tags?: string[]
           source_ref?: string | null
           source_type?: string
           tags?: string[]
@@ -1048,19 +1054,20 @@ export type Database = {
         Args: {
           match_count?: number
           min_confidence?: number
+          primary_tag_filter?: string[]
           query_embedding: string
           query_venue_id: string
           source_type_filter?: string[]
-          tag_filter?: string[]
         }
         Returns: {
           chunk_text: string
           confidence_score: number
           corpus_id: string
           id: string
+          primary_tags: string[]
+          secondary_tags: string[]
           similarity: number
           source_type: string
-          tags: string[]
         }[]
       }
       match_voice_corpus: {
