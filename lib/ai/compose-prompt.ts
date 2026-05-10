@@ -34,10 +34,13 @@ export function composePrompt(input: GenerateMessageInput): {
   if (ragBlock.length > 0) sections.push(ragBlock)
 
   // Knowledge block sits beside voice examples — voice is style, knowledge is
-  // content. Block omitted when retrieval was gated off (knowledgeChunks
-  // undefined) or returned empty.
-  const knowledgeBlock = knowledgeChunksToProse(knowledgeChunks ?? [])
-  if (knowledgeBlock.length > 0) sections.push(knowledgeBlock)
+  // content. undefined means retrieval was gated off entirely (e.g. day_*
+  // cron) — block omitted. Empty array means retrieval ran but matched
+  // nothing — render the explicit no-match block (TAC-242) so R9 fires
+  // reliably instead of relying on the agent to detect absence of context.
+  if (knowledgeChunks !== undefined) {
+    sections.push(knowledgeChunksToProse(knowledgeChunks))
+  }
 
   sections.push(`## Category-specific instructions: ${category}\n${getCategoryInstructions(category)}`)
 

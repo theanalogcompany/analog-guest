@@ -272,7 +272,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       const knowledgeSpan = trace.span('retrieve_knowledge', {
         queryLength: ctx.currentMessage?.body.length ?? 0,
       })
-      ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx)
+      ctx.knowledgeCorpus = await retrieveKnowledgeStage(
+        ctx,
+        ctx.classification?.category ?? null,
+      )
       knowledgeSpan.end({
         output: {
           matchCount: ctx.knowledgeCorpus.length,

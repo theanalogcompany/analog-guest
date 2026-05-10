@@ -221,7 +221,11 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       venue_id: venueId,
       source_type: c.source_type,
       content: c.content,
-      tags: c.tags,
+      // TAC-242: write the split tag arrays. The legacy `tags` column still
+      // exists this cycle (drop scheduled in a follow-up migration) but new
+      // rows leave it default-empty.
+      primary_tags: c.primary_tags,
+      secondary_tags: c.secondary_tags,
       confidence_score: c.confidence_score,
     }))
     const { data: knowledgeInserted, error: knowledgeError } = await supabase

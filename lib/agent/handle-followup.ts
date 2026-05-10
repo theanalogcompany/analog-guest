@@ -195,7 +195,10 @@ export async function handleFollowup(input: {
       const knowledgeSpan = trace.span('retrieve_knowledge', {
         triggerReason: input.trigger.reason,
       })
-      ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx)
+      ctx.knowledgeCorpus = await retrieveKnowledgeStage(
+        ctx,
+        ctx.classification?.category ?? null,
+      )
       knowledgeSpan.end({
         output: {
           matchCount: ctx.knowledgeCorpus.length,

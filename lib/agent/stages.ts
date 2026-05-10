@@ -19,7 +19,9 @@ import {
 } from '@/lib/ai'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
+import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type { Classification, CorpusMatch, KnowledgeMatch, RuntimeContext } from './types'
+import type { MessageCategory } from '@/lib/ai'
 
 export const STRONG_MATCH_SIMILARITY = 0.3
 export const MIN_STRONG_MATCHES = 1
@@ -167,18 +169,30 @@ export function shouldRetrieveKnowledge(ctx: RuntimeContext): boolean {
  * fidelity (the whole point of the message). Knowledge failure means the
  * reply lacks topical grounding — still a coherent message in the venue's
  * voice, just less specific. Different roles, different policies.
+ *
+ * TAC-242: when the inbound's classification category has a primary-tag
+ * preference, the first call passes it as primary_tag_filter. If the
+ * preference yields zero matches (sparse corpus for that topic), retry
+ * without the filter — cosine on the raw query is the universal floor.
  */
-export async function retrieveKnowledgeStage(ctx: RuntimeContext): Promise<KnowledgeMatch[]> {
+export async function retrieveKnowledgeStage(
+  ctx: RuntimeContext,
+  category: MessageCategory | null,
+): Promise<KnowledgeMatch[]> {
   const query =
     ctx.currentMessage?.body ??
     (ctx.followupTrigger
       ? `Followup ${ctx.followupTrigger.reason} for ${ctx.guest.firstName ?? 'guest'}`
       : '')
   if (!query) return []
+
+  const preference = getPrimaryTagPreference(category)
+
   const r = await retrieveKnowledgeContext({
     venueId: ctx.venue.id,
     query,
     limit: KNOWLEDGE_RETRIEVE_LIMIT,
+    primaryTagPreference: preference,
   })
   if (!r.ok) {
     console.warn(
@@ -186,6 +200,22 @@ export async function retrieveKnowledgeStage(ctx: RuntimeContext): Promise<Knowl
     )
     return []
   }
+
+  if (preference !== undefined && r.data.length === 0) {
+    const fallback = await retrieveKnowledgeContext({
+      venueId: ctx.venue.id,
+      query,
+      limit: KNOWLEDGE_RETRIEVE_LIMIT,
+    })
+    if (!fallback.ok) {
+      console.warn(
+        `[agent] knowledge retrieval (fallback) degraded for venue=${ctx.venue.id}: ${fallback.error}`,
+      )
+      return []
+    }
+    return fallback.data
+  }
+
   return r.data
 }
 
@@ -224,17 +254,22 @@ export async function generateStage(
     // expects `relevanceScore?`. Same semantics — pass through.
     relevanceScore: c.similarity,
   }))
-  // knowledgeCorpus is null when retrieval was gated off, [] when it fired
-  // and returned nothing (or degraded). Both render the same — no knowledge
-  // block in the prompt. Pass through with the same similarity → relevanceScore
-  // mapping voice uses.
-  const knowledgeChunks: AiKnowledgeCorpusChunk[] = (ctx.knowledgeCorpus ?? []).map((c) => ({
-    id: c.id,
-    text: c.text,
-    sourceType: c.sourceType,
-    tags: c.tags,
-    relevanceScore: c.similarity,
-  }))
+  // knowledgeCorpus is null when retrieval was gated off (composer omits the
+  // block), [] when it fired and matched nothing (composer renders the
+  // explicit "no venue knowledge matched" block — TAC-242). Pass through
+  // with the same similarity → relevanceScore mapping voice uses, plus the
+  // primary/secondary tag split for the new prompt rendering.
+  const knowledgeChunks: AiKnowledgeCorpusChunk[] | undefined =
+    ctx.knowledgeCorpus === null
+      ? undefined
+      : ctx.knowledgeCorpus.map((c) => ({
+          id: c.id,
+          text: c.text,
+          sourceType: c.sourceType,
+          primaryTags: c.primaryTags,
+          secondaryTags: c.secondaryTags,
+          relevanceScore: c.similarity,
+        }))
   const r = await generateMessage({
     category,
     persona: ctx.venue.brandPersona,

@@ -13,11 +13,13 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // SYSTEM_TEMPLATE body changes, just the version bump. v1.11.0 is a
 // classifier-surface change (recent-conversation + guest-state context,
 // temperature, 1000-char input cap, 3-tier confidence routing) — again
-// no SYSTEM_TEMPLATE body changes, just the version bump.
+// no SYSTEM_TEMPLATE body changes, just the version bump. v1.12.0 is a
+// knowledge_corpus surface change (tag split, tag-aware retrieval, always-
+// render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.11.0 (classifier context + temperature + 3-tier confidence routing)', () => {
-    expect(PROMPT_VERSION).toBe('v1.11.0')
+  it('is v1.12.0 (knowledge_corpus tag split + tag-aware retrieval)', () => {
+    expect(PROMPT_VERSION).toBe('v1.12.0')
   })
 })
 

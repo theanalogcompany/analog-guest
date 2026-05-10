@@ -25,8 +25,19 @@
 // to `unknown` (corrective), 0.3..0.7 fires observation event (current
 // behavior), >= 0.7 silent. CLASSIFY_SYSTEM_PROMPT gains a sentence
 // explaining why outbound categories are absent.
+//
+// v1.12.0: knowledge_corpus tag split (primary closed enum + secondary
+// free-form) and tag-aware retrieval. Four categories carry primary-tag
+// preferences (mechanic_request / perk_inquiry → 'mechanic';
+// recommendation_request → 'recommendations'/'menu'/'sourcing';
+// event_question → 'events'); zero-result fallback retries without filter
+// to avoid recall collapse on sparse corpora. `## Venue knowledge` block
+// now ALWAYS renders when retrieval ran (even on empty results — the
+// explicit no-match framing makes R9 fire reliably). Confidence floor
+// (default 0.7) excludes low-confidence chunks. Constants unified
+// (KNOWLEDGE_RETRIEVE_LIMIT only).
 
-export const PROMPT_VERSION = 'v1.11.0'
+export const PROMPT_VERSION = 'v1.12.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

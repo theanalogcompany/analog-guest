@@ -25,6 +25,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { getPrimaryTagPreference } from '@/lib/agent/knowledge-tag-mapping'
 import {
   buildAiRuntime,
   CORPUS_RETRIEVE_LIMIT,
@@ -236,19 +237,40 @@ export async function regenerateWithCritique(
     }
   }
 
-  // 5. Retrieve knowledge corpus (graceful degradation, mirrors stages.ts)
+  // 5. Retrieve knowledge corpus (graceful degradation, mirrors stages.ts).
+  // TAC-242: derive primary-tag preference from the just-classified category,
+  // fall back to no-filter retrieval when the preferenced query returns
+  // zero matches.
+  const knowledgePreference = getPrimaryTagPreference(classification.data.category)
   let knowledgeChunks: AiKnowledgeCorpusChunk[] = []
   const knowledge = await retrieveKnowledgeContext({
     venueId: input.venueId,
     query: load.data.inbound.body,
     limit: KNOWLEDGE_RETRIEVE_LIMIT,
+    primaryTagPreference: knowledgePreference,
   })
   if (knowledge.ok) {
-    knowledgeChunks = knowledge.data.map((c) => ({
+    let rows = knowledge.data
+    if (knowledgePreference !== undefined && rows.length === 0) {
+      const fallback = await retrieveKnowledgeContext({
+        venueId: input.venueId,
+        query: load.data.inbound.body,
+        limit: KNOWLEDGE_RETRIEVE_LIMIT,
+      })
+      if (fallback.ok) {
+        rows = fallback.data
+      } else {
+        console.warn(
+          `[voices/regen] knowledge retrieval (fallback) degraded for venue=${input.venueId}: ${fallback.error}`,
+        )
+      }
+    }
+    knowledgeChunks = rows.map((c) => ({
       id: c.id,
       text: c.text,
       sourceType: c.sourceType,
-      tags: c.tags,
+      primaryTags: c.primaryTags,
+      secondaryTags: c.secondaryTags,
       relevanceScore: c.similarity,
     }))
   } else {

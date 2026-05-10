@@ -314,6 +314,113 @@ describe('regenerateWithCritique — happy path', () => {
   })
 })
 
+describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
+  beforeEach(() => {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    vi.mocked(buildRuntimeContext).mockResolvedValue(
+      baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
+    )
+    vi.mocked(buildAiRuntime).mockReturnValue({
+      guestName: 'Test',
+      inboundMessage: 'do you have any free drinks?',
+      today: {
+        isoDate: '2026-05-08',
+        dayOfWeek: 'Friday',
+        venueLocalTime: '10:00',
+        venueTimezone: 'America/Los_Angeles',
+      },
+      recentMessages: [],
+      mechanics: [],
+    })
+    vi.mocked(retrieveContext).mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'c1',
+          voiceCorpusId: 'vc1',
+          text: 'venue speaks like this',
+          sourceType: 'sample_text',
+          confidence: 0.9,
+          similarity: 0.5,
+        },
+      ],
+    })
+    vi.mocked(generateMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        body: 'no, sorry.',
+        voiceFidelity: 0.85,
+        reasoning: 'good',
+        attempts: 1,
+        attemptScores: [0.85],
+        attemptHistory: [],
+        systemPrompt: '',
+        userPrompt: '',
+        promptVersion: 'v1.12.0',
+        dashViolationPersisted: false,
+      },
+    })
+  })
+
+  it('threads the mapped preference into retrieveKnowledgeContext for mechanic_request', async () => {
+    vi.mocked(classifyMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        category: 'mechanic_request',
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        promptVersion: 'v1.12.0',
+      },
+    })
+    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
+      ok: true,
+      data: [],
+    })
+    // Fallback after zero matches:
+    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
+      ok: true,
+      data: [],
+    })
+
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+
+    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(2)
+    const firstArgs = vi.mocked(retrieveKnowledgeContext).mock.calls[0][0]
+    const secondArgs = vi.mocked(retrieveKnowledgeContext).mock.calls[1][0]
+    expect(firstArgs.primaryTagPreference).toEqual(['mechanic'])
+    expect(secondArgs.primaryTagPreference).toBeUndefined()
+  })
+
+  it('does NOT fall back when category is unmapped (cosine-only)', async () => {
+    vi.mocked(classifyMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        promptVersion: 'v1.12.0',
+      },
+    })
+    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({ ok: true, data: [] })
+
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+
+    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(1)
+    const args = vi.mocked(retrieveKnowledgeContext).mock.calls[0][0]
+    expect(args.primaryTagPreference).toBeUndefined()
+  })
+})
+
 describe('regenerateWithCritique — corpus thinness', () => {
   it('fails closed when no strong matches above 0.3', async () => {
     vi.mocked(createAdminClient).mockReturnValue(

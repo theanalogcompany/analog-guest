@@ -636,18 +636,23 @@ describe('runtimeToProse — personal_history_question', () => {
   })
 })
 
-describe('knowledgeChunksToProse', () => {
+describe('knowledgeChunksToProse (TAC-242)', () => {
   const makeChunk = (overrides: Partial<KnowledgeCorpusChunk> = {}): KnowledgeCorpusChunk => ({
     id: 'k1',
     text: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
     sourceType: 'voicenote_transcript',
-    tags: ['sourcing', 'ethiopia'],
+    primaryTags: ['sourcing'],
+    secondaryTags: ['ethiopia', 'roaster'],
     relevanceScore: 0.82,
     ...overrides,
   })
 
-  it('returns empty string for empty chunks (composer skips block)', () => {
-    expect(knowledgeChunksToProse([])).toBe('')
+  it('renders the no-match block with explicit framing when chunks is empty', () => {
+    const out = knowledgeChunksToProse([])
+    expect(out).toContain('## Venue knowledge')
+    expect(out).toContain('No specific venue knowledge matched this query')
+    expect(out).toContain('defer or admit you')
+    expect(out).toContain('do not invent specifics')
   })
 
   it('renders the section header and the canonical voice/content disclaimer', () => {
@@ -657,30 +662,53 @@ describe('knowledgeChunksToProse', () => {
     expect(out).toContain("speak in the venue's voice")
   })
 
-  it('renders tags as a bracketed comma-separated list above each quoted body', () => {
+  it('renders [primary: ...] and [secondary: ...] lines above each quoted body', () => {
     const out = knowledgeChunksToProse([makeChunk()])
-    expect(out).toContain('[sourcing, ethiopia]')
+    expect(out).toContain('[primary: sourcing]')
+    expect(out).toContain('[secondary: ethiopia, roaster]')
     expect(out).toContain('> Our flagship blend is two Ethiopian coffees roasted by a friend.')
+  })
+
+  it('renders multiple primary tags comma-separated', () => {
+    const out = knowledgeChunksToProse([
+      makeChunk({ primaryTags: ['menu', 'staff_phoebe'], secondaryTags: ['seasonal'] }),
+    ])
+    expect(out).toContain('[primary: menu, staff_phoebe]')
+    expect(out).toContain('[secondary: seasonal]')
+  })
+
+  it('omits the [secondary: ...] line entirely when secondaryTags is empty', () => {
+    const out = knowledgeChunksToProse([
+      makeChunk({ primaryTags: ['mechanic_perk_card'], secondaryTags: [] }),
+    ])
+    expect(out).toContain('[primary: mechanic_perk_card]')
+    expect(out).not.toContain('[secondary:')
+  })
+
+  it('falls back to sourceType in the [primary: ...] line when primaryTags is empty', () => {
+    // Defensive: schema-valid chunks should always have at least one primary
+    // tag, but the runtime helper shouldn't break on an empty array.
+    const out = knowledgeChunksToProse([
+      makeChunk({ primaryTags: [], secondaryTags: [], sourceType: 'manual_entry' }),
+    ])
+    expect(out).toContain('[primary: manual_entry]')
   })
 
   it('separates multiple chunks with a blank line', () => {
     const out = knowledgeChunksToProse([
-      makeChunk({ id: 'k1', tags: ['sourcing'], text: 'fact one' }),
-      makeChunk({ id: 'k2', tags: ['staff_rayan'], text: 'fact two' }),
+      makeChunk({ id: 'k1', primaryTags: ['sourcing'], secondaryTags: [], text: 'fact one' }),
+      makeChunk({ id: 'k2', primaryTags: ['staff_rayan'], secondaryTags: [], text: 'fact two' }),
     ])
-    expect(out).toMatch(/\[sourcing\]\n> fact one\n\n\[staff_rayan\]\n> fact two/)
-  })
-
-  it('falls back to sourceType in the bracket line when tags is empty', () => {
-    // Defensive: knowledge entries should always have tags per the parser
-    // boundary, but the runtime helper shouldn't break on an empty array.
-    const out = knowledgeChunksToProse([makeChunk({ tags: [], sourceType: 'manual_entry' })])
-    expect(out).toContain('[manual_entry]')
+    expect(out).toMatch(/\[primary: sourcing\]\n> fact one\n\n\[primary: staff_rayan\]\n> fact two/)
   })
 
   it('quotes multi-line chunks line by line', () => {
     const out = knowledgeChunksToProse([
-      makeChunk({ text: 'first line\nsecond line', tags: ['ceremony'] }),
+      makeChunk({
+        text: 'first line\nsecond line',
+        primaryTags: ['philosophy'],
+        secondaryTags: [],
+      }),
     ])
     expect(out).toContain('> first line\n> second line')
   })
