@@ -179,6 +179,7 @@ Ask. Do not guess product behavior. The plan-first rule exists so questions surf
 - Open PR with `gh pr create`. Title format: `THE-XXX: <imperative subject>`.
 - Merge style: `gh pr merge <num> --squash --delete-branch`. Squash matches the linear single-commit-per-change history of `main`.
 - CI must be green before merge — `tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build` all enforced via `.github/workflows/ci.yml`.
+- Pre-commit hook (husky + lint-staged, configured via `prepare` in `package.json`): runs `eslint --fix` on staged `.ts/.tsx`, then `tsc --noEmit` against the full project, then `vitest related --run` on staged files. Failure rejects the commit. Don't `--no-verify` without a reason.
 
 ---
 
@@ -268,6 +269,20 @@ Drive helpers are in `scripts/onboarding/drive.ts`:
 - `writeJsonFile(drive, folderId, name, obj)` — writes/upserts a JSON file by name (pretty-printed)
 - `writeSheetFile(drive, folderId, name, csvBody)` — writes/upserts a native Google Sheet from CSV body. Uses `mimeType: 'application/vnd.google-apps.spreadsheet'` + `media.mimeType: 'text/csv'` so Drive auto-converts on upload. The update path explicitly pins both mimetypes to preserve sharing.
 
+### ADC token refresh (when Drive scripts fail)
+
+When `run-test-scenarios`, `extract-venue-spec`, `seed-supabase`, `extract-test-scenarios`, or `ingest-response-review` fails with `Request had insufficient authentication scopes`, ADC needs reauth with explicit Drive scope:
+
+```bash
+gcloud auth application-default login \
+  --client-id-file='/path/to/client_secret_*.apps.googleusercontent.com.json' \
+  --scopes='openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive'
+```
+
+**Why this is needed:** the default scopes for `gcloud auth application-default login` (with no `--scopes` flag) do NOT include `drive`. The bare command authenticates successfully but every Drive API call returns `Request had insufficient authentication scopes`. The `--scopes` flag is mandatory for any script that touches Drive.
+
+**Why the `--client-id-file`:** Workspace org policy blocks the stock gcloud OAuth client. The project-owned OAuth client (Desktop app type, `client_secret_*.apps.googleusercontent.com.json`) bypasses that policy because Workspace's third-party policy doesn't apply to your own org's apps.
+
 ---
 
 ## Testing
@@ -278,7 +293,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: 366 tests across 26 files as of THE-233 ship (2026-05-03). Don't let regressions land — every PR should keep tests green.
+Test count baseline: 721 tests across 61 files as of 2026-05-11. Don't let regressions land — every PR should keep tests green.
 
 THE-164 covers expanding test coverage.
 
