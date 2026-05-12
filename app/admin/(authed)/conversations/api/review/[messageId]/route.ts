@@ -182,6 +182,11 @@ export async function PUT(
   const review: MessageReview = {
     schemaVersion: MESSAGE_REVIEW_SCHEMA_VERSION,
     reviewedBy: operatorId,
+    // TAC-258: stamp the channel explicitly so the mobile-operator path
+    // (reviewedVia='mobile_operator') and cc-review path are distinguishable
+    // at read time. Legacy rows without this field default to 'cc_review'
+    // via getReviewedVia(); going forward we write it.
+    reviewedVia: 'cc_review',
     reviewedAt: new Date().toISOString(),
     ...(body.category !== undefined ? { category: body.category } : {}),
     ...(body.editedMessage !== undefined ? { editedMessage: body.editedMessage } : {}),

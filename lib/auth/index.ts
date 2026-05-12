@@ -1,5 +1,10 @@
 export { getCurrentOperator } from './get-current-operator'
 export {
+  type NextRouteContext,
+  type OperatorRouteHandler,
+  withOperatorAuth,
+} from './operator-auth'
+export {
   type RequireAdminResult,
   requireCorpusEntryAdmin,
   requireVenueAdmin,

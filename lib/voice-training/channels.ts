@@ -15,18 +15,21 @@ export const SOURCE_REF_PREFIXES = {
   ccReview: 'cc-review:',
   voicesCommit: 'voices-commit:',
   phase5Review: '08-review:',
+  operatorApprove: 'operator-approve:',
 } as const
 
 export const REPLY_PAIRED_SOURCE_REF_PREFIXES: ReadonlyArray<string> = [
   SOURCE_REF_PREFIXES.ccReview,
   SOURCE_REF_PREFIXES.voicesCommit,
   SOURCE_REF_PREFIXES.phase5Review,
+  SOURCE_REF_PREFIXES.operatorApprove,
 ]
 
 export const CORPUS_CHANNEL_TAGS: ReadonlySet<string> = new Set([
   'cc_review',
   'phase_5_review',
   'voices_commit',
+  'operator_approve',
 ])
 
 export function isReplyPairedSourceRef(sourceRef: string | null): boolean {
