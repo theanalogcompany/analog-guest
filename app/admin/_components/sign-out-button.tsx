@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { createBrowserClient } from '@/lib/db/client'
+import { createBrowserClient } from '@/lib/db/browser'
 
 // Small client component for the top-bar sign-out action. Direct register:
 // "Sign out" — no chrome, no "Are you sure?". Calls supabase.auth.signOut()
