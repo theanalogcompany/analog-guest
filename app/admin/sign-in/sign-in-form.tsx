@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createBrowserClient } from '@/lib/db/client'
+import { createBrowserClient } from '@/lib/db/browser'
 
 // Magic-link form. Client component; calls Supabase's signInWithOtp from
 // the browser so the OTP is sent to the operator's email. The callback URL
