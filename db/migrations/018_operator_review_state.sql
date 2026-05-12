@@ -121,6 +121,18 @@ create index idx_messages_operator_action_recent
 -- operator has more than 200 pending drafts, the swipe UX has bigger
 -- problems than pagination. v2 if needed.
 
+-- Column-citation note (per the post-mortem on the first apply attempt):
+--   guests       — first_name, last_name (no full_name column; display name
+--                  is composed here). phone_number, opted_out_at. See
+--                  db/types.ts:201-260.
+--   guest_states — entered_at + exited_at + state. Transition log, not a
+--                  snapshot — currently-active state is the row where
+--                  exited_at IS NULL. Matches the existing in-repo callers
+--                  (app/admin/(authed)/conversations/page.tsx,
+--                   app/admin/(authed)/voices/[slug]/_lib/load-voice-page.ts).
+--                  See db/types.ts:146-200.
+--   venues       — slug. See db/types.ts:829-870.
+
 create or replace function public.list_operator_queue(
   venue_ids uuid[]
 )
@@ -149,7 +161,14 @@ as $function$
     m.venue_id,
     v.slug          as venue_slug,
     m.guest_id,
-    g.full_name     as guest_display_name,
+    -- guests has no full_name; compose from first/last + null-out the empty
+    -- case so the TS layer's `guestDisplayName: string | null` is honored.
+    nullif(
+      trim(both ' ' from
+        coalesce(g.first_name, '') || ' ' || coalesce(g.last_name, '')
+      ),
+      ''
+    )               as guest_display_name,
     g.phone_number  as guest_phone,
     g.opted_out_at  as guest_opted_out_at,
     m.body          as draft_body,
@@ -164,11 +183,16 @@ as $function$
   join venues v on v.id = m.venue_id
   join guests g on g.id = m.guest_id
   left join lateral (
+    -- guest_states is a transition log. Pick the open segment (exited_at
+    -- IS NULL); order by entered_at desc as a defensive tiebreaker for
+    -- the one-open-row-per-(guest,venue) invariant. If a guest has no open
+    -- state, the LATERAL returns 0 rows → gs.state = NULL.
     select state
     from guest_states gs2
     where gs2.guest_id = m.guest_id
       and gs2.venue_id = m.venue_id
-    order by gs2.computed_at desc
+      and gs2.exited_at is null
+    order by gs2.entered_at desc
     limit 1
   ) gs on true
   left join lateral (
