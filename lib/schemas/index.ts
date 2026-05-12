@@ -6,9 +6,12 @@ export {
   VoiceAntiPatternSchema,
 } from './brand-persona'
 export {
+  getReviewedVia,
   MESSAGE_REVIEW_SCHEMA_VERSION,
   type MessageReview,
   MessageReviewSchema,
+  REVIEWED_VIA_VALUES,
+  type ReviewedVia,
 } from './message-review'
 export {
   filterActiveContext,

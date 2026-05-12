@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getReviewedVia,
   MESSAGE_REVIEW_SCHEMA_VERSION,
   MessageReviewSchema,
 } from './message-review'
@@ -88,5 +89,71 @@ describe('MessageReviewSchema', () => {
       expectedFailure: true,
     })
     expect(parsed.success).toBe(false)
+  })
+
+  // ─── TAC-258 additions: reviewedVia + originalAiBody ─────────────────────
+
+  it('accepts a legacy cc-review row with no reviewedVia field (backward-compat)', () => {
+    const parsed = MessageReviewSchema.safeParse(baseRequired)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.reviewedVia).toBeUndefined()
+    }
+  })
+
+  it("accepts explicit reviewedVia: 'cc_review' (TAC-258 forward-stamp on the cc-review path)", () => {
+    const parsed = MessageReviewSchema.safeParse({
+      ...baseRequired,
+      reviewedVia: 'cc_review',
+      editedMessage: 'a hypothetical edit',
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  it("accepts reviewedVia: 'mobile_operator' with originalAiBody (TAC-258 mobile-edit shape)", () => {
+    const parsed = MessageReviewSchema.safeParse({
+      ...baseRequired,
+      reviewedVia: 'mobile_operator',
+      editedMessage: 'the dispatched text',
+      originalAiBody: 'the AI draft before the operator edit',
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.reviewedVia).toBe('mobile_operator')
+      expect(parsed.data.originalAiBody).toBe('the AI draft before the operator edit')
+    }
+  })
+
+  it('rejects unknown reviewedVia values (closed enum)', () => {
+    const parsed = MessageReviewSchema.safeParse({
+      ...baseRequired,
+      reviewedVia: 'web_dashboard',
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('accepts originalAiBody on its own (schema is permissive on cross-field invariants)', () => {
+    // The implication "originalAiBody truthy implies reviewedVia === 'mobile_operator'"
+    // is a route-layer concern, not a schema-layer constraint.
+    const parsed = MessageReviewSchema.safeParse({
+      ...baseRequired,
+      originalAiBody: 'leftover from a different path',
+    })
+    expect(parsed.success).toBe(true)
+  })
+})
+
+describe('getReviewedVia', () => {
+  it("defaults missing reviewedVia to 'cc_review' (legacy compat)", () => {
+    const review = MessageReviewSchema.parse(baseRequired)
+    expect(getReviewedVia(review)).toBe('cc_review')
+  })
+
+  it('returns the explicit value when present', () => {
+    const review = MessageReviewSchema.parse({
+      ...baseRequired,
+      reviewedVia: 'mobile_operator',
+    })
+    expect(getReviewedVia(review)).toBe('mobile_operator')
   })
 })

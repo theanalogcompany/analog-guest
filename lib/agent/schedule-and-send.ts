@@ -152,6 +152,12 @@ export async function scheduleAndSend(
     guest_id: ctx.guest.id,
     direction: 'outbound',
     status: 'sent',
+    // TAC-258: stamp the autonomous-dispatch path with 'auto_sent' so the
+    // mobile operator queue (review_state='pending' partial index) never
+    // surfaces it. When TAC-212's flag policy lands, it'll override this
+    // value to 'pending' at this same insert site for drafts that need
+    // human review. No state-machine change here — mechanical column add.
+    review_state: 'auto_sent',
     category: ctx.classification?.category ?? null,
     body: generation.body,
     generated_by: 'llm',

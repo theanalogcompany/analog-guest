@@ -491,15 +491,19 @@ export type Database = {
           guest_id: string
           id: string
           langfuse_trace_id: string | null
+          last_operator_action_at: string | null
+          last_operator_id: string | null
           media_urls: string[]
           parent_draft_id: string | null
           pending_until: string | null
+          previous_review_state: string | null
           prompt_version: string | null
           provider_message_id: string | null
           reaction_type: string | null
           reply_to_message_id: string | null
           response_review: Json | null
           review_reason: string | null
+          review_state: string | null
           reviewed_at: string | null
           reviewed_by_operator_id: string | null
           sent_at: string | null
@@ -520,15 +524,19 @@ export type Database = {
           guest_id: string
           id?: string
           langfuse_trace_id?: string | null
+          last_operator_action_at?: string | null
+          last_operator_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
           pending_until?: string | null
+          previous_review_state?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
+          review_state?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
@@ -549,15 +557,19 @@ export type Database = {
           guest_id?: string
           id?: string
           langfuse_trace_id?: string | null
+          last_operator_action_at?: string | null
+          last_operator_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
           pending_until?: string | null
+          previous_review_state?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
+          review_state?: string | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
@@ -572,6 +584,13 @@ export type Database = {
             columns: ["guest_id"]
             isOneToOne: false
             referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_last_operator_id_fkey"
+            columns: ["last_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
             referencedColumns: ["id"]
           },
           {
@@ -1035,6 +1054,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      list_operator_queue: {
+        Args: {
+          venue_ids: string[]
+        }
+        Returns: {
+          category: string | null
+          created_at: string
+          draft_body: string
+          draft_id: string
+          guest_display_name: string | null
+          guest_id: string
+          guest_opted_out_at: string | null
+          guest_phone: string
+          langfuse_trace_id: string | null
+          recent_context: Json | null
+          recognition_state: string | null
+          review_reason: string | null
+          venue_id: string
+          venue_slug: string
+          voice_fidelity: number | null
+        }[]
+      }
       find_similar_critiques: {
         Args: {
           exclude_id?: string

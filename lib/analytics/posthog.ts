@@ -371,3 +371,103 @@ function formatWebhookSilence(props: WebhookSilenceProps): string {
     `last webhook: \`${props.lastWebhookAt}\``,
   ].join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// Operator approval queue events (TAC-258)
+// ---------------------------------------------------------------------------
+//
+// Fired from the operator API endpoints. Unlike the agent-runtime events
+// above, these are product-analytics signals (operator behaviour: how often
+// drafts are approved vs edited vs skipped, average time-to-action, undo
+// rates), NOT operational red alerts. They do not post to Slack — analysts
+// consume them in PostHog.
+//
+// Payload shape per the operator-side precedent (voices-commit /
+// voice_critique_committed): IDs + small scalars, never full bodies. Bodies
+// live on the row (messages.body, response_review.editedMessage,
+// response_review.originalAiBody) and Langfuse trace; analysts join by
+// messageId when needed.
+
+export interface OperatorMessageApprovedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  /** now() - messages.created_at — how long the draft sat in queue. */
+  timeToActionMs: number
+  voiceFidelity: number | null
+  category: string | null
+  recognitionState: string | null
+}
+
+export async function captureOperatorMessageApproved(
+  props: OperatorMessageApprovedProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_approved', props.guestId, { ...props })
+}
+
+export interface OperatorMessageEditedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  timeToActionMs: number
+  voiceFidelity: number | null
+  category: string | null
+  recognitionState: string | null
+  /** source_ref written to voice_corpus by the edit path (operator-approve:{messageId}). */
+  corpusSourceRef: string
+  /** Length of the AI draft (messages.body before the edit). */
+  bodyLengthBefore: number
+  /** Length of the operator's final text. */
+  bodyLengthAfter: number
+  /** ((after - before) / before) * 100, rounded to integer. 0 when before === 0. */
+  bodyLengthDeltaPct: number
+}
+
+export async function captureOperatorMessageEdited(
+  props: OperatorMessageEditedProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_edited', props.guestId, { ...props })
+}
+
+export interface OperatorMessageSkippedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  timeToActionMs: number
+  voiceFidelity: number | null
+  category: string | null
+  recognitionState: string | null
+}
+
+export async function captureOperatorMessageSkipped(
+  props: OperatorMessageSkippedProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_skipped', props.guestId, { ...props })
+}
+
+export interface OperatorMessageActionUndoneProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  /** Action being undone. */
+  undoneActionType: 'approved' | 'edited' | 'skipped'
+  /**
+   * True iff the action had already triggered a Sendblue dispatch (approve /
+   * edit). In that case undo does NOT retract the send; state stays as-is
+   * and only this analytics event fires. False for skipped→pending revert,
+   * which is the only truly revertible case in v1.
+   */
+  undoneAfterDispatch: boolean
+  /** now() - last_operator_action_at — how fast the undo arrived. */
+  timeSinceActionMs: number
+}
+
+export async function captureOperatorMessageActionUndone(
+  props: OperatorMessageActionUndoneProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_action_undone', props.guestId, { ...props })
+}
