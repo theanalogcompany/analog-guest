@@ -17,7 +17,9 @@ import {
   MAX_VISIT_HISTORY_DAYS,
   MAX_VISIT_HISTORY_TRANSACTIONS,
 } from '@/lib/agent/build-runtime-context'
+import { COMP_PATTERNS } from '@/lib/agent/comp-backstop'
 import {
+  AUTO_SEND_FIDELITY_FLOOR,
   CORPUS_RETRIEVE_LIMIT,
   KNOWLEDGE_RETRIEVE_LIMIT,
   MIN_STRONG_MATCHES,
@@ -157,6 +159,24 @@ export const TUNABLES = [
     category: 'agent_runtime',
     source: 'lib/agent/stages.ts',
     description: 'Voice fidelity below this refuses to send and fires a red alert.',
+  },
+  {
+    name: 'auto_send_fidelity_floor',
+    value: AUTO_SEND_FIDELITY_FLOOR,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/agent/stages.ts',
+    description: 'Voice fidelity below this (but at or above send_fidelity_floor) queues the draft for operator review instead of auto-sending. Above auto-sends if no other approval trigger fires.',
+    relatedTickets: ['TAC-212'],
+  },
+  {
+    name: 'comp_backstop_pattern_count',
+    value: COMP_PATTERNS.length,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/agent/comp-backstop.ts',
+    description: 'Number of regex patterns in the deterministic comp backstop. Operator-action-anchored phrasings; iterated as a routine PR when false-positive / false-negative counts move.',
+    relatedTickets: ['TAC-212'],
   },
   {
     name: 'voice_fidelity_low_threshold',

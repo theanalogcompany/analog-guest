@@ -31,6 +31,12 @@ export interface MechanicSpec {
   // insert time. Sonnet defaults to one_time + null when not present in spec.
   redemption_policy?: 'one_time' | 'renewable'
   redemption_window_days?: number
+  // TAC-212: when true, committing this mechanic to a guest requires operator
+  // approval before dispatch. Surfaced inline in the eligible-mechanics prompt
+  // block; the model self-flags via requiresOperatorApproval on its structured
+  // output and the approval-policy gate queues the draft. Defaults false at
+  // the DB layer (migration 019) when omitted in the spec.
+  requires_operator_approval?: boolean
 }
 
 const MechanicSchema = z.object({
@@ -46,6 +52,7 @@ const MechanicSchema = z.object({
   min_state: z.enum(GUEST_STATES).optional(),
   redemption_policy: z.enum(['one_time', 'renewable']).optional(),
   redemption_window_days: z.number().int().positive().optional(),
+  requires_operator_approval: z.boolean().optional(),
 })
 
 export interface VoiceCorpusSpec {

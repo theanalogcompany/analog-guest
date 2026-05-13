@@ -110,6 +110,13 @@ export interface RuntimeContext {
 
 export type AgentResult =
   | { status: 'sent'; outboundMessageId: string }
+  // TAC-212: approval-policy gate routed the draft to the operator queue
+  // instead of dispatching. outboundMessageId is the row created with
+  // review_state='pending'; triggers carries every gate trigger that fired
+  // (enumeration order); primaryTrigger is the priority-selected one that
+  // also lands on messages.review_reason and shows up first in the
+  // operator queue UI.
+  | { status: 'queued'; outboundMessageId: string; triggers: string[]; primaryTrigger: string }
   | { status: 'refused'; reason: string; attemptScores?: number[] }
   | { status: 'skipped_duplicate' }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

@@ -124,7 +124,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('mechanics')
       .select(
-        'id, type, name, description, qualification, reward_description, min_state, redemption_policy, redemption_window_days',
+        'id, type, name, description, qualification, reward_description, min_state, redemption_policy, redemption_window_days, requires_operator_approval',
       )
       .eq('venue_id', input.venueId)
       .eq('is_active', true),
@@ -274,6 +274,7 @@ export async function buildRuntimeContext(input: {
     minState: m.min_state,
     redemptionPolicy: m.redemption_policy as RedemptionPolicy,
     redemptionWindowDays: m.redemption_window_days,
+    requiresOperatorApproval: m.requires_operator_approval,
   }))
 
   const redemptions: RedemptionRecord[] = (redemptionsResult.data ?? [])

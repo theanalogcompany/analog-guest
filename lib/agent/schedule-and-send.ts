@@ -16,6 +16,39 @@ function alertKind(ctx: RuntimeContext): 'inbound' | 'followup' {
   return ctx.followupTrigger ? 'followup' : 'inbound'
 }
 
+/**
+ * Single source of truth for the outbound message row shape. Both
+ * scheduleAndSend (auto-send path) and persistQueuedDraft (TAC-212 queue
+ * path) call this so the column set never drifts between the two.
+ *
+ * Caller layers in path-specific fields via `overrides`:
+ *   - Auto-send: { status:'sent', review_state:'auto_sent', sent_at, provider_message_id }
+ *   - Queue:     { status:'pending_review', review_state:'pending', review_reason }
+ *
+ * langfuse_trace_id (THE-200) is empty-string when observability is no-op;
+ * null out at insert time so the partial index `WHERE langfuse_trace_id IS
+ * NOT NULL` only includes real traces.
+ */
+function buildOutboundInsert(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  overrides: Partial<MessageInsert>,
+): MessageInsert {
+  return {
+    venue_id: ctx.venue.id,
+    guest_id: ctx.guest.id,
+    direction: 'outbound',
+    category: ctx.classification?.category ?? null,
+    body: generation.body,
+    generated_by: 'llm',
+    voice_fidelity: generation.voiceFidelity,
+    prompt_version: generation.promptVersion,
+    reply_to_message_id: ctx.currentMessage?.id ?? null,
+    langfuse_trace_id: ctx.trace.id || null,
+    ...overrides,
+  }
+}
+
 async function persistOutbound(
   supabase: AdminSupabaseClient,
   payload: MessageInsert,
@@ -143,31 +176,19 @@ export async function scheduleAndSend(
   const providerMessageId = sendResult.data.providerMessageId
 
   // PERSIST — failures fire alert with providerMessageId + throw.
-  // langfuse_trace_id (THE-200) is empty-string when observability is no-op;
-  // null out at insert time so the partial index `WHERE langfuse_trace_id IS
-  // NOT NULL` only includes real traces.
+  // Row shape is centralized in buildOutboundInsert; auto-send overrides
+  // layer in status='sent', review_state='auto_sent' (TAC-258), sent_at,
+  // provider_message_id. The queue path lives in persistQueuedDraft below.
   const supabase = createAdminClient()
-  const insertResult = await persistOutbound(supabase, {
-    venue_id: ctx.venue.id,
-    guest_id: ctx.guest.id,
-    direction: 'outbound',
-    status: 'sent',
-    // TAC-258: stamp the autonomous-dispatch path with 'auto_sent' so the
-    // mobile operator queue (review_state='pending' partial index) never
-    // surfaces it. When TAC-212's flag policy lands, it'll override this
-    // value to 'pending' at this same insert site for drafts that need
-    // human review. No state-machine change here — mechanical column add.
-    review_state: 'auto_sent',
-    category: ctx.classification?.category ?? null,
-    body: generation.body,
-    generated_by: 'llm',
-    voice_fidelity: generation.voiceFidelity,
-    prompt_version: generation.promptVersion,
-    reply_to_message_id: ctx.currentMessage?.id ?? null,
-    provider_message_id: providerMessageId,
-    sent_at: new Date().toISOString(),
-    langfuse_trace_id: ctx.trace.id || null,
-  })
+  const insertResult = await persistOutbound(
+    supabase,
+    buildOutboundInsert(ctx, generation, {
+      status: 'sent',
+      review_state: 'auto_sent',
+      sent_at: new Date().toISOString(),
+      provider_message_id: providerMessageId,
+    }),
+  )
 
   if (!insertResult.ok) {
     await fireRedAlert({
@@ -183,4 +204,52 @@ export async function scheduleAndSend(
   }
 
   return { outboundMessageId: insertResult.id, providerMessageId }
+}
+
+/**
+ * TAC-212 queue path. Persist the generated draft as a pending review row
+ * — no Sendblue dispatch, no timing sleeps. Mirrors the auto-send INSERT
+ * site (same buildOutboundInsert helper) but with the operator-review
+ * column set:
+ *   - status='pending_review' (migration 001 CHECK enum)
+ *   - review_state='pending'  (TAC-258 migration 018; partial index hot path)
+ *   - review_reason=primaryTrigger (already-existing migration 003 column)
+ *   - sent_at + provider_message_id stay null until dispatchOperatorOutbound
+ *     (lib/operator/dispatch-operator-outbound.ts) stamps them on approve/edit
+ *
+ * No alert here on success — captureDraftQueued (PostHog) is the
+ * observability event, fired by the orchestrator. Persist failure fires
+ * the same red alert shape as scheduleAndSend's persist branch and throws;
+ * caller (handle-inbound / handle-followup) catches and maps to
+ * AgentResult.failed.
+ */
+export async function persistQueuedDraft(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  primaryTrigger: string,
+): Promise<{ outboundMessageId: string }> {
+  const supabase = createAdminClient()
+  const insertResult = await persistOutbound(
+    supabase,
+    buildOutboundInsert(ctx, generation, {
+      status: 'pending_review',
+      review_state: 'pending',
+      review_reason: primaryTrigger,
+    }),
+  )
+
+  if (!insertResult.ok) {
+    await fireRedAlert({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      kind: alertKind(ctx),
+      stage: 'persist',
+      errorMessage: insertResult.error,
+      extra: { primaryTrigger },
+    })
+    throw new Error(`persistQueuedDraft: persist failed: ${insertResult.error}`)
+  }
+
+  return { outboundMessageId: insertResult.id }
 }

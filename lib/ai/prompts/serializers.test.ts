@@ -265,6 +265,7 @@ const mechanic = (overrides: Partial<EligibleMechanic> = {}): EligibleMechanic =
   qualification: null,
   rewardDescription: null,
   minState: null,
+  requiresOperatorApproval: false,
   ...overrides,
 })
 

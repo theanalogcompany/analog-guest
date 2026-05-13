@@ -58,11 +58,28 @@ function makeInput(): GenerateMessageInput {
 
 // Each test re-arms generateObjectMock with a queue of responses, one per
 // expected loop iteration. Mock returns are wrapped in { object } to match
-// the AI SDK's return shape.
-function queueResponses(...objs: Array<{ body: string; voiceFidelity: number; reasoning: string }>) {
+// the AI SDK's return shape. TAC-212: the new Zod schema requires
+// `requiresOperatorApproval` + `approvalReason` on every generation; we
+// default them to (false, '') here so existing call sites stay terse and
+// the tests that focus on the flag explicitly pass them.
+function queueResponses(
+  ...objs: Array<{
+    body: string
+    voiceFidelity: number
+    reasoning: string
+    requiresOperatorApproval?: boolean
+    approvalReason?: string
+  }>
+) {
   generateObjectMock.mockReset()
   for (const o of objs) {
-    generateObjectMock.mockResolvedValueOnce({ object: o })
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        requiresOperatorApproval: false,
+        approvalReason: '',
+        ...o,
+      },
+    })
   }
 }
 
@@ -249,11 +266,76 @@ describe('generateMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
   })
 
-  it('exposes promptVersion v1.13.0 on a successful result', async () => {
+  it('exposes promptVersion v1.14.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.13.0')
+    expect(r.data.promptVersion).toBe('v1.14.0')
+  })
+})
+
+describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('threads requiresOperatorApproval=true + approvalReason through to the result', async () => {
+    queueResponses({
+      body: "anyway, that one's on us",
+      voiceFidelity: 0.9,
+      reasoning: 'comp for the burnt latte',
+      requiresOperatorApproval: true,
+      approvalReason: 'drafted a comp for the burnt latte',
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.requiresOperatorApproval).toBe(true)
+    expect(r.data.approvalReason).toBe('drafted a comp for the burnt latte')
+  })
+
+  it('defaults to requiresOperatorApproval=false + empty approvalReason on benign drafts', async () => {
+    queueResponses({
+      body: 'yeah, oat and almond.',
+      voiceFidelity: 0.9,
+      reasoning: 'simple yes/no answer',
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.requiresOperatorApproval).toBe(false)
+    expect(r.data.approvalReason).toBe('')
+  })
+
+  it('carries the per-attempt flag values through attemptHistory', async () => {
+    queueResponses(
+      {
+        body: 'first try',
+        voiceFidelity: 0.5,
+        reasoning: 'low fidelity',
+        requiresOperatorApproval: false,
+        approvalReason: '',
+      },
+      {
+        body: 'second try with a comp',
+        voiceFidelity: 0.85,
+        reasoning: 'comp added',
+        requiresOperatorApproval: true,
+        approvalReason: 'drafted a complimentary refill',
+      },
+    )
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attemptHistory).toHaveLength(2)
+    expect(r.data.attemptHistory[0].requiresOperatorApproval).toBe(false)
+    expect(r.data.attemptHistory[0].approvalReason).toBe('')
+    expect(r.data.attemptHistory[1].requiresOperatorApproval).toBe(true)
+    expect(r.data.attemptHistory[1].approvalReason).toBe('drafted a complimentary refill')
   })
 })

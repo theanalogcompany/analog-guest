@@ -153,6 +153,11 @@ export type GenerateMessageAttempt = {
   body: string
   voiceFidelity: number
   reasoning: string
+  // TAC-212: model self-flag from the structured output. Surfaced per-attempt
+  // for trace observability so trace viewers can see whether different attempts
+  // produced different flag values.
+  requiresOperatorApproval: boolean
+  approvalReason: string
   // Populated only when the user prompt for this attempt differed from the
   // top-level userPrompt — i.e., a regeneration with explicit feedback (e.g.
   // a dash-violation rewrite request). First-attempt prompts equal the parent
@@ -164,6 +169,13 @@ export type GenerateMessageResult = {
   body: string
   voiceFidelity: number
   reasoning: string
+  // TAC-212: final-attempt model self-flag. Consumed by
+  // applyApprovalPolicyStage to decide whether the model_flagged trigger
+  // fires. approvalReason carries a one-clause rationale; empty string when
+  // requiresOperatorApproval=false. Recorded on the draft_queued PostHog
+  // event when the gate queues.
+  requiresOperatorApproval: boolean
+  approvalReason: string
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so

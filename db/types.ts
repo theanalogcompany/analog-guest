@@ -419,6 +419,7 @@ export type Database = {
           redemption: Json | null
           redemption_policy: string
           redemption_window_days: number | null
+          requires_operator_approval: boolean
           reward_description: string | null
           schema_version: number
           trigger: Json
@@ -440,6 +441,7 @@ export type Database = {
           redemption?: Json | null
           redemption_policy?: string
           redemption_window_days?: number | null
+          requires_operator_approval?: boolean
           reward_description?: string | null
           schema_version?: number
           trigger: Json
@@ -461,6 +463,7 @@ export type Database = {
           redemption?: Json | null
           redemption_policy?: string
           redemption_window_days?: number | null
+          requires_operator_approval?: boolean
           reward_description?: string | null
           schema_version?: number
           trigger?: Json
@@ -667,7 +670,7 @@ export type Database = {
       }
       operators: {
         Row: {
-          auth_user_id: string
+          auth_user_id: string | null
           avatar_url: string | null
           created_at: string
           email: string
@@ -681,7 +684,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          auth_user_id: string
+          auth_user_id?: string | null
           avatar_url?: string | null
           created_at?: string
           email: string
@@ -695,7 +698,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          auth_user_id?: string
+          auth_user_id?: string | null
           avatar_url?: string | null
           created_at?: string
           email?: string
@@ -1054,28 +1057,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      list_operator_queue: {
-        Args: {
-          venue_ids: string[]
-        }
-        Returns: {
-          category: string | null
-          created_at: string
-          draft_body: string
-          draft_id: string
-          guest_display_name: string | null
-          guest_id: string
-          guest_opted_out_at: string | null
-          guest_phone: string
-          langfuse_trace_id: string | null
-          recent_context: Json | null
-          recognition_state: string | null
-          review_reason: string | null
-          venue_id: string
-          venue_slug: string
-          voice_fidelity: number | null
-        }[]
-      }
       find_similar_critiques: {
         Args: {
           exclude_id?: string
@@ -1089,6 +1070,26 @@ export type Database = {
           id: string
           message_id: string
           similarity: number
+        }[]
+      }
+      list_operator_queue: {
+        Args: { venue_ids: string[] }
+        Returns: {
+          category: string
+          created_at: string
+          draft_body: string
+          draft_id: string
+          guest_display_name: string
+          guest_id: string
+          guest_opted_out_at: string
+          guest_phone: string
+          langfuse_trace_id: string
+          recent_context: Json
+          recognition_state: string
+          review_reason: string
+          venue_id: string
+          venue_slug: string
+          voice_fidelity: number
         }[]
       }
       match_knowledge_corpus: {
