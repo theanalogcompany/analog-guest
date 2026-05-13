@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  applyApprovalPolicyStage,
+  APPROVAL_TRIGGERS,
   classifyStage,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
 } from './stages'
 import type { CorpusMatch, RuntimeContext } from './types'
+import type { GenerateMessageResult } from '@/lib/ai'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
 // captureCorpusRetrievalBelowThreshold is fire-and-forget observability —
@@ -17,6 +20,32 @@ const captureLowMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
+// TAC-212: hasPendingDraft inside applyApprovalPolicyStage calls
+// createAdminClient → supabase.from(...).select(...).limit(1).maybeSingle().
+// We mock createAdminClient to return a chainable stub whose terminal
+// maybeSingle() resolves with whatever the test sets via the per-test
+// `pendingDraftMaybeSingleMock`.
+const pendingDraftMaybeSingleMock = vi.fn()
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                limit: () => ({
+                  maybeSingle: (...args: unknown[]) =>
+                    pendingDraftMaybeSingleMock(...args),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+}))
 
 vi.mock('@/lib/rag', () => ({
   retrieveContext: (...args: unknown[]) => retrieveContextMock(...args),
@@ -473,5 +502,175 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// applyApprovalPolicyStage (TAC-212)
+// ---------------------------------------------------------------------------
+
+function makeGenerationResult(
+  overrides: Partial<GenerateMessageResult> = {},
+): GenerateMessageResult {
+  return {
+    body: 'yeah, oat and almond.',
+    voiceFidelity: 0.85,
+    reasoning: 'matches the venue voice',
+    requiresOperatorApproval: false,
+    approvalReason: '',
+    attempts: 1,
+    attemptScores: [0.85],
+    attemptHistory: [],
+    systemPrompt: '',
+    userPrompt: '',
+    promptVersion: 'v1.14.0',
+    dashViolationPersisted: false,
+    ...overrides,
+  }
+}
+
+describe('applyApprovalPolicyStage (TAC-212)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    // Default: no prior pending draft. Per-test overrides where needed.
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns action=send when fidelity >= 0.6, no model flag, no comp match, no prior pending', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ voiceFidelity: 0.8 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('queues with fidelity_below_auto_send_floor when fidelity in [0.4, 0.6)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ voiceFidelity: 0.45 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR])
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.compMatchedPattern).toBeNull()
+  })
+
+  it('queues with model_flagged when the model self-flags', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        requiresOperatorApproval: true,
+        approvalReason: 'drafted a comp for the burnt latte',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+  })
+
+  it('queues with comp_regex_backstop when body matches comp regex even with model_flagged=false', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        body: "anyway, that one's on us today",
+        requiresOperatorApproval: false,
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.compMatchedPattern).not.toBeNull()
+  })
+
+  it('picks comp_regex_backstop as primaryTrigger when both model_flagged AND comp regex fire', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        body: "no charge for this round",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp for unhappy guest',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  })
+
+  it('queues with previous_pending_held when a prior pending draft exists', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  })
+
+  it('composes all four triggers when every condition fires', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        voiceFidelity: 0.45,
+        body: "the next round's on the house",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toHaveLength(4)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    // comp_regex_backstop wins primaryTrigger per PRIMARY_TRIGGER_PRIORITY.
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  })
+
+  it('fails OPEN when hasPendingDraft errors — sends rather than refusing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'connection reset' },
+    })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    // Clean draft + DB read failed → action=send (no triggers fired). The
+    // previous_pending_held check is fail-open by design.
+    expect(decision.action).toBe('send')
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('fails OPEN when hasPendingDraft throws — sends rather than refusing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('admin client init failed'))
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('send')
+    expect(warnSpy).toHaveBeenCalled()
   })
 })

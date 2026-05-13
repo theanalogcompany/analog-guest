@@ -173,6 +173,12 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       ...(m.redemption_window_days !== undefined
         ? { redemption_window_days: m.redemption_window_days }
         : {}),
+      // TAC-212: pass through operator-approval flag. DB default (false) when
+      // the spec omits it. Per-venue overrides land via the Supabase Studio
+      // UPDATE template documented in CLAUDE.md Common gotchas.
+      ...(m.requires_operator_approval !== undefined
+        ? { requires_operator_approval: m.requires_operator_approval }
+        : {}),
     }))
     const { error: mechanicError } = await supabase.from('mechanics').insert(mechanicRows)
     if (mechanicError) {

@@ -354,7 +354,13 @@ function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): stri
   const bullets = mechanics.map((m) => {
     const reward = m.rewardDescription ? ` — ${m.rewardDescription}` : ''
     const qual = m.qualification ? ` (${m.qualification})` : ''
-    return `- ${m.name}${reward}${qual}`
+    // TAC-212: surface the per-mechanic operator-approval flag inline so the
+    // model knows committing this mechanic should set
+    // requiresOperatorApproval=true on its structured output.
+    const approval = m.requiresOperatorApproval
+      ? ' [operator approval required: if you commit this guest to this, set requiresOperatorApproval=true]'
+      : ''
+    return `- ${m.name}${reward}${qual}${approval}`
   })
   return `${header}\n${intro}\n${bullets.join('\n')}`
 }

@@ -17,8 +17,10 @@ import {
   type RuntimeContext as AiRuntimeContext,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
+import { createAdminClient } from '@/lib/db/admin'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
+import { matchComp } from './comp-backstop'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type { Classification, CorpusMatch, KnowledgeMatch, RuntimeContext } from './types'
 import type { MessageCategory } from '@/lib/ai'
@@ -26,8 +28,58 @@ import type { MessageCategory } from '@/lib/ai'
 export const STRONG_MATCH_SIMILARITY = 0.3
 export const MIN_STRONG_MATCHES = 1
 export const SEND_FIDELITY_FLOOR = 0.4
+// TAC-212: voice fidelity below this queues the draft for operator review;
+// above auto-sends (subject to the rest of applyApprovalPolicyStage).
+// Sits above SEND_FIDELITY_FLOOR — < 0.4 still refuses, 0.4..0.6 queues,
+// >= 0.6 evaluates the resource-commitment + sticky-pending triggers.
+export const AUTO_SEND_FIDELITY_FLOOR = 0.6
 export const CORPUS_RETRIEVE_LIMIT = 8
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
+
+/**
+ * TAC-212 approval-policy triggers. Used as both the keys for the
+ * `triggers: string[]` array on a queue decision AND the lookup keys for
+ * PRIMARY_TRIGGER_PRIORITY. Exported so the orchestrator (handle-inbound,
+ * handle-followup), the PostHog event helper, and tests can reuse the
+ * literal strings without copy-paste drift.
+ */
+export const APPROVAL_TRIGGERS = {
+  FIDELITY_BELOW_AUTO_SEND_FLOOR: 'fidelity_below_auto_send_floor',
+  MODEL_FLAGGED: 'model_flagged',
+  COMP_REGEX_BACKSTOP: 'comp_regex_backstop',
+  PREVIOUS_PENDING_HELD: 'previous_pending_held',
+} as const
+
+/**
+ * Priority order for picking the `primaryTrigger` (the value that lands on
+ * messages.review_reason and shows up first in the operator queue UI). NOT
+ * the order triggers are evaluated in (that's enumeration order, which
+ * controls the `triggers: string[]` array — `triggers[0]` is the first one
+ * that fired during evaluation).
+ *
+ * Severity rationale: irreversible financial commitments (comp regex hit)
+ * outrank model self-flag because the regex is deterministic + the failure
+ * mode it protects against is a comp going out unreviewed. Model-flagged
+ * resource commitments outrank sticky-pending because operator attention
+ * should land on the new commitment, not on "we already had a pending
+ * draft." Soft signals (fidelity_below_auto_send_floor) come last.
+ */
+export const PRIMARY_TRIGGER_PRIORITY = [
+  APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+  APPROVAL_TRIGGERS.MODEL_FLAGGED,
+  APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+  APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+] as const
+
+function pickPrimaryTrigger(triggers: readonly string[]): string {
+  // Caller guarantees triggers.length > 0; the fallback to triggers[0]
+  // covers the impossible case of a trigger appearing in the array but
+  // missing from PRIMARY_TRIGGER_PRIORITY (future-add safety).
+  for (const t of PRIMARY_TRIGGER_PRIORITY) {
+    if (triggers.includes(t)) return t
+  }
+  return triggers[0]
+}
 
 /**
  * Internal: classify the inbound message via lib/ai. Throws on AI failure
@@ -333,6 +385,113 @@ export async function generateStage(
     }
   }
   return { status: 'success', result: r.data }
+}
+
+/**
+ * TAC-212 approval-policy gate. Runs after generateStage returns success;
+ * decides whether to dispatch via Sendblue (action='send') or persist as a
+ * pending draft for operator review (action='queue').
+ *
+ * Four triggers compose. Any one fires → queue. The triggers[] array
+ * preserves enumeration order (the order checks fired). primaryTrigger is
+ * picked via PRIMARY_TRIGGER_PRIORITY so the operator queue UI surfaces the
+ * most severe signal first.
+ *
+ * Fail-OPEN on the sticky-pending DB read (returns send rather than queue
+ * when the lookup throws) — refusing to send because of an observability
+ * read failure is worse than the rare race of a draft auto-sending while a
+ * sibling pending draft exists. TAC-264 is the structural fix for the
+ * single-pending-draft invariant.
+ *
+ * Not invoked when the followup trigger reason is `manual` — that path
+ * bypasses the gate entirely (the Command Center Follow Up button is an
+ * explicit operator action; operator already approved by clicking).
+ */
+export type ApprovalDecision =
+  | { action: 'send' }
+  | { action: 'queue'; triggers: string[]; primaryTrigger: string; compMatchedPattern: string | null }
+
+export async function applyApprovalPolicyStage(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+): Promise<ApprovalDecision> {
+  const triggers: string[] = []
+
+  // Trigger 1: voice fidelity in the 0.4–0.6 band → queue.
+  // (< 0.4 already refused by generateStage upstream; >= 0.6 passes here.)
+  if (generation.voiceFidelity < AUTO_SEND_FIDELITY_FLOOR) {
+    triggers.push(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+  }
+
+  // Trigger 2: model self-flagged a resource commitment via the structured
+  // output's requiresOperatorApproval field.
+  if (generation.requiresOperatorApproval) {
+    triggers.push(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+  }
+
+  // Trigger 3: comp regex backstop — runs INDEPENDENTLY of trigger 2 so a
+  // missed model self-flag on a comp commitment still queues.
+  const comp = matchComp(generation.body)
+  if (comp.matched) {
+    triggers.push(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  }
+
+  // Trigger 4: sticky pending — there's already a pending draft for this
+  // (venue_id, guest_id) per the TAC-258 migration 018 partial index
+  // `WHERE review_state='pending'`. Escalates regardless of other triggers.
+  // TAC-264 owns the single-pending invariant; this check is best-effort
+  // read-side enforcement and fails open if the DB lookup throws.
+  if (await hasPendingDraft(ctx.venue.id, ctx.guest.id)) {
+    triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  }
+
+  if (triggers.length === 0) {
+    return { action: 'send' }
+  }
+  return {
+    action: 'queue',
+    triggers,
+    primaryTrigger: pickPrimaryTrigger(triggers),
+    compMatchedPattern: comp.matched ? comp.pattern : null,
+  }
+}
+
+/**
+ * Read-side check for an existing pending draft for the (venue, guest) pair.
+ * Hits the migration 018 partial index
+ * `idx_messages_review_state_pending (venue_id, created_at) WHERE review_state='pending'`
+ * — single cheap lookup. Fails OPEN: any throw is caught + logged + returns
+ * false so the gate proceeds to send rather than refusing on a DB read
+ * failure. The sticky-pending signal is the lowest-stakes of the four
+ * triggers; the regex backstop and model self-flag don't depend on it.
+ */
+async function hasPendingDraft(venueId: string, guestId: string): Promise<boolean> {
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .eq('direction', 'outbound')
+      .eq('review_state', 'pending')
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      console.warn(
+        `[agent] hasPendingDraft lookup degraded for venue=${venueId} guest=${guestId}: ${error.message}`,
+      )
+      return false
+    }
+    return data !== null
+  } catch (e) {
+    console.warn(
+      `[agent] hasPendingDraft threw for venue=${venueId} guest=${guestId}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+    return false
+  }
 }
 
 const FALLBACK_TIMEZONE = 'America/Los_Angeles'

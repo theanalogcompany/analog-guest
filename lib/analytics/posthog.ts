@@ -353,6 +353,67 @@ function formatAgentLatencyHigh(props: AgentLatencyHighProps): string {
   return lines.join('\n')
 }
 
+// TAC-212: emitted from the inbound + followup orchestrators when the
+// approval-policy gate (applyApprovalPolicyStage in lib/agent/stages.ts)
+// routes the draft to the operator queue instead of dispatching. Slack
+// relay yes — pilot ops needs visibility into which drafts are landing in
+// the queue and why. Mirrors the voice_fidelity_low / dash_violation_persisted
+// shape (agentRunId + venue/guest IDs + the per-trigger metadata).
+export interface DraftQueuedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  // Every trigger that fired, in enumeration order. Composes; multiple
+  // triggers can fire on one draft.
+  triggers: string[]
+  // Priority-selected trigger (see PRIMARY_TRIGGER_PRIORITY in stages.ts).
+  // Also persisted on messages.review_reason — what the operator sees first
+  // in the queue UI.
+  primaryTrigger: string
+  voiceFidelity: number
+  modelRequiresApproval: boolean
+  // Empty string when the model didn't set the flag. We don't bother
+  // null-coercing because the model returns "" by contract.
+  modelApprovalReason: string
+  // Pattern source from matchComp when the comp_regex_backstop trigger
+  // fired; null when comp regex didn't match.
+  compRegexMatchedPattern: string | null
+  // True when previous_pending_held was among the triggers.
+  hasPreviousPending: boolean
+  // 'inbound' | 'followup' — distinguishes which orchestrator queued.
+  kind: 'inbound' | 'followup'
+  category: string
+  inboundBody: string | null
+  generatedBody: string
+}
+
+export async function captureDraftQueued(props: DraftQueuedProps): Promise<void> {
+  await capturePostHogEvent('draft_queued', props.guestId, { ...props })
+  await postToSlack(formatDraftQueued(props))
+}
+
+function formatDraftQueued(props: DraftQueuedProps): string {
+  const triggerList = props.triggers.map((t) => `\`${t}\``).join(', ')
+  const lines = [
+    `*Draft queued for review* — primary trigger \`${props.primaryTrigger}\` (all: ${triggerList}, ${props.kind})`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+  ]
+  if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
+    lines.push(`model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  if (props.compRegexMatchedPattern) {
+    lines.push(`comp regex matched: \`${props.compRegexMatchedPattern}\``)
+  }
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  lines.push(`draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  return lines.join('\n')
+}
+
 export interface WebhookSilenceProps {
   hoursWithoutWebhook: number
   lastWebhookAt: string

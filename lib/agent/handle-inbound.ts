@@ -2,13 +2,16 @@ import { randomUUID } from 'node:crypto'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
+  captureDraftQueued,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
-import { scheduleAndSend } from './schedule-and-send'
+import { persistQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
+  applyApprovalPolicyStage,
+  APPROVAL_TRIGGERS,
   classifyStage,
   generateStage,
   retrieveCorpusStage,
@@ -363,6 +366,78 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
+
+    // TAC-212: approval-policy gate decides send vs. queue. Composable —
+    // 4 triggers (fidelity_below_auto_send_floor, model_flagged,
+    // comp_regex_backstop, previous_pending_held); any one queues.
+    const approval = await applyApprovalPolicyStage(ctx, gen.result)
+
+    if (approval.action === 'queue') {
+      const queueSpan = trace.span('queue', {
+        primaryTrigger: approval.primaryTrigger,
+        triggerCount: approval.triggers.length,
+      })
+      try {
+        const { outboundMessageId } = await persistQueuedDraft(
+          ctx,
+          gen.result,
+          approval.primaryTrigger,
+        )
+        queueSpan.end({
+          output: {
+            outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            triggers: approval.triggers,
+            bodyLength: gen.result.body.length,
+          },
+          content: { body: gen.result.body },
+        })
+        console.log('[agent] inbound queued for review', {
+          agentRunId,
+          outboundMessageId,
+          primaryTrigger: approval.primaryTrigger,
+          triggers: approval.triggers,
+        })
+        await captureDraftQueued({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          triggers: approval.triggers,
+          primaryTrigger: approval.primaryTrigger,
+          voiceFidelity: gen.result.voiceFidelity,
+          modelRequiresApproval: gen.result.requiresOperatorApproval,
+          modelApprovalReason: gen.result.approvalReason,
+          compRegexMatchedPattern: approval.compMatchedPattern,
+          hasPreviousPending: approval.triggers.includes(
+            APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+          ),
+          kind: 'inbound',
+          category: ctx.classification.category,
+          inboundBody: ctx.currentMessage?.body ?? null,
+          generatedBody: gen.result.body,
+        })
+        trace.update({
+          output: {
+            status: 'queued',
+            outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            voiceFidelity: gen.result.voiceFidelity,
+          },
+          content: { outboundDraft: gen.result.body },
+        })
+        return {
+          status: 'queued',
+          outboundMessageId,
+          triggers: approval.triggers,
+          primaryTrigger: approval.primaryTrigger,
+        }
+      } catch (e) {
+        // persistQueuedDraft already fired a red alert.
+        const errMsg = e instanceof Error ? e.message : String(e)
+        queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
+        return { status: 'failed', stage: 'persist', error: errMsg }
+      }
+    }
 
     // Send + persist
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })

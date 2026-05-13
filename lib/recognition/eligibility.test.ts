@@ -19,6 +19,7 @@ const candidate = (overrides: Partial<EligibilityCandidate> = {}): EligibilityCa
   minState: null,
   redemptionPolicy: 'one_time',
   redemptionWindowDays: null,
+  requiresOperatorApproval: false,
   ...overrides,
 })
 

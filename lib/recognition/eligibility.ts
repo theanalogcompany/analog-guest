@@ -39,6 +39,11 @@ export interface EligibilityCandidate {
   minState: string | null
   redemptionPolicy: RedemptionPolicy
   redemptionWindowDays: number | null
+  // TAC-212: per-mechanic operator-approval flag. When true, the eligible-
+  // mechanics prompt block annotates the bullet so Sonnet knows committing
+  // this mechanic should set requiresOperatorApproval=true on its structured
+  // output; the approval-policy gate then queues the draft.
+  requiresOperatorApproval: boolean
 }
 
 export interface EligibleMechanic {
@@ -49,6 +54,7 @@ export interface EligibleMechanic {
   qualification: string | null
   rewardDescription: string | null
   minState: GuestState | null
+  requiresOperatorApproval: boolean
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -103,5 +109,6 @@ export function filterEligibleMechanics(
       qualification: m.qualification,
       rewardDescription: m.rewardDescription,
       minState: (m.minState as GuestState | null) ?? null,
+      requiresOperatorApproval: m.requiresOperatorApproval,
     }))
 }

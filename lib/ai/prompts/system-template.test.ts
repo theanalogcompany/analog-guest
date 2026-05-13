@@ -18,8 +18,35 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.13.0 (TAC-234 runtime context blocks: visit history, recognition, field-presence rendering)', () => {
-    expect(PROMPT_VERSION).toBe('v1.13.0')
+  it('is v1.14.0 (TAC-212 resource-commitment self-flag block + per-mechanic approval annotation)', () => {
+    expect(PROMPT_VERSION).toBe('v1.14.0')
+  })
+})
+
+describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)', () => {
+  it('contains the resource-commitment self-flag block header', () => {
+    expect(SYSTEM_TEMPLATE).toContain('# Resource commitment self-flag')
+  })
+
+  it('directs the model to set requiresOperatorApproval=true on comp / discount / refund', () => {
+    expect(SYSTEM_TEMPLATE).toContain('comp, discount, refund, or any monetary credit')
+    expect(SYSTEM_TEMPLATE).toContain('set requiresOperatorApproval=true')
+  })
+
+  it('directs the model to populate a one-clause approvalReason when flagged', () => {
+    expect(SYSTEM_TEMPLATE).toContain('one-clause reason in approvalReason')
+  })
+
+  it('cross-references the mechanic-eligibility approval annotation', () => {
+    expect(SYSTEM_TEMPLATE).toContain('the runtime context\'s "## What this guest can access" block marks a mechanic as requiring operator approval')
+  })
+
+  it('directs the model to leave approvalReason empty when not flagging', () => {
+    expect(SYSTEM_TEMPLATE).toContain('leave approvalReason as an empty string')
+  })
+
+  it('decouples the flag from voice fidelity', () => {
+    expect(SYSTEM_TEMPLATE).toContain('independent of voice fidelity')
   })
 })
 

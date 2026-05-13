@@ -43,6 +43,16 @@ const GeneratedMessageSchema = z.object({
     .number()
     .refine((n) => n >= 0 && n <= 1, { message: 'must be between 0 and 1' }),
   reasoning: z.string(),
+  // TAC-212: model self-flag for resource commitments (comps, refunds,
+  // mechanic commitments where the runtime context marked the mechanic
+  // requires_operator_approval=true). When true, the approval-policy gate
+  // queues the draft (review_state='pending') and skips Sendblue dispatch.
+  // approvalReason is a one-clause human-readable rationale; empty string
+  // when requiresOperatorApproval=false. Both fields rigidly populated on
+  // every generation — no .optional() because the structured-output
+  // validator is more reliable with explicit presence.
+  requiresOperatorApproval: z.boolean(),
+  approvalReason: z.string(),
 })
 
 /**
@@ -83,7 +93,13 @@ export async function generateMessage(
   let attempts = 0
 
   try {
-    let lastResult: { body: string; voiceFidelity: number; reasoning: string } | null = null
+    let lastResult: {
+      body: string
+      voiceFidelity: number
+      reasoning: string
+      requiresOperatorApproval: boolean
+      approvalReason: string
+    } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
     // THE-225: when the previous attempt tripped the dash regex, append a
@@ -111,6 +127,8 @@ export async function generateMessage(
         body: object.body,
         voiceFidelity: object.voiceFidelity,
         reasoning: object.reasoning,
+        requiresOperatorApproval: object.requiresOperatorApproval,
+        approvalReason: object.approvalReason,
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
@@ -134,6 +152,11 @@ export async function generateMessage(
         body: lastResult.body,
         voiceFidelity: lastResult.voiceFidelity,
         reasoning: lastResult.reasoning,
+        // TAC-212: model self-flag for the approval-policy gate. Carries
+        // through to applyApprovalPolicyStage and is recorded on the
+        // draft_queued PostHog event when the gate queues.
+        requiresOperatorApproval: lastResult.requiresOperatorApproval,
+        approvalReason: lastResult.approvalReason,
         attempts,
         attemptScores,
         attemptHistory,
