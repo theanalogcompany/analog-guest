@@ -400,8 +400,20 @@ export async function generateStage(
  * Fail-OPEN on the sticky-pending DB read (returns send rather than queue
  * when the lookup throws) — refusing to send because of an observability
  * read failure is worse than the rare race of a draft auto-sending while a
- * sibling pending draft exists. TAC-264 is the structural fix for the
- * single-pending-draft invariant.
+ * sibling pending draft exists. TAC-264 closes this loop structurally via
+ * the partial unique index on `messages (venue_id, guest_id) WHERE
+ * review_state='pending'` (migration 020) — concurrent INSERTs from rapid
+ * inbounds get caught by the index and recovered to UPDATE inside
+ * persistOrRegenQueuedDraft.
+ *
+ * TAC-264: queue decisions carry `existingPendingDraftId` so the persist
+ * layer knows whether to INSERT a fresh pending row or UPDATE the existing
+ * one in place (regenerate). When non-null, PREVIOUS_PENDING_HELD is also
+ * in `triggers`, structurally guaranteeing the gate returns action='queue'
+ * — no-demotion-on-regeneration is enforced by the trigger, not by the
+ * orchestrator. (The orchestrator-layer override per the TAC-264 plan
+ * review is the dispatch of existingPendingDraftId to the persist layer;
+ * the trigger does the queue-vs-send decision.)
  *
  * Not invoked when the followup trigger reason is `manual` — that path
  * bypasses the gate entirely (the Command Center Follow Up button is an
@@ -409,7 +421,17 @@ export async function generateStage(
  */
 export type ApprovalDecision =
   | { action: 'send' }
-  | { action: 'queue'; triggers: string[]; primaryTrigger: string; compMatchedPattern: string | null }
+  | {
+      action: 'queue'
+      triggers: string[]
+      primaryTrigger: string
+      compMatchedPattern: string | null
+      // TAC-264: when non-null, the persist layer UPDATEs this row in place
+      // (regenerate) instead of INSERTing a new pending row. Captured from
+      // findPendingDraft() during trigger 4 evaluation so the persist layer
+      // doesn't need a second round-trip.
+      existingPendingDraftId: string | null
+    }
 
 export async function applyApprovalPolicyStage(
   ctx: RuntimeContext,
@@ -437,11 +459,10 @@ export async function applyApprovalPolicyStage(
   }
 
   // Trigger 4: sticky pending — there's already a pending draft for this
-  // (venue_id, guest_id) per the TAC-258 migration 018 partial index
-  // `WHERE review_state='pending'`. Escalates regardless of other triggers.
-  // TAC-264 owns the single-pending invariant; this check is best-effort
-  // read-side enforcement and fails open if the DB lookup throws.
-  if (await hasPendingDraft(ctx.venue.id, ctx.guest.id)) {
+  // (venue_id, guest_id). TAC-264 routes regeneration through the persist
+  // layer using the captured row ID rather than the boolean signal alone.
+  const existingPending = await findPendingDraft(ctx.venue.id, ctx.guest.id)
+  if (existingPending !== null) {
     triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   }
 
@@ -453,24 +474,37 @@ export async function applyApprovalPolicyStage(
     triggers,
     primaryTrigger: pickPrimaryTrigger(triggers),
     compMatchedPattern: comp.matched ? comp.pattern : null,
+    existingPendingDraftId: existingPending?.id ?? null,
   }
 }
 
 /**
- * Read-side check for an existing pending draft for the (venue, guest) pair.
- * Hits the migration 018 partial index
+ * Read-side lookup for an existing pending draft for the (venue, guest)
+ * pair. Hits the migration 018 partial index
  * `idx_messages_review_state_pending (venue_id, created_at) WHERE review_state='pending'`
- * — single cheap lookup. Fails OPEN: any throw is caught + logged + returns
- * false so the gate proceeds to send rather than refusing on a DB read
- * failure. The sticky-pending signal is the lowest-stakes of the four
- * triggers; the regex backstop and model self-flag don't depend on it.
+ * — single cheap lookup. Returns the row's id + body when found (body is
+ * captured for forensic logging and future no-op detection; not load-bearing
+ * at the route level), or null on miss / DB error.
+ *
+ * Fails OPEN: any throw is caught + logged + returns null so the approval
+ * gate proceeds to send rather than refusing on a DB read failure. The
+ * sticky-pending signal is the lowest-stakes of the four triggers; the
+ * regex backstop and model self-flag don't depend on it. The partial
+ * unique index from migration 020 is the structural backstop against
+ * concurrent rapid-inbound races that slip past this read.
+ *
+ * Exported for the test suite. TAC-264 renamed from hasPendingDraft (which
+ * returned a boolean) to surface the row identity for the persist layer.
  */
-async function hasPendingDraft(venueId: string, guestId: string): Promise<boolean> {
+export async function findPendingDraft(
+  venueId: string,
+  guestId: string,
+): Promise<{ id: string; body: string } | null> {
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('messages')
-      .select('id')
+      .select('id, body')
       .eq('venue_id', venueId)
       .eq('guest_id', guestId)
       .eq('direction', 'outbound')
@@ -479,18 +513,18 @@ async function hasPendingDraft(venueId: string, guestId: string): Promise<boolea
       .maybeSingle()
     if (error) {
       console.warn(
-        `[agent] hasPendingDraft lookup degraded for venue=${venueId} guest=${guestId}: ${error.message}`,
+        `[agent] findPendingDraft lookup degraded for venue=${venueId} guest=${guestId}: ${error.message}`,
       )
-      return false
+      return null
     }
-    return data !== null
+    return data
   } catch (e) {
     console.warn(
-      `[agent] hasPendingDraft threw for venue=${venueId} guest=${guestId}: ${
+      `[agent] findPendingDraft threw for venue=${venueId} guest=${guestId}: ${
         e instanceof Error ? e.message : String(e)
       }`,
     )
-    return false
+    return null
   }
 }
 

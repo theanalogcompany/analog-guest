@@ -414,6 +414,70 @@ function formatDraftQueued(props: DraftQueuedProps): string {
   return lines.join('\n')
 }
 
+// TAC-264: emitted from the inbound + followup orchestrators when the
+// approval-policy gate decides queue AND an existing pending draft was
+// found, so the persist layer regenerates the row in place rather than
+// inserting a new one. Distinct event from draft_queued so the funnel can
+// distinguish "new card arrived" from "existing card refreshed against new
+// guest context" — operator's mental model is one card per guest, the
+// regen path is what keeps that promise. Slack relay yes for symmetry with
+// captureDraftQueued (pilot ops needs visibility into both paths).
+//
+// originalDraftId: the messages.id that was UPDATEd in place. Same row the
+// operator queue is already showing — analytics joins back to it.
+// priorReviewReason: the value of messages.review_reason BEFORE the
+// regen overwrite. Surfaces trigger evolution (e.g. comp_regex_backstop
+// → model_flagged across regens on the same card).
+export interface DraftRegeneratedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  originalDraftId: string
+  triggers: string[]
+  primaryTrigger: string
+  priorReviewReason: string | null
+  voiceFidelity: number
+  modelRequiresApproval: boolean
+  modelApprovalReason: string
+  compRegexMatchedPattern: string | null
+  kind: 'inbound' | 'followup'
+  category: string
+  inboundBody: string | null
+  generatedBody: string
+}
+
+export async function captureDraftRegenerated(props: DraftRegeneratedProps): Promise<void> {
+  await capturePostHogEvent('draft_regenerated', props.guestId, { ...props })
+  await postToSlack(formatDraftRegenerated(props))
+}
+
+function formatDraftRegenerated(props: DraftRegeneratedProps): string {
+  const triggerList = props.triggers.map((t) => `\`${t}\``).join(', ')
+  const transition =
+    props.priorReviewReason && props.priorReviewReason !== props.primaryTrigger
+      ? ` (was \`${props.priorReviewReason}\`)`
+      : ''
+  const lines = [
+    `*Pending draft regenerated* — primary trigger \`${props.primaryTrigger}\`${transition} (all: ${triggerList}, ${props.kind})`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `draft: \`${props.originalDraftId}\``,
+    `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+  ]
+  if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
+    lines.push(`model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  if (props.compRegexMatchedPattern) {
+    lines.push(`comp regex matched: \`${props.compRegexMatchedPattern}\``)
+  }
+  if (props.inboundBody) {
+    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  }
+  lines.push(`draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  return lines.join('\n')
+}
+
 export interface WebhookSilenceProps {
   hoursWithoutWebhook: number
   lastWebhookAt: string
