@@ -3,11 +3,12 @@ import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
   captureDraftQueued,
+  captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
-import { persistQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
@@ -286,58 +287,101 @@ export async function handleFollowup(input: {
     // TAC-212: approval-policy gate. Bypassed entirely on the Follow Up
     // button path (trigger.reason='manual') — operator already approved by
     // clicking. Cron-triggered followups (day_* / event) run the gate.
+    //
+    // TAC-264: when the gate decides queue AND existingPendingDraftId is
+    // set, persistOrRegenQueuedDraft routes to UPDATE-in-place rather than
+    // INSERT (regenerate the existing pending card with the cron-triggered
+    // followup's body). The card stays pending — no demotion. The manual
+    // followup bypass is intentional: operator clicked "send"; partial
+    // unique index doesn't block because manual goes via scheduleAndSend
+    // which writes review_state='auto_sent', not 'pending'. Pending card +
+    // operator-sent manual outbound can legitimately coexist on the same
+    // guest.
     if (input.trigger.reason !== 'manual') {
       const approval = await applyApprovalPolicyStage(ctx, gen.result)
       if (approval.action === 'queue') {
         const queueSpan = trace.span('queue', {
           primaryTrigger: approval.primaryTrigger,
           triggerCount: approval.triggers.length,
+          existingPendingDraftId: approval.existingPendingDraftId,
         })
         try {
-          const { outboundMessageId } = await persistQueuedDraft(
+          const persistResult = await persistOrRegenQueuedDraft(
             ctx,
             gen.result,
             approval.primaryTrigger,
+            approval.existingPendingDraftId,
           )
+          const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
           queueSpan.end({
             output: {
               outboundMessageId,
               primaryTrigger: approval.primaryTrigger,
               triggers: approval.triggers,
+              persistAction,
+              priorReviewReason,
               bodyLength: gen.result.body.length,
             },
             content: { body: gen.result.body },
           })
-          console.log('[agent] followup queued for review', {
-            agentRunId,
-            outboundMessageId,
-            primaryTrigger: approval.primaryTrigger,
-            triggers: approval.triggers,
-          })
-          await captureDraftQueued({
-            agentRunId,
-            venueId: ctx.venue.id,
-            guestId: ctx.guest.id,
-            triggers: approval.triggers,
-            primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
-            modelRequiresApproval: gen.result.requiresOperatorApproval,
-            modelApprovalReason: gen.result.approvalReason,
-            compRegexMatchedPattern: approval.compMatchedPattern,
-            hasPreviousPending: approval.triggers.includes(
-              APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
-            ),
-            kind: 'followup',
-            category,
-            inboundBody: null,
-            generatedBody: gen.result.body,
-          })
+          console.log(
+            persistAction === 'updated'
+              ? '[agent] followup regenerated existing pending draft'
+              : '[agent] followup queued for review',
+            {
+              agentRunId,
+              outboundMessageId,
+              primaryTrigger: approval.primaryTrigger,
+              triggers: approval.triggers,
+              persistAction,
+              priorReviewReason,
+            },
+          )
+          if (persistAction === 'updated') {
+            await captureDraftRegenerated({
+              agentRunId,
+              venueId: ctx.venue.id,
+              guestId: ctx.guest.id,
+              originalDraftId: outboundMessageId,
+              triggers: approval.triggers,
+              primaryTrigger: approval.primaryTrigger,
+              priorReviewReason,
+              voiceFidelity: gen.result.voiceFidelity,
+              modelRequiresApproval: gen.result.requiresOperatorApproval,
+              modelApprovalReason: gen.result.approvalReason,
+              compRegexMatchedPattern: approval.compMatchedPattern,
+              kind: 'followup',
+              category,
+              inboundBody: null,
+              generatedBody: gen.result.body,
+            })
+          } else {
+            await captureDraftQueued({
+              agentRunId,
+              venueId: ctx.venue.id,
+              guestId: ctx.guest.id,
+              triggers: approval.triggers,
+              primaryTrigger: approval.primaryTrigger,
+              voiceFidelity: gen.result.voiceFidelity,
+              modelRequiresApproval: gen.result.requiresOperatorApproval,
+              modelApprovalReason: gen.result.approvalReason,
+              compRegexMatchedPattern: approval.compMatchedPattern,
+              hasPreviousPending: approval.triggers.includes(
+                APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+              ),
+              kind: 'followup',
+              category,
+              inboundBody: null,
+              generatedBody: gen.result.body,
+            })
+          }
           trace.update({
             output: {
               status: 'queued',
               outboundMessageId,
               primaryTrigger: approval.primaryTrigger,
               voiceFidelity: gen.result.voiceFidelity,
+              persistAction,
             },
             content: { outboundDraft: gen.result.body },
           })

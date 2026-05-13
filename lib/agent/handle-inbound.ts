@@ -3,12 +3,13 @@ import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
   captureDraftQueued,
+  captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
-import { persistQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
@@ -376,52 +377,90 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       const queueSpan = trace.span('queue', {
         primaryTrigger: approval.primaryTrigger,
         triggerCount: approval.triggers.length,
+        // TAC-264: surfaces inserted vs. regenerated on the trace.
+        existingPendingDraftId: approval.existingPendingDraftId,
       })
       try {
-        const { outboundMessageId } = await persistQueuedDraft(
+        const persistResult = await persistOrRegenQueuedDraft(
           ctx,
           gen.result,
           approval.primaryTrigger,
+          approval.existingPendingDraftId,
         )
+        const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({
           output: {
             outboundMessageId,
             primaryTrigger: approval.primaryTrigger,
             triggers: approval.triggers,
+            persistAction,
+            priorReviewReason,
             bodyLength: gen.result.body.length,
           },
           content: { body: gen.result.body },
         })
-        console.log('[agent] inbound queued for review', {
-          agentRunId,
-          outboundMessageId,
-          primaryTrigger: approval.primaryTrigger,
-          triggers: approval.triggers,
-        })
-        await captureDraftQueued({
-          agentRunId,
-          venueId: ctx.venue.id,
-          guestId: ctx.guest.id,
-          triggers: approval.triggers,
-          primaryTrigger: approval.primaryTrigger,
-          voiceFidelity: gen.result.voiceFidelity,
-          modelRequiresApproval: gen.result.requiresOperatorApproval,
-          modelApprovalReason: gen.result.approvalReason,
-          compRegexMatchedPattern: approval.compMatchedPattern,
-          hasPreviousPending: approval.triggers.includes(
-            APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
-          ),
-          kind: 'inbound',
-          category: ctx.classification.category,
-          inboundBody: ctx.currentMessage?.body ?? null,
-          generatedBody: gen.result.body,
-        })
+        console.log(
+          persistAction === 'updated'
+            ? '[agent] inbound regenerated existing pending draft'
+            : '[agent] inbound queued for review',
+          {
+            agentRunId,
+            outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            triggers: approval.triggers,
+            persistAction,
+            priorReviewReason,
+          },
+        )
+        // TAC-264: route to the appropriate analytics event based on whether
+        // the persist layer regenerated an existing row (UPDATE) or created
+        // a fresh one (INSERT, possibly via 23505 race-recovery from another
+        // concurrent inbound).
+        if (persistAction === 'updated') {
+          await captureDraftRegenerated({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            originalDraftId: outboundMessageId,
+            triggers: approval.triggers,
+            primaryTrigger: approval.primaryTrigger,
+            priorReviewReason,
+            voiceFidelity: gen.result.voiceFidelity,
+            modelRequiresApproval: gen.result.requiresOperatorApproval,
+            modelApprovalReason: gen.result.approvalReason,
+            compRegexMatchedPattern: approval.compMatchedPattern,
+            kind: 'inbound',
+            category: ctx.classification.category,
+            inboundBody: ctx.currentMessage?.body ?? null,
+            generatedBody: gen.result.body,
+          })
+        } else {
+          await captureDraftQueued({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            triggers: approval.triggers,
+            primaryTrigger: approval.primaryTrigger,
+            voiceFidelity: gen.result.voiceFidelity,
+            modelRequiresApproval: gen.result.requiresOperatorApproval,
+            modelApprovalReason: gen.result.approvalReason,
+            compRegexMatchedPattern: approval.compMatchedPattern,
+            hasPreviousPending: approval.triggers.includes(
+              APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+            ),
+            kind: 'inbound',
+            category: ctx.classification.category,
+            inboundBody: ctx.currentMessage?.body ?? null,
+            generatedBody: gen.result.body,
+          })
+        }
         trace.update({
           output: {
             status: 'queued',
             outboundMessageId,
             primaryTrigger: approval.primaryTrigger,
             voiceFidelity: gen.result.voiceFidelity,
+            persistAction,
           },
           content: { outboundDraft: gen.result.body },
         })
@@ -432,7 +471,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           primaryTrigger: approval.primaryTrigger,
         }
       } catch (e) {
-        // persistQueuedDraft already fired a red alert.
+        // persistOrRegenQueuedDraft already fired a red alert.
         const errMsg = e instanceof Error ? e.message : String(e)
         queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
         return { status: 'failed', stage: 'persist', error: errMsg }

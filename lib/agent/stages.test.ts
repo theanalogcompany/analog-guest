@@ -3,6 +3,7 @@ import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
   classifyStage,
+  findPendingDraft,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
@@ -20,11 +21,13 @@ const captureLowMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
-// TAC-212: hasPendingDraft inside applyApprovalPolicyStage calls
+// TAC-212 + TAC-264: findPendingDraft inside applyApprovalPolicyStage calls
 // createAdminClient → supabase.from(...).select(...).limit(1).maybeSingle().
 // We mock createAdminClient to return a chainable stub whose terminal
 // maybeSingle() resolves with whatever the test sets via the per-test
-// `pendingDraftMaybeSingleMock`.
+// `pendingDraftMaybeSingleMock`. TAC-264 widened the select to `id, body`
+// so tests assert against {id, body} shapes; the mock's return value is
+// passed through to the stage decision's existingPendingDraftId field.
 const pendingDraftMaybeSingleMock = vi.fn()
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
@@ -608,9 +611,9 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
   })
 
-  it('queues with previous_pending_held when a prior pending draft exists', async () => {
+  it('queues with previous_pending_held and existingPendingDraftId when a prior pending draft exists', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
-      data: { id: 'existing-pending-id' },
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
@@ -620,11 +623,28 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    // TAC-264: the existing pending row's id is surfaced on the decision so
+    // the persist layer can route to UPDATE-in-place rather than INSERT.
+    expect(decision.existingPendingDraftId).toBe('existing-pending-id')
+  })
+
+  it('returns existingPendingDraftId=null on the queue path when no prior pending exists', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({ data: null, error: null })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        voiceFidelity: 0.45, // Low fidelity → queue, but no sticky-pending trigger.
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR])
+    expect(decision.existingPendingDraftId).toBeNull()
   })
 
   it('composes all four triggers when every condition fires', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
-      data: { id: 'existing-pending-id' },
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
@@ -645,9 +665,10 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
     // comp_regex_backstop wins primaryTrigger per PRIMARY_TRIGGER_PRIORITY.
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.existingPendingDraftId).toBe('existing-pending-id')
   })
 
-  it('fails OPEN when hasPendingDraft errors — sends rather than refusing', async () => {
+  it('fails OPEN when findPendingDraft errors — sends rather than refusing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
       data: null,
@@ -663,7 +684,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(warnSpy).toHaveBeenCalled()
   })
 
-  it('fails OPEN when hasPendingDraft throws — sends rather than refusing', async () => {
+  it('fails OPEN when findPendingDraft throws — sends rather than refusing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('admin client init failed'))
     const decision = await applyApprovalPolicyStage(
@@ -671,6 +692,54 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
     expect(decision.action).toBe('send')
+    expect(warnSpy).toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// findPendingDraft (TAC-264 — renamed from hasPendingDraft, returns {id, body} | null)
+// ---------------------------------------------------------------------------
+
+describe('findPendingDraft (TAC-264)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns {id, body} when a pending row exists', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'pending-1', body: 'draft body' },
+      error: null,
+    })
+    const out = await findPendingDraft('venue-1', 'guest-1')
+    expect(out).toEqual({ id: 'pending-1', body: 'draft body' })
+  })
+
+  it('returns null when no pending row exists', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({ data: null, error: null })
+    const out = await findPendingDraft('venue-1', 'guest-1')
+    expect(out).toBeNull()
+  })
+
+  it('returns null (fail-open) when the DB read errors', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'connection reset' },
+    })
+    const out = await findPendingDraft('venue-1', 'guest-1')
+    expect(out).toBeNull()
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('returns null (fail-open) when the DB read throws', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('client init failed'))
+    const out = await findPendingDraft('venue-1', 'guest-1')
+    expect(out).toBeNull()
     expect(warnSpy).toHaveBeenCalled()
   })
 })
