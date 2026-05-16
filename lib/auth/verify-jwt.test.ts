@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAdminClient } from '../db/admin'
+import { linkOperatorByAuthUser } from './link-operator'
 import { AuthError } from './types'
 import { verifyOperatorRequest } from './verify-jwt'
 
 vi.mock('../db/admin', () => ({
   createAdminClient: vi.fn(),
+}))
+
+vi.mock('./link-operator', () => ({
+  linkOperatorByAuthUser: vi.fn(),
 }))
 
 type AuthGetUserResult = {
@@ -18,14 +23,16 @@ type QueryResult<T> = {
 }
 
 // Builds a Supabase client mock that supports the chained query shapes used
-// by verify-jwt: `.from(t).select(c).eq(c, v).maybeSingle()` for the
-// operators lookup, and `.from(t).select(c).eq(c, v)` (awaited directly) for
-// the operator_venues lookup. The returned filter-builder is thenable so
-// either form resolves to the configured result.
+// by verify-jwt: `.from(t).select(c).or(filter).maybeSingle()` for the
+// operators lookup (TAC-272: OR across auth_user_id_phone + auth_user_id_email),
+// and `.from(t).select(c).eq(c, v)` (awaited directly) for the
+// operator_venues lookup. The returned filter-builder is thenable so either
+// form resolves to the configured result.
 function makeBuilder<T>(result: QueryResult<T>) {
   const builder = {
     select: () => builder,
     eq: () => builder,
+    or: () => builder,
     maybeSingle: () => Promise.resolve(result),
     then: (
       onFulfilled?: (value: QueryResult<T>) => unknown,
@@ -69,6 +76,7 @@ function bearerRequest(token: string | null): Request {
 describe('verifyOperatorRequest', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReset()
+    vi.mocked(linkOperatorByAuthUser).mockReset()
   })
 
   afterEach(() => {
@@ -142,12 +150,16 @@ describe('verifyOperatorRequest', () => {
     ).rejects.toMatchObject({ status: 401, message: expect.stringContaining('no user') })
   })
 
-  it('throws AuthError(401) when no matching operator row exists', async () => {
+  it('throws AuthError(401) when no matching operator row exists and lazy-link fails', async () => {
     const mock = makeSupabaseMock({
       authUserResult: { data: { user: { id: 'auth-user-x' } }, error: null },
       operatorsResult: { data: null, error: null },
     })
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
+    vi.mocked(linkOperatorByAuthUser).mockResolvedValue({
+      ok: false,
+      error: 'no_matching_operator',
+    })
 
     await expect(
       verifyOperatorRequest(bearerRequest('Bearer x')),
@@ -155,6 +167,41 @@ describe('verifyOperatorRequest', () => {
       status: 401,
       message: expect.stringContaining('not an operator'),
     })
+  })
+
+  it('lazy-links and returns operatorId when the OR lookup misses but linkOperator succeeds', async () => {
+    const mock = makeSupabaseMock({
+      authUserResult: { data: { user: { id: 'auth-newly-linked' } }, error: null },
+      operatorsResult: { data: null, error: null }, // miss on initial lookup
+      venuesResult: { data: [{ venue_id: 'venue-x' }], error: null },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(mock as never)
+    vi.mocked(linkOperatorByAuthUser).mockResolvedValue({
+      ok: true,
+      operatorId: 'op-newly-linked',
+      column: 'phone',
+      mode: 'newly_linked',
+    })
+
+    const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
+    expect(out).toEqual({
+      operatorId: 'op-newly-linked',
+      allowedVenueIds: ['venue-x'],
+    })
+    expect(linkOperatorByAuthUser).toHaveBeenCalledWith('auth-newly-linked')
+  })
+
+  it('does NOT call lazy-link when the OR lookup already finds the operator', async () => {
+    const mock = makeSupabaseMock({
+      authUserResult: { data: { user: { id: 'auth-existing' } }, error: null },
+      operatorsResult: { data: { id: 'op-existing' }, error: null },
+      venuesResult: { data: [], error: null },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(mock as never)
+
+    const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
+    expect(out.operatorId).toBe('op-existing')
+    expect(linkOperatorByAuthUser).not.toHaveBeenCalled()
   })
 
   it('throws AuthError(401) when the operators query errors', async () => {

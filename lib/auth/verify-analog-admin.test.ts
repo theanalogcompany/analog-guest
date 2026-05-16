@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAdminClient } from '../db/admin'
+import { linkOperatorByAuthUser } from './link-operator'
 import { AuthError } from './types'
 import {
   verifyAnalogAdminAccess,
@@ -15,6 +16,10 @@ vi.mock('./verify-jwt', () => ({
   verifyOperatorRequest: vi.fn(),
 }))
 
+vi.mock('./link-operator', () => ({
+  linkOperatorByAuthUser: vi.fn(),
+}))
+
 type QueryResult<T> = {
   data: T | null
   error: { message: string } | null
@@ -22,11 +27,13 @@ type QueryResult<T> = {
 
 // Mirrors the chained-builder mock pattern in verify-jwt.test.ts. Returns
 // a thenable filter-builder so callers can await directly OR call .single()
-// / .maybeSingle() as needed.
+// / .maybeSingle() as needed. TAC-272 added .or() for OR-matching across
+// auth_user_id_phone + auth_user_id_email.
 function makeBuilder<T>(result: QueryResult<T>) {
   const builder = {
     select: () => builder,
     eq: () => builder,
+    or: () => builder,
     single: () => Promise.resolve(result),
     maybeSingle: () => Promise.resolve(result),
     then: (
@@ -148,6 +155,7 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
 describe('verifyAnalogAdminAccess (session)', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReset()
+    vi.mocked(linkOperatorByAuthUser).mockReset()
   })
 
   afterEach(() => {
@@ -175,16 +183,96 @@ describe('verifyAnalogAdminAccess (session)', () => {
     })
   })
 
-  it('throws 401 when no operator row exists for the auth user', async () => {
+  it('throws 401 when no operator row exists and lazy-link fails', async () => {
     const mock = makeSupabaseMock({
       operatorsResult: { data: null, error: null },
     })
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
+    vi.mocked(linkOperatorByAuthUser).mockResolvedValue({
+      ok: false,
+      error: 'no_matching_operator',
+    })
 
     await expect(verifyAnalogAdminAccess('auth-user-x')).rejects.toMatchObject({
       status: 401,
       message: expect.stringContaining('not an operator'),
     })
+  })
+
+  it('lazy-links and returns AnalogAdminOperator when OR lookup misses', async () => {
+    // Step 1: OR lookup misses (operators result = null).
+    // Step 2: linkOperatorByAuthUser resolves to op-newly-linked.
+    // Step 3: post-link .eq('id', operatorId).single() returns is_analog_admin=true.
+    // Step 4: venues lookup returns one venue.
+    //
+    // The mock factory below returns sequence-aware results for the two
+    // .from('operators') calls.
+    let operatorsCallIndex = 0
+    const mock = {
+      from: vi.fn((table: string) => {
+        if (table === 'operators') {
+          if (operatorsCallIndex === 0) {
+            operatorsCallIndex += 1
+            return makeBuilder({ data: null, error: null })
+          }
+          operatorsCallIndex += 1
+          return makeBuilder({
+            data: { is_analog_admin: true },
+            error: null,
+          })
+        }
+        if (table === 'operator_venues') {
+          return makeBuilder({ data: [{ venue_id: 'venue-x' }], error: null })
+        }
+        throw new Error(`unexpected table: ${table}`)
+      }),
+    }
+    vi.mocked(createAdminClient).mockReturnValue(mock as never)
+    vi.mocked(linkOperatorByAuthUser).mockResolvedValue({
+      ok: true,
+      operatorId: 'op-newly-linked',
+      column: 'email',
+      mode: 'newly_linked',
+    })
+
+    const out = await verifyAnalogAdminAccess('auth-newly-linked')
+    expect(out).toEqual({
+      operatorId: 'op-newly-linked',
+      allowedVenueIds: ['venue-x'],
+      isAnalogAdmin: true,
+    })
+    expect(linkOperatorByAuthUser).toHaveBeenCalledWith('auth-newly-linked')
+  })
+
+  it('throws 403 when lazy-link succeeds but post-link is_analog_admin is false', async () => {
+    let operatorsCallIndex = 0
+    const mock = {
+      from: vi.fn((table: string) => {
+        if (table === 'operators') {
+          if (operatorsCallIndex === 0) {
+            operatorsCallIndex += 1
+            return makeBuilder({ data: null, error: null })
+          }
+          operatorsCallIndex += 1
+          return makeBuilder({
+            data: { is_analog_admin: false },
+            error: null,
+          })
+        }
+        throw new Error(`unexpected table: ${table}`)
+      }),
+    }
+    vi.mocked(createAdminClient).mockReturnValue(mock as never)
+    vi.mocked(linkOperatorByAuthUser).mockResolvedValue({
+      ok: true,
+      operatorId: 'op-non-admin',
+      column: 'phone',
+      mode: 'newly_linked',
+    })
+
+    await expect(
+      verifyAnalogAdminAccess('auth-non-admin'),
+    ).rejects.toMatchObject({ status: 403, message: 'not an analog admin' })
   })
 
   it('throws 403 when operator exists but is_analog_admin is false', async () => {

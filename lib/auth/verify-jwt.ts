@@ -19,6 +19,7 @@
 // against the returned allowedVenueIds.
 
 import { createAdminClient } from '../db/admin'
+import { linkOperatorByAuthUser } from './link-operator'
 import { type AuthenticatedOperator, AuthError } from './types'
 
 export async function verifyOperatorRequest(
@@ -46,18 +47,36 @@ export async function verifyOperatorRequest(
   }
   const authUserId = userData.user.id
 
+  // Operator lookup: match on either auth method's column (phone OTP or
+  // email magic link). authUserId is a UUID just produced by Supabase auth,
+  // so the .or() filter string is safe.
   const { data: operatorRow, error: operatorError } = await supabase
     .from('operators')
     .select('id')
-    .eq('auth_user_id', authUserId)
+    .or(
+      `auth_user_id_phone.eq.${authUserId},auth_user_id_email.eq.${authUserId}`,
+    )
     .maybeSingle()
   if (operatorError) {
     throw new AuthError(401, `operator lookup failed: ${operatorError.message}`)
   }
-  if (!operatorRow) {
-    throw new AuthError(401, 'authenticated user is not an operator')
+  let operatorId: string
+  if (operatorRow) {
+    operatorId = operatorRow.id
+  } else {
+    // Lazy-link path: JWT is valid, but this auth user has never been linked
+    // to an operator. Try now via phone/email match. Self-healing for the
+    // TAC-270 UAT class of bug — pre-TAC-272, sign-in created auth.users
+    // rows that nothing wrote back to operators.auth_user_id.
+    const linked = await linkOperatorByAuthUser(authUserId)
+    if (!linked.ok) {
+      throw new AuthError(
+        401,
+        `authenticated user is not an operator: ${linked.error}`,
+      )
+    }
+    operatorId = linked.operatorId
   }
-  const operatorId = operatorRow.id
 
   const { data: venueRows, error: venuesError } = await supabase
     .from('operator_venues')
