@@ -670,7 +670,8 @@ export type Database = {
       }
       operators: {
         Row: {
-          auth_user_id: string | null
+          auth_user_id_email: string | null
+          auth_user_id_phone: string | null
           avatar_url: string | null
           created_at: string
           email: string
@@ -680,11 +681,12 @@ export type Database = {
           is_test: boolean
           job_title: string | null
           last_seen_at: string | null
-          phone_number: string | null
+          phone_number: string
           updated_at: string
         }
         Insert: {
-          auth_user_id?: string | null
+          auth_user_id_email?: string | null
+          auth_user_id_phone?: string | null
           avatar_url?: string | null
           created_at?: string
           email: string
@@ -694,11 +696,12 @@ export type Database = {
           is_test?: boolean
           job_title?: string | null
           last_seen_at?: string | null
-          phone_number?: string | null
+          phone_number: string
           updated_at?: string
         }
         Update: {
-          auth_user_id?: string | null
+          auth_user_id_email?: string | null
+          auth_user_id_phone?: string | null
           avatar_url?: string | null
           created_at?: string
           email?: string
@@ -708,7 +711,7 @@ export type Database = {
           is_test?: boolean
           job_title?: string | null
           last_seen_at?: string | null
-          phone_number?: string | null
+          phone_number?: string
           updated_at?: string
         }
         Relationships: []
