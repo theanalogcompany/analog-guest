@@ -195,6 +195,22 @@ Migrations live in `db/migrations/` numbered sequentially. Each is hand-written 
 3. Operator runs `npm run db:types` to regenerate `db/types.ts`.
 4. If the migration adds a column the script needs to typecheck against immediately, hand-patch `db/types.ts` in the same commit as the script. The next `db:types` run will overwrite the patch with canonical output. Document the patch in the commit message so it's not lost.
 
+### Ordering for backwards-incompatible migrations
+
+When a migration drops a column, renames a column, or adds a `NOT NULL` constraint that the currently-deployed code doesn't yet handle, **deploy the code first, then apply the migration in Studio.** The reverse order opens a downtime window — between Studio-apply and Vercel-deploy, the deployed code queries a schema that no longer exists and every affected request 500s.
+
+**Backwards-incompatible → code first, then schema:**
+
+1. Open PR with the new code (and the migration file checked in).
+2. Merge → Vercel deploys the new code. The new code may reference columns that don't exist yet — `tsc` and any runtime path that hits the missing column will fail cleanly (compile error / "column does not exist") rather than producing 500s on a live user-facing path.
+3. Apply migration in Studio. Run `npm run db:types`.
+
+**Backwards-compatible (additive only) → order doesn't matter.** A migration that only adds nullable columns, only widens a `CHECK` constraint, or only creates a new index can be applied before or after the code deploy without a downtime window.
+
+**Heuristic:** if `git diff` shows a `DROP COLUMN`, `DROP FUNCTION`, `RENAME COLUMN`, `ALTER ... SET NOT NULL`, or a tightened `CHECK`, treat the migration as backwards-incompatible. Apply Studio AFTER merge — never before.
+
+Source: TAC-272 (2026-05-16). Migration 021 dropped `operators.auth_user_id` while the deployed code still queried it; `admin.theanalog.company` 500'd for the ~3-minute window between Studio-apply and PR merge.
+
 ### Migration log
 
 - `001_initial_schema.sql` — 13 tables: venues, operators, operator_venues, venue_configs, guests, mechanics, transactions, messages, engagement_events, guest_states, voice_corpus, voice_embeddings, audit_log. Includes the shared `updated_at` trigger function.
