@@ -51,6 +51,14 @@ export const APPROVAL_TRIGGERS = {
 } as const
 
 /**
+ * Union of every trigger code that can land on `messages.review_reason`.
+ * Consumed by the operator-queue normalizer (lib/operator/queue.ts) to
+ * keep the human-readable label map exhaustive at compile time — adding
+ * a new trigger above without a corresponding label there is a TS error.
+ */
+export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
+
+/**
  * Priority order for picking the `primaryTrigger` (the value that lands on
  * messages.review_reason and shows up first in the operator queue UI). NOT
  * the order triggers are evaluated in (that's enumeration order, which

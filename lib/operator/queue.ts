@@ -11,6 +11,7 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
+import type { ApprovalTrigger } from '@/lib/agent/stages'
 
 export type GuestRecognitionState =
   | 'new'
@@ -56,6 +57,24 @@ const RECOGNITION_STATE_VALUES: ReadonlySet<string> = new Set([
 function normalizeRecognitionState(s: string | null): GuestRecognitionState | null {
   if (s === null) return null
   return RECOGNITION_STATE_VALUES.has(s) ? (s as GuestRecognitionState) : null
+}
+
+// Operator-facing labels for `messages.review_reason`. The wire field stays
+// `string | null` — only the value changes from raw classifier code to
+// human-readable text. Typed as Record<ApprovalTrigger, ...> so adding a
+// new trigger in lib/agent/stages.ts without a label here fails tsc.
+const REVIEW_REASON_LABELS: Record<ApprovalTrigger, string> = {
+  comp_regex_backstop: 'Compensation language detected',
+  model_flagged: 'Model flagged for approval',
+  fidelity_below_auto_send_floor: 'Voice match below auto-send threshold',
+  previous_pending_held: 'Earlier draft still pending',
+}
+
+const REVIEW_REASON_FALLBACK = 'Needs review'
+
+function normalizeReviewReason(raw: string | null): string | null {
+  if (raw === null) return null
+  return (REVIEW_REASON_LABELS as Record<string, string>)[raw] ?? REVIEW_REASON_FALLBACK
 }
 
 function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
@@ -118,7 +137,7 @@ export async function listPendingQueue(
       draftBody: row.draft_body,
       category: row.category,
       voiceFidelity: row.voice_fidelity,
-      reviewReason: row.review_reason,
+      reviewReason: normalizeReviewReason(row.review_reason),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),
