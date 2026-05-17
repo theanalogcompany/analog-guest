@@ -197,4 +197,53 @@ describe('listPendingQueue', () => {
     const result = await listPendingQueue(['v1'])
     expect(result).toEqual({ ok: false, error: 'function does not exist' })
   })
+
+  describe('reviewReason normalization', () => {
+    const baseRow = {
+      draft_id: 'd1',
+      venue_id: 'v1',
+      venue_slug: 'x',
+      guest_id: 'g1',
+      guest_display_name: null,
+      guest_phone: '+15555550005',
+      guest_opted_out_at: null,
+      draft_body: 'hi',
+      category: null,
+      voice_fidelity: null,
+      recognition_state: null,
+      created_at: '2026-05-12T20:00:00.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+    }
+
+    it.each([
+      ['comp_regex_backstop', 'Compensation language detected'],
+      ['model_flagged', 'Model flagged for approval'],
+      ['fidelity_below_auto_send_floor', 'Voice match below auto-send threshold'],
+      ['previous_pending_held', 'Earlier draft still pending'],
+      ['gibberish_unknown_code', 'Needs review'],
+    ])('maps review_reason %s to %s', async (raw, expected) => {
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, review_reason: raw }],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.drafts[0]!.reviewReason).toBe(expected)
+      }
+    })
+
+    it('passes review_reason null through as null', async () => {
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, review_reason: null }],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.drafts[0]!.reviewReason).toBeNull()
+      }
+    })
+  })
 })
