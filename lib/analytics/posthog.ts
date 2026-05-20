@@ -72,6 +72,18 @@
  *     Skipped on the duplicate-skip return path (fast, not interesting).
  *     Properties: { agentRunId, venueId, guestId, totalElapsedMs, kind }
  *
+ * - demo_bypassed_approval_gate
+ *     TAC-284. Fires from applyApprovalPolicyStage when a guest flagged
+ *     is_demo=true bypasses the TAC-212 approval policy gate AND the bypass
+ *     actually overrode a queue decision (the would-have-queued trigger set
+ *     is non-empty). A clean demo reply that would have auto-sent anyway
+ *     produces no event. Slack-relays ONLY when 'comp_regex_backstop' is
+ *     among the would-have-queued triggers — that's the irreversible-
+ *     financial-commitment case, and demo mode disabling the backstop
+ *     should be loud.
+ *     Properties: { agentRunId, venueId, guestId, wouldHaveQueuedTriggers,
+ *                   voiceFidelity, generatedBody }
+ *
  * - webhook_silence
  *     Daily cron event. Fires when no inbound webhook has landed in 24+
  *     hours, but only when there's been at least one prior inbound (i.e.,
@@ -476,6 +488,58 @@ function formatDraftRegenerated(props: DraftRegeneratedProps): string {
   }
   lines.push(`draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
   return lines.join('\n')
+}
+
+// TAC-284: emitted from applyApprovalPolicyStage (lib/agent/stages.ts) when a
+// guest flagged is_demo=true bypasses the TAC-212 approval policy gate. Only
+// fires when the bypass actually overrode a queue decision — a clean demo
+// reply that would have auto-sent anyway produces no event.
+//
+// Slack relay is CONDITIONAL (TAC-284 risk-1 decision): only when
+// 'comp_regex_backstop' is among the would-have-queued triggers. The comp
+// backstop exists to catch irreversible financial commitments; demo mode
+// disabling it should be loud in Slack. Fidelity-band / model-flagged-only
+// bypasses stay PostHog-only so Slack doesn't drown in routine demo traffic
+// (every mid-fidelity demo reply trips the fidelity band).
+export interface DemoBypassedApprovalGateProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  // The triggers that WOULD have queued this draft were the guest not
+  // flagged is_demo. Non-empty by construction — the caller only fires the
+  // event when at least one trigger fired. Values are APPROVAL_TRIGGERS
+  // codes from lib/agent/stages.ts.
+  wouldHaveQueuedTriggers: string[]
+  voiceFidelity: number
+  generatedBody: string
+}
+
+// Literal kept in sync with APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP in
+// lib/agent/stages.ts. Not imported: posthog.ts is a leaf module (see the
+// dependency-direction note at the top) — importing from lib/agent would
+// reverse the direction and create a cycle (stages.ts imports this file).
+const COMP_REGEX_BACKSTOP_TRIGGER = 'comp_regex_backstop'
+
+export async function captureDemoBypassedApprovalGate(
+  props: DemoBypassedApprovalGateProps,
+): Promise<void> {
+  await capturePostHogEvent('demo_bypassed_approval_gate', props.guestId, { ...props })
+  if (props.wouldHaveQueuedTriggers.includes(COMP_REGEX_BACKSTOP_TRIGGER)) {
+    await postToSlack(formatDemoBypassedApprovalGate(props))
+  }
+}
+
+function formatDemoBypassedApprovalGate(props: DemoBypassedApprovalGateProps): string {
+  const triggerList = props.wouldHaveQueuedTriggers.map((t) => `\`${t}\``).join(', ')
+  return [
+    `*Demo guest bypassed approval gate* — comp regex backstop would have queued this draft`,
+    `would-have-queued triggers: ${triggerList}`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+    `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ].join('\n')
 }
 
 export interface WebhookSilenceProps {

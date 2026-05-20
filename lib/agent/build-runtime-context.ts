@@ -116,7 +116,7 @@ export async function buildRuntimeContext(input: {
       .single(),
     supabase
       .from('guests')
-      .select('id, phone_number, first_name, created_at, created_via')
+      .select('id, phone_number, first_name, created_at, created_via, is_demo')
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
@@ -243,6 +243,7 @@ export async function buildRuntimeContext(input: {
     firstName: guestRow.first_name,
     createdAt: new Date(guestRow.created_at),
     createdVia: guestRow.created_via,
+    isDemo: guestRow.is_demo,
   }
 
   const recognition: RecognitionSnapshot = {

@@ -33,6 +33,12 @@ export interface GuestContext {
   firstName: string | null
   createdAt: Date
   createdVia: string
+  // TAC-284: per-guest demo flag. When true, the agent runtime bypasses the
+  // TAC-212 approval policy gate (applyApprovalPolicyStage short-circuits to
+  // send) and skips the human-feel delay. Populated from guests.is_demo by
+  // build-runtime-context.ts; the column is NOT NULL DEFAULT false so this
+  // is always a real boolean for a normally-built context.
+  isDemo: boolean
 }
 
 export interface InboundMessage {

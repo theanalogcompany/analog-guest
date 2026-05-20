@@ -21,7 +21,7 @@ vi.mock('posthog-node', () => ({
   },
 }))
 
-import { captureClassificationLowConfidence } from './posthog'
+import { captureClassificationLowConfidence, captureDemoBypassedApprovalGate } from './posthog'
 
 beforeEach(() => {
   postToSlackMock.mockReset()
@@ -95,5 +95,64 @@ describe('captureClassificationLowConfidence — Slack formatter (TAC-240)', () 
     expect(args.event).toBe('classification_low_confidence')
     expect(args.properties.autoRoutedToUnknown).toBe(true)
     expect(args.properties.category).toBe('reply')
+  })
+})
+
+describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)', () => {
+  it('Slack-relays when comp_regex_backstop is among the would-have-queued triggers', async () => {
+    await captureDemoBypassedApprovalGate({
+      agentRunId: 'run-1',
+      venueId: 'v-1',
+      guestId: 'g-1',
+      wouldHaveQueuedTriggers: ['comp_regex_backstop', 'model_flagged'],
+      voiceFidelity: 0.82,
+      generatedBody: "anyway, that one's on us today",
+    })
+    expect(postToSlackMock).toHaveBeenCalledTimes(1)
+    const text = postToSlackMock.mock.calls[0][0] as string
+    expect(text).toContain('Demo guest bypassed approval gate')
+    expect(text).toContain('`comp_regex_backstop`')
+  })
+
+  it('does NOT Slack-relay for a fidelity-band-only bypass', async () => {
+    await captureDemoBypassedApprovalGate({
+      agentRunId: 'run-1',
+      venueId: 'v-1',
+      guestId: 'g-1',
+      wouldHaveQueuedTriggers: ['fidelity_below_auto_send_floor'],
+      voiceFidelity: 0.45,
+      generatedBody: 'sure, see you then',
+    })
+    expect(postToSlackMock).not.toHaveBeenCalled()
+  })
+
+  it('does NOT Slack-relay for a model-flagged-only bypass', async () => {
+    await captureDemoBypassedApprovalGate({
+      agentRunId: 'run-1',
+      venueId: 'v-1',
+      guestId: 'g-1',
+      wouldHaveQueuedTriggers: ['model_flagged'],
+      voiceFidelity: 0.9,
+      generatedBody: 'happy to set that aside for you',
+    })
+    expect(postToSlackMock).not.toHaveBeenCalled()
+  })
+
+  it('always fires the PostHog event regardless of Slack relay', async () => {
+    await captureDemoBypassedApprovalGate({
+      agentRunId: 'run-1',
+      venueId: 'v-1',
+      guestId: 'g-1',
+      wouldHaveQueuedTriggers: ['fidelity_below_auto_send_floor'],
+      voiceFidelity: 0.45,
+      generatedBody: 'sure, see you then',
+    })
+    expect(captureMock).toHaveBeenCalledTimes(1)
+    const args = captureMock.mock.calls[0][0] as {
+      event: string
+      properties: { wouldHaveQueuedTriggers: string[] }
+    }
+    expect(args.event).toBe('demo_bypassed_approval_gate')
+    expect(args.properties.wouldHaveQueuedTriggers).toEqual(['fidelity_below_auto_send_floor'])
   })
 })

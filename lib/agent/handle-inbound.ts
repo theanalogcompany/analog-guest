@@ -478,10 +478,16 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       }
     }
 
-    // Send + persist
+    // Send + persist. TAC-284: demo guests skip the human-feel delay and,
+    // when applyApprovalPolicyStage short-circuited the gate, the send is
+    // stamped review_reason='demo_bypass' (approval.reason is undefined on a
+    // normal untriggered send).
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result)
+      const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result, {
+        skipHumanFeelDelay: ctx.guest.isDemo === true,
+        reviewReason: approval.reason,
+      })
       sendSpan.end({
         output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
         content: { body: gen.result.body },
