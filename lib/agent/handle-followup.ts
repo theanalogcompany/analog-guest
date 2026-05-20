@@ -297,6 +297,13 @@ export async function handleFollowup(input: {
     // which writes review_state='auto_sent', not 'pending'. Pending card +
     // operator-sent manual outbound can legitimately coexist on the same
     // guest.
+    // TAC-284: when the gate runs (cron-triggered followups) and
+    // short-circuits for a demo guest, approval.reason carries
+    // 'demo_bypass'; threaded into scheduleAndSend below so the auto-send
+    // row is stamped review_reason='demo_bypass'. Manual followups bypass
+    // the gate entirely and leave this undefined (a manual outbound is an
+    // explicit operator send, not a bypass of anything).
+    let demoBypassReviewReason: 'demo_bypass' | undefined
     if (input.trigger.reason !== 'manual') {
       const approval = await applyApprovalPolicyStage(ctx, gen.result)
       if (approval.action === 'queue') {
@@ -397,15 +404,22 @@ export async function handleFollowup(input: {
           return { status: 'failed', stage: 'persist', error: errMsg }
         }
       }
+      demoBypassReviewReason = approval.reason
     }
 
-    // Send + persist
+    // Send + persist. TAC-284: demo guests skip the human-feel delay (in
+    // addition to the existing Follow Up button skip) and carry the
+    // demo_bypass review_reason when the gate short-circuited above.
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId } = await scheduleAndSend(
         ctx,
         gen.result,
-        { skipHumanFeelDelay: input.skipHumanFeelDelay === true },
+        {
+          skipHumanFeelDelay:
+            input.skipHumanFeelDelay === true || ctx.guest.isDemo === true,
+          reviewReason: demoBypassReviewReason,
+        },
       )
       sendSpan.end({
         output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },

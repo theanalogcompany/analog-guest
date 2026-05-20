@@ -2,6 +2,7 @@ import {
   captureClassificationLowConfidence,
   captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
+  captureDemoBypassedApprovalGate,
   captureRegenerationTriggered,
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
@@ -426,9 +427,19 @@ export async function generateStage(
  * Not invoked when the followup trigger reason is `manual` — that path
  * bypasses the gate entirely (the Command Center Follow Up button is an
  * explicit operator action; operator already approved by clicking).
+ *
+ * TAC-284: when `ctx.guest.isDemo === true` the gate short-circuits to
+ * `{ action: 'send', reason: 'demo_bypass' }` regardless of trigger
+ * evaluation — every trigger including the comp regex backstop is
+ * overridden. The orchestrator stamps `messages.review_reason='demo_bypass'`
+ * on the send so the row is self-describing. See applyApprovalPolicyStage.
  */
 export type ApprovalDecision =
-  | { action: 'send' }
+  // `reason` is only present on the demo-bypass send. A normal
+  // (untriggered) send leaves it undefined. The orchestrator threads
+  // `reason` into scheduleAndSend's `reviewReason` option so the demo
+  // bypass lands on messages.review_reason.
+  | { action: 'send'; reason?: 'demo_bypass' }
   | {
       action: 'queue'
       triggers: string[]
@@ -472,6 +483,29 @@ export async function applyApprovalPolicyStage(
   const existingPending = await findPendingDraft(ctx.venue.id, ctx.guest.id)
   if (existingPending !== null) {
     triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  }
+
+  // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
+  // would-have-queued set — including the previous_pending_held DB read — is
+  // accurate for the analytics event) but BEFORE the queue return. The
+  // bypass is total: every trigger, including the comp regex backstop, is
+  // overridden. Fail-CLOSED — only the literal boolean `true` bypasses;
+  // `undefined` / `null` / a missing column all fall through to the normal
+  // policy below. The demo_bypassed_approval_gate event fires only when the
+  // bypass actually overrode a queue decision (triggers non-empty); a clean
+  // demo reply that would have auto-sent anyway produces no event.
+  if (ctx.guest.isDemo === true) {
+    if (triggers.length > 0) {
+      await captureDemoBypassedApprovalGate({
+        agentRunId: ctx.agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        wouldHaveQueuedTriggers: triggers,
+        voiceFidelity: generation.voiceFidelity,
+        generatedBody: generation.body,
+      })
+    }
+    return { action: 'send', reason: 'demo_bypass' }
   }
 
   if (triggers.length === 0) {

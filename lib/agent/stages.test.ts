@@ -21,6 +21,10 @@ const captureLowMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
+// TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
+// when a demo guest's bypass overrides a would-have-queued decision. Mocked
+// so the demo-bypass tests can assert the payload without a PostHog call.
+const captureDemoBypassMock = vi.fn()
 // TAC-212 + TAC-264: findPendingDraft inside applyApprovalPolicyStage calls
 // createAdminClient → supabase.from(...).select(...).limit(1).maybeSingle().
 // We mock createAdminClient to return a chainable stub whose terminal
@@ -71,6 +75,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
     captureClassificationLowMock(...args),
   captureCorpusRetrievalBelowThreshold: (...args: unknown[]) => captureLowMock(...args),
   captureDashViolationPersisted: vi.fn(),
+  captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
@@ -693,6 +698,175 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     )
     expect(decision.action).toBe('send')
     expect(warnSpy).toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// applyApprovalPolicyStage — demo guest bypass (TAC-284)
+// ---------------------------------------------------------------------------
+
+describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+    captureDemoBypassMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // makeCtx casts `guest`, so isDemo isn't set by default — these helpers
+  // make the demo-flag intent explicit at each call site.
+  function demoCtx(): RuntimeContext {
+    return makeCtx({
+      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+    })
+  }
+
+  it('short-circuits to send (reason=demo_bypass) when every trigger would have fired', async () => {
+    // fidelity band + model flag + comp regex + sticky pending — all four.
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      demoCtx(),
+      makeGenerationResult({
+        voiceFidelity: 0.45,
+        body: "the next round's on the house",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp',
+      }),
+    )
+    expect(decision.action).toBe('send')
+    if (decision.action !== 'send') return
+    expect(decision.reason).toBe('demo_bypass')
+  })
+
+  it('fires demo_bypassed_approval_gate with the full would-have-queued trigger set', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
+      error: null,
+    })
+    await applyApprovalPolicyStage(
+      demoCtx(),
+      makeGenerationResult({
+        voiceFidelity: 0.45,
+        body: "the next round's on the house",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp',
+      }),
+    )
+    expect(captureDemoBypassMock).toHaveBeenCalledTimes(1)
+    const payload = captureDemoBypassMock.mock.calls[0][0] as {
+      agentRunId: string
+      venueId: string
+      guestId: string
+      wouldHaveQueuedTriggers: string[]
+      voiceFidelity: number
+      generatedBody: string
+    }
+    expect(payload.wouldHaveQueuedTriggers).toHaveLength(4)
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    )
+    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+    )
+    expect(payload.agentRunId).toBe('run-1')
+    expect(payload.venueId).toBe('venue-1')
+    expect(payload.guestId).toBe('guest-1')
+    expect(payload.voiceFidelity).toBe(0.45)
+    expect(payload.generatedBody).toBe("the next round's on the house")
+  })
+
+  it('fires the event carrying comp_regex_backstop when only the comp regex would have fired', async () => {
+    const decision = await applyApprovalPolicyStage(
+      demoCtx(),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        body: "anyway, that one's on us today",
+        requiresOperatorApproval: false,
+      }),
+    )
+    expect(decision.action).toBe('send')
+    expect(captureDemoBypassMock).toHaveBeenCalledTimes(1)
+    const payload = captureDemoBypassMock.mock.calls[0][0] as {
+      wouldHaveQueuedTriggers: string[]
+    }
+    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  })
+
+  it('does NOT fire the event for a clean demo reply that would have auto-sent anyway', async () => {
+    const decision = await applyApprovalPolicyStage(
+      demoCtx(),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('send')
+    if (decision.action !== 'send') return
+    // Still stamped demo_bypass — every demo send is, even untriggered ones.
+    expect(decision.reason).toBe('demo_bypass')
+    // ...but no event, because nothing would have queued.
+    expect(captureDemoBypassMock).not.toHaveBeenCalled()
+  })
+
+  // Fail-closed: only the literal boolean `true` bypasses. Any other value
+  // flows through the normal policy. One case per non-true value.
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['false', false],
+  ])('fails CLOSED — isDemo=%s with every trigger still queues', async (_label, isDemoValue) => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
+      error: null,
+    })
+    const ctx = makeCtx({
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        isDemo: isDemoValue,
+      } as unknown as RuntimeContext['guest'],
+    })
+    const decision = await applyApprovalPolicyStage(
+      ctx,
+      makeGenerationResult({
+        voiceFidelity: 0.45,
+        body: "the next round's on the house",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    expect(captureDemoBypassMock).not.toHaveBeenCalled()
+  })
+
+  it('non-demo guest with every trigger still queues (TAC-212 regression guard)', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({
+        guest: {
+          id: 'guest-1',
+          firstName: 'Sam',
+          isDemo: false,
+        } as RuntimeContext['guest'],
+      }),
+      makeGenerationResult({
+        voiceFidelity: 0.45,
+        body: "the next round's on the house",
+        requiresOperatorApproval: true,
+        approvalReason: 'comp',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toHaveLength(4)
   })
 })
 

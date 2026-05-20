@@ -109,12 +109,19 @@ async function persistOutbound(
  * are bypassed. Send + persist still happen. Used by the Command Center
  * Follow Up button — operator clicked "send" expecting a fast result, and
  * a manual outbound is by definition not a "natural" reply where typing-
- * indicator theatre belongs.
+ * indicator theatre belongs. TAC-284 also passes this for demo guests.
+ *
+ * `options.reviewReason`: when set, written to `messages.review_reason` on
+ * the auto-sent row. The auto-send path normally leaves `review_reason`
+ * null (it's a queue-path field — see persistOrRegenQueuedDraft). TAC-284
+ * uses it to stamp `'demo_bypass'` so a demo-bypassed auto-send is
+ * self-describing in the conversation viewer + SQL forensics without a
+ * PostHog cross-reference.
  */
 export async function scheduleAndSend(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  options: { skipHumanFeelDelay?: boolean } = {},
+  options: { skipHumanFeelDelay?: boolean; reviewReason?: string } = {},
 ): Promise<{ outboundMessageId: string; providerMessageId: string }> {
   const skipDelay = options.skipHumanFeelDelay === true
 
@@ -194,13 +201,16 @@ export async function scheduleAndSend(
   // PERSIST — failures fire alert with providerMessageId + throw.
   // Row shape is centralized in buildOutboundInsert; auto-send overrides
   // layer in status='sent', review_state='auto_sent' (TAC-258), sent_at,
-  // provider_message_id. The queue path lives in persistOrRegenQueuedDraft below.
+  // provider_message_id. review_reason is null on a normal auto-send and
+  // 'demo_bypass' when TAC-284's demo bypass routed this draft here.
+  // The queue path lives in persistOrRegenQueuedDraft below.
   const supabase = createAdminClient()
   const insertResult = await persistOutbound(
     supabase,
     buildOutboundInsert(ctx, generation, {
       status: 'sent',
       review_state: 'auto_sent',
+      review_reason: options.reviewReason ?? null,
       sent_at: new Date().toISOString(),
       provider_message_id: providerMessageId,
     }),
