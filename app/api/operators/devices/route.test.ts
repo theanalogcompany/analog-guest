@@ -19,7 +19,7 @@ import { POST } from './route'
 const VALID_TOKEN = 'a'.repeat(64)
 
 function makeRequest(body: unknown): Request {
-  return new Request('https://example.test/api/operator/devices', {
+  return new Request('https://example.test/api/operators/devices', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: typeof body === 'string' ? body : JSON.stringify(body),
