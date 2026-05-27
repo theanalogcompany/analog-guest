@@ -548,6 +548,25 @@ The mobile-operator approval queue is served by six route handlers under `app/ap
 
 **APNs push (TAC-207).** `POST /api/operator/devices` accepts `{ token: string, platform?: string }` (`token` Zod-validated: hex-only, 32-256 chars, opaque-length per Apple's guidance; `platform` is sent by the iOS client today as `"ios"` but **not persisted** — iOS-only pilot, no column. Zod's default object behavior strips unknown keys, so `platform` is silently accepted + ignored. If multi-platform support arrives, add a column AND validate here at the same time). Upserts onto `operators.apns_device_token` + `apns_token_updated_at` (migration 024). Re-registration is idempotent. The token is consumed by `sendDraftFlaggedPush` in `lib/notifications/send.ts`, fired fire-and-forget from `handle-inbound.ts` + `handle-followup.ts` (via `waitUntil`) immediately after `persistOrRegenQueuedDraft` succeeds in the queue branch. Trigger filter is **operator-decided** (plan-review §1): fire on `model_flagged` / `comp_regex_backstop` / `fidelity_below_auto_send_floor`; skip on `previous_pending_held` (regen of an already-pushed draft). Two PostHog events: `push.sent` (per send attempt, `ok:boolean` carries success vs. failure — no Slack relay; analyst-facing) and `push.token_invalid` (APNs 410 Gone OR 400 BadDeviceToken — nulls the token columns + Slack-relays because the operator's push pipeline is non-functional until they reinstall the app). Privacy invariant: payload carries `{ aps: { alert: {title, body}, badge, sound }, draftId, guestId, operatorId }` only — no message contents, ever (asserted in `send.test.ts`). Body is `"Reply to {firstName} — {context}"` where context is a categorical trigger label.
 
+---
+
+## Cross-repo contracts
+
+When a ticket spans this repo and `analog-operator` (or any other sibling repo) — TAC-207 ↔ TAC-288 is the canonical example — the ticket description MUST contain a `## Contract` section that locks the boundary character-exact:
+
+- Endpoint paths (full path string, HTTP method)
+- Request body shape and a concrete example
+- Response shapes per status code (including the 401/404/409 negatives)
+- Required env vars with format notes (multi-line PEM vs single-line secret, etc.)
+
+The Contract section is the single source of truth. Both repos implement against it; at integration time the Contract resolves any disagreement.
+
+**Deviation rule.** If implementation needs to diverge from the Contract — for example, the codebase convention is `/api/operator/*` (singular) but the Contract drafted `/api/operators/*` (plural) — the ticket description gets updated FIRST during the plan-review phase. The implementation never silently diverges from a still-stale Contract. The 2026-05-27 TAC-207 incident — server shipped singular without updating TAC-288's plural spec, the iOS client hit 404 on registration, recovery cost a hotfix plus a re-alignment cycle — is the documented case for why this rule exists.
+
+**Sequencing rule.** Cross-repo work ships sequentially, **server-first**. Before the sibling client ticket starts, the server endpoint must be deployed AND verified via `curl` against the Contract's exact request shape, returning the expected status code. The bar is "401 on missing auth" (proves the route exists, parses, and reaches the auth check) — NOT "404 on missing route," NOT "400 on bad body." A 404 means the route wasn't deployed where the Contract said it would be; a 400 on a valid Contract-shaped body means the body schema diverged.
+
+**UAT gate.** Manual end-to-end UAT is a precondition for marking the server ticket Done — never deferred to the sibling client ticket. Unit tests passing on both sides does not prove the contract is consistent. TAC-207 surfaced this: server tests green, client tests green, integration broken on the first push attempt 9 hours after deploy.
+
 ## Synthetic guests
 
 Four synthetic guests are seeded per venue when `run-test-scenarios` runs against that venue for the first time. Deterministic phone numbers, reused across venues:
@@ -581,6 +600,8 @@ One line per var, grouped by purpose. This section is the index — defaults and
 - **Cron:** `CRON_SECRET` (bearer auth for Vercel cron handlers).
 - **APNs push (TAC-207):** `APNS_AUTH_KEY` (PEM contents of the `.p8` private key, multi-line value — pasted from 1Password); `APNS_KEY_ID` (10-char Apple key identifier, `S4PR9KNPKA` for analog); `APNS_TEAM_ID` (10-char Apple team identifier, `W4J9A9K9YX`); `APNS_BUNDLE_ID` (`company.theanalog.operator`); `APNS_ENV` (`production` or `sandbox` — selects the APNs host).
 - **Scripts / dev:** `TEST_VENUE_ID` (used by `npm run send-test`); `NODE_ENV` (switches Langfuse + other dev/test branches).
+
+**Boot-time validation.** Every required env var must have a startup validator that crashes loudly at module init with a useful error message if missing or malformed. For credential env vars (PEM keys, JWT secrets, signed-payload secrets), the validator MUST parse the value once at boot — not lazily on first use. The 2026-05-27 `APNS_AUTH_KEY` paste bug — pasted without the `-----END PRIVATE KEY-----` footer, signed nothing, failed silently at the first push-send attempt 9 hours after deploy — is the documented example. The fix is to parse the `.p8` as PKCS#8 in `lib/notifications/apns/jwt.ts` at module load with a clear error message naming the suspected paste issue (truncated footer, line-ending munging, wrapping quotes, etc.). When you add a new required env var, ship the validator in the same PR.
 
 ---
 
