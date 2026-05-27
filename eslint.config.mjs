@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local scratch dir (see tsconfig.json + .gitignore for symmetry).
+    "scripts/sandbox/**",
   ]),
 ]);
 

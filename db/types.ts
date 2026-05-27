@@ -673,6 +673,8 @@ export type Database = {
       }
       operators: {
         Row: {
+          apns_device_token: string | null
+          apns_token_updated_at: string | null
           auth_user_id_email: string | null
           auth_user_id_phone: string | null
           avatar_url: string | null
@@ -688,6 +690,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          apns_device_token?: string | null
+          apns_token_updated_at?: string | null
           auth_user_id_email?: string | null
           auth_user_id_phone?: string | null
           avatar_url?: string | null
@@ -703,6 +707,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          apns_device_token?: string | null
+          apns_token_updated_at?: string | null
           auth_user_id_email?: string | null
           auth_user_id_phone?: string | null
           avatar_url?: string | null
