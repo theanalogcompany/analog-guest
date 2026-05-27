@@ -61,6 +61,8 @@ When the 3-way classification is **Proceed**, route by `lastQuestionComment`:
 4. Use the Explore subagent to map the affected surface area. Read at least one existing file the new code will sit next to (per the audit-first rule). Read migrations touching relevant tables. Read existing tests for modules being modified.
 5. Identify existing utilities to reuse — don't reinvent. Specifically check `lib/voice-training/`, `lib/voices/`, `lib/recognition/`, `lib/agent/`, `lib/auth/`, `lib/observability/`, `lib/schemas/`, `lib/ui/` for patterns that match. Run grep for any new function name you'd add to confirm it doesn't already exist.
 
+**Cross-repo audit.** If the ticket body has a `## Contract` section, OR references a sibling ticket in another repo (e.g., TAC-207 ↔ TAC-288), fetch the sibling ticket via Linear and read both the Contract section and the sibling's body before writing the plan. The plan in Phase 2 must cite the Contract VERBATIM wherever it touches contract surface — endpoint paths, request/response shapes, env var names + formats. Any deviation from the Contract (e.g., codebase convention is singular `/api/operator/*` but the Contract drafted plural `/api/operators/*`) requires updating the ticket description FIRST during plan-review — implementation never silently diverges. See CLAUDE.md "Cross-repo contracts."
+
 # Phase 2 — Plan
 6. Output a written plan covering: scope, file paths to touch, function decomposition, sequence of operations, existing patterns being reused, edge cases, what you intentionally chose NOT to do, open questions.
 7. If the ticket's Testing section is blank or partial, propose automated coverage (unit tests, E2E, API smoke) as part of the plan. Match the categorization rules in the qa-runner subagent.
@@ -81,6 +83,8 @@ The implicit question on the plan post is "does this plan look right?" Advance t
 13. If a question surfaces mid-build that wasn't in the plan, post `[NEEDS-INPUT]` (threaded), update `[POLLING-STATE]`, ScheduleWakeup(60s), exit. Don't guess.
 14. **CLAUDE.md hygiene check.** Before exiting Build, evaluate whether this change introduces anything that should be in CLAUDE.md per the "Keeping this file current" rule. Specifically check for: new scripts in `package.json`, new migrations (with migration log entry), new library patterns or conventions, gotchas discovered during implementation, new directories, new env vars, new workflow rules, or version bumps to documented dependencies. If yes, update CLAUDE.md in the same commit as the code change. If no, note in the PR description: *"CLAUDE.md update considered: [what you checked, why no update needed]."* If you have not written a "CLAUDE.md update considered: …" line in the PR description by the time Phase 5 step 21 runs, the task is incomplete — go back and add it before opening the PR.
 
+**Env-var validators.** If this change introduces a new required env var, include a startup validator in the SAME PR. Don't ship the env var without the validator. For credential env vars (PEM keys, JWT secrets, signed-payload secrets), parse the value once at module init — not lazily on first use — so a malformed paste crashes at deploy time, not 9 hours later on first call. See CLAUDE.md "Environment variables" → boot-time validation.
+
 # Phase 4 — Verify
 15. `npx tsc --noEmit` — must pass.
 16. `npm run lint` — must pass.
@@ -93,6 +97,8 @@ The implicit question on the plan post is "does this plan look right?" Advance t
 21. `gh pr create`. Title matches commit subject. Body summarizes changes + test count delta + any plan deviations + CLAUDE.md note (per Phase 3 step 14) + anything you'd push back on.
 22. Post a Linear comment with the PR link (threaded via `parentId`). Move ticket status to "Ready for QA."
 23. Exit. No ScheduleWakeup. Manual merge gate — operator runs `gh pr merge --squash --delete-branch` after reviewing the PR on GitHub.
+
+**Cross-repo UAT gate.** If the Phase 1 cross-repo audit flagged a sibling ticket, the PR description MUST explicitly call out: *"Cross-repo UAT REQUIRED before Done — unit tests passing on both sides does not prove the contract is consistent."* Without manual end-to-end UAT confirming the cross-repo behavior, the ticket stays in "Ready for QA" — the operator runs UAT against the deployed sibling client before moving to Done. The 2026-05-27 TAC-207 incident (server tests green, client tests green, integration broken on first push 9 hours after deploy) is the documented case.
 
 # Polling protocol
 
@@ -176,3 +182,5 @@ Default: every bot comment posts with `parentId = lastBotComment.id` (or omitted
 - Wind-down is operator-driven. The agent never decides to wind down on its own — the substantive reply must indicate stopping. The 3-way classification (Proceed / Modify / Wind-down) is the only path to `[POLLING-CLOSED]`.
 - The agent never auto-closes the ticket. Status is set automatically only at Phase 5 step 22 (PR ship → "Ready for QA"). Wind-down, timeout, and human-review exits leave status untouched — operators close manually. The permission hook enforces this.
 - CLAUDE.md hygiene is mandatory in every Build phase. Skipping = drift, drift = future pain.
+- Cross-repo tickets MUST cite the `## Contract` section verbatim in the plan and ship server-first with curl-verified deployment before the sibling client work starts. Manual end-to-end UAT is a Done-gate; unit-test pass on both sides is not sufficient. See CLAUDE.md "Cross-repo contracts."
+- New required env vars MUST ship in the same PR as a startup validator that crashes loudly at module init. Credential env vars (PEM keys, JWT secrets) MUST be parsed once at boot, not lazily on first use. See CLAUDE.md "Environment variables" → boot-time validation.
