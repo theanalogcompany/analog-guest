@@ -44,39 +44,39 @@ describe('POST /api/operator/devices', () => {
   it('returns 401 when bearer auth fails', async () => {
     const { AuthError } = await import('@/lib/auth/types')
     verifyMock.mockRejectedValueOnce(new AuthError(401, 'missing Authorization header'))
-    const res = await POST(makeRequest({ deviceToken: VALID_TOKEN }), {
+    const res = await POST(makeRequest({ token: VALID_TOKEN }), {
       params: Promise.resolve({}),
     })
     expect(res.status).toBe(401)
     expect(fromMock).not.toHaveBeenCalled()
   })
 
-  it('returns 400 on missing deviceToken', async () => {
+  it('returns 400 on missing token', async () => {
     const res = await POST(makeRequest({}), { params: Promise.resolve({}) })
     expect(res.status).toBe(400)
     expect(fromMock).not.toHaveBeenCalled()
   })
 
-  it('returns 400 on non-hex deviceToken', async () => {
+  it('returns 400 on non-hex token', async () => {
     const res = await POST(
-      makeRequest({ deviceToken: 'not-hex-!!' + 'x'.repeat(30) }),
+      makeRequest({ token: 'not-hex-!!' + 'x'.repeat(30) }),
       { params: Promise.resolve({}) },
     )
     expect(res.status).toBe(400)
     expect(fromMock).not.toHaveBeenCalled()
   })
 
-  it('returns 400 on too-short deviceToken', async () => {
+  it('returns 400 on too-short token', async () => {
     const res = await POST(
-      makeRequest({ deviceToken: 'abcd' }),
+      makeRequest({ token: 'abcd' }),
       { params: Promise.resolve({}) },
     )
     expect(res.status).toBe(400)
   })
 
-  it('returns 400 on too-long deviceToken (>256 chars)', async () => {
+  it('returns 400 on too-long token (>256 chars)', async () => {
     const res = await POST(
-      makeRequest({ deviceToken: 'a'.repeat(257) }),
+      makeRequest({ token: 'a'.repeat(257) }),
       { params: Promise.resolve({}) },
     )
     expect(res.status).toBe(400)
@@ -89,7 +89,7 @@ describe('POST /api/operator/devices', () => {
 
   it('upserts the token + timestamp on the authenticated operator and returns 200', async () => {
     const res = await POST(
-      makeRequest({ deviceToken: VALID_TOKEN }),
+      makeRequest({ token: VALID_TOKEN }),
       { params: Promise.resolve({}) },
     )
     expect(res.status).toBe(200)
@@ -104,7 +104,7 @@ describe('POST /api/operator/devices', () => {
   it('returns 500 when the DB update fails', async () => {
     updateThenMock.mockResolvedValueOnce({ error: { message: 'db connection broke' } })
     const res = await POST(
-      makeRequest({ deviceToken: VALID_TOKEN }),
+      makeRequest({ token: VALID_TOKEN }),
       { params: Promise.resolve({}) },
     )
     expect(res.status).toBe(500)
@@ -112,15 +112,27 @@ describe('POST /api/operator/devices', () => {
 
   it('accepts re-registration of the same token (idempotent)', async () => {
     const res1 = await POST(
-      makeRequest({ deviceToken: VALID_TOKEN }),
+      makeRequest({ token: VALID_TOKEN }),
       { params: Promise.resolve({}) },
     )
     expect(res1.status).toBe(200)
     const res2 = await POST(
-      makeRequest({ deviceToken: VALID_TOKEN }),
+      makeRequest({ token: VALID_TOKEN }),
       { params: Promise.resolve({}) },
     )
     expect(res2.status).toBe(200)
     expect(updateMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('accepts the wire contract { token, platform } and silently ignores platform', async () => {
+    const res = await POST(
+      makeRequest({ token: VALID_TOKEN, platform: 'ios' }),
+      { params: Promise.resolve({}) },
+    )
+    expect(res.status).toBe(200)
+    const [updatePayload] = updateMock.mock.calls[0]!
+    expect(updatePayload.apns_device_token).toBe(VALID_TOKEN)
+    // platform is not persisted (iOS-only pilot, no column).
+    expect('platform' in updatePayload).toBe(false)
   })
 })
