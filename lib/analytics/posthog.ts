@@ -660,3 +660,75 @@ export async function captureOperatorMessageActionUndone(
 ): Promise<void> {
   await capturePostHogEvent('operator_message_action_undone', props.guestId, { ...props })
 }
+
+// ---------------------------------------------------------------------------
+// APNs push events (TAC-207)
+// ---------------------------------------------------------------------------
+//
+// Two events, asymmetric on Slack relay:
+//   push.sent — fires on every send attempt (success OR transport failure).
+//               ok:boolean carries the binary. No Slack relay: this is
+//               product analytics, not operational. Spikes in ok=false
+//               surface in PostHog dashboards.
+//   push.token_invalid — fires when APNs returns 410 Gone or 400 +
+//               reason=BadDeviceToken (the two ways APNs says "this device
+//               token is dead"). The orchestrator has already nulled the
+//               operator's token columns by the time the event fires; this
+//               event is the breadcrumb. Slack-relays because the operator's
+//               push pipeline is now non-functional until they reinstall.
+//
+// Distinct ID is the operator (not the guest) — push events are about the
+// operator surface, not the guest conversation. Aggregations roll up cleanly
+// by operator that way.
+
+export interface PushSentProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  operatorId: string
+  draftId: string
+  primaryTrigger: string
+  /** True iff APNs returned 200. False on any non-200 OR transport failure. */
+  ok: boolean
+  /** HTTP status from APNs, or null on transport-level failure (no response). */
+  status: number | null
+  /** Short error code on failure (jwt_failed / connection_failed / timeout / apns_status_non_200). Null on ok. */
+  error: string | null
+  /** APNs `reason` string from non-200 bodies, or transport error detail. Null on ok. */
+  errorDetail: string | null
+  /** Badge count carried in the payload. */
+  badge: number
+}
+
+export async function capturePushSent(props: PushSentProps): Promise<void> {
+  await capturePostHogEvent('push.sent', props.operatorId, { ...props })
+}
+
+export interface PushTokenInvalidProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  operatorId: string
+  draftId: string
+  primaryTrigger: string
+  /** 410 (Unregistered) or 400 (BadDeviceToken). */
+  status: number
+  /** APNs `reason` field. Null on 410 with empty body. */
+  reason: string | null
+}
+
+export async function capturePushTokenInvalid(props: PushTokenInvalidProps): Promise<void> {
+  await capturePostHogEvent('push.token_invalid', props.operatorId, { ...props })
+  await postToSlack(formatPushTokenInvalid(props))
+}
+
+function formatPushTokenInvalid(props: PushTokenInvalidProps): string {
+  return [
+    `*APNs push token invalid* — status \`${props.status}\`${props.reason ? ` reason \`${props.reason}\`` : ''}`,
+    `operator: \`${props.operatorId}\` (token nulled; operator must re-register via the operator app)`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `draft: \`${props.draftId}\` · trigger: \`${props.primaryTrigger}\``,
+    `run: \`${props.agentRunId}\``,
+  ].join('\n')
+}

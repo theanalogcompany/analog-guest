@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { waitUntil } from '@vercel/functions'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
@@ -6,6 +7,7 @@ import {
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -453,6 +455,30 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             inboundBody: ctx.currentMessage?.body ?? null,
             generatedBody: gen.result.body,
           })
+        }
+        // TAC-207: fire APNs push to every operator whose allowlist covers
+        // this venue. waitUntil composes with the webhook's outer keep-alive
+        // window — push never blocks the agent's return. Helper filters
+        // primaryTrigger internally (model_flagged / comp_regex_backstop /
+        // fidelity_below_auto_send_floor fire; previous_pending_held skips)
+        // and is `never throws` so the .catch is defensive belt-and-braces.
+        if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
+          waitUntil(
+            sendDraftFlaggedPush({
+              agentRunId,
+              venueId: ctx.venue.id,
+              guestId: ctx.guest.id,
+              guestFirstName: ctx.guest.firstName,
+              draftId: outboundMessageId,
+              primaryTrigger: approval.primaryTrigger,
+            }).catch((e) => {
+              console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
+                agentRunId,
+                draftId: outboundMessageId,
+                error: e instanceof Error ? e.message : String(e),
+              })
+            }),
+          )
         }
         trace.update({
           output: {

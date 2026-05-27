@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { waitUntil } from '@vercel/functions'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
+import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -381,6 +383,28 @@ export async function handleFollowup(input: {
               inboundBody: null,
               generatedBody: gen.result.body,
             })
+          }
+          // TAC-207: cron-triggered followups (day_* / event) that hit the
+          // queue path get a push too. Manual-followup bypasses the gate
+          // entirely above (operator already approved by clicking), so this
+          // never fires for reason='manual'.
+          if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
+            waitUntil(
+              sendDraftFlaggedPush({
+                agentRunId,
+                venueId: ctx.venue.id,
+                guestId: ctx.guest.id,
+                guestFirstName: ctx.guest.firstName,
+                draftId: outboundMessageId,
+                primaryTrigger: approval.primaryTrigger,
+              }).catch((e) => {
+                console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
+                  agentRunId,
+                  draftId: outboundMessageId,
+                  error: e instanceof Error ? e.message : String(e),
+                })
+              }),
+            )
           }
           trace.update({
             output: {
