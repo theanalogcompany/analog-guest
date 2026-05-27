@@ -1,15 +1,5 @@
-// POST /api/operators/devices — operator app registers its APNs device token
+// POST /api/operator/devices — operator app registers its APNs device token
 // (TAC-207). Single token per operator for pilot; multi-device deferred.
-//
-// PATH CARVE-OUT — the rest of the operator API is SINGULAR (/api/operator/queue,
-// /api/operator/messages/[id]/{approve,edit,skip,undo}). This endpoint is the
-// one plural exception because the analog-operator iOS client (TAC-288) was
-// built against the ticket's draft text which said /api/operators/devices
-// (plural), and shipped to TestFlight before the server-side path was
-// finalized. Once a TestFlight build is in operators' hands, the URL is
-// locked-in until force-update. Future operator endpoints should follow the
-// SINGULAR convention; this carve-out is a one-off documented under
-// "Operator API" in CLAUDE.md.
 //
 // Re-registration is idempotent: the same token from the same operator just
 // refreshes apns_token_updated_at. A NEW token (e.g. iPhone reinstall after
