@@ -12,6 +12,13 @@
 // opaque, "do not assume a fixed length." We reject non-hex / empty /
 // absurd-length values but don't enforce 64 chars. The mobile client is
 // trusted at this boundary (it's the operator's own app).
+//
+// Wire body shape: `{ token: string, platform?: string }`. `token` is the
+// APNs device token; `platform` is sent by the client today as "ios" but
+// we don't persist it (iOS-only pilot — the column doesn't exist). Zod
+// strips unknown keys by default so `platform` is silently accepted +
+// ignored. If multi-platform support arrives, add a column and validate
+// here at the same time.
 
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -24,11 +31,11 @@ export const dynamic = 'force-dynamic'
 const HEX_RE = /^[0-9a-f]+$/i
 
 const BodySchema = z.object({
-  deviceToken: z
+  token: z
     .string()
-    .min(32, 'deviceToken too short')
-    .max(256, 'deviceToken too long')
-    .regex(HEX_RE, 'deviceToken must be hex'),
+    .min(32, 'token too short')
+    .max(256, 'token too long')
+    .regex(HEX_RE, 'token must be hex'),
 })
 
 export const POST = withOperatorAuth(async (request, { operator }) => {
@@ -51,7 +58,7 @@ export const POST = withOperatorAuth(async (request, { operator }) => {
   const { error } = await supabase
     .from('operators')
     .update({
-      apns_device_token: parsed.data.deviceToken,
+      apns_device_token: parsed.data.token,
       apns_token_updated_at: new Date().toISOString(),
     })
     .eq('id', operator.operatorId)
