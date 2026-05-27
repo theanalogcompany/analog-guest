@@ -308,6 +308,15 @@ export async function handleFollowup(input: {
     let demoBypassReviewReason: 'demo_bypass' | undefined
     if (input.trigger.reason !== 'manual') {
       const approval = await applyApprovalPolicyStage(ctx, gen.result)
+      console.log('[agent] followup approval decision', {
+        agentRunId,
+        triggerReason: input.trigger.reason,
+        action: approval.action,
+        primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
+        triggers: approval.action === 'queue' ? approval.triggers : [],
+        voiceFidelity: gen.result.voiceFidelity,
+        modelRequiresApproval: gen.result.requiresOperatorApproval,
+      })
       if (approval.action === 'queue') {
         const queueSpan = trace.span('queue', {
           primaryTrigger: approval.primaryTrigger,

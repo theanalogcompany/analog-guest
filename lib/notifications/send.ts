@@ -98,7 +98,10 @@ async function loadRecipients(venueId: string): Promise<OperatorRecipient[]> {
     .eq('venue_id', venueId)
     .not('operator.apns_device_token', 'is', null)
   if (error || !data) {
-    console.error('apns: loadRecipients failed', { venueId, error: error?.message })
+    console.error('[apns] loadRecipients query failed', {
+      venueId,
+      error: error?.message,
+    })
     return []
   }
   const seen = new Set<string>()
@@ -111,6 +114,16 @@ async function loadRecipients(venueId: string): Promise<OperatorRecipient[]> {
     seen.add(op.id)
     out.push({ id: op.id, apnsDeviceToken: op.apns_device_token })
   }
+  // Diagnostic delta: rawRowCount > 0 with recipientCount === 0 means the
+  // operator_venues rows exist but the embedded apns_device_token filter
+  // dropped them all (or row.operator was unexpectedly null/array-shaped).
+  // recipientCount === 0 with rawRowCount === 0 means no operator is
+  // allowlisted for this venue.
+  console.log('[apns] loadRecipients', {
+    venueId,
+    rawRowCount: data.length,
+    recipientCount: out.length,
+  })
   return out
 }
 
@@ -179,14 +192,35 @@ async function nullOperatorToken(operatorId: string): Promise<void> {
 export async function sendDraftFlaggedPush(
   input: SendDraftFlaggedPushInput,
 ): Promise<void> {
+  // Entry log is unconditional so Vercel logs surface every invocation
+  // before any early-return path. PostHog events also fire downstream, but
+  // those aren't visible alongside agent logs and surface ~minutes late.
+  const baseFields = {
+    agentRunId: input.agentRunId,
+    venueId: input.venueId,
+    guestId: input.guestId,
+    draftId: input.draftId,
+    primaryTrigger: input.primaryTrigger,
+  }
+  console.log('[apns] sendDraftFlaggedPush called', baseFields)
+
   if (!shouldSendDraftFlaggedPush(input.primaryTrigger)) {
+    console.log('[apns] skipped: primaryTrigger not in fire set', baseFields)
     return
   }
 
   const recipients = await loadRecipients(input.venueId)
   if (recipients.length === 0) {
+    console.log('[apns] skipped: no operators with apns_device_token for venue', {
+      ...baseFields,
+    })
     return
   }
+  console.log('[apns] fanout begin', {
+    ...baseFields,
+    recipientCount: recipients.length,
+    recipientIds: recipients.map((r) => r.id),
+  })
 
   const body = buildPushBody(input.guestFirstName, input.primaryTrigger)
 
@@ -209,6 +243,17 @@ export async function sendDraftFlaggedPush(
     })
 
     if (!result.ok) {
+      // Transport-level failure: no APNs status (we never got a response).
+      // The detail field carries which env var was missing or which
+      // network step failed. Vercel External APIs panel will show no
+      // outgoing api.push.apple.com request in this case, by design — the
+      // failure happened before http2.connect.
+      console.error('[apns] send failed (transport)', {
+        ...baseFields,
+        operatorId: recipient.id,
+        error: result.error,
+        detail: result.detail,
+      })
       await capturePushSent({
         agentRunId: input.agentRunId,
         venueId: input.venueId,
@@ -229,6 +274,18 @@ export async function sendDraftFlaggedPush(
     const tokenInvalid =
       status === APNS_TOKEN_INVALID_STATUS ||
       (status === APNS_BAD_DEVICE_TOKEN_STATUS && reason === 'BadDeviceToken')
+
+    if (status === 200) {
+      console.log('[apns] send ok', { ...baseFields, operatorId: recipient.id, badge })
+    } else {
+      console.warn('[apns] APNs returned non-200', {
+        ...baseFields,
+        operatorId: recipient.id,
+        status,
+        reason,
+        tokenInvalid,
+      })
+    }
 
     if (tokenInvalid) {
       await nullOperatorToken(recipient.id)

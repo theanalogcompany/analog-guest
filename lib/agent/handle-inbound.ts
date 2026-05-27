@@ -374,6 +374,14 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // 4 triggers (fidelity_below_auto_send_floor, model_flagged,
     // comp_regex_backstop, previous_pending_held); any one queues.
     const approval = await applyApprovalPolicyStage(ctx, gen.result)
+    console.log('[agent] inbound approval decision', {
+      agentRunId,
+      action: approval.action,
+      primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
+      triggers: approval.action === 'queue' ? approval.triggers : [],
+      voiceFidelity: gen.result.voiceFidelity,
+      modelRequiresApproval: gen.result.requiresOperatorApproval,
+    })
 
     if (approval.action === 'queue') {
       const queueSpan = trace.span('queue', {
