@@ -200,6 +200,7 @@ export type Database = {
       }
       guests: {
         Row: {
+          context: Json
           created_at: string
           created_via: string
           distance_to_venue_miles: number | null
@@ -222,6 +223,7 @@ export type Database = {
           venue_id: string
         }
         Insert: {
+          context?: Json
           created_at?: string
           created_via: string
           distance_to_venue_miles?: number | null
@@ -244,6 +246,7 @@ export type Database = {
           venue_id: string
         }
         Update: {
+          context?: Json
           created_at?: string
           created_via?: string
           distance_to_venue_miles?: number | null

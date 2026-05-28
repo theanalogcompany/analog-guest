@@ -193,12 +193,13 @@ function makeGeneration(): GenerateMessageResult {
     reasoning: 'matches venue voice',
     requiresOperatorApproval: false,
     approvalReason: '',
+    contextUpdate: {},
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.14.0',
+    promptVersion: 'v1.15.0',
     dashViolationPersisted: false,
   }
 }
@@ -270,7 +271,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     expect(updPayload).toMatchObject({
       body: 'regenerated draft body',
       voice_fidelity: 0.78,
-      prompt_version: 'v1.14.0',
+      prompt_version: 'v1.15.0',
       category: 'reply',
       reply_to_message_id: 'inbound-1',
       review_reason: 'comp_regex_backstop',

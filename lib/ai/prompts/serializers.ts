@@ -1,5 +1,11 @@
 import type { EligibleMechanic } from '@/lib/recognition'
-import type { BrandPersona, MenuItem, VenueInfo } from '@/lib/schemas'
+import {
+  type BrandPersona,
+  isEmptyGuestContext,
+  type MenuItem,
+  type ParsedGuestContext,
+  type VenueInfo,
+} from '@/lib/schemas'
 import type {
   KnowledgeCorpusChunk,
   MessageCategory,
@@ -341,6 +347,119 @@ function formatOperatorInstruction(instruction: string): string {
   ].join('\n')
 }
 
+// TAC-296: rendered `## Guest context` block. Approximate hard cap of ~500
+// tokens enforced as a character budget (≈4 chars/token). Truncation order
+// when the block would exceed the budget: (1) trim observations to the
+// last GUEST_CONTEXT_OBSERVATIONS_FLOOR entries; (2) if still over budget,
+// drop life_context entries from the oldest first. The OBSERVATION_RENDER_LIMIT
+// truncation already happened in toParsedGuestContext (last 10); this layer
+// handles the further fallback to the 5-floor.
+const GUEST_CONTEXT_CHAR_BUDGET = 2000
+const GUEST_CONTEXT_OBSERVATIONS_FLOOR = 5
+
+function formatGuestDetailsLines(
+  details: NonNullable<ParsedGuestContext['guest_details']>,
+): string[] {
+  const lines: string[] = []
+  if (details.first_name) lines.push(`- First name: ${details.first_name}`)
+  if (details.last_name) lines.push(`- Last name: ${details.last_name}`)
+  if (details.pronouns) lines.push(`- Pronouns: ${details.pronouns}`)
+  if (details.date_of_birth) lines.push(`- Date of birth: ${details.date_of_birth}`)
+  if (details.home_base) {
+    const hb = details.home_base
+    const parts = [hb.neighborhood, hb.city, hb.zip, hb.address].filter(
+      (p): p is string => Boolean(p),
+    )
+    if (parts.length > 0) lines.push(`- Home base: ${parts.join(', ')}`)
+  }
+  if (details.workplace) {
+    const wp = details.workplace
+    const parts = [wp.employer, wp.neighborhood].filter((p): p is string => Boolean(p))
+    if (parts.length > 0) lines.push(`- Work: ${parts.join(', ')}`)
+  }
+  return lines
+}
+
+function formatPreferencesLines(
+  prefs: NonNullable<ParsedGuestContext['preferences']>,
+): string[] {
+  const lines: string[] = []
+  if (prefs.dietary && prefs.dietary.length > 0) {
+    lines.push(`- Dietary: ${prefs.dietary.join(', ')}`)
+  }
+  if (prefs.favorites && prefs.favorites.length > 0) {
+    lines.push(`- Favorites: ${prefs.favorites.join(', ')}`)
+  }
+  if (prefs.dislikes && prefs.dislikes.length > 0) {
+    lines.push(`- Dislikes: ${prefs.dislikes.join(', ')}`)
+  }
+  return lines
+}
+
+function renderGuestContextBody(context: ParsedGuestContext): string {
+  const sections: string[] = []
+
+  if (context.guest_details) {
+    const lines = formatGuestDetailsLines(context.guest_details)
+    if (lines.length > 0) sections.push(`Who they are:\n${lines.join('\n')}`)
+  }
+  if (context.preferences) {
+    const lines = formatPreferencesLines(context.preferences)
+    if (lines.length > 0) sections.push(`What they like:\n${lines.join('\n')}`)
+  }
+  if (context.life_context && context.life_context.length > 0) {
+    const lines = context.life_context.map((e) => `- ${e.note}`)
+    sections.push(`Life context (time-bound):\n${lines.join('\n')}`)
+  }
+  if (context.observations && context.observations.length > 0) {
+    const lines = context.observations.map((e) => `- ${e.note}`)
+    sections.push(`Observations:\n${lines.join('\n')}`)
+  }
+
+  const intro =
+    "Things the guest has shared across past conversations. Use this to recognize patterns and reference what they've told you — do not introduce facts the guest hasn't mentioned."
+
+  return `## Guest context\n${intro}\n\n${sections.join('\n\n')}`
+}
+
+function formatGuestContext(context: ParsedGuestContext): string | null {
+  if (isEmptyGuestContext(context)) return null
+
+  let rendered = renderGuestContextBody(context)
+  if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
+
+  // First fallback: trim observations to the floor.
+  if (context.observations && context.observations.length > GUEST_CONTEXT_OBSERVATIONS_FLOOR) {
+    const trimmed: ParsedGuestContext = {
+      ...context,
+      observations: context.observations.slice(-GUEST_CONTEXT_OBSERVATIONS_FLOOR),
+    }
+    rendered = renderGuestContextBody(trimmed)
+    if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
+    context = trimmed
+  }
+
+  // Second fallback: drop life_context entries from the oldest first. Entries
+  // are stored most-recent-last (append order), so we slice from the end.
+  if (context.life_context && context.life_context.length > 0) {
+    let keepCount = context.life_context.length - 1
+    while (keepCount >= 0) {
+      const trimmed: ParsedGuestContext = {
+        ...context,
+        life_context: keepCount === 0 ? undefined : context.life_context.slice(-keepCount),
+      }
+      rendered = renderGuestContextBody(trimmed)
+      if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
+      keepCount -= 1
+    }
+  }
+
+  // Even after both fallbacks we're over budget — return the smallest
+  // rendition anyway. Voice fidelity still beats blocking the agent run on a
+  // soft token budget.
+  return rendered
+}
+
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
 // — the framing instructs Sonnet not to offer perks at all. Non-empty renders
 // the allowlist with name + reward + qualification context.
@@ -401,6 +520,16 @@ export function runtimeToProse(
     shouldRenderVisitHistory(category)
   ) {
     const block = formatVisitHistory(runtime.recentVisits, now)
+    if (block) blocks.push(block)
+  }
+  // TAC-296: ## Guest context sits between visit history and recent
+  // conversation. Reading order continued: ... what they've recently bought →
+  // what we know about them as a person → what was recently said. Block is
+  // omitted entirely (zero tokens) when the guest has no captured context.
+  // No category gate — guest context is useful for every category including
+  // welcome (e.g., a NFC-tap from a known phone whose context says "vegan").
+  if (runtime.guestContext) {
+    const block = formatGuestContext(runtime.guestContext)
     if (block) blocks.push(block)
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {

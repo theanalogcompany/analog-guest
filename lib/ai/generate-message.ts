@@ -1,5 +1,6 @@
 import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
+import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { PROMPT_VERSION } from './prompts/system-template'
@@ -53,6 +54,19 @@ const GeneratedMessageSchema = z.object({
   // validator is more reliable with explicit presence.
   requiresOperatorApproval: z.boolean(),
   approvalReason: z.string(),
+  // TAC-296: agent-emitted patch for guests.context. Field is REQUIRED on
+  // every emission (per the TAC-212 precedent — Anthropic's structured-output
+  // validator is more reliable with explicit presence), but both inner fields
+  // are optional so the agent emits `{}` for the no-op case. The orchestrator
+  // calls isEmptyContextUpdate before any DB hit. GuestContextPatchSchema is
+  // aggressively permissive (every nested field optional, unknown keys
+  // stripped) so a malformed near-miss patch doesn't trigger the regen loop —
+  // the model's MESSAGE quality is what regen exists to fix, not its
+  // context-capture spelling.
+  contextUpdate: z.object({
+    structured: GuestContextPatchSchema.optional(),
+    observation: z.string().optional(),
+  }),
 })
 
 /**
@@ -99,6 +113,10 @@ export async function generateMessage(
       reasoning: string
       requiresOperatorApproval: boolean
       approvalReason: string
+      contextUpdate: {
+        structured?: z.infer<typeof GuestContextPatchSchema>
+        observation?: string
+      }
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -129,6 +147,7 @@ export async function generateMessage(
         reasoning: object.reasoning,
         requiresOperatorApproval: object.requiresOperatorApproval,
         approvalReason: object.approvalReason,
+        contextUpdate: object.contextUpdate,
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
@@ -157,6 +176,10 @@ export async function generateMessage(
         // draft_queued PostHog event when the gate queues.
         requiresOperatorApproval: lastResult.requiresOperatorApproval,
         approvalReason: lastResult.approvalReason,
+        // TAC-296: final-attempt context update. Orchestrator's context-write
+        // step (between generateStage success and applyApprovalPolicyStage)
+        // calls updateGuestContext with this payload.
+        contextUpdate: lastResult.contextUpdate,
         attempts,
         attemptScores,
         attemptHistory,

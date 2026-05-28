@@ -8,7 +8,13 @@ import {
   type RedemptionPolicy,
   type RedemptionRecord,
 } from '@/lib/recognition'
-import { BrandPersonaSchema, filterActiveContext, VenueInfoSchema } from '@/lib/schemas'
+import {
+  BrandPersonaSchema,
+  filterActiveContext,
+  GuestContextSchema,
+  toParsedGuestContext,
+  VenueInfoSchema,
+} from '@/lib/schemas'
 import { extractRecentVisits } from './extract-recent-visits'
 import type {
   AgentRunId,
@@ -116,7 +122,7 @@ export async function buildRuntimeContext(input: {
       .single(),
     supabase
       .from('guests')
-      .select('id, phone_number, first_name, created_at, created_via, is_demo')
+      .select('id, phone_number, first_name, created_at, created_via, is_demo, context')
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
@@ -237,6 +243,24 @@ export async function buildRuntimeContext(input: {
   }
 
   const guestRow = guestResult.data
+  // TAC-296: parse guests.context JSONB at the boundary. fail-OPEN on
+  // malformed payload — log + treat as empty context. The agent already
+  // tolerates missing context (the ## Guest context block is omitted when
+  // empty), so a malformed row degrades gracefully rather than crashing the
+  // run on stored bad data. Per-entry resilience (expired/malformed
+  // life_context expires_at) is handled inside toParsedGuestContext via
+  // filterActiveLifeContext.
+  const guestContextParsed = GuestContextSchema.safeParse(guestRow.context)
+  if (!guestContextParsed.success) {
+    console.warn(
+      `[agent] buildRuntimeContext: malformed guests.context for ${guestRow.id}: ${guestContextParsed.error.message}. Treating as empty.`,
+    )
+  }
+  const parsedGuestContext = toParsedGuestContext(
+    guestContextParsed.success ? guestContextParsed.data : {},
+    computedAt,
+  )
+
   const guest: GuestContext = {
     id: guestRow.id,
     phoneNumber: guestRow.phone_number,
@@ -244,6 +268,7 @@ export async function buildRuntimeContext(input: {
     createdAt: new Date(guestRow.created_at),
     createdVia: guestRow.created_via,
     isDemo: guestRow.is_demo,
+    context: parsedGuestContext,
   }
 
   const recognition: RecognitionSnapshot = {

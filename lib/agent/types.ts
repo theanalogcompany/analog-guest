@@ -7,7 +7,7 @@ import type {
   RelationshipStrengthFormula,
   SignalContributions,
 } from '@/lib/recognition'
-import type { BrandPersona, VenueInfo } from '@/lib/schemas'
+import type { BrandPersona, ParsedGuestContext, VenueInfo } from '@/lib/schemas'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 
@@ -39,6 +39,15 @@ export interface GuestContext {
   // build-runtime-context.ts; the column is NOT NULL DEFAULT false so this
   // is always a real boolean for a normally-built context.
   isDemo: boolean
+  // TAC-296: per-guest accumulating context (dietary, home base, life events,
+  // observations). Loaded from guests.context JSONB, run through
+  // toParsedGuestContext (filters expired life_context entries + truncates
+  // observations) so the runtime-ready shape is already prompt-safe. The
+  // persisted shape lives in lib/schemas/guest-context.ts; this nested field
+  // sidesteps the name collision between the orchestrator's GuestContext
+  // interface (this one — "everything we know about the guest") and the
+  // schema's GuestContext type (just the JSONB payload).
+  context: ParsedGuestContext
 }
 
 export interface InboundMessage {

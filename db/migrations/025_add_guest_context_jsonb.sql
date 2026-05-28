@@ -1,0 +1,50 @@
+-- 025_add_guest_context_jsonb.sql
+-- adds a per-guest context JSONB column for accumulating what the agent
+-- learns about a guest across conversations (tac-296). foundational for the
+-- follow-on guest_commitments and follow-up engine work.
+--
+-- write path: the agent emits a contextUpdate field on GeneratedMessageSchema
+-- (lib/ai/generate-message.ts); the orchestrator's context-write step
+-- (lib/agent/handle-inbound.ts + handle-followup.ts, fired BETWEEN
+-- generateStage success and applyApprovalPolicyStage) calls
+-- updateGuestContext in lib/guests/context.ts. one UPDATE per write,
+-- multi-SET for atomic identity-column sync (first_name / last_name) alongside
+-- the JSONB rewrite.
+--
+-- read path: build-runtime-context.ts loads the column, parses via
+-- GuestContextSchema (lib/schemas/guest-context.ts), filters expired
+-- life_context entries, truncates observations to last 10, and threads onto
+-- AiRuntimeContext.guestContext. The serializer (formatGuestContext in
+-- lib/ai/prompts/serializers.ts) renders a ## Guest context block between
+-- visit-history and recent-conversation in the user prompt.
+--
+-- shape (validated by GuestContextSchema, see lib/schemas/guest-context.ts):
+--   {
+--     guest_details: { first_name, last_name, date_of_birth, pronouns,
+--                      home_base: { neighborhood, zip, city, address },
+--                      workplace: { neighborhood, employer } },
+--     preferences: { dietary[], favorites[], dislikes[] },
+--     life_context: [{ note, captured_at, expires_at? }],
+--     observations: [{ note, captured_at }]
+--   }
+-- all fields optional. the runtime parser is permissive (drops malformed
+-- entries with console.warn, per the THE-150 / filterActiveContext pattern).
+--
+-- additive only: no backfill needed; the DEFAULT '{}'::jsonb covers all
+-- existing rows. per CLAUDE.md "Ordering for backwards-incompatible
+-- migrations" this is backwards-compatible — order does not matter for the
+-- schema/code deploy sequence.
+--
+-- per-venue isolation: guests rows are already per-venue (guests.venue_id NOT
+-- NULL); guest_context inherits that isolation. the same phone number at two
+-- venues resolves to two separate rows and two separate contexts. no
+-- cross-venue context is in scope for v1.
+--
+-- last-write-wins concurrency: see CLAUDE.md "Common gotchas". two
+-- near-simultaneous inbounds from the same guest will deep-merge against the
+-- same baseline and one will clobber the other on UPDATE. acceptable for
+-- pilot scale; revisit with optimistic locking (updated_at precondition + retry)
+-- if the failure mode surfaces.
+
+alter table guests
+  add column context jsonb not null default '{}'::jsonb;

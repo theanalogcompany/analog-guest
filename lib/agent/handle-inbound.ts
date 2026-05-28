@@ -7,6 +7,10 @@ import {
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import {
+  isEmptyContextUpdate,
+  updateGuestContext,
+} from '@/lib/guests/context'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -369,6 +373,48 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
+
+    // TAC-296: capture what the agent UNDERSTOOD from the inbound into
+    // guests.context. Fires BEFORE the approval-policy gate so the write
+    // happens regardless of whether the draft ships, queues, or refuses —
+    // the agent's understanding of "Sarah is vegan" is valid either way.
+    // Empty contextUpdate short-circuits with no DB hit, no Langfuse span,
+    // no log noise. Failures log + continue; context-write is diagnostic,
+    // not load-bearing. Never blocks dispatch.
+    if (!isEmptyContextUpdate(gen.result.contextUpdate)) {
+      const contextWriteSpan = trace.span('context_write', {
+        tool: 'update_guest_context',
+        hasStructured: gen.result.contextUpdate.structured !== undefined,
+        hasObservation:
+          gen.result.contextUpdate.observation !== undefined &&
+          gen.result.contextUpdate.observation.trim().length > 0,
+      })
+      const writeResult = await updateGuestContext({
+        guestId: ctx.guest.id,
+        update: gen.result.contextUpdate,
+        now: ctx.recognition.computedAt,
+      })
+      if (writeResult.ok) {
+        contextWriteSpan.end({ output: writeResult.data })
+        console.log('[agent] inbound context written', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          updatedFields: writeResult.data,
+        })
+      } else {
+        contextWriteSpan.end({
+          level: 'WARNING',
+          statusMessage: writeResult.error,
+          output: { errorCode: writeResult.errorCode },
+        })
+        console.warn('[agent] inbound context write failed (continuing)', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          error: writeResult.error,
+          errorCode: writeResult.errorCode,
+        })
+      }
+    }
 
     // TAC-212: approval-policy gate decides send vs. queue. Composable —
     // 4 triggers (fidelity_below_auto_send_floor, model_flagged,

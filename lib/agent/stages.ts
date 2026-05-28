@@ -690,5 +690,10 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // a `Guest relationship: <state>` line near the inbound framing.
     recentVisits: ctx.recentVisits,
     recognition: { state: ctx.recognition.state },
+    // TAC-296: thread parsed guest context (post-filterActiveLifeContext +
+    // observations-truncated) through to the AI module. The serializer
+    // (formatGuestContext) renders the `## Guest context` block between
+    // visit history and recent conversation; empty context omits the block.
+    guestContext: ctx.guest.context,
   }
 }

@@ -1,5 +1,5 @@
 import type { EligibleMechanic, GuestState } from '@/lib/recognition'
-import type { BrandPersona, VenueInfo } from '@/lib/schemas'
+import type { BrandPersona, ParsedGuestContext, VenueInfo } from '@/lib/schemas'
 
 // Naming asymmetry: this module returns voiceFidelity (camelCase). It persists
 // to messages.confidence_score (snake_case) at the DB write boundary. The
@@ -133,6 +133,13 @@ export type RuntimeContext = {
   // line near the inbound framing (TAC-234). Mirrors what TAC-240 added on
   // the classifier side — same single source of truth.
   recognition?: { state: GuestState }
+  // TAC-296: per-guest accumulating context. The serializer renders a
+  // `## Guest context` block (between Visit history and Recent conversation)
+  // when this is set and isEmptyGuestContext returns false. Loaded by
+  // build-runtime-context.ts via toParsedGuestContext (expired life_context
+  // entries dropped, observations truncated to OBSERVATION_RENDER_LIMIT).
+  // undefined / empty = block omitted entirely.
+  guestContext?: ParsedGuestContext
 }
 
 export type GenerateMessageInput = {
@@ -149,6 +156,18 @@ export type GenerateMessageInput = {
   runtime: RuntimeContext
 }
 
+// TAC-296: agent-emitted patch for guests.context, threaded onto every
+// GenerateMessageResult and stamped on per-attempt history. Field is required
+// at the schema level (Anthropic structured-output validator is more reliable
+// with explicit presence, per the TAC-212 precedent); the inner fields are
+// both optional so the agent can emit `contextUpdate: {}` for the no-op case.
+// The orchestrator's write step short-circuits on isEmptyContextUpdate before
+// any DB hit.
+export type GenerateMessageContextUpdate = {
+  structured?: import('@/lib/schemas').GuestContextPatch
+  observation?: string
+}
+
 export type GenerateMessageAttempt = {
   body: string
   voiceFidelity: number
@@ -158,6 +177,10 @@ export type GenerateMessageAttempt = {
   // produced different flag values.
   requiresOperatorApproval: boolean
   approvalReason: string
+  // TAC-296: per-attempt context update emission. The final attempt's value
+  // becomes the GenerateMessageResult.contextUpdate consumed by the
+  // orchestrator's context-write step.
+  contextUpdate: GenerateMessageContextUpdate
   // Populated only when the user prompt for this attempt differed from the
   // top-level userPrompt — i.e., a regeneration with explicit feedback (e.g.
   // a dash-violation rewrite request). First-attempt prompts equal the parent
@@ -176,6 +199,12 @@ export type GenerateMessageResult = {
   // event when the gate queues.
   requiresOperatorApproval: boolean
   approvalReason: string
+  // TAC-296: final-attempt guest-context patch. Consumed by the orchestrator
+  // between generateStage success and applyApprovalPolicyStage. May be empty
+  // (structured undefined, observation undefined) when the agent has nothing
+  // new to record this turn; the orchestrator's isEmptyContextUpdate check
+  // short-circuits before any DB hit in that case.
+  contextUpdate: GenerateMessageContextUpdate
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
