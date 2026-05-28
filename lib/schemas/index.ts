@@ -27,3 +27,8 @@ export {
   KNOWLEDGE_PRIMARY_TAGS,
   type KnowledgePrimaryTag,
 } from './knowledge-tags'
+export {
+  THREAD_MESSAGE_LIMIT,
+  type ThreadMessage,
+  ThreadMessageSchema,
+} from './thread-message'

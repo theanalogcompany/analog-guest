@@ -16,3 +16,12 @@ export {
   type QueueRecentContextEntry,
   listPendingQueue,
 } from './queue'
+
+export {
+  type LoadGuestThreadErrorCode,
+  type LoadGuestThreadFailure,
+  type LoadGuestThreadInput,
+  type LoadGuestThreadResult,
+  type LoadGuestThreadSuccess,
+  loadGuestThread,
+} from './thread'
