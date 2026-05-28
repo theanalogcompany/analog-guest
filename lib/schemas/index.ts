@@ -23,6 +23,17 @@ export {
   type VenueInfo,
 } from './venue-info'
 export {
+  filterActiveLifeContext,
+  type GuestContext,
+  type GuestContextPatch,
+  GuestContextPatchSchema,
+  GuestContextSchema,
+  isEmptyGuestContext,
+  OBSERVATION_RENDER_LIMIT,
+  type ParsedGuestContext,
+  toParsedGuestContext,
+} from './guest-context'
+export {
   isCanonicalPrimaryTag,
   KNOWLEDGE_PRIMARY_TAGS,
   type KnowledgePrimaryTag,

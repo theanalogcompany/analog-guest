@@ -61,7 +61,9 @@ function makeInput(): GenerateMessageInput {
 // the AI SDK's return shape. TAC-212: the new Zod schema requires
 // `requiresOperatorApproval` + `approvalReason` on every generation; we
 // default them to (false, '') here so existing call sites stay terse and
-// the tests that focus on the flag explicitly pass them.
+// the tests that focus on the flag explicitly pass them. TAC-296: the schema
+// also now requires `contextUpdate` on every emission — default to {} so
+// existing tests don't drown in boilerplate.
 function queueResponses(
   ...objs: Array<{
     body: string
@@ -69,6 +71,7 @@ function queueResponses(
     reasoning: string
     requiresOperatorApproval?: boolean
     approvalReason?: string
+    contextUpdate?: { structured?: unknown; observation?: string }
   }>
 ) {
   generateObjectMock.mockReset()
@@ -77,6 +80,7 @@ function queueResponses(
       object: {
         requiresOperatorApproval: false,
         approvalReason: '',
+        contextUpdate: {},
         ...o,
       },
     })
@@ -266,12 +270,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
   })
 
-  it('exposes promptVersion v1.14.0 on a successful result', async () => {
+  it('exposes promptVersion v1.15.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.14.0')
+    expect(r.data.promptVersion).toBe('v1.15.0')
   })
 })
 

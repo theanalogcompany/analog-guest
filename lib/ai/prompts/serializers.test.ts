@@ -870,3 +870,183 @@ describe('runtimeToProse — critique block', () => {
     expect(out).not.toContain('## Critique to incorporate')
   })
 })
+
+describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
+  const today = {
+    isoDate: '2026-05-08',
+    dayOfWeek: 'Friday',
+    venueLocalTime: '10:00',
+    venueTimezone: 'America/Los_Angeles',
+  }
+
+  it('omits the block entirely when guestContext is undefined', () => {
+    const out = runtimeToProse({ today }, 'reply')
+    expect(out).not.toContain('## Guest context')
+  })
+
+  it('omits the block entirely when guestContext is empty (no captured data)', () => {
+    const out = runtimeToProse({ today, guestContext: {} }, 'reply')
+    expect(out).not.toContain('## Guest context')
+  })
+
+  it('renders structured details when guest_details is populated', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: {
+            first_name: 'Sarah',
+            pronouns: 'she/her',
+            home_base: { neighborhood: 'Bernal Heights', city: 'SF' },
+          },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('First name: Sarah')
+    expect(out).toContain('Pronouns: she/her')
+    expect(out).toContain('Home base: Bernal Heights, SF')
+  })
+
+  it('renders preferences as bulleted lines', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: { preferences: { dietary: ['vegan'], favorites: ['oat latte'] } },
+      },
+      'reply',
+    )
+    expect(out).toContain('Dietary: vegan')
+    expect(out).toContain('Favorites: oat latte')
+  })
+
+  it('renders life_context entries as bullets without echoing timestamps', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          life_context: [
+            { note: 'in Tokyo until the 30th', captured_at: '2026-04-15T10:00:00Z', expires_at: '2026-05-30T00:00:00Z' },
+          ],
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('Life context (time-bound):')
+    expect(out).toContain('- in Tokyo until the 30th')
+    expect(out).not.toContain('2026-04-15')
+  })
+
+  it('renders observations as bullets in stored order', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          observations: [
+            { note: 'mentioned she runs', captured_at: '2026-04-20T08:00:00Z' },
+            { note: 'has a dog named Hank', captured_at: '2026-04-22T08:00:00Z' },
+          ],
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('Observations:')
+    expect(out).toContain('- mentioned she runs')
+    expect(out).toContain('- has a dog named Hank')
+  })
+
+  it('sits between Visit history and Recent conversation in the assembled prompt', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        recentVisits: [{ items: ['cappuccino'], visitedAt: new Date('2026-05-01T10:00:00Z') }],
+        guestContext: { guest_details: { first_name: 'Sarah' } },
+        recentMessages: [
+          { direction: 'inbound', body: 'hi', createdAt: new Date('2026-05-07T10:00:00Z') },
+        ],
+      },
+      'reply',
+      new Date('2026-05-08T10:00:00Z'),
+    )
+    const visitIdx = out.indexOf('## Visit history')
+    const guestCtxIdx = out.indexOf('## Guest context')
+    const recentIdx = out.indexOf('## Recent conversation')
+    expect(visitIdx).toBeGreaterThanOrEqual(0)
+    expect(guestCtxIdx).toBeGreaterThan(visitIdx)
+    expect(recentIdx).toBeGreaterThan(guestCtxIdx)
+  })
+
+  it('renders the framing intro instructing the model to use context for recognition', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: { guest_details: { first_name: 'Sarah' } },
+      },
+      'reply',
+    )
+    expect(out).toContain('Things the guest has shared across past conversations')
+    expect(out).toContain('do not introduce facts the guest hasn')
+  })
+
+  it('renders for the welcome category (guest context is useful for first-contact NFC-tap from known phone)', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: { preferences: { dietary: ['vegan'] } },
+      },
+      'welcome',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('Dietary: vegan')
+  })
+
+  it('truncates observations to 5 floor when the rendered block would exceed the char budget', () => {
+    // 15 observations of ~200 chars each ≈ 3000 chars total, well over the
+    // 2000-char (~500-token) budget. The fallback should trim to the last 5.
+    const longNote = 'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
+    const observations = Array.from({ length: 15 }, (_, i) => ({
+      note: `${longNote} (entry ${i})`,
+      captured_at: `2026-04-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    }))
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: { observations },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    // After fallback: last 5 observations only (entries 10..14).
+    expect(out).toContain('(entry 14)')
+    expect(out).toContain('(entry 10)')
+    expect(out).not.toContain('(entry 0)')
+    expect(out).not.toContain('(entry 9)')
+  })
+
+  it('drops oldest life_context entries when observations-floor truncation still exceeds the budget', () => {
+    // Pre-truncated observations (5, already at floor) + many long life_context
+    // entries. The serializer should drop oldest life_context entries from the
+    // front until under budget.
+    const longNote = 'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
+    const observations = Array.from({ length: 5 }, (_, i) => ({
+      note: `${longNote} (obs ${i})`,
+      captured_at: `2026-04-${String(i + 10).padStart(2, '0')}T00:00:00Z`,
+    }))
+    const life_context = Array.from({ length: 10 }, (_, i) => ({
+      note: `${longNote} (life ${i})`,
+      captured_at: `2026-03-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    }))
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: { observations, life_context },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    // Newest life_context entries survive; oldest were dropped.
+    expect(out).toContain('(life 9)')
+    expect(out).not.toContain('(life 0)')
+  })
+})

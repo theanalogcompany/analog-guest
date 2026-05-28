@@ -6,6 +6,10 @@ import {
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
+import {
+  isEmptyContextUpdate,
+  updateGuestContext,
+} from '@/lib/guests/context'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -285,6 +289,47 @@ export async function handleFollowup(input: {
       voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
+
+    // TAC-296: capture what the agent UNDERSTOOD into guests.context. On
+    // the followup path there's no inbound, so contextUpdate is expected to
+    // be ~always empty here — kept for consistency with handle-inbound and so
+    // the manual followup path (where the operator's note can plausibly
+    // surface a fact about the guest) still has a write surface. Empty
+    // short-circuits with no DB hit. Failures log + continue.
+    if (!isEmptyContextUpdate(gen.result.contextUpdate)) {
+      const contextWriteSpan = trace.span('context_write', {
+        tool: 'update_guest_context',
+        hasStructured: gen.result.contextUpdate.structured !== undefined,
+        hasObservation:
+          gen.result.contextUpdate.observation !== undefined &&
+          gen.result.contextUpdate.observation.trim().length > 0,
+      })
+      const writeResult = await updateGuestContext({
+        guestId: ctx.guest.id,
+        update: gen.result.contextUpdate,
+        now: ctx.recognition.computedAt,
+      })
+      if (writeResult.ok) {
+        contextWriteSpan.end({ output: writeResult.data })
+        console.log('[agent] followup context written', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          updatedFields: writeResult.data,
+        })
+      } else {
+        contextWriteSpan.end({
+          level: 'WARNING',
+          statusMessage: writeResult.error,
+          output: { errorCode: writeResult.errorCode },
+        })
+        console.warn('[agent] followup context write failed (continuing)', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          error: writeResult.error,
+          errorCode: writeResult.errorCode,
+        })
+      }
+    }
 
     // TAC-212: approval-policy gate. Bypassed entirely on the Follow Up
     // button path (trigger.reason='manual') — operator already approved by
