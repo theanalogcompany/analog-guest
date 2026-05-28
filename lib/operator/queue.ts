@@ -12,6 +12,7 @@
 import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
 import type { ApprovalTrigger } from '@/lib/agent/stages'
+import type { ThreadMessage } from '@/lib/schemas'
 
 export type GuestRecognitionState =
   | 'new'
@@ -19,12 +20,12 @@ export type GuestRecognitionState =
   | 'regular'
   | 'raving_fan'
 
-export interface QueueRecentContextEntry {
-  id: string
-  direction: 'inbound' | 'outbound'
-  body: string
-  createdAt: string
-}
+// Recent-context entry shape on the queue (last 3 messages joined by
+// `list_operator_queue`). Aliased to the canonical `ThreadMessage` so the
+// queue payload and the full-thread fetch (`/api/operator/messages/:id/thread`,
+// TAC-277) share a single shape. Adding fields here means adding them in
+// `lib/schemas/thread-message.ts` so both surfaces stay in lockstep.
+export type QueueRecentContextEntry = ThreadMessage
 
 export interface QueueDraft {
   messageId: string
