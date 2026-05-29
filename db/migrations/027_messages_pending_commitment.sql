@@ -1,0 +1,43 @@
+-- 027_messages_pending_commitment.sql
+-- adds messages.pending_commitment jsonb — the intent carrier that threads
+-- an agent-emitted commitment through the approval queue (tac-212) and
+-- materializes a guest_commitments row only on successful dispatch
+-- (tac-297 design call #1).
+--
+-- why this lives on messages rather than as a 'proposed'-status row on
+-- guest_commitments: a draft can sit in the operator queue for hours
+-- before approval. the jsonb carrier survives that gap durably without
+-- polluting guest_commitments with orphan rows that need cleanup on
+-- reject/skip. regen (tac-264) overwrites the draft in place → the jsonb
+-- is overwritten wholesale by the new generation, clean.
+--
+-- write sites:
+--   lib/agent/schedule-and-send.ts → buildOutboundInsert + persistOrRegenQueuedDraft:
+--     INSERT writes pending_commitment from the gated draft's generation.
+--     Regen UPDATE OVERWRITES (not preserves) — stale intent from the prior
+--     draft is replaced or nulled (per tac-297 design call #1).
+--   ungated path (recommendation) writes the guest_commitments row inline
+--     in scheduleAndSend AFTER Sendblue dispatch — no jsonb carrier needed.
+--
+-- read sites:
+--   lib/operator/dispatch-operator-outbound.ts → the first SELECT extends to
+--     include pending_commitment; after the second UPDATE (status='sent')
+--     succeeds, if non-null, createCommitmentFromPending materializes the
+--     guest_commitments row. failure to materialize does NOT roll back the
+--     dispatch (the message has been sent; commitment-write failure is
+--     logged and accepted for pilot — reconciliation later).
+--
+-- HIGH-STAKES: this column lives on the messages table, which is on the
+-- CLAUDE.md "Audit-first" high-stakes migration list. Per CLAUDE.md
+-- "Ordering for backwards-incompatible migrations": additive shape, but
+-- the deployed code SELECTs the new column on read → order-sensitive.
+-- APPLY IN STUDIO BEFORE MERGING THE PR. Then run `npm run db:types`.
+-- db/types.ts is hand-patched in the same commit as a stopgap until
+-- db:types is re-run post-apply.
+
+alter table messages
+  add column pending_commitment jsonb;
+
+-- no index. the column is read only on dispatch, keyed on messages.id
+-- (which is already the primary key). the jsonb is small (≈ 200 bytes
+-- max, see PendingCommitmentSchema), so it adds minimal row width.

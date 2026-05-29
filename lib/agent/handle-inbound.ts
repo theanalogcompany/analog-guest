@@ -11,10 +11,12 @@ import {
   isEmptyContextUpdate,
   updateGuestContext,
 } from '@/lib/guests/context'
+import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
+import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -416,9 +418,71 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       }
     }
 
+    // TAC-297: dispatch arrival capture. Fires BEFORE the approval-policy
+    // gate (mirrors the TAC-296 contextUpdate dispatch site) so the
+    // transition + push happen regardless of whether the draft ships,
+    // queues, or refuses. What the agent UNDERSTOOD from the inbound is
+    // independent of what we SAID back. Imminent win → push fired
+    // fire-and-forget via waitUntil. Imminent loss / scheduled / no-op →
+    // logged but no push. Never throws.
+    const arrival = await dispatchArrivalCapture({
+      arrivalCapture: gen.result.arrivalCapture,
+      now: ctx.recognition.computedAt,
+    })
+    if (arrival.kind === 'imminent_won') {
+      const commitmentRow = arrival.commitmentRow
+      console.log('[agent] inbound arrival imminent — transitioned to pending_ack', {
+        agentRunId,
+        commitmentId: commitmentRow.id,
+      })
+      waitUntil(
+        sendCommitmentArrivalPush({
+          commitmentId: commitmentRow.id,
+          venueId: commitmentRow.venue_id,
+          guestId: commitmentRow.guest_id,
+          guestFirstName: ctx.guest.firstName,
+          type: commitmentRow.type,
+          code: commitmentRow.code,
+          expectedArrival: commitmentRow.expected_arrival,
+          arrivalSignal: 'imminent',
+          venueTimezone: ctx.venue.timezone,
+          agentRunId,
+        }).catch((e) => {
+          console.error('apns: sendCommitmentArrivalPush threw unexpectedly', {
+            agentRunId,
+            commitmentId: commitmentRow.id,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }),
+      )
+    } else if (arrival.kind === 'scheduled_recorded') {
+      console.log('[agent] inbound arrival scheduled — cron will fire at expected_arrival', {
+        agentRunId,
+        commitmentId: arrival.commitmentRow.id,
+        expectedArrival: arrival.commitmentRow.expected_arrival,
+      })
+    } else if (arrival.kind === 'imminent_lost' || arrival.kind === 'scheduled_lost') {
+      console.log('[agent] inbound arrival CAS lost (commitment already transitioned)', {
+        agentRunId,
+        kind: arrival.kind,
+      })
+    } else if (arrival.kind === 'invalid_signal') {
+      console.warn('[agent] inbound arrival capture invalid', {
+        agentRunId,
+        reason: arrival.reason,
+      })
+    } else if (arrival.kind === 'failed') {
+      console.warn('[agent] inbound arrival capture dispatch failed (continuing)', {
+        agentRunId,
+        error: arrival.error,
+        errorCode: arrival.errorCode,
+      })
+    }
+
     // TAC-212: approval-policy gate decides send vs. queue. Composable —
     // 4 triggers (fidelity_below_auto_send_floor, model_flagged,
     // comp_regex_backstop, previous_pending_held); any one queues.
+    // TAC-297: 5th trigger commitment_type_gated also lands here.
     const approval = await applyApprovalPolicyStage(ctx, gen.result)
     console.log('[agent] inbound approval decision', {
       agentRunId,

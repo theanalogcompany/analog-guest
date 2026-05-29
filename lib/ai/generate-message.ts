@@ -1,5 +1,9 @@
 import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
+import {
+  ArrivalCaptureEmissionSchema,
+  CommitmentEmissionSchema,
+} from '@/lib/schemas/guest-commitment'
 import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
@@ -67,6 +71,19 @@ const GeneratedMessageSchema = z.object({
     structured: GuestContextPatchSchema.optional(),
     observation: z.string().optional(),
   }),
+  // TAC-297: agent emits a commitment object when the reply offers something
+  // we'll have ready for the guest — comp, hold, off-menu rec, discount. Same
+  // rigid-presence / optional-inner posture as contextUpdate (TAC-296). When
+  // type ∈ {comp, hold, discount}, the approval-policy gate's
+  // COMMITMENT_TYPE_GATED trigger fires regardless of requiresOperatorApproval
+  // — structural backstop per the TAC-297 plan-review call #2.
+  commitment: CommitmentEmissionSchema,
+  // TAC-297: agent emits an arrivalCapture object when the guest's inbound
+  // signals arrival in response to an active commitment surfaced in the
+  // ## Active commitments user-prompt block. signal='imminent' triggers
+  // immediate transitionToPendingAck + push; signal='scheduled' stores
+  // expected_arrival for the hourly cron to fire.
+  arrivalCapture: ArrivalCaptureEmissionSchema,
 })
 
 /**
@@ -117,6 +134,8 @@ export async function generateMessage(
         structured?: z.infer<typeof GuestContextPatchSchema>
         observation?: string
       }
+      commitment: z.infer<typeof CommitmentEmissionSchema>
+      arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -148,6 +167,8 @@ export async function generateMessage(
         requiresOperatorApproval: object.requiresOperatorApproval,
         approvalReason: object.approvalReason,
         contextUpdate: object.contextUpdate,
+        commitment: object.commitment,
+        arrivalCapture: object.arrivalCapture,
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
@@ -180,6 +201,17 @@ export async function generateMessage(
         // step (between generateStage success and applyApprovalPolicyStage)
         // calls updateGuestContext with this payload.
         contextUpdate: lastResult.contextUpdate,
+        // TAC-297: final-attempt commitment emission. Orchestrator threads
+        // this onto messages.pending_commitment for gated paths (intent
+        // carrier through the approval queue) or materializes inline for
+        // recommendation auto-sends. Empty emission shape `{}` is the
+        // no-op; isEmptyCommitmentEmission short-circuits before any DB hit.
+        commitment: lastResult.commitment,
+        // TAC-297: final-attempt arrival capture. Orchestrator dispatches
+        // independently of the approval-gate outcome — what the agent
+        // UNDERSTOOD from the inbound is independent of what the agent
+        // SAID back (TAC-296 precedent).
+        arrivalCapture: lastResult.arrivalCapture,
         attempts,
         attemptScores,
         attemptHistory,

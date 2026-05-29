@@ -18,8 +18,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.15.0 (TAC-296 guest context capture block)', () => {
-    expect(PROMPT_VERSION).toBe('v1.15.0')
+  it('is v1.16.0 (TAC-297 commitments + arrival capture)', () => {
+    expect(PROMPT_VERSION).toBe('v1.16.0')
   })
 })
 

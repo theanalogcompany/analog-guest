@@ -27,7 +27,9 @@
 // dispatch); approve route stamps neither.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
+import { PendingCommitmentSchema } from '@/lib/schemas'
 
 export type DispatchAction = 'approve' | 'edit'
 
@@ -108,10 +110,14 @@ export async function dispatchOperatorOutbound(
   const supabase = createAdminClient()
 
   // ---- 1. read the draft (also captures the pre-update body for originalAiBody) ----
+  // TAC-297: SELECT pending_commitment so we can materialize the
+  // guest_commitments row after Sendblue dispatch + the second UPDATE
+  // succeed. The carrier is the agent's commitment intent, threaded
+  // through the approval queue by lib/agent/schedule-and-send.ts.
   const { data: row, error: readErr } = await supabase
     .from('messages')
     .select(
-      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at',
+      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment',
     )
     .eq('id', input.messageId)
     .maybeSingle()
@@ -262,6 +268,34 @@ export async function dispatchOperatorOutbound(
       ok: false,
       errorCode: 'db_error',
       error: `dispatch metadata stamp failed: ${stampErr.message} (providerMessageId=${sendResult.data.providerMessageId})`,
+    }
+  }
+
+  // ---- 7. TAC-297: materialize the commitment row if intent was carried ----
+  // The message is now SENT. Materialize the guest_commitments row from the
+  // jsonb carrier. Failure is LOGGED but does NOT roll back the dispatch —
+  // the operator's draft has gone out, and rolling the message back would be
+  // worse than the operator-side gap of a missing heads-up card. Reconciliation
+  // ticket if pilot surfaces this failure mode.
+  if (row.pending_commitment !== null) {
+    const parsedPending = PendingCommitmentSchema.safeParse(row.pending_commitment)
+    if (!parsedPending.success) {
+      console.warn(
+        `[operator] dispatch-operator-outbound: malformed pending_commitment on message=${row.id}: ${parsedPending.error.message}. Skipping commitment materialization.`,
+      )
+    } else {
+      const commitmentResult = await createCommitmentFromPending({
+        guestId: row.guest_id,
+        venueId: row.venue_id,
+        pendingCommitment: parsedPending.data,
+        sourceMessageId: row.id,
+        now: new Date(),
+      })
+      if (!commitmentResult.ok) {
+        console.warn(
+          `[operator] dispatch-operator-outbound: commitment materialization failed for message=${row.id}: ${commitmentResult.error}. Message already sent.`,
+        )
+      }
     }
   }
 

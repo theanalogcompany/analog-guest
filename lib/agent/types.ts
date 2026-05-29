@@ -7,7 +7,12 @@ import type {
   RelationshipStrengthFormula,
   SignalContributions,
 } from '@/lib/recognition'
-import type { BrandPersona, ParsedGuestContext, VenueInfo } from '@/lib/schemas'
+import type {
+  ActiveCommitment,
+  BrandPersona,
+  ParsedGuestContext,
+  VenueInfo,
+} from '@/lib/schemas'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 
@@ -109,6 +114,14 @@ export interface RuntimeContext {
   // when no qualifying transactions on file. TAC-234 (replaces THE-229's
   // single-visit projection).
   recentVisits: Visit[]
+  // TAC-297: open + pending_ack commitments for this guest at this venue.
+  // Loaded by build-runtime-context.ts via findActiveCommitmentsForGuest and
+  // projected through toActiveCommitment. Surfaced as the ## Active commitments
+  // user-prompt block by the serializer. Empty array = no active commitments,
+  // block is omitted. Used by the agent to know what's already been promised
+  // (so it can ask for arrival timing if natural — soft, woven, not a standing
+  // directive).
+  activeCommitments: ActiveCommitment[]
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

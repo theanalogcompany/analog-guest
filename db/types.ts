@@ -143,6 +143,95 @@ export type Database = {
           },
         ]
       }
+      guest_commitments: {
+        Row: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          code: string | null
+          created_at: string
+          created_by: string
+          description: string
+          expected_arrival: string | null
+          expires_at: string | null
+          arrival_signal: string | null
+          guest_id: string
+          id: string
+          redeemed_at: string | null
+          source_message_id: string | null
+          status: string
+          type: string
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          code?: string | null
+          created_at?: string
+          created_by?: string
+          description: string
+          expected_arrival?: string | null
+          expires_at?: string | null
+          arrival_signal?: string | null
+          guest_id: string
+          id?: string
+          redeemed_at?: string | null
+          source_message_id?: string | null
+          status?: string
+          type: string
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          code?: string | null
+          created_at?: string
+          created_by?: string
+          description?: string
+          expected_arrival?: string | null
+          expires_at?: string | null
+          arrival_signal?: string | null
+          guest_id?: string
+          id?: string
+          redeemed_at?: string | null
+          source_message_id?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_commitments_acknowledged_by_fkey"
+            columns: ["acknowledged_by"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_commitments_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_commitments_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_commitments_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guest_states: {
         Row: {
           created_at: string
@@ -504,6 +593,7 @@ export type Database = {
           last_operator_id: string | null
           media_urls: string[]
           parent_draft_id: string | null
+          pending_commitment: Json | null
           pending_until: string | null
           previous_review_state: string | null
           prompt_version: string | null
@@ -537,6 +627,7 @@ export type Database = {
           last_operator_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
+          pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null
           prompt_version?: string | null
@@ -570,6 +661,7 @@ export type Database = {
           last_operator_id?: string | null
           media_urls?: string[]
           parent_draft_id?: string | null
+          pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null
           prompt_version?: string | null
@@ -1086,6 +1178,32 @@ export type Database = {
           message_id: string
           similarity: number
         }[]
+      }
+      link_operator_auth: {
+        Args: { p_email: string; p_phone: string }
+        Returns: {
+          apns_device_token: string | null
+          apns_token_updated_at: string | null
+          auth_user_id_email: string | null
+          auth_user_id_phone: string | null
+          avatar_url: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_analog_admin: boolean
+          is_test: boolean
+          job_title: string | null
+          last_seen_at: string | null
+          phone_number: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "operators"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       list_operator_queue: {
         Args: { venue_ids: string[] }
