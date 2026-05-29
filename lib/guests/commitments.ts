@@ -289,25 +289,31 @@ export async function findActiveCommitmentsForGuest(opts: {
 }
 
 /**
- * Find commitments due for cron-fired transition: status='open',
- * expected_arrival IS NOT NULL AND <= now, AND arrival_signal is set
- * (we don't want to transition rows that have no signal at all — those
- * are stale open commitments without a recorded arrival expectation).
+ * Find open commitments with arrival_signal='scheduled' and expected_arrival
+ * populated. The morning-of model (TAC-297 follow-up): time-of-day filtering
+ * lives in the processor, not the query — the processor knows each venue's
+ * timezone and can decide per-row whether "now" falls in that venue's morning
+ * hour. The SQL just provides the candidate set.
  *
- * Indexed by idx_guest_commitments_due (migration 026).
+ * imminent-signal rows are deliberately excluded — they fire off the inbound
+ * (handle-inbound.ts), never from the cron. Including them here would let a
+ * pathological cron tick (one that races a pending dispatchArrivalCapture
+ * before its CAS lands) potentially transition the row.
+ *
+ * Indexed by idx_guest_commitments_due (migration 026) for the
+ * `status='open' AND expected_arrival IS NOT NULL` half of the filter.
  */
-export async function findDueCommitments(
-  now: Date,
-): Promise<RAGResult<GuestCommitmentRow[]>> {
+export async function findScheduledOpenCommitments(): Promise<
+  RAGResult<GuestCommitmentRow[]>
+> {
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('guest_commitments')
       .select('*')
       .eq('status', 'open')
-      .not('arrival_signal', 'is', null)
+      .eq('arrival_signal', 'scheduled')
       .not('expected_arrival', 'is', null)
-      .lte('expected_arrival', now.toISOString())
       .order('expected_arrival', { ascending: true })
     if (error) {
       return { ok: false, error: error.message, errorCode: 'db_read_failed' }

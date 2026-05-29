@@ -11,7 +11,7 @@ import type { PendingCommitment } from '@/lib/schemas/guest-commitment'
 import {
   createCommitmentFromPending,
   findActiveCommitmentsForGuest,
-  findDueCommitments,
+  findScheduledOpenCommitments,
   markAcknowledged,
   scheduleArrival,
   transitionToPendingAck,
@@ -432,13 +432,15 @@ describe('findActiveCommitmentsForGuest', () => {
   })
 })
 
-describe('findDueCommitments', () => {
-  it('returns due open rows ordered by expected_arrival ASC', async () => {
+describe('findScheduledOpenCommitments', () => {
+  it('returns rows with status=open AND arrival_signal=scheduled, no time filter', async () => {
     const state = newState({
       selectReturn: [
         makeRow({
           status: 'open',
-          expected_arrival: '2026-05-28T08:00:00Z',
+          // Future-dated — the morning-of model means this still surfaces
+          // here; the processor decides eligibility per-venue.
+          expected_arrival: '2026-06-15T12:00:00Z',
           arrival_signal: 'scheduled',
         }),
       ],
@@ -446,9 +448,15 @@ describe('findDueCommitments', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await findDueCommitments(NOW)
+    const r = await findScheduledOpenCommitments()
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data).toHaveLength(1)
+    // Both filters land via .eq() — imminent rows must be excluded at the SQL
+    // boundary so a pathological cron tick can't transition them.
     expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'arrival_signal',
+      value: 'scheduled',
+    })
   })
 })
