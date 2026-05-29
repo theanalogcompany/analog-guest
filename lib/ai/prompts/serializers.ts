@@ -1,5 +1,6 @@
 import type { EligibleMechanic } from '@/lib/recognition'
 import {
+  type ActiveCommitment,
   type BrandPersona,
   isEmptyGuestContext,
   type MenuItem,
@@ -460,6 +461,44 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
   return rendered
 }
 
+// TAC-297: render open + pending_ack commitments as a `## Active commitments`
+// block. Placement (between Guest context and Recent conversation) puts it
+// in the reading order "who they are → what they can get → what they've
+// recently bought → what we know about them as a person → what we've promised
+// → what was recently said." The intro line frames it as PERMISSION to ask
+// about arrival timing if it fits, NOT as a standing directive to ask every
+// turn (TAC-297 plan-review call #5 — interrogation-risk mitigation). Empty
+// commitments list omits the block entirely (zero tokens, no header without
+// body).
+//
+// Per-commitment line shape: `- [type] description (code: XXXX, status: ...) — promised <delta>`
+// Code is omitted for recommendation type (no verification chip for recs).
+// Status appears so the model knows whether the commitment is freshly open
+// or already pending_ack (already-pending = guest already signaled, no point
+// asking arrival again). Time-delta uses the same vocabulary as the Recent
+// conversation block via formatTimeDelta.
+function formatActiveCommitments(
+  commitments: readonly ActiveCommitment[],
+  now: Date,
+): string | null {
+  if (commitments.length === 0) return null
+
+  const lines = commitments.map((c) => {
+    const segments: string[] = []
+    if (c.code) segments.push(`code: ${c.code}`)
+    segments.push(`status: ${c.status}`)
+    const delta = formatTimeDelta(new Date(c.created_at), now)
+    return `- [${c.type}] ${c.description} (${segments.join(', ')}) — promised ${delta}`
+  })
+
+  const intro =
+    'Open promises this venue has made to this guest. ' +
+    "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
+    "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled)."
+
+  return ['## Active commitments', intro, lines.join('\n')].join('\n')
+}
+
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
 // — the framing instructs Sonnet not to offer perks at all. Non-empty renders
 // the allowlist with name + reward + qualification context.
@@ -530,6 +569,14 @@ export function runtimeToProse(
   // welcome (e.g., a NFC-tap from a known phone whose context says "vegan").
   if (runtime.guestContext) {
     const block = formatGuestContext(runtime.guestContext)
+    if (block) blocks.push(block)
+  }
+  // TAC-297: ## Active commitments block sits between Guest context and
+  // Recent conversation. Reading order continued: ... what we know about
+  // them as a person → what we've promised → what was recently said.
+  // Empty / undefined = block omitted entirely.
+  if (runtime.activeCommitments && runtime.activeCommitments.length > 0) {
+    const block = formatActiveCommitments(runtime.activeCommitments, now)
     if (block) blocks.push(block)
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {

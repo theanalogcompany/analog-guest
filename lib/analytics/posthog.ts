@@ -661,6 +661,28 @@ export async function captureOperatorMessageActionUndone(
   await capturePostHogEvent('operator_message_action_undone', props.guestId, { ...props })
 }
 
+// TAC-297: operator acknowledged a pending_ack commitment via the operator
+// app's swipe-right. Mirrors the operator_message_* event shape — IDs +
+// small scalars, no bodies. Distinct event name + commitmentId scalar so
+// analysts can split commitment acks from draft approvals cleanly. Slack
+// relay omitted (matches the draft-action analytics — product, not ops).
+export interface OperatorCommitmentAcknowledgedProps {
+  venueId: string
+  guestId: string
+  commitmentId: string
+  operatorId: string
+  /** now() - guest_commitments.created_at — how long the commitment sat. */
+  timeToActionMs: number
+  /** Commitment type at the time of ack (comp/hold/discount/recommendation). */
+  type: string
+}
+
+export async function captureOperatorCommitmentAcknowledged(
+  props: OperatorCommitmentAcknowledgedProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_commitment_acknowledged', props.guestId, { ...props })
+}
+
 // ---------------------------------------------------------------------------
 // APNs push events (TAC-207)
 // ---------------------------------------------------------------------------
@@ -682,11 +704,19 @@ export async function captureOperatorMessageActionUndone(
 // by operator that way.
 
 export interface PushSentProps {
-  agentRunId: string
+  /** Null when fired from the cron (no agent run). String when fired from the
+   * inbound CAS-win path or the draft-flagged path. */
+  agentRunId: string | null
   venueId: string
   guestId: string
   operatorId: string
+  /** messages.id for the draft-flagged surface; guest_commitments.id for the
+   * commitment-arrival surface. The column name stays `draftId` for backward
+   * compatibility with the existing draft-flagged dashboard panels.
+   * TAC-297. */
   draftId: string
+  /** approval.primaryTrigger for the draft-flagged surface; the literal
+   * 'commitment_arrival' for the commitment surface. */
   primaryTrigger: string
   /** True iff APNs returned 200. False on any non-200 OR transport failure. */
   ok: boolean
@@ -698,14 +728,22 @@ export interface PushSentProps {
   errorDetail: string | null
   /** Badge count carried in the payload. */
   badge: number
+  /** TAC-297: discriminator so the two push surfaces can be analyzed
+   * separately in PostHog. Optional + defaults to 'draft_flagged' so the
+   * existing TAC-207 callsite doesn't have to pass it. */
+  surface?: 'draft_flagged' | 'commitment_arrival'
 }
 
 export async function capturePushSent(props: PushSentProps): Promise<void> {
-  await capturePostHogEvent('push.sent', props.operatorId, { ...props })
+  await capturePostHogEvent('push.sent', props.operatorId, {
+    ...props,
+    surface: props.surface ?? 'draft_flagged',
+  })
 }
 
 export interface PushTokenInvalidProps {
-  agentRunId: string
+  /** Null when fired from the cron (no agent run). String otherwise. */
+  agentRunId: string | null
   venueId: string
   guestId: string
   operatorId: string
@@ -715,20 +753,27 @@ export interface PushTokenInvalidProps {
   status: number
   /** APNs `reason` field. Null on 410 with empty body. */
   reason: string | null
+  /** TAC-297: same discriminator semantics as PushSentProps.surface. */
+  surface?: 'draft_flagged' | 'commitment_arrival'
 }
 
 export async function capturePushTokenInvalid(props: PushTokenInvalidProps): Promise<void> {
-  await capturePostHogEvent('push.token_invalid', props.operatorId, { ...props })
+  await capturePostHogEvent('push.token_invalid', props.operatorId, {
+    ...props,
+    surface: props.surface ?? 'draft_flagged',
+  })
   await postToSlack(formatPushTokenInvalid(props))
 }
 
 function formatPushTokenInvalid(props: PushTokenInvalidProps): string {
+  const surface = props.surface ?? 'draft_flagged'
+  const idLabel = surface === 'commitment_arrival' ? 'commitment' : 'draft'
   return [
-    `*APNs push token invalid* — status \`${props.status}\`${props.reason ? ` reason \`${props.reason}\`` : ''}`,
+    `*APNs push token invalid* — status \`${props.status}\`${props.reason ? ` reason \`${props.reason}\`` : ''}${surface !== 'draft_flagged' ? ` · surface \`${surface}\`` : ''}`,
     `operator: \`${props.operatorId}\` (token nulled; operator must re-register via the operator app)`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
-    `draft: \`${props.draftId}\` · trigger: \`${props.primaryTrigger}\``,
-    `run: \`${props.agentRunId}\``,
+    `${idLabel}: \`${props.draftId}\` · trigger: \`${props.primaryTrigger}\``,
+    `run: \`${props.agentRunId ?? '(cron)'}\``,
   ].join('\n')
 }

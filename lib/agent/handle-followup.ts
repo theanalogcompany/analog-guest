@@ -10,6 +10,7 @@ import {
   isEmptyContextUpdate,
   updateGuestContext,
 } from '@/lib/guests/context'
+import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -329,6 +330,27 @@ export async function handleFollowup(input: {
           errorCode: writeResult.errorCode,
         })
       }
+    }
+
+    // TAC-297: arrival-capture dispatch site mirrors handle-inbound. On the
+    // followup path there's no inbound, so arrivalCapture is expected to be
+    // ~always empty here — kept for consistency. Empty short-circuits.
+    // Skipping the push fanout entirely on this path since followups are
+    // operator/cron-triggered, not guest-arrival-triggered (the agent's
+    // arrivalCapture would only fire on misread context, which is a no-op
+    // here anyway via isEmptyArrivalCapture).
+    const arrival = await dispatchArrivalCapture({
+      arrivalCapture: gen.result.arrivalCapture,
+      now: ctx.recognition.computedAt,
+    })
+    if (arrival.kind !== 'noop') {
+      console.warn(
+        '[agent] followup arrival capture fired unexpectedly (no push on followup path)',
+        {
+          agentRunId,
+          kind: arrival.kind,
+        },
+      )
     }
 
     // TAC-212: approval-policy gate. Bypassed entirely on the Follow Up

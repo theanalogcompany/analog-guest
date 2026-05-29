@@ -69,6 +69,11 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger, string> = {
   model_flagged: 'Model flagged for approval',
   fidelity_below_auto_send_floor: 'Voice match below auto-send threshold',
   previous_pending_held: 'Earlier draft still pending',
+  // TAC-297: structural commitment-type gate. Surfaces as the most-severe
+  // signal in PRIMARY_TRIGGER_PRIORITY (lib/agent/stages.ts), so most queued
+  // drafts carrying a comp/hold/discount will land with this label rather
+  // than the comp_regex_backstop fallback.
+  commitment_type_gated: 'Commitment requires approval',
 }
 
 const REVIEW_REASON_FALLBACK = 'Needs review'

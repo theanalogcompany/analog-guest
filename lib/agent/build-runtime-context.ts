@@ -12,9 +12,11 @@ import {
   BrandPersonaSchema,
   filterActiveContext,
   GuestContextSchema,
+  toActiveCommitment,
   toParsedGuestContext,
   VenueInfoSchema,
 } from '@/lib/schemas'
+import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { extractRecentVisits } from './extract-recent-visits'
 import type {
   AgentRunId,
@@ -112,6 +114,7 @@ export async function buildRuntimeContext(input: {
     mechanicsResult,
     redemptionsResult,
     visitHistoryResult,
+    activeCommitmentsResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -153,6 +156,15 @@ export async function buildRuntimeContext(input: {
       .gte('occurred_at', visitHistoryCutoffIso)
       .order('occurred_at', { ascending: false })
       .limit(MAX_VISIT_HISTORY_TRANSACTIONS),
+    // TAC-297: open + pending_ack commitments for this guest at this venue.
+    // Fail-OPEN at load (RAGResult-typed helper logs + returns error; we
+    // degrade to [] so the agent run continues without the block rather than
+    // crashing on a commitments-load DB hiccup). Runs in parallel with the
+    // other seven queries.
+    findActiveCommitmentsForGuest({
+      venueId: input.venueId,
+      guestId: input.guestId,
+    }),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -328,6 +340,19 @@ export async function buildRuntimeContext(input: {
     MAX_VISIT_HISTORY_DAYS,
   )
 
+  // TAC-297: project active commitment rows into the prompt-facing
+  // ActiveCommitment shape. Fail-OPEN: if the load errored, degrade to []
+  // and continue — a commitments DB hiccup shouldn't break the agent run.
+  // The block is omitted entirely when empty (zero tokens).
+  const activeCommitments = activeCommitmentsResult.ok
+    ? activeCommitmentsResult.data
+        .map((row) => toActiveCommitment(row))
+        .filter((c): c is NonNullable<typeof c> => c !== null)
+    : (console.warn(
+        `[agent] buildRuntimeContext: active commitments load failed for guest ${input.guestId}: ${activeCommitmentsResult.error}. Continuing with empty list.`,
+      ),
+      [])
+
   return {
     agentRunId: input.agentRunId,
     venue,
@@ -338,6 +363,7 @@ export async function buildRuntimeContext(input: {
     recognition,
     mechanics,
     recentVisits,
+    activeCommitments,
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

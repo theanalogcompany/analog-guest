@@ -178,6 +178,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
+    activeCommitments: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: { category: 'reply' } as RuntimeContext['classification'],
@@ -194,12 +195,14 @@ function makeGeneration(): GenerateMessageResult {
     requiresOperatorApproval: false,
     approvalReason: '',
     contextUpdate: {},
+    commitment: {},
+    arrivalCapture: {},
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.15.0',
+    promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
   }
 }
@@ -271,7 +274,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     expect(updPayload).toMatchObject({
       body: 'regenerated draft body',
       voice_fidelity: 0.78,
-      prompt_version: 'v1.15.0',
+      prompt_version: 'v1.16.0',
       category: 'reply',
       reply_to_message_id: 'inbound-1',
       review_reason: 'comp_regex_backstop',

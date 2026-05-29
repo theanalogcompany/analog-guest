@@ -1,5 +1,12 @@
 import type { EligibleMechanic, GuestState } from '@/lib/recognition'
-import type { BrandPersona, ParsedGuestContext, VenueInfo } from '@/lib/schemas'
+import type {
+  ActiveCommitment,
+  ArrivalCaptureEmission,
+  BrandPersona,
+  CommitmentEmission,
+  ParsedGuestContext,
+  VenueInfo,
+} from '@/lib/schemas'
 
 // Naming asymmetry: this module returns voiceFidelity (camelCase). It persists
 // to messages.confidence_score (snake_case) at the DB write boundary. The
@@ -140,6 +147,15 @@ export type RuntimeContext = {
   // entries dropped, observations truncated to OBSERVATION_RENDER_LIMIT).
   // undefined / empty = block omitted entirely.
   guestContext?: ParsedGuestContext
+  // TAC-297: open + pending_ack commitments for this guest at this venue.
+  // The serializer renders a `## Active commitments` block between Guest
+  // context and Recent conversation when this is non-empty. Loaded by
+  // build-runtime-context.ts via findActiveCommitmentsForGuest +
+  // toActiveCommitment projection. Surfacing tells the model what's already
+  // been promised so it can ask for arrival timing if natural — soft, woven
+  // (TAC-297 plan-review call #5), not a standing directive. undefined or
+  // empty array = block omitted entirely (zero tokens).
+  activeCommitments?: ActiveCommitment[]
 }
 
 export type GenerateMessageInput = {
@@ -168,6 +184,23 @@ export type GenerateMessageContextUpdate = {
   observation?: string
 }
 
+// TAC-297: agent-emitted commitment (a promise made in conversation — comp,
+// hold, recommendation, discount). Threaded onto every attempt and the final
+// result; the orchestrator dispatches commitment intent through the approval
+// queue via messages.pending_commitment for gated paths, or materializes
+// inline for recommendation auto-sends. Same rigid-presence / optional-inner
+// posture as contextUpdate. isEmptyCommitmentEmission short-circuits the
+// no-op case before any DB hit.
+export type GenerateMessageCommitment = CommitmentEmission
+
+// TAC-297: agent-emitted arrival capture (response to an active commitment
+// where the guest signals when they're arriving). Independent of the
+// approval-gate outcome — fires regardless of whether the draft ships,
+// queues, or refuses (TAC-296 precedent — what the agent UNDERSTOOD is
+// independent of what we SAID back). isEmptyArrivalCapture short-circuits
+// the no-op case.
+export type GenerateMessageArrivalCapture = ArrivalCaptureEmission
+
 export type GenerateMessageAttempt = {
   body: string
   voiceFidelity: number
@@ -181,6 +214,12 @@ export type GenerateMessageAttempt = {
   // becomes the GenerateMessageResult.contextUpdate consumed by the
   // orchestrator's context-write step.
   contextUpdate: GenerateMessageContextUpdate
+  // TAC-297: per-attempt commitment emission. Final attempt's value becomes
+  // GenerateMessageResult.commitment.
+  commitment: GenerateMessageCommitment
+  // TAC-297: per-attempt arrival capture. Final attempt's value becomes
+  // GenerateMessageResult.arrivalCapture.
+  arrivalCapture: GenerateMessageArrivalCapture
   // Populated only when the user prompt for this attempt differed from the
   // top-level userPrompt — i.e., a regeneration with explicit feedback (e.g.
   // a dash-violation rewrite request). First-attempt prompts equal the parent
@@ -205,6 +244,16 @@ export type GenerateMessageResult = {
   // new to record this turn; the orchestrator's isEmptyContextUpdate check
   // short-circuits before any DB hit in that case.
   contextUpdate: GenerateMessageContextUpdate
+  // TAC-297: final-attempt commitment emission. Threaded onto
+  // messages.pending_commitment by the orchestrator for gated paths (intent
+  // carrier through the approval queue); materialized inline by
+  // scheduleAndSend for recommendation auto-sends. Empty `{}` is the no-op
+  // shape; isEmptyCommitmentEmission short-circuits before any DB hit.
+  commitment: GenerateMessageCommitment
+  // TAC-297: final-attempt arrival capture. Dispatched independently of the
+  // approval-gate outcome (TAC-296 precedent). Empty `{}` is the no-op shape;
+  // isEmptyArrivalCapture short-circuits before any DB hit.
+  arrivalCapture: GenerateMessageArrivalCapture
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so

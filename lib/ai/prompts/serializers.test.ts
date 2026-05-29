@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
 import type { EligibleMechanic } from '../../recognition/eligibility'
 import {
+  type ActiveCommitment,
   type BrandPersona,
   BrandPersonaSchema,
   type MenuItem,
@@ -1048,5 +1049,96 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     // Newest life_context entries survive; oldest were dropped.
     expect(out).toContain('(life 9)')
     expect(out).not.toContain('(life 0)')
+  })
+})
+
+describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
+  function commitment(overrides: Partial<ActiveCommitment> = {}): ActiveCommitment {
+    return {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      type: 'comp',
+      description: 'oat latte',
+      code: '7K2P',
+      status: 'open',
+      expected_arrival: null,
+      arrival_signal: null,
+      created_at: '2026-04-29T11:00:00Z',
+      ...overrides,
+    }
+  }
+
+  it('omits the block entirely when activeCommitments is empty', () => {
+    const out = runtimeToProse({ activeCommitments: [] }, 'reply', NOW)
+    expect(out).not.toContain('## Active commitments')
+  })
+
+  it('omits the block when activeCommitments is undefined', () => {
+    const out = runtimeToProse({}, 'reply', NOW)
+    expect(out).not.toContain('## Active commitments')
+  })
+
+  it('renders comp with code: XXXX and status: open', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('## Active commitments')
+    expect(out).toContain('- [comp] oat latte (code: 7K2P, status: open) — promised')
+    // Regression for the leading-comma bug — the rendering must never produce
+    // an empty leading element when code is present.
+    expect(out).not.toMatch(/\(, /)
+  })
+
+  it('omits the code segment cleanly for recommendation (no leading comma)', () => {
+    const out = runtimeToProse(
+      {
+        activeCommitments: [
+          commitment({ type: 'recommendation', description: 'the duck', code: null }),
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('- [recommendation] the duck (status: open) — promised')
+    // The reported MAJOR bug rendered this as `(, status: open)`.
+    expect(out).not.toContain('(, status: open)')
+  })
+
+  it('surfaces status=pending_ack so the model knows arrival was already signaled', () => {
+    const out = runtimeToProse(
+      {
+        activeCommitments: [
+          commitment({ status: 'pending_ack', arrival_signal: 'imminent' }),
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('status: pending_ack')
+  })
+
+  it('renders between Guest context and Recent conversation when both present', () => {
+    const out = runtimeToProse(
+      {
+        guestContext: { guest_details: { first_name: 'Jaipal' } },
+        activeCommitments: [commitment()],
+        recentMessages: [
+          {
+            direction: 'inbound' as const,
+            body: 'hello',
+            createdAt: new Date('2026-04-29T11:30:00Z'),
+          },
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    const guestIdx = out.indexOf('## Guest context')
+    const activeIdx = out.indexOf('## Active commitments')
+    const recentIdx = out.indexOf('## Recent conversation')
+    expect(guestIdx).toBeGreaterThanOrEqual(0)
+    expect(activeIdx).toBeGreaterThan(guestIdx)
+    expect(recentIdx).toBeGreaterThan(activeIdx)
   })
 })

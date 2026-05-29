@@ -1,7 +1,9 @@
 import { createAdminClient } from '@/lib/db/admin'
 import type { Database } from '@/db/types'
 import type { GenerateMessageResult } from '@/lib/ai'
+import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
+import { type PendingCommitment, pendingFromEmission } from '@/lib/schemas'
 import { fireRedAlert } from './alerts'
 import { sampleTiming } from './timing'
 import type { RuntimeContext } from './types'
@@ -229,6 +231,35 @@ export async function scheduleAndSend(
     throw new Error(`scheduleAndSend: persist failed: ${insertResult.error}`)
   }
 
+  // TAC-297: inline commitment materialization on the auto-send path. For
+  // recommendation-type commitments (ungated by COMMITMENT_TYPE_GATED, so
+  // they flow through here in production) and for demo-bypassed comp/hold/
+  // discount commitments (the demo flag short-circuits the approval gate
+  // but the materialization still needs to happen), we write the
+  // guest_commitments row inline after dispatch success. Pre-dispatch
+  // would risk an orphan row if Sendblue fails; post-dispatch matches the
+  // ticket's "create on send, not at draft" invariant.
+  //
+  // Commitment-write failure is LOGGED + accepted — the message has been
+  // sent; rolling back here would just mean the operator never knows the
+  // commitment was made. Reconciliation via a follow-up ticket if pilot
+  // surfaces this failure mode.
+  const pending: PendingCommitment | null = pendingFromEmission(generation.commitment)
+  if (pending !== null) {
+    const commitmentResult = await createCommitmentFromPending({
+      guestId: ctx.guest.id,
+      venueId: ctx.venue.id,
+      pendingCommitment: pending,
+      sourceMessageId: insertResult.id,
+      now: new Date(),
+    })
+    if (!commitmentResult.ok) {
+      console.warn(
+        `[agent] scheduleAndSend: inline commitment materialization failed for message=${insertResult.id}: ${commitmentResult.error}. Message already sent.`,
+      )
+    }
+  }
+
   return { outboundMessageId: insertResult.id, providerMessageId }
 }
 
@@ -394,6 +425,11 @@ async function tryQueueInsert(
   | { kind: 'failed'; error: string }
 > {
   try {
+    // TAC-297: thread the agent's commitment intent through the approval
+    // queue via the pending_commitment jsonb carrier (migration 027).
+    // Null when the emission isn't actionable (no-op `{}` or recommendation
+    // type that already materialized inline on the auto-send path).
+    const pendingCommitment = pendingFromEmission(generation.commitment)
     const { data, error } = await supabase
       .from('messages')
       .insert(
@@ -401,6 +437,7 @@ async function tryQueueInsert(
           status: 'pending_review',
           review_state: 'pending',
           review_reason: primaryTrigger,
+          pending_commitment: pendingCommitment,
         }),
       )
       .select('id')
@@ -461,6 +498,13 @@ async function tryRegenUpdate(
     // Conditional UPDATE gated on review_state='pending'. Mirrors the
     // TAC-258 dispatchOperatorOutbound TOCTOU pattern: optimistic flip,
     // rowcount=0 means the row was acted on between SELECT and UPDATE.
+    //
+    // TAC-297: pending_commitment joins the UPDATED column set (NOT
+    // preserved). Per the plan-review call #1, regen overwrites the jsonb
+    // wholesale — stale intent from the prior draft is replaced or nulled
+    // when the new regen has no commitment. The carrier always reflects
+    // the current draft's intent.
+    const pendingCommitment = pendingFromEmission(generation.commitment)
     const updatePayload: MessageUpdate = {
       body: generation.body,
       voice_fidelity: generation.voiceFidelity,
@@ -469,6 +513,7 @@ async function tryRegenUpdate(
       reply_to_message_id: ctx.currentMessage?.id ?? null,
       langfuse_trace_id: ctx.trace.id || null,
       review_reason: primaryTrigger,
+      pending_commitment: pendingCommitment,
     }
     const { data: updated, error: updateError } = await supabase
       .from('messages')

@@ -49,6 +49,12 @@ export const APPROVAL_TRIGGERS = {
   MODEL_FLAGGED: 'model_flagged',
   COMP_REGEX_BACKSTOP: 'comp_regex_backstop',
   PREVIOUS_PENDING_HELD: 'previous_pending_held',
+  // TAC-297: structural gate fires when the agent emits a commitment with
+  // type ∈ {comp, hold, discount}. Independent of requiresOperatorApproval —
+  // the structured emission IS the backstop, stronger than the NL comp regex
+  // and covers holds without leaky NL matching (per the TAC-297 plan-review
+  // call #2). Recommendation type does NOT fire this trigger.
+  COMMITMENT_TYPE_GATED: 'commitment_type_gated',
 } as const
 
 /**
@@ -66,14 +72,19 @@ export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_T
  * controls the `triggers: string[]` array — `triggers[0]` is the first one
  * that fired during evaluation).
  *
- * Severity rationale: irreversible financial commitments (comp regex hit)
- * outrank model self-flag because the regex is deterministic + the failure
- * mode it protects against is a comp going out unreviewed. Model-flagged
- * resource commitments outrank sticky-pending because operator attention
- * should land on the new commitment, not on "we already had a pending
- * draft." Soft signals (fidelity_below_auto_send_floor) come last.
+ * Severity rationale: structured commitment type (TAC-297) outranks comp
+ * regex because the structured signal carries explicit type information
+ * (the operator queue UI sees "hold" vs "comp" vs "discount" directly
+ * rather than just "regex matched some comp prose"). Irreversible financial
+ * commitments (comp regex hit) outrank model self-flag because the regex is
+ * deterministic + the failure mode it protects against is a comp going out
+ * unreviewed. Model-flagged resource commitments outrank sticky-pending
+ * because operator attention should land on the new commitment, not on "we
+ * already had a pending draft." Soft signals (fidelity_below_auto_send_floor)
+ * come last.
  */
 export const PRIMARY_TRIGGER_PRIORITY = [
+  APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
@@ -485,6 +496,20 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   }
 
+  // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
+  // discount}. Fires regardless of requiresOperatorApproval self-flag.
+  // Recommendation type does NOT gate. Requires the commitment to be
+  // actionable (type + non-empty description) — a partial emission is treated
+  // as no-op and won't fire the trigger.
+  const commitmentType = generation.commitment.type
+  const commitmentDescription = generation.commitment.description?.trim()
+  if (
+    commitmentDescription &&
+    (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount')
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  }
+
   // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
   // would-have-queued set — including the previous_pending_held DB read — is
   // accurate for the analytics event) but BEFORE the queue return. The
@@ -695,5 +720,10 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // (formatGuestContext) renders the `## Guest context` block between
     // visit history and recent conversation; empty context omits the block.
     guestContext: ctx.guest.context,
+    // TAC-297: thread active commitments (open + pending_ack) to the AI
+    // module. The serializer (formatActiveCommitments) renders the
+    // `## Active commitments` block between guest context and recent
+    // conversation; empty array omits the block.
+    activeCommitments: ctx.activeCommitments,
   }
 }

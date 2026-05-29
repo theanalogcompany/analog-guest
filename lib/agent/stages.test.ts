@@ -99,6 +99,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
+    activeCommitments: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -526,17 +527,19 @@ function makeGenerationResult(
     reasoning: 'matches the venue voice',
     requiresOperatorApproval: false,
     approvalReason: '',
-    // TAC-296: contextUpdate is required on every GenerateMessageResult.
-    // The no-op emission shape is `{}`. Stages tests don't exercise context
-    // capture; default to empty so the existing approval-gate cases stay
-    // focused on their original surface.
+    // TAC-296 / TAC-297: required schema fields. The no-op shapes are `{}`.
+    // Stages tests for legacy triggers (fidelity / model_flagged / regex /
+    // pending) override `commitment` to exercise the COMMITMENT_TYPE_GATED
+    // trigger; leave the default at no-op here.
     contextUpdate: {},
+    commitment: {},
+    arrivalCapture: {},
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.15.0',
+    promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
     ...overrides,
   }
