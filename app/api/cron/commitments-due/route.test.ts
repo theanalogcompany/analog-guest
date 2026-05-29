@@ -5,6 +5,8 @@ const processDueCommitmentsMock = vi.fn<
     scanned: number
     transitioned: number
     skipped: number
+    notMorningHour: number
+    future: number
     invalid: number
     errored: number
     pushed: number
@@ -24,6 +26,8 @@ beforeEach(() => {
     scanned: 2,
     transitioned: 1,
     skipped: 1,
+    notMorningHour: 0,
+    future: 0,
     invalid: 0,
     errored: 0,
     pushed: 1,
