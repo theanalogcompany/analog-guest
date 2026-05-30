@@ -366,18 +366,11 @@ function formatGuestDetailsLines(
   if (details.last_name) lines.push(`- Last name: ${details.last_name}`)
   if (details.pronouns) lines.push(`- Pronouns: ${details.pronouns}`)
   if (details.date_of_birth) lines.push(`- Date of birth: ${details.date_of_birth}`)
-  if (details.home_base) {
-    const hb = details.home_base
-    const parts = [hb.neighborhood, hb.city, hb.zip, hb.address].filter(
-      (p): p is string => Boolean(p),
-    )
-    if (parts.length > 0) lines.push(`- Home base: ${parts.join(', ')}`)
-  }
-  if (details.workplace) {
-    const wp = details.workplace
-    const parts = [wp.employer, wp.neighborhood].filter((p): p is string => Boolean(p))
-    if (parts.length > 0) lines.push(`- Work: ${parts.join(', ')}`)
-  }
+  // TAC-300: home_base / workplace are bare strings post-normalize. Legacy
+  // nested-object reads are flattened in toParsedGuestContext, so the
+  // serializer only ever sees a string here.
+  if (details.home_base) lines.push(`- Home base: ${details.home_base}`)
+  if (details.workplace) lines.push(`- Work: ${details.workplace}`)
   return lines
 }
 

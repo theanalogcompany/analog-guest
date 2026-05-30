@@ -150,7 +150,7 @@ function makeCtx() {
       createdAt: new Date(),
       createdVia: 'inbound_message',
       isDemo: false,
-      context: { dietary: null, home_base: null, life_context: [], observations: [] },
+      context: {},
     },
     currentMessage: null,
     followupTrigger: null,

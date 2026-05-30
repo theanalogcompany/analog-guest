@@ -17,15 +17,15 @@ describe('GuestContextSchema', () => {
     if (r.success) expect(r.data).toEqual({})
   })
 
-  it('accepts a fully populated shape', () => {
+  it('accepts a fully populated shape (post-TAC-300: bare-string home_base + workplace)', () => {
     const r = GuestContextSchema.safeParse({
       guest_details: {
         first_name: 'Sarah',
         last_name: 'Chen',
         pronouns: 'she/her',
         date_of_birth: '1992-06-15',
-        home_base: { neighborhood: 'Bernal Heights', zip: '94110', city: 'SF' },
-        workplace: { neighborhood: 'SoMa', employer: 'Acme' },
+        home_base: 'Bernal Heights',
+        workplace: 'marketing agency near Union Square',
       },
       preferences: {
         dietary: ['vegan'],
@@ -38,6 +38,26 @@ describe('GuestContextSchema', () => {
       observations: [{ note: 'Runs marathons', captured_at: '2026-04-20T08:00:00Z' }],
     })
     expect(r.success).toBe(true)
+  })
+
+  it('still accepts pre-TAC-300 legacy nested home_base / workplace objects (back-compat union)', () => {
+    const r = GuestContextSchema.safeParse({
+      guest_details: {
+        first_name: 'Sarah',
+        home_base: { neighborhood: 'Bernal Heights', zip: '94110', city: 'SF' },
+        workplace: { neighborhood: 'SoMa', employer: 'Acme' },
+      },
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      // Persisted shape preserves the object structure verbatim; normalization
+      // to a string happens at toParsedGuestContext time, not at parse time.
+      expect(r.data.guest_details?.home_base).toEqual({
+        neighborhood: 'Bernal Heights',
+        zip: '94110',
+        city: 'SF',
+      })
+    }
   })
 
   it('strips unknown keys silently (no .strict() so future migrations stay safe)', () => {
@@ -86,6 +106,20 @@ describe('GuestContextPatchSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts bare-string home_base and workplace (TAC-300 reshape)', () => {
+    const r = GuestContextPatchSchema.safeParse({
+      guest_details: {
+        home_base: 'Bernal Heights',
+        workplace: 'marketing agency near Union Square',
+      },
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.guest_details?.home_base).toBe('Bernal Heights')
+      expect(r.data.guest_details?.workplace).toBe('marketing agency near Union Square')
+    }
+  })
+
   it('accepts life_context patch entries without captured_at (runtime stamps)', () => {
     const r = GuestContextPatchSchema.safeParse({
       life_context: [{ note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z' }],
@@ -93,11 +127,24 @@ describe('GuestContextPatchSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('accepts observations patch entries without captured_at (runtime stamps)', () => {
+  it('strips pronouns / date_of_birth / observations from the patch (TAC-300 dropped from patch shape)', () => {
+    // Capturable-before-stays-capturable-after constraint: these slots no
+    // longer live on the PATCH schema; the model captures them via the
+    // observation string shortcut on GuestContextUpdate. Unknown keys are
+    // silently stripped — the parse succeeds, but the slots don't surface.
     const r = GuestContextPatchSchema.safeParse({
+      guest_details: {
+        first_name: 'Sarah',
+        pronouns: 'she/her',
+        date_of_birth: '1992-06-15',
+      },
       observations: [{ note: 'a runner' }],
     })
     expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.guest_details).toEqual({ first_name: 'Sarah' })
+      expect('observations' in r.data).toBe(false)
+    }
   })
 
   it('strips unknown keys (agent might emit near-misses)', () => {
@@ -208,6 +255,53 @@ describe('toParsedGuestContext', () => {
     expect(out.observations).toHaveLength(OBSERVATION_RENDER_LIMIT)
     expect(out.observations?.[0].note).toBe('obs-5')
     expect(out.observations?.[OBSERVATION_RENDER_LIMIT - 1].note).toBe('obs-14')
+  })
+
+  it('normalizes legacy nested home_base + workplace objects into bare strings (TAC-300 back-compat)', () => {
+    const out = toParsedGuestContext(
+      {
+        guest_details: {
+          first_name: 'Sarah',
+          home_base: { neighborhood: 'Bernal Heights', city: 'SF', zip: '94110' },
+          workplace: { employer: 'Acme', neighborhood: 'SoMa' },
+        },
+      },
+      NOW,
+    )
+    expect(out.guest_details).toEqual({
+      first_name: 'Sarah',
+      last_name: undefined,
+      pronouns: undefined,
+      date_of_birth: undefined,
+      home_base: 'Bernal Heights, SF, 94110',
+      workplace: 'Acme, SoMa',
+    })
+  })
+
+  it('passes through string home_base + workplace unchanged (new-shape reads)', () => {
+    const out = toParsedGuestContext(
+      {
+        guest_details: {
+          home_base: 'Bernal Heights',
+          workplace: 'marketing agency near Union Square',
+        },
+      },
+      NOW,
+    )
+    expect(out.guest_details?.home_base).toBe('Bernal Heights')
+    expect(out.guest_details?.workplace).toBe('marketing agency near Union Square')
+  })
+
+  it('drops guest_details entirely when every renderable field is empty after normalize', () => {
+    const out = toParsedGuestContext(
+      {
+        guest_details: {
+          home_base: { neighborhood: '', city: '', zip: '', address: '' },
+        },
+      },
+      NOW,
+    )
+    expect(out.guest_details).toBeUndefined()
   })
 
   it('normalizes empty arrays to undefined so isEmptyGuestContext sees absence consistently', () => {

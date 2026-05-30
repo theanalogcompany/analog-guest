@@ -45,15 +45,18 @@ export function isEmptyContextUpdate(update: GuestContextUpdate): boolean {
 
 /**
  * Pure deep-merge of a GuestContextPatch into an existing GuestContext.
- * - Top-level objects (guest_details, preferences) deep-merge field by field.
- * - One-level-down objects (guest_details.home_base, guest_details.workplace)
- *   also deep-merge — they're conceptually single entities, not arrays.
- * - All arrays (preferences.dietary/favorites/dislikes, life_context,
- *   observations) are REPLACED, not appended (per the TAC-296 ticket spec).
- *   The agent emits the full new array when it wants to update.
- * - life_context and observations entries missing `captured_at` are stamped
- *   with `now.toISOString()` so the persisted shape always carries the
- *   required timestamp.
+ * - guest_details merges shallow {...existing, ...patch}. home_base/workplace
+ *   are bare strings in the PATCH shape (TAC-300), so the patch overwrites
+ *   the existing value in place. If the existing row carried a legacy nested
+ *   object (pre-TAC-300 data), the string patch replaces it — the persisted
+ *   schema's union still parses the result on next read.
+ * - preferences merges shallow.
+ * - life_context is REPLACED, not appended (per the TAC-296 ticket spec). The
+ *   agent emits the full new array when it wants to update. Entries get a
+ *   runtime-stamped captured_at — the PATCH shape no longer carries one.
+ * - observations: NOT merged here. The PATCH schema doesn't carry observations
+ *   (TAC-300); the observation string shortcut on GuestContextUpdate is the
+ *   only append path and lives in updateGuestContext below.
  *
  * Exported for direct unit testing. Callers should usually go through
  * updateGuestContext, which also handles the observation shortcut and
@@ -70,14 +73,6 @@ export function deepMergeContext(
     merged.guest_details = {
       ...existing.guest_details,
       ...patch.guest_details,
-      home_base:
-        patch.guest_details.home_base !== undefined
-          ? { ...existing.guest_details?.home_base, ...patch.guest_details.home_base }
-          : existing.guest_details?.home_base,
-      workplace:
-        patch.guest_details.workplace !== undefined
-          ? { ...existing.guest_details?.workplace, ...patch.guest_details.workplace }
-          : existing.guest_details?.workplace,
     }
   }
 
@@ -91,14 +86,7 @@ export function deepMergeContext(
   if (patch.life_context !== undefined) {
     merged.life_context = patch.life_context.map((entry) => ({
       ...entry,
-      captured_at: entry.captured_at ?? now.toISOString(),
-    }))
-  }
-
-  if (patch.observations !== undefined) {
-    merged.observations = patch.observations.map((entry) => ({
-      ...entry,
-      captured_at: entry.captured_at ?? now.toISOString(),
+      captured_at: now.toISOString(),
     }))
   }
 
