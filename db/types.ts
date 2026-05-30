@@ -147,13 +147,13 @@ export type Database = {
         Row: {
           acknowledged_at: string | null
           acknowledged_by: string | null
+          arrival_signal: string | null
           code: string | null
           created_at: string
           created_by: string
           description: string
           expected_arrival: string | null
           expires_at: string | null
-          arrival_signal: string | null
           guest_id: string
           id: string
           redeemed_at: string | null
@@ -166,13 +166,13 @@ export type Database = {
         Insert: {
           acknowledged_at?: string | null
           acknowledged_by?: string | null
+          arrival_signal?: string | null
           code?: string | null
           created_at?: string
           created_by?: string
           description: string
           expected_arrival?: string | null
           expires_at?: string | null
-          arrival_signal?: string | null
           guest_id: string
           id?: string
           redeemed_at?: string | null
@@ -185,13 +185,13 @@ export type Database = {
         Update: {
           acknowledged_at?: string | null
           acknowledged_by?: string | null
+          arrival_signal?: string | null
           code?: string | null
           created_at?: string
           created_by?: string
           description?: string
           expected_arrival?: string | null
           expires_at?: string | null
-          arrival_signal?: string | null
           guest_id?: string
           id?: string
           redeemed_at?: string | null

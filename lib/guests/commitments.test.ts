@@ -13,6 +13,7 @@ import {
   findActiveCommitmentsForGuest,
   findScheduledOpenCommitments,
   markAcknowledged,
+  markCancelled,
   scheduleArrival,
   transitionToPendingAck,
 } from './commitments'
@@ -372,6 +373,97 @@ describe('markAcknowledged', () => {
     })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data.transitioned).toBe(false)
+  })
+})
+
+describe('markCancelled (TAC-299)', () => {
+  it('short-circuits when allowedVenueIds is empty (no round trip)', async () => {
+    const r = await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [],
+      now: NOW,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data.transitioned).toBe(false)
+    expect(vi.mocked(createAdminClient)).not.toHaveBeenCalled()
+  })
+
+  it('flips status to cancelled on CAS win with allowed venue', async () => {
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [VENUE_ID],
+      now: NOW,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.transitioned).toBe(true)
+      expect(r.data.row?.status).toBe('cancelled')
+    }
+    expect(state.updatePayload).toMatchObject({ status: 'cancelled' })
+    // CAS gate: status='pending_ack' (the only valid prior state)
+    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })
+    expect(state.updateInCalls).toContainEqual({ field: 'venue_id', values: [VENUE_ID] })
+  })
+
+  it('does NOT write cancelled_at or cancelled_by columns (no migration)', async () => {
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [VENUE_ID],
+      now: NOW,
+    })
+    expect(state.updatePayload).not.toHaveProperty('cancelled_at')
+    expect(state.updatePayload).not.toHaveProperty('cancelled_by')
+  })
+
+  it('returns transitioned=false on CAS loss (already acknowledged OR out-of-allowlist)', async () => {
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [VENUE_ID],
+      now: NOW,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.transitioned).toBe(false)
+      expect(r.data.row).toBeNull()
+    }
+  })
+
+  it('returns db_write_failed on update error', async () => {
+    const state = newState({
+      updateError: { message: 'connection lost' },
+      updateReturn: null,
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [VENUE_ID],
+      now: NOW,
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errorCode).toBe('db_write_failed')
   })
 })
 

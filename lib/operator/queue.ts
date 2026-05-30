@@ -60,11 +60,22 @@ function normalizeRecognitionState(s: string | null): GuestRecognitionState | nu
   return RECOGNITION_STATE_VALUES.has(s) ? (s as GuestRecognitionState) : null
 }
 
+// TAC-299: extra non-policy review_reason values that can land on
+// messages.review_reason without going through applyApprovalPolicyStage.
+// Kept as a separate union from ApprovalTrigger so the auto-policy code
+// doesn't have to know about operator-initiated reasons, but folded into
+// the label map below so the queue UI renders both kinds uniformly.
+//   operator_decline_initiated — TAC-299: operator swiped left on a
+//     heads-up card; the draft-decline route persisted an apology draft
+//     bypassing the policy gate (the swipe IS the approval).
+type ExtraReviewReason = 'operator_decline_initiated'
+
 // Operator-facing labels for `messages.review_reason`. The wire field stays
 // `string | null` — only the value changes from raw classifier code to
-// human-readable text. Typed as Record<ApprovalTrigger, ...> so adding a
-// new trigger in lib/agent/stages.ts without a label here fails tsc.
-const REVIEW_REASON_LABELS: Record<ApprovalTrigger, string> = {
+// human-readable text. Typed as Record<ApprovalTrigger | ExtraReviewReason,
+// ...> so adding a new trigger in lib/agent/stages.ts or a new operator-
+// initiated reason without a label here fails tsc.
+const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> = {
   comp_regex_backstop: 'Compensation language detected',
   model_flagged: 'Model flagged for approval',
   fidelity_below_auto_send_floor: 'Voice match below auto-send threshold',
@@ -74,6 +85,9 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger, string> = {
   // drafts carrying a comp/hold/discount will land with this label rather
   // than the comp_regex_backstop fallback.
   commitment_type_gated: 'Commitment requires approval',
+  // TAC-299: operator swiped left on a heads-up card → /draft-decline
+  // persisted an apology draft for review.
+  operator_decline_initiated: 'Operator-initiated decline',
 }
 
 const REVIEW_REASON_FALLBACK = 'Needs review'

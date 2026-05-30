@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import type { GuestState } from '@/lib/recognition/types'
+
 // Guest commitments (TAC-297). Schemas covering: (1) what the agent emits on
 // GeneratedMessageSchema.commitment + .arrivalCapture, (2) the
 // messages.pending_commitment jsonb carrier shape, (3) the persisted
@@ -235,6 +237,15 @@ export function toActiveCommitment(
 // The Contract-locked shape consumed by analog-operator (TAC-298) via
 // GET /api/operator/queue's new `commitments` field. Field names use
 // snake_case to match the SQL row shape (consistent with QueueDraft).
+//
+// TAC-299 added recognitionState (drives the heads-up card's recognition pill)
+// and sourceMessageId (lets the card open the inbound conversation thread via
+// the existing /api/operator/messages/:id/thread fetch — TAC-277). Both are
+// nullable so a guest with no recognition row OR a commitment with no source
+// message (operator-created commitments, future) projects cleanly. The
+// snake_case `source_message_id` column projects to camelCase `sourceMessageId`
+// on the wire per the Contract — column shape and wire shape diverge here,
+// unlike the rest of HeadsUpCommitment which is snake_case end-to-end.
 export interface HeadsUpCommitment {
   id: string
   type: CommitmentType
@@ -243,4 +254,6 @@ export interface HeadsUpCommitment {
   code: string | null
   expected_arrival: string | null
   created_at: string
+  recognitionState: GuestState | null
+  sourceMessageId: string | null
 }
