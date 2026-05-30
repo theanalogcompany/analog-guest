@@ -247,6 +247,83 @@ export async function markAcknowledged(opts: {
   }
 }
 
+/**
+ * Cancel a pending_ack commitment. CAS-gated on status='pending_ack' AND
+ * venue_id IN allowedVenueIds — same single-conditional-UPDATE shape as
+ * markAcknowledged so the auth-allowlist enforcement and the state-machine
+ * gate land in one round trip.
+ *
+ * Sets status='cancelled'. No cancelled_at / cancelled_by columns — the
+ * TAC-299 ticket explicitly bounds the change to "no migration" and the
+ * operator audit trail lives on the PostHog event
+ * (operator_draft_decline_initiated carries operatorId + commitmentId).
+ *
+ * transitioned=false here means one of:
+ *   - row doesn't exist,
+ *   - row is in a venue outside the operator's allowlist,
+ *   - row has moved to a non-pending_ack state (acknowledged, already
+ *     cancelled, expired, redeemed).
+ * The TAC-299 route handler logs but does NOT 500 on transitioned=false —
+ * the decline draft is already persisted at that point, and the operator
+ * can still decide whether to send it. We don't disambiguate because doing
+ * so would require a second SELECT and the route is fire-and-forget on the
+ * commitment-side effect after the persist succeeds.
+ *
+ * Race-safe against a concurrent markAcknowledged on the same row: the two
+ * CAS gates compete, the loser gets transitioned=false. Decline-loser: log
+ * + 200 (draft still persisted). Ack-loser: 409 per /acknowledge route.
+ */
+export async function markCancelled(opts: {
+  commitmentId: string
+  /**
+   * Intentionally unused inside this helper — kept on the signature for
+   * parity with markAcknowledged (so route handlers passing the same
+   * opts shape don't have to special-case decline). The audit trail
+   * lives on the captureOperatorDraftDeclineInitiated PostHog event,
+   * which carries operatorId + commitmentId. No cancelled_by column
+   * exists by design (TAC-299: no migration).
+   */
+  operatorId: string
+  allowedVenueIds: string[]
+  now: Date
+}): Promise<RAGResult<TransitionResult>> {
+  const { commitmentId, allowedVenueIds, now } = opts
+  if (allowedVenueIds.length === 0) {
+    return { ok: true, data: { transitioned: false, row: null } }
+  }
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .update({
+        status: 'cancelled',
+        updated_at: now.toISOString(),
+      })
+      .eq('id', commitmentId)
+      .eq('status', 'pending_ack')
+      .in('venue_id', allowedVenueIds)
+      .select()
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_write_failed' }
+    }
+    if (!data || data.length === 0) {
+      return { ok: true, data: { transitioned: false, row: null } }
+    }
+    const parsed = GuestCommitmentRowSchema.safeParse(data[0])
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: `invalid commitment row shape: ${parsed.error.message}`,
+        errorCode: 'db_write_invalid_shape',
+      }
+    }
+    return { ok: true, data: { transitioned: true, row: parsed.data } }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_write_threw' }
+  }
+}
+
 // ===== Reads =====
 
 /**

@@ -683,6 +683,34 @@ export async function captureOperatorCommitmentAcknowledged(
   await capturePostHogEvent('operator_commitment_acknowledged', props.guestId, { ...props })
 }
 
+/**
+ * TAC-299 — operator swiped left on a heads-up card, triggering an
+ * agent-drafted decline. Carries IDs only (mirrors the TAC-258 + TAC-297
+ * operator events). messageId is the pending draft the route returned;
+ * the body lives on the row + Langfuse so we don't duplicate. No Slack
+ * relay — product analytics, not operational.
+ */
+export interface OperatorDraftDeclineInitiatedProps {
+  venueId: string
+  guestId: string
+  commitmentId: string
+  messageId: string
+  operatorId: string
+  /** Commitment type at the time of decline (comp/hold/discount/recommendation). */
+  type: string
+  /** now() - guest_commitments.created_at — how long the commitment sat. */
+  timeToActionMs: number
+  /** True when markCancelled CAS lost the race (concurrent ack); the draft
+   * is still persisted, the commitment is not at status='cancelled'. */
+  commitmentCancellationRaceLost: boolean
+}
+
+export async function captureOperatorDraftDeclineInitiated(
+  props: OperatorDraftDeclineInitiatedProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_draft_decline_initiated', props.guestId, { ...props })
+}
+
 // ---------------------------------------------------------------------------
 // APNs push events (TAC-207)
 // ---------------------------------------------------------------------------
