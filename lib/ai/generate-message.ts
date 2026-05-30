@@ -38,7 +38,11 @@ voiceFidelity: a DECIMAL number between 0.0 and 1.0 (NOT a 1-10 score).
   0.9 = excellent match, captures distinctive phrases and tone
   1.0 = indistinguishable from how the operator would write`
 
-const GeneratedMessageSchema = z.object({
+// Exported for the TAC-300 CI guardrail in lib/ai/schema-budget.test.ts —
+// the test walks this schema's tree counting ZodOptional wrappers and fails
+// CI if the count breaches OPTIONAL_FIELD_BUDGET. No other call sites; the
+// generation pipeline uses the schema directly via the `schema:` arg below.
+export const GeneratedMessageSchema = z.object({
   body: z.string().min(1),
   // .refine() instead of .min(0).max(1) — Anthropic's structured-output
   // validator rejects `minimum`/`maximum` constraints on JSON Schema number

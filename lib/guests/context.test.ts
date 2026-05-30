@@ -108,7 +108,10 @@ describe('deepMergeContext', () => {
     })
   })
 
-  it('deep-merges nested home_base + workplace without clobbering', () => {
+  it('overwrites home_base with the patch string value (TAC-300 shallow merge)', () => {
+    // TAC-300: PATCH home_base is a bare string; guest_details merge is shallow.
+    // Patching home_base replaces whatever existing carries, including a legacy
+    // nested object — lazy migration of legacy JSONB rows on the next write.
     const existing: GuestContext = {
       guest_details: {
         home_base: { neighborhood: 'Bernal Heights', zip: '94110' },
@@ -117,15 +120,28 @@ describe('deepMergeContext', () => {
     }
     const out = deepMergeContext(
       existing,
-      { guest_details: { home_base: { city: 'SF' } } },
+      { guest_details: { home_base: 'Mission' } },
       NOW,
     )
-    expect(out.guest_details?.home_base).toEqual({
-      neighborhood: 'Bernal Heights',
-      zip: '94110',
-      city: 'SF',
-    })
+    expect(out.guest_details?.home_base).toBe('Mission')
+    // workplace not in patch → preserved from existing (still legacy object).
     expect(out.guest_details?.workplace).toEqual({ employer: 'Acme' })
+  })
+
+  it('preserves untouched guest_details fields when patch only updates one', () => {
+    const existing: GuestContext = {
+      guest_details: { first_name: 'Sarah', home_base: 'Bernal Heights' },
+    }
+    const out = deepMergeContext(
+      existing,
+      { guest_details: { workplace: 'marketing agency near Union Square' } },
+      NOW,
+    )
+    expect(out.guest_details).toEqual({
+      first_name: 'Sarah',
+      home_base: 'Bernal Heights',
+      workplace: 'marketing agency near Union Square',
+    })
   })
 
   it('REPLACES preferences.dietary array (arrays replaced, not appended)', () => {
@@ -166,26 +182,29 @@ describe('deepMergeContext', () => {
     ])
   })
 
-  it('preserves captured_at when patch entry already has one', () => {
-    const existingTimestamp = '2026-03-15T08:00:00Z'
+  it('always stamps captured_at on patch life_context entries (TAC-300: patch shape no longer carries one)', () => {
+    // The PATCH schema dropped captured_at to fit under the optional-field
+    // budget — the runtime stamps now.toISOString() on every entry rather than
+    // preserving any pre-stamped value from the patch (which the schema would
+    // strip anyway since unknown keys are dropped).
     const out = deepMergeContext(
       {},
-      { life_context: [{ note: 'pre-stamped', captured_at: existingTimestamp }] },
+      { life_context: [{ note: 'going to Tokyo' }] },
       NOW,
     )
-    expect(out.life_context?.[0].captured_at).toBe(existingTimestamp)
+    expect(out.life_context?.[0].captured_at).toBe(NOW.toISOString())
   })
 
-  it('replaces observations array via structured.observations (arrays replaced)', () => {
+  it('does NOT merge observations from the structured patch (TAC-300)', () => {
+    // observations are no longer part of GuestContextPatchSchema — the
+    // observation string shortcut on GuestContextUpdate is the only append
+    // path, handled by updateGuestContext below. deepMergeContext leaves
+    // existing observations untouched when only structured is merged.
     const existing: GuestContext = {
       observations: [{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }],
     }
-    const out = deepMergeContext(
-      existing,
-      { observations: [{ note: 'new' }] },
-      NOW,
-    )
-    expect(out.observations).toEqual([{ note: 'new', captured_at: NOW.toISOString() }])
+    const out = deepMergeContext(existing, { preferences: { dietary: ['vegan'] } }, NOW)
+    expect(out.observations).toEqual([{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }])
   })
 })
 

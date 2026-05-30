@@ -898,7 +898,7 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
           guest_details: {
             first_name: 'Sarah',
             pronouns: 'she/her',
-            home_base: { neighborhood: 'Bernal Heights', city: 'SF' },
+            home_base: 'Bernal Heights, SF',
           },
         },
       },
