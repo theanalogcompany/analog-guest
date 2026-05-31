@@ -18,8 +18,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.18.0 (TAC-302 commitment id rendering + arrivalCapture tightening)', () => {
-    expect(PROMPT_VERSION).toBe('v1.18.0')
+  it('is v1.19.0 (TAC-302 follow-up: force arrivalCapture emission on detection)', () => {
+    expect(PROMPT_VERSION).toBe('v1.19.0')
   })
 })
 
@@ -38,6 +38,56 @@ describe('SYSTEM_TEMPLATE — arrivalCapture id discipline (TAC-302, v1.18.0)', 
 
   it('marks the id as system-internal and never spoken to the guest', () => {
     expect(SYSTEM_TEMPLATE).toContain('NEVER read it aloud, NEVER include it in your reply text to the guest')
+  })
+})
+
+describe('SYSTEM_TEMPLATE — arrivalCapture emission discipline (TAC-302 follow-up, v1.19.0)', () => {
+  it('frames arrivalCapture as DETECTION, NOT COMMUNICATION', () => {
+    expect(SYSTEM_TEMPLATE).toContain('THIS IS DETECTION, NOT COMMUNICATION')
+  })
+
+  it('reframes the emit condition as a co-occurrence of arrival intent AND active commitments', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Populate arrivalCapture whenever BOTH of the following are true')
+  })
+
+  it('covers confirmations and closers as arrival intent (not just direct time/direction statements)', () => {
+    expect(SYSTEM_TEMPLATE).toContain('a confirmation of a previously-discussed time')
+    expect(SYSTEM_TEMPLATE).toContain('a closer that confirms intent to arrive')
+  })
+
+  it('explicitly forbids the "I already asked for the heads-up" suppression reason', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '"I already asked for the heads-up earlier in the thread" — IRRELEVANT',
+    )
+  })
+
+  it('explicitly forbids the "guest is just confirming" suppression reason', () => {
+    expect(SYSTEM_TEMPLATE).toContain('A CONFIRMATION IS A SIGNAL')
+  })
+
+  it('explicitly forbids the "end of conversation, no need" suppression reason', () => {
+    expect(SYSTEM_TEMPLATE).toContain('END-OF-CONVERSATION IS WHEN ARRIVAL DETECTION MATTERS MOST')
+  })
+
+  it('explicitly forbids the "previous turn already set expected_arrival" suppression reason', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '"Their previous turn already set the expected_arrival" — DOESN\'T MATTER',
+    )
+  })
+
+  it('directs the model to STOP when it catches itself reasoning toward suppression', () => {
+    expect(SYSTEM_TEMPLATE).toContain('"no need to capture again because…" — STOP')
+  })
+
+  it('decouples the conversational heads-up ask from the structured detection', () => {
+    expect(SYSTEM_TEMPLATE).toContain('one-time courtesy in the venue\'s voice')
+    expect(SYSTEM_TEMPLATE).toContain('structured detection that fires every time arrival intent is present')
+  })
+
+  it('includes the prod-matched worked example showing emission despite prior heads-up ask', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Worked example')
+    expect(SYSTEM_TEMPLATE).toContain('ok i\'ll come in tomorrow around 8')
+    expect(SYSTEM_TEMPLATE).toContain('even though the heads-up was already asked')
   })
 })
 
