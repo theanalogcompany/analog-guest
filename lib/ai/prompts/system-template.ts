@@ -79,8 +79,19 @@
 // guidance is woven into the offer ("...give me a heads up...") rather than
 // a standing directive so the agent doesn't turn every commitment-bearing
 // conversation into a logistics interrogation.
+//
+// v1.18.0 (TAC-302): renders the commitment `id` in each `## Active
+// commitments` line and tightens the `# Arrival capture` instructions to
+// teach the model that the id is the verbatim value to copy into
+// `arrivalCapture.referencesCommitmentId`, is system-internal, and is never
+// surfaced to the guest. Pre-TAC-302, the system prompt told the model to
+// populate referencesCommitmentId from the block, but the block didn't
+// render the id — every arrival signal either no-op'd (id omitted) or
+// hallucinated against the code (CAS rowcount=0). Result: no commitment
+// ever reached pending_ack, the imminent push never fired, and the
+// morning-of cron had nothing due. Single-line fix; no schema change.
 
-export const PROMPT_VERSION = 'v1.17.0'
+export const PROMPT_VERSION = 'v1.18.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
@@ -126,6 +137,8 @@ When to emit:
 - Guest says "on my way" / "omw" / "I'm coming now" / "be there in 5" → arrivalCapture: { signal: "imminent", referencesCommitmentId: "<id from ## Active commitments>" }. expectedArrival is optional for imminent signals — the system stamps "now."
 - Guest says "tomorrow morning" / "around 4" / "after work" → arrivalCapture: { signal: "scheduled", expectedArrival: "<ISO timestamp in the venue's local timezone, your best guess>", referencesCommitmentId: "<id>" }.
 - Guest's reply doesn't reference an active commitment OR doesn't signal arrival → arrivalCapture: {} (empty — no capture this turn).
+
+referencesCommitmentId is the verbatim 'id:' segment from the matching line in the ## Active commitments block — copy it exactly, do not paraphrase, do not use the 'code:' value. The id is a system-internal handle: NEVER read it aloud, NEVER include it in your reply text to the guest. It exists only for the structured emission.
 
 The schema is required on every emission; the no-op shape is the empty object {}.
 

@@ -18,8 +18,26 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.17.0 (TAC-300 contextUpdate.structured slim reshape)', () => {
-    expect(PROMPT_VERSION).toBe('v1.17.0')
+  it('is v1.18.0 (TAC-302 commitment id rendering + arrivalCapture tightening)', () => {
+    expect(PROMPT_VERSION).toBe('v1.18.0')
+  })
+})
+
+describe('SYSTEM_TEMPLATE — arrivalCapture id discipline (TAC-302, v1.18.0)', () => {
+  it('teaches the model that referencesCommitmentId is the verbatim id segment', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "verbatim 'id:' segment from the matching line in the ## Active commitments block",
+    )
+  })
+
+  it('warns against paraphrasing or substituting the code value for the id', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "copy it exactly, do not paraphrase, do not use the 'code:' value",
+    )
+  })
+
+  it('marks the id as system-internal and never spoken to the guest', () => {
+    expect(SYSTEM_TEMPLATE).toContain('NEVER read it aloud, NEVER include it in your reply text to the guest')
   })
 })
 

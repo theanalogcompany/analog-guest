@@ -464,12 +464,17 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
 // commitments list omits the block entirely (zero tokens, no header without
 // body).
 //
-// Per-commitment line shape: `- [type] description (code: XXXX, status: ...) — promised <delta>`
-// Code is omitted for recommendation type (no verification chip for recs).
-// Status appears so the model knows whether the commitment is freshly open
-// or already pending_ack (already-pending = guest already signaled, no point
-// asking arrival again). Time-delta uses the same vocabulary as the Recent
-// conversation block via formatTimeDelta.
+// Per-commitment line shape: `- [type] description (id: <uuid>, code: XXXX, status: ...) — promised <delta>`
+// The id is a system-internal handle for the arrivalCapture structured emission
+// (referencesCommitmentId) — it is NEVER spoken to the guest. Code is omitted
+// for recommendation type (no verification chip for recs). Status appears so
+// the model knows whether the commitment is freshly open or already
+// pending_ack (already-pending = guest already signaled, no point asking
+// arrival again). Time-delta uses the same vocabulary as the Recent
+// conversation block via formatTimeDelta. TAC-302: the id was missing
+// through v1.17.0, so arrivalCapture.referencesCommitmentId had no value to
+// reference — every arrival capture no-op'd and no commitment ever reached
+// pending_ack. Added in v1.18.0.
 function formatActiveCommitments(
   commitments: readonly ActiveCommitment[],
   now: Date,
@@ -477,7 +482,7 @@ function formatActiveCommitments(
   if (commitments.length === 0) return null
 
   const lines = commitments.map((c) => {
-    const segments: string[] = []
+    const segments: string[] = [`id: ${c.id}`]
     if (c.code) segments.push(`code: ${c.code}`)
     segments.push(`status: ${c.status}`)
     const delta = formatTimeDelta(new Date(c.created_at), now)
@@ -487,7 +492,8 @@ function formatActiveCommitments(
   const intro =
     'Open promises this venue has made to this guest. ' +
     "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
-    "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled)."
+    "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+    'Each line carries an internal `id:` — copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. The id is system-internal: never read it aloud, never include it in your reply to the guest.'
 
   return ['## Active commitments', intro, lines.join('\n')].join('\n')
 }
