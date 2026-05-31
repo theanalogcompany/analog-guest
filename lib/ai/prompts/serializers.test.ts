@@ -1077,20 +1077,22 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(out).not.toContain('## Active commitments')
   })
 
-  it('renders comp with code: XXXX and status: open', () => {
+  it('renders comp with id, code, and status (TAC-302: id leads, code/status follow)', () => {
     const out = runtimeToProse(
       { activeCommitments: [commitment()] },
       'reply',
       NOW,
     )
     expect(out).toContain('## Active commitments')
-    expect(out).toContain('- [comp] oat latte (code: 7K2P, status: open) — promised')
+    expect(out).toContain(
+      '- [comp] oat latte (id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa, code: 7K2P, status: open) — promised',
+    )
     // Regression for the leading-comma bug — the rendering must never produce
-    // an empty leading element when code is present.
+    // an empty leading element.
     expect(out).not.toMatch(/\(, /)
   })
 
-  it('omits the code segment cleanly for recommendation (no leading comma)', () => {
+  it('renders the id even when code is absent (recommendation, no verification chip)', () => {
     const out = runtimeToProse(
       {
         activeCommitments: [
@@ -1100,9 +1102,21 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
       'reply',
       NOW,
     )
-    expect(out).toContain('- [recommendation] the duck (status: open) — promised')
+    expect(out).toContain(
+      '- [recommendation] the duck (id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa, status: open) — promised',
+    )
     // The reported MAJOR bug rendered this as `(, status: open)`.
     expect(out).not.toContain('(, status: open)')
+  })
+
+  it('intro explains the id is internal and never surfaced to the guest (TAC-302)', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('copy that value verbatim into arrivalCapture.referencesCommitmentId')
+    expect(out).toContain('never read it aloud, never include it in your reply to the guest')
   })
 
   it('surfaces status=pending_ack so the model knows arrival was already signaled', () => {
