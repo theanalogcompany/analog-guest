@@ -176,6 +176,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         currentMessage: inbound.message,
         trace,
       })
+      // TAC-244: inbound-XOR-outbound invariant. handleInbound is the inbound
+      // entry point; currentMessage MUST be set and followupTrigger MUST be
+      // null. A violation here means buildRuntimeContext was called with both
+      // fields populated (an upstream bug) — throw loud so the top-level
+      // catch fires a red alert with stage='context_build' rather than
+      // silently producing a malformed prompt.
+      if (ctx.currentMessage === null || ctx.followupTrigger !== null) {
+        throw new Error(
+          'inbound run invariant violated: ctx.currentMessage must be set and ctx.followupTrigger must be null on the inbound flow',
+        )
+      }
       contextSpan.end({
         output: {
           recognitionState: ctx.recognition.state,

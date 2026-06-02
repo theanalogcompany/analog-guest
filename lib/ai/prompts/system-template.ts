@@ -107,8 +107,23 @@
 // Sonnet uses to suppress the field, and includes a worked example
 // matching the prod trace. No schema change; the schema is structurally
 // permissive (no-op shape `{}` is valid) and the lever is the prompt.
+//
+// v1.20.0 (TAC-244): adds the `## Follow-up context` user-prompt block,
+// rendered immediately BEFORE `## Visit history` on outbound runs whose
+// `followupTrigger` maps to a renderable FollowupReason (post_visit_day_*
+// or cold_lapsed). The block carries reasons, days-since-last-visit, and an
+// anchor visit (recentVisits[0] for post_visit_*; guests.last_visit_at for
+// cold_lapsed). Multi-reason rendering ships a positively-framed weaving
+// rider ("write the single text a thoughtful owner would actually send")
+// while the follow_up category instruction carries the hard guardrail
+// against leaking internal taxonomy ("post-visit day 7", "cold lapsed") to
+// the guest. Inbound output is unchanged — the block is absent by
+// construction on the inbound path (entry-point assertion guarantees
+// followupTrigger=null there → deriveFollowupContext returns undefined).
+// Also forward-scaffolds cold_lapsed on FollowupTrigger.reason for the
+// TAC-123 engine; nothing fires it at deploy time. No schema change.
 
-export const PROMPT_VERSION = 'v1.19.0'
+export const PROMPT_VERSION = 'v1.20.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

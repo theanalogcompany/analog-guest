@@ -44,6 +44,10 @@ function triggerToCategory(reason: FollowupTrigger['reason']): Classification['c
     case 'day_3':
     case 'day_7':
     case 'day_14':
+    // TAC-244 forward-scaffolds cold_lapsed for the TAC-123 engine. Same
+    // follow_up category; the `## Follow-up context` block carries the
+    // re-engagement framing.
+    case 'cold_lapsed':
       return 'follow_up'
     case 'event':
       return 'event_invite'
@@ -125,6 +129,17 @@ export async function handleFollowup(input: {
         followupTrigger: input.trigger,
         trace,
       })
+      // TAC-244: inbound-XOR-outbound invariant. handleFollowup is the
+      // outbound entry point; currentMessage MUST be null and followupTrigger
+      // MUST be set. A violation here means buildRuntimeContext was called
+      // with both fields populated (an upstream bug) — throw loud so the
+      // top-level catch fires a red alert with stage='context_build' rather
+      // than silently producing a malformed prompt.
+      if (ctx.currentMessage !== null || ctx.followupTrigger === null) {
+        throw new Error(
+          'followup run invariant violated: ctx.currentMessage must be null and ctx.followupTrigger must be set on the followup flow',
+        )
+      }
       contextSpan.end({
         output: {
           recognitionState: ctx.recognition.state,

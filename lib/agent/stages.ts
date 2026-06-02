@@ -12,6 +12,9 @@ import {
 } from '@/lib/analytics/posthog'
 import {
   classifyMessage,
+  type FollowupAnchorVisit,
+  type FollowupContext,
+  type FollowupReason,
   generateMessage,
   type GenerateMessageResult,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
@@ -23,7 +26,14 @@ import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
-import type { Classification, CorpusMatch, KnowledgeMatch, RuntimeContext } from './types'
+import type {
+  Classification,
+  CorpusMatch,
+  FollowupTrigger,
+  KnowledgeMatch,
+  RuntimeContext,
+  Visit,
+} from './types'
 import type { MessageCategory } from '@/lib/ai'
 
 export const STRONG_MATCH_SIMILARITY = 0.3
@@ -631,6 +641,79 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
   return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
 }
 
+// TAC-244: map the agent's FollowupTrigger.reason to the AI-runtime's
+// FollowupReason. day_* → post_visit_day_*; cold_lapsed passes through.
+// event / manual return null — those have their own dedicated context
+// surfaces (eventBeingInvited / operatorInstruction) and don't render the
+// `## Follow-up context` block. The switch covers every FollowupTrigger
+// reason; adding one without a case here is a tsc error because the
+// function's return type wouldn't admit the implicit `undefined`.
+function triggerReasonToFollowupReason(
+  reason: FollowupTrigger['reason'],
+): FollowupReason | null {
+  switch (reason) {
+    case 'day_1':
+      return 'post_visit_day_1'
+    case 'day_3':
+      return 'post_visit_day_3'
+    case 'day_7':
+      return 'post_visit_day_7'
+    case 'day_14':
+      return 'post_visit_day_14'
+    case 'cold_lapsed':
+      return 'cold_lapsed'
+    case 'event':
+    case 'manual':
+      return null
+  }
+}
+
+// TAC-244: derive the `followup` field for the AI runtime from the agent
+// runtime's trigger + visit data. The single mapping point makes the
+// inbound-XOR-outbound invariant structural: `followup` only ever
+// materializes downstream of a `followupTrigger`, and `handleInbound`'s
+// entry-point assertion guarantees `followupTrigger === null` there. Returns
+// undefined when:
+//   - no followup trigger (inbound path)
+//   - trigger.reason maps to null (event / manual — dedicated surfaces)
+//   - no anchor visit available (defensive — block won't render usefully
+//     without one; same `if (block)` posture as formatActiveCommitments)
+export function deriveFollowupContext(
+  trigger: FollowupTrigger | null,
+  recentVisits: readonly Visit[],
+  lastVisitAt: Date | null,
+  now: Date,
+): FollowupContext | undefined {
+  if (!trigger) return undefined
+  const reason = triggerReasonToFollowupReason(trigger.reason)
+  if (!reason) return undefined
+  const isColdLapsed = reason === 'cold_lapsed'
+  let anchor: FollowupAnchorVisit | undefined
+  if (!isColdLapsed && recentVisits[0]) {
+    // Default-derive for post_visit_* reasons. items are present so the
+    // prompt can name what the guest had.
+    anchor = {
+      visitedAt: recentVisits[0].visitedAt,
+      items: recentVisits[0].items,
+    }
+  } else if (isColdLapsed && lastVisitAt) {
+    // cold_lapsed: a deep-lapsed guest's last visit can fall outside the
+    // recentVisits window (90d / 20 txn). Anchor from guests.last_visit_at
+    // with items omitted (date-only minimal anchor — we don't carry items
+    // for visits older than the window).
+    anchor = { visitedAt: lastVisitAt }
+  }
+  // If no anchor available, the block still renders with daysSinceLastVisit=0
+  // and the serializer omits the anchor line. The reason itself carries
+  // useful framing even without the anchor — e.g., a cold_lapsed guest with
+  // no last_visit_at on file (provisioned but never visited) still benefits
+  // from the "this is a re-engagement touch" framing.
+  const daysSinceLastVisit = anchor
+    ? Math.floor((now.getTime() - anchor.visitedAt.getTime()) / 86_400_000)
+    : 0
+  return { reasons: [reason], daysSinceLastVisit, anchorVisit: anchor }
+}
+
 /**
  * Map orchestrator RuntimeContext → lib/ai's RuntimeContext shape.
  * Exported so the Voices regen helper can reuse the same mapping without
@@ -725,5 +808,17 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // `## Active commitments` block between guest context and recent
     // conversation; empty array omits the block.
     activeCommitments: ctx.activeCommitments,
+    // TAC-244: derive `followup` here at the single mapping seam.
+    // `deriveFollowupContext` returns undefined on the inbound path
+    // (followupTrigger=null) and on the event/manual trigger reasons
+    // (dedicated context surfaces). The serializer
+    // (formatFollowupContext) renders the `## Follow-up context` block
+    // immediately BEFORE `## Visit history` when this field is present.
+    followup: deriveFollowupContext(
+      ctx.followupTrigger,
+      ctx.recentVisits,
+      ctx.guest.lastVisitAt,
+      new Date(),
+    ),
   }
 }
