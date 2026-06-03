@@ -47,6 +47,7 @@ import {
   KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT,
   SIMILARITY_FLOOR,
 } from '@/lib/rag/retrieve'
+import { FOLLOWUP_RULES_DEFAULT } from '@/lib/schemas'
 import { VISIT_LOOKBACK_DAYS } from '@/lib/recognition/load-signals'
 import {
   MONEY_MAX_DOLLARS,
@@ -415,5 +416,87 @@ export const TUNABLES = [
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
     description: 'Cosine threshold a voice corpus chunk must meet to count as a strong match for the inbound retrieval gate.',
+  },
+
+  // ---------------------------------------------------------------------------
+  // Follow-up engine (TAC-123)
+  //
+  // Values are the engine-wide default (FOLLOWUP_RULES_DEFAULT). At
+  // runtime each venue reads `venue_configs.followup_rules` (jsonb) and
+  // parseFollowupRules fills missing keys from this default. The
+  // viewer surfaces the default — operator-editable overrides are a
+  // Phase 2 separate ticket.
+  // ---------------------------------------------------------------------------
+  {
+    name: 'followup_absence_window_days',
+    value: FOLLOWUP_RULES_DEFAULT.absence_window_days,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'cold_lapsed: a guest\'s last visit must be older than this many days before the cold-nudge reason fires.',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_cold_dedup_days',
+    value: FOLLOWUP_RULES_DEFAULT.cold_dedup_days,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'cold_lapsed: minimum days between successive cold-nudge dispatches to the same guest (time-bound dedup orthogonal to last_visit_at re-arm).',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_lapsed_eligible_states',
+    value: FOLLOWUP_RULES_DEFAULT.lapsed_eligible_states,
+    type: 'object',
+    category: 'agent_runtime',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'cold_lapsed: only fires when the guest\'s current recognition state is in this set. Excludes new/returning by default — we don\'t try to re-engage guests who never engaged.',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_weekly_cap',
+    value: FOLLOWUP_RULES_DEFAULT.weekly_cap,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'Hard cap on engine-initiated follow-up sends per (venue, guest) in any rolling 7-day window. Operator-initiated manual sends do NOT count.',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_recent_conversation_hours',
+    value: FOLLOWUP_RULES_DEFAULT.recent_conversation_hours,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'If the guest texted in within this many hours, the engine suppresses for this guest this tick — they\'re in active conversation.',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_quiet_hours_start_local',
+    value: FOLLOWUP_RULES_DEFAULT.quiet_hours_start_local,
+    type: 'string-enum',
+    category: 'timing',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'Venue-local time-of-day after which the engine suppresses sends. Pairs with followup_quiet_hours_end_local for a midnight-crossing window.',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_quiet_hours_end_local',
+    value: FOLLOWUP_RULES_DEFAULT.quiet_hours_end_local,
+    type: 'string-enum',
+    category: 'timing',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'Venue-local time-of-day at which quiet hours end (engine resumes dispatching).',
+    relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'followup_cron_hour_local',
+    value: FOLLOWUP_RULES_DEFAULT.cron_hour_local,
+    type: 'number',
+    category: 'timing',
+    source: 'lib/schemas/followup-rules.ts',
+    description: 'Venue-local hour (0-23) at which the daily processor fires. The cron itself fires hourly UTC; the processor filters per-venue against this value.',
+    relatedTickets: ['TAC-123'],
   },
 ] as const satisfies readonly Tunable[]

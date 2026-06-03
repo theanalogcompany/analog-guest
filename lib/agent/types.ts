@@ -1,4 +1,4 @@
-import type { MessageCategory, RecentMessage } from '@/lib/ai'
+import type { FollowupReason, MessageCategory, RecentMessage } from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
 import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -72,9 +72,36 @@ export interface InboundMessage {
 
 export interface FollowupTrigger {
   // TAC-244 added `cold_lapsed` as forward-scaffold for the TAC-123 trigger
-  // engine — nothing fires it today, but the rendering path (buildAiRuntime
-  // → ## Follow-up context block) and the category routing are complete.
-  reason: 'day_1' | 'day_3' | 'day_7' | 'day_14' | 'cold_lapsed' | 'event' | 'manual'
+  // engine — that engine now fires both `cold_lapsed` and `perk_unlock`. The
+  // single primary `reason` carries the highest-priority detector hit; when
+  // multiple reasons applied on one engine pass, the rest ride in
+  // `additionalReasons` and the render seam in `deriveFollowupContext`
+  // combines them into `FollowupContext.reasons[]`. We do NOT widen `reason`
+  // into an array — keeping it scalar means every existing call site that
+  // constructs a FollowupTrigger compiles unchanged.
+  reason:
+    | 'day_1'
+    | 'day_3'
+    | 'day_7'
+    | 'day_14'
+    | 'cold_lapsed'
+    | 'perk_unlock'
+    | 'event'
+    | 'manual'
+  // TAC-123: engine-aggregated secondary reasons for this run. The primary
+  // already lives on `reason` above; this array carries the OTHER reasons that
+  // also applied on this guest's tick, already mapped to the AI-side
+  // `FollowupReason` shape (the render-time enum). `deriveFollowupContext`
+  // concatenates `[primaryMapped, ...additionalReasons]` (dedup-aware) into
+  // the rendered block. Legacy callers omit this; they get the length-one
+  // identity path through the seam.
+  additionalReasons?: readonly FollowupReason[]
+  // TAC-123: when `reason === 'perk_unlock'` or `additionalReasons` includes
+  // `'perk_unlock'`, the engine threads the chosen mechanic here. The mapping
+  // seam in `buildAiRuntime` reads this and populates the AI runtime's
+  // `perkBeingUnlocked`. Typed channel (not metadata) so the schema is
+  // structural.
+  perkMechanic?: EligibleMechanic
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }

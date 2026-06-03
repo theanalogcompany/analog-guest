@@ -308,6 +308,11 @@ function followupReasonLabel(reason: FollowupReason): string {
       return 'post-visit day 14'
     case 'cold_lapsed':
       return 'cold lapsed (re-engagement)'
+    // TAC-123: a perk this guest just became eligible for. The actual perk
+    // detail rides in the `## Perk being unlocked` block; this label just
+    // names the reason in the follow-up context list.
+    case 'perk_unlock':
+      return 'perk just unlocked'
   }
 }
 

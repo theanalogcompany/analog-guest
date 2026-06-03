@@ -48,6 +48,15 @@ function triggerToCategory(reason: FollowupTrigger['reason']): Classification['c
     // follow_up category; the `## Follow-up context` block carries the
     // re-engagement framing.
     case 'cold_lapsed':
+    // TAC-123 plan-review call: engine-initiated perk_unlock runs persist as
+    // `category='follow_up'` (NOT 'perk_unlock'), so the follow_up category
+    // instruction set — including its perk-weaving clause — applies. The
+    // existing 'perk_unlock' MessageCategory is reserved for the inbound /
+    // standalone perk moment; engine outreach is a different tuning and
+    // stays inside the follow_up bucket. The actual perk detail rides via
+    // `RuntimeContext.perkBeingUnlocked` + a `'perk_unlock'` entry in
+    // `FollowupContext.reasons`.
+    case 'perk_unlock':
       return 'follow_up'
     case 'event':
       return 'event_invite'

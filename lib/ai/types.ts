@@ -91,19 +91,22 @@ export type Visit = {
   visitedAt: Date
 }
 
-// TAC-244: closed enum of reasons the agent might be reaching out unprompted.
-// Distinct from `FollowupTrigger.reason` on the orchestrator side — that union
-// also carries `event` / `manual` which have their own dedicated context
-// surfaces (`eventBeingInvited` / `operatorInstruction`). The post-visit
-// variants are derived from the trigger's `day_*` reasons inside
-// `buildAiRuntime`; `cold_lapsed` is the deep-lapsed re-engagement variant
-// (extensible).
+// TAC-244 / TAC-123: closed enum of reasons the agent might be reaching out
+// unprompted. Distinct from `FollowupTrigger.reason` on the orchestrator side
+// — that union also carries `event` / `manual` which have their own dedicated
+// context surfaces (`eventBeingInvited` / `operatorInstruction`). The
+// post-visit variants are derived from the trigger's `day_*` reasons inside
+// `buildAiRuntime`; `cold_lapsed` is the deep-lapsed re-engagement variant;
+// `perk_unlock` is the TAC-123 engine-detected newly-eligible mechanic.
+// When multiple apply on one engine pass they're collected into
+// `FollowupContext.reasons[]` and the serializer's weaving rider fires.
 export type FollowupReason =
   | 'post_visit_day_1'
   | 'post_visit_day_3'
   | 'post_visit_day_7'
   | 'post_visit_day_14'
   | 'cold_lapsed'
+  | 'perk_unlock'
 
 // Anchor visit for the `## Follow-up context` block. For `post_visit_*` reasons
 // this is `recentVisits[0]` and carries `items` so the prompt can name what
