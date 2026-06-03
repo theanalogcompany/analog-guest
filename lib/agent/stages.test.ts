@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
+  buildAiRuntime,
   classifyStage,
+  deriveFollowupContext,
   findPendingDraft,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
 } from './stages'
-import type { CorpusMatch, RuntimeContext } from './types'
+import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
@@ -923,5 +925,151 @@ describe('findPendingDraft (TAC-264)', () => {
     const out = await findPendingDraft('venue-1', 'guest-1')
     expect(out).toBeNull()
     expect(warnSpy).toHaveBeenCalled()
+  })
+})
+
+// TAC-244: deriveFollowupContext is the single mapping point between the
+// agent's FollowupTrigger + visit data and the AI runtime's FollowupContext
+// render payload. Tested directly (rather than through buildAiRuntime) so
+// the assertions don't depend on `new Date()` inside buildAiRuntime —
+// passing an explicit `now` lets us pin daysSinceLastVisit deterministically.
+describe('deriveFollowupContext (TAC-244)', () => {
+  const NOW_DERIVE = new Date('2026-04-29T18:30:00Z')
+  const visit7 = (overrides: Partial<Visit> = {}): Visit => ({
+    items: ['espresso', 'croissant'],
+    visitedAt: new Date(NOW_DERIVE.getTime() - 7 * 24 * 60 * 60 * 1000),
+    ...overrides,
+  })
+  const trigger = (reason: FollowupTrigger['reason']): FollowupTrigger => ({
+    reason,
+    triggeredAt: NOW_DERIVE,
+  })
+
+  it('returns undefined when followupTrigger is null (inbound path)', () => {
+    expect(deriveFollowupContext(null, [], null, NOW_DERIVE)).toBeUndefined()
+  })
+
+  it('maps day_7 → post_visit_day_7 with recentVisits[0] as anchor', () => {
+    const out = deriveFollowupContext(trigger('day_7'), [visit7()], null, NOW_DERIVE)
+    expect(out).toEqual({
+      reasons: ['post_visit_day_7'],
+      daysSinceLastVisit: 7,
+      anchorVisit: {
+        visitedAt: visit7().visitedAt,
+        items: ['espresso', 'croissant'],
+      },
+    })
+  })
+
+  it('maps day_1 / day_3 / day_14 correctly', () => {
+    expect(deriveFollowupContext(trigger('day_1'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
+      'post_visit_day_1',
+    ])
+    expect(deriveFollowupContext(trigger('day_3'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
+      'post_visit_day_3',
+    ])
+    expect(deriveFollowupContext(trigger('day_14'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
+      'post_visit_day_14',
+    ])
+  })
+
+  it('anchors cold_lapsed from lastVisitAt (items omitted, date-only)', () => {
+    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000)
+    const out = deriveFollowupContext(trigger('cold_lapsed'), [], lastVisitAt, NOW_DERIVE)
+    expect(out).toEqual({
+      reasons: ['cold_lapsed'],
+      daysSinceLastVisit: 60,
+      anchorVisit: { visitedAt: lastVisitAt },
+    })
+    expect(out?.anchorVisit?.items).toBeUndefined()
+  })
+
+  it('cold_lapsed ignores recentVisits[0] (the deep-lapsed case may have stale recentVisits)', () => {
+    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000)
+    // recentVisits is non-empty (a 7-day-old visit) but cold_lapsed still
+    // anchors on lastVisitAt — the trigger reason is the source of truth for
+    // which anchor to use.
+    const out = deriveFollowupContext(trigger('cold_lapsed'), [visit7()], lastVisitAt, NOW_DERIVE)
+    expect(out?.anchorVisit?.visitedAt).toEqual(lastVisitAt)
+    expect(out?.daysSinceLastVisit).toBe(60)
+  })
+
+  it('returns context with no anchor (defensive) when cold_lapsed + lastVisitAt is null', () => {
+    const out = deriveFollowupContext(trigger('cold_lapsed'), [], null, NOW_DERIVE)
+    expect(out).toEqual({
+      reasons: ['cold_lapsed'],
+      daysSinceLastVisit: 0,
+      anchorVisit: undefined,
+    })
+  })
+
+  it('returns context with no anchor (defensive) when post_visit_* + recentVisits empty', () => {
+    // The trigger fired (engine decided this guest was due) but recentVisits
+    // came back empty for whatever reason. We still return the context — the
+    // reason itself carries useful framing — and the serializer omits the
+    // anchor line.
+    const out = deriveFollowupContext(trigger('day_7'), [], null, NOW_DERIVE)
+    expect(out).toEqual({
+      reasons: ['post_visit_day_7'],
+      daysSinceLastVisit: 0,
+      anchorVisit: undefined,
+    })
+  })
+
+  it('returns undefined for event trigger (dedicated eventBeingInvited surface)', () => {
+    expect(deriveFollowupContext(trigger('event'), [visit7()], null, NOW_DERIVE)).toBeUndefined()
+  })
+
+  it('returns undefined for manual trigger (dedicated operatorInstruction surface)', () => {
+    expect(deriveFollowupContext(trigger('manual'), [visit7()], null, NOW_DERIVE)).toBeUndefined()
+  })
+})
+
+// TAC-244: integration check at the buildAiRuntime seam — wired correctly.
+// Most behavioral coverage lives on deriveFollowupContext (deterministic now);
+// this asserts buildAiRuntime actually CALLS the helper and threads its
+// output onto the AI runtime under the expected field name.
+describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
+  it('threads deriveFollowupContext output through to the AI runtime', () => {
+    const visitedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const ctx = makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      recentVisits: [{ items: ['espresso'], visitedAt }],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.followup?.reasons).toEqual(['post_visit_day_7'])
+    expect(aiRuntime.followup?.anchorVisit?.items).toEqual(['espresso'])
+  })
+
+  it('leaves followup undefined on the inbound path', () => {
+    const ctx = makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.followup).toBeUndefined()
   })
 })

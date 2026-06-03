@@ -8,6 +8,8 @@ import {
   type VenueInfo,
 } from '@/lib/schemas'
 import type {
+  FollowupContext,
+  FollowupReason,
   KnowledgeCorpusChunk,
   MessageCategory,
   RecentMessage,
@@ -290,6 +292,60 @@ function formatRecentConversation(messages: readonly RecentMessage[], now: Date)
   return `## Recent conversation\n${lines.join('\n')}`
 }
 
+// TAC-244: human-readable label for a FollowupReason. Internal taxonomy
+// (post_visit_day_7, cold_lapsed) gets converted to natural phrasing for the
+// prompt — but the `## Follow-up context` intro tells Sonnet not to speak
+// the labels back to the guest. The labels are reasoning fuel, not voice.
+function followupReasonLabel(reason: FollowupReason): string {
+  switch (reason) {
+    case 'post_visit_day_1':
+      return 'post-visit day 1'
+    case 'post_visit_day_3':
+      return 'post-visit day 3'
+    case 'post_visit_day_7':
+      return 'post-visit day 7'
+    case 'post_visit_day_14':
+      return 'post-visit day 14'
+    case 'cold_lapsed':
+      return 'cold lapsed (re-engagement)'
+  }
+}
+
+// TAC-244: render `## Follow-up context` block when the AI runtime carries
+// the outbound-flow followup field. Block placement is immediately BEFORE
+// `## Visit history` — intent-then-evidence (this block states *why* we're
+// reaching out; visit history is the supporting detail). Multi-reason
+// rendering uses Draft A's weaving rider (operator-picked 2026-06-02) framed
+// positively via medium ("write the single text a thoughtful owner would
+// actually send"), not a prohibitive "don't enumerate" rule — the category
+// instruction carries the hard guardrail against leaking internal taxonomy
+// to the guest.
+function formatFollowupContext(
+  followup: FollowupContext,
+  now: Date,
+): string | null {
+  if (followup.reasons.length === 0) return null
+  const reasonsLine = `Reasons: ${followup.reasons.map(followupReasonLabel).join(', ')}`
+  const lines = [reasonsLine]
+  if (followup.anchorVisit) {
+    lines.push(`Days since last visit: ${followup.daysSinceLastVisit}`)
+    const delta = formatTimeDelta(followup.anchorVisit.visitedAt, now)
+    const items = followup.anchorVisit.items?.length
+      ? ` — ${followup.anchorVisit.items.join(', ')}`
+      : ''
+    lines.push(`Last visit anchor: ${delta}${items}`)
+  }
+  const intro =
+    'This message is an unprompted check-in from the venue — the venue is reaching out, not replying to a message the guest just sent. Use this to inform tone and what to reference.'
+  const sections = ['## Follow-up context', intro, lines.join('\n')]
+  if (followup.reasons.length > 1) {
+    sections.push(
+      "Multiple reasons apply. Write the single text a thoughtful owner would actually send — touch what's genuinely worth mentioning, lead with one and fold in the other, drop one if it doesn't fit.",
+    )
+  }
+  return sections.join('\n')
+}
+
 // TAC-234: render the recent transactions as a bulleted list. Bracketed
 // time-delta matches the ## Recent conversation block style. The intro
 // line tells Sonnet how to use the data — pattern recognition for
@@ -547,6 +603,17 @@ export function runtimeToProse(
   }
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics))
+  }
+  // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
+  // Intent-then-evidence — this block states *why* we're reaching out;
+  // Visit history is the supporting detail it draws on. Only set on the
+  // outbound flow (handleFollowup → buildAiRuntime derives from
+  // followupTrigger). Absent on inbound runs by construction (the
+  // entry-point assertion in handleInbound guarantees followupTrigger=null
+  // there, so deriveFollowupContext returns undefined).
+  if (runtime.followup) {
+    const block = formatFollowupContext(runtime.followup, now)
+    if (block) blocks.push(block)
   }
   // TAC-234: ## Visit history block sits between mechanics and recent
   // conversation. Reading order: who they are → what they can get → what

@@ -1156,3 +1156,191 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(recentIdx).toBeGreaterThan(activeIdx)
   })
 })
+
+// TAC-244: ## Follow-up context block. Renders immediately BEFORE
+// ## Visit history on outbound runs whose followupTrigger maps to a
+// renderable FollowupReason (post_visit_day_* or cold_lapsed).
+describe('runtimeToProse — ## Follow-up context block (TAC-244)', () => {
+  const visitedAt7 = new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const visitedAt60 = new Date(NOW.getTime() - 60 * 24 * 60 * 60 * 1000)
+
+  it('renders the block when followup is present with a single reason', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_7'],
+          daysSinceLastVisit: 7,
+          anchorVisit: { visitedAt: visitedAt7, items: ['espresso', 'croissant'] },
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('## Follow-up context')
+    expect(out).toContain('Reasons: post-visit day 7')
+    expect(out).toContain('Days since last visit: 7')
+    expect(out).toContain('Last visit anchor: 7 days ago — espresso, croissant')
+    // Single-reason: no weaving rider.
+    expect(out).not.toContain('Multiple reasons apply')
+  })
+
+  it('omits the block when followup is undefined (inbound-path invariant)', () => {
+    const out = runtimeToProse({ inboundMessage: 'hey' }, 'reply', NOW)
+    expect(out).not.toContain('## Follow-up context')
+  })
+
+  it('renders the operator-picked Draft A weaving rider when multiple reasons apply', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_7', 'cold_lapsed'],
+          daysSinceLastVisit: 7,
+          anchorVisit: { visitedAt: visitedAt7, items: ['latte'] },
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('Reasons: post-visit day 7, cold lapsed (re-engagement)')
+    expect(out).toContain(
+      "Multiple reasons apply. Write the single text a thoughtful owner would actually send — touch what's genuinely worth mentioning, lead with one and fold in the other, drop one if it doesn't fit.",
+    )
+  })
+
+  it('omits the items suffix on the anchor line for cold_lapsed (date-only minimal anchor)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['cold_lapsed'],
+          daysSinceLastVisit: 60,
+          anchorVisit: { visitedAt: visitedAt60 }, // no items
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('Last visit anchor: 60 days ago')
+    expect(out).not.toMatch(/Last visit anchor: 60 days ago —/)
+  })
+
+  it('omits the days-since + anchor lines when anchorVisit is undefined (defensive fallback)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['cold_lapsed'],
+          daysSinceLastVisit: 0,
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('## Follow-up context')
+    expect(out).toContain('Reasons: cold lapsed (re-engagement)')
+    // Without an anchor, neither the days-since line nor the last-visit-anchor
+    // line renders — the reason itself still carries useful framing.
+    expect(out).not.toContain('Days since last visit:')
+    expect(out).not.toContain('Last visit anchor:')
+  })
+
+  it('coexists with ## Visit history (intent-then-evidence: follow-up before visit history)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_7'],
+          daysSinceLastVisit: 7,
+          anchorVisit: { visitedAt: visitedAt7, items: ['espresso'] },
+        },
+        recentVisits: [{ items: ['espresso'], visitedAt: visitedAt7 }],
+      },
+      'follow_up',
+      NOW,
+    )
+    const followupIdx = out.indexOf('## Follow-up context')
+    const visitHistoryIdx = out.indexOf('## Visit history')
+    expect(followupIdx).toBeGreaterThanOrEqual(0)
+    expect(visitHistoryIdx).toBeGreaterThan(followupIdx)
+  })
+
+  it('coexists with ## Perk being unlocked (both render; intentional outbound multi-block)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['cold_lapsed'],
+          daysSinceLastVisit: 60,
+          anchorVisit: { visitedAt: visitedAt60 },
+        },
+        perkBeingUnlocked: {
+          name: 'Free cortado',
+          qualification: 'first-time visitor returning',
+          rewardDescription: 'a cortado on us next time you stop in',
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('## Follow-up context')
+    expect(out).toContain('Perk: Free cortado')
+  })
+
+  it('coexists with ## Event being invited (both render)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_3'],
+          daysSinceLastVisit: 3,
+          anchorVisit: {
+            visitedAt: new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000),
+            items: ['cappuccino'],
+          },
+        },
+        eventBeingInvited: {
+          name: 'Open mic',
+          description: 'Local poets read short pieces on the back patio.',
+          date: 'Saturday 8pm',
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('## Follow-up context')
+    expect(out).toContain('Event: Open mic')
+  })
+
+  it('renders for follow_up category (the natural caller — handle-followup populates the trigger)', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_7'],
+          daysSinceLastVisit: 7,
+          anchorVisit: { visitedAt: visitedAt7, items: ['latte'] },
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain('## Follow-up context')
+  })
+
+  it('emits a stable prose snapshot for a representative post_visit_day_7 context', () => {
+    const out = runtimeToProse(
+      {
+        followup: {
+          reasons: ['post_visit_day_7'],
+          daysSinceLastVisit: 7,
+          anchorVisit: { visitedAt: visitedAt7, items: ['espresso', 'croissant'] },
+        },
+      },
+      'follow_up',
+      NOW,
+    )
+    expect(out).toContain(
+      [
+        '## Follow-up context',
+        'This message is an unprompted check-in from the venue — the venue is reaching out, not replying to a message the guest just sent. Use this to inform tone and what to reference.',
+        'Reasons: post-visit day 7',
+        'Days since last visit: 7',
+        'Last visit anchor: 7 days ago — espresso, croissant',
+      ].join('\n'),
+    )
+  })
+})

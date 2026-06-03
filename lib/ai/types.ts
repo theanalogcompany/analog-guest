@@ -91,6 +91,44 @@ export type Visit = {
   visitedAt: Date
 }
 
+// TAC-244: closed enum of reasons the agent might be reaching out unprompted.
+// Distinct from `FollowupTrigger.reason` on the orchestrator side — that union
+// also carries `event` / `manual` which have their own dedicated context
+// surfaces (`eventBeingInvited` / `operatorInstruction`). The post-visit
+// variants are derived from the trigger's `day_*` reasons inside
+// `buildAiRuntime`; `cold_lapsed` is the deep-lapsed re-engagement variant
+// (extensible).
+export type FollowupReason =
+  | 'post_visit_day_1'
+  | 'post_visit_day_3'
+  | 'post_visit_day_7'
+  | 'post_visit_day_14'
+  | 'cold_lapsed'
+
+// Anchor visit for the `## Follow-up context` block. For `post_visit_*` reasons
+// this is `recentVisits[0]` and carries `items` so the prompt can name what
+// the guest had. For `cold_lapsed`, the guest's last visit can fall outside
+// the recentVisits window (90d / 20 txn), so the date-only anchor is loaded
+// from `guests.last_visit_at` and `items` is omitted.
+export type FollowupAnchorVisit = {
+  visitedAt: Date
+  items?: string[]
+}
+
+// TAC-244: outbound-flow context for `## Follow-up context` block rendering.
+// Set only by `buildAiRuntime` when `RuntimeContext.followupTrigger` is
+// present and the trigger reason maps to a renderable FollowupReason. Never
+// set on the inbound flow — the entry-point assertion in `handleInbound`
+// guarantees `followupTrigger === null` there. The `reasons[]` shape is
+// multi-reason ready from day one (v1 engine fires one trigger at a time,
+// so reasons.length === 1 in practice; multi-reason composition is a
+// TAC-123 future extension).
+export type FollowupContext = {
+  reasons: FollowupReason[]
+  daysSinceLastVisit: number
+  anchorVisit?: FollowupAnchorVisit
+}
+
 export type RuntimeContext = {
   guestName?: string
   inboundMessage?: string
@@ -156,6 +194,16 @@ export type RuntimeContext = {
   // (TAC-297 plan-review call #5), not a standing directive. undefined or
   // empty array = block omitted entirely (zero tokens).
   activeCommitments?: ActiveCommitment[]
+  // TAC-244: outbound-flow follow-up context. Set only by `buildAiRuntime`
+  // when `RuntimeContext.followupTrigger` is present and maps to a renderable
+  // FollowupReason (post_visit_day_* or cold_lapsed). The serializer renders
+  // a `## Follow-up context` block immediately BEFORE `## Visit history`
+  // (intent-then-evidence: this block states *why* we're reaching out; visit
+  // history is the supporting detail it draws on). Never set on inbound runs
+  // by construction — the entry-point assertion in `handleInbound`
+  // guarantees followupTrigger=null there. Absent on event/manual trigger
+  // reasons (those have their own dedicated context surfaces).
+  followup?: FollowupContext
 }
 
 export type GenerateMessageInput = {

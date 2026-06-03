@@ -125,7 +125,7 @@ export async function buildRuntimeContext(input: {
       .single(),
     supabase
       .from('guests')
-      .select('id, phone_number, first_name, created_at, created_via, is_demo, context')
+      .select('id, phone_number, first_name, created_at, created_via, is_demo, context, last_visit_at')
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
@@ -281,6 +281,11 @@ export async function buildRuntimeContext(input: {
     createdVia: guestRow.created_via,
     isDemo: guestRow.is_demo,
     context: parsedGuestContext,
+    // TAC-244: anchor source for `cold_lapsed` follow-up reasons. `null` for
+    // guests who have never visited; deriveFollowupContext (stages.ts)
+    // ignores this field for post_visit_* reasons (those anchor on
+    // recentVisits[0]).
+    lastVisitAt: guestRow.last_visit_at ? new Date(guestRow.last_visit_at) : null,
   }
 
   const recognition: RecognitionSnapshot = {

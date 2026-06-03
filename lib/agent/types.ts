@@ -53,6 +53,14 @@ export interface GuestContext {
   // interface (this one — "everything we know about the guest") and the
   // schema's GuestContext type (just the JSONB payload).
   context: ParsedGuestContext
+  // TAC-244: guest's last visit timestamp (from guests.last_visit_at). The
+  // `cold_lapsed` follow-up reason needs an anchor that survives a guest
+  // whose last visit fell outside the recentVisits window (90d / 20 txn),
+  // and that's this column. `null` for guests who have never visited. Used
+  // by `buildAiRuntime` to derive `FollowupContext.anchorVisit` for cold
+  // reasons; the post_visit_* reasons default to `recentVisits[0]` and
+  // ignore this field.
+  lastVisitAt: Date | null
 }
 
 export interface InboundMessage {
@@ -63,7 +71,10 @@ export interface InboundMessage {
 }
 
 export interface FollowupTrigger {
-  reason: 'day_1' | 'day_3' | 'day_7' | 'day_14' | 'event' | 'manual'
+  // TAC-244 added `cold_lapsed` as forward-scaffold for the TAC-123 trigger
+  // engine — nothing fires it today, but the rendering path (buildAiRuntime
+  // → ## Follow-up context block) and the category routing are complete.
+  reason: 'day_1' | 'day_3' | 'day_7' | 'day_14' | 'cold_lapsed' | 'event' | 'manual'
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
