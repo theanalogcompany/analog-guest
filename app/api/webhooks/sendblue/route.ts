@@ -21,6 +21,12 @@ type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 
 type InternalMessageStatus = 'sending' | 'sent' | 'delivered' | 'failed'
 
+// Derived from the schema's shape so it can't drift from
+// SendblueWebhookPayloadSchema. Used by the unknown-keys diagnostic in POST.
+const KNOWN_SENDBLUE_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(SendblueWebhookPayloadSchema.shape),
+)
+
 // 'RECEIVED' is excluded here because it only appears on inbound webhooks
 // (is_outbound=false); the status-update path guards it out before calling.
 function mapSendblueStatus(
@@ -268,6 +274,18 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const rawBody = await request.text()
 
+    // Flag-gated raw-body capture for schema-drift investigation. Fires before
+    // signature verification so we capture malformed / unsigned / status
+    // payloads too — those are the most interesting cases during a drift
+    // window. LEAKS PII (phone numbers, message content); see
+    // .env.local.example for the capture-window discipline.
+    if (process.env.SENDBLUE_LOG_RAW_INBOUND === 'true') {
+      console.log('webhook: raw sendblue inbound (PII)', {
+        event: 'sendblue_raw_inbound',
+        raw: rawBody,
+      })
+    }
+
     if (!verifyWebhookSignature(request.headers)) {
       console.warn('webhook: invalid signature', { url: request.url })
       return new Response('Invalid signature', { status: 401 })
@@ -292,6 +310,23 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const payload = result.data
+
+    // Schema-drift canary: safeParse against a Zod object schema strips
+    // unknown keys but does NOT reject, so result.data loses them while
+    // parsedJson retains them. Filtering parsedJson keys against the
+    // schema-derived known set surfaces new Sendblue fields the moment they
+    // appear, without breaking parse. KEYS ONLY — never values, no PII.
+    const rawKeys = Object.keys(parsedJson as Record<string, unknown>)
+    const unknownKeys = rawKeys.filter((k) => !KNOWN_SENDBLUE_KEYS.has(k))
+    if (unknownKeys.length > 0) {
+      console.warn('webhook: sendblue payload contains unknown keys', {
+        event: 'sendblue_unknown_keys',
+        keys: unknownKeys,
+        is_outbound: payload.is_outbound,
+        message_handle: payload.message_handle,
+      })
+    }
+
     const supabase = createAdminClient()
     return payload.is_outbound
       ? await handleStatusUpdate(payload, supabase)
