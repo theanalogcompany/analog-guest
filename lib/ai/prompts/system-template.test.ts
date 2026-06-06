@@ -18,8 +18,8 @@ import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
 // render knowledge block) — also no SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.20.0 (TAC-244: ## Follow-up context block + cold_lapsed forward-scaffold)', () => {
-    expect(PROMPT_VERSION).toBe('v1.20.0')
+  it('is v1.21.0 (TAC-123: perk_unlock FollowupReason + perkBeingUnlocked wiring + multi-reason intake)', () => {
+    expect(PROMPT_VERSION).toBe('v1.21.0')
   })
 })
 

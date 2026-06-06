@@ -641,13 +641,14 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
   return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
 }
 
-// TAC-244: map the agent's FollowupTrigger.reason to the AI-runtime's
-// FollowupReason. day_* → post_visit_day_*; cold_lapsed passes through.
-// event / manual return null — those have their own dedicated context
-// surfaces (eventBeingInvited / operatorInstruction) and don't render the
-// `## Follow-up context` block. The switch covers every FollowupTrigger
-// reason; adding one without a case here is a tsc error because the
-// function's return type wouldn't admit the implicit `undefined`.
+// TAC-244 / TAC-123: map the agent's FollowupTrigger.reason to the
+// AI-runtime's FollowupReason. day_* → post_visit_day_*; cold_lapsed and
+// perk_unlock pass through. event / manual return null — those have their
+// own dedicated context surfaces (eventBeingInvited / operatorInstruction)
+// and don't render the `## Follow-up context` block. The switch covers
+// every FollowupTrigger reason; adding one without a case here is a tsc
+// error because the function's return type wouldn't admit the implicit
+// `undefined`.
 function triggerReasonToFollowupReason(
   reason: FollowupTrigger['reason'],
 ): FollowupReason | null {
@@ -662,22 +663,30 @@ function triggerReasonToFollowupReason(
       return 'post_visit_day_14'
     case 'cold_lapsed':
       return 'cold_lapsed'
+    case 'perk_unlock':
+      return 'perk_unlock'
     case 'event':
     case 'manual':
       return null
   }
 }
 
-// TAC-244: derive the `followup` field for the AI runtime from the agent
-// runtime's trigger + visit data. The single mapping point makes the
-// inbound-XOR-outbound invariant structural: `followup` only ever
+// TAC-244 / TAC-123: derive the `followup` field for the AI runtime from
+// the agent runtime's trigger + visit data. The single mapping point makes
+// the inbound-XOR-outbound invariant structural: `followup` only ever
 // materializes downstream of a `followupTrigger`, and `handleInbound`'s
 // entry-point assertion guarantees `followupTrigger === null` there. Returns
 // undefined when:
 //   - no followup trigger (inbound path)
-//   - trigger.reason maps to null (event / manual — dedicated surfaces)
-//   - no anchor visit available (defensive — block won't render usefully
-//     without one; same `if (block)` posture as formatActiveCommitments)
+//   - trigger.reason maps to null (event / manual — dedicated surfaces) AND
+//     trigger.additionalReasons is empty
+//
+// TAC-123 widens the seam to consume `trigger.additionalReasons[]` — when
+// the engine aggregates multiple detector hits for one guest, the rest of
+// the FollowupReasons ride here and the rendered block carries them all in
+// `reasons[]` (the serializer's multi-reason weaving rider fires when
+// `reasons.length > 1`). De-dup is order-preserving with the primary at the
+// head so the rendered list reads "primary, then the others."
 export function deriveFollowupContext(
   trigger: FollowupTrigger | null,
   recentVisits: readonly Visit[],
@@ -685,33 +694,45 @@ export function deriveFollowupContext(
   now: Date,
 ): FollowupContext | undefined {
   if (!trigger) return undefined
-  const reason = triggerReasonToFollowupReason(trigger.reason)
-  if (!reason) return undefined
-  const isColdLapsed = reason === 'cold_lapsed'
+  const primary = triggerReasonToFollowupReason(trigger.reason)
+  // Combine primary + additionalReasons (de-duplicated, order preserved with
+  // primary first). When the primary is null (event/manual) but the engine
+  // attached additionalReasons anyway — defensive — we still render any
+  // valid additional reasons.
+  const reasons: FollowupReason[] = []
+  if (primary) reasons.push(primary)
+  for (const extra of trigger.additionalReasons ?? []) {
+    if (!reasons.includes(extra)) reasons.push(extra)
+  }
+  if (reasons.length === 0) return undefined
+
+  // Anchor selection: if a post_visit_* reason is present, prefer
+  // recentVisits[0] (carries items so the prompt can name what the guest
+  // had). Otherwise (cold_lapsed-only or perk_unlock-only), fall back to
+  // guests.last_visit_at (date-only minimal anchor). Mixed runs that include
+  // post_visit_* + cold_lapsed/perk_unlock take the post_visit anchor —
+  // freshest visit wins for items context.
+  const hasPostVisit = reasons.some((r) => r.startsWith('post_visit_'))
   let anchor: FollowupAnchorVisit | undefined
-  if (!isColdLapsed && recentVisits[0]) {
-    // Default-derive for post_visit_* reasons. items are present so the
-    // prompt can name what the guest had.
+  if (hasPostVisit && recentVisits[0]) {
     anchor = {
       visitedAt: recentVisits[0].visitedAt,
       items: recentVisits[0].items,
     }
-  } else if (isColdLapsed && lastVisitAt) {
-    // cold_lapsed: a deep-lapsed guest's last visit can fall outside the
-    // recentVisits window (90d / 20 txn). Anchor from guests.last_visit_at
-    // with items omitted (date-only minimal anchor — we don't carry items
-    // for visits older than the window).
+  } else if (lastVisitAt) {
+    // cold_lapsed / perk_unlock anchor: a deep-lapsed guest's last visit can
+    // fall outside the recentVisits window (90d / 20 txn). items omitted —
+    // we don't carry line items for visits older than the window, and a
+    // perk_unlock-only run isn't about specific items anyway.
     anchor = { visitedAt: lastVisitAt }
   }
   // If no anchor available, the block still renders with daysSinceLastVisit=0
-  // and the serializer omits the anchor line. The reason itself carries
-  // useful framing even without the anchor — e.g., a cold_lapsed guest with
-  // no last_visit_at on file (provisioned but never visited) still benefits
-  // from the "this is a re-engagement touch" framing.
+  // and the serializer omits the anchor line. The reasons themselves carry
+  // useful framing even without the anchor.
   const daysSinceLastVisit = anchor
     ? Math.floor((now.getTime() - anchor.visitedAt.getTime()) / 86_400_000)
     : 0
-  return { reasons: [reason], daysSinceLastVisit, anchorVisit: anchor }
+  return { reasons, daysSinceLastVisit, anchorVisit: anchor }
 }
 
 /**
@@ -784,9 +805,25 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     timezone = FALLBACK_TIMEZONE
   }
 
+  // TAC-123: when the engine attached a perkMechanic to a perk_unlock
+  // trigger, surface it as the AI runtime's `perkBeingUnlocked` so the
+  // serializer renders the `## Perk being unlocked` block. The block is
+  // outbound-only — handleInbound's entry-point assertion guarantees
+  // followupTrigger=null on inbound, so perkBeingUnlocked is never set on
+  // the inbound path. Only the typed `perkMechanic` channel populates this
+  // — the engine never threads it through `metadata`.
+  const perkBeingUnlocked = ctx.followupTrigger?.perkMechanic
+    ? {
+        name: ctx.followupTrigger.perkMechanic.name,
+        qualification: ctx.followupTrigger.perkMechanic.qualification ?? '',
+        rewardDescription: ctx.followupTrigger.perkMechanic.rewardDescription ?? '',
+      }
+    : undefined
+
   return {
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
+    perkBeingUnlocked,
     additionalContext,
     operatorInstruction,
     today: computeToday(timezone),

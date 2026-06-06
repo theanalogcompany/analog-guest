@@ -122,8 +122,30 @@
 // followupTrigger=null there → deriveFollowupContext returns undefined).
 // Also forward-scaffolds cold_lapsed on FollowupTrigger.reason for the
 // TAC-123 engine; nothing fires it at deploy time. No schema change.
+//
+// v1.21.0 (TAC-123): the TAC-123 engine now fires. Three additive prompt
+// surface changes: (1) `FollowupReason` gains `perk_unlock` — the engine's
+// newly-eligible-mechanic detector. The serializer's `followupReasonLabel`
+// adds the matching "perk just unlocked" string; the follow_up category
+// instruction extends the never-enumerate-internal-taxonomy clause to cover
+// it. (2) `deriveFollowupContext` consumes a `FollowupReason[]` natively
+// via `trigger.additionalReasons` so multi-reason engine passes (e.g.
+// post_visit_day_7 + perk_unlock for one guest) render as one woven message
+// — the v1.20.0 weaving rider already handled `reasons.length > 1` and
+// covers this case unchanged. (3) `buildAiRuntime` now populates
+// `perkBeingUnlocked` from `FollowupTrigger.perkMechanic`, the first
+// production code path to populate that runtime field; the follow_up
+// category instruction adds a clause telling the model to weave the perk
+// naturally with the check-in rather than leading with it as a marketing
+// push. Engine-initiated runs persist as `category='follow_up'`
+// regardless of which reasons fire (operator's TAC-123 plan-review call) —
+// the existing `perk_unlock` MessageCategory remains for the inbound /
+// standalone perk moment, different tuning. No schema change. The
+// inbound-XOR-outbound invariant is unchanged: handleInbound's entry-point
+// assertion keys on currentMessage vs followupTrigger; perkBeingUnlocked
+// participates in neither.
 
-export const PROMPT_VERSION = 'v1.20.0'
+export const PROMPT_VERSION = 'v1.21.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

@@ -562,6 +562,87 @@ function formatWebhookSilence(props: WebhookSilenceProps): string {
 }
 
 // ---------------------------------------------------------------------------
+// Follow-up engine events (TAC-123)
+// ---------------------------------------------------------------------------
+//
+// Fired by lib/followups/engine.ts. Two events:
+//
+//   - `followup_suppressed` — fires per-guest when canSendFollowup (Gate 1)
+//     blocks a run. PostHog + Slack so pilot ops can see which guests are
+//     being held back and why (an unexpected spike in opted_out or
+//     weekly_cap is operationally interesting).
+//
+//   - `followup_scan_complete` — fires once per processor run (all
+//     dispatching venues aggregated). Includes per-venue breakdown so
+//     dashboards keep venue-level granularity. PostHog only — operational
+//     summary, no Slack noise.
+//
+// Reasons are the FollowupReason render enum strings (`post_visit_day_7`,
+// `cold_lapsed`, `perk_unlock`); typed as `string[]` here to avoid
+// importing from lib/schemas (this module is a leaf — see dependency-
+// direction note at top).
+
+export interface FollowupSuppressedProps {
+  venueId: string
+  guestId: string
+  /** Reasons the detector returned for this guest's tick. */
+  wouldHaveDispatchedReasons: readonly string[]
+  /** Which suppression branch fired (opt-out / quiet hours / etc.). */
+  suppressionReason: string
+}
+
+export async function captureFollowupSuppressed(
+  props: FollowupSuppressedProps,
+): Promise<void> {
+  await capturePostHogEvent('followup_suppressed', props.guestId, { ...props })
+  await postToSlack(formatFollowupSuppressed(props))
+}
+
+function formatFollowupSuppressed(props: FollowupSuppressedProps): string {
+  const reasonList = props.wouldHaveDispatchedReasons.map((r) => `\`${r}\``).join(', ')
+  return [
+    `*Follow-up suppressed* — \`${props.suppressionReason}\` blocked: ${reasonList || '(no reasons)'}`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+  ].join('\n')
+}
+
+export interface FollowupVenueBreakdown {
+  venueId: string
+  guestsEvaluated: number
+  guestsDue: number
+  guestsDispatched: number
+  guestsSuppressed: number
+  guestsConflicted: number
+  guestsDispatchFailed: number
+}
+
+export interface FollowupScanCompleteProps {
+  /** ISO timestamp at the start of the processor tick. */
+  now: string
+  summary: {
+    venuesScanned: number
+    venuesDispatching: number
+    guestsEvaluated: number
+    guestsDue: number
+    guestsDispatched: number
+    guestsSuppressed: number
+    suppressedBy: Record<string, number>
+    guestsConflicted: number
+    guestsDispatchFailed: number
+  }
+  perVenue: readonly FollowupVenueBreakdown[]
+}
+
+export async function captureFollowupScanComplete(
+  props: FollowupScanCompleteProps,
+): Promise<void> {
+  // No guestId — system-level event. Stable distinctId so dashboards can
+  // chart the daily processor run as a single series.
+  await capturePostHogEvent('followup_scan_complete', 'system:followup-engine', { ...props })
+}
+
+// ---------------------------------------------------------------------------
 // Operator approval queue events (TAC-258)
 // ---------------------------------------------------------------------------
 //

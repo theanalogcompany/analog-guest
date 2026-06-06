@@ -143,6 +143,58 @@ export type Database = {
           },
         ]
       }
+      followup_log: {
+        Row: {
+          created_at: string
+          dedup_key: string
+          guest_id: string
+          id: string
+          message_id: string | null
+          reason: string
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          dedup_key: string
+          guest_id: string
+          id?: string
+          message_id?: string | null
+          reason: string
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          dedup_key?: string
+          guest_id?: string
+          id?: string
+          message_id?: string | null
+          reason?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "followup_log_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "followup_log_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "followup_log_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guest_commitments: {
         Row: {
           acknowledged_at: string | null
@@ -891,6 +943,7 @@ export type Database = {
           approval_policy: Json
           brand_persona: Json
           created_at: string
+          followup_rules: Json | null
           messaging_cadence: Json
           onboarding_status: string
           relationship_strength_formula: Json
@@ -904,6 +957,7 @@ export type Database = {
           approval_policy?: Json
           brand_persona?: Json
           created_at?: string
+          followup_rules?: Json | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json
@@ -917,6 +971,7 @@ export type Database = {
           approval_policy?: Json
           brand_persona?: Json
           created_at?: string
+          followup_rules?: Json | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json

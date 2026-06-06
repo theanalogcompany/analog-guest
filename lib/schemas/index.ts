@@ -59,6 +59,14 @@ export {
   toParsedGuestContext,
 } from './guest-context'
 export {
+  type EngineFollowupReason,
+  FOLLOWUP_REASONS,
+  FOLLOWUP_RULES_DEFAULT,
+  type FollowupRules,
+  FollowupRulesSchema,
+  parseFollowupRules,
+} from './followup-rules'
+export {
   isCanonicalPrimaryTag,
   KNOWLEDGE_PRIMARY_TAGS,
   type KnowledgePrimaryTag,

@@ -1023,6 +1023,85 @@ describe('deriveFollowupContext (TAC-244)', () => {
   it('returns undefined for manual trigger (dedicated operatorInstruction surface)', () => {
     expect(deriveFollowupContext(trigger('manual'), [visit7()], null, NOW_DERIVE)).toBeUndefined()
   })
+
+  // TAC-123: deriveFollowupContext gained array intake — the engine
+  // aggregates multiple FollowupReasons for one guest on one pass.
+  it('maps perk_unlock → perk_unlock with lastVisitAt as anchor (no items)', () => {
+    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 14 * 24 * 60 * 60 * 1000)
+    const out = deriveFollowupContext(trigger('perk_unlock'), [], lastVisitAt, NOW_DERIVE)
+    expect(out).toEqual({
+      reasons: ['perk_unlock'],
+      daysSinceLastVisit: 14,
+      anchorVisit: { visitedAt: lastVisitAt },
+    })
+    expect(out?.anchorVisit?.items).toBeUndefined()
+  })
+
+  it('combines primary + additionalReasons into reasons[] in order', () => {
+    const out = deriveFollowupContext(
+      {
+        reason: 'day_7',
+        additionalReasons: ['perk_unlock'],
+        triggeredAt: NOW_DERIVE,
+      },
+      [visit7()],
+      null,
+      NOW_DERIVE,
+    )
+    expect(out?.reasons).toEqual(['post_visit_day_7', 'perk_unlock'])
+    // Mixed run with post_visit_* present → recentVisits[0] anchor wins
+    // (carries items).
+    expect(out?.anchorVisit?.items).toEqual(['espresso', 'croissant'])
+  })
+
+  it('dedups when additionalReasons accidentally includes the primary', () => {
+    const out = deriveFollowupContext(
+      {
+        reason: 'day_7',
+        additionalReasons: ['post_visit_day_7', 'perk_unlock'],
+        triggeredAt: NOW_DERIVE,
+      },
+      [visit7()],
+      null,
+      NOW_DERIVE,
+    )
+    // post_visit_day_7 appears once (de-duped), perk_unlock after.
+    expect(out?.reasons).toEqual(['post_visit_day_7', 'perk_unlock'])
+  })
+
+  it('cold_lapsed + perk_unlock anchors on lastVisitAt (no post_visit_* in the set)', () => {
+    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const out = deriveFollowupContext(
+      {
+        reason: 'cold_lapsed',
+        additionalReasons: ['perk_unlock'],
+        triggeredAt: NOW_DERIVE,
+      },
+      [visit7()], // present, but ignored — no post_visit_* in reasons
+      lastVisitAt,
+      NOW_DERIVE,
+    )
+    expect(out?.reasons).toEqual(['cold_lapsed', 'perk_unlock'])
+    expect(out?.anchorVisit?.visitedAt).toEqual(lastVisitAt)
+    expect(out?.anchorVisit?.items).toBeUndefined()
+  })
+
+  it('renders valid additionalReasons even when primary maps to null (event/manual)', () => {
+    // Defensive: the engine shouldn't normally build a manual/event trigger
+    // with additionalReasons attached, but if it does, render the additional
+    // reasons rather than dropping the run.
+    const out = deriveFollowupContext(
+      {
+        reason: 'manual',
+        additionalReasons: ['perk_unlock'],
+        triggeredAt: NOW_DERIVE,
+      },
+      [],
+      null,
+      NOW_DERIVE,
+    )
+    expect(out?.reasons).toEqual(['perk_unlock'])
+  })
 })
 
 // TAC-244: integration check at the buildAiRuntime seam — wired correctly.
@@ -1071,5 +1150,97 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
     })
     const aiRuntime = buildAiRuntime(ctx)
     expect(aiRuntime.followup).toBeUndefined()
+  })
+
+  // TAC-123: when the engine attaches a perkMechanic to a perk_unlock
+  // trigger, buildAiRuntime threads it onto the AI runtime as
+  // `perkBeingUnlocked`. First production wiring of that field.
+  it('threads followupTrigger.perkMechanic → aiRuntime.perkBeingUnlocked', () => {
+    const ctx = makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      followupTrigger: {
+        reason: 'perk_unlock',
+        triggeredAt: new Date(),
+        perkMechanic: {
+          id: 'mech-1',
+          type: 'perk',
+          name: 'The Joey',
+          description: 'small black coffee',
+          qualification: 'regulars who keep coming back',
+          rewardDescription: 'one free Joey on us',
+          minState: 'regular',
+          requiresOperatorApproval: false,
+        },
+      } as RuntimeContext['followupTrigger'],
+      recognition: { state: 'regular' } as RuntimeContext['recognition'],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.perkBeingUnlocked).toEqual({
+      name: 'The Joey',
+      qualification: 'regulars who keep coming back',
+      rewardDescription: 'one free Joey on us',
+    })
+  })
+
+  it('coerces null qualification / rewardDescription to empty strings for perkBeingUnlocked', () => {
+    const ctx = makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      followupTrigger: {
+        reason: 'perk_unlock',
+        triggeredAt: new Date(),
+        perkMechanic: {
+          id: 'mech-2',
+          type: 'perk',
+          name: 'Pastry on the house',
+          description: null,
+          qualification: null,
+          rewardDescription: null,
+          minState: null,
+          requiresOperatorApproval: false,
+        },
+      } as RuntimeContext['followupTrigger'],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.perkBeingUnlocked).toEqual({
+      name: 'Pastry on the house',
+      qualification: '',
+      rewardDescription: '',
+    })
+  })
+
+  it('leaves perkBeingUnlocked undefined when followupTrigger has no perkMechanic', () => {
+    const ctx = makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      recentVisits: [{ items: ['espresso'], visitedAt: new Date(Date.now() - 7 * 86_400_000) }],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.perkBeingUnlocked).toBeUndefined()
   })
 })
