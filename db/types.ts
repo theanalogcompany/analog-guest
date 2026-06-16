@@ -339,6 +339,48 @@ export type Database = {
           },
         ]
       }
+      guest_card_fingerprints: {
+        Row: {
+          card_fingerprint: string
+          created_at: string
+          first_seen_at: string
+          guest_id: string
+          id: string
+          venue_id: string
+        }
+        Insert: {
+          card_fingerprint: string
+          created_at?: string
+          first_seen_at?: string
+          guest_id: string
+          id?: string
+          venue_id: string
+        }
+        Update: {
+          card_fingerprint?: string
+          created_at?: string
+          first_seen_at?: string
+          guest_id?: string
+          id?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_card_fingerprints_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_card_fingerprints_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guests: {
         Row: {
           context: Json
@@ -872,9 +914,288 @@ export type Database = {
         }
         Relationships: []
       }
+      pos_catalog_items: {
+        Row: {
+          category: string | null
+          created_at: string
+          external_id: string
+          id: string
+          is_available: boolean
+          name: string
+          parent_external_id: string | null
+          price_cents: number | null
+          provider: string
+          raw_data: Json | null
+          updated_at: string
+          venue_id: string
+          version: number | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          external_id: string
+          id?: string
+          is_available?: boolean
+          name: string
+          parent_external_id?: string | null
+          price_cents?: number | null
+          provider: string
+          raw_data?: Json | null
+          updated_at?: string
+          venue_id: string
+          version?: number | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          external_id?: string
+          id?: string
+          is_available?: boolean
+          name?: string
+          parent_external_id?: string | null
+          price_cents?: number | null
+          provider?: string
+          raw_data?: Json | null
+          updated_at?: string
+          venue_id?: string
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_catalog_items_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_credentials: {
+        Row: {
+          access_token_enc: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          location_external_id: string | null
+          merchant_external_id: string | null
+          provider: string
+          refresh_token_enc: string | null
+          scopes: string[] | null
+          token_expires_at: string | null
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          access_token_enc?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          location_external_id?: string | null
+          merchant_external_id?: string | null
+          provider: string
+          refresh_token_enc?: string | null
+          scopes?: string[] | null
+          token_expires_at?: string | null
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          access_token_enc?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          location_external_id?: string | null
+          merchant_external_id?: string | null
+          provider?: string
+          refresh_token_enc?: string | null
+          scopes?: string[] | null
+          token_expires_at?: string | null
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_credentials_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          device_token_hash: string
+          id: string
+          last_seen_at: string | null
+          location_external_id: string | null
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          device_token_hash: string
+          id?: string
+          last_seen_at?: string | null
+          location_external_id?: string | null
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          device_token_hash?: string
+          id?: string
+          last_seen_at?: string | null
+          location_external_id?: string | null
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_devices_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_inventory_counts: {
+        Row: {
+          catalog_external_id: string
+          id: string
+          location_external_id: string
+          provider: string
+          quantity: number | null
+          state: string | null
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          catalog_external_id: string
+          id?: string
+          location_external_id: string
+          provider: string
+          quantity?: number | null
+          state?: string | null
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          catalog_external_id?: string
+          id?: string
+          location_external_id?: string
+          provider?: string
+          quantity?: number | null
+          state?: string | null
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_inventory_counts_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_tap_events: {
+        Row: {
+          created_at: string
+          device_id: string | null
+          id: string
+          location_external_id: string | null
+          phone_number: string | null
+          received_at: string
+          reconciled_transaction_id: string | null
+          status: string
+          tap_token: string
+          tapped_at: string | null
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id?: string | null
+          id?: string
+          location_external_id?: string | null
+          phone_number?: string | null
+          received_at?: string
+          reconciled_transaction_id?: string | null
+          status?: string
+          tap_token: string
+          tapped_at?: string | null
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string | null
+          id?: string
+          location_external_id?: string | null
+          phone_number?: string | null
+          received_at?: string
+          reconciled_transaction_id?: string | null
+          status?: string
+          tap_token?: string
+          tapped_at?: string | null
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_tap_events_reconciled_transaction_id_fkey"
+            columns: ["reconciled_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_tap_events_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_webhook_events: {
+        Row: {
+          event_id: string
+          event_type: string
+          id: string
+          payload: Json | null
+          processed_at: string | null
+          provider: string
+          received_at: string
+          signature_verified: boolean
+        }
+        Insert: {
+          event_id: string
+          event_type: string
+          id?: string
+          payload?: Json | null
+          processed_at?: string | null
+          provider: string
+          received_at?: string
+          signature_verified?: boolean
+        }
+        Update: {
+          event_id?: string
+          event_type?: string
+          id?: string
+          payload?: Json | null
+          processed_at?: string | null
+          provider?: string
+          received_at?: string
+          signature_verified?: boolean
+        }
+        Relationships: []
+      }
       transactions: {
         Row: {
           amount_cents: number
+          card_fingerprint: string | null
           created_at: string
           external_id: string | null
           guest_id: string | null
@@ -891,6 +1212,7 @@ export type Database = {
         }
         Insert: {
           amount_cents: number
+          card_fingerprint?: string | null
           created_at?: string
           external_id?: string | null
           guest_id?: string | null
@@ -907,6 +1229,7 @@ export type Database = {
         }
         Update: {
           amount_cents?: number
+          card_fingerprint?: string | null
           created_at?: string
           external_id?: string | null
           guest_id?: string | null

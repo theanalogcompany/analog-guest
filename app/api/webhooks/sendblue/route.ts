@@ -16,6 +16,7 @@ import {
   type SendblueWebhookPayload,
   verifyWebhookSignature,
 } from '@/lib/messaging'
+import { reconcileTapFromInbound } from '@/lib/pos/reconcile-tap'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 
@@ -185,6 +186,19 @@ async function handleInbound(
   // long enough for the agent to run after we return 200, so the webhook
   // ack stays fast and Sendblue doesn't see a stalled response.
   waitUntil(runInboundAgent(insertedMessage.id))
+
+  // Square NFC opt-in: if this inbound carries a tap_token, reconcile the
+  // tap to its transaction + map the card fingerprint to this guest. No-ops
+  // when no token is present (the common case), never throws (RAGResult), and
+  // runs independently of the agent hand-off above.
+  waitUntil(
+    reconcileTapFromInbound({
+      venueId: venue.id,
+      guestId,
+      phoneNumber: guestNumber,
+      body: payload.content ?? null,
+    }),
+  )
 
   return new Response('OK', { status: 200 })
 }
