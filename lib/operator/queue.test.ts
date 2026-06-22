@@ -9,7 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listPendingQueue } from './queue'
 
 const rpcMock = vi.fn()
-const adminMock = vi.fn(() => ({ rpc: rpcMock }))
+// `.from('venues').select('id, timezone').in('id', ids)` — venue-timezone lookup.
+const venuesInMock = vi.fn()
+const adminMock = vi.fn(() => ({
+  rpc: rpcMock,
+  from: (table: string) => {
+    if (table !== 'venues') throw new Error(`unexpected table: ${table}`)
+    return { select: () => ({ in: () => venuesInMock() }) }
+  },
+}))
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => adminMock(),
@@ -18,6 +26,8 @@ vi.mock('@/lib/db/admin', () => ({
 describe('listPendingQueue', () => {
   beforeEach(() => {
     rpcMock.mockReset()
+    venuesInMock.mockReset()
+    venuesInMock.mockResolvedValue({ data: [], error: null })
     adminMock.mockClear()
   })
 
@@ -158,6 +168,71 @@ describe('listPendingQueue', () => {
     }
   })
 
+  it('attaches the venue timezone from the venues lookup', async () => {
+    rpcMock.mockResolvedValue({
+      data: [
+        {
+          draft_id: 'd1',
+          venue_id: 'v1',
+          venue_slug: 'x',
+          guest_id: 'g1',
+          guest_display_name: null,
+          guest_phone: '+15555550009',
+          guest_opted_out_at: null,
+          draft_body: 'hi',
+          category: null,
+          voice_fidelity: null,
+          review_reason: null,
+          recognition_state: null,
+          created_at: '2026-05-12T20:00:00.000Z',
+          langfuse_trace_id: null,
+          recent_context: null,
+        },
+      ],
+      error: null,
+    })
+    venuesInMock.mockResolvedValue({
+      data: [{ id: 'v1', timezone: 'America/Los_Angeles' }],
+      error: null,
+    })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.drafts[0]!.venueTimezone).toBe('America/Los_Angeles')
+    }
+  })
+
+  it('sets venueTimezone to null when the venue has no timezone row', async () => {
+    rpcMock.mockResolvedValue({
+      data: [
+        {
+          draft_id: 'd1',
+          venue_id: 'v1',
+          venue_slug: 'x',
+          guest_id: 'g1',
+          guest_display_name: null,
+          guest_phone: '+15555550010',
+          guest_opted_out_at: null,
+          draft_body: 'hi',
+          category: null,
+          voice_fidelity: null,
+          review_reason: null,
+          recognition_state: null,
+          created_at: '2026-05-12T20:00:00.000Z',
+          langfuse_trace_id: null,
+          recent_context: null,
+        },
+      ],
+      error: null,
+    })
+    // venuesInMock default returns { data: [], error: null }
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.drafts[0]!.venueTimezone).toBeNull()
+    }
+  })
+
   it('computes pendingSinceMs from created_at vs nowMs (clamped to 0 minimum)', async () => {
     rpcMock.mockResolvedValue({
       data: [
@@ -243,6 +318,75 @@ describe('listPendingQueue', () => {
       expect(result.ok).toBe(true)
       if (result.ok) {
         expect(result.drafts[0]!.reviewReason).toBeNull()
+      }
+    })
+  })
+
+  describe('agentReasoning sentence', () => {
+    const baseRow = {
+      draft_id: 'd1',
+      venue_id: 'v1',
+      venue_slug: 'x',
+      guest_id: 'g1',
+      guest_display_name: null,
+      guest_phone: '+15555550006',
+      guest_opted_out_at: null,
+      draft_body: 'hi',
+      category: null,
+      voice_fidelity: null,
+      recognition_state: null,
+      created_at: '2026-05-12T20:00:00.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+    }
+
+    it.each([
+      [
+        'commitment_type_gated',
+        'This reply promises the guest a comp, hold, or discount, so it needs your sign-off before it sends.',
+      ],
+      [
+        'comp_regex_backstop',
+        "This reply mentions comping or discounting something, so it's held for your approval.",
+      ],
+      [
+        'model_flagged',
+        "The assistant wasn't fully sure on this one and flagged it for you to check.",
+      ],
+      [
+        'fidelity_below_auto_send_floor',
+        "This reply's voice match came in a little low, so it's held for you to review first.",
+      ],
+      [
+        'previous_pending_held',
+        "There's already a reply waiting for this guest, so this one is held too.",
+      ],
+      [
+        'operator_decline_initiated',
+        "You declined this guest's request — here's a drafted reply to review.",
+      ],
+      ['gibberish_unknown_code', 'This reply needs a quick review before it sends.'],
+    ])('maps review_reason %s to its explanatory sentence', async (raw, expected) => {
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, review_reason: raw }],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.drafts[0]!.agentReasoning).toBe(expected)
+      }
+    })
+
+    it('passes review_reason null through as null agentReasoning', async () => {
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, review_reason: null }],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.drafts[0]!.agentReasoning).toBeNull()
       }
     })
   })
