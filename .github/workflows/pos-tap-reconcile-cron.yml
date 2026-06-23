@@ -1,0 +1,41 @@
+# B7 Square tap-reconcile scheduled runner.
+#
+# The route handler at `app/api/cron/pos-tap-reconcile/route.ts` expires
+# pending `pos_tap_events` that never received a send within the TTL. Vercel's
+# Hobby tier caps cron granularity at daily/weekly; this project stays on Hobby,
+# so we trigger the endpoint from GitHub Actions instead — same posture as
+# commitments-due-cron.yml / followups-due-cron.yml.
+#
+# Requires (same as the other cron workflows):
+#   - PROD_BASE_URL  repo variable (guest-host origin, e.g. https://webhooks.theanalog.company)
+#   - CRON_SECRET    repo secret (same value as Vercel's CRON_SECRET env var)
+
+name: cron / pos-tap-reconcile
+
+on:
+  schedule:
+    # every 15 minutes, UTC — tap expiry is not urgent; this bounds staleness.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    if: github.repository == 'theanalogcompany/analog-guest'
+    steps:
+      - name: hit /api/cron/pos-tap-reconcile
+        env:
+          PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$PROD_BASE_URL" ]; then
+            echo "::error::PROD_BASE_URL repo variable is unset"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is unset"
+            exit 1
+          fi
+          curl -fsS -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${PROD_BASE_URL}/api/cron/pos-tap-reconcile"

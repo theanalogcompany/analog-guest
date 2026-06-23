@@ -14,6 +14,7 @@
     "run-test-scenarios": "tsx --env-file=.env.local scripts/run-test-scenarios.ts",
     "ingest-response-review": "tsx --env-file=.env.local scripts/ingest-response-review.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",
+    "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky"
@@ -35,6 +36,7 @@
     "posthog-node": "^5.30.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "square": "^43.2.1",
     "voyageai": "^0.2.1",
     "zod": "^4.3.6"
   },
