@@ -712,6 +712,134 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// applyApprovalPolicyStage — per-venue hold_all_outbound (TAC-XXX)
+// ---------------------------------------------------------------------------
+
+describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+    captureDemoBypassMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // makeCtx casts `venue`, so holdAllOutbound isn't set by default. These
+  // helpers make the venue-flag + compliance-category intent explicit.
+  function holdVenueCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', holdAllOutbound: true } as RuntimeContext['venue'],
+      ...overrides,
+    })
+  }
+
+  function classification(category: string): RuntimeContext['classification'] {
+    return {
+      category,
+      classifierConfidence: 0.95,
+      reasoning: 'test',
+    } as RuntimeContext['classification']
+  }
+
+  it('queues a clean high-fidelity message at a hold venue (the new behavior)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: classification('follow_up') }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND])
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+  })
+
+  it('queues proactive sends when classification is null (no inbound on the followup path)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: null }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+  })
+
+  it('does NOT hold an opt_out compliance reply — it sends immediately', async () => {
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: classification('opt_out') }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('still sends a clean message at a non-hold venue (regression guard)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({ classification: classification('follow_up') }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('composes with comp regex; a co-firing comp wins primaryTrigger (hold is ranked lowest)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: classification('reply') }),
+      makeGenerationResult({ voiceFidelity: 0.85, body: "that one's on us today" }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  })
+
+  it('an opt_out reply still passes through existing triggers (comp still queues it)', async () => {
+    // Carve-out bypasses ONLY the hold flag — the pre-existing triggers are
+    // unchanged. A comp-bearing opt_out reply still queues, just not via hold.
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: classification('opt_out') }),
+      makeGenerationResult({ voiceFidelity: 0.85, body: "no charge for this round" }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+  })
+
+  it('preserves regen-in-place: composes with previous_pending_held + surfaces the row id', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: { id: 'existing-pending-id', body: 'earlier draft body' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({ classification: classification('follow_up') }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(decision.existingPendingDraftId).toBe('existing-pending-id')
+  })
+
+  it('demo guest at a hold venue still auto-sends (demo bypass wins)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      holdVenueCtx({
+        classification: classification('follow_up'),
+        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      }),
+      makeGenerationResult({ voiceFidelity: 0.85 }),
+    )
+    expect(decision.action).toBe('send')
+    if (decision.action !== 'send') return
+    expect(decision.reason).toBe('demo_bypass')
+    // The would-have-queued set still records the hold trigger for analytics.
+    expect(captureDemoBypassMock).toHaveBeenCalledTimes(1)
+    const payload = captureDemoBypassMock.mock.calls[0][0] as { wouldHaveQueuedTriggers: string[] }
+    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // applyApprovalPolicyStage — demo guest bypass (TAC-284)
 // ---------------------------------------------------------------------------
 

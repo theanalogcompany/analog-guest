@@ -119,7 +119,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('venues')
       .select(
-        'id, slug, timezone, messaging_phone_number, venue_configs(brand_persona, venue_info)',
+        'id, slug, timezone, messaging_phone_number, hold_all_outbound, venue_configs(brand_persona, venue_info)',
       )
       .eq('id', input.venueId)
       .single(),
@@ -252,6 +252,9 @@ export async function buildRuntimeContext(input: {
     venueInfo,
     timezone: venueRow.timezone,
     sendblueNumber: venueRow.messaging_phone_number,
+    // TAC-XXX: NOT NULL DEFAULT false at the column level, so this is always
+    // a real boolean. `=== true` guards against a hand-patched-types drift.
+    holdAllOutbound: venueRow.hold_all_outbound === true,
   }
 
   const guestRow = guestResult.data

@@ -1,0 +1,36 @@
+-- 031_venue_hold_all_outbound.sql
+-- adds a per-venue hold_all_outbound flag (tac-xxx). when set, every
+-- guest-facing CONTENT message at that venue is held for operator review
+-- instead of auto-sending — the existing operator queue (review_state
+-- ='pending') surfaces it, and approve/edit/skip act on it identically to
+-- a held AI reply.
+--
+-- runtime wiring: build-runtime-context.ts SELECTs the column onto
+-- VenueContext.holdAllOutbound; applyApprovalPolicyStage (lib/agent/stages.ts)
+-- pushes the new `hold_all_outbound` trigger when the flag is true AND the
+-- message is not a compliance reply (ctx.classification.category !== 'opt_out').
+-- the trigger composes with the existing tac-212 triggers — it does not
+-- short-circuit them — so a co-firing comp/commitment still wins the
+-- operator-visible review_reason (hold_all_outbound is ranked lowest in
+-- PRIMARY_TRIGGER_PRIORITY).
+--
+-- compliance carve-out: opt_out confirmations ALWAYS auto-send regardless of
+-- this flag (TCPA/carrier rules require instant responses). the carve-out
+-- bypasses ONLY this flag — opt_out replies still pass through the pre-existing
+-- triggers unchanged.
+--
+-- bypasses that remain in effect at a hold venue (unchanged behavior):
+--   - demo guests (guests.is_demo, migration 022) still auto-send.
+--   - manual Command Center "Follow Up" sends (trigger.reason='manual') skip
+--     the approval gate entirely — the operator is explicitly sending.
+--
+-- operator surface: flipping the flag is a Supabase Studio SQL UPDATE keyed on
+-- slug — see CLAUDE.md "Common gotchas". No UI in v1.
+--
+-- additive (DEFAULT false covers existing venues), but the deployed code
+-- SELECTs the new column, so apply this migration in Studio BEFORE merging the
+-- PR per CLAUDE.md "Database migrations → Ordering". db/types.ts is hand-patched
+-- in the same commit until `npm run db:types` runs post-apply.
+
+alter table venues
+  add column hold_all_outbound boolean not null default false;

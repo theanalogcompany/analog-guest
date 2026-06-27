@@ -1317,6 +1317,7 @@ export type Database = {
       venues: {
         Row: {
           created_at: string
+          hold_all_outbound: boolean
           id: string
           is_test: boolean
           messaging_phone_number: string | null
@@ -1328,6 +1329,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          hold_all_outbound?: boolean
           id?: string
           is_test?: boolean
           messaging_phone_number?: string | null
@@ -1339,6 +1341,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          hold_all_outbound?: boolean
           id?: string
           is_test?: boolean
           messaging_phone_number?: string | null
