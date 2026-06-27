@@ -116,6 +116,7 @@ const baseCtx = {
     venueInfo: {},
     timezone: 'America/Los_Angeles',
     sendblueNumber: '+15555550000',
+    holdAllOutbound: false,
   },
   guest: { id: GUEST_ID },
   recentMessages: [

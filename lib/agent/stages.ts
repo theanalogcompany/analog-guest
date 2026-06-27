@@ -65,6 +65,12 @@ export const APPROVAL_TRIGGERS = {
   // and covers holds without leaky NL matching (per the TAC-297 plan-review
   // call #2). Recommendation type does NOT fire this trigger.
   COMMITMENT_TYPE_GATED: 'commitment_type_gated',
+  // TAC-XXX: per-venue blanket hold. Fires when venues.hold_all_outbound is
+  // true AND the message is not a compliance reply (opt_out confirmation).
+  // Venue-wide policy rather than a per-message signal, so it's ranked LAST in
+  // PRIMARY_TRIGGER_PRIORITY — a co-firing comp/commitment carries more
+  // operator-actionable information and should win the review_reason label.
+  HOLD_ALL_OUTBOUND: 'hold_all_outbound',
 } as const
 
 /**
@@ -99,6 +105,9 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
   APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+  // TAC-XXX: blanket venue hold is the least-specific signal — ranked last so
+  // any concrete per-message trigger above carries the operator-facing label.
+  APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND,
 ] as const
 
 function pickPrimaryTrigger(triggers: readonly string[]): string {
@@ -518,6 +527,20 @@ export async function applyApprovalPolicyStage(
     (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount')
   ) {
     triggers.push(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  }
+
+  // Trigger 6 (TAC-XXX): per-venue blanket hold. When venues.hold_all_outbound
+  // is true, hold every guest-facing content message for operator review —
+  // EXCEPT compliance replies, which must auto-send instantly (TCPA/carrier
+  // rules). Compliance == an opt_out confirmation, detected via the inbound
+  // classification (the outbound reply inherits ctx.classification.category;
+  // for the proactive/followup path category is never opt_out, so this gate
+  // correctly holds proactive sends at a hold venue). The carve-out bypasses
+  // ONLY this trigger — an opt_out reply still passes through triggers 1–5
+  // above unchanged. Composes with (does not short-circuit) the other
+  // triggers, so existingPendingDraftId still routes regen-in-place correctly.
+  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+    triggers.push(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
   }
 
   // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
