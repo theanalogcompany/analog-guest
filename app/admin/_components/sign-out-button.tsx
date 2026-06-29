@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { createBrowserClient } from '@/lib/db/browser'
 
 // Small client component for the top-bar sign-out action. Direct register:
@@ -27,13 +28,15 @@ export function SignOutButton() {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={handleClick}
       disabled={busy}
-      className="text-sm text-ink-soft hover:text-ink transition-colors disabled:opacity-50"
+      className="text-ink-soft hover:text-ink"
     >
       {busy ? 'Signing out…' : 'Sign out'}
-    </button>
+    </Button>
   )
 }
