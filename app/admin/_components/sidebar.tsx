@@ -2,77 +2,91 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Eyebrow } from '@/lib/ui'
+import {
+  Activity,
+  AudioLines,
+  Home,
+  MessagesSquare,
+  SlidersHorizontal,
+  type LucideIcon,
+} from 'lucide-react'
+import {
+  Sidebar as SidebarRoot,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from '@/components/ui/sidebar'
+import { isNavItemActive, NAV_GROUPS } from './nav-items'
 
-// Sidebar nav for the Command Center. Thin section-list register — no
-// dropdowns, no nested items, no icons. Direct copy throughout.
-// usePathname drives active-state highlighting on each item.
+// Command Center sidebar, rebuilt on the shadcn Sidebar family (TAC-306,
+// option A). usePathname drives active state via the shared isNavItemActive
+// helper; nav targets come from the shared NAV_GROUPS so the sidebar and the
+// ⌘K palette stay in lockstep. collapsible="icon" gives a ⌘B-toggled icon
+// rail (SidebarProvider wires the shortcut + persists the state) — icons keyed
+// by href so the collapsed rail stays legible.
 
-interface NavItem {
-  href: string
-  label: string
+// Icon per nav href. Kept in the React layer (not nav-items.ts) so the shared
+// nav source stays pure/unit-testable. Adding a nav item without an icon falls
+// back to no glyph — visible in the expanded label, blank in the icon rail.
+const NAV_ICONS: Record<string, LucideIcon> = {
+  '/admin': Home,
+  '/admin/conversations': MessagesSquare,
+  '/admin/voices': AudioLines,
+  '/admin/tunables': SlidersHorizontal,
+  '/admin/health': Activity,
 }
-
-const NAV: ReadonlyArray<{ section: string; items: ReadonlyArray<NavItem> }> = [
-  {
-    section: 'Surfaces',
-    items: [
-      { href: '/admin', label: 'Home' },
-      { href: '/admin/conversations', label: 'Conversations' },
-      { href: '/admin/voices', label: 'Voices' },
-    ],
-  },
-  {
-    section: 'System',
-    items: [
-      { href: '/admin/tunables', label: 'Tunables' },
-      { href: '/admin/health', label: 'Health' },
-    ],
-  },
-]
 
 export function Sidebar() {
   const pathname = usePathname()
   return (
-    <nav className="w-56 shrink-0 border-r border-stone-light/60 px-6 py-8 flex flex-col gap-9">
-      {/* Plain <img> instead of next/image: the asset is small (200KB,
-          rendered at 144x33) and the Next image-optimization pipeline was
-          intermittently failing to serve it on prod. Direct <img> is
-          cheaper to render and removes a layer that can fail or get cached
-          in a bad state. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/brand/analog-full-ink.png"
-        alt="The Analog Company"
-        width={144}
-        height={33}
-      />
-      <div className="flex flex-col gap-6">
-        {NAV.map((group) => (
-          <div key={group.section} className="flex flex-col gap-2">
-            <Eyebrow>{group.section}</Eyebrow>
-            <ul className="flex flex-col gap-1">
+    <SidebarRoot collapsible="icon">
+      <SidebarHeader className="px-3 py-4">
+        {/* Plain <img> instead of next/image: the asset is small (200KB,
+            rendered at 144x33) and the Next image-optimization pipeline was
+            intermittently failing to serve it on prod. Hidden in the collapsed
+            icon rail where there's no room for the wordmark. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/analog-full-ink.png"
+          alt="The Analog Company"
+          width={144}
+          height={33}
+          className="group-data-[collapsible=icon]:hidden"
+        />
+      </SidebarHeader>
+      <SidebarContent>
+        {NAV_GROUPS.map((group) => (
+          <SidebarGroup key={group.section}>
+            <SidebarGroupLabel>{group.section}</SidebarGroupLabel>
+            <SidebarMenu>
               {group.items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== '/admin' && pathname.startsWith(`${item.href}/`))
+                const Icon = NAV_ICONS[item.href]
+                const isActive = isNavItemActive(item.href, pathname)
                 return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={`block py-1 text-sm transition-colors ${
-                        isActive ? 'text-clay font-medium' : 'text-ink hover:text-clay'
-                      }`}
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive}
+                      tooltip={item.label}
                     >
-                      {item.label}
-                    </Link>
-                  </li>
+                      <Link href={item.href}>
+                        {Icon ? <Icon /> : null}
+                        <span>{item.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 )
               })}
-            </ul>
-          </div>
+            </SidebarMenu>
+          </SidebarGroup>
         ))}
-      </div>
-    </nav>
+      </SidebarContent>
+      <SidebarRail />
+    </SidebarRoot>
   )
 }
