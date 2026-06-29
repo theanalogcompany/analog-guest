@@ -1,6 +1,16 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import {
   ADD_CORPUS_SOURCE_TYPES,
   type AddCorpusSourceType,
@@ -136,44 +146,52 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
           Voice corpus · {corpus.length} entries
         </h3>
         {!adding && (
-          <button
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => setAdding(true)}
-            className="text-[11px] text-clay font-medium hover:text-clay-deep"
+            className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep"
           >
             + Add entry
-          </button>
+          </Button>
         )}
       </header>
 
       {adding && (
         <div className="flex flex-col gap-2 py-3 border-b border-stone-light/60">
-          <select
+          <Select
             value={addSource}
-            onChange={(e) => setAddSource(e.target.value as AddCorpusSourceType)}
-            className="bg-highlight border border-stone-light/60 rounded-[3px] px-2 py-1.5 text-[12px] text-ink focus:outline-none focus:border-clay focus:bg-paper"
+            onValueChange={(v) => setAddSource(v as AddCorpusSourceType)}
             disabled={busy}
           >
-            {ADD_CORPUS_SOURCE_TYPES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <textarea
+            <SelectTrigger className="h-auto bg-highlight py-1.5 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ADD_CORPUS_SOURCE_TYPES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Textarea
             value={addContent}
             onChange={(e) => setAddContent(e.target.value)}
             placeholder="Voice example — how this venue actually communicates..."
-            className="bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-2 text-[12.5px] text-ink leading-snug focus:outline-none focus:border-clay focus:bg-paper resize-vertical min-h-[60px]"
+            className="bg-highlight text-[12.5px] leading-snug resize-vertical min-h-[60px]"
             autoFocus
           />
-          <input
+          <Input
             value={addTags}
             onChange={(e) => setAddTags(e.target.value)}
             placeholder="tags, comma separated (optional)"
-            className="bg-highlight border border-stone-light/60 rounded-[3px] px-2 py-1.5 text-[12px] text-ink focus:outline-none focus:border-clay focus:bg-paper"
+            className="h-auto bg-highlight py-1.5 text-[12px]"
           />
           <div className="flex justify-end gap-3 text-[11px]">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setAdding(false)
                 setAddContent('')
@@ -184,14 +202,15 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
               className="text-ink-faint hover:text-ink"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={submitAdd}
               disabled={busy}
-              className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+              size="sm"
+              className="bg-ink text-paper hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
             >
               {busy ? 'Adding…' : 'Add'}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -216,35 +235,41 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
               </span>
               <div className="flex items-center gap-3 text-[10.5px]">
                 {!isEditing && (
-                  <button
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={() => startEdit(row)}
-                    className="text-ink-faint hover:text-ink"
+                    className="h-auto p-0 text-[10.5px] text-ink-faint hover:text-ink"
                   >
                     edit
-                  </button>
+                  </Button>
                 )}
                 {!isEditing && (
-                  <button
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={() => removeEntry(row.id)}
                     disabled={busy}
-                    className="text-ink-faint hover:text-clay disabled:opacity-50"
+                    className="h-auto p-0 text-[10.5px] text-ink-faint hover:text-clay"
                   >
                     delete
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
 
             {isEditing ? (
               <div className="flex flex-col gap-2">
-                <textarea
+                <Textarea
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
-                  className="bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-2 text-[12.5px] text-ink leading-snug focus:outline-none focus:border-clay focus:bg-paper resize-vertical min-h-[60px]"
+                  className="bg-highlight text-[12.5px] leading-snug resize-vertical min-h-[60px]"
                   autoFocus
                 />
                 <div className="flex justify-end gap-3 text-[11px]">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setEditingId(null)
                       setEditContent('')
@@ -254,14 +279,15 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
                     className="text-ink-faint hover:text-ink"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => submitEdit(row.id)}
                     disabled={busy}
-                    className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+                    size="sm"
+                    className="bg-ink text-paper hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
                   >
                     {busy ? 'Saving…' : 'Save'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : paired ? (

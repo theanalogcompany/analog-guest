@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import type { VoicePageMessage } from '../_lib/load-voice-page'
 import { AttemptsStack, type PlaygroundAttempt } from './attempts-stack'
 import { CommitModal, type CommitPayload } from './commit-modal'
@@ -207,11 +209,11 @@ export function PlaygroundShell({
             <label className="text-[9.5px] uppercase font-semibold text-ink tracking-eyebrow">
               Why this is wrong
             </label>
-            <textarea
+            <Textarea
               value={critique}
               onChange={(e) => setCritique(e.target.value)}
               placeholder="What's bad about this? Be specific."
-              className="bg-paper border border-stone-light/60 rounded-[3px] px-3 py-2.5 text-[13px] leading-snug text-ink resize-vertical min-h-[64px] focus:outline-none focus:border-clay focus:shadow-[0_0_0_1px_var(--clay-soft)]"
+              className="resize-vertical min-h-[64px] text-[13px] leading-snug"
             />
           </div>
 
@@ -223,13 +225,14 @@ export function PlaygroundShell({
                 ? 'Type the critique, then regenerate'
                 : `${attempts.length} ${attempts.length === 1 ? 'attempt' : 'attempts'} · using current rules + corpus`}
             </span>
-            <button
+            <Button
               onClick={regenerate}
               disabled={regenBusy || critique.trim().length === 0}
-              className="bg-ink text-paper px-3.5 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+              size="sm"
+              className="bg-ink text-paper hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
             >
               {regenBusy ? 'Regenerating…' : '↻ Regenerate'}
-            </button>
+            </Button>
           </div>
 
           <AttemptsStack
@@ -246,13 +249,14 @@ export function PlaygroundShell({
 
           {attempts.length > 0 && selectedAttemptId && (
             <div className="flex justify-end pt-2 border-t border-stone-light/60">
-              <button
+              <Button
                 onClick={startCommit}
                 disabled={committing}
-                className="bg-clay text-white px-4 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+                size="sm"
+                className="hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
               >
                 Commit to voice
-              </button>
+              </Button>
             </div>
           )}
 

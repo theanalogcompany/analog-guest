@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import type { BrandPersona } from '@/lib/schemas'
 import { UNIVERSAL_RULES_DISPLAY } from '../_lib/universal-rules'
 import { PatternsBanner } from './patterns-banner'
@@ -97,26 +99,30 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
             Venue rules · {persona.voiceAntiPatterns.length}
           </h3>
           {!adding && (
-            <button
+            <Button
+              variant="link"
+              size="sm"
               onClick={() => setAdding(true)}
-              className="text-[11px] text-clay font-medium hover:text-clay-deep"
+              className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep"
             >
               + Add rule
-            </button>
+            </Button>
           )}
         </header>
 
         {adding && (
           <div className="flex flex-col gap-2 py-3 border-b border-stone-light/60">
-            <textarea
+            <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Concrete rule, in the operator's voice..."
-              className="bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-2 text-[12.5px] leading-snug text-ink focus:outline-none focus:border-clay focus:bg-paper resize-vertical min-h-[60px]"
+              className="bg-highlight text-[12.5px] leading-snug resize-vertical min-h-[60px]"
               autoFocus
             />
             <div className="flex justify-end gap-3 text-[11px]">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setAdding(false)
                   setDraft('')
@@ -126,14 +132,15 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
                 disabled={busy}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={submit}
-                className="bg-ink text-paper px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+                size="sm"
+                className="bg-ink text-paper hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
                 disabled={busy}
               >
                 {busy ? 'Adding…' : 'Add'}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -153,14 +160,16 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
               <p className="text-[12.5px] text-ink leading-snug flex-1">
                 {rule.text}
               </p>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => remove(rule.text)}
                 disabled={busy}
-                className="text-[10.5px] text-ink-faint hover:text-clay disabled:opacity-50 shrink-0"
+                className="text-ink-faint hover:text-clay shrink-0"
                 aria-label="Remove rule"
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="flex items-center gap-2 text-[9.5px] uppercase font-semibold tracking-wider text-ink-faint">
               <SourcePill variant={rule.source}>

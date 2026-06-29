@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { guestDisplayName } from '../../../_lib/guest-name'
+import { Input } from '@/components/ui/input'
 import { Eyebrow } from '@/lib/ui'
 import type { VoicePageThread } from '../_lib/load-voice-page'
 
@@ -68,12 +69,12 @@ export function ThreadsList({
     <div className="flex flex-col min-h-0 border-r border-stone-light/60 bg-paper">
       <div className="px-4 pt-4 pb-3 border-b border-stone-light/60 flex flex-col gap-2">
         <Eyebrow>{eyebrowLabel}</Eyebrow>
-        <input
+        <Input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="search guests, messages..."
-          className="w-full bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:outline-none focus:border-clay focus:bg-paper"
+          className="h-auto bg-highlight py-1.5 text-xs"
         />
       </div>
 
