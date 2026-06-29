@@ -2,6 +2,8 @@
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useMemo, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { HairlineRow } from '@/lib/ui'
 import type { Tunable, TunableCategory } from '@/lib/tunables/manifest'
 
@@ -124,12 +126,12 @@ export function TunablesTable({ tunables }: TunablesTableProps) {
           })}
         </div>
         <div className="ml-auto">
-          <input
+          <Input
             type="search"
             value={params.get('search') ?? ''}
             onChange={(e) => updateParam('search', e.target.value || null)}
             placeholder="Search by name…"
-            className="text-sm px-3 py-1.5 border border-stone-light/60 rounded-[2px] bg-paper text-ink placeholder:text-ink-faint focus:outline-none focus:border-clay w-56"
+            className="w-56"
             aria-label="Search tunables by name"
           />
         </div>
@@ -180,25 +182,20 @@ interface CategoryPillProps {
 }
 
 function CategoryPill({ label, isActive, disabled, onClick }: CategoryPillProps) {
-  const base = 'text-xs px-2.5 py-1 rounded-[2px] border transition-colors'
-  let tone = ''
-  if (isActive) {
-    tone = 'bg-clay text-paper border-clay'
-  } else if (disabled) {
-    tone = 'bg-paper text-ink-faint border-stone-light/60 cursor-not-allowed opacity-60'
-  } else {
-    tone = 'bg-paper text-ink border-stone-light/60 hover:border-clay hover:text-clay'
-  }
+  // Discrete filter control → shadcn Button (TAC-306). Active reads as the
+  // clay primary; inactive is the outline variant. disabled + aria-pressed
+  // are forwarded for the same accessibility semantics as the prior pill.
   return (
-    <button
+    <Button
       type="button"
+      variant={isActive ? 'default' : 'outline'}
+      size="xs"
       disabled={disabled}
       onClick={onClick}
-      className={`${base} ${tone}`}
       aria-pressed={isActive}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
