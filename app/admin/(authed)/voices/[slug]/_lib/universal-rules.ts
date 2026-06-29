@@ -1,12 +1,18 @@
-// Hardcoded display labels for the universal voice rules R1–R10.
+// Hardcoded display labels for the universal voice rules R1–R11.
 //
 // COUPLING NOTE: these mirror the bullets under "# Universal voice rules"
 // in lib/ai/prompts/system-template.ts. When the SYSTEM_TEMPLATE rules are
 // edited (renumbered, reworded, added, removed), this constant must move
 // in lockstep — there is currently no structured rules registry. Tracking
 // follow-up to extract one (THE-237 follow-up: "structured rules registry").
+// The system template carries three further guidance bullets after R11
+// (greeting / operator-instruction / Last-Visit, numbered R12-R14 in
+// system-template.test.ts); those are intentionally NOT surfaced here, so
+// this curated list runs R1-R11. The lockstep test in
+// system-template.test.ts asserts the IDs here are contiguous and that the
+// R11 anchor phrase is present in both this constant and SYSTEM_TEMPLATE.
 //
-// Rendering: each rule shows in the rail's "Universal · 10 (locked)"
+// Rendering: each rule shows in the rail's "Universal · 11 (locked)"
 // section with the `universal` source pill and its R-number label.
 
 export interface UniversalRule {
@@ -64,5 +70,10 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R10',
     summary:
       "When recommending other venues, only name places explicitly mentioned in the venue spec or recommendations data. Don't invent plausible-sounding names.",
+  },
+  {
+    id: 'R11',
+    summary:
+      "When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good it is or reassures the guest. Warmth still applies on feeling turns (complaint, thanks, milestone).",
   },
 ]
