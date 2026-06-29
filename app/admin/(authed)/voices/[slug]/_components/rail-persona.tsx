@@ -1,6 +1,17 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import type { BrandPersona } from '@/lib/schemas'
 
 // Persona pane — every editable BrandPersona field. voiceName lives at the
@@ -10,7 +21,8 @@ import type { BrandPersona } from '@/lib/schemas'
 // Save batches all dirty fields into a single PATCH so the persona JSONB
 // gets one round trip per save rather than one per field. Optimistic UI
 // updates ride on the local form state — server is source of truth, the
-// onMutate callback re-fetches.
+// onMutate callback re-fetches. Controls reskinned to shadcn (TAC-306); the
+// diff + PATCH logic is unchanged.
 
 interface RailPersonaProps {
   venueId: string
@@ -81,6 +93,10 @@ function diffPersona(form: PersonaForm, persona: BrandPersona): Record<string, u
   return out
 }
 
+// Shared field chrome — shadcn controls themed onto the rail's highlight wash.
+const FIELD_CLS = 'h-auto w-full bg-highlight py-1.5 text-[12.5px]'
+const TEXTAREA_CLS = 'w-full bg-highlight text-[12.5px] leading-snug resize-vertical'
+
 export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
   const [form, setForm] = useState<PersonaForm>(() => toForm(persona))
   const [busy, setBusy] = useState(false)
@@ -118,11 +134,11 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
     <div className="flex flex-col gap-3">
       {/* voiceName at the very top — discoverable, single PATCH writer */}
       <PersonaField label="Voice name" help="Rendered in the topbar + sidebar voice list">
-        <input
+        <Input
           value={form.voiceName}
           onChange={(e) => setForm({ ...form, voiceName: e.target.value })}
           placeholder="e.g. Sana"
-          className={inputCls}
+          className={FIELD_CLS}
         />
       </PersonaField>
 
@@ -133,68 +149,80 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
       </div>
 
       <PersonaField label="Tone" help="Free text · the voice in one or two breaths">
-        <textarea
+        <Textarea
           value={form.tone}
           onChange={(e) => setForm({ ...form, tone: e.target.value })}
           rows={3}
-          className={textareaCls}
+          className={TEXTAREA_CLS}
         />
       </PersonaField>
 
       <PersonaField label="Formality">
-        <select
+        <Select
           value={form.formality}
-          onChange={(e) => setForm({ ...form, formality: e.target.value as BrandPersona['formality'] })}
-          className={inputCls}
+          onValueChange={(v) => setForm({ ...form, formality: v as BrandPersona['formality'] })}
         >
-          <option value="casual">casual — contractions, lowercase starts okay</option>
-          <option value="warm">warm — conversational, no stiffness</option>
-          <option value="formal">formal — complete sentences, proper caps</option>
-        </select>
+          <SelectTrigger className={FIELD_CLS}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="casual">casual — contractions, lowercase starts okay</SelectItem>
+            <SelectItem value="warm">warm — conversational, no stiffness</SelectItem>
+            <SelectItem value="formal">formal — complete sentences, proper caps</SelectItem>
+          </SelectContent>
+        </Select>
       </PersonaField>
 
       <PersonaField label="Length guide" help="How long replies should run">
-        <textarea
+        <Textarea
           value={form.lengthGuide}
           onChange={(e) => setForm({ ...form, lengthGuide: e.target.value })}
           rows={2}
-          className={textareaCls}
+          className={TEXTAREA_CLS}
         />
       </PersonaField>
 
       <PersonaField label="Speaker framing">
-        <select
+        <Select
           value={form.speakerFraming}
-          onChange={(e) => setForm({ ...form, speakerFraming: e.target.value as BrandPersona['speakerFraming'] })}
-          className={inputCls}
+          onValueChange={(v) => setForm({ ...form, speakerFraming: v as BrandPersona['speakerFraming'] })}
         >
-          <option value="venue">venue — &quot;we&quot; / unnamed</option>
-          <option value="named_person">named person — sign as a specific person</option>
-          <option value="owner">owner — first person, owner&apos;s voice</option>
-        </select>
+          <SelectTrigger className={FIELD_CLS}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="venue">venue — &quot;we&quot; / unnamed</SelectItem>
+            <SelectItem value="named_person">named person — sign as a specific person</SelectItem>
+            <SelectItem value="owner">owner — first person, owner&apos;s voice</SelectItem>
+          </SelectContent>
+        </Select>
       </PersonaField>
 
       {form.speakerFraming === 'named_person' && (
         <PersonaField label="Speaker name" help="Required for the named-person framing">
-          <input
+          <Input
             value={form.speakerName}
             onChange={(e) => setForm({ ...form, speakerName: e.target.value })}
             placeholder="e.g. Sana"
-            className={inputCls}
+            className={FIELD_CLS}
           />
         </PersonaField>
       )}
 
       <PersonaField label="Emoji policy">
-        <select
+        <Select
           value={form.emojiPolicy}
-          onChange={(e) => setForm({ ...form, emojiPolicy: e.target.value as BrandPersona['emojiPolicy'] })}
-          className={inputCls}
+          onValueChange={(v) => setForm({ ...form, emojiPolicy: v as BrandPersona['emojiPolicy'] })}
         >
-          <option value="never">never</option>
-          <option value="sparingly">sparingly</option>
-          <option value="frequent">frequent</option>
-        </select>
+          <SelectTrigger className={FIELD_CLS}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="never">never</SelectItem>
+            <SelectItem value="sparingly">sparingly</SelectItem>
+            <SelectItem value="frequent">frequent</SelectItem>
+          </SelectContent>
+        </Select>
       </PersonaField>
 
       <PersonaField
@@ -228,29 +256,27 @@ export function RailPersona({ venueId, persona, onMutate }: RailPersonaProps) {
       )}
 
       <div className="flex justify-end gap-3 mt-3 pt-3 border-t border-stone-light/60 sticky bottom-0 bg-paper">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setForm(toForm(persona))}
           disabled={!dirty || busy}
-          className="text-[11px] text-ink-faint hover:text-ink disabled:opacity-40"
+          className="text-[11px] text-ink-faint hover:text-ink"
         >
           Reset
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={save}
           disabled={!dirty || busy}
-          className="bg-clay text-white px-4 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+          size="sm"
+          className="hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
         >
           {busy ? 'Saving…' : dirty ? 'Save persona' : 'Saved'}
-        </button>
+        </Button>
       </div>
     </div>
   )
 }
-
-const inputCls =
-  'w-full bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-1.5 text-[12.5px] text-ink focus:outline-none focus:border-clay focus:bg-paper'
-const textareaCls =
-  'w-full bg-highlight border border-stone-light/60 rounded-[3px] px-2.5 py-2 text-[12.5px] text-ink leading-snug focus:outline-none focus:border-clay focus:bg-paper resize-vertical'
 
 function PersonaField({
   label,
@@ -303,22 +329,25 @@ function PillEditor({
   return (
     <div className="flex flex-wrap gap-1.5">
       {values.map((v, idx) => (
-        <span
+        <Badge
           key={`${v}-${idx}`}
-          className="inline-flex items-center gap-1 bg-parchment border border-stone-light/60 rounded-full pl-2.5 pr-1.5 py-[3px] text-[11.5px] text-ink"
+          variant="secondary"
+          className="gap-1 rounded-full bg-parchment border-stone-light/60 pl-2.5 pr-1 py-[3px] text-[11.5px] font-normal text-ink"
         >
           {v}
-          <button
+          <Button
+            type="button"
+            variant="ghost"
             onClick={() => onChange(values.filter((_, i) => i !== idx))}
-            className="text-ink-faint hover:text-clay text-[14px] leading-none px-1"
+            className="size-4 p-0 text-ink-faint hover:text-clay hover:bg-transparent text-[14px] leading-none"
             aria-label={`Remove ${v}`}
           >
             ×
-          </button>
-        </span>
+          </Button>
+        </Badge>
       ))}
       {adding ? (
-        <input
+        <Input
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -332,15 +361,17 @@ function PillEditor({
               setDraft('')
             }
           }}
-          className="bg-highlight border border-clay rounded-full px-2.5 py-[3px] text-[11.5px] text-ink focus:outline-none min-w-[80px]"
+          className="h-auto w-auto min-w-[80px] rounded-full bg-highlight border-clay px-2.5 py-[3px] text-[11.5px]"
         />
       ) : (
-        <button
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => setAdding(true)}
-          className="bg-transparent border border-dashed border-stone-dark rounded-full px-2.5 py-[3px] text-[11.5px] text-ink-faint hover:text-clay hover:border-clay"
+          className="h-auto rounded-full border-dashed border-stone-dark bg-transparent px-2.5 py-[3px] text-[11.5px] text-ink-faint hover:text-clay hover:border-clay"
         >
           + add
-        </button>
+        </Button>
       )}
     </div>
   )
