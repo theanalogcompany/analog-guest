@@ -3,6 +3,17 @@
 import { formatInTimeZone } from 'date-fns-tz'
 import { useState } from 'react'
 import type { Json } from '@/db/types'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { type MessageCategory } from '@/lib/ai/types'
 import { type MessageReview, MessageReviewSchema } from '@/lib/schemas'
 import { Eyebrow } from '@/lib/ui'
@@ -11,6 +22,11 @@ import {
   canSaveReview,
   type ReviewFormState,
 } from './build-review-payload'
+
+// Radix Select forbids an empty-string item value, so "(none)" rides a
+// sentinel that maps back to '' (the ReviewFormState.category empty value
+// build-review-payload already understands).
+const NO_CATEGORY = '__none__'
 
 // Per-message review form (THE-235). Sits below the trace panel inside the
 // vertical-split SidePanel for outbound messages. Submits to PR-A's
@@ -203,34 +219,38 @@ export function ReviewForm({
       </div>
 
       <fieldset disabled={saving} className="flex flex-col gap-3 disabled:opacity-60">
-        <label className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-[0.18em] text-ink-soft">
             Category
           </span>
-          <select
-            value={state.category}
-            onChange={(e) => update('category', e.target.value)}
-            className="border border-stone-light bg-paper px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-clay/40"
+          <Select
+            value={state.category === '' ? NO_CATEGORY : state.category}
+            onValueChange={(v) => update('category', v === NO_CATEGORY ? '' : v)}
           >
-            <option value="">(none)</option>
-            {CATEGORY_OPTIONS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger className="text-[13px]">
+              <SelectValue placeholder="(none)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_CATEGORY}>(none)</SelectItem>
+              {CATEGORY_OPTIONS.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-[0.18em] text-ink-soft">
             Comment <span className="text-clay">*</span>
           </span>
-          <textarea
+          <Textarea
             value={state.comment}
             onChange={(e) => update('comment', e.target.value)}
             rows={3}
             placeholder="What did you notice? Required."
-            className="border border-stone-light bg-paper px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-clay/40"
+            className="text-[13px]"
           />
         </label>
 
@@ -239,11 +259,11 @@ export function ReviewForm({
           expanded={showEdit}
           onToggle={toggleEdit}
         >
-          <textarea
+          <Textarea
             value={state.editedMessage}
             onChange={(e) => update('editedMessage', e.target.value)}
             rows={4}
-            className="w-full border border-stone-light bg-paper px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-clay/40"
+            className="text-[13px]"
           />
           <p className="mt-1 text-[11px] text-ink-soft">
             Pre-filled with the original. Only this corrected text is embedded into the corpus.
@@ -255,31 +275,30 @@ export function ReviewForm({
           expanded={showRule}
           onToggle={toggleRule}
         >
-          <textarea
+          <Textarea
             value={state.rule}
             onChange={(e) => update('rule', e.target.value)}
             rows={2}
             placeholder="rule: don't apologize twice"
-            className="w-full border border-stone-light bg-paper px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-clay/40"
+            className="text-[13px]"
           />
         </Disclosure>
 
         <div className="flex flex-col gap-1">
           <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={showExpectedFailure}
-              onChange={toggleExpectedFailure}
+              onCheckedChange={() => toggleExpectedFailure()}
             />
             <span className="text-[12px]">Expected failure</span>
           </label>
           {showExpectedFailure ? (
-            <input
+            <Input
               type="text"
               value={state.expectedFailure}
               onChange={(e) => update('expectedFailure', e.target.value)}
               placeholder="Reason — short note about why this is an acceptable miss"
-              className="border border-stone-light bg-paper px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-clay/40"
+              className="text-[13px]"
             />
           ) : null}
         </div>
@@ -290,13 +309,14 @@ export function ReviewForm({
               {saveError}
             </span>
           ) : null}
-          <button
+          <Button
             type="submit"
+            size="sm"
             disabled={!canSave}
-            className="border border-clay bg-clay px-3 py-1.5 text-[12px] uppercase tracking-[0.18em] text-paper transition-opacity disabled:opacity-40"
+            className="text-[12px] uppercase tracking-[0.18em]"
           >
             {saving ? 'Saving…' : 'Save review'}
-          </button>
+          </Button>
         </div>
       </fieldset>
     </form>

@@ -1,13 +1,20 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Textarea } from '@/components/ui/textarea'
 
 // Operator-initiated manual outbound. Lives in the Filters bar (right side)
 // and only renders when both venueId and guestId are set.
 //
 // State machine:
 //   idle    → button. Click → open.
-//   open    → small popover anchored under the button: optional textarea +
+//   open    → shadcn Popover anchored under the button: optional textarea +
 //             Send / Cancel. Empty hint is fine; the agent picks the topic.
 //   sending → POST in flight. Send/Cancel disabled, label "Sending…".
 //   sent    → ✓ Sent. Auto-collapses to idle after 3s. Realtime subscription
@@ -16,8 +23,16 @@ import { useEffect, useRef, useState } from 'react'
 //   error   → inline error text inside the open panel; user can retry or
 //             cancel.
 //
+// Dismissal (TAC-306): the Popover owns outside-click + Escape. Every close
+// path routes through `cancel()` — it NEVER triggers a send. Outside-click is
+// suppressed mid-flight (`onInteractOutside` preventDefault while sending) so
+// closing the panel can't orphan the in-flight request from its UI signal;
+// Escape is still allowed mid-flight (the request completes server-side and
+// Realtime surfaces the result) — matching the pre-reskin behavior. The send
+// call + its confirm step (Send button / Cmd+Enter) are unchanged.
+//
 // Keyboard:
-//   Esc           → cancel (close panel).
+//   Esc           → cancel (close panel; Popover-handled).
 //   Cmd/Ctrl+Enter → send (when textarea focused).
 //
 // HTTP contract:
@@ -54,15 +69,10 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
   const [status, setStatus] = useState<Status>('idle')
   const [hint, setHint] = useState('')
   const [errorText, setErrorText] = useState<string | null>(null)
-  const popoverRef = useRef<HTMLDivElement | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const isOpenLike = status === 'open' || status === 'sending' || status === 'error'
-
-  // Focus the textarea on open. Tied to status so re-opening focuses again.
-  useEffect(() => {
-    if (status === 'open') textareaRef.current?.focus()
-  }, [status])
+  const sending = status === 'sending'
+  const overLimit = hint.length > MAX_HINT_LENGTH
 
   // Auto-collapse after a successful send. Cleared on unmount or status change.
   useEffect(() => {
@@ -73,38 +83,6 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
     }, SUCCESS_DISPLAY_MS)
     return () => clearTimeout(t)
   }, [status])
-
-  // Click-outside dismiss while open. Skipped during 'sending' — closing
-  // mid-flight would orphan the in-flight request from the UI signal; finish
-  // first.
-  useEffect(() => {
-    if (status !== 'open' && status !== 'error') return
-    function onDocClick(e: MouseEvent) {
-      if (!popoverRef.current) return
-      if (!popoverRef.current.contains(e.target as Node)) {
-        setStatus('idle')
-        setErrorText(null)
-      }
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [status])
-
-  // Esc to cancel — even mid-flight Esc is safe (the request still completes
-  // server-side; we just stop showing the panel and rely on Realtime to
-  // surface the resulting message). Allowing escape during 'sending' beats
-  // trapping the operator. (isOpenLike already includes 'sending'.)
-  useEffect(() => {
-    if (!isOpenLike) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setStatus('idle')
-        setErrorText(null)
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [isOpenLike])
 
   async function send() {
     setStatus('sending')
@@ -149,6 +127,14 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
     setErrorText(null)
   }
 
+  // Popover open/close. Opening routes to open(); every close path routes to
+  // cancel() — never send(). (Outside-click while sending is suppressed below
+  // via onInteractOutside, so this only fires for Escape / trigger re-click.)
+  function handleOpenChange(next: boolean) {
+    if (next) open()
+    else cancel()
+  }
+
   if (status === 'sent') {
     return (
       <div className="ml-auto self-end mb-1.5">
@@ -160,92 +146,89 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
     )
   }
 
-  if (status === 'idle') {
-    return (
-      <div className="ml-auto self-end mb-1.5">
-        <button
-          type="button"
-          onClick={open}
-          className="text-sm border border-clay text-clay rounded px-3 py-1.5 bg-paper hover:bg-clay hover:text-paper transition-colors"
-        >
-          Follow up
-        </button>
-      </div>
-    )
-  }
-
-  // open / sending / error all share the popover shell.
-  const sending = status === 'sending'
-  const overLimit = hint.length > MAX_HINT_LENGTH
-
   return (
-    <div className="ml-auto self-end mb-1.5 relative">
-      <button
-        type="button"
-        disabled
-        className="text-sm border border-clay text-clay rounded px-3 py-1.5 bg-paper opacity-60 cursor-default"
-      >
-        Follow up
-      </button>
-      <div
-        ref={popoverRef}
-        role="dialog"
-        aria-label="Compose follow-up"
-        className="absolute right-0 top-full mt-1 w-[22rem] z-30 bg-paper border border-stone-light rounded shadow-sm p-3 flex flex-col gap-2"
-      >
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-ink-soft uppercase tracking-wider">
-            Note (optional)
-          </span>
-          <textarea
-            ref={textareaRef}
-            value={hint}
-            onChange={(e) => setHint(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !sending && !overLimit) {
-                e.preventDefault()
-                void send()
-              }
-            }}
+    <div className="ml-auto self-end mb-1.5">
+      <Popover open={isOpenLike} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            // Locked mid-flight, matching the pre-reskin trigger: prevents a
+            // trigger re-click from collapsing the panel while a send is in
+            // flight (Escape is still allowed; the request completes and
+            // Realtime surfaces the result).
             disabled={sending}
-            rows={3}
-            placeholder="What should the agent address?"
-            className="text-sm border border-stone-light rounded px-2 py-1.5 bg-paper resize-none focus:outline-none focus:border-clay disabled:bg-stone-light/30"
-          />
-          <span
-            className={`text-xs tabular-nums self-end ${
-              overLimit ? 'text-clay-deep' : 'text-ink-faint'
-            }`}
+            className="border-clay text-clay hover:bg-clay hover:text-paper"
           >
-            {hint.length}/{MAX_HINT_LENGTH}
-          </span>
-        </label>
+            Follow up
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          // Don't let an outside click tear down the panel mid-flight — the
+          // request is in-flight and closing would orphan it from the UI.
+          onInteractOutside={(e) => {
+            if (sending) e.preventDefault()
+          }}
+          className="w-[22rem] p-3 flex flex-col gap-2"
+          aria-label="Compose follow-up"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-soft uppercase tracking-wider">
+              Note (optional)
+            </span>
+            <Textarea
+              value={hint}
+              onChange={(e) => setHint(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !sending && !overLimit) {
+                  e.preventDefault()
+                  void send()
+                }
+              }}
+              disabled={sending}
+              rows={3}
+              placeholder="What should the agent address?"
+              className="resize-none text-sm"
+            />
+            <span
+              className={`text-xs tabular-nums self-end ${
+                overLimit ? 'text-clay-deep' : 'text-ink-faint'
+              }`}
+            >
+              {hint.length}/{MAX_HINT_LENGTH}
+            </span>
+          </label>
 
-        {errorText && (
-          <div className="text-xs text-clay-deep bg-clay-soft/30 border border-clay-soft rounded px-2 py-1.5">
-            {errorText}
+          {errorText && (
+            <div className="text-xs text-clay-deep bg-clay-soft/30 border border-clay-soft rounded px-2 py-1.5">
+              {errorText}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={cancel}
+              disabled={sending}
+              className="text-ink-soft hover:text-ink"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void send()}
+              disabled={sending || overLimit}
+            >
+              {sending ? 'Sending…' : 'Send'}
+            </Button>
           </div>
-        )}
-
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={cancel}
-            disabled={sending}
-            className="text-sm text-ink-soft px-2 py-1 hover:text-ink disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void send()}
-            disabled={sending || overLimit}
-            className="text-sm border border-clay bg-clay text-paper rounded px-3 py-1.5 hover:bg-clay-deep hover:border-clay-deep transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </div>
-      </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
