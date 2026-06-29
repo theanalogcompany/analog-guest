@@ -2,24 +2,63 @@ import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` alias without a
 // vitest.config.ts. Other tests in this repo use relative imports too.
 import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
+import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slug]/_lib/universal-rules'
 
-// Each universal voice rule (R1–R13) has a distinguishing phrase asserted
+// Each universal voice rule (R1–R14) has a distinguishing phrase asserted
 // here so a future edit that drops or rewords a rule beyond recognition
 // fails loudly. THE-225 added R8/R9/R10 + strengthened R3. v1.9.0 added R11
 // (greeting discipline) + R12 (operator instruction block usage), promoted
 // the existing Last Visit guidance to R13, and anchored R2 to the ## Right
-// now block. v1.10.0 is a category-instructions-layer change (acknowledgment
-// rewrite, em-dash hygiene, classifier inbound/outbound split) — no
-// SYSTEM_TEMPLATE body changes, just the version bump. v1.11.0 is a
-// classifier-surface change (recent-conversation + guest-state context,
-// temperature, 1000-char input cap, 3-tier confidence routing) — again
-// no SYSTEM_TEMPLATE body changes, just the version bump. v1.12.0 is a
-// knowledge_corpus surface change (tag split, tag-aware retrieval, always-
-// render knowledge block) — also no SYSTEM_TEMPLATE body changes.
+// now block. v1.22.0 (TAC-305) inserted a new R11 (deliver the answer, no
+// sentiment-closer) as the 11th bullet and shifted greeting / operator /
+// Last-Visit to R12 / R13 / R14 — the curated UNIVERSAL_RULES_DISPLAY tracks
+// R1–R11 only; the lockstep test below asserts they stay aligned. v1.10.0 is
+// a category-instructions-layer change (acknowledgment rewrite, em-dash
+// hygiene, classifier inbound/outbound split) — no SYSTEM_TEMPLATE body
+// changes, just the version bump. v1.11.0 is a classifier-surface change
+// (recent-conversation + guest-state context, temperature, 1000-char input
+// cap, 3-tier confidence routing) — again no SYSTEM_TEMPLATE body changes,
+// just the version bump. v1.12.0 is a knowledge_corpus surface change (tag
+// split, tag-aware retrieval, always-render knowledge block) — also no
+// SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.21.0 (TAC-123: perk_unlock FollowupReason + perkBeingUnlocked wiring + multi-reason intake)', () => {
-    expect(PROMPT_VERSION).toBe('v1.21.0')
+  it('is v1.22.0 (TAC-305: R11 — deliver the answer, no sentiment-closer)', () => {
+    expect(PROMPT_VERSION).toBe('v1.22.0')
+  })
+})
+
+// Lockstep guard (TAC-305): the curated UNIVERSAL_RULES_DISPLAY in the Voices
+// rail and the `# Universal voice rules` block in SYSTEM_TEMPLATE are dual
+// sources of truth with no shared registry. This catches the failure mode
+// where a rule is added/reworded in one source but not the other. We do NOT
+// assert display-count === template-bullet-count: the template legitimately
+// carries three further guidance bullets (greeting / operator / Last-Visit,
+// R12-R14) that the display intentionally omits. The guards here are (a)
+// contiguous ids R1..R{length} and (b) the new R11 rule's anchor phrase
+// present in BOTH sources. R1-R10 summaries are paraphrases (not substrings)
+// of their template bullets, so they are not asserted phrase-for-phrase; a
+// structured per-rule anchor field would be needed for full coverage and is
+// deferred to the rules-registry extraction (THE-237 follow-up).
+describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305)', () => {
+  it('exposes contiguous ids R1..R{length} with no gaps', () => {
+    const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
+    const expected = UNIVERSAL_RULES_DISPLAY.map((_, i) => `R${i + 1}`)
+    expect(ids).toEqual(expected)
+  })
+
+  it('curates exactly R1..R11 (the new R11 landed; greeting/operator/Last-Visit stay display-excluded)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(11)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R11')
+  })
+
+  it('shares the R11 anchor phrase across both sources', () => {
+    const r11 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R11')
+    expect(r11).toBeDefined()
+    // The display summary and the template prose both speak to ending the
+    // delivery turn on the answer rather than a sentiment-closer.
+    expect(r11?.summary).toContain('end on the answer')
+    expect(SYSTEM_TEMPLATE).toContain('Let it stand')
   })
 })
 
@@ -292,7 +331,38 @@ describe('SYSTEM_TEMPLATE — R10: only documented venue recommendations (THE-22
   })
 })
 
-describe('SYSTEM_TEMPLATE — R11: greeting discipline', () => {
+describe('SYSTEM_TEMPLATE — R11: deliver the answer, no sentiment-closer (TAC-305)', () => {
+  it('directs the agent to end delivery turns on the answer, not a sentiment-closer', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When delivering a recommendation, a description, or a fact',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Let it stand')
+  })
+
+  it('frames the observed closers as the shape to avoid, not a fixed banlist', () => {
+    expect(SYSTEM_TEMPLATE).toContain('trust me on this one')
+    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+  })
+
+  it('carves out emotional turns so warmth is retained (over-firing guard)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When the guest brings a feeling, like a complaint, thanks, or a milestone',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('meeting it warmly is the answer')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // Slice from R11's opening clause to the next rule (greeting discipline).
+    const start = SYSTEM_TEMPLATE.indexOf('When delivering a recommendation, a description, or a fact')
+    const end = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const r11Body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(r11Body).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R12: greeting discipline', () => {
   it('limits greetings to first message or after long silence', () => {
     expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message of a thread')
     expect(SYSTEM_TEMPLATE).toContain('multi-day silence')
@@ -312,17 +382,17 @@ describe('SYSTEM_TEMPLATE — R11: greeting discipline', () => {
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    // Slice from R11's opening clause to the next rule (operator instruction).
+    // Slice from R12's opening clause to the next rule (operator instruction).
     const start = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
     const end = SYSTEM_TEMPLATE.indexOf('If your runtime context includes a ## Operator instruction')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
-    const r11Body = SYSTEM_TEMPLATE.slice(start, end)
-    expect(r11Body).not.toMatch(/[—–]/)
+    const r12Body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(r12Body).not.toMatch(/[—–]/)
   })
 })
 
-describe('SYSTEM_TEMPLATE — R12: Operator instruction block usage (THE-232)', () => {
+describe('SYSTEM_TEMPLATE — R13: Operator instruction block usage (THE-232)', () => {
   it('introduces the Operator instruction block', () => {
     expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes a ## Operator instruction block')
   })
@@ -361,7 +431,7 @@ describe('SYSTEM_TEMPLATE — R12: Operator instruction block usage (THE-232)', 
   })
 })
 
-describe('SYSTEM_TEMPLATE — R13: Last Visit block usage (THE-229)', () => {
+describe('SYSTEM_TEMPLATE — R14: Last Visit block usage (THE-229)', () => {
   it('introduces the Last Visit block', () => {
     expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you what the guest most recently ordered')
   })
