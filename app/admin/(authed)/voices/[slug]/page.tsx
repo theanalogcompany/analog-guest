@@ -64,12 +64,15 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   return (
     // Full-bleed wrapper: `position: fixed` escapes the admin shell's
     // `<main>` max-w-5xl container so the 280/1fr/400 workbench can use
-    // the full viewport width. `left-56` mirrors the sidebar's `w-56` and
-    // `top-14` mirrors the topbar's `h-14`; if either changes in
-    // admin-shell, this wrapper has to follow. Tracked as a follow-up to
-    // extract `--admin-sidebar-width` / `--admin-topbar-height` CSS vars
-    // when there's a second consumer to amortize the refactor.
-    <div className="fixed left-56 top-14 right-0 bottom-0 bg-paper">
+    // the full viewport width. `left` tracks the shadcn Sidebar's expanded
+    // width via the inherited `--sidebar-width` var (set by SidebarProvider,
+    // 16rem) — the TAC-306 shell reskin replaced the old fixed `w-56` nav, so
+    // a hardcoded `left-56` (14rem) clipped this content under the wider
+    // sidebar. `top-14` still mirrors the topbar's `h-14`. Known minor:
+    // collapsing the sidebar (⌘B) leaves harmless paper whitespace on the
+    // left here since `--sidebar-width` doesn't shrink to the icon width — a
+    // collapse-aware fix would need useSidebar() inside the client tree.
+    <div className="fixed left-[var(--sidebar-width)] top-14 right-0 bottom-0 bg-paper">
       <VoicesClient
         key={`${data.venue.id}:${data.selectedGuest?.id ?? 'none'}`}
         data={data}
