@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 /* analog brand tokens — see docs/brand/style-guide-v01.html for the
    canonical reference. Do not edit values here without updating the style
@@ -26,6 +29,20 @@
   --fraunces: "opsz" 144, "SOFT" 50, "WONK" 1;
   --fraunces-text: "opsz" 14, "SOFT" 50, "WONK" 1;
   --tracking-eyebrow: 0.22em;
+
+  /* shadcn/ui bridge — non-brand literals (TAC-306).
+     Every other shadcn semantic token aliases an existing brand var directly
+     in the @theme inline block below, so the [data-surface="admin"] override
+     flows through. These two have no brand equivalent:
+       --destructive: the debug red, intentionally matched to StatusDot `bad`
+         (#DC2626) so failure states read identically across CC. Same value in
+         and out of admin — red is red, no surface override.
+       --radius: shadcn component corner radius. Deliberately does NOT remap
+         Tailwind's named rounded-* scale (that would shift every existing
+         rounded-md/lg on live surfaces); only components that reference
+         var(--radius) directly pick this up. */
+  --destructive: #DC2626;
+  --radius: 0.375rem;
 }
 
 @theme inline {
@@ -46,6 +63,44 @@
   --font-inter-tight: var(--font-inter-tight-loaded);
 
   --tracking-eyebrow: 0.22em;
+
+  /* shadcn/ui semantic token bridge (TAC-306). Maps shadcn's component
+     contract (`bg-background`, `text-muted-foreground`, `border-input`, …)
+     directly onto the canonical brand vars — no second palette. Because
+     `@theme inline` inlines the source var into each utility, and the brand
+     vars are re-bound under [data-surface="admin"], these tokens inherit the
+     admin grayscale automatically at every use site inside CC. Keep the
+     mapping aliased to brand vars (not literals) so that property holds. */
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--paper);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--paper);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--clay);
+  --color-primary-foreground: var(--paper);
+  --color-secondary: var(--parchment);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--parchment);
+  --color-muted-foreground: var(--ink-faint);
+  --color-accent: var(--highlight);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--paper);
+  --color-border: var(--stone-light);
+  --color-input: var(--stone-light);
+  --color-ring: var(--clay);
+
+  /* Sidebar token set — referenced by the shadcn sidebar component (installed
+     as plumbing this PR, wired into the shell in a follow-up surface PR). */
+  --color-sidebar: var(--paper);
+  --color-sidebar-foreground: var(--ink);
+  --color-sidebar-primary: var(--clay);
+  --color-sidebar-primary-foreground: var(--paper);
+  --color-sidebar-accent: var(--highlight);
+  --color-sidebar-accent-foreground: var(--ink);
+  --color-sidebar-border: var(--stone-light);
+  --color-sidebar-ring: var(--clay);
 }
 
 /* Per-surface palette override for the Command Center. Re-binds the
@@ -62,6 +117,22 @@
   --parchment: #EAEAE8;
   --highlight: #F5F5F3;
   --stone-light: #E5E3DE;
+}
+
+/* shadcn/ui default border color, scoped to the Command Center (TAC-306).
+   Tailwind v4's bare `border` utility resolves to currentColor; shadcn
+   components (Card, dialog, dropdown, select, …) assume a base layer pins the
+   default border-color to the `--border` token. Scoped to
+   [data-surface="admin"] so guest-facing surfaces keep Tailwind's default.
+   Every existing CC border already sets an explicit color, so this changes
+   nothing on current surfaces — it only colors the new shadcn components.
+   --stone-light is exactly what --color-border aliases (admin grayscale). */
+@layer base {
+  [data-surface="admin"] *,
+  [data-surface="admin"] ::before,
+  [data-surface="admin"] ::after {
+    border-color: var(--stone-light);
+  }
 }
 
 body {
