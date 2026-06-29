@@ -1,6 +1,7 @@
 'use client'
 
 import { formatInTimeZone } from 'date-fns-tz'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Eyebrow, HairlineRow, SectionHeader } from '@/lib/ui'
 
@@ -79,13 +80,14 @@ export function InboundDetail({
       </Card>
 
       {triggeredOutboundId ? (
-        <button
+        <Button
           type="button"
+          variant="link"
           onClick={() => onSelectOutbound(triggeredOutboundId)}
-          className="self-start text-sm text-clay hover:underline cursor-pointer"
+          className="self-start h-auto p-0 text-sm text-clay"
         >
           View triggered agent reply →
-        </button>
+        </Button>
       ) : (
         <div className="text-xs text-ink-soft">
           No outbound reply linked to this inbound (yet, or the agent skipped it).
