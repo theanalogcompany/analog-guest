@@ -1,4 +1,5 @@
-import { Card, Eyebrow, StatusDot } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow, StatusDot } from '@/lib/ui'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
 
 // Compact venue context. Densified for the 240px context-row slot. Shows the
@@ -68,7 +69,7 @@ export function VenueContext({
   const statusTone = STATUS_TONE[venue.status] ?? 'neutral'
 
   return (
-    <Card variant="trace" className="h-full overflow-y-auto p-4 flex flex-col gap-3">
+    <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none h-full overflow-y-auto p-4 flex flex-col gap-3">
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>Venue</Eyebrow>
         {phoneTail ? (

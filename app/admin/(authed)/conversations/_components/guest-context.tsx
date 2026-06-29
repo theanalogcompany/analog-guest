@@ -1,6 +1,7 @@
 import { differenceInCalendarDays } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
-import { Card, Eyebrow, StatePill } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow, StatePill } from '@/lib/ui'
 import type { GuestState } from '@/lib/recognition'
 
 // Compact guest context. Densified for the 240px context-row slot. Pulls
@@ -65,7 +66,7 @@ export function GuestContext({
   const messagesLabel = `${totalMessageCount} · ${responseRatePct}% response rate`
 
   return (
-    <Card variant="trace" className="h-full overflow-y-auto p-4 flex flex-col gap-3">
+    <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none h-full overflow-y-auto p-4 flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <Eyebrow>Guest</Eyebrow>
         {state ? <StatePill state={state} /> : null}

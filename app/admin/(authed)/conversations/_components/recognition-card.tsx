@@ -1,4 +1,5 @@
-import { Card, Eyebrow, SignalBar, StatePill } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow, SignalBar, StatePill } from '@/lib/ui'
 import type { RecognitionData } from '../lib/extract-recognition'
 
 // Hero summary at the top of the trace panel: one row per recognition signal,
@@ -20,7 +21,7 @@ interface RecognitionCardProps {
 
 export function RecognitionCard({ data }: RecognitionCardProps) {
   return (
-    <Card variant="trace" className="p-3 flex flex-col gap-3">
+    <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Eyebrow>Recognition</Eyebrow>
