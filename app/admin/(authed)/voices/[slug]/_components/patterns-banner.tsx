@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
+import { Button } from '@/components/ui/button'
 import { PatternsPanel, type RailCluster } from './patterns-panel'
 
 // Banner at the top of the Rules tab. Visible only when there's at least
@@ -61,19 +62,23 @@ export function PatternsBanner({ venueId }: PatternsBannerProps) {
   return (
     <div className="bg-clay-soft/15 border-l-2 border-clay rounded-r-[3px] px-3 py-2 flex flex-col gap-1">
       <div className="flex items-baseline justify-between">
-        <button
+        <Button
+          variant="link"
+          size="sm"
           onClick={() => setExpanded((v) => !v)}
-          className="text-[11.5px] uppercase font-semibold tracking-wider text-clay-deep hover:text-clay"
+          className="h-auto p-0 text-[11.5px] uppercase font-semibold tracking-wider text-clay-deep hover:text-clay"
         >
           {clusters.length} {clusters.length === 1 ? 'pattern' : 'patterns'} detected · {expanded ? 'hide' : 'review'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={() => setHidden(true)}
-          className="text-[10.5px] text-ink-faint hover:text-ink"
+          className="text-ink-faint hover:text-ink"
           aria-label="Hide banner for this session"
         >
           ×
-        </button>
+        </Button>
       </div>
       {expanded && (
         <PatternsPanel

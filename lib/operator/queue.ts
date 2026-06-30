@@ -87,6 +87,10 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // drafts carrying a comp/hold/discount will land with this label rather
   // than the comp_regex_backstop fallback.
   commitment_type_gated: 'Commitment requires approval',
+  // TAC-XXX: venue is in "hold all outbound" mode — every content message is
+  // held for review. Ranked lowest in PRIMARY_TRIGGER_PRIORITY, so this label
+  // shows only when no more-specific trigger co-fired on the draft.
+  hold_all_outbound: 'Venue holds all messages',
   // TAC-299: operator swiped left on a heads-up card → /draft-decline
   // persisted an apology draft for review.
   operator_decline_initiated: 'Operator-initiated decline',

@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/card'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
@@ -65,19 +66,21 @@ export default async function HealthPage() {
         />
       </div>
 
-      <div className="flex flex-col">
-        {rows.map((row, i) => (
-          <HairlineRow key={row.label} last={i === rows.length - 1}>
-            <div className="flex items-center gap-4">
-              <StatusDot tone={row.tone} label={row.tone} />
-              <div className="flex-1 flex items-baseline justify-between gap-4">
-                <span className="text-sm text-ink">{row.label}</span>
-                <span className="text-sm text-ink-soft">{row.detail}</span>
+      <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 px-4 shadow-none">
+        <div className="flex flex-col">
+          {rows.map((row, i) => (
+            <HairlineRow key={row.label} last={i === rows.length - 1}>
+              <div className="flex items-center gap-4">
+                <StatusDot tone={row.tone} label={row.tone} />
+                <div className="flex-1 flex items-baseline justify-between gap-4">
+                  <span className="text-sm text-ink">{row.label}</span>
+                  <span className="text-sm text-ink-soft">{row.detail}</span>
+                </div>
               </div>
-            </div>
-          </HairlineRow>
-        ))}
-      </div>
+            </HairlineRow>
+          ))}
+        </div>
+      </Card>
     </div>
   )
 }

@@ -34,10 +34,12 @@ export default async function VoicesIndexPage() {
   const voices = await loadVoices(allowedVenueIds)
 
   return (
-    // Full-bleed fixed wrapper escapes admin-shell's max-w-5xl. Coords
-    // mirror the sidebar (`w-56`) and topbar (`h-14`); coupling tracked
-    // alongside the per-voice workbench follow-up.
-    <div className="fixed left-56 top-14 right-0 bottom-0 bg-paper overflow-y-auto">
+    // Full-bleed fixed wrapper escapes admin-shell's max-w-5xl. `left` tracks
+    // the shadcn Sidebar's expanded width via the inherited `--sidebar-width`
+    // var (TAC-306 shell reskin — the old `left-56` mirrored the prior fixed
+    // `w-56` nav and now clips under the wider sidebar). `top-14` mirrors the
+    // topbar's `h-14`.
+    <div className="fixed left-[var(--sidebar-width)] top-14 right-0 bottom-0 bg-paper overflow-y-auto">
       <div className="max-w-5xl mx-auto px-8 py-10 flex flex-col gap-8">
         <SectionHeader
           eyebrow={<Eyebrow>Command Center</Eyebrow>}

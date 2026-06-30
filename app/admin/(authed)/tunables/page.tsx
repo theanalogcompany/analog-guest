@@ -1,4 +1,5 @@
-import { Card, Eyebrow, SectionHeader } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { TUNABLES } from '@/lib/tunables/manifest'
 import { TunablesTable } from './_components/tunables-table'
 
@@ -17,7 +18,7 @@ export default function TunablesPage() {
         title="Tunables"
         subtitle={`${TUNABLES.length} operational levers · read-only`}
       />
-      <Card>
+      <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 shadow-none">
         <TunablesTable tunables={[...TUNABLES]} />
       </Card>
     </div>

@@ -1,6 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Textarea } from '@/components/ui/textarea'
 
 // Commit modal. Opens when the operator clicks "Commit" on a selected
 // regen attempt. Three async stages stack:
@@ -10,8 +22,11 @@ import { useEffect, useState } from 'react'
 //   3. on confirm: parent fires POST /commit; modal calls onCommitted
 //      (or onError) and closes
 //
-// All AI inference is opt-in here — the modal renders cleanly even
-// before classification returns.
+// Built on shadcn Dialog (TAC-306). The parent (PlaygroundShell) mounts this
+// only while open, so `open` is fixed true; every dismissal (X / Escape /
+// outside-click) routes to onCancel — and is suppressed while `busy` so a
+// commit can't be torn down mid-flight. The classify-critique + commit fetch
+// paths are unchanged.
 
 export interface CommitPayload {
   kind: 'edit_only' | 'edit_and_rule'
@@ -116,29 +131,29 @@ export function CommitModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 bg-ink/40 flex items-center justify-center px-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) onCancel()
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && !busy) onCancel()
       }}
     >
-      <div className="bg-paper border border-stone-light/60 rounded-[6px] max-w-xl w-full max-h-[85vh] overflow-y-auto p-6 flex flex-col gap-4">
-        <header className="flex items-baseline justify-between pb-3 border-b border-stone-light/60">
-          <h2
-            className="font-fraunces font-fraunces-display italic text-2xl text-ink leading-none"
-          >
+      <DialogContent
+        className="max-w-xl max-h-[85vh] overflow-y-auto gap-4"
+        onInteractOutside={(e) => {
+          if (busy) e.preventDefault()
+        }}
+        onEscapeKeyDown={(e) => {
+          if (busy) e.preventDefault()
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle className="font-fraunces font-fraunces-display italic text-2xl text-ink leading-none">
             Commit to voice
-          </h2>
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            className="text-[11px] text-ink-faint hover:text-clay disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        </header>
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Review the selected response, choose whether to add a rule, and commit it to this venue&apos;s voice.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex flex-col gap-1 text-[12.5px] leading-snug">
           <span className="text-[9.5px] uppercase font-semibold tracking-eyebrow text-ink-faint">
@@ -173,43 +188,36 @@ export function CommitModal({
             )}
           </div>
 
-          <div className="flex gap-3 text-[12px]">
+          <RadioGroup
+            value={kind}
+            onValueChange={(v) => setKind(v as 'edit_only' | 'edit_and_rule')}
+            className="flex gap-3 text-[12px]"
+          >
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio"
-                name="commit-kind"
-                checked={kind === 'edit_only'}
-                onChange={() => setKind('edit_only')}
-              />
+              <RadioGroupItem value="edit_only" />
               edit only
             </label>
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio"
-                name="commit-kind"
-                checked={kind === 'edit_and_rule'}
-                onChange={() => setKind('edit_and_rule')}
-              />
+              <RadioGroupItem value="edit_and_rule" />
               edit + rule
             </label>
-          </div>
+          </RadioGroup>
 
           {kind === 'edit_and_rule' && (
-            <textarea
+            <Textarea
               value={ruleText}
               onChange={(e) => setRuleText(e.target.value)}
               placeholder="Synthesized rule — operator can override..."
-              className="w-full bg-paper border-l-2 border-clay rounded-r-[3px] px-2.5 py-2 text-[13px] leading-snug text-ink italic font-fraunces font-fraunces-text resize-vertical min-h-[60px] focus:outline-none focus:bg-paper"
+              className="bg-paper border-0 border-l-2 border-clay rounded-r-[3px] rounded-l-none px-2.5 py-2 text-[13px] leading-snug text-ink italic font-fraunces font-fraunces-text resize-vertical min-h-[60px]"
             />
           )}
         </div>
 
         <div className="flex gap-4 text-[12px] text-ink-soft flex-wrap pt-1">
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={saveToCorpus}
-              onChange={(e) => setSaveToCorpus(e.target.checked)}
+              onCheckedChange={(c) => setSaveToCorpus(c === true)}
             />
             Add corrected response to corpus
           </label>
@@ -221,26 +229,29 @@ export function CommitModal({
           </p>
         )}
 
-        <div className="flex justify-end gap-3 pt-2 border-t border-stone-light/60">
-          <button
+        <DialogFooter className="border-t border-stone-light/60 pt-2">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onCancel}
             disabled={busy}
-            className="text-[11px] text-ink-faint hover:text-ink disabled:opacity-50"
+            className="text-ink-faint hover:text-ink"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={confirm}
             disabled={
               busy ||
               (kind === 'edit_and_rule' && ruleText.trim().length === 0)
             }
-            className="bg-clay text-white px-4 py-1.5 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+            size="sm"
+            className="hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
           >
             {busy ? 'Committing…' : 'Commit'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

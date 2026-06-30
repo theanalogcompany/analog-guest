@@ -1,13 +1,15 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Card, Eyebrow } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow } from '@/lib/ui'
 import { type Transaction, TransactionRow } from './transaction-row'
 
 // Full-width transactions section below the context cards. Card chrome
-// matches PR-4's resolution (variant="trace" — bg-parchment + 6px radius)
-// so the bottom region reads as one visual cluster (Recognition → Pipeline
-// → context cards → transactions, all on the same parchment surface).
+// reproduces the legacy trace look (bg-parchment + 6px radius via shadcn Card
+// className overrides, TAC-306) so the bottom region reads as one visual
+// cluster (Recognition → Pipeline → context cards → transactions, all on the
+// same parchment surface).
 //
 // Header: count + window label · totals (sum + avg). Empty state: muted
 // "no transactions in last N days" centered, no totals row.
@@ -35,7 +37,7 @@ export function TransactionsList({
 
   if (transactions.length === 0) {
     return (
-      <Card variant="trace" className="p-3 flex flex-col gap-2">
+      <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-2">
         <header>
           <Eyebrow>{`Transactions · 0 in last ${windowDays} days`}</Eyebrow>
         </header>
@@ -51,7 +53,7 @@ export function TransactionsList({
   const totalsLabel = `$${formatDollars(totalCents)} total · avg $${formatDollars(avgCents)}`
 
   return (
-    <Card variant="trace" className="p-3 flex flex-col gap-3">
+    <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-3">
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>{`Transactions · ${transactions.length} in last ${windowDays} days`}</Eyebrow>
         <span className="text-xs text-ink-soft tabular-nums">{totalsLabel}</span>

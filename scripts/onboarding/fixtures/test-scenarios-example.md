@@ -2,7 +2,7 @@
 
 This file is consumed by `extract-test-scenarios` (THE-180) during venue onboarding. The extraction script reads this fixture along with the venue-spec and generates a list of venue-tailored test scenarios written to `07-{slug}-test-scenarios.json`. The runner script `run-test-scenarios` (THE-181) then executes those scenarios against the agent and writes results to `08-{slug}-response-review` (gsheet) for owner review.
 
-## Universal voice rules (referenced as R1–R10 below)
+## Universal voice rules (referenced as R1–R11 below)
 
 These rules live in `SYSTEM_TEMPLATE` (PROMPT_VERSION v1.2.0+) and apply to every agent on every venue. Test categories below cite the rules they exercise so reviewers can quickly identify which rule a failure violates.
 
@@ -16,6 +16,7 @@ These rules live in `SYSTEM_TEMPLATE` (PROMPT_VERSION v1.2.0+) and apply to ever
 - **R8**: Never invent details beyond what your runtime context documents (sourcing stories, line/weather/staff specifics, agent's "current location"). Terse and accurate beats colorful and wrong
 - **R9**: When you don't have a confident answer, say so plainly. Don't pivot to unrelated venue info, events, or perks as deflection
 - **R10**: When recommending other places, only name venues explicitly documented in the venue spec, voice corpus, or recommendations data. No invented or conflated names
+- **R11**: When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good the thing is or reassures the guest about it ("trust me on this one", "just try it"). On feeling turns (complaint, thanks, milestone) warmth still applies — the rule does not strip warmth
 
 ## Format
 
@@ -61,7 +62,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 3: recommendation
 
-- **description**: Guest asks for a recommendation. Tests recommendation hygiene — agent should recommend without bloating the response with sourcing detail or enumeration. Stays in venue voice rather than defaulting to marketing copy. Often pairs with venue-specific anti-patterns ("don't include sourcing detail"). Tests **R10** when the guest steers toward "what else nearby" / "where else should I go" — agent should only name venues documented in the venue spec or recommendations data, never invent. Tested across `new`, `returning`, and `regular` because the agent should plausibly lean on visit history at higher relationship states.
+- **description**: Guest asks for a recommendation. Tests recommendation hygiene — agent should recommend without bloating the response with sourcing detail or enumeration. Stays in venue voice rather than defaulting to marketing copy. Tests **R11** (the canonical delivery-turn case — the recommendation should end on the answer, not a trailing "trust me on this one" / "just try it" sentiment-closer). Often pairs with venue-specific anti-patterns ("don't include sourcing detail"). Tests **R10** when the guest steers toward "what else nearby" / "where else should I go" — agent should only name venues documented in the venue spec or recommendations data, never invent. Tested across `new`, `returning`, and `regular` because the agent should plausibly lean on visit history at higher relationship states.
 - **classifier_category**: `recommendation_request` (THE-228)
 - **target_count**: 2
 - **guest_states**: `['new', 'returning', 'regular']`
@@ -73,7 +74,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 4: menu fact
 
-- **description**: Guest asks a yes/no question about whether the venue serves a specific item. Tests **R6** (the canonical case — yes/no answer, not enumeration). When agent doesn't know, tests **R5** (don't redirect to email/web for menu questions).
+- **description**: Guest asks a yes/no question about whether the venue serves a specific item. Tests **R6** (the canonical case — yes/no answer, not enumeration). When agent doesn't know, tests **R5** (don't redirect to email/web for menu questions). Tests **R11** when the answer carries a short description of the item — the description should end on the fact, not a trailing "you'll love it" / "just try it" sentiment-closer.
 - **target_count**: 2
 - **guest_states**: `['any']`
 - **example_phrasings**:
@@ -134,7 +135,7 @@ In addition to the categories below, the extraction script derives extra scenari
 
 ### Category 10: situational facts
 
-- **description**: Pet/kid/wifi/parking/outlets/payments — operational facts about the space. Tests **R6** (these are almost always yes/no). Tests venue-info coverage.
+- **description**: Pet/kid/wifi/parking/outlets/payments — operational facts about the space. Tests **R6** (these are almost always yes/no). Tests venue-info coverage. Tests **R11** (the fact branch — when the agent states an operational fact, it should end on the fact, not append a reassuring closer like "you'll be all set").
 - **target_count**: 2
 - **guest_states**: `['any']`
 - **example_phrasings**:

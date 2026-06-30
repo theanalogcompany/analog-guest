@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 
 // Patterns panel — expanded body of the rail-rules banner. One row per
 // confirmed cluster, with promote / dismiss buttons that hit the patterns
@@ -115,28 +117,31 @@ export function PatternsPanel({
                 </p>
               ))}
             </div>
-            <textarea
+            <Textarea
               value={ruleTextFor(idx, cluster.proposedRuleText)}
               onChange={(e) =>
                 setEditedRuleByIdx((prev) => ({ ...prev, [idx]: e.target.value }))
               }
-              className="bg-paper border-l-2 border-clay rounded-r-[3px] px-2.5 py-1.5 text-[12.5px] leading-snug italic font-fraunces font-fraunces-text text-ink resize-vertical min-h-[44px] focus:outline-none"
+              className="bg-paper border-0 border-l-2 border-clay rounded-r-[3px] rounded-l-none px-2.5 py-1.5 text-[12.5px] leading-snug italic font-fraunces font-fraunces-text text-ink resize-vertical min-h-[44px]"
             />
             <div className="flex justify-end gap-3 text-[11px]">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => dismiss(idx, cluster)}
                 disabled={busy}
-                className="text-ink-faint hover:text-ink disabled:opacity-50"
+                className="text-ink-faint hover:text-ink"
               >
                 Dismiss
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => promote(idx, cluster)}
                 disabled={busy}
-                className="bg-clay text-white px-3 py-1 rounded-[3px] uppercase font-semibold text-[10.5px] tracking-wider hover:bg-clay-deep disabled:opacity-50"
+                size="sm"
+                className="hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"
               >
                 {busy ? 'Working…' : 'Promote'}
-              </button>
+              </Button>
             </div>
           </div>
         )

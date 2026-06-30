@@ -30,6 +30,14 @@ export interface VenueContext {
   venueInfo: VenueInfo
   timezone: string
   sendblueNumber: string
+  // TAC-XXX: per-venue "hold all outbound" flag. When true, every
+  // guest-facing content message is held for operator review (the
+  // hold_all_outbound trigger in applyApprovalPolicyStage queues it instead
+  // of auto-sending) — EXCEPT compliance replies (opt_out confirmations),
+  // which always auto-send. Populated from venues.hold_all_outbound by
+  // build-runtime-context.ts; the column is NOT NULL DEFAULT false so this is
+  // always a real boolean for a normally-built context.
+  holdAllOutbound: boolean
 }
 
 export interface GuestContext {

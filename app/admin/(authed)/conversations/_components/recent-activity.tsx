@@ -3,7 +3,8 @@
 import { formatDistanceToNowStrict } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { useTransition } from 'react'
-import { Card, Eyebrow, HairlineRow } from '@/lib/ui'
+import { Card } from '@/components/ui/card'
+import { Eyebrow, HairlineRow } from '@/lib/ui'
 
 // Five-row list of the most recently-active (venue, guest) pairs. Click a row
 // → applies filters (?venue=&guest=) so the conversation loads. Server pre-
@@ -33,7 +34,7 @@ export function RecentActivity({ rows, emptyMessage }: RecentActivityProps) {
   }
 
   return (
-    <Card>
+    <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 shadow-none">
       <div className="flex flex-col">
         <div className="px-4 py-3 border-b border-stone-light/60">
           <Eyebrow>Recent activity</Eyebrow>

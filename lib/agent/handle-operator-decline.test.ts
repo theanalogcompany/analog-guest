@@ -142,7 +142,7 @@ const EXISTING_PENDING_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 function makeCtx() {
   return {
     agentRunId: 'agent-run-1',
-    venue: { id: VENUE_ID, slug: 'v', brandPersona: {}, venueInfo: {}, timezone: 'UTC', sendblueNumber: '+1' },
+    venue: { id: VENUE_ID, slug: 'v', brandPersona: {}, venueInfo: {}, timezone: 'UTC', sendblueNumber: '+1', holdAllOutbound: false },
     guest: {
       id: GUEST_ID,
       phoneNumber: '+1',
