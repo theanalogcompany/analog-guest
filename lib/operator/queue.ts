@@ -121,6 +121,8 @@ const REVIEW_REASON_SENTENCES: Record<ApprovalTrigger | ExtraReviewReason, strin
     "This reply's voice match came in a little low, so it's held for you to review first.",
   previous_pending_held:
     "There's already a reply waiting for this guest, so this one is held too.",
+  hold_all_outbound:
+    'This venue is holding every reply for review right now, so this one is waiting on you.',
   operator_decline_initiated:
     "You declined this guest's request — here's a drafted reply to review.",
 }
