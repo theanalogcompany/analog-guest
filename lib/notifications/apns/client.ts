@@ -16,6 +16,7 @@
 
 import { connect, constants as http2Constants, type SecureClientSessionOptions } from 'node:http2'
 
+import { checkApnsEnv, TRANSPORT_APNS_VARS } from './env'
 import { getApnsJwt } from './jwt'
 
 const PROD_HOST = 'https://api.push.apple.com'
@@ -33,6 +34,13 @@ export interface ApnsResponse {
   status: number
   /** APNs surfaces error details under "reason" in the JSON body. Null on 200. */
   reason: string | null
+  /**
+   * Apple's per-notification UUID from the `apns-id` response header. Present
+   * on success AND on most errors. Quote it verbatim when opening an Apple
+   * support case — it is the only handle Apple can trace a delivery by.
+   * Null when the header was absent or malformed.
+   */
+  apnsId: string | null
 }
 
 export type ApnsClientResult =
@@ -61,6 +69,17 @@ export async function sendApnsRequest(
   payload: ApnsRequestPayload,
   options: { connectOptions?: SecureClientSessionOptions } = {},
 ): Promise<ApnsClientResult> {
+  // First-call validation for the TRANSPORT vars only (topic + host). The
+  // signing credentials are getApnsJwt's to validate — this layer mocks that
+  // call in tests and never reads the key. Runs before any network work so a
+  // misconfiguration surfaces as a specific, named defect in the [apns] logs
+  // and the PostHog push.sent errorDetail, rather than as silence. See
+  // ./env.ts for why validation is first-call and not module-load.
+  const envCheck = checkApnsEnv(process.env, TRANSPORT_APNS_VARS)
+  if (!envCheck.ok) {
+    return { ok: false, error: 'env_missing', detail: envCheck.problems.join('; ') }
+  }
+
   const bundleId = process.env.APNS_BUNDLE_ID
   if (!bundleId) {
     return { ok: false, error: 'env_missing', detail: 'APNS_BUNDLE_ID' }
@@ -137,11 +156,16 @@ export async function sendApnsRequest(
     }, REQUEST_TIMEOUT_MS)
 
     let status = 0
+    let apnsId: string | null = null
     const bodyChunks: Buffer[] = []
 
     stream.once('response', (headers) => {
       const s = headers[http2Constants.HTTP2_HEADER_STATUS]
       status = typeof s === 'number' ? s : Number(s ?? 0)
+      // node:http2 types header values as string | string[] | undefined.
+      const id = headers['apns-id']
+      if (typeof id === 'string') apnsId = id
+      else if (Array.isArray(id) && typeof id[0] === 'string') apnsId = id[0]
     })
     stream.on('data', (chunk: Buffer | string) => {
       bodyChunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
@@ -172,7 +196,7 @@ export async function sendApnsRequest(
           // non-JSON body; leave reason null.
         }
       }
-      settle({ ok: true, response: { status, reason } })
+      settle({ ok: true, response: { status, reason, apnsId } })
     })
 
     stream.end(JSON.stringify(payload.body))

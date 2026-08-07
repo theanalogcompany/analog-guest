@@ -312,25 +312,28 @@ export async function sendCommitmentArrivalPush(
       continue
     }
 
-    const { status, reason } = result.response
+    const { status, reason, apnsId } = result.response
     const tokenInvalid =
       status === APNS_TOKEN_INVALID_STATUS ||
       (status === APNS_BAD_DEVICE_TOKEN_STATUS && reason === 'BadDeviceToken')
 
+    // Mirrors the draft-flagged surface in send.ts: ONE unconditional line
+    // carrying status + reason + apnsId on every response, success included.
+    // Kept symmetric on purpose — asymmetric logging across the two push
+    // surfaces makes a UAT run ambiguous about which one actually fired.
+    const responseFields = {
+      ...baseFields,
+      operatorId: recipient.id,
+      badge,
+      status,
+      reason: reason ?? null,
+      apnsId: apnsId ?? null,
+      tokenInvalid,
+    }
     if (status === 200) {
-      console.log('[apns] commitment send ok', {
-        ...baseFields,
-        operatorId: recipient.id,
-        badge,
-      })
+      console.log('[apns] commitment apns response', responseFields)
     } else {
-      console.warn('[apns] commitment APNs returned non-200', {
-        ...baseFields,
-        operatorId: recipient.id,
-        status,
-        reason,
-        tokenInvalid,
-      })
+      console.warn('[apns] commitment apns response', responseFields)
     }
 
     if (tokenInvalid) {

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// send.ts now imports APPROVAL_TRIGGERS from @/lib/agent/stages (so the label
+// map is keyed on the source of truth rather than re-listed literals), which
+// transitively loads the Voyage SDK — its ESM build trips vitest's
+// directory-import resolver at module load. Same dodge as
+// lib/tunables/manifest.test.ts; nothing here instantiates a Voyage client.
+vi.mock('voyageai', () => ({
+  VoyageAIClient: class {},
+}))
+
 import type {
   PushSentProps,
   PushTokenInvalidProps,
@@ -112,8 +121,29 @@ describe('shouldSendDraftFlaggedPush', () => {
     expect(shouldSendDraftFlaggedPush('previous_pending_held')).toBe(false)
   })
 
-  it('returns false for unknown triggers (future-add safety)', () => {
-    expect(shouldSendDraftFlaggedPush('something_new')).toBe(false)
+  // INVERTED. This assertion previously read:
+  //
+  //   it('returns false for unknown triggers (future-add safety)', ...)
+  //     expect(shouldSendDraftFlaggedPush('something_new')).toBe(false)
+  //
+  // It was labelled "future-add safety" but encoded the exact opposite: an
+  // allow-list that DROPS anything it doesn't recognize. When ff653be added
+  // commitment_type_gated and 0c1515c added hold_all_outbound, both were
+  // "unknown triggers" and both were silently discarded — with this test
+  // green, asserting the behavior as intended. The suite did not merely miss
+  // the regression; it locked it in.
+  //
+  // Fail-open is the correct default: a push the operator can dismiss beats a
+  // queued draft they are never told about. Exhaustiveness now lives in
+  // push-policy.ts's `satisfies Record<ApprovalTrigger, PushDecision>`, which
+  // fails tsc rather than deferring to a runtime default.
+  it('returns true for unknown triggers (fail-open — see push-policy.ts)', () => {
+    expect(shouldSendDraftFlaggedPush('something_new')).toBe(true)
+  })
+
+  it('pushes the two triggers that regressed (commitment_type_gated, hold_all_outbound)', () => {
+    expect(shouldSendDraftFlaggedPush('commitment_type_gated')).toBe(true)
+    expect(shouldSendDraftFlaggedPush('hold_all_outbound')).toBe(true)
   })
 })
 
@@ -170,6 +200,37 @@ describe('sendDraftFlaggedPush', () => {
     expect(capturePushSentMock).not.toHaveBeenCalled()
   })
 
+  // The 200 path previously logged only the badge, so a UAT run could not
+  // tell "APNs accepted it" from "we never reached APNs" without waiting on
+  // PostHog. Status/reason/apnsId must be on EVERY response line.
+  it('logs status, reason and apnsId on a 200 — not just on failures', async () => {
+    queue('operator_venues', {
+      data: [{ operator: { id: 'op-1', apns_device_token: 'tok-1' } }],
+      error: null,
+    })
+    queue('operator_venues', { data: [{ venue_id: 'venue-1' }], error: null })
+    queue('messages', { count: 3, error: null })
+    sendApnsRequestMock.mockResolvedValueOnce({
+      ok: true,
+      response: { status: 200, reason: null, apnsId: 'A1B2C3D4-0000-1111-2222-333344445555' },
+    })
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await sendDraftFlaggedPush(baseInput)
+      const responseLine = logSpy.mock.calls.find((c) => c[0] === '[apns] apns response')
+      expect(responseLine, 'expected an [apns] apns response log on the 200 path').toBeDefined()
+      expect(responseLine?.[1]).toMatchObject({
+        status: 200,
+        reason: null,
+        apnsId: 'A1B2C3D4-0000-1111-2222-333344445555',
+        operatorId: 'op-1',
+      })
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+
   it('sends a push with the contracted payload shape on 200', async () => {
     queue('operator_venues', {
       data: [{ operator: { id: 'op-1', apns_device_token: 'tok-1' } }],
@@ -180,7 +241,7 @@ describe('sendDraftFlaggedPush', () => {
 
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 200, reason: null },
+      response: { status: 200, reason: null, apnsId: null },
     })
 
     await sendDraftFlaggedPush(baseInput)
@@ -222,7 +283,7 @@ describe('sendDraftFlaggedPush', () => {
     queue('messages', { count: 1, error: null })
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 200, reason: null },
+      response: { status: 200, reason: null, apnsId: null },
     })
 
     await sendDraftFlaggedPush(baseInput)
@@ -251,7 +312,7 @@ describe('sendDraftFlaggedPush', () => {
 
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 410, reason: 'Unregistered' },
+      response: { status: 410, reason: 'Unregistered', apnsId: null },
     })
 
     await sendDraftFlaggedPush(baseInput)
@@ -282,7 +343,7 @@ describe('sendDraftFlaggedPush', () => {
 
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 400, reason: 'BadDeviceToken' },
+      response: { status: 400, reason: 'BadDeviceToken', apnsId: null },
     })
 
     await sendDraftFlaggedPush(baseInput)
@@ -303,7 +364,7 @@ describe('sendDraftFlaggedPush', () => {
 
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 400, reason: 'PayloadEmpty' },
+      response: { status: 400, reason: 'PayloadEmpty', apnsId: null },
     })
 
     await sendDraftFlaggedPush(baseInput)
@@ -354,8 +415,8 @@ describe('sendDraftFlaggedPush', () => {
     queue('messages', { count: 1, error: null })
 
     sendApnsRequestMock
-      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null } })
-      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null } })
+      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null, apnsId: null } })
+      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null, apnsId: null } })
 
     await sendDraftFlaggedPush(baseInput)
 

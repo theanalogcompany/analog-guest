@@ -204,7 +204,7 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     queueBadge('op-1', 0, 1)
     sendApnsRequestMock.mockResolvedValue({
       ok: true,
-      response: { status: 200, reason: null, raw: '' },
+      response: { status: 200, reason: null, apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
 
     // Notably: input doesn't include description at all — the function never
@@ -236,7 +236,7 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     queueBadge('op-1', 0, 1)
     sendApnsRequestMock.mockResolvedValue({
       ok: true,
-      response: { status: 200, reason: null, raw: '' },
+      response: { status: 200, reason: null, apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
 
     await sendCommitmentArrivalPush(baseInput)
@@ -261,7 +261,7 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     queueBadge('op-1', 0, 1)
     sendApnsRequestMock.mockResolvedValue({
       ok: true,
-      response: { status: 410, reason: 'Unregistered', raw: '' },
+      response: { status: 410, reason: 'Unregistered', apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
     // operator-token null UPDATE
     queue('operators', { error: null })
@@ -278,7 +278,7 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     queueBadge('op-1', 3, 2) // drafts=3, commitments=2 → badge=5
     sendApnsRequestMock.mockResolvedValue({
       ok: true,
-      response: { status: 200, reason: null, raw: '' },
+      response: { status: 200, reason: null, apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
     await sendCommitmentArrivalPush(baseInput)
     const call = sendApnsRequestMock.mock.calls[0][0]
