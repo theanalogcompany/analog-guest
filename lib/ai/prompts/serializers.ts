@@ -562,7 +562,19 @@ function formatActiveCommitments(
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
 // — the framing instructs Sonnet not to offer perks at all. Non-empty renders
 // the allowlist with name + reward + qualification context.
-function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): string {
+// v1.24.0: `willBeReviewed` conditions the denial. It is true only when the
+// turn is already certain to be routed to operator approval by its CATEGORY,
+// which is knowable before generation because classification runs first. That
+// certainty is what makes a comp-forward draft safe: a human sees it before
+// the guest does.
+//
+// When false, the categorical denial below stands EXACTLY as it did in
+// v1.23.0. The auto-send path is not relaxed by one word. This is the whole
+// design: warmth is unlocked by the gate, not by loosening the brake.
+function formatMechanicEligibility(
+  mechanics: readonly EligibleMechanic[],
+  willBeReviewed: boolean,
+): string {
   const header = '## What this guest can access'
   if (mechanics.length === 0) {
     // "hasn't yet earned access" was earn/loyalty framing sitting in the live
@@ -573,6 +585,9 @@ function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): stri
     // eligibility leaks, and "of any kind" now explicitly covers remakes and
     // replacements after the 2026-08-07 incident, where the model reasoned a
     // remake was "not a perk" and offered it anyway.
+    if (willBeReviewed) {
+      return `${header}\nThere's nothing standing set aside for this guest yet, and no perk to unlock.\nThat does not mean you have nothing to offer. Someone at the venue reads this message and approves it before the guest ever sees it, so you can propose putting something right. Asking them to come back for another on us is the normal shape of that. Propose it plainly and let the venue decide.`
+    }
     return `${header}\nNothing right now beyond the standard menu and answering questions. There's nothing set aside for this guest to be recognized with yet. Do not offer perks of any kind. Do not offer comps, remakes, replacements, or discounts either. None of those are available for this guest.`
   }
   const intro =
@@ -588,7 +603,10 @@ function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): stri
       : ''
     return `- ${m.name}${reward}${qual}${approval}`
   })
-  return `${header}\n${intro}\n${bullets.join('\n')}`
+  const reviewedRider = willBeReviewed
+    ? "\nSomeone at the venue approves this message before the guest sees it, so if putting things right calls for something beyond the list, propose it and let them decide."
+    : ''
+  return `${header}\n${intro}\n${bullets.join('\n')}${reviewedRider}`
 }
 
 export function runtimeToProse(
@@ -615,7 +633,7 @@ export function runtimeToProse(
     blocks.push(formatOperatorInstruction(runtime.operatorInstruction))
   }
   if (runtime.mechanics !== undefined) {
-    blocks.push(formatMechanicEligibility(runtime.mechanics))
+    blocks.push(formatMechanicEligibility(runtime.mechanics, runtime.willBeReviewed === true))
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
   // Intent-then-evidence — this block states *why* we're reaching out;

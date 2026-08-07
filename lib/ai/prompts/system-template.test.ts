@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.23.0 (value-transfer resource-commitment gates)', () => {
-    expect(PROMPT_VERSION).toBe('v1.23.0')
+  it('is v1.24.0 (warm complaint register + category routing)', () => {
+    expect(PROMPT_VERSION).toBe('v1.24.0')
   })
 })
 

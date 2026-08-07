@@ -282,6 +282,36 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
   })
 
+  // v1.24.0 THE CRUX. Comp-forward language is permissible ONLY on a turn
+  // already certain to reach an operator. willBeReviewed is knowable at
+  // prompt-assembly time because classification runs ~90 lines before
+  // generation, and category routing depends on nothing the model says.
+  describe('empty-mechanics block is conditioned on willBeReviewed (v1.24.0)', () => {
+    it('invites a proposal when a human will approve the draft first', () => {
+      const out = runtimeToProse({ mechanics: [], willBeReviewed: true }, 'reply', NOW)
+      expect(out).toContain('approves it before the guest ever sees it')
+      expect(out).toContain('come back for another on us')
+      // The model must know it is proposing, not authorizing.
+      expect(out).toContain('let the venue decide')
+    })
+
+    it('keeps the v1.23.0 denial VERBATIM when nothing will review it', () => {
+      // The auto-send path must not be relaxed by one word. This is what
+      // stops v1.24.0 from reopening the 2026-08-07 unauthorized-comp path.
+      const out = runtimeToProse({ mechanics: [], willBeReviewed: false }, 'reply', NOW)
+      expect(out).toContain('Do not offer perks of any kind.')
+      expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+      expect(out).not.toContain('come back for another on us')
+    })
+
+    it('defaults to the denial when willBeReviewed is absent', () => {
+      // Fail toward the restrictive branch: an unset flag must never be read
+      // as permission to offer something.
+      const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
+      expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+    })
+  })
+
   // Product principle, not style. CLAUDE.md forbids earn/loyalty vocabulary
   // outright: guests are recognized, not enrolled. This string sat in the
   // live prompt on every new-guest turn.

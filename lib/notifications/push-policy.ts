@@ -88,6 +88,13 @@ const PUSH_POLICY = {
   // intercept a promise the guest has already been given.
   [APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR]: 'push',
 
+  // v1.24.0. Per-category routing (today: comp_complaint). This is the
+  // trigger that makes the intended complaint behavior work end to end — the
+  // agent drafts something warm and generous, and an operator authorizes it.
+  // The push is not optional decoration: an operator who is never told has a
+  // guest waiting on a reply that will never send itself.
+  [APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator

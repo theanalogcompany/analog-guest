@@ -60,38 +60,71 @@ describe('getCategoryInstructions — round-trip', () => {
   })
 })
 
-describe('comp-complaint instructions (THE-228)', () => {
-  it('directs the agent to acknowledge what was said', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Acknowledge what they said directly')
+describe('comp-complaint instructions (v1.24.0 register)', () => {
+  // This file has now caused two production failures in OPPOSITE directions,
+  // and the assertions below are written so a revert toward either one fails.
+  //
+  //   v1.3.0-v1.22.0  "unless ... eligible mechanics support it" read as
+  //                   permission -> unauthorized comp auto-sent 2026-08-07.
+  //   v1.23.0         prohibition-first + a stopping license -> "Sour
+  //                   matcha's usually a sign something was off with the
+  //                   prep. Noted." forty minutes later.
+  //
+  // v1.24.0 removes the prohibitions entirely and lets the approval gate be
+  // the brake. Deleting an assertion here should require deleting the reason.
+
+  it('opens on understanding, not on a rule', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('First, understand what actually happened')
   })
 
-  // v1.23.0: the old wording was "Do not promise a specific remedy ... unless
-  // the additional context or eligible mechanics support it." The model
-  // inverted that conditional prohibition into standing permission — its
-  // trace reads "Per comp_complaint category instructions, I should ...
-  // offer a remedy if eligible mechanics support it" — then found the
-  // mechanics list EMPTY and offered a remake anyway, on the theory that a
-  // remake isn't a perk. The prohibition now leads and stands alone; the
-  // exception follows and is explicitly closed against the remake loophole.
-  it('states the remedy prohibition flatly, before any exception', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Do not promise a remedy.')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('No remedy of any kind is yours to offer here')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain("offering a remedy you can't deliver is worse".replace('offering', 'Offering'))
+  it('authorizes exactly one genuine apology', () => {
+    // "once, and mean it" carries the entire anti-stacking intent of the
+    // deleted "Do not perform sympathy or pile on apologies" rule. It is
+    // deliberately NOT restated as a separate prohibition — that is how this
+    // file drifts back into a list of things not to do.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('say sorry for it, once, and mean it')
   })
 
-  it('closes the remake loophole the model used', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('not a redo, not a replacement')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('a remake is not an exception')
+  it('makes the comp the default remedy, framed as an invitation', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('come back and have another one on us')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('invitation rather than a payout')
   })
 
-  it('offers a complete non-remedy response so the model has somewhere to go', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
-      'Acknowledging the problem and asking a real question IS a complete response',
-    )
+  it('names the goal as winning the guest back', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('trying to win back')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('a bad visit put right well')
   })
 
-  it('forbids performative sympathy', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Do not perform sympathy')
+  it('forbids the diagnostic register that produced the cold turn', () => {
+    // "Sour matcha's usually a sign something was off with the prep" was
+    // exactly this: explaining the prep instead of addressing the person.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('not explaining what went wrong in the prep')
+  })
+
+  it('mirrors the gate: a question alone is a complete turn', () => {
+    // The shape understand -> apologize -> make it up maps onto
+    // complaintIntent clarifying -> resolving, which is what decides
+    // auto-send vs queue. Prompt and routing must tell the same story.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('ask one real question and send only that')
+  })
+
+  it('defers to the eligibility block rather than hardcoding what is offerable', () => {
+    // That block is conditioned on willBeReviewed, so this pointer is what
+    // keeps the instruction correct on BOTH the reviewed and unreviewed paths.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('"What this guest can access" block')
+  })
+
+  it('carries none of the deleted prohibitions', () => {
+    // Regression guard in the cold direction. Each of these strings produced
+    // or reinforced the 2026-08-07 03:40 "Noted." reply.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('Do not perform sympathy')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('No remedy of any kind is yours to offer')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('IS a complete response')
+  })
+
+  it('still names the specific thing raised, and stays short', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Name the specific thing they raised')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Keep it short')
   })
 
   it('contains no em or en dashes (THE-225 prose hygiene)', () => {

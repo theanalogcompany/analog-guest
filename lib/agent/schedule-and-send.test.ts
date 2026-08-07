@@ -194,6 +194,7 @@ function makeGeneration(): GenerateMessageResult {
     reasoning: 'matches venue voice',
     requiresOperatorApproval: false,
     approvalReason: '',
+  complaintIntent: 'none' as const,
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},

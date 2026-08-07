@@ -529,6 +529,7 @@ function makeGenerationResult(
     reasoning: 'matches the venue voice',
     requiresOperatorApproval: false,
     approvalReason: '',
+    complaintIntent: 'none' as const,
     // TAC-296 / TAC-297: required schema fields. The no-op shapes are `{}`.
     // Stages tests for legacy triggers (fidelity / model_flagged / regex /
     // pending) override `commitment` to exercise the COMMITMENT_TYPE_GATED
@@ -1420,7 +1421,13 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR])
+    // v1.24.0: this draft now trips TWO independent gates — the content-based
+    // floor AND category routing. Defence in depth: either alone would have
+    // caught it. The floor still wins primaryTrigger because it names a
+    // concrete promise in this specific message, which is more useful to an
+    // operator than "the category is routed."
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
   })
 
@@ -1441,15 +1448,36 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     expect(decision.action).toBe('queue')
   })
 
-  it('lets a clarifying question on a complaint auto-send (no forward promise)', async () => {
+  // v1.24.0: a clarifying question still auto-sends, but it now requires the
+  // model to SAY it is clarifying. Category routing queues comp_complaint by
+  // default, and complaintIntent is the only exemption — the fixture default
+  // of 'none' correctly queues, so this test states the intent explicitly.
+  // Making a guest wait on an operator before you'll even ask what went wrong
+  // is worse service than the cold reply v1.24.0 exists to fix.
+  it('lets a declared clarifying question on a complaint auto-send', async () => {
     const decision = await applyApprovalPolicyStage(
       complaintCtx(),
       makeGenerationResult({
         body: 'What was off with it? I want to make sure I understand before we figure out next steps.',
         voiceFidelity: 0.82,
+        complaintIntent: 'clarifying',
       }),
     )
     expect(decision.action).toBe('send')
+  })
+
+  it('queues that same question when the model does NOT declare it clarifying', async () => {
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({
+        body: 'What was off with it? I want to make sure I understand before we figure out next steps.',
+        voiceFidelity: 0.82,
+        complaintIntent: 'resolving',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
   })
 
   // The regression guard that matters most: a widened gate that queues

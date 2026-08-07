@@ -94,6 +94,10 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // rather than naming the mechanism, since the operator's job here is to
   // judge the promise, not the detector.
   complaint_commitment_floor: 'Promise made on a complaint',
+  // v1.24.0: category routing. Phrased around what the operator is being
+  // asked to do — decide how generous to be — rather than naming the policy
+  // mechanism, which tells them nothing actionable.
+  category_requires_approval: 'Complaint needs your call',
   // TAC-299: operator swiped left on a heads-up card → /draft-decline
   // persisted an apology draft for review.
   operator_decline_initiated: 'Operator-initiated decline',

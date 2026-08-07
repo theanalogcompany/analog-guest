@@ -62,6 +62,17 @@ export const GeneratedMessageSchema = z.object({
   // validator is more reliable with explicit presence.
   requiresOperatorApproval: z.boolean(),
   approvalReason: z.string(),
+  // v1.24.0: what this turn is doing on a complaint. Drives the ONLY
+  // exemption from comp_complaint's category routing — a turn that is
+  // genuinely just asking auto-sends; anything else queues for an operator.
+  // REQUIRED, not optional, for two reasons: the TAC-212 precedent that
+  // Anthropic's validator is more reliable with explicit presence, and
+  // because a required field costs ZERO against the TAC-300 24-optional
+  // budget (the counter counts properties absent from `required`), keeping
+  // the schema at 20. Non-complaint turns emit 'none'. See
+  // lib/agent/complaint-routing.ts for how it is consumed and why the model's
+  // claim is necessary but never sufficient.
+  complaintIntent: z.enum(['clarifying', 'resolving', 'none']),
   // TAC-296: agent-emitted patch for guests.context. Field is REQUIRED on
   // every emission (per the TAC-212 precedent — Anthropic's structured-output
   // validator is more reliable with explicit presence), but both inner fields
@@ -134,6 +145,7 @@ export async function generateMessage(
       reasoning: string
       requiresOperatorApproval: boolean
       approvalReason: string
+      complaintIntent: z.infer<typeof GeneratedMessageSchema>['complaintIntent']
       contextUpdate: {
         structured?: z.infer<typeof GuestContextPatchSchema>
         observation?: string
@@ -170,6 +182,7 @@ export async function generateMessage(
         reasoning: object.reasoning,
         requiresOperatorApproval: object.requiresOperatorApproval,
         approvalReason: object.approvalReason,
+        complaintIntent: object.complaintIntent,
         contextUpdate: object.contextUpdate,
         commitment: object.commitment,
         arrivalCapture: object.arrivalCapture,
@@ -200,6 +213,7 @@ export async function generateMessage(
         // through to applyApprovalPolicyStage and is recorded on the
         // draft_queued PostHog event when the gate queues.
         requiresOperatorApproval: lastResult.requiresOperatorApproval,
+        complaintIntent: lastResult.complaintIntent,
         approvalReason: lastResult.approvalReason,
         // TAC-296: final-attempt context update. Orchestrator's context-write
         // step (between generateStage success and applyApprovalPolicyStage)

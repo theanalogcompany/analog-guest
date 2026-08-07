@@ -77,5 +77,11 @@ describe('GeneratedMessageSchema optional-field budget (TAC-300)', () => {
     const jsonSchema = z.toJSONSchema(GeneratedMessageSchema) as JsonSchemaNode
     const count = countOptionalsInJsonSchema(jsonSchema)
     expect(count).toBeLessThanOrEqual(OPTIONAL_FIELD_BUDGET)
+    // Pinned exactly, not just bounded. v1.24.0 added `complaintIntent` as a
+    // REQUIRED enum precisely so it would cost zero here — the counter counts
+    // properties absent from `required`. If this number moves, someone added
+    // an OPTIONAL field and spent one of the two remaining slots; that should
+    // be a deliberate decision, not a silent drift toward the 24 cap.
+    expect(count, 'optional-field count changed — see the note above').toBe(20)
   })
 })
