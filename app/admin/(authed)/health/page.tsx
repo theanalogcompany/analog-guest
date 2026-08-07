@@ -2,6 +2,7 @@ import { Card } from '@/components/ui/card'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
+import { checkApns } from './check-apns'
 import { checkLangfuse } from './check-langfuse'
 
 // /admin/health — three-row status panel. Server component; runs all
@@ -53,6 +54,7 @@ export default async function HealthPage() {
   const rows: CheckRow[] = [
     await checkDatabase(),
     checkLangfuse(),
+    checkApns(),
     await checkCurrentAdmin(),
   ]
 

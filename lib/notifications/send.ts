@@ -5,14 +5,12 @@
 // caller wraps in `waitUntil(...)` so the keep-alive window covers the
 // network round-trip without blocking the agent's return.
 //
-// Trigger filter (operator-approved, TAC-207 plan revision 1):
-//   model_flagged                    → fire push  ("needs review")
-//   comp_regex_backstop              → fire push  ("comp request")
-//   fidelity_below_auto_send_floor   → fire push  ("low fidelity")
-//   previous_pending_held            → skip — regen of an already-pushed
-//                                       draft; original push is the
-//                                       notification, Realtime updates the
-//                                       card live.
+// Trigger filter: DENY-LIST, owned by ./push-policy.ts. Every approval
+// trigger pushes except an explicit 'skip' (today only previous_pending_held).
+// The decision map there is TOTAL over ApprovalTrigger, so a new trigger fails
+// tsc until someone decides. It used to be an allow-list keyed on the label
+// map below, which silently dropped commitment_type_gated (ff653be) and
+// hold_all_outbound (0c1515c) — see push-policy.ts for the full post-mortem.
 //
 // Payload contract (locked at plan review w/ TAC-288):
 //   { aps: { alert: { title, body }, badge, sound: "default" },
@@ -29,23 +27,49 @@ import {
   capturePushSent,
   capturePushTokenInvalid,
 } from '@/lib/analytics/posthog'
+import { APPROVAL_TRIGGERS, type ApprovalTrigger } from '@/lib/agent/stages'
 import { sendApnsRequest } from './apns/client'
+import { shouldSendDraftFlaggedPush } from './push-policy'
+
+// Re-exported so the two orchestrator call sites (handle-inbound.ts,
+// handle-followup.ts) keep importing it from here. The decision itself lives
+// in ./push-policy.ts, deliberately separated from the label map below —
+// coupling those two jobs to one constant is what caused the 2026-06-01
+// silent-drop regression.
+export { shouldSendDraftFlaggedPush }
 
 const APNS_TOKEN_INVALID_STATUS = 410
 const APNS_BAD_DEVICE_TOKEN_STATUS = 400
 const MAX_PUSH_BODY_CHARS = 40
 
-// Categorical labels mapped from approval.primaryTrigger. Keys MUST stay in
-// sync with APPROVAL_TRIGGERS in lib/agent/stages.ts. A trigger that lands
-// here without a mapping fires push with no context dash (defensive
-// fallback, see buildPushBody) — the missing entry is the bug to fix.
-const CONTEXT_BY_TRIGGER: Record<string, string> = {
-  model_flagged: 'needs review',
-  comp_regex_backstop: 'comp request',
-  fidelity_below_auto_send_floor: 'low fidelity',
-}
+// Categorical labels for the push body's context clause. Deliberately
+// PARTIAL: this map answers "what do we call this?", NOT "do we push?" —
+// that is ./push-policy.ts's job. A trigger with no entry here still pushes,
+// just without the context dash (see buildPushBody). That fallback was
+// unreachable while this map doubled as the fire-set; it is now the designed
+// degradation for a trigger whose copy hasn't been written yet.
+//
+// `satisfies Partial<Record<ApprovalTrigger, string>>` still catches a typo'd
+// or removed trigger key at compile time without forcing a label on every
+// trigger. previous_pending_held is intentionally absent — it never pushes.
+//
+// Values must stay CATEGORICAL. Never interpolate guest text, draft body, or
+// commitment description here — the payload privacy invariant is asserted in
+// send.test.ts.
+const CONTEXT_BY_TRIGGER = {
+  [APPROVAL_TRIGGERS.MODEL_FLAGGED]: 'needs review',
+  [APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP]: 'comp request',
+  [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR]: 'low fidelity',
+  // TAC-297 (ff653be). Specific noun phrase matching the register of
+  // 'comp request' / 'low fidelity' — this trigger carries explicit type
+  // information (comp/hold/discount), so the generic bucket would undersell it.
+  [APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]: 'commitment',
+  // #95 (0c1515c). Venue-wide hold — no per-message signal to name, so the
+  // generic bucket is correct here.
+  [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
+} as const satisfies Partial<Record<ApprovalTrigger, string>>
 
-const SHOULD_PUSH_TRIGGERS = new Set(Object.keys(CONTEXT_BY_TRIGGER))
+const CONTEXT_LOOKUP: Record<string, string | undefined> = CONTEXT_BY_TRIGGER
 
 export interface SendDraftFlaggedPushInput {
   agentRunId: string
@@ -59,22 +83,13 @@ export interface SendDraftFlaggedPushInput {
   primaryTrigger: string
 }
 
-/**
- * Returns true if primaryTrigger should fire a push. Used by the caller as a
- * pre-flight check so we don't even take the supabase round-trip when the
- * trigger is filtered out.
- */
-export function shouldSendDraftFlaggedPush(primaryTrigger: string): boolean {
-  return SHOULD_PUSH_TRIGGERS.has(primaryTrigger)
-}
-
 export function buildPushBody(
   firstName: string | null,
   primaryTrigger: string,
 ): string {
   const trimmed = firstName?.trim() ?? ''
   const namePart = trimmed ? `Reply to ${trimmed}` : 'Reply to a guest'
-  const context = CONTEXT_BY_TRIGGER[primaryTrigger]
+  const context = CONTEXT_LOOKUP[primaryTrigger]
   const full = context ? `${namePart} — ${context}` : namePart
   if (full.length <= MAX_PUSH_BODY_CHARS) return full
   if (context && trimmed) {
@@ -270,21 +285,30 @@ export async function sendDraftFlaggedPush(
       continue
     }
 
-    const { status, reason } = result.response
+    const { status, reason, apnsId } = result.response
     const tokenInvalid =
       status === APNS_TOKEN_INVALID_STATUS ||
       (status === APNS_BAD_DEVICE_TOKEN_STATUS && reason === 'BadDeviceToken')
 
+    // ONE unconditional log line carrying status + reason on EVERY response,
+    // success included. The 200 branch previously logged only the badge, so a
+    // UAT run couldn't distinguish "APNs accepted it" from "we never got that
+    // far" without waiting on PostHog. Severity still splits log/warn so
+    // non-200s stay greppable. apnsId is Apple's per-notification UUID —
+    // quote it verbatim when opening a support case.
+    const responseFields = {
+      ...baseFields,
+      operatorId: recipient.id,
+      badge,
+      status,
+      reason: reason ?? null,
+      apnsId: apnsId ?? null,
+      tokenInvalid,
+    }
     if (status === 200) {
-      console.log('[apns] send ok', { ...baseFields, operatorId: recipient.id, badge })
+      console.log('[apns] apns response', responseFields)
     } else {
-      console.warn('[apns] APNs returned non-200', {
-        ...baseFields,
-        operatorId: recipient.id,
-        status,
-        reason,
-        tokenInvalid,
-      })
+      console.warn('[apns] apns response', responseFields)
     }
 
     if (tokenInvalid) {

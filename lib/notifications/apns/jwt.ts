@@ -15,6 +15,8 @@
 
 import { importPKCS8, SignJWT } from 'jose'
 
+import { checkApnsEnv, JWT_APNS_VARS } from './env'
+
 const ALG = 'ES256'
 const JWT_REFRESH_AFTER_MS = 50 * 60 * 1000
 
@@ -62,10 +64,15 @@ export async function getApnsJwt(
   const keyId = process.env.APNS_KEY_ID
   const teamId = process.env.APNS_TEAM_ID
   if (!authKey || !keyId || !teamId) {
+    // Name the specific missing var(s). The old detail listed all three
+    // unconditionally, so a log line reading "env_missing: APNS_AUTH_KEY /
+    // APNS_KEY_ID / APNS_TEAM_ID" left the operator to check all three by
+    // hand — which is how a solitary missing APNS_KEY_ID stays invisible.
+    const check = checkApnsEnv(process.env, JWT_APNS_VARS)
     return {
       ok: false,
       error: 'env_missing',
-      detail: 'APNS_AUTH_KEY / APNS_KEY_ID / APNS_TEAM_ID',
+      detail: check.ok ? 'APNS_AUTH_KEY / APNS_KEY_ID / APNS_TEAM_ID' : check.problems.join('; '),
     }
   }
 
@@ -82,10 +89,19 @@ export async function getApnsJwt(
   try {
     privateKey = await importPKCS8(authKey, ALG)
   } catch (e) {
+    // jose's raw message ("Failed to read asymmetric key") does not say WHY,
+    // and this exact failure cost ~9h of silent non-delivery on 2026-05-27.
+    // Append the shape diagnosis so the operator sees "missing footer" or
+    // "literal \n escapes" in the [apns] log and the PostHog errorDetail.
+    const shape = checkApnsEnv(process.env, JWT_APNS_VARS)
+    const authKeyProblems = shape.ok
+      ? []
+      : shape.problems.filter((p) => p.startsWith('APNS_AUTH_KEY'))
+    const raw = e instanceof Error ? e.message : String(e)
     return {
       ok: false,
       error: 'key_parse_failed',
-      detail: e instanceof Error ? e.message : String(e),
+      detail: authKeyProblems.length > 0 ? `${raw} — ${authKeyProblems.join('; ')}` : raw,
     }
   }
 
