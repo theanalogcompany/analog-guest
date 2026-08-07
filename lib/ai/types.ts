@@ -160,6 +160,22 @@ export type RuntimeContext = {
   // path when the operator typed a note; absent for note-less manual sends
   // and for cron triggers.
   operatorInstruction?: string
+  // v1.24.0: true when this turn is ALREADY certain to be routed to operator
+  // approval on the strength of its category alone — before the model has
+  // written anything. Knowable because classification (handle-inbound.ts:230)
+  // runs ~90 lines before generation (:324), and category routing depends on
+  // nothing the model says.
+  //
+  // It is what makes comp-forward complaint drafting safe: the eligible-
+  // mechanics block relaxes its denial ONLY when a human is guaranteed to see
+  // the draft first. When false, the categorical denial stands unchanged, so
+  // the auto-send path is exactly as constrained as it was before.
+  //
+  // FALSE for demo guests even on a routed category — TAC-284's bypass
+  // returns action:'send' unconditionally, so a demo guest's "reviewed" draft
+  // would ship straight to a real phone. Demo guests keep the restrictive
+  // prompt precisely because nothing downstream will catch them.
+  willBeReviewed?: boolean
   today?: {
     isoDate: string
     dayOfWeek: string
@@ -252,6 +268,15 @@ export type GenerateMessageCommitment = CommitmentEmission
 // the no-op case.
 export type GenerateMessageArrivalCapture = ArrivalCaptureEmission
 
+/**
+ * v1.24.0: what a complaint turn is doing. Mirrored from the
+ * GeneratedMessageSchema enum; consumed by lib/agent/complaint-routing.ts.
+ *   clarifying — asking what happened; proposing nothing
+ *   resolving  — addressing the problem, proposing or declining a remedy
+ *   none       — not a complaint turn
+ */
+export type ComplaintIntent = 'clarifying' | 'resolving' | 'none'
+
 export type GenerateMessageAttempt = {
   body: string
   voiceFidelity: number
@@ -261,6 +286,9 @@ export type GenerateMessageAttempt = {
   // produced different flag values.
   requiresOperatorApproval: boolean
   approvalReason: string
+  // v1.24.0: per-attempt complaint-turn intent. Final attempt's value becomes
+  // GenerateMessageResult.complaintIntent.
+  complaintIntent: ComplaintIntent
   // TAC-296: per-attempt context update emission. The final attempt's value
   // becomes the GenerateMessageResult.contextUpdate consumed by the
   // orchestrator's context-write step.
@@ -289,6 +317,11 @@ export type GenerateMessageResult = {
   // event when the gate queues.
   requiresOperatorApproval: boolean
   approvalReason: string
+  // v1.24.0: final-attempt complaint-turn intent. Consumed by
+  // applyApprovalPolicyStage via canAutoSendComplaintTurn — it is the only
+  // exemption from comp_complaint's category routing, and it is necessary
+  // but not sufficient (three deterministic checks sit behind it).
+  complaintIntent: ComplaintIntent
   // TAC-296: final-attempt guest-context patch. Consumed by the orchestrator
   // between generateStage success and applyApprovalPolicyStage. May be empty
   // (structured undefined, observation undefined) when the agent has nothing

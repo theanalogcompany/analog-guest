@@ -13,6 +13,7 @@ import type {
   ParsedGuestContext,
   VenueInfo,
 } from '@/lib/schemas'
+import type { ApprovalPolicy } from '@/lib/schemas/approval-policy'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 
@@ -38,6 +39,15 @@ export interface VenueContext {
   // build-runtime-context.ts; the column is NOT NULL DEFAULT false so this is
   // always a real boolean for a normally-built context.
   holdAllOutbound: boolean
+  // v1.24.0: per-category approval routing, parsed from
+  // venue_configs.approval_policy (a column seeded fleet-wide since
+  // 2026-04-27 that had no reader until now). Consumed by
+  // applyApprovalPolicyStage's CATEGORY_REQUIRES_APPROVAL trigger and by
+  // buildAiRuntime to decide whether the generation prompt may be
+  // comp-forward. parseApprovalPolicy fails OPEN to defaults, and the
+  // defaults route comp_complaint to review — so a malformed policy produces
+  // MORE operator oversight, never less.
+  approvalPolicy: ApprovalPolicy
 }
 
 export interface GuestContext {

@@ -22,10 +22,12 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
+import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
+import { canAutoSendComplaintTurn } from './complaint-routing'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type {
   Classification,
@@ -80,6 +82,13 @@ export const APPROVAL_TRIGGERS = {
   // enumeration alone would only relocate the line it argued past. See
   // lib/agent/complaint-floor.ts for the measured precision numbers.
   COMPLAINT_COMMITMENT_FLOOR: 'complaint_commitment_floor',
+  // v1.24.0: per-category routing from venue_configs.approval_policy. Fires
+  // BEFORE the model has said anything meaningful — it inspects the
+  // classification, not the draft. Today it routes comp_complaint, so a guest
+  // reporting a bad experience gets a warm, comp-forward draft that a human
+  // authorizes rather than an agent deciding on its own. The one exemption is
+  // a genuine clarifying question (canAutoSendComplaintTurn).
+  CATEGORY_REQUIRES_APPROVAL: 'category_requires_approval',
 } as const
 
 /**
@@ -119,6 +128,13 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
   APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+  // v1.24.0: category routing is a POLICY signal, not a claim about this
+  // draft. Every trigger above names a concrete risk in the specific message
+  // and should carry the operator-facing label instead. Ranked above
+  // hold_all_outbound because per-category routing is more specific than a
+  // venue-wide hold, and BELOW previous_pending_held so a regenerated
+  // complaint turn doesn't re-push at an operator already holding the card.
+  APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL,
   // TAC-XXX: blanket venue hold is the least-specific signal — ranked last so
   // any concrete per-message trigger above carries the operator-facing label.
   APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND,
@@ -571,6 +587,28 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
   }
 
+  // Trigger 8 (v1.24.0): per-category routing from venue_configs.approval_policy.
+  // Unlike every trigger above, this one is decided by the CLASSIFICATION, not
+  // by the draft — which is what lets the generation prompt know in advance
+  // that a human will review this turn, and therefore permits it to be
+  // comp-forward (see buildAiRuntime's willBeReviewed).
+  //
+  // The single exemption is a genuine clarifying question: making a guest wait
+  // on an operator before you'll even ask what went wrong is worse service
+  // than the cold reply this shipped to fix. Every check inside
+  // canAutoSendComplaintTurn fails toward queue.
+  if (
+    resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
+      'operator_approval' &&
+    !canAutoSendComplaintTurn({
+      complaintIntent: generation.complaintIntent,
+      body: generation.body,
+      commitment: generation.commitment,
+    })
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
+  }
+
   // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
   // would-have-queued set — including the previous_pending_held DB read — is
   // accurate for the analytics event) but BEFORE the queue return. The
@@ -908,5 +946,18 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       ctx.guest.lastVisitAt,
       new Date(),
     ),
+    // v1.24.0: the crux of warm-but-gated complaint handling. True only when
+    // category routing guarantees this draft reaches an operator before the
+    // guest sees it — which is exactly when the prompt may invite a comp.
+    //
+    // The `!== true` demo guard is load-bearing, not defensive: TAC-284's
+    // bypass in applyApprovalPolicyStage returns action:'send' unconditionally
+    // and overrides every trigger, so telling a demo guest's generation "a
+    // human will review this" would produce a comp-forward draft that then
+    // auto-sends to a real phone. Demo guests keep the restrictive prompt.
+    willBeReviewed:
+      ctx.guest.isDemo !== true &&
+      resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
+        'operator_approval',
   }
 }

@@ -17,6 +17,7 @@ import {
   VenueInfoSchema,
 } from '@/lib/schemas'
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
+import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { extractRecentVisits } from './extract-recent-visits'
 import type {
   AgentRunId,
@@ -119,7 +120,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('venues')
       .select(
-        'id, slug, timezone, messaging_phone_number, hold_all_outbound, venue_configs(brand_persona, venue_info)',
+        'id, slug, timezone, messaging_phone_number, hold_all_outbound, venue_configs(brand_persona, venue_info, approval_policy)',
       )
       .eq('id', input.venueId)
       .single(),
@@ -255,6 +256,11 @@ export async function buildRuntimeContext(input: {
     // TAC-XXX: NOT NULL DEFAULT false at the column level, so this is always
     // a real boolean. `=== true` guards against a hand-patched-types drift.
     holdAllOutbound: venueRow.hold_all_outbound === true,
+    // v1.24.0: first reader of venue_configs.approval_policy since the column
+    // was seeded on 2026-04-27. parseApprovalPolicy fails OPEN to defaults on
+    // null/malformed; the defaults route comp_complaint to operator review, so
+    // a bad policy row yields more oversight rather than less.
+    approvalPolicy: parseApprovalPolicy(config.approval_policy),
   }
 
   const guestRow = guestResult.data
