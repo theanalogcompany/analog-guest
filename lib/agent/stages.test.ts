@@ -1372,3 +1372,136 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
     expect(aiRuntime.perkBeingUnlocked).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// applyApprovalPolicyStage — complaint commitment floor (v1.23.0)
+// ---------------------------------------------------------------------------
+//
+// Reproduces the 2026-08-07 production incident at the gate level. The pure
+// predicate is covered in complaint-floor.test.ts against the full history of
+// comp_complaint bodies; these tests cover the WIRING — that the floor fires
+// independently of the model's self-assessment, and that its category scope
+// keeps ordinary refusals out.
+
+describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+    captureDemoBypassMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function complaintCtx(): RuntimeContext {
+    return makeCtx({
+      classification: {
+        category: 'comp_complaint',
+        classifierConfidence: 0.95,
+        reasoning: 'quality complaint',
+      } as RuntimeContext['classification'],
+    })
+  }
+
+  // THE INCIDENT. Every field here is what production actually produced:
+  // body verbatim, voiceFidelity 0.72, requiresOperatorApproval false,
+  // commitment {} — the model reported no commitment and no need for
+  // approval, and the draft auto-sent with review_reason NULL.
+  it('queues the exact draft that shipped unreviewed on 2026-08-07', async () => {
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({
+        body: "Matcha can be tricky to dial in. Come by and I'll have another made for you.",
+        voiceFidelity: 0.72,
+        requiresOperatorApproval: false,
+        commitment: {},
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR])
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+  })
+
+  it('fires without consulting the model self-flag or the commitment emission', async () => {
+    // Same assertion as above stated as an invariant: the model saying "I
+    // committed nothing" must not be able to suppress the floor. If this ever
+    // starts depending on generation state, the floor has stopped being a
+    // floor.
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({
+        body: "come in and I'll make it right",
+        voiceFidelity: 0.95,
+        requiresOperatorApproval: false,
+        commitment: {},
+      }),
+    )
+    expect(decision.action).toBe('queue')
+  })
+
+  it('lets a clarifying question on a complaint auto-send (no forward promise)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({
+        body: 'What was off with it? I want to make sure I understand before we figure out next steps.',
+        voiceFidelity: 0.82,
+      }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // The regression guard that matters most: a widened gate that queues
+  // ordinary refusals is a worse bug than the one being fixed. Both bodies
+  // are real production replies from the same UAT session.
+  it('does not touch mechanic_request refusals, however they are worded', async () => {
+    const refusalCtx = makeCtx({
+      classification: {
+        category: 'mechanic_request',
+        classifierConfidence: 0.95,
+        reasoning: 'perk request',
+      } as RuntimeContext['classification'],
+    })
+    for (const body of [
+      'Not something we do on request, sorry.',
+      "We don't do holds on bags, but we're usually well stocked. Come by and it'll be there.",
+    ]) {
+      const decision = await applyApprovalPolicyStage(
+        refusalCtx,
+        makeGenerationResult({ body, voiceFidelity: 0.82 }),
+      )
+      expect(decision.action, `should auto-send: ${body}`).toBe('send')
+    }
+  })
+
+  it('yields the label to commitment_type_gated when both fire', async () => {
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({
+        body: "Come by and I'll have another made for you.",
+        commitment: { type: 'comp', description: 'replacement matcha' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    // More specific signal wins the operator-facing review_reason.
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+
+  it('outranks previous_pending_held so a regenerated promise still pushes', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: { id: 'existing-draft' },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      complaintCtx(),
+      makeGenerationResult({ body: "come by and I'll make it right" }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+  })
+})

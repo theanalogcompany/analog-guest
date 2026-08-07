@@ -275,7 +275,20 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
     expect(out).toContain('## What this guest can access')
     expect(out).toContain('Do not offer perks of any kind.')
-    expect(out).toContain("hasn't yet earned access to perks")
+    // v1.23.0: the empty-list instruction now names comps / remakes /
+    // replacements explicitly. "Do not offer perks" alone did not bind on
+    // 2026-08-07 — the model classified a remake as "not a perk, just good
+    // hospitality" and offered it with this block rendered in its prompt.
+    expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+  })
+
+  // Product principle, not style. CLAUDE.md forbids earn/loyalty vocabulary
+  // outright: guests are recognized, not enrolled. This string sat in the
+  // live prompt on every new-guest turn.
+  it('uses recognition framing, never earn/loyalty vocabulary', () => {
+    const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
+    expect(out).not.toMatch(/\bearn(ed|s|ing)?\b/i)
+    expect(out).toContain('to be recognized with')
   })
 
   it('renders bullets with name + reward + qualification when mechanics has entries', () => {

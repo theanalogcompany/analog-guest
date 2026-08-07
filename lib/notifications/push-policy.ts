@@ -80,6 +80,14 @@ const PUSH_POLICY = {
   // label when no more-specific trigger co-fired.
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'push',
 
+  // v1.23.0. Deterministic complaint-category floor — fires when a complaint
+  // reply carries a first-person forward promise regardless of what the model
+  // said about its own commitment. The whole reason it exists is that the
+  // model's self-assessment was wrong and the draft shipped unreviewed, so
+  // its notification is load-bearing: an operator who isn't told cannot
+  // intercept a promise the guest has already been given.
+  [APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator

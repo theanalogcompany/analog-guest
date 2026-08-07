@@ -25,6 +25,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
+import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type {
   Classification,
@@ -71,6 +72,14 @@ export const APPROVAL_TRIGGERS = {
   // PRIMARY_TRIGGER_PRIORITY — a co-firing comp/commitment carries more
   // operator-actionable information and should win the review_reason label.
   HOLD_ALL_OUTBOUND: 'hold_all_outbound',
+  // v1.23.0: deterministic category floor. Fires when a complaint-category
+  // reply carries first-person forward-commitment grammar, REGARDLESS of what
+  // the model concluded about its own commitment. Exists because the
+  // 2026-08-07 incident was the model reasoning its way around the self-flag
+  // line ("a remake isn't a monetary credit"), so widening the prompt's
+  // enumeration alone would only relocate the line it argued past. See
+  // lib/agent/complaint-floor.ts for the measured precision numbers.
+  COMPLAINT_COMMITMENT_FLOOR: 'complaint_commitment_floor',
 } as const
 
 /**
@@ -103,6 +112,11 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
+  // v1.23.0: below MODEL_FLAGGED so a self-flagged or structurally-typed
+  // commitment keeps the more specific operator label; ABOVE
+  // PREVIOUS_PENDING_HELD so a regenerated draft carrying a fresh complaint
+  // promise still fires a push rather than being treated as a silent re-draft.
+  APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
   APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
   // TAC-XXX: blanket venue hold is the least-specific signal — ranked last so
@@ -541,6 +555,20 @@ export async function applyApprovalPolicyStage(
   // triggers, so existingPendingDraftId still routes regen-in-place correctly.
   if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
     triggers.push(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+  }
+
+  // Trigger 7 (v1.23.0): complaint-category floor. Deterministic — does not
+  // consult generation.requiresOperatorApproval or generation.commitment at
+  // all, which is the entire point: on 2026-08-07 the model correctly
+  // reported BOTH as empty ("I'm not promising a monetary credit, just a
+  // corrected drink") and the reply still gave away free product on a refund
+  // request. Category scope keeps ordinary perk refusals out — "can i get a
+  // free drink" classifies as mechanic_request, not comp_complaint.
+  const forwardCommitment = isFloorCategory(ctx.classification?.category)
+    ? matchForwardCommitment(generation.body)
+    : { matched: false as const }
+  if (forwardCommitment.matched) {
+    triggers.push(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
   }
 
   // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
