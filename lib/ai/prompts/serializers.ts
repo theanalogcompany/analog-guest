@@ -565,7 +565,15 @@ function formatActiveCommitments(
 function formatMechanicEligibility(mechanics: readonly EligibleMechanic[]): string {
   const header = '## What this guest can access'
   if (mechanics.length === 0) {
-    return `${header}\nNothing right now beyond the standard menu and answering questions. The guest hasn't yet earned access to perks. Do not offer perks of any kind.`
+    // "hasn't yet earned access" was earn/loyalty framing sitting in the live
+    // prompt on every new-guest turn — the exact vocabulary CLAUDE.md's
+    // product principles forbid ("guests do not earn things; they get
+    // recognized"). Replaced with recognition framing. Kept just as
+    // restrictive: the empty-list instruction is load-bearing against
+    // eligibility leaks, and "of any kind" now explicitly covers remakes and
+    // replacements after the 2026-08-07 incident, where the model reasoned a
+    // remake was "not a perk" and offered it anyway.
+    return `${header}\nNothing right now beyond the standard menu and answering questions. There's nothing set aside for this guest to be recognized with yet. Do not offer perks of any kind. Do not offer comps, remakes, replacements, or discounts either. None of those are available for this guest.`
   }
   const intro =
     'The list below is the complete set of perks, invites, and unlocks this guest is currently eligible for. Do not offer items that are not on this list. If the guest asks for something not listed, acknowledge naturally and decline without invoking the item by name.'

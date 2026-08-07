@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.22.0 (TAC-305: R11 — deliver the answer, no sentiment-closer)', () => {
-    expect(PROMPT_VERSION).toBe('v1.22.0')
+  it('is v1.23.0 (value-transfer resource-commitment gates)', () => {
+    expect(PROMPT_VERSION).toBe('v1.23.0')
   })
 })
 
@@ -135,9 +135,40 @@ describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)',
     expect(SYSTEM_TEMPLATE).toContain('# Resource commitment self-flag')
   })
 
-  it('directs the model to set requiresOperatorApproval=true on comp / discount / refund', () => {
-    expect(SYSTEM_TEMPLATE).toContain('comp, discount, refund, or any monetary credit')
+  // v1.23.0: this assertion previously locked the MONETARY enumeration
+  // ('comp, discount, refund, or any monetary credit') that caused the
+  // 2026-08-07 incident. The model read that list literally, concluded an
+  // in-kind remake was none of those, and auto-sent free product on a refund
+  // request. The test passed throughout, because it asserted the presence of
+  // the defective wording. Now asserts the value-transfer framing instead.
+  it('tests for value transfer, not monetary instruments', () => {
+    expect(SYSTEM_TEMPLATE).toContain('ANYTHING OF VALUE')
+    expect(SYSTEM_TEMPLATE).toContain('product, service, or money they did not pay for')
+    expect(SYSTEM_TEMPLATE).toContain('It does not matter whether money changes hands')
     expect(SYSTEM_TEMPLATE).toContain('set requiresOperatorApproval=true')
+  })
+
+  it('names the in-kind remedies the monetary framing missed', () => {
+    for (const remedy of ['A remake', 'a replacement', 'a redo']) {
+      expect(SYSTEM_TEMPLATE).toContain(remedy)
+    }
+    // The exact rationalization from the incident trace, pre-empted by name.
+    expect(SYSTEM_TEMPLATE).toContain('just service recovery')
+  })
+
+  // Guards the over-fire direction. A self-flag that queues "let me find out"
+  // would stall complaint threads on turns that commit nothing, which is a
+  // worse failure than the one v1.23.0 fixes.
+  it('carves out information-only promises so the widening does not over-fire', () => {
+    expect(SYSTEM_TEMPLATE).toContain('promises that only cost you effort')
+    expect(SYSTEM_TEMPLATE).toContain('commit information, not resources')
+  })
+
+  it('teaches comp to cover in-kind replacement, with the incident as the example', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '"Come by and I\'ll have another made for you" is commitment.type = "comp"',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('not limited to money or credit')
   })
 
   it('directs the model to populate a one-clause approvalReason when flagged', () => {

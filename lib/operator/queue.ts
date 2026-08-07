@@ -89,6 +89,11 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // held for review. Ranked lowest in PRIMARY_TRIGGER_PRIORITY, so this label
   // shows only when no more-specific trigger co-fired on the draft.
   hold_all_outbound: 'Venue holds all messages',
+  // v1.23.0: complaint-category floor. Phrased around what the operator has
+  // to decide — the reply promises the guest something on a complaint turn —
+  // rather than naming the mechanism, since the operator's job here is to
+  // judge the promise, not the detector.
+  complaint_commitment_floor: 'Promise made on a complaint',
   // TAC-299: operator swiped left on a heads-up card → /draft-decline
   // persisted an apology draft for review.
   operator_decline_initiated: 'Operator-initiated decline',

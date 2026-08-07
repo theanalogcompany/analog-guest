@@ -65,9 +65,29 @@ describe('comp-complaint instructions (THE-228)', () => {
     expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Acknowledge what they said directly')
   })
 
-  it('forbids over-promising a remedy without supporting context', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Do not promise a specific remedy')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('offering one you can\'t deliver is worse')
+  // v1.23.0: the old wording was "Do not promise a specific remedy ... unless
+  // the additional context or eligible mechanics support it." The model
+  // inverted that conditional prohibition into standing permission — its
+  // trace reads "Per comp_complaint category instructions, I should ...
+  // offer a remedy if eligible mechanics support it" — then found the
+  // mechanics list EMPTY and offered a remake anyway, on the theory that a
+  // remake isn't a perk. The prohibition now leads and stands alone; the
+  // exception follows and is explicitly closed against the remake loophole.
+  it('states the remedy prohibition flatly, before any exception', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Do not promise a remedy.')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('No remedy of any kind is yours to offer here')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain("offering a remedy you can't deliver is worse".replace('offering', 'Offering'))
+  })
+
+  it('closes the remake loophole the model used', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('not a redo, not a replacement')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('a remake is not an exception')
+  })
+
+  it('offers a complete non-remedy response so the model has somewhere to go', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'Acknowledging the problem and asking a real question IS a complete response',
+    )
   })
 
   it('forbids performative sympathy', () => {
