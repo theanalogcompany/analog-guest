@@ -595,14 +595,6 @@ function formatPendingQuestion(pending: PendingQuestion, now: Date): string {
         "Say that you're still on it, in the venue's voice, the way a person would if they'd been asked something and hadn't chased it down yet. Keep it short.",
         'Do not attempt the answer. Do not say when the answer will come, do not name a time or a day, and do not say "soon" or "shortly" or anything else that implies a deadline. Do not apologize more than once. Do not offer anything to make up for the wait.',
       ].join('\n\n')
-    case 'answering_after_holding':
-      return [
-        header,
-        asked,
-        "The guest has already been told the venue is looking into it, and some time has passed. This message IS the answer to that question, so answer it.",
-        "You may acknowledge the wait once, lightly, the way a person would who got back to someone later than they meant to. Don't over-apologize and don't explain the delay.",
-        'If you still cannot ground the answer in what you were given, set knowledgeGap=true again and write your best attempt, exactly as before.',
-      ].join('\n\n')
     case 'acknowledged':
       return [
         header,

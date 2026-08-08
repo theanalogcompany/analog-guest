@@ -258,17 +258,13 @@ export type PendingQuestion = {
    *   'outstanding'       — replying to something else; guest told nothing yet
    *   'acknowledged'      — replying to something else; holding message sent
    *   'writing_holding'   — THIS generation is the holding message
-   *   'answering_after_holding' — THIS generation is the card's answer draft,
-   *                         rewritten after the holding message went out
    *
-   * The fourth mode exists because reusing 'acknowledged' for the post-holding
-   * card regen reproduced the exact bug this discriminator was introduced to
-   * kill: that branch says "leave the outstanding question alone," but the
-   * regen's whole job is to ANSWER the outstanding question. The model was
-   * being told to answer and not to answer, about the same question, in the
-   * same prompt.
+   * A fourth mode ('answering_after_holding') existed briefly for the
+   * post-holding card regen; TAC-309 deleted that regen along with blank
+   * cards, so the mode went with it rather than lingering as an unreachable
+   * branch.
    */
-  mode: 'outstanding' | 'acknowledged' | 'writing_holding' | 'answering_after_holding'
+  mode: 'outstanding' | 'acknowledged' | 'writing_holding'
 }
 
 export type GenerateMessageInput = {

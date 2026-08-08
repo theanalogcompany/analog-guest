@@ -22,7 +22,14 @@ export async function sendMessage(
   }
 
   const hasMedia = mediaUrls !== undefined && mediaUrls.length > 0
-  if (body === '' && !hasMedia) {
+  // TAC-309: trimmed, not exact-equality. `" "` used to pass this check and
+  // ship a visibly blank text to the guest. It also matters more now than it
+  // did: knowledge-gap drafts persist with an empty body on purpose, so this
+  // is the universal backstop that stops one reaching a guest — every send
+  // path funnels through here (scheduleAndSend, dispatchOperatorOutbound).
+  // The guard predates TAC-309 but had never fired in production, because an
+  // empty body was previously unreachable. Treat it as newly load-bearing.
+  if (body.trim() === '' && !hasMedia) {
     return { ok: false, error: 'message_must_have_content' }
   }
   if (mediaUrls !== undefined && mediaUrls.length > 1) {

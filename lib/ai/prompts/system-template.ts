@@ -249,7 +249,19 @@
 // model-generated holding message if no operator has answered. What the
 // guest hears, and when, is now a system decision rather than a sentence the
 // model improvises.
-export const PROMPT_VERSION = 'v1.25.0'
+// v1.26.0 (TAC-309): two output-field changes, no SYSTEM_TEMPLATE body change.
+// (1) The augmented system prompt in generate-message.ts gains a
+// "# Reasoning brevity" instruction capping `reasoning` at two short
+// sentences. That field is the only unbounded one in the emission and it
+// serializes THIRD, ahead of knowledgeGap / contextUpdate / commitment /
+// arrivalCapture — so a long deliberation starved the tail, truncated the
+// JSON mid-object, and surfaced as a generic "could not parse the response."
+// (2) MAX_OUTPUT_TOKENS 500 → 1500 as the companion fix. Also in this ticket
+// but NOT a prompt change: knowledge-gap drafts now persist blank (the model
+// still writes a body; it is discarded at the persist boundary), and a
+// knowledge-gap turn is exempt from the send-fidelity floor because nothing
+// on that path reaches the guest.
+export const PROMPT_VERSION = 'v1.26.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 

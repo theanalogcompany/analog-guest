@@ -567,3 +567,57 @@ describe('persistOrRegenQueuedDraft — updateOnly (TAC-308)', () => {
     expect(scenario.inserts).toHaveLength(1)
   })
 })
+
+describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+  })
+
+  // The whole point of TAC-309: the model's attempted answer is DISCARDED,
+  // never persisted, never surfaced as a hint. The first live card read
+  // "Not sure on the specific matcha we source. I can find out if that
+  // matters for your order." — the exact promise phrasing TAC-308 had just
+  // deleted from the corpus, sitting in a field an operator can swipe.
+  it('persists an empty body on INSERT and discards the generated text', async () => {
+    scenario.insertResponses.push({ data: { id: 'gap-card' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
+      blankBody: true,
+    })
+    expect(scenario.inserts[0]?.body).toBe('')
+    expect(scenario.inserts[0]?.body).not.toContain('regenerated draft body')
+  })
+
+  // A blank card carrying 0.78 would be claiming a voice score for text that
+  // does not exist.
+  it('nulls voice_fidelity alongside the body', async () => {
+    scenario.insertResponses.push({ data: { id: 'gap-card' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
+      blankBody: true,
+    })
+    expect(scenario.inserts[0]?.voice_fidelity).toBeNull()
+  })
+
+  // A second unanswerable question refreshes the card in place; it must be
+  // just as blank as the first one.
+  it('blanks on the UPDATE path too', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'gap-card' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'gap-card', {
+      blankBody: true,
+    })
+    expect(scenario.updates[0]?.payload.body).toBe('')
+    expect(scenario.updates[0]?.payload.voice_fidelity).toBeNull()
+  })
+
+  // Ordinary queued drafts are untouched — the operator still gets the
+  // model's text to review on every other trigger.
+  it('leaves a normal queued draft prefilled', async () => {
+    scenario.insertResponses.push({ data: { id: 'normal' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {})
+    expect(scenario.inserts[0]?.body).toBe('regenerated draft body')
+    expect(scenario.inserts[0]?.voice_fidelity).toBe(0.78)
+  })
+})

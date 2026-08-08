@@ -43,6 +43,16 @@ export const POST = withOperatorAuth<{ id: string }>(
           return NextResponse.json({ error: 'not found' }, { status: 404 })
         case 'opted_out':
           return NextResponse.json({ error: 'guest opted out' }, { status: 422 })
+        // TAC-309: nothing to send. Either a knowledge-gap card the operator
+        // hasn't written yet, or a blank edit. 422 rather than the default
+        // 500, because this is a user-actionable refusal and the Contract
+        // requires the client be able to say WHY the swipe did nothing.
+        // Refused before the review_state flip, so the card is still queued.
+        case 'empty_body':
+          return NextResponse.json(
+            { error: 'empty_body', detail: result.error },
+            { status: 422 },
+          )
         case 'venue_misconfigured':
           return NextResponse.json(
             { error: 'venue misconfigured', detail: result.error },

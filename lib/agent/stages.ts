@@ -174,6 +174,43 @@ export const PRIMARY_TRIGGER_PRIORITY = [
 ] as const
 
 /**
+ * TAC-309: will a knowledge-gap emission on THIS run actually be queued?
+ *
+ * The single source of truth for the knowledge-gap safety property, because
+ * two places need it and they must not drift:
+ *
+ *   1. `applyApprovalPolicyStage` — whether the KNOWLEDGE_GAP trigger fires
+ *      (and therefore whether the body is blanked and a clock armed).
+ *   2. `generateStage` — whether the run is exempt from SEND_FIDELITY_FLOOR.
+ *
+ * (2) is only safe because of (1). The exemption's whole justification is
+ * "nothing reaches the guest on this turn, and the scored body is discarded
+ * anyway." That holds ONLY when the turn is genuinely queued. Keying the
+ * exemption on `knowledgeGap` alone broke it in two directions:
+ *
+ *   - OUTBOUND runs. The trigger requires `currentMessage !== null`, but a
+ *     manual followup (Command Center "Follow Up") skips the approval gate
+ *     entirely and dispatches. A model emitting knowledgeGap=true at
+ *     voiceFidelity 0.2 would have shipped that text to a real guest,
+ *     unblanked. Reachable, not theoretical: the `## Unanswered question`
+ *     block renders on followups too, and its `acknowledged` copy explicitly
+ *     tells the model to set knowledgeGap again.
+ *   - DEMO guests. TAC-284's bypass returns `action:'send'` unconditionally,
+ *     so the gate's queue decision never happens. The fidelity floor used to
+ *     be the last thing standing there.
+ *
+ * Same shape as `willBeReviewed` in buildAiRuntime, and the same reasoning:
+ * a relaxation is only safe when something downstream is guaranteed to catch
+ * it.
+ */
+export function knowledgeGapWillQueue(
+  ctx: Pick<RuntimeContext, 'currentMessage' | 'guest'>,
+  knowledgeGap: boolean,
+): boolean {
+  return knowledgeGap === true && ctx.currentMessage !== null && ctx.guest.isDemo !== true
+}
+
+/**
  * TAC-308: is this pending row a knowledge-gap card?
  *
  * Two conditions, OR'd, and the OR is load-bearing:
@@ -413,7 +450,7 @@ export async function retrieveKnowledgeStage(
 export type GenerateOutcome =
   | { status: 'success'; result: GenerateMessageResult }
   | { status: 'refused'; attemptScores: number[]; finalScore: number }
-  | { status: 'failed'; error: string }
+  | { status: 'failed'; error: string; errorCode?: string }
 
 /**
  * Internal: call lib/ai's generateMessage and apply the orchestrator's
@@ -469,7 +506,7 @@ export async function generateStage(
     knowledgeChunks,
     runtime: buildAiRuntime(ctx),
   })
-  if (!r.ok) return { status: 'failed', error: r.error }
+  if (!r.ok) return { status: 'failed', error: r.error, errorCode: r.errorCode }
 
   // Observability events: emit before the floor-check return so they fire
   // for both refused (< 0.4) and below-0.5-but-above-0.4 sends.
@@ -516,7 +553,29 @@ export async function generateStage(
     })
   }
 
-  if (r.data.voiceFidelity < SEND_FIDELITY_FLOOR) {
+  // TAC-309: a knowledge-gap turn is exempt from the send floor.
+  //
+  // The floor exists to stop a poorly-voiced message reaching a guest. On a
+  // knowledge-gap turn NOTHING reaches the guest — the draft is queued, and
+  // TAC-309 discards its body before persisting, so the text being scored is
+  // thrown away. Refusing here would gate CARD CREATION on the voice quality
+  // of a body that never exists, and the result is silence: the refused
+  // branch returns without a card, so the guest gets nothing and no operator
+  // learns they asked. That is the third silent-drop door, alongside the
+  // generation crash this ticket also closes.
+  //
+  // The holding message stays fidelity-gated (handle-holding-message.ts runs
+  // the real gates). That one does reach the guest, and on this path it is
+  // the only text that does.
+  //
+  // knowledgeGapWillQueue, not `knowledgeGap` alone: the exemption is only
+  // sound when the turn is genuinely queued. Manual followups skip the gate
+  // and demo guests bypass it, and in both cases the body WOULD reach a
+  // guest — unblanked, since blanking is also the gate's job.
+  if (
+    r.data.voiceFidelity < SEND_FIDELITY_FLOOR &&
+    !knowledgeGapWillQueue(ctx, r.data.knowledgeGap)
+  ) {
     return {
       status: 'refused',
       attemptScores: r.data.attemptScores,
@@ -588,6 +647,12 @@ export type ApprovalDecision =
       // set, because the timeout regen also queues with a knowledge_gap
       // trigger and must NOT re-arm the clock it just fired.
       pendingUntil?: Date
+      // TAC-309: persist this card with NO body, discarding what the model
+      // wrote. True whenever the knowledge_gap trigger fired — no exceptions,
+      // including when it co-fires with commitment_type_gated (the comp detail
+      // survives on pending_commitment, and a model that couldn't ground the
+      // answer has no business pre-writing one).
+      blankBody: boolean
     }
   // TAC-308: the guest already has a knowledge-gap card holding the one
   // pending slot migration 020 allows, and THIS turn would queue for some
@@ -712,8 +777,7 @@ export async function applyApprovalPolicyStage(
   // followup has no guest question outstanding, and letting a cron-triggered
   // proactive message arm a 5-minute holding-message clock would produce a
   // holding note for a question nobody asked.
-  const knowledgeGapFired =
-    generation.knowledgeGap === true && ctx.currentMessage !== null
+  const knowledgeGapFired = knowledgeGapWillQueue(ctx, generation.knowledgeGap)
   if (knowledgeGapFired) {
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
   }
@@ -819,6 +883,7 @@ export async function applyApprovalPolicyStage(
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
     pendingUntil,
+    blankBody: knowledgeGapFired,
   }
 }
 

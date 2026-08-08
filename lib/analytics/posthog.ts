@@ -933,3 +933,47 @@ export async function captureDraftDropped(props: DraftDroppedProps): Promise<voi
     ].join('\n'),
   )
 }
+
+// ---------------------------------------------------------------------------
+// TAC-309: a generation attempt was cut off at the output-token ceiling
+// ---------------------------------------------------------------------------
+
+export interface GenerationTruncatedProps {
+  attempts: number
+  maxOutputTokens: number
+  promptVersion: string
+  /** Head of the truncated raw text. Diagnostic only; never guest-facing. */
+  truncatedTextPreview: string | null
+}
+
+/**
+ * Fires when `generateObject` failed with `finishReason: 'length'` — the model
+ * ran out of output budget and the JSON was cut mid-object.
+ *
+ * SLACK-RELAYED, because this is a ceiling we control rather than a model
+ * misbehaving, and because the generic "could not parse the response" error
+ * makes the two look identical. The 2026-08-08 occurrence cost a UAT session
+ * to identify and required reading Langfuse latencies against a throughput
+ * estimate to infer. It should announce itself next time.
+ *
+ * If this fires repeatedly, the fix is MAX_OUTPUT_TOKENS or a shorter
+ * `reasoning`, not a retry — a retry re-runs into the same wall.
+ */
+export async function captureGenerationTruncated(
+  props: GenerationTruncatedProps,
+): Promise<void> {
+  await capturePostHogEvent('generation_truncated', 'system', { ...props })
+  await postToSlack(
+    [
+      '*Generation truncated at the output-token ceiling*',
+      `attempts: \`${props.attempts}\` · cap: \`${props.maxOutputTokens}\` · prompt: \`${props.promptVersion}\``,
+      'The emission hit the cap and was cut mid-JSON, so the whole object failed to parse.',
+      'Fix the ceiling or shorten `reasoning` — a retry hits the same wall.',
+      props.truncatedTextPreview
+        ? `truncated head: ${truncate(props.truncatedTextPreview, 300)}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
+}

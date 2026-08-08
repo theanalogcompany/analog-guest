@@ -65,6 +65,26 @@ export interface PersistQueuedDraftOptions {
    * caller's contract already treats a failed regen as best-effort.
    */
   updateOnly?: boolean
+  /**
+   * TAC-309: persist the card with NO body, discarding whatever the model
+   * wrote.
+   *
+   * The discard happens HERE rather than at generation because the generation
+   * genuinely needs real text: `body: z.string().min(1)` is still required,
+   * the dash regex operates on it, and `voiceFidelity` is self-assessed
+   * against it. Blanking at the persist boundary means the discarded guess
+   * never reaches the database, is never stashed on the row, and is never
+   * surfaced to the operator as a hint — which is the whole point. TAC-308
+   * prefilled these cards and the first live one read "Not sure on the
+   * specific matcha we source. I can find out if that matters for your
+   * order." A visible guess is something you swipe, not something you replace.
+   *
+   * `voice_fidelity` is nulled alongside it. A blank card carrying 0.85 would
+   * be claiming a voice score for text that doesn't exist. (Distinct from the
+   * TAC-308 holding-message fallback, which persists 0 because there the body
+   * IS what shipped.)
+   */
+  blankBody?: boolean
 }
 
 /**
@@ -517,6 +537,18 @@ async function tryQueueInsert(
           // TAC-308: arms the holding-message timer. Undefined stays null —
           // only a knowledge-gap draft gets a clock.
           pending_until: options.pendingUntil?.toISOString() ?? null,
+          // TAC-309: blank card. `pending_commitment` is nulled alongside the
+          // body, deliberately. The carrier is NOT surfaced on QueueDraft, so
+          // leaving it live would mean the operator types their own answer
+          // into a blank card, sends, and dispatchOperatorOutbound
+          // materializes a guest_commitments row for a comp the model
+          // invented and they never saw. Pre-TAC-309 the body at least named
+          // it. Given this repo's history with unauthorized comps, a model
+          // that could not ground an answer does not get to bind one
+          // invisibly.
+          ...(options.blankBody === true
+            ? { body: '', voice_fidelity: null, pending_commitment: null }
+            : {}),
         }),
       )
       .select('id')
@@ -585,15 +617,21 @@ async function tryRegenUpdate(
     // when the new regen has no commitment. The carrier always reflects
     // the current draft's intent.
     const pendingCommitment = pendingFromEmission(generation.commitment)
+    // TAC-309: same discard on the regen path. A second unanswerable question
+    // refreshes the card in place and must leave it just as blank as the
+    // first one did.
+    const blank = options.blankBody === true
     const updatePayload: MessageUpdate = {
-      body: generation.body,
-      voice_fidelity: generation.voiceFidelity,
+      body: blank ? '' : generation.body,
+      voice_fidelity: blank ? null : generation.voiceFidelity,
       prompt_version: generation.promptVersion,
       category: ctx.classification?.category ?? null,
       reply_to_message_id: ctx.currentMessage?.id ?? null,
       langfuse_trace_id: ctx.trace.id || null,
       review_reason: primaryTrigger,
-      pending_commitment: pendingCommitment,
+      // See the INSERT path: a blank card must not carry an invisible
+      // commitment the operator would unknowingly authorize on send.
+      pending_commitment: blank ? null : pendingCommitment,
     }
     // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
     // omitted from the payload unless the caller explicitly passed a new

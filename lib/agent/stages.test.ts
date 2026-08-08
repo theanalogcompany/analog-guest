@@ -6,7 +6,9 @@ import {
   classifyStage,
   deriveFollowupContext,
   findPendingDraft,
+  generateStage,
   isKnowledgeGapCard,
+  knowledgeGapWillQueue,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
@@ -24,6 +26,7 @@ const captureLowMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
+const generateMessageMock = vi.fn()
 // TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
 // when a demo guest's bypass overrides a would-have-queued decision. Mocked
 // so the demo-bypass tests can assert the payload without a PostHog call.
@@ -65,8 +68,9 @@ vi.mock('@/lib/rag', () => ({
 vi.mock('@/lib/ai', () => ({
   classifyMessage: (...args: unknown[]) => classifyMessageMock(...args),
   // generateMessage is referenced at module load by stages.ts; stub so the
-  // import doesn't pull in real SDK init.
-  generateMessage: vi.fn(),
+  // import doesn't pull in real SDK init. TAC-309 gave it a named handle so
+  // the fidelity-exemption tests can drive generateStage directly.
+  generateMessage: (...args: unknown[]) => generateMessageMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -1768,5 +1772,171 @@ describe('isKnowledgeGapCard (TAC-308)', () => {
   it('treats a MISSING pending_until as not-a-card, not as a running clock', () => {
     expect(isKnowledgeGapCard({})).toBe(false)
     expect(isKnowledgeGapCard({ review_reason: 'model_flagged' })).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-309: blank gap cards + the fidelity-floor exemption
+// ---------------------------------------------------------------------------
+
+describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const inboundCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: 'what grade is the matcha?',
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'question',
+      },
+    })
+
+  it('sets blankBody on a knowledge-gap queue', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.blankBody).toBe(true)
+  })
+
+  it('leaves blankBody false for every other trigger', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.blankBody).toBe(false)
+  })
+
+  // No exceptions, including the co-fire case. The comp detail survives on
+  // pending_commitment; a model that couldn't ground the answer has no
+  // business pre-writing one.
+  it('still blanks when knowledge_gap co-fires with commitment_type_gated', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({
+        knowledgeGap: true,
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.blankBody).toBe(true)
+  })
+})
+
+describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)', () => {
+  const inbound = {
+    id: 'inbound-1',
+    body: 'what grade is the matcha?',
+    providerMessageId: 'p1',
+    receivedAt: new Date(),
+  }
+  const subFloorGap = () => ({
+    ok: true,
+    data: makeGenerationResult({ voiceFidelity: 0.2, knowledgeGap: true }),
+  })
+
+  // THE SILENT-DROP DOOR THIS CLOSES: the refused branch in handle-inbound
+  // returns with NO card, so a low-fidelity gap turn produced silence — the
+  // guest got nothing and no operator learned they'd asked. Gating card
+  // creation on the voice quality of a body TAC-309 then discards is
+  // incoherent; nothing on this path reaches the guest.
+  it('does NOT refuse a sub-floor body on an inbound knowledge-gap turn', async () => {
+    generateMessageMock.mockResolvedValue(subFloorGap())
+    const out = await generateStage(
+      makeCtx({ corpus: [], currentMessage: inbound }),
+      'new_question',
+    )
+    expect(out.status).toBe('success')
+  })
+
+  // THE SAFETY PROPERTY, not the mechanism. The exemption is only sound
+  // where the turn is guaranteed to be queued. These two are the paths where
+  // it isn't, and where the text WOULD reach a guest — unblanked, because
+  // blanking is also the gate's job. Asserting them here is what stops the
+  // exemption widening back out by accident.
+  it('STILL refuses on the outbound path — a manual followup skips the gate entirely', async () => {
+    generateMessageMock.mockResolvedValue(subFloorGap())
+    const out = await generateStage(
+      makeCtx({
+        corpus: [],
+        currentMessage: null,
+        followupTrigger: { reason: 'manual', triggeredAt: new Date() },
+      }),
+      'manual',
+    )
+    expect(out.status).toBe('refused')
+  })
+
+  it('STILL refuses for a demo guest — TAC-284 bypasses the gate unconditionally', async () => {
+    generateMessageMock.mockResolvedValue(subFloorGap())
+    const out = await generateStage(
+      makeCtx({
+        corpus: [],
+        currentMessage: inbound,
+        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      }),
+      'new_question',
+    )
+    expect(out.status).toBe('refused')
+  })
+
+  // The floor still protects every path where text actually reaches a guest.
+  it('still refuses a sub-floor body when knowledgeGap is false', async () => {
+    generateMessageMock.mockResolvedValue({
+      ok: true,
+      data: makeGenerationResult({ voiceFidelity: 0.2, knowledgeGap: false }),
+    })
+    const out = await generateStage(
+      makeCtx({ corpus: [], currentMessage: inbound }),
+      'new_question',
+    )
+    expect(out.status).toBe('refused')
+  })
+
+  it('leaves above-floor behavior unchanged either way', async () => {
+    generateMessageMock.mockResolvedValue({
+      ok: true,
+      data: makeGenerationResult({ voiceFidelity: 0.9, knowledgeGap: true }),
+    })
+    expect(
+      (await generateStage(makeCtx({ corpus: [], currentMessage: inbound }), 'new_question'))
+        .status,
+    ).toBe('success')
+  })
+})
+
+describe('knowledgeGapWillQueue (TAC-309)', () => {
+  const g = (isDemo = false) => ({ id: 'g', isDemo }) as RuntimeContext['guest']
+  const inbound = { id: 'i' } as RuntimeContext['currentMessage']
+
+  it('is true only for a non-demo inbound gap turn', () => {
+    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, true)).toBe(true)
+  })
+
+  it('is false on the outbound path', () => {
+    expect(knowledgeGapWillQueue({ currentMessage: null, guest: g() }, true)).toBe(false)
+  })
+
+  it('is false for a demo guest', () => {
+    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g(true) }, true)).toBe(false)
+  })
+
+  it('is false when the model did not report a gap', () => {
+    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, false)).toBe(false)
   })
 })
