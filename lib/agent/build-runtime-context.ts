@@ -19,6 +19,7 @@ import {
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { extractRecentVisits } from './extract-recent-visits'
+import { findPendingQuestion } from './pending-question'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -116,6 +117,7 @@ export async function buildRuntimeContext(input: {
     redemptionsResult,
     visitHistoryResult,
     activeCommitmentsResult,
+    pendingQuestionResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -166,6 +168,13 @@ export async function buildRuntimeContext(input: {
       venueId: input.venueId,
       guestId: input.guestId,
     }),
+    // TAC-308: the question this guest is still owed an answer to, if a
+    // knowledge-gap card is holding the pending slot. Fail-OPEN inside the
+    // helper (returns null on any DB error) — the block is a nudge on top of
+    // the universal no-promise rules, not the guardrail itself. Runs in
+    // parallel with the other eight queries; the common case is one indexed
+    // lookup that matches nothing.
+    findPendingQuestion(input.venueId, input.guestId),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -378,6 +387,9 @@ export async function buildRuntimeContext(input: {
     mechanics,
     recentVisits,
     activeCommitments,
+    // TAC-308: null when nothing is outstanding (the overwhelmingly common
+    // case) — the serializer omits the block entirely at zero token cost.
+    pendingQuestion: pendingQuestionResult?.question ?? null,
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

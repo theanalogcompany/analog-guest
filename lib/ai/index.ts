@@ -12,6 +12,7 @@ export type {
   GenerateMessageResult,
   KnowledgeCorpusChunk,
   MessageCategory,
+  PendingQuestion,
   RecentMessage,
   RuntimeContext,
   VoiceCorpusChunk,

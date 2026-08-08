@@ -1,0 +1,53 @@
+# TAC-308 knowledge-gap timeout runner.
+#
+# The route handler at `app/api/cron/pending-timeout/route.ts` scans for
+# knowledge-gap cards whose `messages.pending_until` has elapsed without an
+# operator answering, and sends the guest a model-generated holding message
+# so they aren't left in silence. Vercel's Hobby tier caps cron granularity
+# at daily/weekly and this project stays on Hobby, so the trigger lives here
+# — same arrangement as commitments-due and followups-due.
+#
+# WHY EVERY 5 MINUTES, AND WHY THAT ISN'T A PROMISE: `pending_until` is the
+# EARLIEST a holding message may fire, not a deadline. GitHub Actions
+# scheduled runs lag the target minute under platform load, so a card whose
+# window elapses just after a tick waits for the next one — the real
+# distribution is roughly 5 to 15 minutes. That asymmetry is deliberate.
+# Firing late costs a guest a few more minutes inside a silence they are
+# already in; firing early would talk over an operator who was about to
+# answer. Do NOT shorten the window in the app to compensate for jitter here.
+#
+# If per-minute precision ever matters, that is a Vercel Pro decision (native
+# cron) or a QStash one — not something to fix by tightening this schedule.
+
+name: cron / pending-timeout
+
+on:
+  schedule:
+    # every 5 minutes, UTC.
+    - cron: '*/5 * * * *'
+  # manual trigger for UAT — seed a knowledge-gap card with a pending_until
+  # in the past and fire this to exercise the path end to end.
+  workflow_dispatch:
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    # don't run on fork PRs — schedule/dispatch are repo-internal only
+    if: github.repository == 'theanalogcompany/analog-guest'
+    steps:
+      - name: hit /api/cron/pending-timeout
+        env:
+          PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$PROD_BASE_URL" ]; then
+            echo "::error::PROD_BASE_URL repo variable is unset"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is unset"
+            exit 1
+          fi
+          curl -fsS -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${PROD_BASE_URL}/api/cron/pending-timeout"

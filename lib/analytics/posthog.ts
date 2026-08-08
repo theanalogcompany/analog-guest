@@ -886,3 +886,50 @@ function formatPushTokenInvalid(props: PushTokenInvalidProps): string {
     `run: \`${props.agentRunId ?? '(cron)'}\``,
   ].join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// TAC-308: a generated draft was thrown away to protect a knowledge-gap card
+// ---------------------------------------------------------------------------
+
+export interface DraftDroppedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** messages.id of the knowledge-gap card that won the pending slot. */
+  protectedDraftId: string
+  /** The triggers that would have queued the discarded draft. */
+  triggers: string[]
+  kind: 'inbound' | 'followup'
+  category: string | null
+  droppedBody: string
+}
+
+/**
+ * Fires when the approval gate discards a draft because a knowledge-gap card
+ * already holds this guest's one pending slot (migration 020).
+ *
+ * SLACK-RELAYED, unlike most product analytics, and the reason matters: this
+ * is the one path where a guest says something and receives nothing while no
+ * operator is told anything new. The sharpest case is a complaint — the
+ * clarifying turn auto-sends via the carve-out, then the warm apologetic
+ * resolving draft trips category_requires_approval and is dropped here. Two
+ * safety systems interlocking into silence is the failure class this repo has
+ * been bitten by twice, so it gets an alert rather than a dashboard nobody
+ * opens.
+ */
+export async function captureDraftDropped(props: DraftDroppedProps): Promise<void> {
+  await capturePostHogEvent('draft_dropped', props.guestId, { ...props })
+  await postToSlack(
+    [
+      `*Draft dropped to protect a knowledge-gap card* (${props.kind})`,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `run: \`${props.agentRunId}\``,
+      `protected card: \`${props.protectedDraftId}\``,
+      `would-have-queued: ${props.triggers.map((t) => `\`${t}\``).join(', ')}`,
+      `category: \`${props.category ?? 'null'}\``,
+      `discarded draft: ${truncate(props.droppedBody, 300)}`,
+      `_The guest received nothing on this turn. Answering the pending card releases the guest's slot._`,
+    ].join('\n'),
+  )
+}

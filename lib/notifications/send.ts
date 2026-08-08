@@ -67,6 +67,10 @@ const CONTEXT_BY_TRIGGER = {
   // #95 (0c1515c). Venue-wide hold — no per-message signal to name, so the
   // generic bucket is correct here.
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
+  // TAC-308. Names the thing the operator is being asked for — an answer —
+  // rather than the mechanism. Stays categorical: the guest's actual question
+  // never goes in the payload.
+  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'needs an answer',
 } as const satisfies Partial<Record<ApprovalTrigger, string>>
 
 const CONTEXT_LOOKUP: Record<string, string | undefined> = CONTEXT_BY_TRIGGER

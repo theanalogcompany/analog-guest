@@ -51,6 +51,23 @@ export const CORPUS_RETRIEVE_LIMIT = 8
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
+ * TAC-308: how long an operator has to answer a knowledge-gap card before the
+ * guest gets a holding message, in milliseconds.
+ *
+ * This is a FLOOR, not an SLA. `messages.pending_until` is the earliest the
+ * holding message may fire; the timer cron runs on GitHub Actions (Vercel
+ * Hobby caps cron granularity at daily) and scheduled runs there lag the
+ * target minute under platform load, so the real distribution is roughly
+ * 5–15 minutes. That is acceptable: the cost of lateness is a guest waiting
+ * slightly longer inside a silence they are already in, whereas firing EARLY
+ * would talk over an operator who was about to answer. Never shorten the
+ * check to compensate for jitter.
+ *
+ * Shared constant, not per-venue, per the ticket's out-of-scope list.
+ */
+export const KNOWLEDGE_GAP_WINDOW_MS = 5 * 60 * 1000
+
+/**
  * TAC-212 approval-policy triggers. Used as both the keys for the
  * `triggers: string[]` array on a queue decision AND the lookup keys for
  * PRIMARY_TRIGGER_PRIORITY. Exported so the orchestrator (handle-inbound,
@@ -89,6 +106,12 @@ export const APPROVAL_TRIGGERS = {
   // authorizes rather than an agent deciding on its own. The one exemption is
   // a genuine clarifying question (canAutoSendComplaintTurn).
   CATEGORY_REQUIRES_APPROVAL: 'category_requires_approval',
+  // TAC-308: the model answered a guest question it could not ground in venue
+  // knowledge. Queues the draft AND arms messages.pending_until, which is the
+  // only trigger that starts a clock — if no operator answers before it
+  // elapses, the timer cron sends the guest a holding message. Inbound-only:
+  // a followup has no guest question to leave unanswered.
+  KNOWLEDGE_GAP: 'knowledge_gap',
 } as const
 
 /**
@@ -119,6 +142,16 @@ export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_T
  */
 export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+  // TAC-308: second, deliberately not first. The ticket asked for "top of
+  // priority," but that request was reasoning about the TIMER — and the timer
+  // anchors on messages.pending_until, not on review_reason, so rank decides
+  // only which label the operator card shows. Ranked below
+  // COMMITMENT_TYPE_GATED because a comp/hold/discount losing its label is the
+  // worse failure (this repo has bled from an unlabelled comp signal twice),
+  // and above everything else because a knowledge-gap card is the only card
+  // with a running clock and a guest sitting in silence. A gap-only turn —
+  // the overwhelmingly common case — still wins the label.
+  APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
   // v1.23.0: below MODEL_FLAGGED so a self-flagged or structurally-typed
@@ -139,6 +172,43 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // any concrete per-message trigger above carries the operator-facing label.
   APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND,
 ] as const
+
+/**
+ * TAC-308: is this pending row a knowledge-gap card?
+ *
+ * Two conditions, OR'd, and the OR is load-bearing:
+ *
+ *   pending_until IS NOT NULL — the clock is still running. Catches the card
+ *     even when a co-firing trigger (a comp commitment on the same turn) won
+ *     `review_reason` and the label doesn't say "knowledge_gap".
+ *   review_reason = 'knowledge_gap' — the clock has already fired. The timer
+ *     CLEARS pending_until as its CAS claim, so after a holding message goes
+ *     out the first condition stops matching. Without this second one the
+ *     card would silently lose its eviction protection five minutes after
+ *     being created, which is the original data-loss bug on a delay.
+ *
+ * Residual, accepted: a draft that BOTH gapped and committed a comp gets
+ * review_reason='commitment_type_gated', so once its clock fires it is no
+ * longer recognized. Rare (the model has to do both in one turn) and it
+ * degrades to pre-TAC-308 behavior rather than to something worse. Closing it
+ * needs a column, which the ticket ruled out.
+ */
+export function isKnowledgeGapCard(row: {
+  review_reason?: string | null
+  pending_until?: string | null
+}): boolean {
+  // Positive identification only. `typeof === 'string'` rather than
+  // `!== null` because an ABSENT field (a caller that didn't select the
+  // column, a hand-built row) is `undefined`, and `undefined !== null` is
+  // true — which would classify every ordinary pending draft as a protected
+  // knowledge-gap card and silently start dropping replies that used to
+  // send. Unknown means "not a gap card": the fail-safe direction is the
+  // pre-TAC-308 behavior, not the new one.
+  return (
+    typeof row.pending_until === 'string' ||
+    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP
+  )
+}
 
 function pickPrimaryTrigger(triggers: readonly string[]): string {
   // Caller guarantees triggers.length > 0; the fallback to triggers[0]
@@ -510,6 +580,28 @@ export type ApprovalDecision =
       // findPendingDraft() during trigger 4 evaluation so the persist layer
       // doesn't need a second round-trip.
       existingPendingDraftId: string | null
+      // TAC-308: when set, the persist layer stamps messages.pending_until,
+      // arming the holding-message timer. `undefined` means "leave the column
+      // alone" — omitted on INSERT (so the column stays null), absent from the
+      // UPDATE payload (so an existing clock is PRESERVED rather than pushed
+      // out by a chatty guest). Explicit rather than derived from the trigger
+      // set, because the timeout regen also queues with a knowledge_gap
+      // trigger and must NOT re-arm the clock it just fired.
+      pendingUntil?: Date
+    }
+  // TAC-308: the guest already has a knowledge-gap card holding the one
+  // pending slot migration 020 allows, and THIS turn would queue for some
+  // reason other than gapping itself. We can't store a second pending row and
+  // we won't overwrite the card an operator is about to answer, so the new
+  // draft is discarded: not sent, not persisted. The guest is silent on this
+  // turn. That cost is accepted deliberately — the turn needed a human
+  // anyway, and losing the outstanding question is worse than losing a reply
+  // that was never going to reach the guest without review.
+  | {
+      action: 'drop'
+      reason: 'knowledge_gap_card_protected'
+      triggers: string[]
+      protectedDraftId: string
     }
 
 export async function applyApprovalPolicyStage(
@@ -540,10 +632,16 @@ export async function applyApprovalPolicyStage(
   // Trigger 4: sticky pending — there's already a pending draft for this
   // (venue_id, guest_id). TAC-264 routes regeneration through the persist
   // layer using the captured row ID rather than the boolean signal alone.
+  //
+  // TAC-308 moves the PUSH of this trigger to the end of the function (see
+  // "pending-row resolution" below) while keeping the LOOKUP here in
+  // enumeration order. The carve-out has to know whether any OTHER trigger
+  // fired, which isn't decided until trigger 9 has run. Consequence: when
+  // previous_pending_held does fire it now appears LAST in `triggers[]`
+  // rather than fourth. `triggers[]` order is observability only —
+  // primaryTrigger is priority-selected via PRIMARY_TRIGGER_PRIORITY — so
+  // nothing downstream keys on the position.
   const existingPending = await findPendingDraft(ctx.venue.id, ctx.guest.id)
-  if (existingPending !== null) {
-    triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
-  }
 
   // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
   // discount}. Fires regardless of requiresOperatorApproval self-flag.
@@ -609,6 +707,52 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
   }
 
+  // Trigger 9 (TAC-308): the model answered a question it could not ground in
+  // venue knowledge. Inbound-only — `ctx.currentMessage !== null` — because a
+  // followup has no guest question outstanding, and letting a cron-triggered
+  // proactive message arm a 5-minute holding-message clock would produce a
+  // holding note for a question nobody asked.
+  const knowledgeGapFired =
+    generation.knowledgeGap === true && ctx.currentMessage !== null
+  if (knowledgeGapFired) {
+    triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+  }
+
+  // ---- Pending-row resolution (TAC-308) ----
+  //
+  // Trigger 4's lookup ran in enumeration order above; its PUSH happens here,
+  // because whether it fires depends on what every other trigger decided.
+  //
+  // A knowledge-gap card is a pending row with a live `pending_until`: an
+  // operator is on the hook for an answer and a clock is running. Three cases,
+  // and they are genuinely different:
+  //
+  //   1. This turn is independently sendable (no trigger fired at all).
+  //      Send it. TAC-264's no-demotion invariant would otherwise queue it and
+  //      route it into UPDATE-in-place, which BOTH silences the guest AND
+  //      overwrites the card. What that invariant actually guards is a
+  //      REGENERATED VERSION OF THE SAME DRAFT going out from under an
+  //      operator; a reply to a different question is not that. Narrowed to
+  //      knowledge-gap cards only, so the invariant stays absolute everywhere
+  //      it was designed to apply. Migration 020 permits the coexistence —
+  //      the send writes review_state='auto_sent', which is outside the
+  //      partial unique index.
+  //   2. This turn also gaps. UPDATE the card in place (the standard
+  //      regen path) and PRESERVE its original pending_until, so a guest
+  //      asking a second unanswerable question can't push the clock out.
+  //   3. This turn queues for any other reason. The card wins; the new draft
+  //      is dropped below.
+  //
+  // Every other pending row keeps the pre-TAC-308 behavior exactly.
+  const existingIsKnowledgeGapCard =
+    existingPending !== null && isKnowledgeGapCard(existingPending)
+  const protectedCardCarveOut =
+    existingIsKnowledgeGapCard && triggers.length === 0
+
+  if (existingPending !== null && !protectedCardCarveOut) {
+    triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  }
+
   // TAC-284: demo guest bypass. Evaluated AFTER all four triggers (so the
   // would-have-queued set — including the previous_pending_held DB read — is
   // accurate for the analytics event) but BEFORE the queue return. The
@@ -635,12 +779,46 @@ export async function applyApprovalPolicyStage(
   if (triggers.length === 0) {
     return { action: 'send' }
   }
+
+  // TAC-308 case 3: a knowledge-gap card holds the slot and this turn queues
+  // for some reason OTHER than gapping itself. Regen-in-place would overwrite
+  // the question an operator is about to answer, and migration 020 forbids a
+  // second pending row, so the draft is discarded rather than stored.
+  if (existingPending !== null && existingIsKnowledgeGapCard && !knowledgeGapFired) {
+    return {
+      action: 'drop',
+      reason: 'knowledge_gap_card_protected',
+      triggers,
+      protectedDraftId: existingPending.id,
+    }
+  }
+
+  // TAC-308: arm the clock only when this draft is BECOMING a knowledge-gap
+  // card that isn't already one.
+  //   - fresh INSERT on a gap turn          → now + window
+  //   - regen of a gap card, clock running  → undefined, preserving its
+  //     original deadline so a guest asking a second unanswerable question
+  //     can't push it out
+  //   - regen of a gap card, clock ALREADY FIRED → undefined, so the holding
+  //     message stays one-per-card. The guest was told "we're on it" minutes
+  //     ago; a second holding note for a second unanswered question would be
+  //     the same sentence again. The operator still holds the card.
+  //   - gap turn overwriting a NON-gap card → now + window (the row is a gap
+  //     card as of this write, so it needs a clock; that overwrite is the
+  //     pre-existing TAC-264 clobber, out of scope here)
+  //   - any non-gap queue                   → undefined, column untouched
+  const pendingUntil =
+    knowledgeGapFired && !existingIsKnowledgeGapCard
+      ? new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
+      : undefined
+
   return {
     action: 'queue',
     triggers,
     primaryTrigger: pickPrimaryTrigger(triggers),
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
+    pendingUntil,
   }
 }
 
@@ -661,16 +839,24 @@ export async function applyApprovalPolicyStage(
  *
  * Exported for the test suite. TAC-264 renamed from hasPendingDraft (which
  * returned a boolean) to surface the row identity for the persist layer.
+ * TAC-308 adds `pending_until` + `review_reason` so the gate can tell a
+ * knowledge-gap card (protected from eviction) from an ordinary pending
+ * draft — see isKnowledgeGapCard for why it takes both.
  */
 export async function findPendingDraft(
   venueId: string,
   guestId: string,
-): Promise<{ id: string; body: string } | null> {
+): Promise<{
+  id: string
+  body: string
+  pending_until: string | null
+  review_reason: string | null
+} | null> {
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('messages')
-      .select('id, body')
+      .select('id, body, pending_until, review_reason')
       .eq('venue_id', venueId)
       .eq('guest_id', guestId)
       .eq('direction', 'outbound')
@@ -853,6 +1039,14 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
         typeof rawHint === 'string' && rawHint.trim().length > 0 ? rawHint.trim() : null
       if (hint) {
         operatorInstruction = hint
+      } else if (ctx.pendingQuestion?.mode === 'writing_holding') {
+        // TAC-308: the holding-message run reaches buildAiRuntime through a
+        // synthetic 'manual' trigger (it needs the outbound path), but no
+        // operator asked for it — the timer did. Emitting the generic
+        // "the venue operator has asked you to follow up" line below would be
+        // a false statement in the prompt, and it would compete with the
+        // `## Unanswered question` block that carries the real brief. Leave
+        // both operatorInstruction and additionalContext unset.
       } else {
         // No note — fall back to the generic framing as before, via
         // additionalContext. Without the block firing, Sonnet still needs
@@ -934,6 +1128,10 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // `## Active commitments` block between guest context and recent
     // conversation; empty array omits the block.
     activeCommitments: ctx.activeCommitments,
+    // TAC-308: the outstanding knowledge-gap question. Rendered as
+    // `## Unanswered question` immediately before `## Recent conversation`.
+    // null → undefined so the serializer's presence check omits the block.
+    pendingQuestion: ctx.pendingQuestion ?? undefined,
     // TAC-244: derive `followup` here at the single mapping seam.
     // `deriveFollowupContext` returns undefined on the inbound path
     // (followupTrigger=null) and on the event/manual trigger reasons

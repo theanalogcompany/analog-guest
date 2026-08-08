@@ -6,6 +6,7 @@ import {
   classifyStage,
   deriveFollowupContext,
   findPendingDraft,
+  isKnowledgeGapCard,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
@@ -97,6 +98,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
     currentMessage: null,
     followupTrigger: null,
+    pendingQuestion: null,
     recentMessages: [],
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
@@ -530,6 +532,7 @@ function makeGenerationResult(
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none' as const,
+    knowledgeGap: false,
     // TAC-296 / TAC-297: required schema fields. The no-op shapes are `{}`.
     // Stages tests for legacy triggers (fidelity / model_flagged / regex /
     // pending) override `commitment` to exercise the COMMITMENT_TYPE_GATED
@@ -1531,5 +1534,239 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-308: knowledge-gap trigger + protected-card resolution
+// ---------------------------------------------------------------------------
+
+describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const inboundCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: 'what grade is the matcha?',
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'question',
+      },
+    })
+
+  it('queues and arms the clock when the model reports a knowledge gap', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    // The clock is the whole point: without pendingUntil the card sits in the
+    // queue forever and the guest never hears anything.
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+  })
+
+  it('sends normally when the model reports no gap', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // A cron followup has no guest question outstanding. Arming a clock there
+  // would produce a holding message for something nobody asked.
+  it('does NOT fire on the outbound path even when the model sets the flag', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({
+        currentMessage: null,
+        followupTrigger: { reason: 'day_7', triggeredAt: new Date() },
+      }),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // Ranked second, below commitment_type_gated. The ticket asked for "top",
+  // but that was reasoning about the timer — and the timer anchors on
+  // pending_until, not on this label. A comp losing its label is worse.
+  it('yields the operator label to commitment_type_gated when both fire', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({
+        knowledgeGap: true,
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    // ...but it still gets a clock. The label and the timer are independent,
+    // which is the entire reason the scan keys on pending_until.
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+  })
+
+  it('outranks everything that is not a structured commitment', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({
+        knowledgeGap: true,
+        voiceFidelity: 0.45,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+  })
+})
+
+describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)', () => {
+  const gapCard = {
+    id: 'gap-card-1',
+    body: 'best guess at the answer',
+    pending_until: new Date(Date.now() + 60_000).toISOString(),
+    review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+  }
+
+  const inboundCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-2',
+        body: 'are you open till 6?',
+        providerMessageId: 'p2',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'question',
+      },
+    })
+
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+  })
+
+  // CASE 1 — the carve-out. This is the behavior TAC-264's no-demotion
+  // invariant would otherwise block: the guest asks a SECOND, answerable
+  // question while a gap card is pending, and today that reply is both
+  // silenced AND allowed to overwrite the card. Narrowed to gap cards only.
+  it('sends an independently sendable reply instead of evicting the card', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // CASE 2 — the card wins, the new draft is discarded. The guest is silent
+  // on this turn, which is the accepted cost of not losing the question.
+  it('drops a draft that would queue for some other reason', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({
+        knowledgeGap: false,
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+    )
+    expect(decision.action).toBe('drop')
+    if (decision.action !== 'drop') return
+    expect(decision.reason).toBe('knowledge_gap_card_protected')
+    expect(decision.protectedDraftId).toBe('gap-card-1')
+  })
+
+  // CASE 3 — a second unanswerable question updates the card in place and
+  // must NOT push the deadline out, or a chatty guest could defer the
+  // holding message indefinitely.
+  it('regenerates in place and preserves the original clock when the new turn also gaps', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    // undefined = "don't touch the column", which preserves the running clock.
+    expect(decision.pendingUntil).toBeUndefined()
+  })
+
+  // A card whose holding message already fired has pending_until cleared, so
+  // it is recognized by review_reason alone. Without this the card would
+  // silently lose its protection five minutes after being created.
+  it('still protects a card whose clock has already fired', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: { ...gapCard, pending_until: null },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // An ORDINARY pending draft keeps pre-TAC-308 behavior exactly: it queues
+  // and regenerates in place. The carve-out must not leak.
+  it('leaves non-gap pending drafts on the old path', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: 'ordinary-draft',
+        body: 'earlier draft',
+        pending_until: null,
+        review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+      },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(decision.existingPendingDraftId).toBe('ordinary-draft')
+  })
+})
+
+describe('isKnowledgeGapCard (TAC-308)', () => {
+  it('identifies a card by a running clock', () => {
+    expect(
+      isKnowledgeGapCard({ pending_until: new Date().toISOString(), review_reason: 'anything' }),
+    ).toBe(true)
+  })
+
+  it('identifies a fired card by its review_reason', () => {
+    expect(
+      isKnowledgeGapCard({ pending_until: null, review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP }),
+    ).toBe(true)
+  })
+
+  it('treats an ordinary pending draft as not a card', () => {
+    expect(isKnowledgeGapCard({ pending_until: null, review_reason: 'model_flagged' })).toBe(false)
+  })
+
+  // The direction here is the safe one, and it is the point of the test:
+  // an ABSENT field means "we don't know", and unknown must fall back to
+  // pre-TAC-308 behavior. The opposite default would classify every ordinary
+  // pending draft as protected and start silently dropping sendable replies.
+  it('treats a MISSING pending_until as not-a-card, not as a running clock', () => {
+    expect(isKnowledgeGapCard({})).toBe(false)
+    expect(isKnowledgeGapCard({ review_reason: 'model_flagged' })).toBe(false)
   })
 })

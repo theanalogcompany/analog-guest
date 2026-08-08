@@ -3,6 +3,7 @@ import { waitUntil } from '@vercel/functions'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
+  captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
@@ -504,6 +505,45 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       modelRequiresApproval: gen.result.requiresOperatorApproval,
     })
 
+    // TAC-308: a knowledge-gap card holds this guest's one pending slot and
+    // this turn would have queued for a different reason. We don't overwrite
+    // the question an operator is about to answer, and migration 020 forbids
+    // a second pending row, so the draft is discarded. The guest hears
+    // nothing on this turn — accepted deliberately (the turn needed a human
+    // anyway, and losing the outstanding question is the worse outcome).
+    if (approval.action === 'drop') {
+      console.warn('[agent] inbound dropped to protect knowledge-gap card', {
+        agentRunId,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
+      })
+      await captureDraftDropped({
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
+        kind: 'inbound',
+        category: ctx.classification.category,
+        droppedBody: gen.result.body,
+      })
+      trace.update({
+        output: {
+          status: 'dropped',
+          reason: approval.reason,
+          protectedDraftId: approval.protectedDraftId,
+          triggers: approval.triggers,
+        },
+        content: { droppedDraft: gen.result.body },
+      })
+      return {
+        status: 'dropped',
+        reason: approval.reason,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
+      }
+    }
+
     if (approval.action === 'queue') {
       const queueSpan = trace.span('queue', {
         primaryTrigger: approval.primaryTrigger,
@@ -517,6 +557,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           gen.result,
           approval.primaryTrigger,
           approval.existingPendingDraftId,
+          // TAC-308: set only when this draft is becoming a knowledge-gap
+          // card that doesn't already have a clock. Undefined preserves an
+          // existing pending_until on regen and leaves the column null
+          // otherwise — see applyApprovalPolicyStage for the full table.
+          { pendingUntil: approval.pendingUntil },
         )
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({

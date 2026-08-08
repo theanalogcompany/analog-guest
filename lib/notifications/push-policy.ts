@@ -95,6 +95,14 @@ const PUSH_POLICY = {
   // guest waiting on a reply that will never send itself.
   [APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL]: 'push',
 
+  // TAC-308. The model answered a question it couldn't ground, and the draft
+  // is now sitting in the queue with a clock running. This is the push that
+  // most needs to arrive: if the operator doesn't see it before the timer
+  // elapses, the guest gets a holding message instead of an answer. Pushing
+  // is what makes the good path (operator answers inside the window, guest
+  // never sees a holding note) reachable at all.
+  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator

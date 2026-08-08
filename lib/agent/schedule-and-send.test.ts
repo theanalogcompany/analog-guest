@@ -179,6 +179,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
+    pendingQuestion: null,
     corpus: null,
     knowledgeCorpus: null,
     classification: { category: 'reply' } as RuntimeContext['classification'],
@@ -195,6 +196,7 @@ function makeGeneration(): GenerateMessageResult {
     requiresOperatorApproval: false,
     approvalReason: '',
   complaintIntent: 'none' as const,
+    knowledgeGap: false,
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
@@ -447,5 +449,121 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null),
     ).rejects.toThrow(/race-recovery/)
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-308: pending_until threading
+// ---------------------------------------------------------------------------
+
+describe('persistOrRegenQueuedDraft — pending_until (TAC-308)', () => {
+  const WHEN = new Date('2026-08-07T12:05:00Z')
+
+  beforeEach(() => {
+    scenario = freshScenario()
+  })
+
+  it('stamps the clock on INSERT when a card is being armed', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
+      pendingUntil: WHEN,
+    })
+    expect(scenario.inserts[0]?.pending_until).toBe(WHEN.toISOString())
+  })
+
+  it('leaves the clock null on INSERT for an ordinary queued draft', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {})
+    expect(scenario.inserts[0]?.pending_until).toBeNull()
+  })
+
+  // The two behaviors that depend on the key being ABSENT rather than null:
+  // a chatty guest can't push the deadline out by asking again, and the
+  // timeout regen can't re-arm the clock it just fired (which would send a
+  // second holding message five minutes later).
+  it('omits pending_until from the UPDATE payload so an existing clock survives', async () => {
+    scenario.priorReasonResponses.push({ data: { review_reason: 'knowledge_gap' }, error: null })
+    scenario.updateResponses.push({ data: { id: 'existing' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'existing', {})
+    expect(scenario.updates[0]?.payload).not.toHaveProperty('pending_until')
+  })
+
+  it('writes pending_until on UPDATE only when a fresh clock is passed', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'comp_regex_backstop' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'existing', {
+      pendingUntil: WHEN,
+    })
+    expect(scenario.updates[0]?.payload.pending_until).toBe(WHEN.toISOString())
+  })
+
+  // Defaulted parameter: every pre-TAC-308 call site omits the options arg
+  // entirely and must keep behaving exactly as it did.
+  it('is backward compatible with call sites that pass no options', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null)
+    expect(scenario.inserts[0]?.pending_until).toBeNull()
+  })
+})
+
+describe('persistOrRegenQueuedDraft — updateOnly (TAC-308)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+  })
+
+  // THE REGRESSION THIS EXISTS TO PREVENT: without updateOnly, a vanished
+  // target row falls through to INSERT. For the timeout regen that would
+  // create a phantom pending card — answering a question the guest was
+  // already answered, protected forever by review_reason='knowledge_gap',
+  // invisible to the timer (pending_until null) and never pushed. It would
+  // surface only when the operator next opened the queue.
+  it('returns skipped instead of INSERTing when the target row is gone', async () => {
+    scenario.priorReasonResponses.push({ data: null, error: null }) // row vanished
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'card-1',
+      { updateOnly: true },
+    )
+    expect(result.action).toBe('skipped')
+    expect(result.outboundMessageId).toBeNull()
+    expect(scenario.inserts).toHaveLength(0)
+  })
+
+  it('still UPDATEs normally when the row is present', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'card-1' }, error: null })
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'card-1',
+      { updateOnly: true },
+    )
+    expect(result.action).toBe('updated')
+    expect(scenario.inserts).toHaveLength(0)
+  })
+
+  // The orchestrators must keep the old recovery behavior: for them, a
+  // vanished row means the pending slot is free and the draft still needs
+  // somewhere to live.
+  it('leaves the INSERT fallback intact for callers that do not opt in', async () => {
+    scenario.priorReasonResponses.push({ data: null, error: null })
+    scenario.insertResponses.push({ data: { id: 'fresh' }, error: null })
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      'gone-row',
+    )
+    expect(result.action).toBe('inserted')
+    expect(scenario.inserts).toHaveLength(1)
   })
 })
