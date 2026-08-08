@@ -221,6 +221,8 @@ describe('listPendingQueue', () => {
       ['model_flagged', 'Model flagged for approval'],
       ['fidelity_below_auto_send_floor', 'Voice match below auto-send threshold'],
       ['previous_pending_held', 'Earlier draft still pending'],
+      // TAC-308: the only card in the queue with a running clock.
+      ['knowledge_gap', 'Waiting on an answer'],
       ['gibberish_unknown_code', 'Needs review'],
     ])('maps review_reason %s to %s', async (raw, expected) => {
       rpcMock.mockResolvedValue({

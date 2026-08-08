@@ -101,6 +101,11 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-299: operator swiped left on a heads-up card → /draft-decline
   // persisted an apology draft for review.
   operator_decline_initiated: 'Operator-initiated decline',
+  // TAC-308: the agent couldn't ground the answer, so the draft is its best
+  // guess and the guest has been told nothing. Phrased as the ask, because
+  // this is the one card in the queue where a guest is actively waiting on a
+  // clock — if it isn't answered, a holding message goes out instead.
+  knowledge_gap: 'Waiting on an answer',
 }
 
 const REVIEW_REASON_FALLBACK = 'Needs review'

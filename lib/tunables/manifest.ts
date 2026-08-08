@@ -21,6 +21,7 @@ import { COMP_PATTERNS } from '@/lib/agent/comp-backstop'
 import {
   AUTO_SEND_FIDELITY_FLOOR,
   CORPUS_RETRIEVE_LIMIT,
+  KNOWLEDGE_GAP_WINDOW_MS,
   KNOWLEDGE_RETRIEVE_LIMIT,
   MIN_STRONG_MATCHES,
   SEND_FIDELITY_FLOOR,
@@ -498,5 +499,15 @@ export const TUNABLES = [
     source: 'lib/schemas/followup-rules.ts',
     description: 'Venue-local hour (0-23) at which the daily processor fires. The cron itself fires hourly UTC; the processor filters per-venue against this value.',
     relatedTickets: ['TAC-123'],
+  },
+  {
+    name: 'knowledge_gap_window_ms',
+    value: KNOWLEDGE_GAP_WINDOW_MS,
+    type: 'number',
+    category: 'timing',
+    source: 'lib/agent/stages.ts',
+    description:
+      'How long an operator has to answer a knowledge-gap card before the guest gets a holding message. A FLOOR, not an SLA: the timer cron runs on GitHub Actions every 5 minutes and scheduled runs lag under load, so the real distribution is roughly 5-15 minutes. Never fires early.',
+    relatedTickets: ['TAC-308'],
   },
 ] as const satisfies readonly Tunable[]

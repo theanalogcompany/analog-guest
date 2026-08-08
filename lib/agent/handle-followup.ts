@@ -3,6 +3,7 @@ import { waitUntil } from '@vercel/functions'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
+  captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
@@ -420,6 +421,10 @@ export async function handleFollowup(input: {
             gen.result,
             approval.primaryTrigger,
             approval.existingPendingDraftId,
+            // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
+            // trigger is inbound-only), passed for call-site symmetry so the
+            // two orchestrators can't drift.
+            { pendingUntil: approval.pendingUntil },
           )
           const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
           queueSpan.end({
@@ -526,6 +531,47 @@ export async function handleFollowup(input: {
           const errMsg = e instanceof Error ? e.message : String(e)
           queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
           return { status: 'failed', stage: 'persist', error: errMsg }
+        }
+      }
+      // TAC-308: this guest has a knowledge-gap card awaiting an operator
+      // answer. A cron-triggered followup that would otherwise queue must not
+      // take the pending slot — regen-in-place would overwrite the question.
+      // Drop it; the next tick re-evaluates once the card clears.
+      //
+      // Reachable on this path only via a NON-gap trigger, since the
+      // KNOWLEDGE_GAP trigger is inbound-only. Manual followups never get
+      // here at all — they bypass the gate entirely above.
+      if (approval.action === 'drop') {
+        console.warn('[agent] followup dropped to protect knowledge-gap card', {
+          agentRunId,
+          triggerReason: input.trigger.reason,
+          protectedDraftId: approval.protectedDraftId,
+          triggers: approval.triggers,
+        })
+        await captureDraftDropped({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          protectedDraftId: approval.protectedDraftId,
+          triggers: approval.triggers,
+          kind: 'followup',
+          category,
+          droppedBody: gen.result.body,
+        })
+        trace.update({
+          output: {
+            status: 'dropped',
+            reason: approval.reason,
+            protectedDraftId: approval.protectedDraftId,
+            triggers: approval.triggers,
+          },
+          content: { droppedDraft: gen.result.body },
+        })
+        return {
+          status: 'dropped',
+          reason: approval.reason,
+          protectedDraftId: approval.protectedDraftId,
+          triggers: approval.triggers,
         }
       }
       demoBypassReviewReason = approval.reason

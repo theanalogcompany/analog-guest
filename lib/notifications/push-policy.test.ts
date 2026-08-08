@@ -82,3 +82,13 @@ describe('shouldSendDraftFlaggedPush', () => {
     expect(shouldSendDraftFlaggedPush('')).toBe(true)
   })
 })
+
+describe('push-policy — knowledge_gap (TAC-308)', () => {
+  // This is the push that makes the good path reachable at all: if the
+  // operator doesn't see the card before the timer elapses, the guest gets a
+  // holding message instead of an answer.
+  it('pushes on a knowledge gap', () => {
+    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)).toBe(true)
+    expect(_PUSH_POLICY_FOR_TESTS[APPROVAL_TRIGGERS.KNOWLEDGE_GAP]).toBe('push')
+  })
+})

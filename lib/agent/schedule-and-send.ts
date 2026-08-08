@@ -34,6 +34,40 @@ function alertKind(ctx: RuntimeContext): 'inbound' | 'followup' {
 }
 
 /**
+ * TAC-308 options for the queue-path persist.
+ *
+ * `pendingUntil` is deliberately three-state rather than `Date | null`:
+ *   - a Date        → stamp it (INSERT and UPDATE alike)
+ *   - undefined     → leave the column ALONE. On INSERT that means null; on
+ *                     UPDATE it means an existing clock survives untouched.
+ * There is no "clear it" value here on purpose. The only thing that clears
+ * `pending_until` is the timer's CAS claim, which is what makes that claim
+ * the single writer of the fired/not-fired state.
+ */
+export interface PersistQueuedDraftOptions {
+  pendingUntil?: Date
+  /**
+   * TAC-308: refuse to fall back to INSERT when the target row is gone.
+   *
+   * The default race-recovery behavior — UPDATE misses, so INSERT a fresh
+   * pending row — is right for the orchestrators, where the draft still needs
+   * somewhere to live. It is WRONG for the timeout regen, which is only
+   * trying to freshen the body of a card that already exists. If an operator
+   * approves that card mid-regen, the UPDATE matches nothing and an INSERT
+   * would create a phantom: a new pending row answering a question the guest
+   * was already answered, carrying review_reason='knowledge_gap' (so
+   * isKnowledgeGapCard protects it forever, silently dropping later drafts)
+   * with pending_until null (so the timer never touches it) and no push (the
+   * orchestrators fire those, not this helper). Nothing would surface it
+   * until the operator next opened the queue.
+   *
+   * With this set, a vanished row returns `action: 'skipped'` instead. The
+   * caller's contract already treats a failed regen as best-effort.
+   */
+  updateOnly?: boolean
+}
+
+/**
  * Single source of truth for the outbound message row shape. Both
  * scheduleAndSend (auto-send path) and persistOrRegenQueuedDraft (TAC-212
  * + TAC-264 queue path) call this so the column set never drifts between
@@ -316,14 +350,40 @@ export async function scheduleAndSend(
  * can observe trigger transitions (the row is overwritten in place; the
  * old value is otherwise lost). Always null on the INSERT path.
  */
+// Overloads, so the widened return shape doesn't leak to callers that can
+// never see it. Only an `updateOnly` caller can be told 'skipped'; everyone
+// else keeps the original non-null contract and needs no narrowing.
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
+  options: PersistQueuedDraftOptions & { updateOnly: true },
+): Promise<{
+  outboundMessageId: string | null
+  action: 'inserted' | 'updated' | 'skipped'
+  priorReviewReason: string | null
+}>
+export async function persistOrRegenQueuedDraft(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  primaryTrigger: string,
+  initialExistingPendingDraftId: string | null,
+  options?: PersistQueuedDraftOptions & { updateOnly?: false },
 ): Promise<{
   outboundMessageId: string
   action: 'inserted' | 'updated'
+  priorReviewReason: string | null
+}>
+export async function persistOrRegenQueuedDraft(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  primaryTrigger: string,
+  initialExistingPendingDraftId: string | null,
+  options: PersistQueuedDraftOptions = {},
+): Promise<{
+  outboundMessageId: string | null
+  action: 'inserted' | 'updated' | 'skipped'
   priorReviewReason: string | null
 }> {
   const supabase = createAdminClient()
@@ -331,7 +391,14 @@ export async function persistOrRegenQueuedDraft(
 
   for (let attempt = 0; attempt < RACE_RECOVERY_MAX_ATTEMPTS; attempt++) {
     if (existingId !== null) {
-      const upd = await tryRegenUpdate(supabase, ctx, generation, primaryTrigger, existingId)
+      const upd = await tryRegenUpdate(
+        supabase,
+        ctx,
+        generation,
+        primaryTrigger,
+        existingId,
+        options,
+      )
       if (upd.kind === 'updated') {
         return {
           outboundMessageId: upd.id,
@@ -341,8 +408,16 @@ export async function persistOrRegenQueuedDraft(
       }
       if (upd.kind === 'rowcount_zero') {
         // TOCTOU vs. dispatchOperatorOutbound: row was approved/edited/skipped
-        // between findPendingDraft and our UPDATE. The pending slot is now
-        // empty — drop the ID and retry as INSERT on the next loop tick.
+        // between findPendingDraft and our UPDATE.
+        if (options.updateOnly === true) {
+          // Update-only caller (the TAC-308 timeout regen). The row it wanted
+          // to freshen is gone, which means an operator already handled it.
+          // Inserting a replacement would be actively harmful — see the
+          // updateOnly doc comment. Report and stop.
+          return { outboundMessageId: null, action: 'skipped', priorReviewReason: null }
+        }
+        // The pending slot is now empty — drop the ID and retry as INSERT on
+        // the next loop tick.
         existingId = null
         continue
       }
@@ -362,7 +437,7 @@ export async function persistOrRegenQueuedDraft(
       throw new Error(`persistOrRegenQueuedDraft: regen update failed: ${upd.error}`)
     }
 
-    const ins = await tryQueueInsert(supabase, ctx, generation, primaryTrigger)
+    const ins = await tryQueueInsert(supabase, ctx, generation, primaryTrigger, options)
     if (ins.kind === 'inserted') {
       return { outboundMessageId: ins.id, action: 'inserted', priorReviewReason: null }
     }
@@ -419,6 +494,7 @@ async function tryQueueInsert(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
+  options: PersistQueuedDraftOptions,
 ): Promise<
   | { kind: 'inserted'; id: string }
   | { kind: 'unique_violation' }
@@ -438,6 +514,9 @@ async function tryQueueInsert(
           review_state: 'pending',
           review_reason: primaryTrigger,
           pending_commitment: pendingCommitment,
+          // TAC-308: arms the holding-message timer. Undefined stays null —
+          // only a knowledge-gap draft gets a clock.
+          pending_until: options.pendingUntil?.toISOString() ?? null,
         }),
       )
       .select('id')
@@ -473,6 +552,7 @@ async function tryRegenUpdate(
   generation: GenerateMessageResult,
   primaryTrigger: string,
   existingPendingDraftId: string,
+  options: PersistQueuedDraftOptions,
 ): Promise<
   | { kind: 'updated'; id: string; priorReviewReason: string | null }
   | { kind: 'rowcount_zero' }
@@ -514,6 +594,19 @@ async function tryRegenUpdate(
       langfuse_trace_id: ctx.trace.id || null,
       review_reason: primaryTrigger,
       pending_commitment: pendingCommitment,
+    }
+    // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
+    // omitted from the payload unless the caller explicitly passed a new
+    // clock. Two behaviors depend on the omission:
+    //   - a guest asking a second unanswerable question refreshes the card's
+    //     body but cannot push its deadline out
+    //   - the timeout regen (which runs after the clock has fired and been
+    //     cleared) cannot re-arm it, so the holding message stays one-shot
+    // Contrast pending_commitment directly above, which is overwritten
+    // wholesale by design (TAC-297 call #1). Different columns, opposite
+    // policies, deliberately.
+    if (options.pendingUntil !== undefined) {
+      updatePayload.pending_until = options.pendingUntil.toISOString()
     }
     const { data: updated, error: updateError } = await supabase
       .from('messages')

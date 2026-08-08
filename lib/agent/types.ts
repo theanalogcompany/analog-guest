@@ -1,4 +1,9 @@
-import type { FollowupReason, MessageCategory, RecentMessage } from '@/lib/ai'
+import type {
+  FollowupReason,
+  MessageCategory,
+  PendingQuestion,
+  RecentMessage,
+} from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
 import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -178,6 +183,16 @@ export interface RuntimeContext {
   // (so it can ask for arrival timing if natural — soft, woven, not a standing
   // directive).
   activeCommitments: ActiveCommitment[]
+  // TAC-308: the question this guest is still owed an answer to, when a
+  // knowledge-gap card is sitting in the operator queue. Loaded by
+  // build-runtime-context.ts via findPendingQuestion; mapped onto the AI
+  // runtime by buildAiRuntime and rendered as `## Unanswered question`.
+  // null = nothing outstanding, block omitted.
+  //
+  // The timer path (handle-holding-message.ts) overwrites `mode` to
+  // 'writing_holding' on the context it builds, which is what turns this
+  // block from "don't promise anything" into the holding message's brief.
+  pendingQuestion: PendingQuestion | null
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups
@@ -203,6 +218,18 @@ export type AgentResult =
   | { status: 'queued'; outboundMessageId: string; triggers: string[]; primaryTrigger: string }
   | { status: 'refused'; reason: string; attemptScores?: number[] }
   | { status: 'skipped_duplicate' }
+  // TAC-308: the guest has a knowledge-gap card awaiting an operator answer,
+  // and this turn would have queued for some other reason. Migration 020
+  // allows one pending row per guest and the card wins it, so the draft was
+  // discarded — nothing sent, nothing persisted. Distinct from 'refused'
+  // (which means the generation itself wasn't good enough) because the draft
+  // here was fine; it just had nowhere to go.
+  | {
+      status: 'dropped'
+      reason: 'knowledge_gap_card_protected'
+      protectedDraftId: string
+      triggers: string[]
+    }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }
 
 export interface TimingPlan {

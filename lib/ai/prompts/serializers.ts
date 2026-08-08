@@ -12,6 +12,7 @@ import type {
   FollowupReason,
   KnowledgeCorpusChunk,
   MessageCategory,
+  PendingQuestion,
   RecentMessage,
   RuntimeContext,
   Visit,
@@ -559,6 +560,66 @@ function formatActiveCommitments(
   return ['## Active commitments', intro, lines.join('\n')].join('\n')
 }
 
+// TAC-308: render the outstanding knowledge-gap question as an
+// `## Unanswered question` block, immediately before `## Recent conversation`
+// — it is the most recent unresolved state in the thread, and it sits next to
+// the history the model would otherwise mine for a promise to imitate.
+//
+// The three modes render three DIFFERENT and mutually non-contradictory
+// instructions. That is the point of the discriminator: an earlier
+// two-boolean shape had the block telling the model not to say it was
+// checking on the very turn whose entire job is to say exactly that.
+//
+//   outstanding     — guest has heard nothing. Reply to the new message; do
+//                     not promise, do not date, do not claim to be checking.
+//   acknowledged    — guest already got the holding message. Same, except
+//                     don't repeat that we're looking into it.
+//   writing_holding — THIS generation is the holding message. Say we're on
+//                     it, in the venue's voice, with no time attached and no
+//                     attempt at the answer.
+//
+// The question text is rendered verbatim so the holding message can be
+// specific about WHAT is outstanding without the model re-deriving it from
+// conversation history.
+function formatPendingQuestion(pending: PendingQuestion, now: Date): string {
+  const delta = formatTimeDelta(pending.askedAt, now)
+  const header = '## Unanswered question'
+  const asked = `The guest asked this ${delta} and the venue still owes them an answer:\n"${pending.question}"`
+
+  switch (pending.mode) {
+    case 'writing_holding':
+      return [
+        header,
+        asked,
+        "Someone at the venue is working on it and hasn't come back yet. This message is the holding note, and it is the only thing you are writing right now.",
+        "Say that you're still on it, in the venue's voice, the way a person would if they'd been asked something and hadn't chased it down yet. Keep it short.",
+        'Do not attempt the answer. Do not say when the answer will come, do not name a time or a day, and do not say "soon" or "shortly" or anything else that implies a deadline. Do not apologize more than once. Do not offer anything to make up for the wait.',
+      ].join('\n\n')
+    case 'answering_after_holding':
+      return [
+        header,
+        asked,
+        "The guest has already been told the venue is looking into it, and some time has passed. This message IS the answer to that question, so answer it.",
+        "You may acknowledge the wait once, lightly, the way a person would who got back to someone later than they meant to. Don't over-apologize and don't explain the delay.",
+        'If you still cannot ground the answer in what you were given, set knowledgeGap=true again and write your best attempt, exactly as before.',
+      ].join('\n\n')
+    case 'acknowledged':
+      return [
+        header,
+        asked,
+        "The guest has already been told the venue is looking into it, so don't tell them again and don't add a time. Reply to whatever their newest message actually asks, and leave the outstanding question alone.",
+        'If their newest message is asking about this same outstanding thing, set knowledgeGap=true again rather than attempting the answer. Nothing has changed since they asked.',
+      ].join('\n\n')
+    case 'outstanding':
+      return [
+        header,
+        asked,
+        "The guest has not been told anything about it yet, and the system is handling that separately. Don't promise an answer, don't say when one is coming, and don't say you're checking on it. Reply to whatever their newest message actually asks.",
+        'If their newest message is asking about this same outstanding thing, set knowledgeGap=true again rather than attempting the answer. Nothing has changed since they asked.',
+      ].join('\n\n')
+  }
+}
+
 // THE-170: render a deterministic eligibility block. Empty array is meaningful
 // — the framing instructs Sonnet not to offer perks at all. Non-empty renders
 // the allowlist with name + reward + qualification context.
@@ -675,6 +736,14 @@ export function runtimeToProse(
   if (runtime.activeCommitments && runtime.activeCommitments.length > 0) {
     const block = formatActiveCommitments(runtime.activeCommitments, now)
     if (block) blocks.push(block)
+  }
+  // TAC-308: ## Unanswered question sits immediately BEFORE ## Recent
+  // conversation. Two reasons for the placement: it is the most recent
+  // unresolved state in the thread, and it lands next to the history the
+  // model would otherwise mine for an earlier "let me find out" to imitate.
+  // undefined = nothing outstanding, block omitted entirely.
+  if (runtime.pendingQuestion) {
+    blocks.push(formatPendingQuestion(runtime.pendingQuestion, now))
   }
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)

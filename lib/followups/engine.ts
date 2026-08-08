@@ -691,6 +691,15 @@ async function dispatchOnce(input: {
           return { kind: 'release_claim' }
       }
     }
+    if (result.status === 'dropped') {
+      // TAC-308: the guest has a knowledge-gap card awaiting an operator
+      // answer, so the gate discarded this followup rather than take the
+      // pending slot. Pre-persist by construction — nothing was written and
+      // nothing was sent — so RELEASE the claim. Keeping it would burn the
+      // dedup key on a followup that never happened, and this guest would
+      // silently skip the reason forever once the card cleared.
+      return { kind: 'release_claim' }
+    }
     // skipped_duplicate is an inbound-flow shape that shouldn't appear
     // on the followup path; defensively release the claim if it does.
     return { kind: 'release_claim' }

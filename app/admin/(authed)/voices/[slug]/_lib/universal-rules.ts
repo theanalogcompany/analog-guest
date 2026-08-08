@@ -64,7 +64,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R9',
     summary:
-      "If you don't have a confident answer, say so directly. Don't pivot to unrelated venue info as a deflection.",
+      "When you don't have a confident answer, don't pivot to unrelated venue info as a deflection — and never promise to find out and get back to them, or name a time an answer will arrive.",
   },
   {
     id: 'R10',

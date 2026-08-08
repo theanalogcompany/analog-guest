@@ -73,6 +73,20 @@ export const GeneratedMessageSchema = z.object({
   // lib/agent/complaint-routing.ts for how it is consumed and why the model's
   // claim is necessary but never sufficient.
   complaintIntent: z.enum(['clarifying', 'resolving', 'none']),
+  // TAC-308: true when the reply answers a guest question the model could not
+  // ground in the runtime context — venue knowledge, venue_info, or the voice
+  // corpus. The body is still the model's best attempt at the answer; that
+  // text becomes the prefilled draft an operator corrects or approves. The
+  // KNOWLEDGE_GAP approval trigger routes it to the queue with a live
+  // messages.pending_until, and the guest gets nothing on that turn.
+  //
+  // REQUIRED, not optional, for the same two reasons as complaintIntent: the
+  // TAC-212 precedent that Anthropic's validator is more reliable with
+  // explicit presence, and because a required field costs ZERO against the
+  // TAC-300 24-optional budget (the counter counts properties absent from
+  // `required`). Turns that answer nothing, or answer it confidently, emit
+  // false.
+  knowledgeGap: z.boolean(),
   // TAC-296: agent-emitted patch for guests.context. Field is REQUIRED on
   // every emission (per the TAC-212 precedent — Anthropic's structured-output
   // validator is more reliable with explicit presence), but both inner fields
@@ -146,6 +160,7 @@ export async function generateMessage(
       requiresOperatorApproval: boolean
       approvalReason: string
       complaintIntent: z.infer<typeof GeneratedMessageSchema>['complaintIntent']
+      knowledgeGap: boolean
       contextUpdate: {
         structured?: z.infer<typeof GuestContextPatchSchema>
         observation?: string
@@ -183,6 +198,7 @@ export async function generateMessage(
         requiresOperatorApproval: object.requiresOperatorApproval,
         approvalReason: object.approvalReason,
         complaintIntent: object.complaintIntent,
+        knowledgeGap: object.knowledgeGap,
         contextUpdate: object.contextUpdate,
         commitment: object.commitment,
         arrivalCapture: object.arrivalCapture,
@@ -215,6 +231,10 @@ export async function generateMessage(
         requiresOperatorApproval: lastResult.requiresOperatorApproval,
         complaintIntent: lastResult.complaintIntent,
         approvalReason: lastResult.approvalReason,
+        // TAC-308: final-attempt knowledge-gap flag. applyApprovalPolicyStage
+        // turns this into the KNOWLEDGE_GAP trigger (inbound only), which
+        // queues the draft and arms messages.pending_until.
+        knowledgeGap: lastResult.knowledgeGap,
         // TAC-296: final-attempt context update. Orchestrator's context-write
         // step (between generateStage success and applyApprovalPolicyStage)
         // calls updateGuestContext with this payload.

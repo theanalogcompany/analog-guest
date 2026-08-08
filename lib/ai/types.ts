@@ -223,6 +223,52 @@ export type RuntimeContext = {
   // guarantees followupTrigger=null there. Absent on event/manual trigger
   // reasons (those have their own dedicated context surfaces).
   followup?: FollowupContext
+  // TAC-308: a question this guest asked that the venue still owes an answer
+  // to — a knowledge-gap draft sitting in the operator queue with a live
+  // messages.pending_until. Loaded by build-runtime-context.ts. The serializer
+  // renders `## Unanswered question` immediately before `## Recent
+  // conversation` (it is the most recent unresolved state in the thread).
+  //
+  // Two consumers, one field. On a normal inbound it stops the model
+  // manufacturing a second promise or a fresh deadline on top of the one
+  // already outstanding. On the timer path it is what the holding-message
+  // generation is written against. undefined = nothing outstanding, block
+  // omitted entirely.
+  pendingQuestion?: PendingQuestion
+}
+
+/**
+ * TAC-308: the outstanding question behind a knowledge-gap card.
+ *
+ * `mode` is a single discriminator rather than a pair of booleans because
+ * only three states are real, and the fourth combination a boolean pair
+ * would admit ("writing the holding message, which has already been sent")
+ * is nonsense. Each mode renders a different, non-contradictory instruction
+ * — which matters because the earlier two-boolean shape had the
+ * outstanding-question block telling the model not to say it was checking
+ * on the very turn whose whole job is to say exactly that.
+ */
+export type PendingQuestion = {
+  /** The guest's original inbound text, verbatim. */
+  question: string
+  /** When the guest asked it. Rendered as a time delta, not a timestamp. */
+  askedAt: Date
+  /**
+   * What this generation is doing relative to the outstanding question.
+   *   'outstanding'       — replying to something else; guest told nothing yet
+   *   'acknowledged'      — replying to something else; holding message sent
+   *   'writing_holding'   — THIS generation is the holding message
+   *   'answering_after_holding' — THIS generation is the card's answer draft,
+   *                         rewritten after the holding message went out
+   *
+   * The fourth mode exists because reusing 'acknowledged' for the post-holding
+   * card regen reproduced the exact bug this discriminator was introduced to
+   * kill: that branch says "leave the outstanding question alone," but the
+   * regen's whole job is to ANSWER the outstanding question. The model was
+   * being told to answer and not to answer, about the same question, in the
+   * same prompt.
+   */
+  mode: 'outstanding' | 'acknowledged' | 'writing_holding' | 'answering_after_holding'
 }
 
 export type GenerateMessageInput = {
@@ -289,6 +335,9 @@ export type GenerateMessageAttempt = {
   // v1.24.0: per-attempt complaint-turn intent. Final attempt's value becomes
   // GenerateMessageResult.complaintIntent.
   complaintIntent: ComplaintIntent
+  // TAC-308: per-attempt knowledge-gap flag. Final attempt's value becomes
+  // GenerateMessageResult.knowledgeGap.
+  knowledgeGap: boolean
   // TAC-296: per-attempt context update emission. The final attempt's value
   // becomes the GenerateMessageResult.contextUpdate consumed by the
   // orchestrator's context-write step.
@@ -322,6 +371,13 @@ export type GenerateMessageResult = {
   // exemption from comp_complaint's category routing, and it is necessary
   // but not sufficient (three deterministic checks sit behind it).
   complaintIntent: ComplaintIntent
+  // TAC-308: final-attempt knowledge-gap flag. True when the reply answers a
+  // question the model could not ground in venue knowledge. Consumed by
+  // applyApprovalPolicyStage's KNOWLEDGE_GAP trigger, which queues the draft
+  // and arms messages.pending_until so the timer cron can send a holding
+  // message if no operator answers in time. Inbound-only at the gate: a
+  // followup has no guest question to leave unanswered.
+  knowledgeGap: boolean
   // TAC-296: final-attempt guest-context patch. Consumed by the orchestrator
   // between generateStage success and applyApprovalPolicyStage. May be empty
   // (structured undefined, observation undefined) when the agent has nothing

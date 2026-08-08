@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.24.0 (warm complaint register + category routing)', () => {
-    expect(PROMPT_VERSION).toBe('v1.24.0')
+  it('is v1.25.0 (knowledge-gap routing; no unkeepable promises)', () => {
+    expect(PROMPT_VERSION).toBe('v1.25.0')
   })
 })
 
@@ -290,10 +290,16 @@ describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
     expect(SYSTEM_TEMPLATE).toContain('Don\'t claim to see, hear, smell, or be near anything')
   })
 
-  it('offers the dash-free fallback phrasings', () => {
+  // TAC-308 dropped 'let me find out.' from this list. It was one of three
+  // places the template taught the agent to promise a follow-up it had no
+  // machinery to deliver; the promise is now forbidden outright and the
+  // # Knowledge gaps block routes the turn to an operator instead.
+  it('offers the dash-free fallback phrasings, without the promise', () => {
     expect(SYSTEM_TEMPLATE).toContain('\'not sure,\'')
-    expect(SYSTEM_TEMPLATE).toContain('\'no idea,\'')
-    expect(SYSTEM_TEMPLATE).toContain('\'let me find out.\'')
+    expect(SYSTEM_TEMPLATE).toContain('\'no idea.\'')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never promise to find out and come back',
+    )
   })
 
   // THE-233 tightened R8 with explicit named-product coverage.
@@ -309,15 +315,20 @@ describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
 })
 
 describe('SYSTEM_TEMPLATE — R9: admit uncertainty, don\'t deflect (THE-225)', () => {
-  it('directs the agent to say so directly when no confident answer exists', () => {
+  // TAC-308 rewrote this rule's opening. It used to endorse
+  // "let me find out and get back to you" by name — the exact phrase behind
+  // thirteen unkept promises in production. The anti-deflection half is
+  // unchanged; the promise half is now a prohibition.
+  it('forbids the promise and the invented deadline', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'If you don\'t have a confident answer to what the guest asked, say so directly',
+      'never say you\'ll find out and get back to them, and never name a time an answer will arrive',
     )
+    expect(SYSTEM_TEMPLATE).not.toContain('let me find out and get back to you')
   })
 
   it('forbids pivoting to unrelated venue info as deflection', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'Never pivot to unrelated venue info, upcoming events, or perks as a deflection',
+      'never pivot to unrelated venue info, upcoming events, or perks as a deflection',
     )
   })
 
@@ -334,7 +345,7 @@ describe('SYSTEM_TEMPLATE — R9: admit uncertainty, don\'t deflect (THE-225)', 
     // Slice out R9's prose by anchoring on its opening clause + the next rule
     // boundary (R10 starts with "When recommending other places").
     const start = SYSTEM_TEMPLATE.indexOf(
-      'If you don\'t have a confident answer to what the guest asked',
+      'When you don\'t have a confident answer, never pivot',
     )
     const end = SYSTEM_TEMPLATE.indexOf('When recommending other places')
     expect(start).toBeGreaterThan(-1)
@@ -490,5 +501,58 @@ describe('SYSTEM_TEMPLATE — R14: Last Visit block usage (THE-229)', () => {
     const end = lvBody.indexOf('\n# ')
     const slice = end === -1 ? lvBody : lvBody.slice(0, end)
     expect(slice).not.toMatch(/[—–]/)
+  })
+})
+describe('SYSTEM_TEMPLATE — # Knowledge gaps (TAC-308, v1.25.0)', () => {
+  it('carries the block header and the required emission field', () => {
+    expect(SYSTEM_TEMPLATE).toContain('# Knowledge gaps')
+    expect(SYSTEM_TEMPLATE).toContain('The output field "knowledgeGap"')
+  })
+
+  // The draft is what an operator corrects, so "let me find out" as a body
+  // would hand them nothing to work with. This is the instruction that makes
+  // the prefilled card useful.
+  it('requires a best-attempt ANSWER in the body, not a holding line', () => {
+    expect(SYSTEM_TEMPLATE).toContain('still write your best attempt at the answer in the body')
+    expect(SYSTEM_TEMPLATE).toContain('Do not write "let me find out" as the body')
+  })
+
+  it('tells the model the body is reviewed before the guest sees it', () => {
+    expect(SYSTEM_TEMPLATE).toContain('That text is NOT sent to the guest')
+  })
+
+  // Without this the gate would fire on "what's the weather" and create a
+  // card no operator can action.
+  it('excludes questions nobody at the venue could answer either', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Nobody at the venue could answer it either')
+    expect(SYSTEM_TEMPLATE).toContain('That is a complete reply, not a gap')
+  })
+
+  it('forbids the promise and the deadline outright', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never tell the guest you will find out and get back to them',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Never say when an answer will arrive')
+  })
+
+  // The regression this whole ticket exists to prevent. Three separate sites
+  // taught this phrase; none may survive.
+  it('contains NO instruction endorsing the unkeepable promise anywhere', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('let me find out and get back to you')
+    expect(SYSTEM_TEMPLATE).not.toContain("say 'let me find out' without the artifact framing")
+    expect(SYSTEM_TEMPLATE).not.toContain("'let me find out.'")
+  })
+
+  it('points the physical-artifact rule at the block instead of the promise', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'handle it per the # Knowledge gaps block above, and never with the artifact framing',
+    )
+  })
+})
+
+describe('SYSTEM_TEMPLATE — ## Unanswered question rule (TAC-308, v1.25.0)', () => {
+  it('tells the agent not to re-promise while one is outstanding', () => {
+    expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes an ## Unanswered question block')
+    expect(SYSTEM_TEMPLATE).toContain("don't state or invent a deadline for it")
   })
 })

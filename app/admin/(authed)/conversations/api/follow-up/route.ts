@@ -176,6 +176,19 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 502 },
     )
   }
+  // TAC-308 widened AgentResult with 'dropped'. Unreachable from here (manual
+  // followups bypass the approval gate entirely, so nothing can protect a
+  // knowledge-gap card against them), but named explicitly so this tail can't
+  // silently relabel it — and any future member — as a duplicate.
+  if (result.status === 'dropped') {
+    return NextResponse.json(
+      {
+        error: 'dropped',
+        detail: "a pending question is holding this guest's review slot",
+      },
+      { status: 409 },
+    )
+  }
   // skipped_duplicate — handleFollowup doesn't currently produce this for the
   // manual path (the duplicate guard lives in handleInbound's idempotency
   // check), but AgentResult permits it. Treat as a benign no-op rather than

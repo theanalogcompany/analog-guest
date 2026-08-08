@@ -1387,3 +1387,103 @@ describe('runtimeToProse — ## Follow-up context block (TAC-244)', () => {
     )
   })
 })
+// ---------------------------------------------------------------------------
+// TAC-308: ## Unanswered question
+// ---------------------------------------------------------------------------
+
+describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
+  const NOW_308 = new Date('2026-08-07T12:30:00Z')
+  const ASKED = new Date('2026-08-07T12:00:00Z')
+
+  it('omits the block entirely when nothing is outstanding', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW_308)
+    expect(out).not.toContain('## Unanswered question')
+  })
+
+  it('renders the question verbatim so the model does not re-derive it', () => {
+    const out = runtimeToProse(
+      {
+        inboundMessage: 'you there?',
+        pendingQuestion: {
+          question: 'what grade is the matcha?',
+          askedAt: ASKED,
+          mode: 'outstanding',
+        },
+      },
+      'reply',
+      NOW_308,
+    )
+    expect(out).toContain('## Unanswered question')
+    expect(out).toContain('"what grade is the matcha?"')
+  })
+
+  // The three modes must not contradict each other. An earlier two-boolean
+  // shape had the block forbidding "I'm checking on it" on the very turn
+  // whose job was to say exactly that.
+  it('outstanding: forbids promising, dating, or claiming to be checking', () => {
+    const out = runtimeToProse(
+      {
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
+      },
+      'reply',
+      NOW_308,
+    )
+    expect(out).toContain('has not been told anything about it yet')
+    expect(out).toContain("don't say you're checking on it")
+  })
+
+  it('acknowledged: stops the agent repeating that we are looking into it', () => {
+    const out = runtimeToProse(
+      {
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'acknowledged' },
+      },
+      'reply',
+      NOW_308,
+    )
+    expect(out).toContain('already been told the venue is looking into it')
+    expect(out).toContain("don't add a time")
+  })
+
+  it('writing_holding: asks for the holding note and bans a deadline or an answer', () => {
+    const out = runtimeToProse(
+      {
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'writing_holding' },
+      },
+      'manual',
+      NOW_308,
+    )
+    expect(out).toContain('This message is the holding note')
+    expect(out).toContain('Do not attempt the answer')
+    expect(out).toContain('do not name a time or a day')
+  })
+
+  // Placement is load-bearing: the block sits next to the history the model
+  // would otherwise mine for an earlier "let me find out" to imitate.
+  it('sits immediately before ## Recent conversation', () => {
+    const out = runtimeToProse(
+      {
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
+        recentMessages: [
+          { direction: 'inbound', body: 'hello', createdAt: ASKED } as RecentMessage,
+        ],
+      },
+      'reply',
+      NOW_308,
+    )
+    expect(out.indexOf('## Unanswered question')).toBeLessThan(
+      out.indexOf('## Recent conversation'),
+    )
+  })
+
+  it('renders no em or en dashes (R3 self-consistency)', () => {
+    for (const mode of ['outstanding', 'acknowledged', 'writing_holding'] as const) {
+      const out = runtimeToProse(
+        { pendingQuestion: { question: 'q', askedAt: ASKED, mode } },
+        'reply',
+        NOW_308,
+      )
+      const block = out.slice(out.indexOf('## Unanswered question'))
+      expect(block).not.toMatch(/[—–]/)
+    }
+  })
+})
