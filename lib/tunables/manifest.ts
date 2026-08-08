@@ -144,7 +144,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/build-runtime-context.ts',
-    description: 'Cap on recent message rows loaded into runtime context.',
+    description:
+      'Cap on recent RESPONSES loaded into runtime context. TAC-313: a split reply occupies one slot however many message rows it was dispatched as.',
   },
   {
     name: 'min_voice_fidelity',

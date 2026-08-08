@@ -195,6 +195,48 @@ export type Database = {
           },
         ]
       }
+      guest_card_fingerprints: {
+        Row: {
+          card_fingerprint: string
+          created_at: string
+          first_seen_at: string
+          guest_id: string
+          id: string
+          venue_id: string
+        }
+        Insert: {
+          card_fingerprint: string
+          created_at?: string
+          first_seen_at?: string
+          guest_id: string
+          id?: string
+          venue_id: string
+        }
+        Update: {
+          card_fingerprint?: string
+          created_at?: string
+          first_seen_at?: string
+          guest_id?: string
+          id?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_card_fingerprints_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_card_fingerprints_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guest_commitments: {
         Row: {
           acknowledged_at: string | null
@@ -332,48 +374,6 @@ export type Database = {
           },
           {
             foreignKeyName: "guest_states_venue_id_fkey"
-            columns: ["venue_id"]
-            isOneToOne: false
-            referencedRelation: "venues"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      guest_card_fingerprints: {
-        Row: {
-          card_fingerprint: string
-          created_at: string
-          first_seen_at: string
-          guest_id: string
-          id: string
-          venue_id: string
-        }
-        Insert: {
-          card_fingerprint: string
-          created_at?: string
-          first_seen_at?: string
-          guest_id: string
-          id?: string
-          venue_id: string
-        }
-        Update: {
-          card_fingerprint?: string
-          created_at?: string
-          first_seen_at?: string
-          guest_id?: string
-          id?: string
-          venue_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "guest_card_fingerprints_guest_id_fkey"
-            columns: ["guest_id"]
-            isOneToOne: false
-            referencedRelation: "guests"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_card_fingerprints_venue_id_fkey"
             columns: ["venue_id"]
             isOneToOne: false
             referencedRelation: "venues"
@@ -680,13 +680,13 @@ export type Database = {
           edits_made: boolean
           failure_reason: string | null
           generated_by: string | null
+          generation_id: string | null
           guest_id: string
           id: string
           langfuse_trace_id: string | null
           last_operator_action_at: string | null
           last_operator_id: string | null
           media_urls: string[]
-          parent_draft_id: string | null
           pending_commitment: Json | null
           pending_until: string | null
           previous_review_state: string | null
@@ -714,13 +714,13 @@ export type Database = {
           edits_made?: boolean
           failure_reason?: string | null
           generated_by?: string | null
+          generation_id?: string | null
           guest_id: string
           id?: string
           langfuse_trace_id?: string | null
           last_operator_action_at?: string | null
           last_operator_id?: string | null
           media_urls?: string[]
-          parent_draft_id?: string | null
           pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null
@@ -748,13 +748,13 @@ export type Database = {
           edits_made?: boolean
           failure_reason?: string | null
           generated_by?: string | null
+          generation_id?: string | null
           guest_id?: string
           id?: string
           langfuse_trace_id?: string | null
           last_operator_action_at?: string | null
           last_operator_id?: string | null
           media_urls?: string[]
-          parent_draft_id?: string | null
           pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null
@@ -786,13 +786,6 @@ export type Database = {
             columns: ["last_operator_id"]
             isOneToOne: false
             referencedRelation: "operators"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "messages_parent_draft_id_fkey"
-            columns: ["parent_draft_id"]
-            isOneToOne: false
-            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
           {
@@ -917,7 +910,6 @@ export type Database = {
       pos_catalog_items: {
         Row: {
           category: string | null
-          created_at: string
           external_id: string
           id: string
           is_available: boolean
@@ -932,7 +924,6 @@ export type Database = {
         }
         Insert: {
           category?: string | null
-          created_at?: string
           external_id: string
           id?: string
           is_available?: boolean
@@ -947,7 +938,6 @@ export type Database = {
         }
         Update: {
           category?: string | null
-          created_at?: string
           external_id?: string
           id?: string
           is_available?: boolean
@@ -1545,6 +1535,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      count_outbound_responses: {
+        Args: { p_guest_id: string; p_venue_id: string }
+        Returns: number
+      }
       find_similar_critiques: {
         Args: {
           exclude_id?: string

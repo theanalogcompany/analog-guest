@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.26.0 (blank gap drafts; reasoning brevity + raised token ceiling)', () => {
-    expect(PROMPT_VERSION).toBe('v1.26.0')
+  it('is v1.27.0 (message splitting: R12 + [[BREAK]] delimiter)', () => {
+    expect(PROMPT_VERSION).toBe('v1.27.0')
   })
 })
 
@@ -47,9 +47,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305)', () =>
     expect(ids).toEqual(expected)
   })
 
-  it('curates exactly R1..R11 (the new R11 landed; greeting/operator/Last-Visit stay display-excluded)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(11)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R11')
+  it('curates exactly R1..R12 (TAC-313 added R12; greeting/operator/Last-Visit stay display-excluded)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(12)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R12')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -59,6 +59,41 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305)', () =>
     // delivery turn on the answer rather than a sentiment-closer.
     expect(r11?.summary).toContain('end on the answer')
     expect(SYSTEM_TEMPLATE).toContain('Let it stand')
+  })
+
+  it('shares the R12 anchor phrase across both sources (TAC-313)', () => {
+    const r12 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R12')
+    expect(r12).toBeDefined()
+    // Display summary speaks to the guest-visible behavior; the template
+    // carries the delimiter the model actually has to emit.
+    expect(r12?.summary).toContain('separate messages')
+    expect(SYSTEM_TEMPLATE).toContain('more than one distinct beat')
+  })
+})
+
+// TAC-313: the delimiter token in SYSTEM_TEMPLATE and BUBBLE_DELIMITER in
+// lib/agent/split-message.ts are a second dual-source-of-truth pair — the
+// model is told to emit one string and the sender splits on another. If they
+// drift, every reply ships the literal token to a guest. This asserts they
+// agree without importing the agent module into the prompt tests.
+describe('SYSTEM_TEMPLATE — split delimiter (TAC-313, v1.27.0)', () => {
+  it('teaches the exact token the sender splits on', () => {
+    expect(SYSTEM_TEMPLATE).toContain('[[BREAK]]')
+  })
+
+  it('tells the model splitting is the exception, not the default', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Splitting is the exception, not the default')
+  })
+
+  it('reconciles the per-venue length guidance against a multi-beat reply', () => {
+    // lengthGuide is per-venue JSONB that commonly says "default to one
+    // sentence" and would otherwise fight this rule on exactly the turns where
+    // splitting matters.
+    expect(SYSTEM_TEMPLATE).toContain('describes each message, not the whole reply')
+  })
+
+  it('forbids leaking the token into guest-visible text', () => {
+    expect(SYSTEM_TEMPLATE).toContain('never mention it to the guest')
   })
 })
 

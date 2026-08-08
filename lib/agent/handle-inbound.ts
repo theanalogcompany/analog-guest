@@ -894,18 +894,29 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // normal untriggered send).
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId } = await scheduleAndSend(ctx, gen.result, {
-        skipHumanFeelDelay: ctx.guest.isDemo === true,
-        reviewReason: approval.reason,
-      })
+      const { outboundMessageId, providerMessageId, generationId, bubbleCount } =
+        await scheduleAndSend(ctx, gen.result, {
+          skipHumanFeelDelay: ctx.guest.isDemo === true,
+          reviewReason: approval.reason,
+        })
       sendSpan.end({
-        output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
+        output: {
+          outboundMessageId,
+          providerMessageId,
+          bodyLength: gen.result.body.length,
+          // TAC-313: how many messages this response actually became. 1 is the
+          // common case; >1 means the model split.
+          generationId,
+          bubbleCount,
+        },
         content: { body: gen.result.body },
       })
       console.log('[agent] inbound sent + persisted', {
         agentRunId,
         outboundMessageId,
         providerMessageId,
+        generationId,
+        bubbleCount,
       })
       await capturePostHogEvent('inbound_message_handled', ctx.guest.id, {
         agentRunId,

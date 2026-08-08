@@ -19,7 +19,9 @@ import {
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { extractRecentVisits } from './extract-recent-visits'
+import { groupIntoResponses } from './group-responses'
 import { findPendingQuestion } from './pending-question'
+import { MAX_BUBBLES_PER_RESPONSE } from './split-message'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -31,6 +33,9 @@ import type {
   VenueContext,
 } from './types'
 
+// TAC-313: a cap on RESPONSES, not on rows. A split reply occupies one slot
+// here however many bubbles it was dispatched as — otherwise the agent's sense
+// of what was just said would get shallower every time it split.
 export const MAX_HISTORY_MESSAGES = 30
 export const MAX_HISTORY_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -88,15 +93,19 @@ export async function buildRuntimeContext(input: {
   // Exclude the current inbound row (it's already in the table by the time the
   // agent runs, and gets rendered separately as `inboundMessage` in the prompt).
   // For followups there's no currentMessage, so no exclusion.
+  // TAC-313: fetch enough ROWS to guarantee MAX_HISTORY_MESSAGES RESPONSES,
+  // then group. The bound is exact because the cap on bubbles per response is
+  // enforced in the sender (splitIntoBubbles), so this many rows can never
+  // yield fewer than MAX_HISTORY_MESSAGES groups.
   let messagesQuery = supabase
     .from('messages')
-    .select('id, direction, body, created_at')
+    .select('id, direction, body, created_at, generation_id')
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
     .neq('body', '')
     .gte('created_at', historyCutoffIso)
     .order('created_at', { ascending: false })
-    .limit(MAX_HISTORY_MESSAGES)
+    .limit(MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE)
   if (input.currentMessage) {
     messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
   }
@@ -315,15 +324,13 @@ export async function buildRuntimeContext(input: {
     computedAt,
   }
 
-  // Query returns DESC; reverse for chronological order in the prompt.
-  const recentMessages: RecentMessage[] = (messagesResult.data ?? [])
-    .slice()
-    .reverse()
-    .map((row) => ({
-      direction: row.direction as RecentMessage['direction'],
-      body: row.body,
-      createdAt: new Date(row.created_at),
-    }))
+  // Query returns DESC. groupIntoResponses folds each response's bubbles into
+  // one entry, caps at MAX_HISTORY_MESSAGES responses, and returns
+  // chronological order for the prompt.
+  const recentMessages: RecentMessage[] = groupIntoResponses(
+    messagesResult.data ?? [],
+    MAX_HISTORY_MESSAGES,
+  )
 
   const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
     id: m.id,
