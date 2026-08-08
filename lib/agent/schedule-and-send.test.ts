@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { persistOrRegenQueuedDraft } from './schedule-and-send'
+import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
+import { createCommitmentFromPending } from '@/lib/guests/commitments'
+import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { BUBBLE_DELIMITER } from './split-message'
 import type { RuntimeContext } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 
@@ -165,6 +168,11 @@ vi.mock('@/lib/messaging', () => ({
   markAsRead: vi.fn(),
   sendMessage: vi.fn(),
   sendTypingIndicator: vi.fn(),
+}))
+
+// TAC-313: scheduleAndSend materializes commitments inline after dispatch.
+vi.mock('@/lib/guests/commitments', () => ({
+  createCommitmentFromPending: vi.fn(),
 }))
 
 function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
@@ -619,5 +627,387 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
     await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {})
     expect(scenario.inserts[0]?.body).toBe('regenerated draft body')
     expect(scenario.inserts[0]?.voice_fidelity).toBe(0.78)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// scheduleAndSend — message splitting (TAC-313)
+// ---------------------------------------------------------------------------
+//
+// The auto-send path. One generation becomes up to MAX_BUBBLES_PER_RESPONSE
+// Sendblue messages, each with its own `messages` row sharing a generation_id.
+//
+// Most tests pass skipHumanFeelDelay so no real time passes; the one test that
+// exercises the inter-bubble pause says so in its name.
+
+const okSend = (providerMessageId: string) => ({
+  ok: true as const,
+  data: { providerMessageId, status: 'sent' },
+})
+
+function queueSends(...ids: string[]): void {
+  const send = vi.mocked(sendMessage)
+  for (const id of ids) send.mockResolvedValueOnce(okSend(id))
+}
+
+function queueInserts(...ids: string[]): void {
+  for (const id of ids) scenario.insertResponses.push({ data: { id }, error: null })
+}
+
+function generationWithBody(body: string): GenerateMessageResult {
+  return { ...makeGeneration(), body }
+}
+
+const NO_DELAY = { skipHumanFeelDelay: true }
+
+describe('scheduleAndSend — message splitting (TAC-313)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(createCommitmentFromPending)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // ── unchanged single-bubble behavior ──────────────────────────────────
+
+  it('sends a delimiter-free body as ONE message and ONE row', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    const result = await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), NO_DELAY)
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(scenario.inserts).toHaveLength(1)
+    expect(scenario.inserts[0]!.body).toBe('Open until 4')
+    expect(result.outboundMessageId).toBe('msg-1')
+    expect(result.providerMessageId).toBe('provider-1')
+    expect(result.bubbleCount).toBe(1)
+  })
+
+  // ── the split ─────────────────────────────────────────────────────────
+
+  it('dispatches one message per beat, in order', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`I'd go for the Frosty Gandhi${BUBBLE_DELIMITER}Espresso, chai, peppermint`),
+      NO_DELAY,
+    )
+
+    const sent = vi.mocked(sendMessage).mock.calls.map((c) => (c[0] as { body: string }).body)
+    expect(sent).toEqual(["I'd go for the Frosty Gandhi", 'Espresso, chai, peppermint'])
+  })
+
+  it('persists one row per bubble, each carrying its own text', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    await scheduleAndSend(makeCtx(), generationWithBody(`first${BUBBLE_DELIMITER}second`), NO_DELAY)
+
+    expect(scenario.inserts).toHaveLength(2)
+    expect(scenario.inserts.map((r) => r.body)).toEqual(['first', 'second'])
+  })
+
+  it('stamps every row of a response with the SAME generation_id', async () => {
+    queueSends('p1', 'p2', 'p3')
+    queueInserts('m1', 'm2', 'm3')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`a${BUBBLE_DELIMITER}b${BUBBLE_DELIMITER}c`),
+      NO_DELAY,
+    )
+
+    const ids = scenario.inserts.map((r) => r.generation_id)
+    expect(new Set(ids).size).toBe(1)
+    expect(ids[0]).toBe(result.generationId)
+    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  })
+
+  it('mints a DIFFERENT generation_id per dispatch', async () => {
+    queueSends('p1')
+    queueInserts('m1')
+    const first = await scheduleAndSend(makeCtx(), generationWithBody('one'), NO_DELAY)
+
+    queueSends('p2')
+    queueInserts('m2')
+    const second = await scheduleAndSend(makeCtx(), generationWithBody('two'), NO_DELAY)
+
+    expect(first.generationId).not.toBe(second.generationId)
+  })
+
+  it('never lets the delimiter reach Sendblue or the database', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`first${BUBBLE_DELIMITER}second`),
+      NO_DELAY,
+    )
+
+    for (const call of vi.mocked(sendMessage).mock.calls) {
+      expect((call[0] as { body: string }).body).not.toContain('BREAK')
+    }
+    for (const insert of scenario.inserts) {
+      expect(String(insert.body)).not.toContain('BREAK')
+    }
+  })
+
+  it('enforces the cap of three in the SENDER, not just the prompt', async () => {
+    queueSends('p1', 'p2', 'p3')
+    queueInserts('m1', 'm2', 'm3')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(['a', 'b', 'c', 'd', 'e'].join(BUBBLE_DELIMITER)),
+      NO_DELAY,
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(3)
+    expect(result.bubbleCount).toBe(3)
+    // Text past the cap is merged into the last bubble, never dropped.
+    const sent = vi.mocked(sendMessage).mock.calls.map((c) => (c[0] as { body: string }).body)
+    expect(sent[2]).toBe('c d e')
+  })
+
+  it('returns the FIRST bubble ids so existing consumers are unaffected', async () => {
+    queueSends('provider-first', 'provider-second')
+    queueInserts('msg-first', 'msg-second')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`a${BUBBLE_DELIMITER}b`),
+      NO_DELAY,
+    )
+
+    expect(result.outboundMessageId).toBe('msg-first')
+    expect(result.providerMessageId).toBe('provider-first')
+  })
+
+  // ── timing ────────────────────────────────────────────────────────────
+
+  it('shows a typing indicator before each later bubble (real inter-bubble pause)', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`))
+
+    // Once in the opening sequence, once before the second bubble.
+    expect(vi.mocked(sendTypingIndicator)).toHaveBeenCalledTimes(2)
+    // markAsRead fires once for the response, not once per bubble.
+    expect(vi.mocked(markAsRead)).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the inter-bubble pause entirely when skipHumanFeelDelay is set', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY)
+
+    expect(vi.mocked(sendTypingIndicator)).not.toHaveBeenCalled()
+    expect(vi.mocked(markAsRead)).not.toHaveBeenCalled()
+  })
+
+  // ── failure asymmetry: "have we committed anything to the guest yet" ──
+
+  it('THROWS when the first bubble fails to send, persisting nothing', async () => {
+    vi.mocked(sendMessage).mockResolvedValueOnce({
+      ok: false,
+      error: 'sendblue down',
+      errorCode: 'provider_error',
+    } as never)
+
+    await expect(
+      scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY),
+    ).rejects.toThrow(/sendMessage failed/)
+
+    expect(scenario.inserts).toHaveLength(0)
+    expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT throw when a LATER bubble fails — it truncates', async () => {
+    // Throwing here maps to AgentResult.failed, which for the follow-up engine
+    // releases the claim and re-dispatches — sending the guest bubble 1 twice.
+    // A truncated reply beats a duplicated one.
+    queueSends('p1')
+    vi.mocked(sendMessage).mockResolvedValueOnce({
+      ok: false,
+      error: 'sendblue down',
+      errorCode: 'provider_error',
+    } as never)
+    queueInserts('m1')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`first${BUBBLE_DELIMITER}second`),
+      NO_DELAY,
+    )
+
+    expect(result.outboundMessageId).toBe('m1')
+    expect(result.bubbleCount).toBe(1)
+    expect(scenario.inserts).toHaveLength(1)
+  })
+
+  it('alerts on a truncated response so it is never silent', async () => {
+    queueSends('p1')
+    vi.mocked(sendMessage).mockResolvedValueOnce({
+      ok: false,
+      error: 'sendblue down',
+      errorCode: 'provider_error',
+    } as never)
+    queueInserts('m1')
+
+    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY)
+
+    expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
+    const alert = fireRedAlertMock.mock.calls[0]![0] as {
+      stage: string
+      extra: { bubbleIndex: number; deliveredBubbles: number }
+    }
+    expect(alert.stage).toBe('send')
+    expect(alert.extra.bubbleIndex).toBe(1)
+    expect(alert.extra.deliveredBubbles).toBe(1)
+  })
+
+  it('THROWS when the first bubble persists badly (no id to return)', async () => {
+    queueSends('p1')
+    scenario.insertResponses.push({ data: null, error: { message: 'db down' } })
+
+    await expect(
+      scheduleAndSend(makeCtx(), generationWithBody('single'), NO_DELAY),
+    ).rejects.toThrow(/persist failed/)
+  })
+
+  it('truncates rather than throwing when a LATER bubble persists badly', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1')
+    scenario.insertResponses.push({ data: null, error: { message: 'db down' } })
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody(`a${BUBBLE_DELIMITER}b`),
+      NO_DELAY,
+    )
+
+    expect(result.bubbleCount).toBe(1)
+    expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws without sending when the body yields no bubbles', async () => {
+    await expect(
+      scheduleAndSend(makeCtx(), generationWithBody(BUBBLE_DELIMITER), NO_DELAY),
+    ).rejects.toThrow(/no sendable bubbles/)
+
+    expect(vi.mocked(sendMessage)).not.toHaveBeenCalled()
+    expect(scenario.inserts).toHaveLength(0)
+  })
+
+  // ── commitments ───────────────────────────────────────────────────────
+
+  it('materializes a commitment ONCE, anchored to the first bubble', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
+
+    const generation: GenerateMessageResult = {
+      ...generationWithBody(`holding it for you${BUBBLE_DELIMITER}see you at 8`),
+      commitment: { type: 'hold', description: 'holding a loaf' },
+    }
+
+    await scheduleAndSend(makeCtx(), generation, NO_DELAY)
+
+    expect(vi.mocked(createCommitmentFromPending)).toHaveBeenCalledTimes(1)
+    const arg = vi.mocked(createCommitmentFromPending).mock.calls[0]![0] as {
+      sourceMessageId: string
+    }
+    expect(arg.sourceMessageId).toBe('m1')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// persistOrRegenQueuedDraft — delimiter strip (TAC-313)
+// ---------------------------------------------------------------------------
+//
+// The queue path is one row an operator reads and approves verbatim, and
+// approve dispatches messages.body unchanged. A delimiter surviving into the
+// row would reach a guest over text the operator was never shown.
+
+describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('collapses the delimiter to a space on INSERT', async () => {
+    scenario.insertResponses.push({ data: { id: 'msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      generationWithBody(`I'd go for the Frosty Gandhi${BUBBLE_DELIMITER}Espresso, chai, peppermint`),
+      'model_flagged',
+      null,
+    )
+
+    expect(scenario.inserts[0]!.body).toBe(
+      "I'd go for the Frosty Gandhi Espresso, chai, peppermint",
+    )
+  })
+
+  it('collapses the delimiter on the regen UPDATE path too', async () => {
+    scenario.priorReasonResponses.push({ data: { review_reason: 'model_flagged' }, error: null })
+    scenario.updateResponses.push({ data: { id: 'existing-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      generationWithBody(`first${BUBBLE_DELIMITER}second`),
+      'model_flagged',
+      'existing-1',
+    )
+
+    expect(scenario.updates[0]!.payload.body).toBe('first second')
+  })
+
+  it('leaves no bracketed BREAK in a persisted draft for any near-miss variant', async () => {
+    for (const variant of ['[[BREAK]]', '[BREAK]', '[[break]]', '[[ BREAK ]]']) {
+      scenario = freshScenario()
+      scenario.insertResponses.push({ data: { id: 'msg-1' }, error: null })
+
+      await persistOrRegenQueuedDraft(
+        makeCtx(),
+        generationWithBody(`a${variant}b`),
+        'model_flagged',
+        null,
+      )
+
+      expect(scenario.inserts[0]!.body).toBe('a b')
+    }
+  })
+
+  it('still blanks the body when blankBody wins over the strip', async () => {
+    scenario.insertResponses.push({ data: { id: 'msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      generationWithBody(`a${BUBBLE_DELIMITER}b`),
+      'knowledge_gap',
+      null,
+      { blankBody: true },
+    )
+
+    expect(scenario.inserts[0]!.body).toBe('')
   })
 })

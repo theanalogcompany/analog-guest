@@ -51,13 +51,22 @@ export async function loadSignals({
       .eq('venue_id', venueId)
       .eq('guest_id', guestId)
       .gte('occurred_at', lookbackIso),
-    supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', venueId)
-      .eq('guest_id', guestId)
-      .eq('direction', 'outbound')
-      .in('status', ['sent', 'delivered']),
+    // TAC-313: counts RESPONSES, not rows. A split reply is dispatched as up
+    // to three `messages` rows sharing a `generation_id`, and this count is the
+    // denominator of `responseRate = replied / sent` (weight 0.10 in
+    // computeRelationshipStrength). Splitting inflates the denominator ONLY —
+    // the guest's replies don't multiply — so a row count would walk guests
+    // downward out of `regular` with no change in their behavior. Not a display
+    // bug: it changes who the product treats as a regular.
+    //
+    // The RPC (migration 032) is `count(distinct coalesce(generation_id, id))`,
+    // the same grouping identity used by list_operator_queue and by
+    // groupIntoResponses. COUNT(DISTINCT) has no PostgREST expression, hence
+    // the function.
+    supabase.rpc('count_outbound_responses', {
+      p_venue_id: venueId,
+      p_guest_id: guestId,
+    }),
     supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
@@ -141,7 +150,11 @@ export async function loadSignals({
       visitsLast90Days,
       daysSinceLastVisit,
       totalSpentLast90Days: totalSpentCents / 100,
-      outboundMessageCount: outboundMessagesResult.count ?? 0,
+      // TAC-313: RPC returns a bigint response count. Deliberately no fallback
+      // to a row count on failure — the error branch above returns instead, so
+      // a broken RPC surfaces as a recognition failure rather than silently
+      // restoring the row-counting bug.
+      outboundMessageCount: outboundMessagesResult.data ?? 0,
       // TODO: refine to per-message reply attribution when message threading is wired up.
       repliedMessageCount: inboundMessagesResult.count ?? 0,
       engagementEventsByType,

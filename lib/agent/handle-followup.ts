@@ -582,17 +582,21 @@ export async function handleFollowup(input: {
     // demo_bypass review_reason when the gate short-circuited above.
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId } = await scheduleAndSend(
-        ctx,
-        gen.result,
-        {
+      const { outboundMessageId, providerMessageId, generationId, bubbleCount } =
+        await scheduleAndSend(ctx, gen.result, {
           skipHumanFeelDelay:
             input.skipHumanFeelDelay === true || ctx.guest.isDemo === true,
           reviewReason: demoBypassReviewReason,
-        },
-      )
+        })
       sendSpan.end({
-        output: { outboundMessageId, providerMessageId, bodyLength: gen.result.body.length },
+        output: {
+          outboundMessageId,
+          providerMessageId,
+          bodyLength: gen.result.body.length,
+          // TAC-313: how many messages this response actually became.
+          generationId,
+          bubbleCount,
+        },
         content: { body: gen.result.body },
       })
       console.log('[agent] followup sent + persisted', {

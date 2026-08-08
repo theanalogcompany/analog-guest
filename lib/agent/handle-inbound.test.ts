@@ -381,7 +381,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.26.0',
+    promptVersion: 'v1.27.0',
     dashViolationPersisted: false,
   }
 }
