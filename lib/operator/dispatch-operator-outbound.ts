@@ -81,6 +81,10 @@ export type DispatchErrorCode =
   | 'sendblue_failed'
   | 'db_error'
   | 'invalid_input'
+  // TAC-309: the card has no body to send. Either a knowledge-gap card the
+  // operator hasn't written yet, or an edit submitted blank. Refused BEFORE
+  // the optimistic review_state flip, so the card stays in the queue.
+  | 'empty_body'
 
 export interface DispatchFailure {
   ok: false
@@ -179,6 +183,32 @@ export async function dispatchOperatorOutbound(
   }
   if (guestRow.opted_out_at !== null) {
     return { ok: false, errorCode: 'opted_out', error: 'guest opted out' }
+  }
+
+  // ---- 3b. TAC-309: refuse an empty body BEFORE the optimistic flip. ----
+  //
+  // `sendMessage` also refuses an empty body, but that check fires too late to
+  // be the guard here. The flip below sets review_state='approved', which
+  // REMOVES THE CARD FROM THE QUEUE; a failure after it leaves the row
+  // approved with provider_message_id null, nothing sent, and no way for the
+  // operator to get the card back. That is the module's known v1 recovery gap
+  // (see the Sendblue branch below) — and knowledge-gap cards, which persist
+  // deliberately blank since TAC-309, make it reachable on an ordinary
+  // swipe-right rather than only during a provider outage.
+  //
+  // The text that matters is what would actually be dispatched: the operator's
+  // edit when they supplied one, otherwise the stored draft body. Trimmed, to
+  // match the send-layer check — a lone space is not an answer.
+  const bodyToDispatch = input.action === 'edit' ? (input.editedBody ?? '') : row.body
+  if (bodyToDispatch.trim() === '') {
+    return {
+      ok: false,
+      errorCode: 'empty_body',
+      error:
+        input.action === 'edit'
+          ? 'cannot send an empty message'
+          : 'this card has no draft yet — open it and write the answer',
+    }
   }
 
   // ---- 4. optimistic state flip (pending → approved | edited). On race, rowcount=0. ----

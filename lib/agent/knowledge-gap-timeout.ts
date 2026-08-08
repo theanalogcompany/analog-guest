@@ -36,21 +36,9 @@
 // seam still isn't extracted; three instances now agree on the shape, so the
 // next person to touch all three has a real basis for pulling it out.
 
-import { randomUUID } from 'node:crypto'
 import { createAdminClient } from '@/lib/db/admin'
-import { startAgentTrace } from '@/lib/observability'
-import { buildRuntimeContext } from './build-runtime-context'
 import { handleHoldingMessage } from './handle-holding-message'
 import { loadInboundQuestion } from './pending-question'
-import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import {
-  APPROVAL_TRIGGERS,
-  generateStage,
-  retrieveCorpusStage,
-  retrieveKnowledgeStage,
-  shouldRetrieveKnowledge,
-} from './stages'
-import type { MessageCategory } from '@/lib/ai'
 
 /**
  * Cap on cards processed per tick. Generation + send is a few seconds per
@@ -72,8 +60,6 @@ export interface ProcessDueKnowledgeGapsResult {
   sent: number
   /** Holding messages sent as the plain fallback line. */
   fallbackSent: number
-  /** Cards whose body was regenerated to account for the elapsed wait. */
-  regenerated: number
   /** Cards where policy suppressed the send (guest opted out, venue holds all outbound). */
   suppressed: number
   /** Cards that errored after being claimed. */
@@ -87,44 +73,6 @@ interface DueCard {
   venue_id: string
   guest_id: string
   reply_to_message_id: string | null
-  category: string | null
-}
-
-/**
- * Inbound categories a knowledge-gap card can legitimately carry — the same
- * set the classifier can emit, since the card's category came from
- * classifying the guest's question.
- *
- * `satisfies` makes a typo here a compile error. Exhaustiveness is NOT
- * required: a category missing from this list falls back to 'new_question',
- * which is the safe direction for a validator whose only job is to keep an
- * unrecognized string out of the prompt.
- */
-const CARD_CATEGORIES = [
-  'reply',
-  'new_question',
-  'opt_out',
-  'manual',
-  'acknowledgment',
-  'comp_complaint',
-  'mechanic_request',
-  'recommendation_request',
-  'casual_chatter',
-  'personal_history_question',
-  'perk_inquiry',
-  'event_question',
-  'unknown',
-] as const satisfies readonly MessageCategory[]
-
-/**
- * Narrow a stored `messages.category` to the runtime union, falling back to
- * `new_question` — the category a knowledge-gap card almost always carries,
- * and the one whose instructions suit "answer the thing they asked."
- */
-function toMessageCategory(raw: string | null): MessageCategory {
-  return raw !== null && (CARD_CATEGORIES as readonly string[]).includes(raw)
-    ? (raw as MessageCategory)
-    : 'new_question'
 }
 
 interface PendingQuestionRow {
@@ -150,7 +98,6 @@ export async function processDueKnowledgeGaps(
     casLost: 0,
     sent: 0,
     fallbackSent: 0,
-    regenerated: 0,
     suppressed: 0,
     errored: 0,
     invalid: 0,
@@ -227,13 +174,10 @@ export async function processDueKnowledgeGaps(
       if (result.usedFallback) summary.fallbackSent += 1
       else summary.sent += 1
 
-      // WYSIWYG: bring the card's body in line with the fact that the guest
-      // has now been told we're checking. Best-effort — a failure leaves the
-      // original draft, which is stale but sendable, so it never costs the
-      // operator their card.
-      if (await regenerateCardForElapsedWait(card, question)) {
-        summary.regenerated += 1
-      }
+      // TAC-309 removed the post-send card regen. It existed for WYSIWYG on a
+      // prefilled body; knowledge-gap cards are now blank, so there was
+      // nothing left to keep in sync and it was spending a context build,
+      // retrieval and generation per timed-out card to write nothing.
     } catch (e) {
       // handleHoldingMessage is fail-closed, so a throw is unexpected.
       console.error('[cron pending-timeout] handleHoldingMessage threw', {
@@ -270,7 +214,7 @@ async function findDueCards(now: Date): Promise<DueCard[] | null> {
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('messages')
-      .select('id, venue_id, guest_id, reply_to_message_id, category')
+      .select('id, venue_id, guest_id, reply_to_message_id')
       .eq('review_state', 'pending')
       .not('pending_until', 'is', null)
       .lte('pending_until', now.toISOString())
@@ -346,119 +290,3 @@ async function loadQuestion(inboundMessageId: string): Promise<PendingQuestionRo
   }
 }
 
-/**
- * Rewrite the pending card's body now that the guest has been told we're
- * checking.
- *
- * WYSIWYG (TAC-308 §3): the operator approves a body and that exact body
- * ships. Before the holding message went out, the right draft answered the
- * question cold. After it, the right draft can acknowledge the wait — "sorry,
- * took a sec, it's ceremonial grade from Ippodo" instead of answering as
- * though no time passed. Regenerating here rather than at approve-time is
- * what keeps the two identical; regenerating on approve would mean the
- * operator reads one string and the guest receives another.
- *
- * Runs on the INBOUND path — currentMessage is the guest's original question,
- * because this generation is still an answer to it. The
- * `## Unanswered question` block rides along in 'acknowledged' mode to say
- * the guest has already been told.
- *
- * Best-effort. A failure leaves the original body in place, which is a
- * slightly stale but perfectly sendable draft. Never throws.
- */
-async function regenerateCardForElapsedWait(
-  card: DueCard,
-  question: PendingQuestionRow,
-): Promise<boolean> {
-  const agentRunId = randomUUID()
-  const trace = startAgentTrace({
-    name: 'agent.knowledge_gap_regen',
-    agentRunId,
-    metadata: { venueId: card.venue_id, guestId: card.guest_id, cardId: card.id },
-  })
-  try {
-    const ctx = await buildRuntimeContext({
-      agentRunId,
-      guestId: card.guest_id,
-      venueId: card.venue_id,
-      currentMessage: {
-        id: question.id,
-        providerMessageId: question.providerMessageId,
-        body: question.question,
-        receivedAt: question.askedAt,
-      },
-      trace,
-    })
-
-    // Reuse the card's stored category instead of re-classifying. The inbound
-    // hasn't changed, so a second classifier call would spend a model round
-    // trip to reproduce an answer we already persisted — and could return a
-    // different category, silently relabelling the row mid-review. Validated
-    // rather than cast: the column is CHECK-constrained in Postgres, but a
-    // value predating a category rename would otherwise flow into the prompt
-    // as a category no instruction file handles.
-    const category = toMessageCategory(card.category)
-    ctx.classification = {
-      category,
-      classifierConfidence: 1,
-      reasoning: 'reused from the original inbound classification (TAC-308 timeout regen)',
-    }
-
-    // The holding message has just gone out, and THIS generation is the
-    // answer draft the operator will approve. Not 'acknowledged' — that mode
-    // tells the model to leave the outstanding question alone, which is the
-    // opposite of what this draft is for.
-    ctx.pendingQuestion = {
-      question: question.question,
-      askedAt: question.askedAt,
-      mode: 'answering_after_holding',
-    }
-
-    ctx.corpus = await retrieveCorpusStage(ctx)
-    ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-      ? await retrieveKnowledgeStage(ctx, category)
-      : []
-
-    const gen = await generateStage(ctx, category)
-    if (gen.status !== 'success') {
-      console.warn(
-        `[cron pending-timeout] card=${card.id} regen did not succeed (${gen.status}), keeping original body`,
-      )
-      return false
-    }
-
-    // UPDATE in place. `pendingUntil` omitted, so the cleared clock STAYS
-    // cleared — this is the specific path that would otherwise re-arm the
-    // timer it just fired and send a second holding message five minutes
-    // later. review_reason is pinned to knowledge_gap rather than re-derived
-    // from the gate: the card is still a card awaiting an answer, and the
-    // operator's label shouldn't churn underneath them.
-    const persisted = await persistOrRegenQueuedDraft(
-      ctx,
-      gen.result,
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-      card.id,
-      // updateOnly: an operator can approve this card during the seconds we
-      // spend generating. Without it, the vanished-row path would INSERT a
-      // replacement pending row answering a question the guest was already
-      // answered — protected forever by review_reason, invisible to the timer,
-      // and never pushed. Skipping is correct: the operator handled it.
-      { updateOnly: true },
-    )
-    if (persisted.action === 'skipped') {
-      console.log(
-        `[cron pending-timeout] card=${card.id} was acted on during regen, skipping body refresh`,
-      )
-      return false
-    }
-    return true
-  } catch (e) {
-    console.warn('[cron pending-timeout] card regen failed, keeping original body', {
-      cardId: card.id,
-      error: e instanceof Error ? e.message : String(e),
-    })
-    return false
-  } finally {
-    await trace.flushAsync()
-  }
-}

@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.25.0 (knowledge-gap routing; no unkeepable promises)', () => {
-    expect(PROMPT_VERSION).toBe('v1.25.0')
+  it('is v1.26.0 (blank gap drafts; reasoning brevity + raised token ceiling)', () => {
+    expect(PROMPT_VERSION).toBe('v1.26.0')
   })
 })
 

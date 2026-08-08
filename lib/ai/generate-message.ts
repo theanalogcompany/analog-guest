@@ -5,6 +5,7 @@ import {
   CommitmentEmissionSchema,
 } from '@/lib/schemas/guest-commitment'
 import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
+import { captureGenerationTruncated } from '@/lib/analytics/posthog'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { PROMPT_VERSION } from './prompts/system-template'
@@ -17,6 +18,46 @@ import type {
 
 export const MIN_VOICE_FIDELITY = 0.7
 export const MAX_ATTEMPTS = 3
+
+/**
+ * Output-token ceiling for one generation attempt.
+ *
+ * TAC-309 raised this from 500. The measured picture, from Langfuse on live
+ * Mock Sextant traffic:
+ *
+ *   successful single attempts   4.1-5.7s, ~121-299 emitted tokens
+ *   the 2026-08-08 crash         13.7s, single call, "could not parse the
+ *                                response" — at the observed ~33 tok/s that
+ *                                is ~450 tokens, i.e. the old 500 cap
+ *
+ * The object serializes `body`, `voiceFidelity`, `reasoning` FIRST and
+ * `knowledgeGap` / `contextUpdate` / `commitment` / `arrivalCapture` LAST, so
+ * running out of budget truncates mid-JSON and the whole emission fails to
+ * parse. `reasoning` is the only unbounded field and it sits third.
+ *
+ * The correlation that makes this worse than it looks: the model reasons
+ * LONGEST on questions it can't answer cleanly, which is exactly the
+ * knowledge-gap case. Truncation preferentially killed the path TAC-308 built
+ * to catch those questions.
+ *
+ * 500 predates TAC-296 / TAC-297 / TAC-308, each of which appended a required
+ * field to the tail while the cap stood still — the same failure class as
+ * TAC-300's optional-parameter budget, without the guardrail. 1500 is ~5x the
+ * largest emission observed. Raising it costs nothing on normal runs: output
+ * tokens bill on what's actually produced, and generation stops at the end of
+ * the object.
+ */
+export const MAX_OUTPUT_TOKENS = 1500
+
+/**
+ * errorCode returned when a generation attempt was cut off at
+ * MAX_OUTPUT_TOKENS rather than failing for a content reason.
+ *
+ * Structural, not a string match on the SDK's message: callers need to tell
+ * the two apart because retrying a truncation just runs into the same
+ * ceiling, and the AI SDK reports both as "could not parse the response."
+ */
+export const AI_ERROR_TRUNCATED = 'ai_generation_truncated'
 // THE-225: hard-block regex companion to the R3 voice rule. Em dash (U+2014)
 // or en dash (U+2013) anywhere in the body forces a regen even if voice
 // fidelity passes. Sonnet still occasionally emits dashes despite the rule
@@ -36,7 +77,12 @@ voiceFidelity: a DECIMAL number between 0.0 and 1.0 (NOT a 1-10 score).
   0.5 = generic but acceptable, lacks distinctive voice markers
   0.7 = good match, voice is recognizable
   0.9 = excellent match, captures distinctive phrases and tone
-  1.0 = indistinguishable from how the operator would write`
+  1.0 = indistinguishable from how the operator would write
+
+# Reasoning brevity (output field)
+reasoning: at most two short sentences. It is a debugging note, not a
+  deliberation. Do not restate the guest's message, do not enumerate the
+  options you considered, and do not explain fields you left empty.`
 
 // Exported for the TAC-300 CI guardrail in lib/ai/schema-budget.test.ts —
 // the test walks this schema's tree counting ZodOptional wrappers and fails
@@ -75,10 +121,18 @@ export const GeneratedMessageSchema = z.object({
   complaintIntent: z.enum(['clarifying', 'resolving', 'none']),
   // TAC-308: true when the reply answers a guest question the model could not
   // ground in the runtime context — venue knowledge, venue_info, or the voice
-  // corpus. The body is still the model's best attempt at the answer; that
-  // text becomes the prefilled draft an operator corrects or approves. The
-  // KNOWLEDGE_GAP approval trigger routes it to the queue with a live
-  // messages.pending_until, and the guest gets nothing on that turn.
+  // corpus. The KNOWLEDGE_GAP approval trigger routes the turn to the operator
+  // queue with a live messages.pending_until, and the guest gets nothing on
+  // that turn.
+  //
+  // TAC-309: the model still WRITES a body (the dash regex and the fidelity
+  // self-assessment both operate on real text), but that body is DISCARDED at
+  // the persist boundary and the card is stored blank. TAC-308 shipped it
+  // prefilled; the first live card read "Not sure on the specific matcha we
+  // source. I can find out if that matters for your order." — the exact
+  // promise phrasing the same ticket had just deleted from the corpus. A
+  // visible guess is something an operator swipes rather than replaces, so
+  // there is now nothing to swipe.
   //
   // REQUIRED, not optional, for the same two reasons as complaintIntent: the
   // TAC-212 precedent that Anthropic's validator is more reliable with
@@ -187,7 +241,7 @@ export async function generateMessage(
         system: augmentedSystemPrompt,
         prompt: userPromptForAttempt,
         schema: GeneratedMessageSchema,
-        maxOutputTokens: 500,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
       })
       lastResult = object
       attemptScores.push(object.voiceFidelity)
@@ -293,8 +347,32 @@ export async function generateMessage(
         causeMessage,
         zodIssues: issues ?? null,
       })
+      // TAC-309: surface truncation without a Vercel log dig. `finishReason:
+      // 'length'` means the emission hit MAX_OUTPUT_TOKENS and was cut
+      // mid-JSON — a fixable ceiling problem, not a model-behavior problem,
+      // and the two are indistinguishable from the generic parse error alone.
+      // It took a UAT session to find the first one. Fire-and-forget; a
+      // failure to report a failure must not deepen it.
+      if (e.finishReason === 'length') {
+        // Awaited, not floated: on Vercel a pending fetch can be lost when the
+        // function freezes, and this is the alert that makes truncation
+        // visible at all. The path has already failed, so the added latency
+        // costs nothing anyone is waiting on.
+        await captureGenerationTruncated({
+          attempts,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          promptVersion: PROMPT_VERSION,
+          truncatedTextPreview: e.text ? e.text.slice(0, 500) : null,
+        })
+      }
     }
     const message = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: message, errorCode: 'ai_generation_failed' }
+    const truncated =
+      NoObjectGeneratedError.isInstance(e) && e.finishReason === 'length'
+    return {
+      ok: false,
+      error: message,
+      errorCode: truncated ? AI_ERROR_TRUNCATED : 'ai_generation_failed',
+    }
   }
 }

@@ -33,7 +33,7 @@ const VALID_TYPES: readonly TunableType[] = [
 
 describe('TUNABLES manifest', () => {
   it('contains exactly 46 entries (locks the audit set)', () => {
-    expect(TUNABLES.length).toBe(47)
+    expect(TUNABLES.length).toBe(48)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -51,7 +51,7 @@ describe('TUNABLES manifest', () => {
     }
     for (const t of TUNABLES) counts[t.category] += 1
     expect(counts).toEqual({
-      agent_runtime: 18,
+      agent_runtime: 19,
       classification: 3,
       timing: 8,
       recognition: 8,

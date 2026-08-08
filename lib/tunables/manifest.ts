@@ -34,7 +34,7 @@ import {
   TOTAL_DELAY_MIN_MS,
 } from '@/lib/agent/timing'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
-import { MAX_ATTEMPTS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
+import { MAX_ATTEMPTS, MAX_OUTPUT_TOKENS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
@@ -509,5 +509,15 @@ export const TUNABLES = [
     description:
       'How long an operator has to answer a knowledge-gap card before the guest gets a holding message. A FLOOR, not an SLA: the timer cron runs on GitHub Actions every 5 minutes and scheduled runs lag under load, so the real distribution is roughly 5-15 minutes. Never fires early.',
     relatedTickets: ['TAC-308'],
+  },
+  {
+    name: 'max_output_tokens',
+    value: MAX_OUTPUT_TOKENS,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/ai/generate-message.ts',
+    description:
+      "Output-token ceiling for one generation attempt. Raised 500 -> 1500 in TAC-309: the emission serializes body/voiceFidelity/reasoning first and knowledgeGap/contextUpdate/commitment/arrivalCapture last, so exhausting the budget truncates mid-JSON and the whole object fails to parse as a generic 'could not parse the response'. Every ticket since TAC-296 has appended a required field to that tail. Watch generation_truncated in PostHog.",
+    relatedTickets: ['TAC-309'],
   },
 ] as const satisfies readonly Tunable[]

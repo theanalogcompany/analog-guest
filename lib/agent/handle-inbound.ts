@@ -23,7 +23,10 @@ import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
   classifyStage,
+  findPendingDraft,
   generateStage,
+  isKnowledgeGapCard,
+  KNOWLEDGE_GAP_WINDOW_MS,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
@@ -35,6 +38,9 @@ import {
   buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
+import { AI_ERROR_TRUNCATED } from '@/lib/ai/generate-message'
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
+import type { GenerateMessageResult } from '@/lib/ai'
 import type { AgentResult, InboundMessage, RuntimeContext } from './types'
 
 async function loadInbound(messageId: string): Promise<{
@@ -86,6 +92,160 @@ async function findExistingReply(inboundMessageId: string): Promise<string | nul
     throw new Error(`findExistingReply: lookup failed: ${error.message}`)
   }
   return data?.id ?? null
+}
+
+/**
+ * TAC-309: turn a hard generation failure into an operator queue card.
+ *
+ * Called after generation has failed TWICE. The alternative is what shipped
+ * before: no outbound row, no card, no retry — the guest sits in silence and
+ * nobody at the venue learns they asked anything. That is strictly worse than
+ * a bad draft, because a bad draft at least surfaces.
+ *
+ * Why this can't go through `applyApprovalPolicyStage`: the gate takes a
+ * `GenerateMessageResult` as input and a crash didn't produce one. So the card
+ * is written directly, with a synthetic result standing in for the generation
+ * that never happened — the same shape as `buildFallbackGeneration` in
+ * handle-holding-message.ts.
+ *
+ * Policy, matching the gate's behavior rather than reinventing it:
+ *   - `opted_out_at` → NO card. Nobody is going to reply to someone who left.
+ *   - `hold_all_outbound` → card ANYWAY. A queue card IS the hold outcome;
+ *     suppressing it would restore the exact silence this fixes, and would do
+ *     it specifically at the venues that asked for more oversight. That flag
+ *     gates sends, which it already does elsewhere.
+ *   - The clock is armed only when the guest doesn't already have a
+ *     knowledge-gap card, so a crash can't reset a deadline that's already
+ *     running.
+ *
+ * Never throws — a failure to record a failure must not deepen it.
+ */
+async function persistGenerationFailureCard(
+  ctx: RuntimeContext,
+  agentRunId: string,
+): Promise<{ kind: 'carded'; outboundMessageId: string } | { kind: 'skipped' }> {
+  try {
+    const supabase = createAdminClient()
+    const { data: guestRow } = await supabase
+      .from('guests')
+      .select('opted_out_at')
+      .eq('id', ctx.guest.id)
+      .maybeSingle()
+    if (guestRow?.opted_out_at) {
+      console.warn('[agent] generation-failure card skipped — guest opted out', {
+        agentRunId,
+        guestId: ctx.guest.id,
+      })
+      return { kind: 'skipped' }
+    }
+
+    const existing = await findPendingDraft(ctx.venue.id, ctx.guest.id)
+    const alreadyGapCard = existing !== null && isKnowledgeGapCard(existing)
+
+    // Never overwrite a pending draft that ISN'T a gap card. Writing here
+    // would UPDATE it in place with body '', voice_fidelity null,
+    // review_reason 'knowledge_gap' AND a nulled pending_commitment — so an
+    // operator holding a comp draft would lose the text, the label, and the
+    // commitment carrier because a LATER, unrelated turn happened to crash.
+    // The gate has a whole `drop` branch to avoid exactly that; this path
+    // must respect the same rule rather than route around it.
+    //
+    // The guest already has a card in the queue, so nothing is silent — the
+    // operator is on the hook either way, and the red alert above records the
+    // crash. Adding a second signal isn't worth erasing the first.
+    if (existing !== null && !alreadyGapCard) {
+      console.warn(
+        '[agent] generation-failure card skipped — a non-gap pending draft holds the slot',
+        { agentRunId, guestId: ctx.guest.id, protectedDraftId: existing.id },
+      )
+      return { kind: 'skipped' }
+    }
+
+    // Same clock rule the gate applies: only arm a new deadline when the row
+    // isn't already a knowledge-gap card, so a crash can't push out a
+    // deadline that's already running.
+    const pendingUntil = alreadyGapCard
+      ? undefined
+      : new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
+
+    const persisted = await persistOrRegenQueuedDraft(
+      ctx,
+      buildGenerationFailureGeneration(),
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      existing?.id ?? null,
+      { pendingUntil, blankBody: true },
+    )
+
+    console.warn('[agent] generation failed twice — carded for operator', {
+      agentRunId,
+      outboundMessageId: persisted.outboundMessageId,
+      persistAction: persisted.action,
+    })
+    await captureDraftQueued({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
+      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      voiceFidelity: 0,
+      modelRequiresApproval: false,
+      modelApprovalReason: '',
+      compRegexMatchedPattern: null,
+      hasPreviousPending: existing !== null,
+      kind: 'inbound',
+      // Classification always succeeded to reach the generate stage; the
+      // fallback satisfies the non-null contract without inventing a category.
+      category: ctx.classification?.category ?? 'unknown',
+      inboundBody: ctx.currentMessage?.body ?? null,
+      generatedBody: '',
+    })
+    if (shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)) {
+      waitUntil(
+        sendDraftFlaggedPush({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          guestFirstName: ctx.guest.firstName,
+          draftId: persisted.outboundMessageId,
+          primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+        }).catch(() => {}),
+      )
+    }
+    return { kind: 'carded', outboundMessageId: persisted.outboundMessageId }
+  } catch (e) {
+    console.error('[agent] generation-failure card could not be written', {
+      agentRunId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return { kind: 'skipped' }
+  }
+}
+
+/**
+ * Synthetic generation for the failure card. The body is blank and
+ * `blankBody: true` is passed alongside, so nothing here reaches the row's
+ * body — this exists to satisfy the shape `buildOutboundInsert` reads.
+ */
+function buildGenerationFailureGeneration(): GenerateMessageResult {
+  return {
+    body: '(generation failed)',
+    voiceFidelity: 0,
+    reasoning: 'TAC-309: generation failed twice; carded for operator answer',
+    requiresOperatorApproval: false,
+    approvalReason: '',
+    complaintIntent: 'none',
+    knowledgeGap: true,
+    contextUpdate: {},
+    commitment: {},
+    arrivalCapture: {},
+    attempts: 2,
+    attemptScores: [],
+    attemptHistory: [],
+    systemPrompt: '',
+    userPrompt: '',
+    promptVersion: PROMPT_VERSION,
+    dashViolationPersisted: false,
+  }
 }
 
 /**
@@ -322,7 +482,30 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
 
     // Generate
     const generateSpan = trace.span('generate', { category: ctx.classification.category })
-    const gen = await generateStage(ctx, ctx.classification.category)
+    let gen = await generateStage(ctx, ctx.classification.category)
+    if (gen.status === 'failed') {
+      // TAC-309: retry once before giving up. generateMessage's internal
+      // MAX_ATTEMPTS loop only covers fidelity and dash violations — a parse
+      // throw exits it immediately, so this is genuinely a second call.
+      //
+      // EXCEPT on truncation. If the emission hit MAX_OUTPUT_TOKENS, a second
+      // attempt runs into the same ceiling: it just doubles the wait for a
+      // guest who is already getting no reply, and posts the truncation alert
+      // twice. Go straight to the card.
+      const truncated = gen.errorCode === AI_ERROR_TRUNCATED
+      if (truncated) {
+        console.warn('[agent] inbound generation truncated — skipping retry', {
+          agentRunId,
+          error: gen.error,
+        })
+      } else {
+        console.warn('[agent] inbound generation failed, retrying once', {
+          agentRunId,
+          error: gen.error,
+        })
+        gen = await generateStage(ctx, ctx.classification.category)
+      }
+    }
     if (gen.status === 'failed') {
       generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
@@ -332,7 +515,27 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         kind: 'inbound',
         stage: 'generation',
         errorMessage: gen.error,
+        extra: { retried: true },
       })
+      // TAC-309: two failures in a row, and the guest is waiting. Route to
+      // the operator queue instead of returning silence. A crash is
+      // functionally "couldn't produce an answer" — the same condition
+      // knowledge_gap already handles, on a surface that already exists.
+      // Reusing review_reason='knowledge_gap' means the timer, the holding
+      // message, and PRIMARY_TRIGGER_PRIORITY all work unchanged; crashes
+      // stay separately visible because the red alert above Slack-relays.
+      const card = await persistGenerationFailureCard(ctx, agentRunId)
+      if (card.kind === 'carded') {
+        trace.update({
+          output: { status: 'queued', outboundMessageId: card.outboundMessageId, generationFailed: true },
+        })
+        return {
+          status: 'queued',
+          outboundMessageId: card.outboundMessageId,
+          triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
+          primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+        }
+      }
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
     if (gen.status === 'refused') {
@@ -561,7 +764,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           // card that doesn't already have a clock. Undefined preserves an
           // existing pending_until on regen and leaves the column null
           // otherwise — see applyApprovalPolicyStage for the full table.
-          { pendingUntil: approval.pendingUntil },
+          // TAC-309: blankBody discards the model's attempted answer on a
+          // knowledge-gap card so the operator types rather than swipes.
+          { pendingUntil: approval.pendingUntil, blankBody: approval.blankBody },
         )
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({
@@ -571,9 +776,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             triggers: approval.triggers,
             persistAction,
             priorReviewReason,
-            bodyLength: gen.result.body.length,
+            bodyLength: approval.blankBody ? 0 : gen.result.body.length,
           },
-          content: { body: gen.result.body },
+          content: { body: approval.blankBody ? '' : gen.result.body },
         })
         console.log(
           persistAction === 'updated'
@@ -608,7 +813,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             kind: 'inbound',
             category: ctx.classification.category,
             inboundBody: ctx.currentMessage?.body ?? null,
-            generatedBody: gen.result.body,
+            // TAC-309: a blanked card has no draft. Publishing the discarded
+            // guess here would put the sentence this ticket removed into
+            // Slack under a field labelled "draft" — for a row whose body is
+            // empty.
+            generatedBody: approval.blankBody ? '' : gen.result.body,
           })
         } else {
           await captureDraftQueued({
@@ -627,7 +836,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             kind: 'inbound',
             category: ctx.classification.category,
             inboundBody: ctx.currentMessage?.body ?? null,
-            generatedBody: gen.result.body,
+            // TAC-309: see above — never republish a discarded guess.
+            generatedBody: approval.blankBody ? '' : gen.result.body,
           })
         }
         // TAC-207: fire APNs push to every operator whose allowlist covers

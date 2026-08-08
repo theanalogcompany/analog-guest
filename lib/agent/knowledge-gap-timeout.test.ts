@@ -259,12 +259,12 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
     expect(summary.sent).toBe(1)
   })
 
-  // A regen failure must never cost the operator their card or re-send.
-  it('still reports the send when the post-send card regen fails', async () => {
+  // TAC-309 removed the post-send card regen entirely; cards are blank now,
+  // so there was no body left to keep in sync.
+  it('sends without attempting any card regeneration', async () => {
     seedCard('card-1', 'inbound-1')
     const summary = await processDueKnowledgeGaps(new Date())
     expect(summary.sent).toBe(1)
-    expect(summary.regenerated).toBe(0)
   })
 
   it('counts a claim DB error without sending', async () => {
