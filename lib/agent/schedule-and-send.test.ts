@@ -660,7 +660,13 @@ function generationWithBody(body: string): GenerateMessageResult {
 
 const NO_DELAY = { skipHumanFeelDelay: true }
 
-describe('scheduleAndSend — message splitting (TAC-313)', () => {
+describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, TAC-319 decision)', () => {
+  // TAC-319: the model no longer decides the split. Dispatch sentence-splits
+  // the body and flips a fair coin for 2-3 sentence replies; the rng is
+  // injected through options so each branch is pinned deterministically.
+  const SPLIT = { skipHumanFeelDelay: true, rng: () => 0 }
+  const SINGLE = { skipHumanFeelDelay: true, rng: () => 0.99 }
+
   beforeEach(() => {
     scenario = freshScenario()
     fireRedAlertMock.mockClear()
@@ -676,14 +682,19 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     vi.restoreAllMocks()
   })
 
-  // ── unchanged single-bubble behavior ──────────────────────────────────
+  // ── single-sentence bodies never flip ─────────────────────────────────
 
-  it('sends a delimiter-free body as ONE message and ONE row', async () => {
+  it('sends a one-sentence body as ONE message and ONE row without consulting the rng', async () => {
     queueSends('provider-1')
     queueInserts('msg-1')
+    const rng = vi.fn(() => 0)
 
-    const result = await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), NO_DELAY)
+    const result = await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      skipHumanFeelDelay: true,
+      rng,
+    })
 
+    expect(rng).not.toHaveBeenCalled()
     expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
     expect(scenario.inserts).toHaveLength(1)
     expect(scenario.inserts[0]!.body).toBe('Open until 4')
@@ -692,30 +703,51 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     expect(result.bubbleCount).toBe(1)
   })
 
-  // ── the split ─────────────────────────────────────────────────────────
+  // ── the flip ──────────────────────────────────────────────────────────
 
-  it('dispatches one message per beat, in order', async () => {
+  it('dispatches one message per sentence, in order, when the flip says split', async () => {
     queueSends('p1', 'p2')
     queueInserts('m1', 'm2')
 
     await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`I'd go for the Frosty Gandhi${BUBBLE_DELIMITER}Espresso, chai, peppermint`),
-      NO_DELAY,
+      generationWithBody('Espresso with foam on top. Stronger than a cortado.'),
+      SPLIT,
     )
 
     const sent = vi.mocked(sendMessage).mock.calls.map((c) => (c[0] as { body: string }).body)
-    expect(sent).toEqual(["I'd go for the Frosty Gandhi", 'Espresso, chai, peppermint'])
+    // Terminal periods are stripped on split pieces; ? and ! would survive.
+    expect(sent).toEqual(['Espresso with foam on top', 'Stronger than a cortado'])
+  })
+
+  it('sends the same multi-sentence body as ONE untouched block when the flip says no', async () => {
+    queueSends('p1')
+    queueInserts('m1')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('Espresso with foam on top. Stronger than a cortado.'),
+      SINGLE,
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string }).body
+    expect(sent).toBe('Espresso with foam on top. Stronger than a cortado.')
+    expect(result.bubbleCount).toBe(1)
   })
 
   it('persists one row per bubble, each carrying its own text', async () => {
     queueSends('p1', 'p2')
     queueInserts('m1', 'm2')
 
-    await scheduleAndSend(makeCtx(), generationWithBody(`first${BUBBLE_DELIMITER}second`), NO_DELAY)
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
+    )
 
     expect(scenario.inserts).toHaveLength(2)
-    expect(scenario.inserts.map((r) => r.body)).toEqual(['first', 'second'])
+    expect(scenario.inserts.map((r) => r.body)).toEqual(['First one here', 'Second one here'])
   })
 
   it('stamps every row of a response with the SAME generation_id', async () => {
@@ -724,8 +756,8 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
 
     const result = await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`a${BUBBLE_DELIMITER}b${BUBBLE_DELIMITER}c`),
-      NO_DELAY,
+      generationWithBody('First one here. Second one here. Third one here.'),
+      SPLIT,
     )
 
     const ids = scenario.inserts.map((r) => r.generation_id)
@@ -746,14 +778,16 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     expect(first.generationId).not.toBe(second.generationId)
   })
 
-  it('never lets the delimiter reach Sendblue or the database', async () => {
+  it('strips stray model-emitted delimiters so none reach Sendblue or the database', async () => {
+    // TAC-319: the model no longer controls splitting, so a leftover [[BREAK]]
+    // is noise, not a boundary. It is stripped on BOTH branches.
     queueSends('p1', 'p2')
     queueInserts('m1', 'm2')
 
     await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`first${BUBBLE_DELIMITER}second`),
-      NO_DELAY,
+      generationWithBody(`First one here.${BUBBLE_DELIMITER}Second one here.`),
+      SPLIT,
     )
 
     for (const call of vi.mocked(sendMessage).mock.calls) {
@@ -764,21 +798,40 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     }
   })
 
-  it('enforces the cap of three in the SENDER, not just the prompt', async () => {
-    queueSends('p1', 'p2', 'p3')
-    queueInserts('m1', 'm2', 'm3')
+  it('a stray delimiter is NOT itself a split instruction', async () => {
+    queueSends('p1')
+    queueInserts('m1')
 
+    // Two sentences joined by a stray marker, flip says no split: one block.
     const result = await scheduleAndSend(
       makeCtx(),
-      generationWithBody(['a', 'b', 'c', 'd', 'e'].join(BUBBLE_DELIMITER)),
-      NO_DELAY,
+      generationWithBody(`First one here.${BUBBLE_DELIMITER}Second one here.`),
+      SINGLE,
     )
 
-    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(3)
-    expect(result.bubbleCount).toBe(3)
-    // Text past the cap is merged into the last bubble, never dropped.
-    const sent = vi.mocked(sendMessage).mock.calls.map((c) => (c[0] as { body: string }).body)
-    expect(sent[2]).toBe('c d e')
+    expect(result.bubbleCount).toBe(1)
+    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string }).body
+    expect(sent).toBe('First one here. Second one here.')
+  })
+
+  it('sends a 4+ sentence body as ONE block without consulting the rng (all-or-nothing)', async () => {
+    // TAC-319 ruling #1: past MAX_BUBBLES_PER_RESPONSE sentences the cap
+    // would force partial grouping, so long answers stay single and the coin
+    // is never flipped.
+    queueSends('p1')
+    queueInserts('m1')
+    const rng = vi.fn(() => 0)
+
+    const body = 'One here. Two here. Three here. Four here.'
+    const result = await scheduleAndSend(makeCtx(), generationWithBody(body), {
+      skipHumanFeelDelay: true,
+      rng,
+    })
+
+    expect(rng).not.toHaveBeenCalled()
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(result.bubbleCount).toBe(1)
+    expect(scenario.inserts[0]!.body).toBe(body)
   })
 
   it('returns the FIRST bubble ids so existing consumers are unaffected', async () => {
@@ -787,8 +840,8 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
 
     const result = await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`a${BUBBLE_DELIMITER}b`),
-      NO_DELAY,
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
     )
 
     expect(result.outboundMessageId).toBe('msg-first')
@@ -801,7 +854,11 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     queueSends('p1', 'p2')
     queueInserts('m1', 'm2')
 
-    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`))
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('First one here. Second one here.'),
+      { rng: () => 0 },
+    )
 
     // Once in the opening sequence, once before the second bubble.
     expect(vi.mocked(sendTypingIndicator)).toHaveBeenCalledTimes(2)
@@ -813,7 +870,11 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     queueSends('p1', 'p2')
     queueInserts('m1', 'm2')
 
-    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY)
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
+    )
 
     expect(vi.mocked(sendTypingIndicator)).not.toHaveBeenCalled()
     expect(vi.mocked(markAsRead)).not.toHaveBeenCalled()
@@ -829,7 +890,11 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     } as never)
 
     await expect(
-      scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY),
+      scheduleAndSend(
+        makeCtx(),
+        generationWithBody('First one here. Second one here.'),
+        SPLIT,
+      ),
     ).rejects.toThrow(/sendMessage failed/)
 
     expect(scenario.inserts).toHaveLength(0)
@@ -850,8 +915,8 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
 
     const result = await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`first${BUBBLE_DELIMITER}second`),
-      NO_DELAY,
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
     )
 
     expect(result.outboundMessageId).toBe('m1')
@@ -868,7 +933,11 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     } as never)
     queueInserts('m1')
 
-    await scheduleAndSend(makeCtx(), generationWithBody(`a${BUBBLE_DELIMITER}b`), NO_DELAY)
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
+    )
 
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
     const alert = fireRedAlertMock.mock.calls[0]![0] as {
@@ -896,8 +965,8 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
 
     const result = await scheduleAndSend(
       makeCtx(),
-      generationWithBody(`a${BUBBLE_DELIMITER}b`),
-      NO_DELAY,
+      generationWithBody('First one here. Second one here.'),
+      SPLIT,
     )
 
     expect(result.bubbleCount).toBe(1)
@@ -920,11 +989,11 @@ describe('scheduleAndSend — message splitting (TAC-313)', () => {
     queueInserts('m1', 'm2')
 
     const generation: GenerateMessageResult = {
-      ...generationWithBody(`holding it for you${BUBBLE_DELIMITER}see you at 8`),
+      ...generationWithBody('Holding it for you. See you at 8.'),
       commitment: { type: 'hold', description: 'holding a loaf' },
     }
 
-    await scheduleAndSend(makeCtx(), generation, NO_DELAY)
+    await scheduleAndSend(makeCtx(), generation, SPLIT)
 
     expect(vi.mocked(createCommitmentFromPending)).toHaveBeenCalledTimes(1)
     const arg = vi.mocked(createCommitmentFromPending).mock.calls[0]![0] as {
