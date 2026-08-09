@@ -120,6 +120,7 @@ Example: `ingest-response-review-pure.ts` (parsing, classification, dedupe) + `i
 - **THE-157 gotcha: never use `.min()` or `.max()` on number fields in LLM-output Zod schemas.** Anthropic's structured output rejects these. Use `.refine()` or post-LLM validation instead.
 - Default model for production agent work: `claude-sonnet-4-6`. Default temperature for generation: 0.7 (variation in phrasing) or 0.3 (idempotent extraction).
 - All LLM-output schemas should have a `prompt_version` string field on the wrapper object so we can distinguish output from different prompt iterations.
+- **Bumping `PROMPT_VERSION` requires updating FOUR test files, not three.** `lib/ai/prompts/system-template.test.ts`, `lib/ai/generate-message.test.ts`, `lib/ai/classify-message.test.ts`, **and `lib/agent/handle-inbound.test.ts`** — the last carries a `promptVersion:` fixture that is easy to miss because it lives outside `lib/ai/`. Ticket descriptions have listed three since at least TAC-308; the fourth bit on both the v1.27.0 and v1.28.0 bumps. The reliable move is `grep -rn "v1\.<old>\.<new>" --include='*.ts' .` after the bump rather than trusting any written list, including this one. (TAC-313.)
 
 ---
 

@@ -44,6 +44,40 @@ function speakerFramingProse(persona: BrandPersona): string {
   }
 }
 
+/**
+ * Render one persona list entry as a bullet that OWNS its own structure.
+ *
+ * TAC-313. These entries are operator-authored free text and routinely carry
+ * paragraphs, and sometimes their own nested list. Splicing them in raw as
+ * `- ${text}` corrupts the result in two ways, both silent:
+ *
+ *   1. A continuation paragraph renders flush-left with no bullet, so it reads
+ *      as document-level prose rather than part of the rule above it. Mock
+ *      Sextant's out-of-domain anti-pattern is three paragraphs: ¶1 supplies
+ *      the phrase "not my world", ¶2 is the carve-out forbidding that phrase
+ *      for documented nearby places. ¶1 got the bullet, ¶2 trailed as loose
+ *      text, and the agent hedged on a recommendation it had documented.
+ *   2. An entry containing its own `- ` list emits those inner bullets at the
+ *      SAME level as the anti-patterns themselves. This is worse than a
+ *      formatting nit, because the enclosing heading is "Anti-patterns (what
+ *      NOT to sound like)": Sextant's recommendation-shapes entry lists four
+ *      GOOD shapes ("One pick, nothing after it."), and each was rendering as
+ *      its own top-level bullet under that heading. Four rules written to shape
+ *      recommendations were being read as things to avoid. Measured on the live
+ *      persona: 30 stored anti-patterns rendered as 34 bullets, with 4
+ *      flush-left orphan lines.
+ *
+ * Indenting every line after the first keeps the entry one unit. Blank lines
+ * stay genuinely blank (no trailing spaces) so paragraph breaks survive.
+ *
+ * Single-line entries — the overwhelming majority — render byte-identically to
+ * before, which is what makes this safe to apply to every persona list field.
+ */
+function personaBullet(text: string): string {
+  const [first = '', ...rest] = text.split('\n')
+  return [`- ${first}`, ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`))].join('\n')
+}
+
 export function personaToProse(persona: BrandPersona): string {
   const sections: string[] = []
 
@@ -55,22 +89,22 @@ export function personaToProse(persona: BrandPersona): string {
 
   if (persona.signaturePhrases.length > 0) {
     sections.push(
-      `## Phrases the venue uses\n${persona.signaturePhrases.map((p) => `- ${p}`).join('\n')}`,
+      `## Phrases the venue uses\n${persona.signaturePhrases.map(personaBullet).join('\n')}`,
     )
   }
   if (persona.bannedTopics.length > 0) {
     sections.push(
-      `## Topics to avoid\n${persona.bannedTopics.map((t) => `- ${t}`).join('\n')}`,
+      `## Topics to avoid\n${persona.bannedTopics.map(personaBullet).join('\n')}`,
     )
   }
   if (persona.voiceAntiPatterns.length > 0) {
     sections.push(
-      `## Anti-patterns (what NOT to sound like)\n${persona.voiceAntiPatterns.map((a) => `- ${a.text}`).join('\n')}`,
+      `## Anti-patterns (what NOT to sound like)\n${persona.voiceAntiPatterns.map((a) => personaBullet(a.text)).join('\n')}`,
     )
   }
   if (persona.voiceTouchstones.length > 0) {
     sections.push(
-      `## Voice anchors\n${persona.voiceTouchstones.map((v) => `- ${v}`).join('\n')}`,
+      `## Voice anchors\n${persona.voiceTouchstones.map(personaBullet).join('\n')}`,
     )
   }
 
