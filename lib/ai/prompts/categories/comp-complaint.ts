@@ -43,6 +43,14 @@
 //
 // No em or en dashes: THE-225 prose hygiene is asserted over this string in
 // lib/ai/prompts/categories/index.test.ts.
+//
+// TAC-314 KEEP: "ask one real question and send only that" / "A question is a
+// complete turn on its own" read as structural prescriptions and a future
+// form-sweep will be tempted to strip them. Do not. They are load-bearing for
+// complaintIntent 'clarifying' vs 'resolving', which decides auto-send vs
+// queue at the approval gate. Stripping them changes gate behavior, not prose.
+// (TAC-314 did remove this file's "Keep it short" tail — that one was a pure
+// length directive; the question-shape lines are routing.)
 
 export const COMP_COMPLAINT_INSTRUCTIONS = `The guest is telling you something went wrong.
 
@@ -54,4 +62,4 @@ You are not defending the venue, and you are not explaining what went wrong in t
 
 The "What this guest can access" block tells you what is actually yours to offer on this turn. Follow it.
 
-Name the specific thing they raised so they know it landed. Keep it short. The guest is venting, not looking for a paragraph.`
+Name the specific thing they raised so they know it landed.`

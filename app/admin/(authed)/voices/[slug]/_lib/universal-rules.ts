@@ -1,24 +1,31 @@
-// Hardcoded display labels for the universal voice rules R1–R12.
+// Hardcoded display labels for the universal voice rules.
 //
 // COUPLING NOTE: these mirror the bullets under "# Universal voice rules"
 // in lib/ai/prompts/system-template.ts. When the SYSTEM_TEMPLATE rules are
-// edited (renumbered, reworded, added, removed), this constant must move
-// in lockstep — there is currently no structured rules registry. Tracking
-// follow-up to extract one (THE-237 follow-up: "structured rules registry").
-// The system template carries three further guidance bullets after R12
-// (greeting / operator-instruction / Last-Visit, numbered R13-R15 in
-// system-template.test.ts); those are intentionally NOT surfaced here, so
-// this curated list runs R1-R12. The lockstep test in
-// system-template.test.ts asserts the IDs here are contiguous and that the
-// R11 and R12 anchor phrases are present in both this constant and
-// SYSTEM_TEMPLATE.
+// edited (reworded, added, removed), this constant must move in lockstep —
+// there is currently no structured rules registry. Tracking follow-up to
+// extract one (THE-237 follow-up: "structured rules registry").
 //
-// TAC-313 added R12 (message splitting) as the 12th bullet, shifting
-// greeting / operator / Last-Visit from R12-R14 to R13-R15. It is displayed
-// rather than left in the undisplayed tail because splitting is message form,
-// which is what operators tune on this rail.
+// NUMBERING IS POSITIONAL AND APPEND-ONLY (TAC-314). An R-number is the
+// bullet's position in the template block, and rules are only ever APPENDED —
+// never inserted mid-list — because renumbering live rule IDs stales every
+// external reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
+// consequence: displayed IDs are NOT contiguous. This list curates R1-R12
+// plus R17-R18; R13-R16 are the four undisplayed guidance bullets (greeting /
+// operator-instruction / Last-Visit / Unanswered-question) and R19-R20 are
+// undisplayed form-authority bullets (mirroring, ## Length authority). The
+// lockstep test in system-template.test.ts asserts the exact ID sequence and
+// that each displayed rule's anchor phrase is present in both this constant
+// and SYSTEM_TEMPLATE.
 //
-// Rendering: each rule shows in the rail's "Universal · 12 (locked)"
+// TAC-313 added R12 (message splitting). TAC-314 appended R17 (price
+// scoping) and R18 (nearby places), both promoted out of lower layers where
+// they kept losing: price scoping only rendered on new_question while the
+// leak happened on reply; the nearby-places carve-out lived in venue
+// anti-pattern data, which renders earlier and loses. Displayed because both
+// are form/policy rules operators tune on this rail.
+//
+// Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
 
 export interface UniversalRule {
@@ -86,5 +93,16 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R12',
     summary:
       "A reply carrying more than one distinct beat arrives as separate messages — a pick and its description are two beats, two picks are two beats. A short factual answer stays one message. Splitting is the exception; most replies stay single.",
+  },
+  // R13-R16 are undisplayed guidance bullets — see the numbering note above.
+  {
+    id: 'R17',
+    summary:
+      "Price is not part of an answer unless the guest asked what something costs. Describing a drink is not asking its price.",
+  },
+  {
+    id: 'R18',
+    summary:
+      "Documented nearby places are in-domain: name them and speak with the same confidence you'd use about the menu, no hedge. Hedge only when nothing is documented, and never fill the gap from general knowledge.",
   },
 ]
