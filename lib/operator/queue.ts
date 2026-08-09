@@ -31,6 +31,7 @@ export interface QueueDraft {
   messageId: string
   venueId: string
   venueSlug: string
+  venueTimezone: string | null
   guestId: string
   guestDisplayName: string | null
   guestPhoneFallback: string
@@ -38,6 +39,7 @@ export interface QueueDraft {
   category: string | null
   voiceFidelity: number | null
   reviewReason: string | null
+  agentReasoning: string | null
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
   recentContext: QueueRecentContextEntry[]
@@ -115,6 +117,41 @@ function normalizeReviewReason(raw: string | null): string | null {
   return (REVIEW_REASON_LABELS as Record<string, string>)[raw] ?? REVIEW_REASON_FALLBACK
 }
 
+// A short plain-English sentence explaining WHY a draft was flagged for review,
+// surfaced on the operator card under the guest name. Distinct from the chip-
+// sized `REVIEW_REASON_LABELS` above: the label is the category, this is the
+// explanation an operator reads to decide quickly. Derived deterministically
+// from `messages.review_reason` (the trigger) — no model call, so it can't go
+// generic or drift. Typed exhaustively like the label map so a new trigger
+// without a sentence fails tsc.
+const REVIEW_REASON_SENTENCES: Record<ApprovalTrigger | ExtraReviewReason, string> = {
+  commitment_type_gated:
+    'This reply promises the guest a comp, hold, or discount, so it needs your sign-off before it sends.',
+  comp_regex_backstop:
+    "This reply mentions comping or discounting something, so it's held for your approval.",
+  model_flagged:
+    "The assistant wasn't fully sure on this one and flagged it for you to check.",
+  fidelity_below_auto_send_floor:
+    "This reply's voice match came in a little low, so it's held for you to review first.",
+  previous_pending_held:
+    "There's already a reply waiting for this guest, so this one is held too.",
+  hold_all_outbound:
+    'This venue is holding every reply for review right now, so this one is waiting on you.',
+  operator_decline_initiated:
+    "You declined this guest's request — here's a drafted reply to review.",
+}
+
+const REVIEW_REASON_SENTENCE_FALLBACK =
+  'This reply needs a quick review before it sends.'
+
+function reviewReasonToSentence(raw: string | null): string | null {
+  if (raw === null) return null
+  return (
+    (REVIEW_REASON_SENTENCES as Record<string, string>)[raw] ??
+    REVIEW_REASON_SENTENCE_FALLBACK
+  )
+}
+
 function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
   if (raw === null) return []
   if (!Array.isArray(raw)) return []
@@ -163,12 +200,25 @@ export async function listPendingQueue(
     return { ok: false, error: error.message }
   }
 
+  // The RPC return doesn't carry the venue timezone; fetch it for the allowed
+  // venues so the operator app renders times in venue-local time instead of
+  // falling back to the device timezone.
+  const tzByVenue = new Map<string, string | null>()
+  const { data: venueRows } = await supabase
+    .from('venues')
+    .select('id, timezone')
+    .in('id', allowedVenueIds)
+  for (const v of venueRows ?? []) {
+    tzByVenue.set(v.id, v.timezone)
+  }
+
   const drafts: QueueDraft[] = (data ?? []).map((row) => {
     const createdAt = new Date(row.created_at).getTime()
     return {
       messageId: row.draft_id,
       venueId: row.venue_id,
       venueSlug: row.venue_slug,
+      venueTimezone: tzByVenue.get(row.venue_id) ?? null,
       guestId: row.guest_id,
       guestDisplayName: row.guest_display_name,
       guestPhoneFallback: row.guest_phone,
@@ -176,6 +226,7 @@ export async function listPendingQueue(
       category: row.category,
       voiceFidelity: row.voice_fidelity,
       reviewReason: normalizeReviewReason(row.review_reason),
+      agentReasoning: reviewReasonToSentence(row.review_reason),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),
