@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.28.0 (R12/anti-pattern reconcile, price scoping, persona bullet fix)', () => {
-    expect(PROMPT_VERSION).toBe('v1.28.0')
+  it('is v1.29.0 (TAC-314: category layer stripped of form authority; R17/R18 promoted)', () => {
+    expect(PROMPT_VERSION).toBe('v1.29.0')
   })
 })
 
@@ -40,16 +40,25 @@ describe('PROMPT_VERSION', () => {
 // of their template bullets, so they are not asserted phrase-for-phrase; a
 // structured per-rule anchor field would be needed for full coverage and is
 // deferred to the rules-registry extraction (THE-237 follow-up).
-describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305)', () => {
-  it('exposes contiguous ids R1..R{length} with no gaps', () => {
+describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numbering policy TAC-314)', () => {
+  it('exposes the exact expected id sequence — positional, append-only, NOT contiguous', () => {
+    // R-numbers are template bullet positions and rules are only ever
+    // APPENDED (TAC-314): renumbering live rule IDs stales every external
+    // reference. R13-R16 are the undisplayed guidance bullets (greeting /
+    // operator-instruction / Last-Visit / Unanswered-question); R19-R20 are
+    // the undisplayed form-authority bullets. So the displayed sequence has a
+    // deliberate gap. The old assertion here demanded contiguity, which
+    // would have forced exactly the renumbering the policy forbids.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
-    const expected = UNIVERSAL_RULES_DISPLAY.map((_, i) => `R${i + 1}`)
-    expect(ids).toEqual(expected)
+    expect(ids).toEqual([
+      'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12',
+      'R17', 'R18',
+    ])
   })
 
-  it('curates exactly R1..R12 (TAC-313 added R12; greeting/operator/Last-Visit stay display-excluded)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(12)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R12')
+  it('curates 14 rules ending at R18 (TAC-314 appended R17 price + R18 nearby)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(14)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R18')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -68,6 +77,48 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305)', () =>
     // carries the delimiter the model actually has to emit.
     expect(r12?.summary).toContain('separate messages')
     expect(SYSTEM_TEMPLATE).toContain('more than one distinct beat')
+  })
+
+  it('shares the R17 price-scoping anchor across both sources (TAC-314)', () => {
+    const r17 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R17')
+    expect(r17).toBeDefined()
+    expect(r17?.summary).toContain('not part of an answer unless')
+    expect(SYSTEM_TEMPLATE).toContain('Price is not part of an answer unless the guest asked')
+    expect(SYSTEM_TEMPLATE).toContain('Describing a drink is not asking its price')
+  })
+
+  it('shares the R18 nearby-places anchor across both sources (TAC-314)', () => {
+    const r18 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R18')
+    expect(r18).toBeDefined()
+    expect(r18?.summary).toContain('speak with the same confidence')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "speak with the same confidence you'd use about the menu",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('never fill the gap from general knowledge')
+  })
+})
+
+// TAC-314: the template used to carry a SECOND `# Universal voice rules`
+// heading — bare, contentless, immediately followed by `# Guest context
+// capture`, 31 lines before the real section. A heading that promises the
+// authority layer and delivers a different topic dilutes the exact layer this
+// ticket makes authoritative. Deleted; this pins it deleted.
+describe('SYSTEM_TEMPLATE — single universal-rules heading (TAC-314)', () => {
+  it('contains exactly one # Universal voice rules heading', () => {
+    const matches = SYSTEM_TEMPLATE.match(/^# Universal voice rules$/gm) ?? []
+    expect(matches).toHaveLength(1)
+  })
+
+  it('keeps the four undisplayed guidance bullets and the two form-authority bullets', () => {
+    // R13-R16 must survive TAC-314 untouched (append-only numbering depends
+    // on their positions staying fixed), and R19/R20 fill the gaps the
+    // category strip left.
+    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message')
+    expect(SYSTEM_TEMPLATE).toContain('## Operator instruction block')
+    expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you')
+    expect(SYSTEM_TEMPLATE).toContain('## Unanswered question block')
+    expect(SYSTEM_TEMPLATE).toContain('Match the register and length of what the guest sent')
+    expect(SYSTEM_TEMPLATE).toContain('only authority on how long a message should be')
   })
 })
 

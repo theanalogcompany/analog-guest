@@ -1,12 +1,11 @@
-// TAC-313: the price clause scopes what comes OUT of "Venue facts" rather than
-// asking for a filter afterwards. The old sentence requested a copy of a
-// section where every menu item carries a price (69/69 at Mock Sextant), and
-// this instruction renders LAST in the system prompt — so it outranked the
-// venue's own "don't volunteer prices" anti-pattern, which sits earlier and
-// asked the model to subtract a field from the block it had just been told to
-// copy. Scoping the pull removes the contradiction instead of restating the
-// ban. Note the price data itself is correct and available; what changed is
-// that price is not part of an answer nobody asked a cost question about.
+// TAC-313 added a price-scoping clause here; TAC-314 PROMOTED it to the
+// universal rules layer in SYSTEM_TEMPLATE (R17), where it renders on every
+// category. The category-local version only ever fired on new_question turns,
+// and the turn that actually leaked a price classified as `reply` — a
+// category this file never touches. Don't re-add price language here; the
+// universal rule is the single owner now. The remaining "Do not guess prices"
+// below is a DIFFERENT rule (anti-invention, R8 territory): R17 governs
+// volunteering real prices, this governs fabricating ones that aren't listed.
 //
 // TAC-313 also removes a TAC-308 survivor from this string. It used to end
 // "say so plainly and offer to ask someone or get back to them" — the exact
@@ -19,4 +18,4 @@
 // Rayan" by name. Unanswerable questions now route through # Knowledge gaps,
 // which is what puts them in front of an operator instead of promising a guest
 // a follow-up nobody scheduled.
-export const NEW_QUESTION_INSTRUCTIONS = `The guest is asking a question that should be answered factually from the venue's information. Pull only from the "Venue facts" section above, and only the parts that answer what was asked: hours, address, menu item names and descriptions, amenities, contact details. That section lists a price on every menu item; price is not part of the answer unless the guest asked what something costs. If the answer is not in those facts, handle it per the # Knowledge gaps block. Do not guess prices, availability, or specific items not listed. Keep the answer direct and short.`
+export const NEW_QUESTION_INSTRUCTIONS = `The guest is asking a question that should be answered factually from the venue's information. Pull only from the "Venue facts" section above, and only the parts that answer what was asked: hours, address, menu item names and descriptions, amenities, contact details. If the answer is not in those facts, handle it per the # Knowledge gaps block. Do not guess prices, availability, or specific items not listed.`

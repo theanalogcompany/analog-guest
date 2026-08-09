@@ -122,9 +122,9 @@ describe('comp-complaint instructions (v1.24.0 register)', () => {
     expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('IS a complete response')
   })
 
-  it('still names the specific thing raised, and stays short', () => {
+  it('still names the specific thing raised (length directive removed, TAC-314)', () => {
     expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Name the specific thing they raised')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Keep it short')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('Keep it short')
   })
 
   it('contains no em or en dashes (THE-225 prose hygiene)', () => {
@@ -166,12 +166,14 @@ describe('recommendation-request instructions (THE-228)', () => {
     )
   })
 
-  it('limits picks to one or two with optional context', () => {
-    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('one or two specific picks')
+  it('directs specific picks without prescribing a count (TAC-314)', () => {
+    // The pick COUNT is venue policy (Sextant's AP[28] caps at two and
+    // rotates delivery shapes); a count here overrode it into a template.
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('Name specific picks')
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).not.toMatch(/one or two/i)
   })
 
   it('forbids cataloging the menu', () => {
-    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('Do not list every menu item')
     expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('not a catalog')
   })
 
@@ -181,8 +183,9 @@ describe('recommendation-request instructions (THE-228)', () => {
 })
 
 describe('casual-chatter instructions (THE-228)', () => {
-  it('directs the agent to match energy and length', () => {
-    expect(CASUAL_CHATTER_INSTRUCTIONS).toContain('Match their energy and length')
+  it('carries no mirroring directive (universal R19 owns it, TAC-314)', () => {
+    expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain('Match their energy')
+    expect(CASUAL_CHATTER_INSTRUCTIONS).toContain('Stay in voice')
   })
 
   it('forbids pivoting to perks/events/service offers', () => {
@@ -316,9 +319,9 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     )
   })
 
-  it('directs the agent to mirror with a short close', () => {
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Mirror their energy with a short close')
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('one to three words')
+  it('frames the turn as a close, without word-count prescriptions (TAC-314)', () => {
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('This is a close, not an opening')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('one to three words')
   })
 
   it('forbids pivoting or starting a new thread', () => {
@@ -337,8 +340,9 @@ describe('unknown instructions — inbound catch-all (v1.10.0)', () => {
     expect(UNKNOWN_INSTRUCTIONS).toContain('classifier could not confidently categorize')
   })
 
-  it('directs the agent to send a brief holding response', () => {
-    expect(UNKNOWN_INSTRUCTIONS).toContain('brief, warm holding response')
+  it('directs the agent to send a warm holding response (no length directive, TAC-314)', () => {
+    expect(UNKNOWN_INSTRUCTIONS).toContain('warm holding response')
+    expect(UNKNOWN_INSTRUCTIONS).not.toContain('brief')
   })
 
   it('directs the agent to reference what they asked', () => {
@@ -392,9 +396,12 @@ describe('event-question instructions (v1.10.0)', () => {
     expect(EVENT_QUESTION_INSTRUCTIONS).toContain('documented events')
   })
 
-  it('forbids inventing or pivoting', () => {
-    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('rather than inventing one')
-    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot')
+  it('forbids the sales pivot; invention is R8 territory now (TAC-314)', () => {
+    // The category-local "say so plainly rather than inventing one" was
+    // disclosure policy — R8 + # Knowledge gaps own that on every category.
+    // The no-sales-pressure pivot is topic/behavior and stays.
+    expect(EVENT_QUESTION_INSTRUCTIONS).not.toContain('rather than inventing one')
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot to suggesting they come anyway')
   })
 
   it('contains no em or en dashes', () => {
@@ -407,36 +414,73 @@ describe('event-question instructions (v1.10.0)', () => {
 // instruction below asks for a copy of a section where 69/69 menu items carry a
 // price, and category instructions render LAST in the system prompt, so this
 // outranked the venue's ban. The fix scopes what comes out of the pull.
-describe('NEW_QUESTION_INSTRUCTIONS — price scoping (TAC-313 UAT, v1.28.0)', () => {
-  it('scopes price out of the pull unless the guest asked what something costs', () => {
-    expect(NEW_QUESTION_INSTRUCTIONS).toContain(
-      'price is not part of the answer unless the guest asked what something costs',
-    )
+describe('NEW_QUESTION_INSTRUCTIONS — after the TAC-314 promotion', () => {
+  it('no longer carries category-local price scoping (moved to universal R17)', () => {
+    // The category-local rule only ever rendered on new_question turns; the
+    // price that leaked in UAT was on a `reply` turn. R17 in SYSTEM_TEMPLATE
+    // owns this now, on every category — compose-prompt.test.ts asserts the
+    // assembled prompt carries it for reply and recommendation_request too.
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('price is not part of the answer')
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('lists a price on every menu item')
   })
 
-  it('names that the section carries a price on every item', () => {
-    // Says WHY the exception exists, so it reads as scoping rather than as a
-    // second contradictory rule about prices.
-    expect(NEW_QUESTION_INSTRUCTIONS).toContain('lists a price on every menu item')
-  })
-
-  it('still forbids guessing prices that are not listed', () => {
-    // Distinct failure from volunteering a real one; both stay banned.
+  it('still forbids guessing prices that are not listed (kept: anti-invention, not disclosure)', () => {
+    // Deliberate keep per TAC-314: R17 governs volunteering REAL prices; this
+    // governs FABRICATING ones that are not listed. R8 territory.
     expect(NEW_QUESTION_INSTRUCTIONS).toContain('Do not guess prices')
   })
 
   it('routes an unanswerable question to # Knowledge gaps, not a promise', () => {
-    // TAC-308 survivor. This instruction renders LAST, so on the turns most
-    // likely to gap it was the strongest-positioned text in the prompt — and it
-    // said the one thing TAC-308 exists to prevent.
     expect(NEW_QUESTION_INSTRUCTIONS).toContain('handle it per the # Knowledge gaps block')
   })
 
   it('no longer offers to ask someone or get back to the guest', () => {
-    // Named in the direction that matters: the promise must be ABSENT. A test
-    // asserting only the presence of the new routing would still pass if both
-    // sentences shipped side by side.
+    // Named in the direction that matters: the promise must be ABSENT.
     expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('get back to them')
     expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('ask someone')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-314: the category layer loses structural authority.
+// ---------------------------------------------------------------------------
+//
+// Governing principle: a category block governs what the turn is ABOUT. It may
+// not prescribe message structure, length, sentence count, splitting, hedging
+// policy, or disclosure policy — those belong to the universal layer, which
+// renders in SYSTEM_TEMPLATE for every category. Category blocks render LAST,
+// so a form directive here outranks every layer above it; that is how "Keep it
+// short, one or two short sentences total" kept R12 at zero splits across five
+// UAT turns while every test was green.
+
+describe('category blocks carry no form authority (TAC-314)', () => {
+  // One entry per instruction constant — all 17. The regex is the union of
+  // every length/count phrasing removed by the TAC-314 sweep; a new category
+  // block that reintroduces one fails here by construction. Both deliberate
+  // keeps (personal_history no-record handling, comp_complaint question shape)
+  // pass on CONTENT, not via an exemption: neither contains a length pattern.
+  const FORBIDDEN_FORM =
+    /keep it short|keep the answer direct and short|short sentences? total|one short (line|message)|at or below the length|stay short|one to three words|one or two short (lines|sentences)|match their energy and length|match the energy and length/i
+
+  it.each(ROUND_TRIP_TABLE)('%s has no length or sentence-count directive', (_cat, text) => {
+    expect(text).not.toMatch(FORBIDDEN_FORM)
+  })
+
+  it('reply and unknown carry no TAC-308 survivor phrasing', () => {
+    for (const block of [REPLY_INSTRUCTIONS, UNKNOWN_INSTRUCTIONS]) {
+      expect(block).not.toContain('get back to you')
+      expect(block).not.toContain('offer to find out')
+    }
+    // reply gets the same routing new_question got in #111.
+    expect(REPLY_INSTRUCTIONS).toContain('handle it per the # Knowledge gaps block')
+  })
+
+  it('recommendation_request prescribes topic, not shape or hedging', () => {
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).not.toContain('say so plainly')
+    // No pick count — the cap and rotation shapes are venue policy (AP[28]),
+    // which the category layer was overriding into a two-pick template.
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).not.toMatch(/one or two/i)
+    // The anti-catalog topic scoping stays.
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('not a catalog')
   })
 })
