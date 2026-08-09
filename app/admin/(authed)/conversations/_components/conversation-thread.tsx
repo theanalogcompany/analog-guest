@@ -2,7 +2,7 @@
 
 import { formatInTimeZone } from 'date-fns-tz'
 import { useEffect, useRef } from 'react'
-import type { Json } from '@/db/types'
+import { deriveResponseState, type ThreadResponse } from '../lib/project-thread'
 import { type BubblePosition, MessageBubble } from './message-bubble'
 
 // iMessage-style thread layout. Bubbles are clickable; the parent owns the
@@ -12,6 +12,13 @@ import { type BubblePosition, MessageBubble } from './message-bubble'
 // SEQUENCE_GAP_MS *or* direction flips, render a centered timestamp row
 // above the next bubble.
 //
+// TAC-316: the thread consumes response-grained ThreadResponse entries.
+// A split response renders its fragments as separate chained bubbles (visual
+// fidelity to what the guest's phone showed) that share ONE selection /
+// trace / review identity — clicking any fragment selects the response.
+// Never-sent, pending, failed, and unknown-state responses render muted with
+// a caption under the last fragment; blank bodies render a placeholder.
+//
 // Auto-scroll: on mount and on new-message append, scroll to bottom — but
 // only if the user is already near the bottom. Don't yank them if they've
 // scrolled up to read history.
@@ -20,21 +27,8 @@ const SEQUENCE_GAP_MS = 60 * 1000
 const TIMESTAMP_GAP_MS = 5 * 60 * 1000  // Show centered timestamp row when gap exceeds 5 min
 const NEAR_BOTTOM_PX = 120
 
-export interface ThreadMessage {
-  id: string
-  body: string
-  direction: 'inbound' | 'outbound'
-  createdAt: Date
-  langfuseTraceId: string | null
-  replyToMessageId: string | null
-  /** messages.category at row write time. Form pre-fills the dropdown from this. */
-  category: string | null
-  /** messages.response_review JSONB. Parsed by the form via MessageReviewSchema.safeParse. */
-  responseReview: Json | null
-}
-
 interface ConversationThreadProps {
-  messages: ThreadMessage[]
+  messages: ThreadResponse[]
   venueTimezone: string
   selectedMessageId: string | null
   onSelectMessage: (id: string) => void
@@ -54,14 +48,17 @@ export function ConversationThread({
     if (!el) return
     const last = messages[messages.length - 1]
     if (!last) return
-    if (last.id === lastMessageIdRef.current) return
+    // Key on the last response's last bubble so a live-arriving second bubble
+    // of a split still triggers the scroll.
+    const lastBubbleId = last.bubbles[last.bubbles.length - 1]?.id ?? last.id
+    if (lastBubbleId === lastMessageIdRef.current) return
     // Only auto-scroll if user is near the bottom — don't yank mid-read.
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     const isInitialMount = lastMessageIdRef.current === null
     if (isInitialMount || distanceFromBottom < NEAR_BOTTOM_PX) {
       el.scrollTop = el.scrollHeight
     }
-    lastMessageIdRef.current = last.id
+    lastMessageIdRef.current = lastBubbleId
   }, [messages])
 
   // Pre-compute positions + timestamp insertions in a single pass to keep the
@@ -96,15 +93,18 @@ export function ConversationThread({
         }
         return (
           <MessageBubble
-            key={item.message.id}
-            body={item.message.body}
-            direction={item.message.direction}
-            createdAt={item.message.createdAt}
+            key={item.bubbleId}
+            body={item.placeholder ?? item.body}
+            isPlaceholder={item.placeholder !== null}
+            direction={item.response.direction}
+            createdAt={item.createdAt}
             venueTimezone={venueTimezone}
             position={item.position}
-            selected={item.message.id === selectedMessageId}
-            reviewed={item.message.responseReview !== null}
-            onSelect={() => onSelectMessage(item.message.id)}
+            selected={item.response.id === selectedMessageId}
+            reviewed={item.isLastBubble && item.response.responseReview !== null}
+            muted={item.state.kind === 'annotated'}
+            stateLabel={item.isLastBubble && item.state.kind === 'annotated' ? item.state.label : null}
+            onSelect={() => onSelectMessage(item.response.id)}
           />
         )
       })}
@@ -114,7 +114,17 @@ export function ConversationThread({
 
 type ThreadItem =
   | { kind: 'timestamp'; atIso: string }
-  | { kind: 'bubble'; message: ThreadMessage; position: BubblePosition }
+  | {
+      kind: 'bubble'
+      response: ThreadResponse
+      bubbleId: string
+      body: string
+      placeholder: string | null
+      createdAt: Date
+      isLastBubble: boolean
+      state: ReturnType<typeof deriveResponseState>
+      position: BubblePosition
+    }
 
 // Format a cluster timestamp as "EEE MMM d · period" in the venue's local
 // timezone. Period buckets the local hour into morning/afternoon/evening/
@@ -138,15 +148,46 @@ function formatClusterTimestamp(iso: string, tz: string): string {
   return `${dayLabel} · ${period}`
 }
 
-function computeItems(messages: ThreadMessage[]): ThreadItem[] {
+// Flatten responses to per-bubble render entries. The chain/timestamp logic
+// runs over the flattened bubble sequence exactly as it did over rows —
+// fragments of a split share a direction and sit within seconds of each
+// other, so they chain naturally without special-casing.
+//
+// Display-order caveat (accepted cost of keyed grouping): an inbound that
+// lands INSIDE the 1.5s inter-bubble gap of a split renders after both
+// bubbles even though it arrived between them — the flatten is response-by-
+// response, not globally chronological. Same posture as the queue's
+// recent_context merge (migration 032).
+function computeItems(messages: ThreadResponse[]): ThreadItem[] {
+  const flat: Array<{
+    response: ThreadResponse
+    bubbleId: string
+    body: string
+    placeholder: string | null
+    createdAt: Date
+    isLastBubble: boolean
+  }> = []
+  for (const response of messages) {
+    response.bubbles.forEach((bubble, i) => {
+      flat.push({
+        response,
+        bubbleId: bubble.id,
+        body: bubble.body,
+        placeholder: bubble.placeholder,
+        createdAt: bubble.createdAt,
+        isLastBubble: i === response.bubbles.length - 1,
+      })
+    })
+  }
+
   const items: ThreadItem[] = []
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i]
-    const prev = messages[i - 1]
-    const next = messages[i + 1]
+  for (let i = 0; i < flat.length; i++) {
+    const m = flat[i]
+    const prev = flat[i - 1]
+    const next = flat[i + 1]
 
     // Insert centered timestamp row when there's a sustained gap or direction flip
-    // with notable elapsed time. First message always gets a timestamp row above.
+    // with notable elapsed time. First bubble always gets a timestamp row above.
     if (
       !prev ||
       m.createdAt.getTime() - prev.createdAt.getTime() > TIMESTAMP_GAP_MS
@@ -156,11 +197,11 @@ function computeItems(messages: ThreadMessage[]): ThreadItem[] {
 
     const samePrev =
       prev &&
-      prev.direction === m.direction &&
+      prev.response.direction === m.response.direction &&
       m.createdAt.getTime() - prev.createdAt.getTime() <= SEQUENCE_GAP_MS
     const sameNext =
       next &&
-      next.direction === m.direction &&
+      next.response.direction === m.response.direction &&
       next.createdAt.getTime() - m.createdAt.getTime() <= SEQUENCE_GAP_MS
 
     let position: BubblePosition
@@ -169,7 +210,17 @@ function computeItems(messages: ThreadMessage[]): ThreadItem[] {
     else if (samePrev && sameNext) position = 'middle'
     else position = 'last'
 
-    items.push({ kind: 'bubble', message: m, position })
+    items.push({
+      kind: 'bubble',
+      response: m.response,
+      bubbleId: m.bubbleId,
+      body: m.body,
+      placeholder: m.placeholder,
+      createdAt: m.createdAt,
+      isLastBubble: m.isLastBubble,
+      state: deriveResponseState(m.response),
+      position,
+    })
   }
   return items
 }
