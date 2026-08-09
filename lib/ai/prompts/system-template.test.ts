@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.29.0 (TAC-314: category layer stripped of form authority; R17/R18 promoted)', () => {
-    expect(PROMPT_VERSION).toBe('v1.29.0')
+  it('is v1.30.0 (TAC-319: R12 beats defined by the two-job test)', () => {
+    expect(PROMPT_VERSION).toBe('v1.30.0')
   })
 })
 
@@ -132,8 +132,13 @@ describe('SYSTEM_TEMPLATE — split delimiter (TAC-313, v1.27.0)', () => {
     expect(SYSTEM_TEMPLATE).toContain('[[BREAK]]')
   })
 
-  it('tells the model splitting is the exception, not the default', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Splitting is the exception, not the default')
+  // TAC-319 (v1.30.0): this assertion originally pinned 'Splitting is the
+  // exception, not the default', which contradicted the two-job test — a
+  // short definitional answer doing two jobs matched "exception" framing and
+  // merged. The calibration signal survives in the reworded sentence below;
+  // the removal itself is pinned in the TAC-319 describe block at the bottom.
+  it('tells the model most replies carry a single job and stay single', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Most replies carry a single job and stay a single message')
   })
 
   it('reconciles the per-venue length guidance against a multi-beat reply', () => {
@@ -666,5 +671,69 @@ describe('SYSTEM_TEMPLATE — R12 does not instruct a bare comma list (TAC-313 U
     expect(SYSTEM_TEMPLATE).toContain(
       'Splitting changes where a thought lands, not how it is written',
     )
+  })
+})
+
+// TAC-319 (v1.30.0): R12's beat taxonomy was recommendation-shaped — every
+// example was pick+description / two picks, and "A short factual answer is
+// ONE beat" plus "Splitting is the exception, not the default" taught the
+// model to merge a short definitional answer that does two jobs (states what
+// a thing is, then compares it). Observed in TAC-314 UAT: "whats a macchiato"
+// produced one bubble carrying a definition AND a comparison. Beats are now
+// defined by the two-job test, with definition+comparison as a worked
+// example.
+describe('SYSTEM_TEMPLATE — R12 beats by the two-job test (TAC-319, v1.30.0)', () => {
+  it('defines a beat as one complete job, not one complete thought', () => {
+    expect(SYSTEM_TEMPLATE).toContain('A beat is one complete job')
+    expect(SYSTEM_TEMPLATE).not.toContain('A beat is one complete thought')
+  })
+
+  it('states the two-job test', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'An answer carries two beats when it does two jobs',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'states a thing, then does something with it',
+    )
+  })
+
+  it('includes the definition+comparison worked example with the delimiter', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'Espresso with a small dollop of foam on top' [[BREAK]] 'stronger than a cortado, barely any milk'",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A definition and its comparison are two beats even when the whole answer is short',
+    )
+  })
+
+  it('keeps the single-job floor: one job takes no delimiter', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A single-job answer is ONE beat and takes no delimiter: 'open until 4' does not need company",
+    )
+  })
+
+  // Pins the removals so the shape-based merge instruction can't be
+  // reintroduced by a future edit that "restores" familiar phrasing.
+  it('no longer carries the exception framing or the short-factual-answer merge rule', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('Splitting is the exception, not the default')
+    expect(SYSTEM_TEMPLATE).not.toContain('A short factual answer is ONE beat')
+  })
+
+  it('shares the "one complete job" anchor with the display mirror (lockstep)', () => {
+    const r12 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R12')
+    expect(r12).toBeDefined()
+    expect(r12?.summary).toContain('one complete job')
+    expect(SYSTEM_TEMPLATE).toContain('one complete job')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // Slice from the splitting bullet's opening clause to the next rule
+    // (greeting discipline), matching the sibling dash-free slice tests.
+    const start = SYSTEM_TEMPLATE.indexOf('Break a reply into separate messages')
+    const end = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const r12Body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(r12Body).not.toMatch(/[—–]/)
   })
 })

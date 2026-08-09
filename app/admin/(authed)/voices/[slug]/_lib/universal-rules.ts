@@ -23,7 +23,10 @@
 // they kept losing: price scoping only rendered on new_question while the
 // leak happened on reply; the nearby-places carve-out lived in venue
 // anti-pattern data, which renders earlier and loses. Displayed because both
-// are form/policy rules operators tune on this rail.
+// are form/policy rules operators tune on this rail. TAC-319 rewrote R12's
+// beat taxonomy to the two-job test (v1.30.0); the summary here shares the
+// verbatim anchor "one complete job" with the template bullet, asserted by
+// the lockstep test.
 //
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
@@ -92,7 +95,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R12',
     summary:
-      "A reply carrying more than one distinct beat arrives as separate messages — a pick and its description are two beats, two picks are two beats. A short factual answer stays one message. Splitting is the exception; most replies stay single.",
+      "A reply carrying more than one distinct beat arrives as separate messages. A beat is one complete job: a pick and its description are two beats, a definition and its comparison are two beats even when short. A single-job answer stays one message.",
   },
   // R13-R16 are undisplayed guidance bullets — see the numbering note above.
   {

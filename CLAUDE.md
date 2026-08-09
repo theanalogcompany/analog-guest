@@ -341,7 +341,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: **1794 tests across 119 files as of 2026-08-09** (TAC-314; measured, not computed) (measured via `npx vitest run`; was 721/61 on 2026-05-11 and had drifted undocumented for three months). Don't let regressions land — every PR should keep tests green.
+Test count baseline: **1801 tests across 119 files as of 2026-08-09** (TAC-319; measured, not computed) (measured via `npx vitest run`; was 721/61 on 2026-05-11 and had drifted undocumented for three months). Don't let regressions land — every PR should keep tests green.
 
 **Update this line when you add or remove test files, and measure rather than estimate.** A stale baseline is what let an "after" count be reported without an "if the delta doesn't match, a file isn't being collected" check — and an uncollected test file is indistinguishable from a passing one in the summary output. To get a trustworthy before/after on a branch: `git stash push -u -- <the paths you touched>`, run `npx vitest run`, record, `git stash pop`, re-run. `npx vitest list | grep <filename>` proves a specific file is actually collected rather than silently skipped.
 
