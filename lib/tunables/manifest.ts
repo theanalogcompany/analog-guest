@@ -508,7 +508,7 @@ export const TUNABLES = [
     category: 'timing',
     source: 'lib/agent/stages.ts',
     description:
-      'How long an operator has to answer a knowledge-gap card before the guest gets a holding message. A FLOOR, not an SLA: the timer cron runs on GitHub Actions every 5 minutes and scheduled runs lag under load, so the real distribution is roughly 5-15 minutes. Never fires early.',
+      'How long an operator has to answer a knowledge-gap card before the guest gets a holding message. A FLOOR, not an SLA: the timer is an external HTTP cron (cron-job.org) checking every minute, so the message lands within ~6 minutes of the floor. Never fires early.',
     relatedTickets: ['TAC-308'],
   },
   {
