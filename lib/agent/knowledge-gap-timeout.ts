@@ -1,20 +1,20 @@
-// TAC-308 knowledge-gap timeout processor. Called from the GitHub Actions
-// cron (.github/workflows/pending-timeout-cron.yml) that hits
-// /api/cron/pending-timeout every 5 minutes.
+// TAC-308 knowledge-gap timeout processor. Called from the external HTTP cron
+// (cron-job.org) that hits /api/cron/pending-timeout every minute.
 //
 // What it does: finds knowledge-gap cards whose window has elapsed without an
 // operator answering, and sends the guest a holding message so they aren't
 // left in silence indefinitely.
 //
 // THE WINDOW IS A FLOOR, NOT AN SLA. `messages.pending_until` is the earliest
-// a holding message may fire. The trigger lives on GitHub Actions because
-// Vercel Hobby caps cron granularity at daily, and GH Actions scheduled runs
-// lag the target minute under platform load — so the real distribution is
-// roughly 5 to 15 minutes. That asymmetry is deliberate: firing LATE costs a
-// guest a few more minutes inside a silence they are already in, while firing
-// EARLY would talk over an operator who was about to answer. Never compensate
-// for jitter by shortening the window or by treating `pending_until` as
-// approximate.
+// a holding message may fire. With the every-minute external trigger the
+// message lands within ~6 minutes of the floor. (The trigger originally lived
+// on GitHub Actions with a `*/5` schedule — Vercel Hobby caps cron at daily —
+// but GH queues scheduled workflows at low priority and the measured cadence
+// was min 22m / median 36m / max 117m, so it moved to cron-job.org.) The
+// asymmetry is deliberate: firing LATE costs a guest a few more minutes
+// inside a silence they are already in, while firing EARLY would talk over an
+// operator who was about to answer. Never compensate for jitter by shortening
+// the window or by treating `pending_until` as approximate.
 //
 // Idempotency: claim-before-side-effect, CAS-gated, following
 // transitionToPendingAck (lib/guests/commitments.ts) and

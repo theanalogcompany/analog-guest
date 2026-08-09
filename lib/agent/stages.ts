@@ -55,10 +55,9 @@ export const KNOWLEDGE_RETRIEVE_LIMIT = 4
  * guest gets a holding message, in milliseconds.
  *
  * This is a FLOOR, not an SLA. `messages.pending_until` is the earliest the
- * holding message may fire; the timer cron runs on GitHub Actions (Vercel
- * Hobby caps cron granularity at daily) and scheduled runs there lag the
- * target minute under platform load, so the real distribution is roughly
- * 5–15 minutes. That is acceptable: the cost of lateness is a guest waiting
+ * holding message may fire; the timer is an external HTTP cron (cron-job.org)
+ * hitting /api/cron/pending-timeout every minute, so the message lands within
+ * roughly 6 minutes of the floor. The cost of lateness is a guest waiting
  * slightly longer inside a silence they are already in, whereas firing EARLY
  * would talk over an operator who was about to answer. Never shorten the
  * check to compensate for jitter.
