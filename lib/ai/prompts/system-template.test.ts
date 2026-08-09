@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.30.0 (TAC-319: R12 beats defined by the two-job test)', () => {
-    expect(PROMPT_VERSION).toBe('v1.30.0')
+  it('is v1.31.0 (TAC-319 round 3: R12 deleted, splitting moved to dispatch code)', () => {
+    expect(PROMPT_VERSION).toBe('v1.31.0')
   })
 })
 
@@ -42,22 +42,25 @@ describe('PROMPT_VERSION', () => {
 // deferred to the rules-registry extraction (THE-237 follow-up).
 describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numbering policy TAC-314)', () => {
   it('exposes the exact expected id sequence — positional, append-only, NOT contiguous', () => {
-    // R-numbers are template bullet positions and rules are only ever
-    // APPENDED (TAC-314): renumbering live rule IDs stales every external
-    // reference. R13-R16 are the undisplayed guidance bullets (greeting /
-    // operator-instruction / Last-Visit / Unanswered-question); R19-R20 are
-    // the undisplayed form-authority bullets. So the displayed sequence has a
-    // deliberate gap. The old assertion here demanded contiguity, which
-    // would have forced exactly the renumbering the policy forbids.
+    // R-numbers are template bullet positions, rules are only ever APPENDED
+    // (TAC-314), and retired ids are never reused (TAC-319): renumbering or
+    // recycling live rule IDs stales every external reference. R12 (message
+    // splitting) is RETIRED — TAC-319 moved splitting into deterministic
+    // dispatch code — and R13-R16 are the undisplayed guidance bullets
+    // (greeting / operator-instruction / Last-Visit / Unanswered-question);
+    // R19-R20 are the undisplayed form-authority bullets. So the displayed
+    // sequence has a deliberate gap. The old assertion here demanded
+    // contiguity, which would have forced exactly the renumbering the policy
+    // forbids.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
-      'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12',
+      'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18',
     ])
   })
 
-  it('curates 14 rules ending at R18 (TAC-314 appended R17 price + R18 nearby)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(14)
+  it('curates 13 rules ending at R18 (TAC-319 retired R12)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(13)
     expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R18')
   })
 
@@ -70,14 +73,6 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(SYSTEM_TEMPLATE).toContain('Let it stand')
   })
 
-  it('shares the R12 anchor phrase across both sources (TAC-313)', () => {
-    const r12 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R12')
-    expect(r12).toBeDefined()
-    // Display summary speaks to the guest-visible behavior; the template
-    // carries the delimiter the model actually has to emit.
-    expect(r12?.summary).toContain('separate messages')
-    expect(SYSTEM_TEMPLATE).toContain('more than one distinct beat')
-  })
 
   it('shares the R17 price-scoping anchor across both sources (TAC-314)', () => {
     const r17 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R17')
@@ -119,37 +114,6 @@ describe('SYSTEM_TEMPLATE — single universal-rules heading (TAC-314)', () => {
     expect(SYSTEM_TEMPLATE).toContain('## Unanswered question block')
     expect(SYSTEM_TEMPLATE).toContain('Match the register and length of what the guest sent')
     expect(SYSTEM_TEMPLATE).toContain('only authority on how long a message should be')
-  })
-})
-
-// TAC-313: the delimiter token in SYSTEM_TEMPLATE and BUBBLE_DELIMITER in
-// lib/agent/split-message.ts are a second dual-source-of-truth pair — the
-// model is told to emit one string and the sender splits on another. If they
-// drift, every reply ships the literal token to a guest. This asserts they
-// agree without importing the agent module into the prompt tests.
-describe('SYSTEM_TEMPLATE — split delimiter (TAC-313, v1.27.0)', () => {
-  it('teaches the exact token the sender splits on', () => {
-    expect(SYSTEM_TEMPLATE).toContain('[[BREAK]]')
-  })
-
-  // TAC-319 (v1.30.0): this assertion originally pinned 'Splitting is the
-  // exception, not the default', which contradicted the two-job test — a
-  // short definitional answer doing two jobs matched "exception" framing and
-  // merged. The calibration signal survives in the reworded sentence below;
-  // the removal itself is pinned in the TAC-319 describe block at the bottom.
-  it('tells the model most replies carry a single job and stay single', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Most replies carry a single job and stay a single message')
-  })
-
-  it('reconciles the per-venue length guidance against a multi-beat reply', () => {
-    // lengthGuide is per-venue JSONB that commonly says "default to one
-    // sentence" and would otherwise fight this rule on exactly the turns where
-    // splitting matters.
-    expect(SYSTEM_TEMPLATE).toContain('describes each message, not the whole reply')
-  })
-
-  it('forbids leaking the token into guest-visible text', () => {
-    expect(SYSTEM_TEMPLATE).toContain('never mention it to the guest')
   })
 })
 
@@ -648,92 +612,45 @@ describe('SYSTEM_TEMPLATE — ## Unanswered question rule (TAC-308, v1.25.0)', (
   })
 })
 
-// TAC-313 UAT fix #1. R12's original worked example was, character for
-// character, the string Mock Sextant's clause anti-pattern holds up as the
-// failure — so the prompt was instructing the model to emit a banned shape,
-// and `# Voice imperative` (venue voice beats general rules) meant the
-// anti-pattern won. Zero splits across five UAT turns.
-describe('SYSTEM_TEMPLATE — R12 does not instruct a bare comma list (TAC-313 UAT, v1.28.0)', () => {
-  it('no longer uses the bare comma list as R12s worked example', () => {
-    expect(SYSTEM_TEMPLATE).not.toContain("[[BREAK]] 'espresso, chai, peppermint'")
+// TAC-319 round 3: after two prompt-side rounds (v1.30.0's two-job test and a
+// canceled late-position re-surfacing) failed to make the model split
+// reliably, splitting moved OUT of the prompt into deterministic dispatch
+// code (lib/agent/sentence-split.ts). This describe pins the removal: the
+// prompt must carry no trace of the delimiter, the beat taxonomy, or the
+// macchiato worked example, and the display mirror must no longer list R12.
+describe('SYSTEM_TEMPLATE — splitting removed from the prompt (TAC-319, v1.31.0)', () => {
+  it('carries no delimiter token anywhere', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('[[BREAK]]')
+    expect(SYSTEM_TEMPLATE).not.toContain('BREAK')
   })
 
-  it('shows the description in clause form instead', () => {
-    expect(SYSTEM_TEMPLATE).toContain(
-      "[[BREAK]] 'espresso pulled into a chai latte with a peppermint kick'",
-    )
+  it('carries no beat taxonomy', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('distinct beat')
+    expect(SYSTEM_TEMPLATE).not.toContain('one complete job')
+    expect(SYSTEM_TEMPLATE).not.toContain('one complete thought')
+    expect(SYSTEM_TEMPLATE).not.toContain('two beats')
   })
 
-  it('states outright that splitting does not license a comma list', () => {
-    // Load-bearing beyond Sextant: every other venue lacks the anti-pattern
-    // that would otherwise catch this, so R12 has to carry the ban itself.
-    expect(SYSTEM_TEMPLATE).toContain('never a bare comma list')
-    expect(SYSTEM_TEMPLATE).toContain(
-      'Splitting changes where a thought lands, not how it is written',
-    )
-  })
-})
-
-// TAC-319 (v1.30.0): R12's beat taxonomy was recommendation-shaped — every
-// example was pick+description / two picks, and "A short factual answer is
-// ONE beat" plus "Splitting is the exception, not the default" taught the
-// model to merge a short definitional answer that does two jobs (states what
-// a thing is, then compares it). Observed in TAC-314 UAT: "whats a macchiato"
-// produced one bubble carrying a definition AND a comparison. Beats are now
-// defined by the two-job test, with definition+comparison as a worked
-// example.
-describe('SYSTEM_TEMPLATE — R12 beats by the two-job test (TAC-319, v1.30.0)', () => {
-  it('defines a beat as one complete job, not one complete thought', () => {
-    expect(SYSTEM_TEMPLATE).toContain('A beat is one complete job')
-    expect(SYSTEM_TEMPLATE).not.toContain('A beat is one complete thought')
+  it('carries no macchiato worked example', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('Espresso with a small dollop of foam on top')
+    expect(SYSTEM_TEMPLATE).not.toContain('stronger than a cortado')
   })
 
-  it('states the two-job test', () => {
-    expect(SYSTEM_TEMPLATE).toContain(
-      'An answer carries two beats when it does two jobs',
-    )
-    expect(SYSTEM_TEMPLATE).toContain(
-      'states a thing, then does something with it',
-    )
+  it('carries no separate-messages instruction', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('separate messages')
+    expect(SYSTEM_TEMPLATE).not.toContain('Most replies carry a single job')
   })
 
-  it('includes the definition+comparison worked example with the delimiter', () => {
-    expect(SYSTEM_TEMPLATE).toContain(
-      "'Espresso with a small dollop of foam on top' [[BREAK]] 'stronger than a cortado, barely any milk'",
-    )
-    expect(SYSTEM_TEMPLATE).toContain(
-      'A definition and its comparison are two beats even when the whole answer is short',
-    )
+  it('no longer lists R12 in the display mirror', () => {
+    expect(UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R12')).toBeUndefined()
   })
 
-  it('keeps the single-job floor: one job takes no delimiter', () => {
-    expect(SYSTEM_TEMPLATE).toContain(
-      "A single-job answer is ONE beat and takes no delimiter: 'open until 4' does not need company",
-    )
-  })
-
-  // Pins the removals so the shape-based merge instruction can't be
-  // reintroduced by a future edit that "restores" familiar phrasing.
-  it('no longer carries the exception framing or the short-factual-answer merge rule', () => {
-    expect(SYSTEM_TEMPLATE).not.toContain('Splitting is the exception, not the default')
-    expect(SYSTEM_TEMPLATE).not.toContain('A short factual answer is ONE beat')
-  })
-
-  it('shares the "one complete job" anchor with the display mirror (lockstep)', () => {
-    const r12 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R12')
-    expect(r12).toBeDefined()
-    expect(r12?.summary).toContain('one complete job')
-    expect(SYSTEM_TEMPLATE).toContain('one complete job')
-  })
-
-  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    // Slice from the splitting bullet's opening clause to the next rule
-    // (greeting discipline), matching the sibling dash-free slice tests.
-    const start = SYSTEM_TEMPLATE.indexOf('Break a reply into separate messages')
-    const end = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    const r12Body = SYSTEM_TEMPLATE.slice(start, end)
-    expect(r12Body).not.toMatch(/[—–]/)
+  // The Frosty Gandhi pick example lived inside R12 and leaves with it; the
+  // greeting rule (the old 13th bullet) must survive as the block's neighbor
+  // so the deletion took exactly one bullet.
+  it('deleted exactly the splitting bullet, not its neighbors', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('Frosty Gandhi')
+    expect(SYSTEM_TEMPLATE).toContain('When delivering a recommendation, a description, or a fact')
+    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message')
   })
 })

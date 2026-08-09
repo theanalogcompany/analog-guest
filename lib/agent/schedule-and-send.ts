@@ -7,11 +7,8 @@ import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
 import { type PendingCommitment, pendingFromEmission } from '@/lib/schemas'
 import { fireRedAlert } from './alerts'
-import {
-  INTER_BUBBLE_GAP_MS,
-  collapseToSingleMessage,
-  splitIntoBubbles,
-} from './split-message'
+import { resolveDispatchBubbles } from './sentence-split'
+import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
 import { sampleTiming } from './timing'
 import type { RuntimeContext } from './types'
 
@@ -162,12 +159,16 @@ async function persistOutbound(
  *   sleep typingDuration → [ send → persist ] → for each later bubble:
  *   typing indicator → sleep INTER_BUBBLE_GAP_MS → send → persist.
  *
- * TAC-313: one generation may dispatch as up to MAX_BUBBLES_PER_RESPONSE
- * separate Sendblue messages, and EACH GETS ITS OWN `messages` ROW sharing a
- * `generation_id`. One row per bubble is forced by evidence, not preference:
- * the Sendblue status webhook resolves rows by `provider_message_id` and every
- * send returns its own handle, so a single row covering two bubbles would
- * leave the second bubble's send/delivered/failed status with nowhere to land.
+ * TAC-313 shape, TAC-319 decision-maker: one generation may dispatch as up to
+ * MAX_BUBBLES_PER_RESPONSE separate Sendblue messages, and EACH GETS ITS OWN
+ * `messages` ROW sharing a `generation_id`. One row per bubble is forced by
+ * evidence, not preference: the Sendblue status webhook resolves rows by
+ * `provider_message_id` and every send returns its own handle, so a single
+ * row covering two bubbles would leave the second bubble's
+ * send/delivered/failed status with nowhere to land. WHETHER a reply splits
+ * is decided here by resolveDispatchBubbles (sentence split + 50/50 flip),
+ * not by the model — TAC-319 removed the model's R12 splitting rule after two
+ * prompt-side rounds failed to make it fire.
  *
  * The opening sequence is untouched — `sampleTiming` supplies exactly the
  * numbers it always did, and no timing constant is read or changed here
@@ -211,11 +212,20 @@ async function persistOutbound(
  * uses it to stamp `'demo_bypass'` so a demo-bypassed auto-send is
  * self-describing in the conversation viewer + SQL forensics without a
  * PostHog cross-reference.
+ *
+ * `options.rng`: TAC-319 — the coin behind the deterministic split. Defaults
+ * to Math.random at this boundary (the pure module takes it as a required
+ * parameter so no randomness hides inside it); tests inject a constant to pin
+ * either branch. See resolveDispatchBubbles for the full split rule.
  */
 export async function scheduleAndSend(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  options: { skipHumanFeelDelay?: boolean; reviewReason?: string } = {},
+  options: {
+    skipHumanFeelDelay?: boolean
+    reviewReason?: string
+    rng?: () => number
+  } = {},
 ): Promise<{
   outboundMessageId: string
   providerMessageId: string
@@ -224,10 +234,13 @@ export async function scheduleAndSend(
 }> {
   const skipDelay = options.skipHumanFeelDelay === true
 
-  // TAC-313: the delimiter becomes bubble boundaries here and exists nowhere
-  // downstream — each row is persisted with its own bubble's text, so no
-  // delimiter ever reaches the database on this path.
-  const bubbles = splitIntoBubbles(generation.body)
+  // TAC-319: dispatch decides the split, not the model. Stray [[BREAK]]
+  // markers are stripped as noise, the body is sentence-split, and a 2-3
+  // sentence reply rides a fair coin flip — split into per-sentence bubbles
+  // (terminal periods stripped) or sent as one block. Each bubble is
+  // persisted with its own text, so no delimiter ever reaches the database
+  // on this path.
+  const bubbles = resolveDispatchBubbles(generation.body, options.rng ?? Math.random)
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has
     // been sent, so this takes the ordinary send-failure path.

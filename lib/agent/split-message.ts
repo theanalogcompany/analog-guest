@@ -1,37 +1,37 @@
-// TAC-313: message splitting. Pure helpers for turning one generated body
-// into the bubbles that get dispatched as separate Sendblue messages.
+// TAC-313 introduced this module as the model-driven splitting machinery;
+// TAC-319 retired the model's role. The model no longer places delimiters —
+// dispatch decides the split deterministically in ./sentence-split — so what
+// survives here is the DEFENSIVE half: the delimiter matcher and the
+// collapse/strip helper, plus the shared bubble constants.
 //
-// No imports — this module is deliberately dependency-free so the split and
-// strip logic can be unit-tested without any SDK init (see CLAUDE.md
-// "Module split for testability").
+// No imports — this module is deliberately dependency-free so the strip logic
+// can be unit-tested without any SDK init (see CLAUDE.md "Module split for
+// testability").
 //
-// The model places the delimiter; the sender decides what to do with it. Two
-// entry points, and the asymmetry between them is the whole design:
-//
-//   splitIntoBubbles       — the auto-send path. Delimiter becomes a boundary.
-//   collapseToSingleMessage — the queue path. Delimiter becomes a space.
-//
-// Together they enforce the invariant that NO DELIMITER EVER REACHES THE
-// DATABASE: the auto-send path persists per-bubble bodies that never contained
-// one, and the queue path strips before the row is written. An operator
-// approving a draft therefore sends text they can actually see, and the
-// operator dispatch path needs no delimiter logic of its own.
+// collapseToSingleMessage now serves BOTH paths:
+//   - queue path: a draft is one row an operator reads and approves verbatim,
+//     so it must contain prose, never markup.
+//   - dispatch path: resolveDispatchBubbles (./sentence-split) calls it first,
+//     so a stray model-emitted [[BREAK]] is stripped as noise before sentence
+//     detection runs.
+// Between them the TAC-313 invariant stands: NO DELIMITER EVER REACHES THE
+// DATABASE, or Sendblue.
 
 /**
- * The token the model emits where one beat ends and the next begins.
- *
- * Chosen over a punctuation-shaped delimiter (`|||`, `---`, `\n\n`) because
- * those can occur in real text, and a false positive splits a message the
- * model never meant to split. `[[BREAK]]` cannot appear by accident, and it is
- * unmistakable when reading a Langfuse trace or a corpus row during voice
- * tuning — which is the activity this token will mostly be seen during.
+ * The token the model USED to emit where one beat ended and the next began
+ * (TAC-313, prompt versions v1.27.0–v1.30.0). TAC-319 removed the rule that
+ * taught it, so the model should never emit it again — but "should never" is
+ * exactly what defensive stripping is for, and traces or corpus rows written
+ * during that era may still carry it.
  */
 export const BUBBLE_DELIMITER = '[[BREAK]]'
 
 /**
- * Hard cap on bubbles per response, enforced HERE rather than only in the
- * prompt. A prompt rule is guidance; this is the guarantee. Four bubbles in a
- * row stops reading as texting and starts reading as a machine.
+ * Hard cap on bubbles per response. Four bubbles in a row stops reading as
+ * texting and starts reading as a machine. TAC-319: also the upper bound of
+ * the flippable sentence range in ./sentence-split — a body with more
+ * sentences than this never splits at all (all-or-nothing; partial grouping
+ * is forbidden).
  */
 export const MAX_BUBBLES_PER_RESPONSE = 3
 
@@ -92,43 +92,22 @@ function normalizeWhitespace(text: string): string {
 }
 
 /**
- * Split a generated body into the bubbles to dispatch, in order.
+ * Flatten a body to one message: delimiters become a single space, whitespace
+ * runs collapse, ends trim. Returns an empty string for a body that was only
+ * delimiters or whitespace — callers treat that as an empty body.
  *
- * - No delimiter present → a single-element array holding the body unchanged.
- *   This is the common case; splitting is the exception.
- * - Over the cap → the first `MAX_BUBBLES_PER_RESPONSE - 1` bubbles are kept
- *   as-is and every remaining beat is JOINED into the last one. Text is never
- *   discarded. Truncating would silently delete a sentence the model meant to
- *   send, which is a worse failure than a slightly dense final bubble.
- * - Body that is only delimiters (or only whitespace) → empty array. The
- *   caller treats that as an empty body and takes its existing failure path
- *   rather than dispatching nothing and reporting success.
- */
-export function splitIntoBubbles(body: string): string[] {
-  const parts = body
-    .split(DELIMITER_PATTERN)
-    .map(normalizeWhitespace)
-    .filter((part) => part.length > 0)
-
-  if (parts.length <= MAX_BUBBLES_PER_RESPONSE) return parts
-
-  const kept = parts.slice(0, MAX_BUBBLES_PER_RESPONSE - 1)
-  const merged = parts.slice(MAX_BUBBLES_PER_RESPONSE - 1).join(' ')
-  return [...kept, merged]
-}
-
-/**
- * Flatten a generated body to one message: delimiters become a single space,
- * whitespace runs collapse, ends trim.
+ * Queue path: a queued draft is one row that an operator reads and approves
+ * verbatim, so it must contain prose rather than markup — and because approve
+ * dispatches `messages.body` unchanged, a delimiter left in the row would go
+ * straight to the guest over a body the operator was never shown.
  *
- * This is the queue-path guard. A queued draft is one row that an operator
- * reads and approves verbatim, so it must contain prose rather than markup —
- * and because approve dispatches `messages.body` unchanged, a delimiter left
- * in the row would go straight to the guest over a body the operator was never
- * shown.
+ * Dispatch path (TAC-319): resolveDispatchBubbles calls this before sentence
+ * detection, so a stray marker is stripped as noise rather than treated as a
+ * split instruction.
  *
- * Accepted cost, per TAC-313 §2: an approved draft does not split where an
- * auto-sent one would.
+ * Accepted cost, unchanged from TAC-313 §2 and reaffirmed by the TAC-319
+ * ruling: an approved draft does not split — when a human wrote or approved
+ * exact text, sending it verbatim is the least surprising behavior.
  */
 export function collapseToSingleMessage(body: string): string {
   return normalizeWhitespace(body.replace(DELIMITER_PATTERN, ' '))

@@ -6,27 +6,27 @@
 // there is currently no structured rules registry. Tracking follow-up to
 // extract one (THE-237 follow-up: "structured rules registry").
 //
-// NUMBERING IS POSITIONAL AND APPEND-ONLY (TAC-314). An R-number is the
-// bullet's position in the template block, and rules are only ever APPENDED —
-// never inserted mid-list — because renumbering live rule IDs stales every
-// external reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
-// consequence: displayed IDs are NOT contiguous. This list curates R1-R12
-// plus R17-R18; R13-R16 are the four undisplayed guidance bullets (greeting /
+// NUMBERING IS POSITIONAL AND APPEND-ONLY (TAC-314), AND RETIRED IDS ARE
+// NEVER REUSED (TAC-319). Rules are only ever appended — never inserted
+// mid-list — because renumbering live rule IDs stales every external
+// reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
+// consequence: displayed IDs are NOT contiguous. This list curates R1-R11
+// plus R17-R18. R12 (message splitting, TAC-313) is RETIRED: TAC-319 moved
+// splitting out of the prompt into deterministic dispatch code after two
+// prompt-side rounds failed to make the rule fire, so the undisplayed gap is
+// now R12-R16 (retired splitting slot, then greeting /
 // operator-instruction / Last-Visit / Unanswered-question) and R19-R20 are
 // undisplayed form-authority bullets (mirroring, ## Length authority). The
 // lockstep test in system-template.test.ts asserts the exact ID sequence and
 // that each displayed rule's anchor phrase is present in both this constant
 // and SYSTEM_TEMPLATE.
 //
-// TAC-313 added R12 (message splitting). TAC-314 appended R17 (price
-// scoping) and R18 (nearby places), both promoted out of lower layers where
-// they kept losing: price scoping only rendered on new_question while the
-// leak happened on reply; the nearby-places carve-out lived in venue
-// anti-pattern data, which renders earlier and loses. Displayed because both
-// are form/policy rules operators tune on this rail. TAC-319 rewrote R12's
-// beat taxonomy to the two-job test (v1.30.0); the summary here shares the
-// verbatim anchor "one complete job" with the template bullet, asserted by
-// the lockstep test.
+// TAC-314 appended R17 (price scoping) and R18 (nearby places), both
+// promoted out of lower layers where they kept losing: price scoping only
+// rendered on new_question while the leak happened on reply; the
+// nearby-places carve-out lived in venue anti-pattern data, which renders
+// earlier and loses. Displayed because both are form/policy rules operators
+// tune on this rail.
 //
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
@@ -92,12 +92,10 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good it is or reassures the guest. Warmth still applies on feeling turns (complaint, thanks, milestone).",
   },
-  {
-    id: 'R12',
-    summary:
-      "A reply carrying more than one distinct beat arrives as separate messages. A beat is one complete job: a pick and its description are two beats, a definition and its comparison are two beats even when short. A single-job answer stays one message.",
-  },
-  // R13-R16 are undisplayed guidance bullets — see the numbering note above.
+  // R12 (message splitting) is RETIRED — TAC-319 moved splitting out of the
+  // prompt into deterministic dispatch code (lib/agent/sentence-split.ts).
+  // The id is never reused. R13-R16 are undisplayed guidance bullets — see
+  // the numbering note above.
   {
     id: 'R17',
     summary:

@@ -95,8 +95,9 @@ export async function buildRuntimeContext(input: {
   // For followups there's no currentMessage, so no exclusion.
   // TAC-313: fetch enough ROWS to guarantee MAX_HISTORY_MESSAGES RESPONSES,
   // then group. The bound is exact because the cap on bubbles per response is
-  // enforced in the sender (splitIntoBubbles), so this many rows can never
-  // yield fewer than MAX_HISTORY_MESSAGES groups.
+  // enforced in the sender (TAC-319: resolveDispatchBubbles never splits past
+  // MAX_BUBBLES_PER_RESPONSE sentences), so this many rows can never yield
+  // fewer than MAX_HISTORY_MESSAGES groups.
   let messagesQuery = supabase
     .from('messages')
     .select('id, direction, body, created_at, generation_id')
