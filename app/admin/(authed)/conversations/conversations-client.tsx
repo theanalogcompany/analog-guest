@@ -1,12 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Json } from '@/db/types'
 import { createBrowserClient } from '@/lib/db/browser'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import type { GuestState } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
-import { ConversationThread, type ThreadMessage } from './_components/conversation-thread'
+import { ConversationThread } from './_components/conversation-thread'
 import { GuestContext } from './_components/guest-context'
 import { InboundDetail } from './_components/inbound-detail'
 import { ReviewForm } from './_components/review-form'
@@ -14,10 +13,20 @@ import { TracePanel } from './_components/trace-panel'
 import { type Transaction } from './_components/transaction-row'
 import { TransactionsList } from './_components/transactions-list'
 import { VenueContext } from './_components/venue-context'
+import {
+  type ConversationMessageRow,
+  projectThread,
+  type ThreadResponse,
+} from './lib/project-thread'
 
 // Client surface that owns selection, the trace fetch cache, and the
 // Realtime subscription. Server (page.tsx) hands over a fully-loaded
 // InitialData and we go from there.
+//
+// TAC-316: state is RAW `messages` rows; the response-grained thread derives
+// via useMemo(projectThread). Realtime handlers stay row-grained (no group
+// surgery) — an inserted bubble of a split lands as a row and the projection
+// folds it into its response on the next render.
 
 export interface InitialData {
   venue: {
@@ -55,13 +64,15 @@ export interface InitialData {
   spendCents90d: number
   /** Total spend / visit count, rounded to cents. Null when there are no visits. */
   avgPerVisitCents: number | null
-  /** All-time message count for venue+guest pair. Independent of the 200-row messages array. */
+  /** All-time message count for venue+guest pair. Independent of the 200-row window. */
   totalMessageCount: number
-  /** 0–100, rounded. Computed from the loaded messages within responseWindowHours. */
+  /** 0–100, rounded. Computed server-side from dispatched responses in the window. */
   responseRatePct: number
   responseWindowHours: number
   recentEvents: Array<{ eventType: string; createdAt: Date }>
-  messages: Array<ThreadMessage & { providerMessageId: string | null }>
+  /** Raw messages rows, newest-200 window. The thread derives via projectThread. */
+  messageRows: ConversationMessageRow[]
+  /** Keyed by response id (= first bubble's row id). */
   traceMap: Record<string, ApiTraceWithFullDetails | null>
   todayLocalIso: string
   /** Last 50 transactions in the lookback window, newest-first. */
@@ -78,18 +89,30 @@ interface ConversationsClientProps {
   initialData: InitialData
 }
 
-interface MessageRow {
-  id: string
-  body: string
-  direction: 'inbound' | 'outbound'
-  created_at: string
-  langfuse_trace_id: string | null
-  reply_to_message_id: string | null
-  provider_message_id: string | null
-  category: string | null
-  response_review: Json | null
+/** Realtime payload shape: the projection's columns plus the filter columns. */
+type RealtimeMessageRow = ConversationMessageRow & {
   venue_id: string
   guest_id: string
+}
+
+function toProjectionRow(m: RealtimeMessageRow): ConversationMessageRow {
+  return {
+    id: m.id,
+    body: m.body,
+    direction: m.direction,
+    created_at: m.created_at,
+    langfuse_trace_id: m.langfuse_trace_id,
+    reply_to_message_id: m.reply_to_message_id,
+    provider_message_id: m.provider_message_id,
+    category: m.category,
+    response_review: m.response_review,
+    status: m.status,
+    review_state: m.review_state,
+    review_reason: m.review_reason,
+    generation_id: m.generation_id,
+    reaction_type: m.reaction_type,
+    media_urls: m.media_urls ?? [],
+  }
 }
 
 export function ConversationsClient({
@@ -97,11 +120,17 @@ export function ConversationsClient({
   guestId,
   initialData,
 }: ConversationsClientProps) {
-  const [messages, setMessages] = useState(initialData.messages)
+  const [messageRows, setMessageRows] = useState<ConversationMessageRow[]>(
+    initialData.messageRows,
+  )
+  const messages = useMemo(() => projectThread(messageRows), [messageRows])
+
   const [selectedId, setSelectedId] = useState<string | null>(() => {
-    // Default selection: most recent outbound, or most recent message overall.
-    const outbound = [...initialData.messages].reverse().find((m) => m.direction === 'outbound')
-    return outbound?.id ?? initialData.messages[initialData.messages.length - 1]?.id ?? null
+    // Default selection: most recent outbound response, or most recent
+    // response overall. Derived from the same projection the thread renders.
+    const responses = projectThread(initialData.messageRows)
+    const outbound = [...responses].reverse().find((r) => r.direction === 'outbound')
+    return outbound?.id ?? responses[responses.length - 1]?.id ?? null
   })
   const [traceCache, setTraceCache] = useState<Record<string, ApiTraceWithFullDetails | null>>(
     () => ({ ...initialData.traceMap }),
@@ -113,7 +142,7 @@ export function ConversationsClient({
   )
 
   // Loading is derived, not state — avoids the setState-in-effect anti-pattern.
-  // True iff we have a trace ID for the selected outbound message but the
+  // True iff we have a trace ID for the selected outbound response but the
   // cache hasn't been populated yet (either prefetch missed it or the fetch
   // is still in flight).
   const traceLoading =
@@ -122,8 +151,8 @@ export function ConversationsClient({
     !!selected.langfuseTraceId &&
     !(selected.id in traceCache)
 
-  // Trace fetch on click for outbound messages not in the prefetch cache.
-  // Cache is keyed by message id (not trace id) so re-renders with the same
+  // Trace fetch on click for outbound responses not in the prefetch cache.
+  // Cache is keyed by response id (not trace id) so re-renders with the same
   // selection don't re-fetch.
   useEffect(() => {
     if (!selected || selected.direction !== 'outbound' || !selected.langfuseTraceId) return
@@ -150,6 +179,10 @@ export function ConversationsClient({
   // refine by guest_id client-side. Tear down + re-subscribe when filters
   // change (which happens via a fresh page load via router.replace, but the
   // unmount on navigation handles the cleanup).
+  //
+  // TAC-316: no body filter — blank knowledge-gap cards land live. UPDATEs
+  // replace the row's projection columns wholesale so a card flipping to
+  // approved/sent (or gaining a body) updates its state chip in place.
   useEffect(() => {
     const supabase = createBrowserClient()
     const channel = supabase
@@ -163,46 +196,18 @@ export function ConversationsClient({
           filter: `venue_id=eq.${venueId}`,
         },
         (payload) => {
-          const row = (payload.new ?? payload.old) as MessageRow | undefined
+          const row = (payload.new ?? payload.old) as RealtimeMessageRow | undefined
           if (!row || row.guest_id !== guestId) return
           if (payload.eventType === 'INSERT' && payload.new) {
-            const m = payload.new as MessageRow
-            if (!m.body) return
-            setMessages((prev) => {
+            const m = payload.new as RealtimeMessageRow
+            setMessageRows((prev) => {
               if (prev.some((x) => x.id === m.id)) return prev
-              return [
-                ...prev,
-                {
-                  id: m.id,
-                  body: m.body,
-                  direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
-                  createdAt: new Date(m.created_at),
-                  langfuseTraceId: m.langfuse_trace_id,
-                  replyToMessageId: m.reply_to_message_id,
-                  providerMessageId: m.provider_message_id,
-                  category: m.category,
-                  responseReview: m.response_review,
-                },
-              ]
+              return [...prev, toProjectionRow(m)]
             })
           } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const m = payload.new as MessageRow
-            setMessages((prev) =>
-              prev.map((x) =>
-                x.id === m.id
-                  ? {
-                      ...x,
-                      body: m.body || x.body,
-                      langfuseTraceId: m.langfuse_trace_id ?? x.langfuseTraceId,
-                      replyToMessageId: m.reply_to_message_id ?? x.replyToMessageId,
-                      // response_review is the THE-235 surface — UPDATE
-                      // payloads from the review API land here. Last-write-
-                      // wins; idempotent on self-echo since the JSONB
-                      // value matches what the route just wrote.
-                      responseReview: m.response_review ?? x.responseReview,
-                    }
-                  : x,
-              ),
+            const m = payload.new as RealtimeMessageRow
+            setMessageRows((prev) =>
+              prev.map((x) => (x.id === m.id ? toProjectionRow(m) : x)),
             )
           }
         },
@@ -213,9 +218,9 @@ export function ConversationsClient({
     }
   }, [venueId, guestId])
 
-  // For inbound clicks, find the outbound message that was triggered by it
-  // (messages.reply_to_message_id === <inbound id>) so the panel can offer a
-  // pivot link to the agent's reply.
+  // For inbound clicks, find the outbound response that was triggered by it
+  // (reply_to_message_id === <inbound id>) so the panel can offer a pivot
+  // link to the agent's reply.
   const triggeredByMap = useMemo(() => {
     const map = new Map<string, string>()
     for (const m of messages) {
@@ -316,9 +321,7 @@ export function ConversationsClient({
 }
 
 interface SidePanelProps {
-  selected:
-    | (ThreadMessage & { providerMessageId: string | null })
-    | null
+  selected: ThreadResponse | null
   traceCache: Record<string, ApiTraceWithFullDetails | null>
   traceLoading: boolean
   guestName: string
@@ -388,12 +391,14 @@ function SidePanel({
         />
       </div>
       <div className="h-72 flex-shrink-0 overflow-y-auto border-t border-stone-light/60 bg-paper/50">
-        {/* key forces a remount when the selected message changes so the
+        {/* key forces a remount when the selected response changes so the
             form's lazy useState initializers re-run with fresh
             responseReview / messageBody. Same pattern conversations/page.tsx
             uses for ConversationsClient on (venue, guest) changes —
             sidesteps the setState-in-effect lint rule and is genuinely
-            cleaner than a re-prefill useEffect. */}
+            cleaner than a re-prefill useEffect. Review target is the
+            response id (= first bubble's row id) — one review per response,
+            the migration 032 queue precedent. */}
         <ReviewForm
           key={selected.id}
           messageId={selected.id}

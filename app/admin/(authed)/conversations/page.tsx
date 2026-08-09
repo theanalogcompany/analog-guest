@@ -11,6 +11,7 @@ import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
 import type { RecentActivityRow } from './_components/recent-activity'
 import { computeMessageStats } from './lib/compute-message-stats'
+import { type ConversationMessageRow, projectThread, wasDispatched } from './lib/project-thread'
 
 // Server orchestrator. Fetches everything the client needs in one render path
 // so initial paint is one network round trip. The client is responsible for
@@ -214,15 +215,21 @@ async function loadConversationData({
     transactionsListResult,
     operatorsResult,
   ] = await Promise.all([
+    // TAC-316: newest-first window (DESC + limit), matching lib/operator/
+    // thread.ts's loadGuestThread. The previous ASC order kept the OLDEST 200
+    // rows and silently hid everything newer once a thread crossed the cap —
+    // the truncation this ticket exists to fix. No body filter and no
+    // status/review_state filter: the viewer's contract is show-everything
+    // (blank knowledge-gap cards included). projectThread groups split
+    // responses client- and server-side from these raw rows.
     supabase
       .from('messages')
       .select(
-        'id, body, direction, created_at, langfuse_trace_id, reply_to_message_id, voice_fidelity, category, status, provider_message_id, response_review',
+        'id, body, direction, created_at, langfuse_trace_id, reply_to_message_id, voice_fidelity, category, status, review_state, review_reason, generation_id, reaction_type, media_urls, provider_message_id, response_review',
       )
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
-      .neq('body', '')
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(MESSAGE_LIMIT),
     supabase
       .from('venue_configs')
@@ -372,15 +379,23 @@ async function loadConversationData({
         : earliestTransactionAt
       : earliestMessageAt ?? earliestTransactionAt
 
-  // Pre-fetch last 5 outbound traces in parallel. allSettled so one Langfuse
-  // hiccup doesn't 500 the whole page.
-  const outboundWithTrace = (messagesResult.data ?? [])
-    .filter((m) => m.direction === 'outbound' && m.langfuse_trace_id)
+  // TAC-316: group raw rows into responses once here — stats and trace
+  // prefetch below are response-grained; the client re-derives the same
+  // projection from the raw rows it receives (single source: projectThread).
+  const messageRows: ConversationMessageRow[] = messagesResult.data ?? []
+  const responses = projectThread(messageRows)
+
+  // Pre-fetch the last 5 outbound RESPONSES' traces in parallel (bubbles of a
+  // split share one generation → one trace). allSettled so one Langfuse
+  // hiccup doesn't 500 the whole page. Cache keyed by response id (= first
+  // bubble's row id), matching the client's selection identity.
+  const outboundWithTrace = responses
+    .filter((r) => r.direction === 'outbound' && r.langfuseTraceId)
     .slice(-TRACE_PREFETCH_LIMIT)
   const traceFetches = await Promise.allSettled(
-    outboundWithTrace.map(async (m) => {
-      const trace = await fetchTrace(m.langfuse_trace_id as string)
-      return { messageId: m.id, trace }
+    outboundWithTrace.map(async (r) => {
+      const trace = await fetchTrace(r.langfuseTraceId as string)
+      return { messageId: r.id, trace }
     }),
   )
   const traceMap: Record<string, ApiTraceWithFullDetails | null> = {}
@@ -389,18 +404,6 @@ async function loadConversationData({
   }
 
   const todayLocalIso = formatInTimeZone(new Date(), venueRow.timezone, 'yyyy-MM-dd')
-
-  const messages = (messagesResult.data ?? []).map((m) => ({
-    id: m.id,
-    body: m.body,
-    direction: (m.direction === 'outbound' ? 'outbound' : 'inbound') as 'inbound' | 'outbound',
-    createdAt: new Date(m.created_at),
-    langfuseTraceId: m.langfuse_trace_id,
-    replyToMessageId: m.reply_to_message_id,
-    providerMessageId: m.provider_message_id,
-    category: m.category,
-    responseReview: m.response_review,
-  }))
 
   // Build operator display-name map. email local-part (jaipal@x → jaipal) is
   // the cheapest stable display label since the operators table has no
@@ -411,10 +414,14 @@ async function loadConversationData({
     const at = op.email.indexOf('@')
     operatorMap[op.id] = at > 0 ? op.email.slice(0, at) : op.email
   }
-  // Response rate computed from the loaded conversation messages (200-row
-  // cap). For high-volume guests the count would under-count; Jaipal's run
-  // (~38 messages) fits well within the cap so this is exact in practice.
-  const responseStats = computeMessageStats(messages)
+  // Response rate computed from the loaded conversation window (200-row cap,
+  // newest-first as of TAC-316), grouped to RESPONSES so a split reply counts
+  // once — consistent with count_outbound_responses on the recognition side.
+  // Never-sent drafts, pending cards, and failed sends are excluded: a guest
+  // can't reply to a message they never received.
+  const responseStats = computeMessageStats(
+    responses.filter(wasDispatched).map((r) => ({ direction: r.direction, createdAt: r.createdAt })),
+  )
   // Total messages is from the dedicated count query (all-time, not capped),
   // so the headline number on the guest card stays accurate even when the
   // conversation array is truncated.
@@ -469,7 +476,7 @@ async function loadConversationData({
       eventType: e.event_type,
       createdAt: new Date(e.created_at),
     })),
-    messages,
+    messageRows,
     traceMap,
     todayLocalIso,
     transactions,
