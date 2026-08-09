@@ -1487,3 +1487,104 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
     }
   })
 })
+
+// TAC-313 UAT fix #3. Persona list entries are operator-authored free text and
+// routinely carry paragraphs, sometimes their own nested list. Splicing them in
+// raw silently corrupted both: a carve-out in paragraph 2 trailed as loose
+// document-level prose under the rule in paragraph 1, and an entry's inner
+// bullets were emitted as siblings of the anti-patterns themselves.
+describe('personaToProse — multi-line persona entries keep their structure (TAC-313)', () => {
+  // Local fixture: the one in the anti-patterns describe above is block-scoped.
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  const multiParagraph = [
+    'For questions outside the venue domain, acknowledge briefly ("not my world").',
+    '',
+    'Nearby places are a separate case. Name them with confidence.',
+    '',
+    'When nothing is documented, the hedge is correct.',
+  ].join('\n')
+
+  it('indents continuation paragraphs under their own bullet', () => {
+    const out = personaToProse(
+      makePersona({
+        voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
+      }),
+    )
+    expect(out).toContain('- For questions outside the venue domain')
+    expect(out).toContain('  Nearby places are a separate case. Name them with confidence.')
+    expect(out).toContain('  When nothing is documented, the hedge is correct.')
+  })
+
+  it('never leaves a continuation paragraph flush-left', () => {
+    // The actual defect: flush-left text reads as document-level prose rather
+    // than as part of the rule above it, so the carve-out lost to its own ¶1.
+    const out = personaToProse(
+      makePersona({
+        voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
+      }),
+    )
+    expect(out).not.toContain('\nNearby places are a separate case')
+  })
+
+  it('keeps blank lines genuinely blank so paragraph breaks survive', () => {
+    const out = personaToProse(
+      makePersona({
+        voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
+      }),
+    )
+    expect(out).not.toMatch(/[ \t]+\n/)
+  })
+
+  it('nests an entry’s own bullet list instead of re-parenting it', () => {
+    // Before the fix these four rendered at the same level as the anti-patterns
+    // themselves, so "One pick, nothing after it" read as a top-level rule
+    // sitting beside "Don't use em dashes."
+    const withList = [
+      'Menu recommendations cap at two items. Rotate between these shapes:',
+      '',
+      '- One pick, nothing after it.',
+      '- Two picks stated flat, no framing.',
+    ].join('\n')
+    const out = personaToProse(
+      makePersona({
+        voiceAntiPatterns: [
+          { text: withList, source: 'manual' },
+          { text: 'Do not use em dashes.', source: 'manual' },
+        ],
+      }),
+    )
+    expect(out).toContain('  - One pick, nothing after it.')
+    expect(out).toContain('  - Two picks stated flat, no framing.')
+    expect(out).not.toContain('\n- One pick, nothing after it.')
+    // The genuinely top-level sibling is still top-level.
+    expect(out).toContain('\n- Do not use em dashes.')
+  })
+
+  it('renders single-line entries byte-identically to before the fix', () => {
+    // Regression guard on applying the helper to all four persona list fields:
+    // for the overwhelming majority of entries nothing may change at all.
+    const out = personaToProse(
+      makePersona({
+        signaturePhrases: ['see you soon'],
+        bannedTopics: ['politics'],
+        voiceAntiPatterns: [{ text: 'no marketing flourishes', source: 'manual' }],
+        voiceTouchstones: ['dry, warm, unhurried'],
+      }),
+    )
+    expect(out).toContain('- see you soon')
+    expect(out).toContain('- politics')
+    expect(out).toContain('- no marketing flourishes')
+    expect(out).toContain('- dry, warm, unhurried')
+    expect(out).not.toMatch(/\n {2}\S/)
+  })
+})

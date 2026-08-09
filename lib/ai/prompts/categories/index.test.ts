@@ -401,3 +401,42 @@ describe('event-question instructions (v1.10.0)', () => {
     expect(EVENT_QUESTION_INSTRUCTIONS).not.toMatch(/[—–]/)
   })
 })
+
+// TAC-313 UAT fix #2. The leak was not a missing price rule — Mock Sextant has
+// "Don't volunteer prices" as an anti-pattern and it emitted $7.95 anyway. The
+// instruction below asks for a copy of a section where 69/69 menu items carry a
+// price, and category instructions render LAST in the system prompt, so this
+// outranked the venue's ban. The fix scopes what comes out of the pull.
+describe('NEW_QUESTION_INSTRUCTIONS — price scoping (TAC-313 UAT, v1.28.0)', () => {
+  it('scopes price out of the pull unless the guest asked what something costs', () => {
+    expect(NEW_QUESTION_INSTRUCTIONS).toContain(
+      'price is not part of the answer unless the guest asked what something costs',
+    )
+  })
+
+  it('names that the section carries a price on every item', () => {
+    // Says WHY the exception exists, so it reads as scoping rather than as a
+    // second contradictory rule about prices.
+    expect(NEW_QUESTION_INSTRUCTIONS).toContain('lists a price on every menu item')
+  })
+
+  it('still forbids guessing prices that are not listed', () => {
+    // Distinct failure from volunteering a real one; both stay banned.
+    expect(NEW_QUESTION_INSTRUCTIONS).toContain('Do not guess prices')
+  })
+
+  it('routes an unanswerable question to # Knowledge gaps, not a promise', () => {
+    // TAC-308 survivor. This instruction renders LAST, so on the turns most
+    // likely to gap it was the strongest-positioned text in the prompt — and it
+    // said the one thing TAC-308 exists to prevent.
+    expect(NEW_QUESTION_INSTRUCTIONS).toContain('handle it per the # Knowledge gaps block')
+  })
+
+  it('no longer offers to ask someone or get back to the guest', () => {
+    // Named in the direction that matters: the promise must be ABSENT. A test
+    // asserting only the presence of the new routing would still pass if both
+    // sentences shipped side by side.
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('get back to them')
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('ask someone')
+  })
+})

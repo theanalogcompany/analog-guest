@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.27.0 (message splitting: R12 + [[BREAK]] delimiter)', () => {
-    expect(PROMPT_VERSION).toBe('v1.27.0')
+  it('is v1.28.0 (R12/anti-pattern reconcile, price scoping, persona bullet fix)', () => {
+    expect(PROMPT_VERSION).toBe('v1.28.0')
   })
 })
 
@@ -589,5 +589,31 @@ describe('SYSTEM_TEMPLATE — ## Unanswered question rule (TAC-308, v1.25.0)', (
   it('tells the agent not to re-promise while one is outstanding', () => {
     expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes an ## Unanswered question block')
     expect(SYSTEM_TEMPLATE).toContain("don't state or invent a deadline for it")
+  })
+})
+
+// TAC-313 UAT fix #1. R12's original worked example was, character for
+// character, the string Mock Sextant's clause anti-pattern holds up as the
+// failure — so the prompt was instructing the model to emit a banned shape,
+// and `# Voice imperative` (venue voice beats general rules) meant the
+// anti-pattern won. Zero splits across five UAT turns.
+describe('SYSTEM_TEMPLATE — R12 does not instruct a bare comma list (TAC-313 UAT, v1.28.0)', () => {
+  it('no longer uses the bare comma list as R12s worked example', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain("[[BREAK]] 'espresso, chai, peppermint'")
+  })
+
+  it('shows the description in clause form instead', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "[[BREAK]] 'espresso pulled into a chai latte with a peppermint kick'",
+    )
+  })
+
+  it('states outright that splitting does not license a comma list', () => {
+    // Load-bearing beyond Sextant: every other venue lacks the anti-pattern
+    // that would otherwise catch this, so R12 has to carry the ban itself.
+    expect(SYSTEM_TEMPLATE).toContain('never a bare comma list')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Splitting changes where a thought lands, not how it is written',
+    )
   })
 })
