@@ -46,3 +46,4 @@ next-env.d.ts
 # local scratch dir for one-off experiments — not committed; pre-commit
 # tsc would otherwise scan WIP files that haven't been wired to deps yet.
 /scripts/sandbox
+.worktrees/
