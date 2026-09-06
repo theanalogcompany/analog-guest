@@ -13,12 +13,10 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
 import type { ApprovalTrigger } from '@/lib/agent/stages'
 import type { ThreadMessage } from '@/lib/schemas'
+import { normalizeRecognitionState } from './recognition-state'
+import type { GuestRecognitionState } from './recognition-state'
 
-export type GuestRecognitionState =
-  | 'new'
-  | 'returning'
-  | 'regular'
-  | 'raving_fan'
+export type { GuestRecognitionState } from './recognition-state'
 
 // Recent-context entry shape on the queue (last 3 messages joined by
 // `list_operator_queue`). Aliased to the canonical `ThreadMessage` so the
@@ -47,18 +45,6 @@ export interface QueueDraft {
 export type ListPendingQueueResult =
   | { ok: true; drafts: QueueDraft[] }
   | { ok: false; error: string }
-
-const RECOGNITION_STATE_VALUES: ReadonlySet<string> = new Set([
-  'new',
-  'returning',
-  'regular',
-  'raving_fan',
-])
-
-function normalizeRecognitionState(s: string | null): GuestRecognitionState | null {
-  if (s === null) return null
-  return RECOGNITION_STATE_VALUES.has(s) ? (s as GuestRecognitionState) : null
-}
 
 // TAC-299: extra non-policy review_reason values that can land on
 // messages.review_reason without going through applyApprovalPolicyStage.

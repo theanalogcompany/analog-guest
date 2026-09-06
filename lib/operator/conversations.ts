@@ -4,8 +4,10 @@
 // analog-operator's docs/superpowers/specs/2026-09-05-conversations-tab-design.md.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { normalizeRecognitionState } from './recognition-state'
+import type { GuestRecognitionState } from './recognition-state'
 
-export type GuestRecognitionState = 'new' | 'returning' | 'regular' | 'raving_fan'
+export type { GuestRecognitionState } from './recognition-state'
 
 export interface ConversationSummary {
   guestId: string
@@ -26,18 +28,6 @@ export interface ConversationSummary {
 export type ListOperatorConversationsResult =
   | { ok: true; conversations: ConversationSummary[] }
   | { ok: false; error: string }
-
-const RECOGNITION_STATE_VALUES: ReadonlySet<string> = new Set([
-  'new',
-  'returning',
-  'regular',
-  'raving_fan',
-])
-
-function normalizeRecognitionState(s: string | null): GuestRecognitionState | null {
-  if (s === null) return null
-  return RECOGNITION_STATE_VALUES.has(s) ? (s as GuestRecognitionState) : null
-}
 
 function composeName(first: string | null, last: string | null): string | null {
   const parts = [first, last].filter((p): p is string => !!p && p.trim().length > 0)
