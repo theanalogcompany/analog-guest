@@ -1580,6 +1580,25 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      list_operator_conversations: {
+        Args: { venue_ids: string[] }
+        Returns: {
+          agent_name: string
+          conversation_count: number
+          first_conversation_at: string
+          guest_first_name: string
+          guest_id: string
+          guest_last_name: string
+          guest_phone: string
+          last_message_at: string
+          last_message_body: string
+          last_message_direction: string
+          recognition_state: string
+          venue_id: string
+          venue_slug: string
+          venue_timezone: string
+        }[]
+      }
       list_operator_queue: {
         Args: { venue_ids: string[] }
         Returns: {
