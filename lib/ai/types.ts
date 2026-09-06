@@ -445,3 +445,21 @@ export type ClassifyMessageResult = {
 export type AIResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; errorCode?: string }
+
+// TAC-323: standalone order-extraction call, deliberately decoupled from the
+// classify/generate contract (see lib/agent/extract-reported-order.ts for
+// the gate + resolution logic that wraps this call).
+export type ExtractReportedOrderInput = {
+  inboundBody: string
+  menuItemNames: readonly string[]
+}
+
+export type ExtractedReportedOrderItem = {
+  name: string
+  quantity: number
+}
+
+export type ExtractReportedOrderResult = {
+  items: ExtractedReportedOrderItem[]
+  promptVersion: string
+}

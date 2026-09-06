@@ -18,6 +18,7 @@ import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
+import { extractReportedOrder } from './extract-reported-order'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -414,6 +415,37 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
       return { status: 'failed', stage: 'classification', error: errMsg }
     }
+
+    // TAC-323: fire the self-reported-order extractor. Non-blocking by
+    // design (waitUntil) — a slow or failed Haiku call must never delay or
+    // block the reply. Consequence, deliberate: the extracted order is NOT
+    // available to generateStage below, so the reply can't reference it.
+    // Never throws; the module logs its own outcome. Placed post-classify,
+    // pre-generate per the ticket's own sequencing.
+    waitUntil(
+      extractReportedOrder(ctx)
+        .then((outcome) => {
+          if (outcome.kind === 'recorded') {
+            console.log('[agent] inbound self-reported order recorded', {
+              agentRunId,
+              transactionId: outcome.transactionId,
+              amountCents: outcome.amountCents,
+              itemCount: outcome.itemCount,
+            })
+          } else if (outcome.kind === 'failed') {
+            console.warn('[agent] inbound self-reported order extraction failed (continuing)', {
+              agentRunId,
+              error: outcome.error,
+            })
+          }
+        })
+        .catch((e) => {
+          console.error('[agent] extractReportedOrder threw unexpectedly', {
+            agentRunId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }),
+    )
 
     // Retrieve corpus
     const retrieveSpan = trace.span(

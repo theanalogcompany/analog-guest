@@ -1184,7 +1184,7 @@ export type Database = {
       }
       transactions: {
         Row: {
-          amount_cents: number
+          amount_cents: number | null
           card_fingerprint: string | null
           created_at: string
           external_id: string | null
@@ -1201,7 +1201,7 @@ export type Database = {
           venue_id: string
         }
         Insert: {
-          amount_cents: number
+          amount_cents?: number | null
           card_fingerprint?: string | null
           created_at?: string
           external_id?: string | null
@@ -1218,7 +1218,7 @@ export type Database = {
           venue_id: string
         }
         Update: {
-          amount_cents?: number
+          amount_cents?: number | null
           card_fingerprint?: string | null
           created_at?: string
           external_id?: string | null

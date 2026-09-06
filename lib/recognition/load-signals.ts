@@ -120,7 +120,12 @@ export async function loadSignals({
   let totalSpentCents = 0
   const occurredAtList: string[] = []
   for (const row of transactionsResult.data ?? []) {
-    totalSpentCents += row.amount_cents
+    // TAC-323: guest_reported transactions can carry a null amount_cents
+    // (resolved item with no price in venue_info). Treating null as a
+    // 0-contribution to this sum is SQL SUM()-ignores-NULL semantics, not a
+    // claim that the order cost $0 — the row still counts as a visit via
+    // occurredAtList below.
+    totalSpentCents += row.amount_cents ?? 0
     occurredAtList.push(row.occurred_at)
   }
   const visitDateList = dedupeVisitsByLocalDate(occurredAtList, timezone)

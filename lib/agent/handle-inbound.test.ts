@@ -85,6 +85,11 @@ vi.mock('./alerts', () => ({
 vi.mock('./dispatch-arrival-capture', () => ({
   dispatchArrivalCapture: vi.fn(async () => ({ kind: 'noop' })),
 }))
+// TAC-323: fire-and-forget side effect, mocked wholesale — its own unit
+// coverage lives in extract-reported-order.test.ts.
+vi.mock('./extract-reported-order', () => ({
+  extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
+}))
 vi.mock('@/lib/guests/context', () => ({
   isEmptyContextUpdate: () => true,
   updateGuestContext: vi.fn(),
