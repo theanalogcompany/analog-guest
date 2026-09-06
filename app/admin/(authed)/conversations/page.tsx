@@ -354,14 +354,29 @@ async function loadConversationData({
   // Visit count: distinct calendar days in venue tz. Spend total: sum of
   // amount_cents across the 90-day window. Avg per visit derives in JS and
   // is left null when visit count is 0 (UI omits the "avg" clause).
+  //
+  // TAC-323: a guest-reported transaction can carry a null amount_cents.
+  // `visitCount90d` (the headline "N visits" figure) still counts every
+  // visit-day regardless of whether we know the amount — a visit is a visit.
+  // `pricedVisitCount90d` is the narrower denominator used ONLY for the
+  // average: a visit-day with no known-amount transaction on it would
+  // otherwise silently drag avgPerVisitCents down (spend treated as $0 for a
+  // day whose true spend is simply unknown, not zero).
   const visitDates = new Set<string>()
+  const pricedVisitDates = new Set<string>()
   let spendCents90d = 0
   for (const t of transactionsResult.data ?? []) {
-    visitDates.add(formatInTimeZone(new Date(t.occurred_at), venueRow.timezone, 'yyyy-MM-dd'))
-    spendCents90d += t.amount_cents ?? 0
+    const dateKey = formatInTimeZone(new Date(t.occurred_at), venueRow.timezone, 'yyyy-MM-dd')
+    visitDates.add(dateKey)
+    if (t.amount_cents !== null) {
+      pricedVisitDates.add(dateKey)
+      spendCents90d += t.amount_cents
+    }
   }
   const visitCount90d = visitDates.size
-  const avgPerVisitCents = visitCount90d > 0 ? Math.round(spendCents90d / visitCount90d) : null
+  const pricedVisitCount90d = pricedVisitDates.size
+  const avgPerVisitCents =
+    pricedVisitCount90d > 0 ? Math.round(spendCents90d / pricedVisitCount90d) : null
 
   // "Since" = earliest signal we have on this guest at this venue, considering
   // both transactions and messages. A guest may have texted before transacting

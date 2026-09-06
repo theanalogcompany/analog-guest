@@ -1,10 +1,14 @@
 export { generateMessage } from './generate-message'
 export { classifyMessage } from './classify-message'
+export { extractReportedOrder } from './extract-reported-order'
 
 export type {
   AIResult,
   ClassifyMessageInput,
   ClassifyMessageResult,
+  ExtractedReportedOrderItem,
+  ExtractReportedOrderInput,
+  ExtractReportedOrderResult,
   FollowupAnchorVisit,
   FollowupContext,
   FollowupReason,

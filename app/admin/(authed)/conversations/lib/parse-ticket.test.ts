@@ -49,17 +49,35 @@ describe('parseTicket', () => {
     ).toBeNull()
   })
 
-  it('drops malformed line items but keeps the parsable ones', () => {
+  it('drops line items missing name/quantity but keeps the parsable ones', () => {
     const ticket = parseTicket({
       line_items: [
         { name: 'Good', quantity: 1, unit_price_cents: 100 },
-        { name: 'Missing price', quantity: 1 },
+        { quantity: 1, unit_price_cents: 100 },
         null,
         { name: 'Also good', quantity: 2, unit_price_cents: 50 },
       ],
     })
     expect(ticket?.lineItems).toHaveLength(2)
     expect(ticket?.lineItems.map((l) => l.name)).toEqual(['Good', 'Also good'])
+  })
+
+  // TAC-323: a guest-reported line item can resolve to a real menu name with
+  // no known price. Keep it (with a null price) rather than dropping it —
+  // the operator should still see what was reported.
+  it('keeps a line item with a valid name/quantity but no unit_price_cents', () => {
+    const ticket = parseTicket({
+      line_items: [
+        { name: 'Good', quantity: 1, unit_price_cents: 100 },
+        { name: 'Missing price', quantity: 1 },
+      ],
+    })
+    expect(ticket?.lineItems).toHaveLength(2)
+    expect(ticket?.lineItems[1]).toEqual({
+      name: 'Missing price',
+      quantity: 1,
+      unitPriceCents: null,
+    })
   })
 })
 
@@ -114,6 +132,7 @@ describe('formatPosProvider', () => {
     expect(formatPosProvider('mock')).toBe('mock POS')
     expect(formatPosProvider('square')).toBe('Square')
     expect(formatPosProvider('toast')).toBe('Toast')
+    expect(formatPosProvider('guest_reported')).toBe('Guest-reported')
   })
 
   it('returns the raw string for unknown providers', () => {

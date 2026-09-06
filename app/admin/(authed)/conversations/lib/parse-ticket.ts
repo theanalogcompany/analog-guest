@@ -22,7 +22,11 @@ import { readNumber, readRecord, readString } from '../stage-detail/_primitives'
 export interface TicketLineItem {
   name: string
   quantity: number
-  unitPriceCents: number
+  // TAC-323: null when the item resolved but venue_info has no price for it
+  // (guest-reported orders only — POS-sourced tickets always carry a real
+  // price). The row renders a blank price cell rather than treating this as
+  // $0 — see transaction-row.tsx.
+  unitPriceCents: number | null
 }
 
 export interface ParsedTicket {
@@ -47,9 +51,12 @@ export function parseTicket(rawData: unknown): ParsedTicket | null {
     if (!ir) continue
     const name = readString(ir.name)
     const quantity = readNumber(ir.quantity)
-    const unitPriceCents = readNumber(ir.unit_price_cents)
-    if (name === null || quantity === null || unitPriceCents === null) continue
-    lineItems.push({ name, quantity, unitPriceCents })
+    if (name === null || quantity === null) continue
+    // TAC-323: unit_price_cents is intentionally absent (not zero) on a
+    // guest-reported line item whose menu entry has no price — keep the
+    // item so the operator still sees what was reported, with a blank price
+    // cell rather than a fabricated $0.00.
+    lineItems.push({ name, quantity, unitPriceCents: readNumber(ir.unit_price_cents) })
   }
   if (lineItems.length === 0) return null
 
@@ -99,6 +106,8 @@ export function formatPosProvider(provider: string | null): string {
       return 'Square'
     case 'toast':
       return 'Toast'
+    case 'guest_reported':
+      return 'Guest-reported'
     default:
       return provider
   }

@@ -89,11 +89,20 @@ function buildMenuNameSet(menuItems: readonly MenuItemLike[]): Set<string> {
   // case-insensitive matching against POS line item names.
   const set = new Set<string>()
   for (const item of menuItems) {
-    const normalized = item.name.trim().toLowerCase()
+    const normalized = normalizeMenuItemName(item.name)
     if (normalized.length === 0) continue
     set.add(normalized)
   }
   return set
+}
+
+// Shared with lib/agent/extract-reported-order.ts (TAC-323): the prefilter
+// and the post-extraction item resolver both need to agree on what "the same
+// menu item name" means, or a name that passes the prefilter could fail to
+// resolve (or vice versa). Exported so both sites import the one definition
+// rather than drifting.
+export function normalizeMenuItemName(name: string): string {
+  return name.trim().toLowerCase()
 }
 
 function extractLineItemNames(rawData: unknown): string[] {

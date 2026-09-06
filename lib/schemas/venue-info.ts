@@ -109,6 +109,13 @@ export const VenueInfoSchema = z.object({
     notes: z.string().optional(),
   }).optional(),
   currentContext: z.array(VenueContextNoteSchema).default([]),
+  // TAC-323: the exact prefilled-message string a guest sends by scanning the
+  // venue's static QR sign (e.g. "Hi Sana!" for Mock Sextant). Used by the
+  // Sendblue webhook to distinguish a QR enrollment (created_via: 'qr_scan')
+  // from an unprompted inbound (created_via: 'inbound_message') on a
+  // never-seen phone number. Must match the printed sign character-for-
+  // character — that's an operator/print-process concern, not validated here.
+  qrEnrollmentMessage: z.string().optional(),
 })
 
 export type VenueInfo = z.infer<typeof VenueInfoSchema>

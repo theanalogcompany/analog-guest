@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Eyebrow } from '@/lib/ui'
 import { type Transaction, TransactionRow } from './transaction-row'
@@ -34,6 +35,11 @@ export function TransactionsList({
 }: TransactionsListProps) {
   // Stable per-render "now" so all rows agree on relative dates.
   const now = useMemo(() => nowProp ?? new Date(), [nowProp])
+  // TAC-323: after a successful delete, refresh so the server re-fetches the
+  // transactions list — same router.refresh() propagation pattern as the
+  // Voices command-center rail (server is source of truth, no client-side
+  // removal state to keep in sync).
+  const router = useRouter()
 
   if (transactions.length === 0) {
     return (
@@ -48,9 +54,21 @@ export function TransactionsList({
     )
   }
 
-  const totalCents = transactions.reduce((acc, t) => acc + t.amountCents, 0)
-  const avgCents = Math.round(totalCents / transactions.length)
-  const totalsLabel = `$${formatDollars(totalCents)} total · avg $${formatDollars(avgCents)}`
+  // TAC-323: null-amount (guest-reported, unpriced) rows contribute 0 to the
+  // sum — SUM()-ignores-NULL semantics, not a claim those orders cost $0 —
+  // and don't count toward the average's denominator, so one unpriced order
+  // doesn't silently drag the average down. See the per-row display in
+  // transaction-row.tsx for the individual-row null case, which is handled
+  // differently (shows "—", never folded into an average). When EVERY
+  // transaction in the window is unpriced there's no known amount at all —
+  // render that explicitly rather than a fabricated "$0.00 total · avg
+  // $0.00" (mirrors page.tsx's avgPerVisitCents === null treatment).
+  const pricedCount = transactions.reduce((acc, t) => (t.amountCents !== null ? acc + 1 : acc), 0)
+  const totalCents = transactions.reduce((acc, t) => acc + (t.amountCents ?? 0), 0)
+  const totalsLabel =
+    pricedCount > 0
+      ? `$${formatDollars(totalCents)} total · avg $${formatDollars(Math.round(totalCents / pricedCount))}`
+      : 'amount unknown'
 
   return (
     <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-3">
@@ -60,7 +78,13 @@ export function TransactionsList({
       </header>
       <div className="flex flex-col">
         {transactions.map((tx) => (
-          <TransactionRow key={tx.id} tx={tx} venueTimezone={venueTimezone} now={now} />
+          <TransactionRow
+            key={tx.id}
+            tx={tx}
+            venueTimezone={venueTimezone}
+            now={now}
+            onDeleted={() => router.refresh()}
+          />
         ))}
       </div>
     </Card>

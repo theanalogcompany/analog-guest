@@ -17,6 +17,7 @@ import {
   verifyWebhookSignature,
 } from '@/lib/messaging'
 import { reconcileTapFromInbound } from '@/lib/pos/reconcile-tap'
+import { VenueInfoSchema } from '@/lib/schemas'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 
@@ -43,6 +44,43 @@ function mapSendblueStatus(
     case 'ERROR':
       return 'failed'
   }
+}
+
+// TAC-323: distinguish a QR-sign enrollment from an unprompted inbound on a
+// never-seen phone number. The prefilled body IS the signal —
+// venue_info.qrEnrollmentMessage carries the exact string printed on that
+// venue's sign. Exact match on the trimmed body (both sides trimmed
+// defensively; the printed sign matching the config value character-for-
+// character is an operator/print-process concern, not validated here).
+// Fails safe to 'inbound_message' on any lookup/parse issue — an enrollment
+// misclassified as an ordinary inbound loses only the provenance label,
+// never data or functionality.
+async function resolveCreatedVia(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  inboundBody: string | null,
+): Promise<'qr_scan' | 'inbound_message'> {
+  const trimmedBody = inboundBody?.trim() ?? ''
+  if (trimmedBody.length === 0) return 'inbound_message'
+
+  const { data, error } = await supabase
+    .from('venue_configs')
+    .select('venue_info')
+    .eq('venue_id', venueId)
+    .maybeSingle()
+  if (error || !data) {
+    console.warn('webhook inbound: venue_configs lookup failed for enrollment check', {
+      venueId,
+      error: error?.message,
+    })
+    return 'inbound_message'
+  }
+
+  const parsed = VenueInfoSchema.safeParse(data.venue_info)
+  const enrollmentMessage = parsed.success ? parsed.data.qrEnrollmentMessage?.trim() : undefined
+  if (!enrollmentMessage) return 'inbound_message'
+
+  return trimmedBody === enrollmentMessage ? 'qr_scan' : 'inbound_message'
 }
 
 async function handleInbound(
@@ -102,15 +140,15 @@ async function handleInbound(
     guestId = existingGuest.id
   } else {
     const nowIso = new Date().toISOString()
+    // TAC-323: resolves to 'qr_scan' when the trimmed body exactly matches
+    // this venue's qrEnrollmentMessage, else 'inbound_message'.
+    const createdVia = await resolveCreatedVia(supabase, venue.id, payload.content ?? null)
     const { data: newGuest, error: insertGuestError } = await supabase
       .from('guests')
       .insert({
         venue_id: venue.id,
         phone_number: guestNumber,
-        // TODO: add 'inbound_message' to guests.created_via check constraint in
-        // a future migration; switch this value at the same time. May also
-        // want 'nfc_inbound' when THE-34 ships.
-        created_via: 'manual',
+        created_via: createdVia,
         first_contacted_at: nowIso,
         last_inbound_at: nowIso,
         last_interaction_at: nowIso,
