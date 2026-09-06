@@ -46,25 +46,91 @@ interface ResolvedReportedItem {
   unitPriceCents: number | null
 }
 
+// Prefilter word-splitting is deliberately crude — this is a cheapness gate
+// (avoid the Haiku call on the common case of a message naming no menu item
+// at all), not a correctness gate (that's the LLM extractor + the resolver's
+// structural enum constraint, below). A false positive here costs one extra
+// Haiku call and writes nothing; a false negative silently kills the feature
+// for that message. Bias accordingly: this list drops only tokens generic
+// enough to appear in ordinary chat regardless of any menu item ("and",
+// "with"), not tokens that merely seem short. Every entry must be
+// >= MIN_SIGNIFICANT_WORD_LENGTH chars — a shorter entry ("of", "in", "a",
+// "an", "to") is dead code, since the length floor below already excludes it
+// before this set is ever checked.
+const MENU_WORD_STOPWORDS = new Set(['the', 'and', 'with', 'for'])
+const MIN_SIGNIFICANT_WORD_LENGTH = 3
+
+// Diacritics-as-separator is a real failure mode, not a hypothetical one:
+// the un-normalized split regex below treats "ñ"/"è"/"û" as separators (not
+// a-z0-9), so "Piña" -> ["pi", "a"] -> both fragments die at the length
+// floor -> the item is UNMATCHABLE by any phrasing, forever. Independent
+// cafes/bakeries routinely carry accented names ("Crème Brûlée", "Piña
+// Colada"). NFD + strip combining marks turns "crème" into "creme" before
+// either side of the comparison sees it.
+function stripDiacritics(value: string): string {
+  // NFD decomposes an accented char into base char + combining mark(s);
+  // \u0300-\u036f is the Unicode combining diacritical marks block, so
+  // stripping it leaves the plain base characters ("cr\u00e8me" -> "creme").
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+// Splits a menu item name into its individually-matchable words. "Gibraltar
+// / Cortado" -> ["gibraltar", "cortado"]; "Hario V60 Dripper" ->
+// ["hario", "v60", "dripper"]. Alphanumeric runs stay whole ("v60" isn't
+// split into "v" + "60"), and separators (whitespace, "/", punctuation,
+// diacritics once stripped) all split alike.
+//
+// Also generates naive de-pluralized variants alongside the original word —
+// a menu item stored in PLURAL form ("Croissants") must still match a
+// guest's natural singular phrasing ("i got a croissant"); the reverse
+// (singular menu, plural guest) already works via plain substring
+// containment ("croissant" is a substring of "croissants"). This is not a
+// lemmatizer: for a word ending "s" it also tries the word minus one
+// trailing char, and for a word ending "es" it also tries the word minus two
+// — deliberately BOTH when applicable ("sandwiches" yields the correct
+// "sandwich" via the -es rule AND the linguistically-wrong-but-harmless
+// "sandwiche" via the -s rule). A wrong extra candidate only ever costs one
+// more cheap Haiku call on a false positive; the alternative — picking just
+// one rule and guessing wrong for a given word — is what would leave real
+// plurals silently unmatchable again.
+function extractSignificantWords(name: string): string[] {
+  const words = stripDiacritics(name.toLowerCase())
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= MIN_SIGNIFICANT_WORD_LENGTH && !MENU_WORD_STOPWORDS.has(word))
+
+  const withSingularVariants = new Set(words)
+  for (const word of words) {
+    if (word.endsWith('s') && word.length - 1 >= MIN_SIGNIFICANT_WORD_LENGTH) {
+      withSingularVariants.add(word.slice(0, -1))
+    }
+    if (word.endsWith('es') && word.length - 2 >= MIN_SIGNIFICANT_WORD_LENGTH) {
+      withSingularVariants.add(word.slice(0, -2))
+    }
+  }
+  return [...withSingularVariants]
+}
+
 /**
  * Pure prefilter: does the inbound body mention any of the venue's menu item
- * names? Substring-containment after normalization (trim + lowercase) on
- * both sides — "i got an oat cortado" contains the normalized menu name
- * "cortado". Known limitation, accepted per the TAC-323 plan: a short/generic
- * item name could false-positive inside an unrelated word; the cost of a
- * false positive here is one extra (cheap) Haiku call, never a bad write,
- * since the LLM extractor is still the actual intent gate.
+ * names? Matches on individual significant WORDS drawn from each menu name,
+ * not the whole name as one string — real multi-word/slash-separated names
+ * ("Gibraltar / Cortado") are never typed verbatim by a guest who just says
+ * "cortado" or "oat cortado", and 47 of Mock Sextant's 69 menu items are
+ * multi-word (confirmed against production data in UAT). Matching on the
+ * whole name here was a real bug, not an accepted tradeoff — it left the
+ * feature effectively dead for the majority of real menu items. Substring-
+ * containment (not exact word-boundary matching) on both sides is still the
+ * mechanism at the word level: "cortados" (plural) still contains "cortado".
  */
 export function bodyMentionsMenuItem(
   body: string,
   menuItems: readonly Pick<MenuItem, 'name'>[],
 ): boolean {
-  const normalizedBody = normalizeMenuItemName(body)
+  const normalizedBody = stripDiacritics(normalizeMenuItemName(body))
   if (normalizedBody.length === 0) return false
-  return menuItems.some((item) => {
-    const normalizedName = normalizeMenuItemName(item.name)
-    return normalizedName.length > 0 && normalizedBody.includes(normalizedName)
-  })
+  return menuItems.some((item) =>
+    extractSignificantWords(item.name).some((word) => normalizedBody.includes(word)),
+  )
 }
 
 // A reported quantity this far outside normal cafe-order range is more
@@ -74,10 +140,20 @@ export function bodyMentionsMenuItem(
 const MAX_REASONABLE_QUANTITY = 20
 
 /**
- * Resolve the LLM's extracted item names against the real venue menu via the
- * SAME normalization the prefilter uses, so the two can't disagree about
- * what "the same menu item" means. Unmatched names are dropped silently —
- * per the ticket, unresolvable items are never stored as freeform text.
+ * Resolve the LLM's extracted item names against the real venue menu.
+ * Deliberately NOT a fuzzy match (per the ticket's §6 "no fuzzy or
+ * embedding-based item matching") — the extractor prompt instructs the model
+ * to return the menu item's name EXACTLY as given in the candidate list it
+ * was shown (mapping the guest's own words, e.g. "oat cortado", onto the
+ * canonical name, e.g. "Gibraltar / Cortado"), and this function does an
+ * exact match (after trim/lowercase via `normalizeMenuItemName`) against
+ * that same canonical list — it never tries to interpret or fuzzy-map the
+ * model's output itself. This is a DIFFERENT normalization step from the
+ * prefilter's `extractSignificantWords` (word-level, above): the prefilter's
+ * job is "is it worth calling the model at all," this function's job is
+ * "did the model return something real." Unmatched names are dropped
+ * silently — per the ticket, unresolvable items are never stored as
+ * freeform text.
  *
  * A normalized name can map to two-or-more menu rows (e.g. a "Latte" with
  * separate small/large rows sharing one name — `MenuItemSchema` permits this

@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // Relative import — matches classify-message.test.ts's convention for a
 // same-directory sibling module.
 import { extractReportedOrder } from './extract-reported-order'
+// Real (unmocked) resolver, for the enum-dedup/max-price composition test
+// below — only generateObject and the model client are mocked in this file,
+// so this is the actual production resolveReportedItems, not a stand-in.
+import { resolveReportedItems } from '@/lib/agent/extract-reported-order'
+import type { MenuItem } from '@/lib/schemas'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 const generateObjectMock = vi.fn()
@@ -67,6 +72,52 @@ describe('extractReportedOrder', () => {
     expect(generateObjectMock).not.toHaveBeenCalled()
   })
 
+  it('returns ok:true with empty items for an empty menu, without calling the model', async () => {
+    // z.enum requires a non-empty tuple — this guard exists independent of
+    // caller discipline (bodyMentionsMenuItem already short-circuits before
+    // ever reaching this function on an empty menu).
+    const result = await extractReportedOrder({ inboundBody: 'i got a cortado', menuItemNames: [] })
+    expect(result).toEqual({ ok: true, data: { items: [], promptVersion: expect.any(String) } })
+    expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('constrains the name field to a z.enum of the given menu item names — behaviorally, not by inspecting Zod internals', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    await extractReportedOrder({
+      inboundBody: 'i got a cortado',
+      menuItemNames: ['Cortado', 'Croissant'],
+    })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
+      | undefined
+    // Valid: a name literally in the given list.
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Cortado', quantity: 1 }] }).success).toBe(
+      true,
+    )
+    // Invalid: this is the exact class of bug the enum constraint closes —
+    // a hallucinated or reformatted name that a bare z.string() would have
+    // silently accepted (and the resolver would have silently dropped one
+    // layer down, with no visibility into why).
+    expect(
+      callArgs?.schema?.safeParse({ items: [{ name: 'Not A Real Menu Item', quantity: 1 }] })
+        .success,
+    ).toBe(false)
+  })
+
+  it('dedupes repeated menu item names before building the enum (harmless either way, but avoids redundant enum entries)', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    await extractReportedOrder({
+      inboundBody: 'i got a cortado',
+      menuItemNames: ['Cortado', 'Cortado', 'Croissant'],
+    })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
+      | undefined
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Croissant', quantity: 1 }] }).success).toBe(
+      true,
+    )
+  })
+
   it('returns ok:false with an errorCode when the model call throws', async () => {
     generateObjectMock.mockRejectedValue(new Error('anthropic down'))
 
@@ -80,6 +131,44 @@ describe('extractReportedOrder', () => {
       expect(result.error).toBe('anthropic down')
       expect(result.errorCode).toBe('ai_extract_reported_order_failed')
     }
+  })
+
+  describe('enum dedup composes correctly with the resolver max-price rule', () => {
+    // Answers a specific review question: the enum sent to the model is
+    // DEDUPED (12 "Olipop" rows -> 1 enum entry), but resolveReportedItems
+    // groups and max-prices against the ORIGINAL, non-deduped menuItems
+    // array — a completely separate variable the AI layer's dedup never
+    // touches. This test exercises both real (unmocked) functions together
+    // to prove the composition, not just each one in isolation.
+    function makeMenuItem(overrides: Partial<MenuItem> & { name: string }): MenuItem {
+      return { category: 'drinks', modifiers: [], dietary: [], isOffMenu: false, ...overrides }
+    }
+
+    it('dedupes the enum to one entry but still resolves against all underlying rows for max price', async () => {
+      const duplicatedMenu = [
+        makeMenuItem({ name: 'Olipop', price: 4 }),
+        makeMenuItem({ name: 'Olipop', price: 5 }),
+        makeMenuItem({ name: 'Olipop', price: 3.5 }),
+      ]
+      const menuItemNames = duplicatedMenu.map((m) => m.name) // ['Olipop','Olipop','Olipop']
+
+      // The model can only ever return "Olipop" once per item — the enum
+      // has exactly one entry regardless of how many menu rows share it.
+      generateObjectMock.mockResolvedValue({
+        object: { items: [{ name: 'Olipop', quantity: 1 }] },
+      })
+      const extraction = await extractReportedOrder({
+        inboundBody: 'i got an olipop',
+        menuItemNames,
+      })
+      expect(extraction.ok).toBe(true)
+      if (!extraction.ok) return
+
+      // Fed into the REAL resolver against the ORIGINAL (non-deduped, 3-row)
+      // menu — the enum's deduping in the AI layer never touched this array.
+      const resolved = resolveReportedItems(extraction.data.items, duplicatedMenu)
+      expect(resolved).toEqual([{ name: 'Olipop', quantity: 1, unitPriceCents: 500 }])
+    })
   })
 
   it('never uses .min()/.max() on the quantity number field (THE-157)', async () => {
