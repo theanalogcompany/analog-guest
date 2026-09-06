@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // Relative import — matches classify-message.test.ts's convention for a
 // same-directory sibling module.
 import { extractReportedOrder } from './extract-reported-order'
+// Real (unmocked) resolver, for the enum-dedup/max-price composition test
+// below — only generateObject and the model client are mocked in this file,
+// so this is the actual production resolveReportedItems, not a stand-in.
+import { resolveReportedItems } from '@/lib/agent/extract-reported-order'
+import type { MenuItem } from '@/lib/schemas'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 const generateObjectMock = vi.fn()
@@ -126,6 +131,44 @@ describe('extractReportedOrder', () => {
       expect(result.error).toBe('anthropic down')
       expect(result.errorCode).toBe('ai_extract_reported_order_failed')
     }
+  })
+
+  describe('enum dedup composes correctly with the resolver max-price rule', () => {
+    // Answers a specific review question: the enum sent to the model is
+    // DEDUPED (12 "Olipop" rows -> 1 enum entry), but resolveReportedItems
+    // groups and max-prices against the ORIGINAL, non-deduped menuItems
+    // array — a completely separate variable the AI layer's dedup never
+    // touches. This test exercises both real (unmocked) functions together
+    // to prove the composition, not just each one in isolation.
+    function makeMenuItem(overrides: Partial<MenuItem> & { name: string }): MenuItem {
+      return { category: 'drinks', modifiers: [], dietary: [], isOffMenu: false, ...overrides }
+    }
+
+    it('dedupes the enum to one entry but still resolves against all underlying rows for max price', async () => {
+      const duplicatedMenu = [
+        makeMenuItem({ name: 'Olipop', price: 4 }),
+        makeMenuItem({ name: 'Olipop', price: 5 }),
+        makeMenuItem({ name: 'Olipop', price: 3.5 }),
+      ]
+      const menuItemNames = duplicatedMenu.map((m) => m.name) // ['Olipop','Olipop','Olipop']
+
+      // The model can only ever return "Olipop" once per item — the enum
+      // has exactly one entry regardless of how many menu rows share it.
+      generateObjectMock.mockResolvedValue({
+        object: { items: [{ name: 'Olipop', quantity: 1 }] },
+      })
+      const extraction = await extractReportedOrder({
+        inboundBody: 'i got an olipop',
+        menuItemNames,
+      })
+      expect(extraction.ok).toBe(true)
+      if (!extraction.ok) return
+
+      // Fed into the REAL resolver against the ORIGINAL (non-deduped, 3-row)
+      // menu — the enum's deduping in the AI layer never touched this array.
+      const resolved = resolveReportedItems(extraction.data.items, duplicatedMenu)
+      expect(resolved).toEqual([{ name: 'Olipop', quantity: 1, unitPriceCents: 500 }])
+    })
   })
 
   it('never uses .min()/.max() on the quantity number field (THE-157)', async () => {
