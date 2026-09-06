@@ -108,6 +108,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
+    openIntentions: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -1378,6 +1379,88 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
     })
     const aiRuntime = buildAiRuntime(ctx)
     expect(aiRuntime.perkBeingUnlocked).toBeUndefined()
+  })
+})
+
+describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
+  const FRESH = new Date() // "now" for createdAt, well inside every window
+  const STALE = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 days ago
+
+  function qrScanCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', timezone: 'America/New_York' } as RuntimeContext['venue'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        createdVia: 'qr_scan',
+        createdAt: FRESH,
+        lastVisitAt: null,
+      } as RuntimeContext['guest'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
+      recentMessages: [],
+      recognition: { state: 'new' } as RuntimeContext['recognition'],
+      ...overrides,
+    })
+  }
+
+  it('is true for a fresh qr_scan guest\'s first inbound', () => {
+    const aiRuntime = buildAiRuntime(qrScanCtx())
+    expect(aiRuntime.firstTouchAfterQrScan).toBe(true)
+  })
+
+  it('is false on the followup path (no currentMessage)', () => {
+    const aiRuntime = buildAiRuntime(qrScanCtx({ currentMessage: null }))
+    expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
+  })
+
+  it('is false when the guest was not created via qr_scan', () => {
+    const ctx = qrScanCtx()
+    const aiRuntime = buildAiRuntime({
+      ...ctx,
+      guest: { ...ctx.guest, createdVia: 'inbound_message' },
+    })
+    expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
+  })
+
+  it('is false when the guest has other recent messages (not their first inbound)', () => {
+    const aiRuntime = buildAiRuntime(
+      qrScanCtx({
+        recentMessages: [{ direction: 'inbound', body: 'earlier', createdAt: new Date() }],
+      }),
+    )
+    expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
+  })
+
+  it('is false once the guest is outside the freshness window, even with recentMessages still empty', () => {
+    const ctx = qrScanCtx()
+    const aiRuntime = buildAiRuntime({
+      ...ctx,
+      guest: { ...ctx.guest, createdAt: STALE },
+    })
+    expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
+  })
+
+  it('maps ctx.openIntentions promptLines onto aiRuntime.openIntentions', () => {
+    const ctx = qrScanCtx({
+      openIntentions: [
+        { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+        { key: 'invite_contact_save', promptLine: "You haven't told them to save your number." },
+      ],
+    })
+    const aiRuntime = buildAiRuntime(ctx)
+    expect(aiRuntime.openIntentions).toEqual([
+      "You haven't heard what this guest ordered yet.",
+      "You haven't told them to save your number.",
+    ])
+  })
+
+  it('leaves aiRuntime.openIntentions undefined when ctx.openIntentions is empty', () => {
+    const aiRuntime = buildAiRuntime(qrScanCtx({ openIntentions: [] }))
+    expect(aiRuntime.openIntentions).toBeUndefined()
   })
 })
 

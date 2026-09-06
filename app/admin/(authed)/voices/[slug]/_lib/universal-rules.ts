@@ -40,7 +40,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R1',
     summary:
-      "Don't reference actions the guest didn't take ('you stopped by', 'thanks for visiting').",
+      "Don't reference actions the guest didn't take ('you stopped by', 'thanks for visiting'). Narrow exception: a qr_scan guest's first message may be greeted as someone present, without narrating the scan.",
   },
   {
     id: 'R2',

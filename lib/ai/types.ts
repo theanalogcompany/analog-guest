@@ -235,6 +235,22 @@ export type RuntimeContext = {
   // generation is written against. undefined = nothing outstanding, block
   // omitted entirely.
   pendingQuestion?: PendingQuestion
+  // TAC-324: first-touch intentions still open for this guest, one rendered
+  // line per intention (already the prompt-facing copy, not a key). The
+  // serializer renders a `## What you're hoping to get to` block between
+  // mechanics and `## Follow-up context` / `## Visit history` when this is
+  // non-empty. Mapped by buildAiRuntime from the agent-side
+  // RuntimeContext.openIntentions, which is already gated to qr_scan guests,
+  // inbound runs only, and current-turn-suppressed. undefined or empty =
+  // block omitted entirely (zero tokens).
+  openIntentions?: string[]
+  // TAC-324: true only when this is a qr_scan guest's first-ever inbound,
+  // inside the R1 carve-out's freshness window. Lets the R1 exception in
+  // SYSTEM_TEMPLATE have a real, narrow condition — the model has no other
+  // way to know a guest arrived via QR scan, since createdVia isn't rendered
+  // anywhere else. Computed inline in buildAiRuntime; never true on the
+  // followup path (no currentMessage there).
+  firstTouchAfterQrScan?: boolean
 }
 
 /**
@@ -461,5 +477,25 @@ export type ExtractedReportedOrderItem = {
 
 export type ExtractReportedOrderResult = {
   items: ExtractedReportedOrderItem[]
+  promptVersion: string
+}
+
+// TAC-324: post-send classification of which first-touch intentions a sent
+// message actually raised, deliberately decoupled from the classify/generate
+// contract — same posture as ExtractReportedOrderInput above. `openIntentions`
+// is the CALLER's already-derived open set (lib/agent/intentions), never
+// recomputed here; this call only ever asks "of these, which did the sent
+// text raise." Carries `key` + `description` as a self-contained pair
+// (rather than a bare key list this module would need its own description
+// lookup for) so lib/ai never needs a second, independently-maintained copy
+// of what each intention key means — lib/agent/intentions/definitions.ts
+// stays the only place that fact lives.
+export type ClassifyIntentionPromptsInput = {
+  sentBody: string
+  openIntentions: readonly { key: string; description: string }[]
+}
+
+export type ClassifyIntentionPromptsResult = {
+  raisedKeys: string[]
   promptVersion: string
 }

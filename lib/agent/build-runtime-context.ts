@@ -20,6 +20,8 @@ import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { extractRecentVisits } from './extract-recent-visits'
 import { groupIntoResponses } from './group-responses'
+import { applyCurrentTurnSuppression, deriveOpenIntentions, type OpenIntention } from './intentions/derive'
+import { INTENTION_DEFINITIONS } from './intentions/definitions'
 import { findPendingQuestion } from './pending-question'
 import { MAX_BUBBLES_PER_RESPONSE } from './split-message'
 import type {
@@ -128,6 +130,7 @@ export async function buildRuntimeContext(input: {
     visitHistoryResult,
     activeCommitmentsResult,
     pendingQuestionResult,
+    intentionPromptsResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -185,6 +188,17 @@ export async function buildRuntimeContext(input: {
     // parallel with the other eight queries; the common case is one indexed
     // lookup that matches nothing.
     findPendingQuestion(input.venueId, input.guestId),
+    // TAC-324: which first-touch intentions have already been prompted for
+    // this guest, ever (guest_intention_prompts, capped one row per intention
+    // per guest by its unique constraint). Fails CLOSED below, not open — see
+    // the error handling after Promise.all. Runs in parallel with the other
+    // nine queries; the common case (a non-qr_scan guest, or a qr_scan guest
+    // past the display gate) is one indexed lookup that matches nothing.
+    supabase
+      .from('guest_intention_prompts')
+      .select('intention_key')
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -384,6 +398,58 @@ export async function buildRuntimeContext(input: {
       ),
       [])
 
+  // TAC-324: first-touch intentions. Gated to inbound runs only — intentions
+  // are goals Sana carries into a conversation she's IN, not into a scheduled
+  // nudge. A followup engine tick (day_1/day_3) can fire for exactly the
+  // qr_scan, non-responding population these intentions target, and that
+  // path never calls recordIntentionPrompts (handle-inbound.ts is the only
+  // caller), so rendering there would raise an intention with no row ever
+  // written for it — silently breaking the one-prompt-per-intention-ever cap
+  // for the modal case, not an edge case. So: empty set, no block, on any
+  // followup run, unconditionally.
+  let openIntentions: OpenIntention[] = []
+  if (input.currentMessage) {
+    // Fail CLOSED, not open: a broken read must not risk re-raising
+    // something already asked, which is the exact failure this ticket
+    // exists to prevent. "Unknown" is modeled as "everything prompted" (the
+    // full definitions key set), not "nothing prompted" — deriveOpenIntentions
+    // then closes every intention uniformly, same as a real fully-prompted
+    // guest would.
+    let promptedKeys: ReadonlySet<(typeof INTENTION_DEFINITIONS)[number]['key']>
+    if (intentionPromptsResult.error) {
+      console.warn(
+        `[agent] buildRuntimeContext: guest_intention_prompts load failed for guest ${input.guestId}: ${intentionPromptsResult.error.message}. Failing closed (rendering no intentions this turn).`,
+      )
+      promptedKeys = new Set(INTENTION_DEFINITIONS.map((d) => d.key))
+    } else {
+      promptedKeys = new Set(
+        (intentionPromptsResult.data ?? []).map(
+          (row) => row.intention_key as (typeof INTENTION_DEFINITIONS)[number]['key'],
+        ),
+      )
+    }
+
+    // hasQualifyingTransaction reuses the visit-history query already run
+    // above rather than issuing a second transactions query — the RAW row
+    // count (before extractRecentVisits's parse-projection), since "we heard
+    // what they ordered" is true even if raw_data later turns out
+    // unparseable for the ## Visit history block's purposes.
+    const hasQualifyingTransaction = (visitHistoryResult.data?.length ?? 0) > 0
+
+    const rawOpenIntentions = deriveOpenIntentions({
+      createdVia: guest.createdVia,
+      guestCreatedAt: guest.createdAt,
+      now: computedAt,
+      hasQualifyingTransaction,
+      promptedKeys,
+    })
+    openIntentions = applyCurrentTurnSuppression(
+      rawOpenIntentions,
+      input.currentMessage.body,
+      venue.venueInfo.menu.items,
+    )
+  }
+
   return {
     agentRunId: input.agentRunId,
     venue,
@@ -395,6 +461,9 @@ export async function buildRuntimeContext(input: {
     mechanics,
     recentVisits,
     activeCommitments,
+    // TAC-324: empty on every followup run and on every non-qr_scan guest.
+    // The serializer omits the block entirely when empty.
+    openIntentions,
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.
     pendingQuestion: pendingQuestionResult?.question ?? null,

@@ -326,6 +326,58 @@ export type Database = {
           },
         ]
       }
+      guest_intention_prompts: {
+        Row: {
+          created_at: string
+          guest_id: string
+          id: string
+          intention_key: string
+          message_id: string | null
+          prompted_at: string
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          guest_id: string
+          id?: string
+          intention_key: string
+          message_id?: string | null
+          prompted_at?: string
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          guest_id?: string
+          id?: string
+          intention_key?: string
+          message_id?: string | null
+          prompted_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_intention_prompts_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_intention_prompts_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_intention_prompts_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guest_states: {
         Row: {
           created_at: string

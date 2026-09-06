@@ -28,6 +28,7 @@ import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
+import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type {
   Classification,
@@ -945,6 +946,8 @@ export async function findPendingDraft(
 }
 
 const FALLBACK_TIMEZONE = 'America/Los_Angeles'
+// TAC-324: used only by the R1 carve-out freshness check in buildAiRuntime.
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 function isValidTimezone(tz: string): boolean {
   try {
@@ -1167,6 +1170,37 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       }
     : undefined
 
+  // TAC-324: R1 carve-out signal. Every ingredient is already on the
+  // agent-side context, so this is computed inline here (the single mapping
+  // seam) rather than threading a new field through build-runtime-context.ts
+  // — same pattern as perkBeingUnlocked above. `recentMessages.length === 0`
+  // (current inbound already excluded, 14-day lookback) is the "first
+  // inbound" test: a qr_scan guest's guest row and their triggering message
+  // row are created in the same webhook request (confirmed against
+  // app/api/webhooks/sendblue/route.ts), so there is no gap between
+  // "created" and "first message" to worry about on the true first turn.
+  // The additional age check is what distinguishes that true first turn from
+  // a guest who goes quiet for weeks and then sends a SECOND message that
+  // also happens to have no OTHER messages inside the 14-day lookback —
+  // without it, a three-weeks-later "do you have parking" would incorrectly
+  // re-fire the "just scanned" framing. Reuses REPORTED_ORDER_WINDOW_DAYS
+  // (not a new constant) as the "is this still a fresh first-touch moment"
+  // check, deliberately unlike deriveOpenIntentions' expiry (its own
+  // independent constant for a genuinely different concept, ask vs. listen).
+  // Code-review note: this reuse is NOT load-bearing as things stand today —
+  // recentMessages.length===0 already requires no message inside the 14-day
+  // MAX_HISTORY_DAYS lookback, so any stale re-trigger this age check would
+  // catch is already at least 14 days old, past every window constant in
+  // this file (7 or 3). Any value <= MAX_HISTORY_DAYS produces identical
+  // gating today. Kept as REPORTED_ORDER_WINDOW_DAYS anyway for the
+  // conceptual match (both are "is this still a fresh first-touch moment")
+  // and so the two don't silently diverge if MAX_HISTORY_DAYS ever changes.
+  const firstTouchAfterQrScan =
+    ctx.currentMessage !== null &&
+    ctx.guest.createdVia === 'qr_scan' &&
+    ctx.recentMessages.length === 0 &&
+    Date.now() - ctx.guest.createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+
   return {
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
@@ -1192,6 +1226,14 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // `## Active commitments` block between guest context and recent
     // conversation; empty array omits the block.
     activeCommitments: ctx.activeCommitments,
+    // TAC-324: thread open first-touch intentions (already gated to qr_scan
+    // guests, inbound runs only, and current-turn-suppressed by
+    // build-runtime-context.ts) as rendered prompt lines. The serializer
+    // renders the `## What you're hoping to get to` block between mechanics
+    // and follow-up context / visit history when non-empty.
+    openIntentions:
+      ctx.openIntentions.length > 0 ? ctx.openIntentions.map((o) => o.promptLine) : undefined,
+    firstTouchAfterQrScan,
     // TAC-308: the outstanding knowledge-gap question. Rendered as
     // `## Unanswered question` immediately before `## Recent conversation`.
     // null → undefined so the serializer's presence check omits the block.

@@ -696,6 +696,28 @@ function formatMechanicEligibility(
   return `${header}\n${intro}\n${bullets.join('\n')}${reviewedRider}`
 }
 
+// TAC-324: render open first-touch intentions as a `## What you're hoping to
+// get to` block. Position: after `## What this guest can access`, before
+// `## Follow-up context` / `## Visit history` — Sana's own goals sit with
+// who-the-guest-is, not with what-was-recently-said. Only ever non-empty on
+// the inbound path (build-runtime-context.ts gates it there), so this never
+// co-renders with the followup-only blocks in practice — the ordering just
+// keeps a single deterministic position regardless.
+//
+// The non-steering paragraph below is load-bearing in the same way the
+// empty-mechanics framing above is: it's what turns "things Sana wants" into
+// "not a checklist to work through," and doesn't get trimmed for brevity.
+// "You haven't heard what they ordered yet" invites a natural moment;
+// "ask what they ordered" demands one — that difference is the whole point
+// of rendering these as states Sana is in, not instructions to execute.
+function formatOpenIntentions(lines: readonly string[]): string | null {
+  if (lines.length === 0) return null
+  const header = "## What you're hoping to get to"
+  const paragraph =
+    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them."
+  return `${header}\n${lines.join('\n')}\n\n${paragraph}`
+}
+
 export function runtimeToProse(
   runtime: RuntimeContext,
   category: MessageCategory,
@@ -721,6 +743,16 @@ export function runtimeToProse(
   }
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics, runtime.willBeReviewed === true))
+  }
+  // TAC-324: ## What you're hoping to get to sits between mechanics and
+  // follow-up context / visit history — Sana's own goals sit with
+  // who-the-guest-is, not with what-was-recently-said. In practice this only
+  // ever renders on the inbound path (build-runtime-context.ts gates
+  // openIntentions to inbound runs), so it never actually co-renders with
+  // ## Follow-up context, but the position is fixed regardless of that.
+  if (runtime.openIntentions && runtime.openIntentions.length > 0) {
+    const block = formatOpenIntentions(runtime.openIntentions)
+    if (block) blocks.push(block)
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
   // Intent-then-evidence — this block states *why* we're reaching out;
@@ -788,6 +820,13 @@ export function runtimeToProse(
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
   if (runtime.inboundMessage) {
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+  }
+  // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
+  // surfaces in the prompt — without this line the model has no way to know
+  // a guest arrived via QR scan, since createdVia isn't rendered anywhere
+  // else. See SYSTEM_TEMPLATE's R1 for the exception this enables.
+  if (runtime.firstTouchAfterQrScan) {
+    lines.push("This is the guest's first message, sent after they scanned your venue's QR sign.")
   }
   if (runtime.recognition?.state) {
     lines.push(`Guest relationship: ${runtime.recognition.state}`)

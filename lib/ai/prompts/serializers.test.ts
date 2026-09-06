@@ -374,6 +374,93 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
   })
 })
 
+describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', () => {
+  it('omits the block entirely when openIntentions is undefined', () => {
+    const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
+    expect(out).not.toContain("What you're hoping to get to")
+  })
+
+  it('omits the block entirely when openIntentions is an empty array', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions: [] }, 'reply', NOW)
+    expect(out).not.toContain("What you're hoping to get to")
+  })
+
+  it('renders one line per open intention, verbatim', () => {
+    const out = runtimeToProse(
+      {
+        mechanics: [],
+        openIntentions: [
+          "You haven't heard what this guest ordered yet.",
+          "You haven't told them to save your number.",
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain("## What you're hoping to get to")
+    expect(out).toContain("You haven't heard what this guest ordered yet.")
+    expect(out).toContain("You haven't told them to save your number.")
+  })
+
+  // The non-steering paragraph is load-bearing in the same way the
+  // empty-mechanics framing is (per the ticket's own framing) — asserted
+  // verbatim so a future edit that trims it for brevity fails loudly.
+  it('carries the non-steering paragraph verbatim', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions: ["You haven't heard what this guest ordered yet."] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain(
+      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+    )
+  })
+
+  it('renders after ## What this guest can access and before ## Follow-up context', () => {
+    const out = runtimeToProse(
+      {
+        mechanics: [],
+        openIntentions: ["You haven't told them to save your number."],
+        followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
+      },
+      'follow_up',
+      NOW,
+    )
+    const eligibilityIdx = out.indexOf('## What this guest can access')
+    const intentionsIdx = out.indexOf("## What you're hoping to get to")
+    const followupIdx = out.indexOf('## Follow-up context')
+    expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
+    expect(intentionsIdx).toBeGreaterThan(eligibilityIdx)
+    expect(followupIdx).toBeGreaterThan(intentionsIdx)
+  })
+})
+
+describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
+  it('renders the first-touch-after-qr-scan line immediately after the inbound framing line', () => {
+    const out = runtimeToProse(
+      { inboundMessage: 'hi', firstTouchAfterQrScan: true },
+      'welcome',
+      NOW,
+    )
+    expect(out).toContain(
+      "This is the guest's first message, sent after they scanned your venue's QR sign.",
+    )
+    const inboundIdx = out.indexOf('The guest just sent:')
+    const signalIdx = out.indexOf("This is the guest's first message")
+    expect(signalIdx).toBeGreaterThan(inboundIdx)
+  })
+
+  it('omits the line when firstTouchAfterQrScan is false', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW)
+    expect(out).not.toContain("This is the guest's first message")
+  })
+
+  it('omits the line when firstTouchAfterQrScan is undefined', () => {
+    const out = runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW)
+    expect(out).not.toContain("This is the guest's first message")
+  })
+})
+
 // TAC-234: runtimeToProse field-presence rendering replaces the per-category
 // switch. Tests assert what each independent emitter renders given a runtime
 // shape, regardless of which category it pairs with.

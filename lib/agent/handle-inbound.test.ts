@@ -90,6 +90,15 @@ vi.mock('./dispatch-arrival-capture', () => ({
 vi.mock('./extract-reported-order', () => ({
   extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
 }))
+const recordIntentionPromptsMock = vi.fn()
+// TAC-324: same posture as extractReportedOrder above — fire-and-forget side
+// effect, mocked wholesale; its own unit coverage lives in
+// lib/agent/intentions/record.test.ts. This file only needs to prove the
+// call site: gated on ctx.openIntentions, fired with the right shape, never
+// lets a rejection propagate.
+vi.mock('./intentions/record', () => ({
+  recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
+}))
 vi.mock('@/lib/guests/context', () => ({
   isEmptyContextUpdate: () => true,
   updateGuestContext: vi.fn(),
@@ -185,6 +194,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
+    openIntentions: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -226,6 +236,7 @@ beforeEach(() => {
     priorReviewReason: null,
   })
   sendDraftFlaggedPushMock.mockResolvedValue(undefined)
+  recordIntentionPromptsMock.mockResolvedValue({ kind: 'no_open_intentions' })
 })
 
 describe('handleInbound — generation-failure fallback (TAC-309)', () => {
@@ -386,7 +397,72 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.31.0',
+    promptVersion: 'v1.32.0',
     dashViolationPersisted: false,
   }
 }
+
+describe('handleInbound — intention-prompt recording call site (TAC-324)', () => {
+  function setUpSentPath() {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-1',
+      providerMessageId: 'p',
+    })
+  }
+
+  it('never calls recordIntentionPrompts when ctx.openIntentions is empty', async () => {
+    setUpSentPath()
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [] }))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  it('calls recordIntentionPrompts with the sent body and open intentions after a successful send', async () => {
+    setUpSentPath()
+    const openIntentions = [
+      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
+    expect(recordIntentionPromptsMock).toHaveBeenCalledWith({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      messageId: 'sent-1',
+      sentBody: successResult().body,
+      openIntentions,
+    })
+  })
+
+  it('never calls recordIntentionPrompts on a queued (not sent) draft', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.MODEL_FLAGGED],
+      primaryTrigger: APPROVAL_TRIGGERS.MODEL_FLAGGED,
+    })
+    const openIntentions = [
+      { key: 'invite_contact_save', promptLine: "You haven't told them to save your number." },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'queued' })
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  // A recording failure must never surface as a handleInbound failure — the
+  // message has already reached the guest by the time this runs.
+  it('does not let a recordIntentionPrompts rejection propagate or change the result', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockRejectedValue(new Error('anthropic timeout'))
+    const openIntentions = [
+      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
+  })
+})
