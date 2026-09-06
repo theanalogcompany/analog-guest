@@ -47,6 +47,47 @@ export interface LoadGuestThreadFailure {
 
 export type LoadGuestThreadResult = LoadGuestThreadSuccess | LoadGuestThreadFailure
 
+/**
+ * Fetches up to THREAD_MESSAGE_LIMIT non-empty-body messages for a resolved
+ * (venueId, guestId) pair, oldest→newest. Shared by loadGuestThread (keyed
+ * off a messageId, resolves venue/guest first) and loadGuestThreadByGuestId
+ * (lib/operator/guest-thread.ts, keyed directly off guestId) so both thread
+ * endpoints run the identical query instead of drifting independently.
+ */
+export async function fetchThreadMessagesForGuest(
+  supabase: ReturnType<typeof createAdminClient>,
+  venueId: string,
+  guestId: string,
+): Promise<{ ok: true; messages: ThreadMessage[] } | { ok: false; error: string }> {
+  const { data: rows, error: threadErr } = await supabase
+    .from('messages')
+    .select('id, body, direction, created_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .neq('body', '')
+    .order('created_at', { ascending: false })
+    .limit(THREAD_MESSAGE_LIMIT)
+
+  if (threadErr) {
+    return { ok: false, error: threadErr.message }
+  }
+
+  const recentDesc = rows ?? []
+  const messages: ThreadMessage[] = []
+  for (let i = recentDesc.length - 1; i >= 0; i--) {
+    const r = recentDesc[i]!
+    if (r.direction !== 'inbound' && r.direction !== 'outbound') continue
+    messages.push({
+      id: r.id,
+      direction: r.direction,
+      body: r.body,
+      createdAt: r.created_at,
+    })
+  }
+
+  return { ok: true, messages }
+}
+
 export async function loadGuestThread(
   input: LoadGuestThreadInput,
 ): Promise<LoadGuestThreadResult> {
@@ -77,38 +118,9 @@ export async function loadGuestThread(
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 
-  // ---- 2. fetch the most-recent N non-empty-body messages, then reverse ----
-  // DESC + LIMIT picks the right slice; the reverse makes the wire
-  // ordering oldest→newest per the Contract.
-  const { data: rows, error: threadErr } = await supabase
-    .from('messages')
-    .select('id, body, direction, created_at')
-    .eq('venue_id', row.venue_id)
-    .eq('guest_id', row.guest_id)
-    .neq('body', '')
-    .order('created_at', { ascending: false })
-    .limit(THREAD_MESSAGE_LIMIT)
-
-  if (threadErr) {
-    return { ok: false, errorCode: 'db_error', error: threadErr.message }
+  const result = await fetchThreadMessagesForGuest(supabase, row.venue_id, row.guest_id)
+  if (!result.ok) {
+    return { ok: false, errorCode: 'db_error', error: result.error }
   }
-
-  const recentDesc = rows ?? []
-  const messages: ThreadMessage[] = []
-  // Reverse-iterate (DESC slice → ASC output) without an extra .reverse()
-  // allocation. Drop any row whose direction isn't one of the two enum
-  // values — the messages.direction CHECK constraint makes this defensive
-  // rather than likely, but mirrors normalizeRecentContext's posture.
-  for (let i = recentDesc.length - 1; i >= 0; i--) {
-    const r = recentDesc[i]!
-    if (r.direction !== 'inbound' && r.direction !== 'outbound') continue
-    messages.push({
-      id: r.id,
-      direction: r.direction,
-      body: r.body,
-      createdAt: r.created_at,
-    })
-  }
-
-  return { ok: true, messages }
+  return { ok: true, messages: result.messages }
 }
