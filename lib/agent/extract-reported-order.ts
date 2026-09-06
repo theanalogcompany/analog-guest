@@ -79,51 +79,48 @@ const MAX_REASONABLE_QUANTITY = 20
  * what "the same menu item" means. Unmatched names are dropped silently —
  * per the ticket, unresolvable items are never stored as freeform text.
  *
- * A normalized name that maps to two-or-more menu rows with DIFFERENT prices
- * (e.g. a "Latte" with separate small/large rows sharing one name —
- * `MenuItemSchema` permits this via the `size` field, and the CSV parser
- * enforces no name uniqueness) is treated as unresolvable, same as a name
- * matching nothing at all. Size-aware pricing is explicitly out of scope for
- * this ticket, but silently picking whichever row happens to come first in
- * `venue_info.menu.items` would write a specific, wrong, permanent price —
- * worse than the accepted "drop it" outcome for anything else we can't
- * confidently resolve. Rows sharing a name with the SAME price aren't
- * ambiguous (duplicate data, not conflicting data) and resolve normally.
+ * A normalized name can map to two-or-more menu rows (e.g. a "Latte" with
+ * separate small/large rows sharing one name — `MenuItemSchema` permits this
+ * via the `size` field, and the CSV parser enforces no name uniqueness;
+ * confirmed live on the Mock Sextant menu, five duplicated names, three of
+ * which disagree on price). The item is still resolved — the guest DID
+ * report a real menu item, and dropping it would lose information they
+ * actually gave us over a price ambiguity alone — priced at the HIGHEST of
+ * the matching rows' prices. Rows with no price at all (`priceNote`-only)
+ * are excluded from that max; if none of the matching rows has a price, the
+ * item resolves with a null unitPriceCents, same as a single unpriced item.
  */
 export function resolveReportedItems(
   extracted: readonly { name: string; quantity: number }[],
   menuItems: readonly MenuItem[],
 ): ResolvedReportedItem[] {
-  const byNormalizedName = new Map<string, MenuItem>()
-  const ambiguousNames = new Set<string>()
+  const groupsByNormalizedName = new Map<string, MenuItem[]>()
   for (const item of menuItems) {
     const normalized = normalizeMenuItemName(item.name)
     if (normalized.length === 0) continue
-    const existing = byNormalizedName.get(normalized)
-    if (existing === undefined) {
-      byNormalizedName.set(normalized, item)
-    } else if (existing.price !== item.price) {
-      ambiguousNames.add(normalized)
+    const group = groupsByNormalizedName.get(normalized)
+    if (group) {
+      group.push(item)
+    } else {
+      groupsByNormalizedName.set(normalized, [item])
     }
   }
 
   const resolved: ResolvedReportedItem[] = []
   for (const e of extracted) {
-    const normalized = normalizeMenuItemName(e.name)
-    if (ambiguousNames.has(normalized)) {
-      console.warn('[extract-reported-order] dropping ambiguous item name (multiple menu prices)', {
-        name: e.name,
-      })
-      continue
-    }
-    const match = byNormalizedName.get(normalized)
-    if (!match) continue
+    const group = groupsByNormalizedName.get(normalizeMenuItemName(e.name))
+    if (!group) continue
     const quantity =
       Number.isFinite(e.quantity) && e.quantity > 0
         ? Math.min(Math.round(e.quantity), MAX_REASONABLE_QUANTITY)
         : 1
-    const unitPriceCents = match.price !== undefined ? Math.round(match.price * 100) : null
-    resolved.push({ name: match.name, quantity, unitPriceCents })
+    const highestPrice = group.reduce<number | undefined>(
+      (max, item) =>
+        item.price === undefined ? max : max === undefined || item.price > max ? item.price : max,
+      undefined,
+    )
+    const unitPriceCents = highestPrice !== undefined ? Math.round(highestPrice * 100) : null
+    resolved.push({ name: group[0].name, quantity, unitPriceCents })
   }
   return resolved
 }

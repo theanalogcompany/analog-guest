@@ -206,13 +206,31 @@ describe('resolveReportedItems (pure resolution)', () => {
     expect(resolved[0]?.quantity).toBe(20)
   })
 
-  it('drops a name that resolves to two menu rows with DIFFERENT prices (e.g. size variants sharing one name)', () => {
+  it('resolves a name that maps to two menu rows with DIFFERENT prices at the HIGHER price (e.g. size variants sharing one name)', () => {
     const sizedMenu = [
       makeMenuItem({ name: 'Latte', size: '12oz', price: 4 }),
       makeMenuItem({ name: 'Latte', size: '16oz', price: 5 }),
     ]
     const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], sizedMenu)
-    expect(resolved).toEqual([])
+    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: 500 }])
+  })
+
+  it('excludes an unpriced row from the max when resolving a duplicated name with a mix of priced/unpriced rows', () => {
+    const mixedMenu = [
+      makeMenuItem({ name: 'Latte', size: '12oz', price: 4 }),
+      makeMenuItem({ name: 'Latte', size: 'seasonal', price: undefined, priceNote: 'ask staff' }),
+    ]
+    const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], mixedMenu)
+    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: 400 }])
+  })
+
+  it('resolves a duplicated name with no priced rows at all to a null unitPriceCents', () => {
+    const unpricedMenu = [
+      makeMenuItem({ name: 'Latte', size: 'small', price: undefined, priceNote: 'ask staff' }),
+      makeMenuItem({ name: 'Latte', size: 'large', price: undefined, priceNote: 'ask staff' }),
+    ]
+    const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], unpricedMenu)
+    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: null }])
   })
 
   it('resolves a name that appears twice with the SAME price (duplicate data, not conflicting)', () => {

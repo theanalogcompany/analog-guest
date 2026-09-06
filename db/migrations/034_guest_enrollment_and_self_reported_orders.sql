@@ -36,27 +36,27 @@
 -- `pg_constraint` immediately before applying in Studio — the DROP below
 -- fails loudly, not silently, if the name has drifted.
 --
--- HIGH-STAKES (touches `transactions` and `guests`). ORDERING, revised from
--- the plan's original "apply after merge" call — see PR description for the
--- explicit ask to confirm this before applying:
+-- HIGH-STAKES (touches `transactions` and `guests`). ORDERING: apply in
+-- Studio BEFORE merging this PR — confirmed with Jaipal, reversing the
+-- plan's original "apply after merge" call.
 --
 -- This migration is purely additive per CLAUDE.md "Database migrations"
 -- §Ordering (new enum values, a relaxed NOT NULL, a new index) — "order
 -- doesn't matter" is the stated rule for this exact shape, and old code
 -- never writes the new enum values or a null amount_cents, so applying
--- early changes nothing for it. The ticket's own instruction to deploy code
--- first only reasoned about the qr_scan half ("The QR is not printed yet,
--- so no guest can enroll in the gap") — true, but the self-reported-order
--- half has NO equivalent gate: any existing guest within 7 days of
--- guests.created_at who mentions a menu item in an ordinary text trips
--- lib/agent/extract-reported-order.ts regardless of whether a QR sign
--- exists anywhere. Applying this migration AFTER merge would open a real
--- (if narrow, pilot-scale) window where that guest's self-report hits the
--- pre-migration CHECK/NOT NULL constraints, fails the INSERT, and is
--- logged-and-permanently-lost with no retry — extractReportedOrder never
--- throws, so nothing crashes, but the data is gone. Recommend applying in
--- Studio BEFORE merging this PR to close that window entirely, at no cost
--- to the qr_scan path (which still can't fire until the sign is printed
+-- early changes nothing for it. The plan's original instruction to deploy
+-- code first only reasoned about the qr_scan half ("The QR is not printed
+-- yet, so no guest can enroll in the gap") — true, but the
+-- self-reported-order half has NO equivalent gate: any existing guest
+-- within 7 days of guests.created_at who mentions a menu item in an
+-- ordinary text trips lib/agent/extract-reported-order.ts regardless of
+-- whether a QR sign exists anywhere. Applying this migration AFTER merge
+-- would open a real (if narrow, pilot-scale) window where that guest's
+-- self-report hits the pre-migration CHECK/NOT NULL constraints, fails the
+-- INSERT, and is logged-and-permanently-lost with no retry —
+-- extractReportedOrder never throws, so nothing crashes, but the data is
+-- gone. Applying BEFORE merge closes that window entirely, at no cost to
+-- the qr_scan path (which still can't fire until the sign is printed
 -- regardless of migration timing).
 --
 -- db/types.ts hand-patched in the same commit (transactions.amount_cents ->
