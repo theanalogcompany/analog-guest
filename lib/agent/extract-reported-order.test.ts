@@ -143,6 +143,81 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
   it('returns false for an empty body', () => {
     expect(bodyMentionsMenuItem('', menu)).toBe(false)
   })
+
+  // Regression: the original whole-name substring match required the guest
+  // to type "gibraltar / cortado" verbatim, which killed the feature for the
+  // 47 of 69 real Mock Sextant menu items that are multi-word or
+  // slash-separated. Confirmed live in UAT — this exact message wrote no
+  // transaction pre-fix.
+  it('matches on a single significant word from a multi-word, slash-separated menu name', () => {
+    const realMenu = [{ name: 'Gibraltar / Cortado' }, { name: 'Almond Croissant' }]
+    expect(bodyMentionsMenuItem('i got an oat cortado and a croissant', realMenu)).toBe(true)
+  })
+
+  it('matches a multi-word menu name on just one of its words', () => {
+    const realMenu = [{ name: 'Wild Wonder Peach Ginger' }]
+    expect(bodyMentionsMenuItem('grabbed a ginger drink', realMenu)).toBe(true)
+  })
+
+  it('does not match on a stopword shared between the body and a menu name', () => {
+    // "and" alone must never trigger — it's dropped as a stopword-grade
+    // token, not treated as a distinctive word of "Bacon and Eggs".
+    const realMenu = [{ name: 'Bacon and Eggs' }]
+    expect(bodyMentionsMenuItem('you and me should hang out', realMenu)).toBe(false)
+  })
+
+  it('does not match on an alphanumeric menu word split into fragments', () => {
+    // "v60" must stay one token, not split into "v" + "60" (which would be
+    // dropped by the length-3 floor and/or false-positive on stray digits).
+    const realMenu = [{ name: 'Hario V60 Dripper' }]
+    expect(bodyMentionsMenuItem('i got a v60 pour over', realMenu)).toBe(true)
+    expect(bodyMentionsMenuItem('table 60 please', realMenu)).toBe(false)
+  })
+
+  // Second review round found this: a menu name stored in PLURAL form is a
+  // real, common bakery-case pattern ("Croissants", "Bagels", "Scones") and
+  // was silently unmatchable against the natural singular guest phrasing —
+  // the same failure family as the multi-word bug above, just triggered by
+  // pluralization instead. The reverse direction (singular menu name,
+  // plural guest phrasing) already worked via plain substring containment.
+  it('matches a plural menu name against singular guest phrasing', () => {
+    const realMenu = [{ name: 'Croissants' }]
+    expect(bodyMentionsMenuItem('i got a croissant this morning', realMenu)).toBe(true)
+  })
+
+  it('matches an "-es" plural menu name against singular guest phrasing', () => {
+    const realMenu = [{ name: 'Sandwiches' }]
+    expect(bodyMentionsMenuItem('i got the turkey sandwich', realMenu)).toBe(true)
+  })
+
+  it('still matches singular menu name against plural guest phrasing (unaffected, pre-existing)', () => {
+    const realMenu = [{ name: 'Croissant' }]
+    expect(bodyMentionsMenuItem('i got two croissants', realMenu)).toBe(true)
+  })
+
+  // Second review round also found this: the split regex treats any
+  // non-ASCII character as a separator, so an un-normalized accented name
+  // fragments into pieces that all die at the length floor, leaving the
+  // item permanently unmatchable by ANY phrasing. Independent
+  // cafes/bakeries routinely carry accented names.
+  it('matches an accented menu name against unaccented guest phrasing', () => {
+    const realMenu = [{ name: 'Crème Brûlée' }]
+    expect(bodyMentionsMenuItem('i got the creme brulee', realMenu)).toBe(true)
+  })
+
+  it('matches an accented menu name against accented guest phrasing', () => {
+    const realMenu = [{ name: 'Piña Colada' }]
+    expect(bodyMentionsMenuItem('had a piña colada', realMenu)).toBe(true)
+  })
+
+  it('does not leave a short accented name with zero significant words', () => {
+    // "Piña" alone, unaccented-and-unfixed, splits into ["pi", "a"] — both
+    // under the length floor, zero significant words, permanently
+    // unmatchable. With diacritic stripping it becomes "pina" (4 chars),
+    // matchable.
+    const realMenu = [{ name: 'Piña' }]
+    expect(bodyMentionsMenuItem('i got a pina colada', realMenu)).toBe(true)
+  })
 })
 
 describe('resolveReportedItems (pure resolution)', () => {
@@ -240,6 +315,22 @@ describe('resolveReportedItems (pure resolution)', () => {
     ]
     const resolved = resolveReportedItems([{ name: 'Cortado', quantity: 1 }], duplicateMenu)
     expect(resolved).toEqual([{ name: 'Cortado', quantity: 1, unitPriceCents: 500 }])
+  })
+
+  it('resolves the model returning the full multi-word, slash-separated canonical name verbatim', () => {
+    const realMenu = [makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 })]
+    const resolved = resolveReportedItems([{ name: 'Gibraltar / Cortado', quantity: 1 }], realMenu)
+    expect(resolved).toEqual([{ name: 'Gibraltar / Cortado', quantity: 1, unitPriceCents: 500 }])
+  })
+
+  it('drops a bare fragment the model did NOT canonicalize (resolver never fuzzy-maps on its own)', () => {
+    // If the model returned "cortado" instead of the full canonical
+    // "Gibraltar / Cortado", the resolver must NOT try to guess — that's
+    // exactly the fuzzy-matching the ticket rules out. The extractor prompt
+    // is what's responsible for returning the verbatim name.
+    const realMenu = [makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 })]
+    const resolved = resolveReportedItems([{ name: 'cortado', quantity: 1 }], realMenu)
+    expect(resolved).toEqual([])
   })
 })
 
@@ -390,6 +481,91 @@ describe('extractReportedOrder (orchestration gate)', () => {
     const brokenCtx = { currentMessage: null } as unknown as RuntimeContext
     await expect(extractReportedOrder(brokenCtx)).resolves.toEqual({
       kind: 'no_menu_item_mentioned',
+    })
+  })
+
+  describe('end-to-end against a real multi-word menu (UAT regression)', () => {
+    const realMenuCtx = (body: string) =>
+      makeCtx({
+        venue: {
+          id: 'venue-1',
+          venueInfo: {
+            menu: {
+              items: [
+                makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 }),
+                makeMenuItem({ name: 'Almond Croissant', price: 4.5 }),
+              ],
+            },
+          },
+        } as RuntimeContext['venue'],
+        currentMessage: { id: 'm1', body, providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      })
+
+    it('records an order for a bare fragment of a multi-word item once the model canonicalizes it', async () => {
+      // The exact production failure: guest says "cortado", menu item is
+      // "Gibraltar / Cortado". Pre-fix, the prefilter never let this reach
+      // the model at all.
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: {
+          items: [
+            { name: 'Gibraltar / Cortado', quantity: 1 },
+            { name: 'Almond Croissant', quantity: 1 },
+          ],
+          promptVersion: 'v1',
+        },
+      })
+      const outcome = await extractReportedOrder(
+        realMenuCtx('i got an oat cortado and a croissant'),
+      )
+      expect(extractReportedOrderAiMock).toHaveBeenCalled()
+      expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 500 + 450, itemCount: 2 })
+    })
+
+    it('records an order for a modifier-prefixed fragment ("oat cortado")', async () => {
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], promptVersion: 'v1' },
+      })
+      const outcome = await extractReportedOrder(realMenuCtx('the oat cortado was great today'))
+      expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 500 })
+    })
+
+    it('drops a model-returned name that is not verbatim on the supplied menu list', async () => {
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        // Hallucinated / non-canonical — not present in realMenuCtx's menu.
+        data: { items: [{ name: 'Oat Cortado', quantity: 1 }], promptVersion: 'v1' },
+      })
+      const outcome = await extractReportedOrder(realMenuCtx('i got an oat cortado'))
+      expect(outcome).toEqual({ kind: 'no_items_resolved' })
+    })
+
+    it('prices at the highest match when the canonicalized name has menu duplicates with different prices', async () => {
+      const ctx = makeCtx({
+        venue: {
+          id: 'venue-1',
+          venueInfo: {
+            menu: {
+              items: [
+                makeMenuItem({ name: 'Gibraltar / Cortado', size: '8oz', price: 5 }),
+                makeMenuItem({ name: 'Gibraltar / Cortado', size: '12oz', price: 6 }),
+              ],
+            },
+          },
+        } as RuntimeContext['venue'],
+        currentMessage: {
+          id: 'm1',
+          body: 'i got a cortado',
+          providerMessageId: 'p1',
+        } as RuntimeContext['currentMessage'],
+      })
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], promptVersion: 'v1' },
+      })
+      const outcome = await extractReportedOrder(ctx)
+      expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 600 })
     })
   })
 })

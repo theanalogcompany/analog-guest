@@ -67,6 +67,52 @@ describe('extractReportedOrder', () => {
     expect(generateObjectMock).not.toHaveBeenCalled()
   })
 
+  it('returns ok:true with empty items for an empty menu, without calling the model', async () => {
+    // z.enum requires a non-empty tuple — this guard exists independent of
+    // caller discipline (bodyMentionsMenuItem already short-circuits before
+    // ever reaching this function on an empty menu).
+    const result = await extractReportedOrder({ inboundBody: 'i got a cortado', menuItemNames: [] })
+    expect(result).toEqual({ ok: true, data: { items: [], promptVersion: expect.any(String) } })
+    expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('constrains the name field to a z.enum of the given menu item names — behaviorally, not by inspecting Zod internals', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    await extractReportedOrder({
+      inboundBody: 'i got a cortado',
+      menuItemNames: ['Cortado', 'Croissant'],
+    })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
+      | undefined
+    // Valid: a name literally in the given list.
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Cortado', quantity: 1 }] }).success).toBe(
+      true,
+    )
+    // Invalid: this is the exact class of bug the enum constraint closes —
+    // a hallucinated or reformatted name that a bare z.string() would have
+    // silently accepted (and the resolver would have silently dropped one
+    // layer down, with no visibility into why).
+    expect(
+      callArgs?.schema?.safeParse({ items: [{ name: 'Not A Real Menu Item', quantity: 1 }] })
+        .success,
+    ).toBe(false)
+  })
+
+  it('dedupes repeated menu item names before building the enum (harmless either way, but avoids redundant enum entries)', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    await extractReportedOrder({
+      inboundBody: 'i got a cortado',
+      menuItemNames: ['Cortado', 'Cortado', 'Croissant'],
+    })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
+      | undefined
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Croissant', quantity: 1 }] }).success).toBe(
+      true,
+    )
+  })
+
   it('returns ok:false with an errorCode when the model call throws', async () => {
     generateObjectMock.mockRejectedValue(new Error('anthropic down'))
 
