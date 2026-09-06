@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.31.0 (TAC-319 round 3: R12 deleted, splitting moved to dispatch code)', () => {
-    expect(PROMPT_VERSION).toBe('v1.31.0')
+  it('is v1.32.0 (TAC-324: R1 carve-out + R15 scoping, first-touch intentions)', () => {
+    expect(PROMPT_VERSION).toBe('v1.32.0')
   })
 })
 
@@ -90,6 +90,22 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
       "speak with the same confidence you'd use about the menu",
     )
     expect(SYSTEM_TEMPLATE).toContain('never fill the gap from general knowledge')
+  })
+
+  // TAC-324, added per QA suggestion: R1's overall summary is a paraphrase
+  // (per this file's own header comment) and isn't held to the same
+  // full-anchor standard as R11/R17/R18 above. The NEW qr_scan carve-out
+  // sentence is new voice text, not a paraphrase, so it gets the same
+  // cross-checked-anchor treatment those three get, closing the gap QA
+  // flagged rather than leaving R1 the one displayed rule with no lockstep
+  // coverage on its most recent edit.
+  it('shares the R1 qr_scan carve-out anchor across both sources (TAC-324)', () => {
+    const r1 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R1')
+    expect(r1).toBeDefined()
+    expect(r1?.summary).toContain('qr_scan')
+    expect(r1?.summary).toContain('greeted as someone present')
+    expect(SYSTEM_TEMPLATE).toContain('Greet them as someone present')
+    expect(SYSTEM_TEMPLATE).toContain('Do not narrate the scan or thank them for it')
   })
 })
 
@@ -256,6 +272,33 @@ describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
     expect(SYSTEM_TEMPLATE).toContain('Don\'t reference actions the guest didn\'t take')
     expect(SYSTEM_TEMPLATE).toContain('tapped in')
     expect(SYSTEM_TEMPLATE).toContain('thanks for stopping by')
+  })
+
+  // TAC-324: narrow, tightly-bounded exception — the one case where Sana
+  // legitimately knows the guest just took a real action (scanned the
+  // venue's QR sign). Gated at the runtime-context level (build-runtime-context.ts
+  // + buildAiRuntime), not by this text alone; the text just teaches the
+  // model what to do when that signal is present.
+  it('carves out a narrow exception for a qr_scan guest\'s first message', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "when the context says this is the guest's first message after they scanned a sign at the venue",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Greet them as someone present')
+  })
+
+  // This is the register R1's carve-out must NOT license — permission to
+  // know the guest is present is not permission to narrate the mechanism
+  // that told Sana so. A first-touch send that says "thanks for scanning"
+  // would be exactly the software-talking-about-itself failure this rule
+  // exists to prevent everywhere else.
+  it('explicitly forbids narrating the scan or thanking the guest for it', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Do not narrate the scan or thank them for it')
+  })
+
+  it('restates that the rest of the rule is unchanged by the exception', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm.",
+    )
   })
 })
 
@@ -459,7 +502,11 @@ describe('SYSTEM_TEMPLATE — R11: deliver the answer, no sentiment-closer (TAC-
   })
 })
 
-describe('SYSTEM_TEMPLATE — R12: greeting discipline', () => {
+// TAC-324: label corrected from R12 to R13. R12 is the retired splitting
+// slot (TAC-319) — this bullet (greeting discipline) sits one further down
+// the undisplayed R12-R16 range than its old label reflected. Pure rename,
+// no assertion content changes.
+describe('SYSTEM_TEMPLATE — R13: greeting discipline', () => {
   it('limits greetings to first message or after long silence', () => {
     expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message of a thread')
     expect(SYSTEM_TEMPLATE).toContain('multi-day silence')
@@ -489,7 +536,9 @@ describe('SYSTEM_TEMPLATE — R12: greeting discipline', () => {
   })
 })
 
-describe('SYSTEM_TEMPLATE — R13: Operator instruction block usage (THE-232)', () => {
+// TAC-324: label corrected from R13 to R14, same reason as the greeting
+// block above — pure rename, no assertion content changes.
+describe('SYSTEM_TEMPLATE — R14: Operator instruction block usage (THE-232)', () => {
   it('introduces the Operator instruction block', () => {
     expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes a ## Operator instruction block')
   })
@@ -528,7 +577,12 @@ describe('SYSTEM_TEMPLATE — R13: Operator instruction block usage (THE-232)', 
   })
 })
 
-describe('SYSTEM_TEMPLATE — R14: Last Visit block usage (THE-229)', () => {
+// TAC-324: label corrected from R14 to R15 (same off-by-one as the two
+// blocks above), AND the rule itself is scoped in this ticket — the one-item
+// cap now binds explicitly to backward references to past visits, with a
+// forward recommendation carved out as a separate act. Substance otherwise
+// unchanged from THE-229.
+describe('SYSTEM_TEMPLATE — R15: Last Visit block usage, scoped to backward references (THE-229, TAC-324)', () => {
   it('introduces the Last Visit block', () => {
     expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you what the guest most recently ordered')
   })
@@ -542,9 +596,29 @@ describe('SYSTEM_TEMPLATE — R14: Last Visit block usage (THE-229)', () => {
     expect(SYSTEM_TEMPLATE).toContain('Do not volunteer the date unless the guest asks about timing')
   })
 
-  it('caps references at one item', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Do not list multiple items if you reference at all')
+  it('caps references at one PAST item', () => {
+    expect(SYSTEM_TEMPLATE).toContain('do not list multiple past items if you reference at all')
     expect(SYSTEM_TEMPLATE).toContain('Pick one')
+  })
+
+  // TAC-324: the scoping fix. R15 was always about the ## Visit history
+  // block; the wording just never said so. Acknowledging what they had is a
+  // BACKWARD reference (what this cap polices); recommending something for
+  // next time is a FORWARD move and isn't a reference to their history at
+  // all, so it doesn't count against the one-item cap.
+  it('binds the cap explicitly to backward references to past visits', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This cap is about backward references to past visits specifically',
+    )
+  })
+
+  it('carves out a forward recommendation as a separate act not counted against the cap', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A recommendation for next time is a separate, forward move and does not count against this cap',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'You can reference one thing they had and still recommend something new in the same message',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {

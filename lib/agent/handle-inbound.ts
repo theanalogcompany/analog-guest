@@ -19,6 +19,7 @@ import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import { extractReportedOrder } from './extract-reported-order'
+import { recordIntentionPrompts } from './intentions/record'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -943,6 +944,44 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         },
         content: { body: gen.result.body },
       })
+      // TAC-324: record which first-touch intentions this send raised.
+      // Fire-and-forget, mirrors extractReportedOrder's waitUntil posture —
+      // never blocks the reply. Gated on ctx.openIntentions.length > 0 (already
+      // gated to qr_scan guests, inbound runs only, and current-turn-suppressed
+      // by build-runtime-context.ts) so the common case (every other guest)
+      // never calls the classifier. Uses the SENT body, not the drafted one —
+      // this only ever fires on the 'sent' path, never queued/dropped/refused,
+      // because those bodies never reached the guest.
+      if (ctx.openIntentions.length > 0) {
+        waitUntil(
+          recordIntentionPrompts({
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            messageId: outboundMessageId,
+            sentBody: gen.result.body,
+            openIntentions: ctx.openIntentions,
+          })
+            .then((outcome) => {
+              if (outcome.kind === 'recorded') {
+                console.log('[agent] inbound intention prompts recorded', {
+                  agentRunId,
+                  raisedKeys: outcome.raisedKeys,
+                })
+              } else if (outcome.kind === 'failed') {
+                console.warn('[agent] inbound intention prompt recording failed (continuing)', {
+                  agentRunId,
+                  error: outcome.error,
+                })
+              }
+            })
+            .catch((e) => {
+              console.error('[agent] recordIntentionPrompts threw unexpectedly', {
+                agentRunId,
+                error: e instanceof Error ? e.message : String(e),
+              })
+            }),
+        )
+      }
       console.log('[agent] inbound sent + persisted', {
         agentRunId,
         outboundMessageId,

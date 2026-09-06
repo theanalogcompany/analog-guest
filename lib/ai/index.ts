@@ -1,9 +1,12 @@
 export { generateMessage } from './generate-message'
 export { classifyMessage } from './classify-message'
 export { extractReportedOrder } from './extract-reported-order'
+export { classifyIntentionPrompts } from './classify-intention-prompts'
 
 export type {
   AIResult,
+  ClassifyIntentionPromptsInput,
+  ClassifyIntentionPromptsResult,
   ClassifyMessageInput,
   ClassifyMessageResult,
   ExtractedReportedOrderItem,

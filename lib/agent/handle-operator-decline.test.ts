@@ -164,6 +164,7 @@ function makeCtx() {
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
+    openIntentions: [],
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

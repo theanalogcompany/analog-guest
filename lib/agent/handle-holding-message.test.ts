@@ -72,6 +72,7 @@ function makeCtx() {
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
+    openIntentions: [],
     trace: { id: '' },
   }
 }
