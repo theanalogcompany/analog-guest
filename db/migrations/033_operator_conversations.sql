@@ -20,11 +20,13 @@
 --
 -- recognition_state: guest_states row where exited_at IS NULL, scoped to
 -- BOTH guest_id and venue_id (a guest can in principle appear at more than
--- one venue). Same source as list_operator_queue.
+-- one venue). Same source as list_operator_queue. Uses LATERAL to pick the
+-- most recent open state as a defensive tiebreaker against non-transactional
+-- write gaps (matching list_operator_queue's own guard in migration 018).
 --
 -- Column citations (same sources list_operator_queue's own comment cites):
 --   guests         — first_name, last_name, phone_number. db/types.ts.
---   guest_states   — guest_id, venue_id, state, exited_at. db/types.ts.
+--   guest_states   — guest_id, venue_id, state, entered_at, exited_at. db/types.ts.
 --   venues         — slug, name, timezone. db/types.ts.
 --   venue_configs  — venue_id, brand_persona (jsonb). db/types.ts:1254.
 --   messages       — venue_id, guest_id, direction, body, created_at.
@@ -94,10 +96,19 @@ as $function$
   join conversation_days cd
     on cd.guest_id = lm.guest_id and cd.venue_id = lm.venue_id
   left join venue_configs vc on vc.venue_id = lm.venue_id
-  left join guest_states gs
-    on gs.guest_id = lm.guest_id
-   and gs.venue_id = lm.venue_id
-   and gs.exited_at is null
+  left join lateral (
+    -- guest_states is a transition log. Pick the open segment (exited_at
+    -- IS NULL); order by entered_at desc as a defensive tiebreaker for
+    -- the one-open-row-per-(guest,venue) invariant. If a guest has no open
+    -- state, the LATERAL returns 0 rows → gs.state = NULL.
+    select state
+    from guest_states gs2
+    where gs2.guest_id = lm.guest_id
+      and gs2.venue_id = lm.venue_id
+      and gs2.exited_at is null
+    order by gs2.entered_at desc
+    limit 1
+  ) gs on true
   order by lm.created_at desc
   limit 200;
 $function$;
