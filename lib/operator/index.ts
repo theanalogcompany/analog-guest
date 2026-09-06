@@ -30,3 +30,17 @@ export {
   type LoadGuestThreadSuccess,
   loadGuestThread,
 } from './thread'
+
+export {
+  type ConversationSummary,
+  type GuestRecognitionState as ConversationRecognitionState,
+  type ListOperatorConversationsResult,
+  listOperatorConversations,
+} from './conversations'
+
+export {
+  type LoadGuestThreadByGuestIdErrorCode,
+  type LoadGuestThreadByGuestIdInput,
+  type LoadGuestThreadByGuestIdResult,
+  loadGuestThreadByGuestId,
+} from './guest-thread'
