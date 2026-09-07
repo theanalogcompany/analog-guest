@@ -11,10 +11,10 @@
 // mid-list — because renumbering live rule IDs stales every external
 // reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
 // consequence: displayed IDs are NOT contiguous. This list curates R1-R11
-// plus R17-R18. R12 (message splitting, TAC-313) is RETIRED: TAC-319 moved
-// splitting out of the prompt into deterministic dispatch code after two
-// prompt-side rounds failed to make the rule fire, so the undisplayed gap is
-// now R12-R16 (retired splitting slot, then greeting /
+// plus R17-R18 plus R21. R12 (message splitting, TAC-313) is RETIRED:
+// TAC-319 moved splitting out of the prompt into deterministic dispatch code
+// after two prompt-side rounds failed to make the rule fire, so the
+// undisplayed gap is now R12-R16 (retired splitting slot, then greeting /
 // operator-instruction / Last-Visit / Unanswered-question) and R19-R20 are
 // undisplayed form-authority bullets (mirroring, ## Length authority). The
 // lockstep test in system-template.test.ts asserts the exact ID sequence and
@@ -27,6 +27,12 @@
 // nearby-places carve-out lived in venue anti-pattern data, which renders
 // earlier and loses. Displayed because both are form/policy rules operators
 // tune on this rail.
+//
+// TAC-334 appended R21 (don't volunteer advice the guest didn't ask for).
+// Displayed alongside R10/R11, its closest siblings — both also govern when
+// a recommendation or opinion is permitted, and both are behavioral-judgment
+// rules operators would want visible here, unlike the undisplayed
+// mechanical/rendering-timing bullets (R12-R16, R19-R20).
 //
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
@@ -105,5 +111,12 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R18',
     summary:
       "Documented nearby places are in-domain: name them and speak with the same confidence you'd use about the menu, no hedge. Hedge only when nothing is documented, and never fill the gap from general knowledge.",
+  },
+  // R19-R20 are undisplayed form-authority bullets (mirroring, ## Length
+  // authority) — see the numbering note above.
+  {
+    id: 'R21',
+    summary:
+      "Venue knowledge is for answering with, not for leading with. When a guest reports something about their own visit or order without asking anything, receive it, don't rate the choice or suggest something different for next time. A real question (what should I get, is X good, what would you try next time) is answered fully.",
   },
 ]
