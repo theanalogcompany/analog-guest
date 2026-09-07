@@ -590,6 +590,55 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   })
 })
 
+// TAC-328: a qr_scan guest's very first message can itself be an opt-out.
+// build-runtime-context.ts's gating on created_via/expiry/prompted-keys has
+// no access to the classified category (classification runs after
+// context_build), so the earliest the block can be suppressed for opt_out is
+// here, at render time — mirroring shouldRenderVisitHistory's placement for
+// the same category. Both the baseline two-line shape and the TAC-329
+// opener (the more directive of the two payloads) must be fully suppressed,
+// not just the header — a stray intention line surviving under a missing
+// header would still be a compliance exposure.
+describe("runtimeToProse — ## What you're hoping to get to opt_out suppression (TAC-328)", () => {
+  const openIntentions = [
+    "You haven't heard what this guest ordered yet.",
+    "You haven't told them to save your number.",
+  ]
+
+  it('omits the block entirely for opt_out', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'opt_out', NOW)
+    expect(out).not.toContain("What you're hoping to get to")
+    expect(out).not.toContain("You haven't heard what this guest ordered yet.")
+    expect(out).not.toContain("You haven't told them to save your number.")
+  })
+
+  // The sharper case: a fresh qr_scan guest's literal first message is the
+  // opt-out itself, so firstTouchAfterQrScan is also true and the block
+  // would otherwise carry the more directive opener ("thank them for coming
+  // in and ask whether it's their first time") rather than just the two
+  // soft state lines.
+  it('omits the block entirely for opt_out even when firstTouchAfterQrScan is true', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'opt_out',
+      NOW,
+    )
+    expect(out).not.toContain("What you're hoping to get to")
+    expect(out).not.toContain('scanned your sign')
+    expect(out).not.toContain("ask whether it's their first time")
+  })
+
+  it('still renders the block for a non-opt_out category with the same inputs', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain("## What you're hoping to get to")
+    expect(out).toContain('scanned your sign')
+  })
+})
+
 describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
   it('renders the first-touch-after-qr-scan line immediately after the inbound framing line', () => {
     const out = runtimeToProse(

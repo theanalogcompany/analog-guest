@@ -415,6 +415,26 @@ function shouldRenderVisitHistory(category: MessageCategory): boolean {
   return category !== 'welcome' && category !== 'opt_out'
 }
 
+// TAC-328: category gate for the first-touch intentions block. A qr_scan
+// guest's very first message can itself be an opt-out — nothing about
+// build-runtime-context.ts's created_via/expiry/prompted-keys gating knows
+// the classified category (classification runs AFTER context_build in the
+// inbound pipeline, so it isn't available yet at derivation time). This is
+// the earliest point in the pipeline where category is actually in scope,
+// mirroring shouldRenderVisitHistory's placement immediately above for the
+// same category. Suppressing the whole block (rather than trusting the
+// opt_out category instruction's "don't try to retain them" prose alone) is
+// the point: a guest asking to stop being contacted should never share a
+// prompt with a directive to solicit contact-info-save or an order recap,
+// including the TAC-329 first-touch opener paragraph nested inside the same
+// block. Only opt_out is excluded here — no other category was found to
+// pose the same risk, but no other category was specifically audited for it
+// either; this isn't a claim that opt_out is the only one that should ever
+// suppress this block.
+function shouldRenderOpenIntentions(category: MessageCategory): boolean {
+  return category !== 'opt_out'
+}
+
 // Voices regen-loop block. The operator's free-text critique of the
 // flagged outbound is rendered as the very first block in the user prompt
 // (above `## Right now`) so Sonnet treats it as the dominant signal.
@@ -811,7 +831,7 @@ export function runtimeToProse(
   // ever renders on the inbound path (build-runtime-context.ts gates
   // openIntentions to inbound runs), so it never actually co-renders with
   // ## Follow-up context, but the position is fixed regardless of that.
-  if (runtime.openIntentions && runtime.openIntentions.length > 0) {
+  if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
     const block = formatOpenIntentions(runtime.openIntentions, runtime.firstTouchAfterQrScan === true)
     if (block) blocks.push(block)
   }
