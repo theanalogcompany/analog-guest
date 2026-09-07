@@ -416,6 +416,56 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     )
   })
 
+  // TAC-330: the "answering Sana's own question" exception, appended after
+  // the TAC-324 paragraph above (which stays byte-identical — asserted by
+  // the previous test still passing unmodified). Turn two of the first-touch
+  // arc: Sana's opener asks about newness, the guest answers, and the
+  // original symmetric wording gave the model no way to treat that reply
+  // differently from the guest raising a brand-new topic of their own.
+  describe('answering-Sana\'s-own-question exception (TAC-330)', () => {
+    const openIntentions = ["You haven't heard what this guest ordered yet."]
+
+    it('distinguishes a reply to Sana\'s own question from the guest\'s own topic', () => {
+      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      expect(out).toContain("That's about the guest's own topic")
+      expect(out).toContain(
+        "It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it.",
+      )
+    })
+
+    // Plan-review caught that "your last message was a question" is too
+    // broad — Sana ends messages with questions constantly. The condition is
+    // tied to the CONTENT of the question (about the guest themselves), not
+    // merely its presence, so an unrelated closer ("you heading in soon?")
+    // doesn't qualify. This is prose, not code, so the test can only assert
+    // the narrowing language is present — actual model behavior on the
+    // parking-shaped case is a UAT gate (ticket §9), not a unit test.
+    it('scopes the exception to what Sana asked, not merely that she asked something', () => {
+      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      expect(out).toContain('something about themselves')
+      expect(out).not.toContain('your last message was a question and this is their reply')
+    })
+
+    it('asserts the exception is consumed on the very next reply regardless of content', () => {
+      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      expect(out).toContain(
+        "It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater",
+      )
+    })
+
+    it('asserts the exception does not change how any other topic is treated', () => {
+      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      expect(out).toContain("it doesn't change how you treat anything else")
+    })
+
+    // Plan-review: "license" is spec vocabulary describing the mechanism,
+    // not language that belongs in Sana's own prompt.
+    it('does not use "license" — reads as guidance, not a specification', () => {
+      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      expect(out.toLowerCase()).not.toContain('license')
+    })
+  })
+
   it('renders after ## What this guest can access and before ## Follow-up context', () => {
     const out = runtimeToProse(
       {

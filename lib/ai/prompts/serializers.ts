@@ -738,11 +738,41 @@ function formatMechanicEligibility(
 // fail-closed posture empties `openIntentions`, the opener disappears along
 // with the whole block — on exactly the turn this ticket exists to fix.
 // Accepted for pilot scale; revisit if it's ever observed in the wild.
+//
+// TAC-330: the non-steering paragraph above is symmetric — it has no way to
+// distinguish the guest raising their own topic from the guest replying to
+// something Sana herself just asked. Live turn two: Sana's opener asked
+// "first time in, or have you been coming around for a while?", the guest
+// answered "first time!", and the restraint (correctly tuned against a
+// DIFFERENT case — Sana pivoting from a parking question back to the order)
+// fired anyway, because nothing told it these two situations differ.
+//
+// The second paragraph adds a bounded exception, appended rather than
+// rewritten so the original four sentences stay byte-identical. It is
+// DELIBERATELY narrower than "Sana's last message was any question" — Sana
+// ends messages with questions constantly, so that condition would have
+// licensed a pivot after almost any exchange, including the exact
+// TAC-324 pivot the paragraph exists to prevent (plan-review caught this:
+// venue asks about parking, closes with "you heading in soon?", guest
+// replies "yeah, ten minutes" — that answers Sana's question but has
+// nothing to do with the intention). The condition is tied to the CONTENT
+// of Sana's question — did she ask the guest something about themselves
+// (new vs. regular, that kind of thing) — not merely its presence. A
+// logistics/timing question doesn't qualify; the first-touch opener does.
+//
+// Residual risk, on the record rather than assumed away (plan-review note):
+// what actually separates the two cases for the model is the worked
+// exemplar ("new or a regular"), not a crisp category boundary — "you
+// heading in soon?" is also technically a question about the guest. A
+// tighter category would need a runtime signal or would collapse back into
+// the same circular "natural door" phrasing already in paragraph one, so
+// this is accepted rather than solved. UAT covers the parking-shaped case
+// explicitly (ticket §9) because it's the one most likely to fail.
 function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
   const paragraph =
-    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them."
+    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.\n\nThat's about the guest's own topic — don't pivot away from what they\nbrought up to chase one of these. It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it. That's not the guest\nopening a door on some other subject — you're the one who asked, and\none of these can fit in the same breath if the moment calls for it.\nTake it on that reply if it fits. It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater, and it doesn't change how you treat anything else."
   const opener = firstTouchAfterQrScan
     ? "This is the guest's first message on this number, sent right after they scanned your sign. You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask whether it's their first time — one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
     : ''
