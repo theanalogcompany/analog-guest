@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.33.0 (TAC-327: casual_chatter loses two PURSUIT-DUPLICATE lines)', () => {
-    expect(PROMPT_VERSION).toBe('v1.33.0')
+  it('is v1.34.0 (TAC-329: first-touch opener + R1 carve-out rationale reword)', () => {
+    expect(PROMPT_VERSION).toBe('v1.34.0')
   })
 })
 
@@ -99,12 +99,12 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
   // cross-checked-anchor treatment those three get, closing the gap QA
   // flagged rather than leaving R1 the one displayed rule with no lockstep
   // coverage on its most recent edit.
-  it('shares the R1 qr_scan carve-out anchor across both sources (TAC-324)', () => {
+  it('shares the R1 qr_scan carve-out anchor across both sources (TAC-324, reworded TAC-329)', () => {
     const r1 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R1')
     expect(r1).toBeDefined()
     expect(r1?.summary).toContain('qr_scan')
-    expect(r1?.summary).toContain('greeted as someone present')
-    expect(SYSTEM_TEMPLATE).toContain('Greet them as someone present')
+    expect(r1?.summary).toContain('shared channel context')
+    expect(SYSTEM_TEMPLATE).toContain('treat the channel itself as the shared context')
     expect(SYSTEM_TEMPLATE).toContain('Do not narrate the scan or thank them for it')
   })
 })
@@ -279,11 +279,20 @@ describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
   // venue's QR sign). Gated at the runtime-context level (build-runtime-context.ts
   // + buildAiRuntime), not by this text alone; the text just teaches the
   // model what to do when that signal is present.
+  //
+  // TAC-329: the RATIONALE for the exception was reworded from physical-
+  // presence framing ("greet them as someone present, the way you'd greet a
+  // person standing in front of you") to channel-context framing ("treat the
+  // channel itself as the shared context"). The prior framing licensed
+  // present-tense location assumptions and was observed producing "Password's
+  // on the board when you get here" sent to a guest who had already left. The
+  // gate (the condition that triggers the exception) is unchanged.
   it('carves out a narrow exception for a qr_scan guest\'s first message', () => {
     expect(SYSTEM_TEMPLATE).toContain(
       "when the context says this is the guest's first message after they scanned a sign at the venue",
     )
-    expect(SYSTEM_TEMPLATE).toContain('Greet them as someone present')
+    expect(SYSTEM_TEMPLATE).toContain('treat the channel itself as the shared context')
+    expect(SYSTEM_TEMPLATE).toContain("without assuming they're still on-site")
   })
 
   // This is the register R1's carve-out must NOT license — permission to

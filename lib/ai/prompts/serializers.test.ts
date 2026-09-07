@@ -435,6 +435,111 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   })
 })
 
+// TAC-329: the first-touch opener paragraph. Fixes the one turn TAC-324's
+// non-steering paragraph couldn't open on — a bare "Hi Sana!" produced the
+// identical reply "Hey, what's up?" across four UAT runs, because "only
+// raise one if the conversation opens a natural door" is correct restraint
+// but a bare greeting doesn't open a door by any plain reading. The opener
+// leads the block (not appended) so reading order is "this turn's job, then
+// the longer-term things not to push."
+describe("runtimeToProse — ## What you're hoping to get to first-touch opener (TAC-329)", () => {
+  const openIntentions = ["You haven't heard what this guest ordered yet."]
+
+  it('renders the opener before the intention lines when firstTouchAfterQrScan is true', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    const headerIdx = out.indexOf("## What you're hoping to get to")
+    const openerIdx = out.indexOf('sent right after they scanned your sign')
+    const intentionLineIdx = out.indexOf("You haven't heard what this guest ordered yet.")
+    expect(headerIdx).toBeGreaterThanOrEqual(0)
+    expect(openerIdx).toBeGreaterThan(headerIdx)
+    expect(intentionLineIdx).toBeGreaterThan(openerIdx)
+  })
+
+  // Carries the never-texted-vs-never-visited distinction from the ticket's
+  // own framing (created_via: 'qr_scan' means never-texted, not
+  // never-visited) so the question reads as genuinely open rather than
+  // hollow against a `Guest relationship: new` line that only reflects
+  // absence of signals, not absence of history. Also asserts the opener does
+  // NOT license physical-presence framing — that phrasing was in an earlier
+  // draft and was deliberately cut because it re-introduced exactly what the
+  // R1 rationale reword removes.
+  it('carries the never-texted-vs-never-visited framing and asks one question', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain(
+      "You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited.",
+    )
+    expect(out).toContain('thank them for coming in')
+    expect(out).toContain("ask whether it's their first time")
+    expect(out).toContain('one question, then let their answer lead')
+    expect(out).not.toContain('walking up for the first time')
+    expect(out).not.toContain('someone present')
+  })
+
+  // The gate (firstTouchAfterQrScan) is content-blind — it fires on ANY
+  // qr_scan guest's true first message, not just a bare greeting. A real
+  // question deserves an answer, not a scripted first-time question stapled
+  // on top, so the paragraph defers the question (not the greeting) whenever
+  // the guest's own message already asks something.
+  it('defers the first-time question to a real question in the guest\'s own message', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain("If their message doesn't ask you anything")
+    expect(out).toContain('If they did ask something, answer that instead')
+  })
+
+  it('renders byte-identical to the pre-opener shape when firstTouchAfterQrScan is false', () => {
+    const withFlagFalse = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: false },
+      'reply',
+      NOW,
+    )
+    const withFlagUndefined = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    expect(withFlagFalse).toBe(withFlagUndefined)
+    expect(withFlagFalse).not.toContain('scanned your sign')
+  })
+
+  it('omits the opener when firstTouchAfterQrScan is undefined', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    expect(out).not.toContain('scanned your sign')
+  })
+
+  // The specific edge case the AC names: a DB read failure for
+  // guest_intention_prompts fails closed and can empty openIntentions even on
+  // a true first-touch turn. The whole block — opener included — must stay
+  // omitted, not render an opener with nothing under it.
+  it('omits the block entirely when openIntentions is empty even though firstTouchAfterQrScan is true', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions: [], firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).not.toContain("What you're hoping to get to")
+    expect(out).not.toContain('scanned your sign')
+  })
+
+  it('still carries the non-steering paragraph verbatim after the opener', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain(
+      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+    )
+  })
+})
+
 describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
   it('renders the first-touch-after-qr-scan line immediately after the inbound framing line', () => {
     const out = runtimeToProse(
