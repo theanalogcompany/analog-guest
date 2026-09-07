@@ -65,6 +65,9 @@ vi.mock('./stages', async () => {
     APPROVAL_TRIGGERS: actual.APPROVAL_TRIGGERS,
     KNOWLEDGE_GAP_WINDOW_MS: actual.KNOWLEDGE_GAP_WINDOW_MS,
     isKnowledgeGapCard: actual.isKnowledgeGapCard,
+    // TAC-332: pure and deterministic — forward the real implementation
+    // rather than mocking it, same posture as the three constants above.
+    computeFirstTouchAfterQrScan: actual.computeFirstTouchAfterQrScan,
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
     retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
@@ -87,9 +90,19 @@ vi.mock('./dispatch-arrival-capture', () => ({
 }))
 // TAC-323: fire-and-forget side effect, mocked wholesale — its own unit
 // coverage lives in extract-reported-order.test.ts.
-vi.mock('./extract-reported-order', () => ({
-  extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
-}))
+vi.mock('./extract-reported-order', async () => {
+  const actual = await vi.importActual<typeof import('./extract-reported-order')>(
+    './extract-reported-order',
+  )
+  return {
+    // TAC-332: stages.ts's real computeFirstTouchAfterQrScan (forwarded,
+    // not mocked, in the ./stages mock below) imports this constant — it's
+    // now reachable from a code path this file doesn't mock away, so the
+    // mock needs to provide it. A plain re-exported value, not a mock.
+    REPORTED_ORDER_WINDOW_DAYS: actual.REPORTED_ORDER_WINDOW_DAYS,
+    extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
+  }
+})
 const recordIntentionPromptsMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
 // effect, mocked wholesale; its own unit coverage lives in
@@ -435,6 +448,70 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
       sentBody: successResult().body,
       openIntentions,
     })
+  })
+
+  // TAC-332: the opener turn (a true first message from a qr_scan guest)
+  // can never legitimately raise an intention — the opener block instructs
+  // the model to greet + ask newness, never order — so recordIntentionPrompts
+  // must not even be CALLED there, regardless of what openIntentions holds.
+  // This is what makes the case-3 reproduction ("opener sent -> zero rows")
+  // deterministic rather than dependent on the classifier happening not to
+  // misfire.
+  it('never calls recordIntentionPrompts on the true opener turn, even with open intentions (TAC-332)', async () => {
+    setUpSentPath()
+    const openIntentions = [
+      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        openIntentions,
+        guest: {
+          id: GUEST_ID,
+          phoneNumber: '+15555550123',
+          firstName: null,
+          createdAt: new Date(),
+          createdVia: 'qr_scan',
+          isDemo: false,
+          context: {},
+          lastVisitAt: null,
+        },
+        recentMessages: [],
+      }),
+    )
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  // Same qr_scan guest, but NOT the opener turn (recentMessages non-empty) —
+  // confirms the gate is specific to the true first turn, not qr_scan
+  // guests generally.
+  it('still calls recordIntentionPrompts for a qr_scan guest past the opener turn', async () => {
+    setUpSentPath()
+    const openIntentions = [
+      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        openIntentions,
+        guest: {
+          id: GUEST_ID,
+          phoneNumber: '+15555550123',
+          firstName: null,
+          createdAt: new Date(),
+          createdVia: 'qr_scan',
+          isDemo: false,
+          context: {},
+          lastVisitAt: null,
+        },
+        recentMessages: [
+          { direction: 'outbound', body: 'Hey, first time in?', createdAt: new Date() },
+        ],
+      }),
+    )
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(recordIntentionPromptsMock).toHaveBeenCalled()
   })
 
   it('never calls recordIntentionPrompts on a queued (not sent) draft', async () => {

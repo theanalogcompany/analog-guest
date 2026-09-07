@@ -1077,6 +1077,52 @@ export function deriveFollowupContext(
   return { reasons, daysSinceLastVisit, anchorVisit: anchor }
 }
 
+// TAC-324: R1 carve-out signal. Every ingredient is already on the
+// agent-side context, so this is computed from `ctx` directly (the single
+// mapping seam) rather than threading a new field through
+// build-runtime-context.ts — same pattern as `perkBeingUnlocked` below.
+// `recentMessages.length === 0` (current inbound already excluded, 14-day
+// lookback) is the "first inbound" test: a qr_scan guest's guest row and
+// their triggering message row are created in the same webhook request
+// (confirmed against app/api/webhooks/sendblue/route.ts), so there is no gap
+// between "created" and "first message" to worry about on the true first
+// turn. The additional age check is what distinguishes that true first turn
+// from a guest who goes quiet for weeks and then sends a SECOND message that
+// also happens to have no OTHER messages inside the 14-day lookback —
+// without it, a three-weeks-later "do you have parking" would incorrectly
+// re-fire the "just scanned" framing. Reuses REPORTED_ORDER_WINDOW_DAYS (not
+// a new constant) as the "is this still a fresh first-touch moment" check,
+// deliberately unlike deriveOpenIntentions' expiry (its own independent
+// constant for a genuinely different concept, ask vs. listen). Code-review
+// note: this reuse is NOT load-bearing as things stand today —
+// recentMessages.length===0 already requires no message inside the 14-day
+// MAX_HISTORY_DAYS lookback, so any stale re-trigger this age check would
+// catch is already at least 14 days old, past every window constant in this
+// file (7 or 3). Any value <= MAX_HISTORY_DAYS produces identical gating
+// today. Kept as REPORTED_ORDER_WINDOW_DAYS anyway for the conceptual match
+// (both are "is this still a fresh first-touch moment") and so the two don't
+// silently diverge if MAX_HISTORY_DAYS ever changes.
+//
+// TAC-332: extracted into its own exported function (previously inlined in
+// buildAiRuntime below) so `handle-inbound.ts` can reuse the SAME "is this
+// the opener turn" signal to gate `recordIntentionPrompts` — the opener
+// block instructs the model to greet + ask newness, never order, so there is
+// no legitimate path for a turn-one send to raise a first-touch intention,
+// and running the classifier there has no upside, only false-positive risk.
+// Reusing this flag rather than inventing a new turn-index check keeps the
+// two call sites (what renders the opener, what's allowed to record against
+// it) structurally unable to disagree about what "the opener turn" means.
+// `buildAiRuntime` below calls this with `new Date()`, identical to its
+// prior inline `Date.now()` call — zero behavior change there.
+export function computeFirstTouchAfterQrScan(ctx: RuntimeContext, now: Date): boolean {
+  return (
+    ctx.currentMessage !== null &&
+    ctx.guest.createdVia === 'qr_scan' &&
+    ctx.recentMessages.length === 0 &&
+    now.getTime() - ctx.guest.createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+  )
+}
+
 /**
  * Map orchestrator RuntimeContext → lib/ai's RuntimeContext shape.
  * Exported so the Voices regen helper can reuse the same mapping without
@@ -1170,36 +1216,11 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       }
     : undefined
 
-  // TAC-324: R1 carve-out signal. Every ingredient is already on the
-  // agent-side context, so this is computed inline here (the single mapping
-  // seam) rather than threading a new field through build-runtime-context.ts
-  // — same pattern as perkBeingUnlocked above. `recentMessages.length === 0`
-  // (current inbound already excluded, 14-day lookback) is the "first
-  // inbound" test: a qr_scan guest's guest row and their triggering message
-  // row are created in the same webhook request (confirmed against
-  // app/api/webhooks/sendblue/route.ts), so there is no gap between
-  // "created" and "first message" to worry about on the true first turn.
-  // The additional age check is what distinguishes that true first turn from
-  // a guest who goes quiet for weeks and then sends a SECOND message that
-  // also happens to have no OTHER messages inside the 14-day lookback —
-  // without it, a three-weeks-later "do you have parking" would incorrectly
-  // re-fire the "just scanned" framing. Reuses REPORTED_ORDER_WINDOW_DAYS
-  // (not a new constant) as the "is this still a fresh first-touch moment"
-  // check, deliberately unlike deriveOpenIntentions' expiry (its own
-  // independent constant for a genuinely different concept, ask vs. listen).
-  // Code-review note: this reuse is NOT load-bearing as things stand today —
-  // recentMessages.length===0 already requires no message inside the 14-day
-  // MAX_HISTORY_DAYS lookback, so any stale re-trigger this age check would
-  // catch is already at least 14 days old, past every window constant in
-  // this file (7 or 3). Any value <= MAX_HISTORY_DAYS produces identical
-  // gating today. Kept as REPORTED_ORDER_WINDOW_DAYS anyway for the
-  // conceptual match (both are "is this still a fresh first-touch moment")
-  // and so the two don't silently diverge if MAX_HISTORY_DAYS ever changes.
-  const firstTouchAfterQrScan =
-    ctx.currentMessage !== null &&
-    ctx.guest.createdVia === 'qr_scan' &&
-    ctx.recentMessages.length === 0 &&
-    Date.now() - ctx.guest.createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+  // TAC-332: extracted to the standalone computeFirstTouchAfterQrScan above
+  // so handle-inbound.ts can reuse the same signal to gate
+  // recordIntentionPrompts. `new Date()` here matches the prior inline
+  // `Date.now()` call exactly — no behavior change.
+  const firstTouchAfterQrScan = computeFirstTouchAfterQrScan(ctx, new Date())
 
   return {
     guestName: ctx.guest.firstName ?? undefined,
