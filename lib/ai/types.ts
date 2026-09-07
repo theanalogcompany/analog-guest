@@ -239,10 +239,11 @@ export type RuntimeContext = {
   // line per intention (already the prompt-facing copy, not a key). The
   // serializer renders a `## What you're hoping to get to` block between
   // mechanics and `## Follow-up context` / `## Visit history` when this is
-  // non-empty. Mapped by buildAiRuntime from the agent-side
-  // RuntimeContext.openIntentions, which is already gated to qr_scan guests,
-  // inbound runs only, and current-turn-suppressed. undefined or empty =
-  // block omitted entirely (zero tokens).
+  // non-empty and the category is not opt_out (TAC-328). Mapped by
+  // buildAiRuntime from the agent-side RuntimeContext.openIntentions, which
+  // is already gated to qr_scan guests, inbound runs only, and
+  // current-turn-suppressed. undefined or empty = block omitted entirely
+  // (zero tokens).
   openIntentions?: string[]
   // TAC-324: true only when this is a qr_scan guest's first-ever inbound,
   // inside the R1 carve-out's freshness window. Lets the R1 exception in
