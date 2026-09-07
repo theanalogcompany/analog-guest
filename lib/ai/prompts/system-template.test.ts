@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.32.0 (TAC-324: R1 carve-out + R15 scoping, first-touch intentions)', () => {
-    expect(PROMPT_VERSION).toBe('v1.32.0')
+  it('is v1.33.0 (TAC-327: casual_chatter loses two PURSUIT-DUPLICATE lines)', () => {
+    expect(PROMPT_VERSION).toBe('v1.33.0')
   })
 })
 

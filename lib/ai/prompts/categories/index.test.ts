@@ -188,14 +188,21 @@ describe('casual-chatter instructions (THE-228)', () => {
     expect(CASUAL_CHATTER_INSTRUCTIONS).toContain('Stay in voice')
   })
 
-  it('forbids pivoting to perks/events/service offers', () => {
-    expect(CASUAL_CHATTER_INSTRUCTIONS).toContain(
+  // TAC-327: these two lines were PURSUIT-DUPLICATE — an absolute ban on
+  // pivoting to perks/events/a service offer, restating (more strictly than)
+  // what the first-touch intentions block already states conditionally.
+  // Named in the direction that matters, per this file's own established
+  // pattern (see NEW_QUESTION_INSTRUCTIONS below): the ban must be ABSENT
+  // from the category layer, not present. Restraint on raising perks/events
+  // now lives exclusively in lib/agent/intentions/, correctly conditional.
+  it('no longer forbids pivoting to perks/events/service offers (TAC-327: PURSUIT belongs to intentions)', () => {
+    expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain(
       'don\'t pivot to perks, events, or a service offer',
     )
   })
 
-  it('forbids reading service intent into chatter', () => {
-    expect(CASUAL_CHATTER_INSTRUCTIONS).toContain(
+  it('no longer forbids reading service intent into chatter (TAC-327: PURSUIT belongs to intentions)', () => {
+    expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain(
       'Don\'t try to read a service intent into a friendly remark',
     )
   })
@@ -482,5 +489,63 @@ describe('category blocks carry no form authority (TAC-314)', () => {
     expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).not.toMatch(/one or two/i)
     // The anti-catalog topic scoping stays.
     expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('not a catalog')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-327: the category layer loses PURSUIT authority.
+// ---------------------------------------------------------------------------
+//
+// Governing principle, sibling to TAC-314's FORM boundary above: a category
+// block governs REGISTER — how to sound, how long, how literal, what shape
+// the reply takes for this kind of turn. It may not prescribe PURSUIT — what
+// goals are open, or the restraint around raising them — because that is the
+// first-touch intentions block's job (lib/agent/intentions/), and intentions
+// states its restraint CONDITIONALLY ("only raise one if the conversation
+// opens a natural door"). An ABSOLUTE ban living in a category block outranks
+// that conditional restraint by construction (category blocks render last),
+// which is exactly how casual_chatter silently suppressed the intentions
+// block's own correctly-conditional restraint on every single turn,
+// including first touch, where it mattered most.
+//
+// The test below is intentionally narrow (mirrors the SPECIFIC deleted
+// phrasing, not a generic "no pursuit-shaped words anywhere" rule) because
+// three lines elsewhere in this file are DELIBERATE KEEPS, not leaks:
+// event_question's "come anyway" and follow_up's "push a return visit"
+// restrain a goal (generic return-visit nudging) that no current intention
+// models, so there is nothing for them to duplicate; acknowledgment's
+// return-visit/new-topic ban exists independent of any intentions mechanism
+// (it would exist even with zero intentions) and is safe only by
+// COINCIDENCE with the current two intentions, not by design — see CLAUDE.md
+// "Category instruction layer carries NO pursuit authority (TAC-327)" for
+// the full classification and the fragility note on both of those keeps.
+// THIS IS A LITERAL-REVERT CANARY, NOT A SEMANTIC GUARD: it catches the
+// exact two deleted phrases (whitespace/comma-tolerant) coming back verbatim
+// or via a copy-paste revert. A differently-worded reintroduction of the
+// same restraint (e.g. "don't nudge toward perks unprompted") would pass
+// this sweep silently — a broader regex isn't achievable without immediately
+// false-positiving on the three legitimate keeps above. Human review at the
+// next audit is still what catches a reworded leak, same as TAC-314's
+// FORBIDDEN_FORM sweep above it.
+describe('category blocks carry no pursuit authority (TAC-327)', () => {
+  const FORBIDDEN_PURSUIT = /pivot to perks,?\s*events,?\s*or a service offer|service intent into a friendly remark/i
+
+  it.each(ROUND_TRIP_TABLE)('%s has no pursuit-of-intentions restraint language', (_cat, text) => {
+    expect(text).not.toMatch(FORBIDDEN_PURSUIT)
+  })
+
+  it('deliberate keeps are unaffected: event_question and follow_up still restrain generic return-visit nudging', () => {
+    // Not a duplicate of anything intentions currently models (no
+    // plant_next_visit-style intention exists) — deleting these would leave
+    // a real gap, not remove a leak. See CLAUDE.md for the full rationale.
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot to suggesting they come anyway')
+    expect(FOLLOW_UP_INSTRUCTIONS).toContain('Do not push a return visit explicitly')
+  })
+
+  it('deliberate keep is unaffected: acknowledgment still bans pivoting off a close', () => {
+    // Safe by coincidence with the current two intentions, not by design —
+    // see CLAUDE.md fragility note before assuming this stays safe forever.
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not push for a return visit')
   })
 })

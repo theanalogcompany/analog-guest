@@ -1,3 +1,11 @@
+// Category instructions govern REGISTER: how to sound, how long, how literal,
+// what shape the reply takes for THIS kind of turn. They carry no FORM
+// authority (TAC-314 — length/structure/hedging belong to SYSTEM_TEMPLATE's
+// universal layer) and no PURSUIT authority (TAC-327 — what goals are open,
+// and the restraint around raising them, belongs to the first-touch
+// intentions block in lib/agent/intentions/). A line here that says what to
+// pursue or not pursue is a leak, not a register rule — see CLAUDE.md
+// "Category instruction layer carries NO pursuit authority (TAC-327)".
 import type { MessageCategory } from '../../types'
 import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
 import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
