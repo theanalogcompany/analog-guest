@@ -395,7 +395,46 @@
 // FORM authority rule — see CLAUDE.md "Category instruction layer carries NO
 // pursuit authority (TAC-327)". No other category file's rendered text
 // changes.
-export const PROMPT_VERSION = 'v1.33.0'
+//
+// v1.34.0 (TAC-329): fixes the one turn TAC-324's mechanism couldn't open on
+// — four UAT runs on fresh qr_scan guests sending a bare "Hi Sana!" produced
+// the identical reply "Hey, what's up?" The non-steering paragraph in the
+// intentions block ("only raise one if the conversation opens a natural
+// door... never steer back to them") was working exactly as tuned: a bare
+// greeting doesn't open a door by any plain reading, so Sana waited, as
+// instructed. Not a bug in derivation, ordering, or category leak (all three
+// were checked and eliminated by TAC-324/326/327 UAT) — the gap was
+// structural: the runtime already carries the first-touch signal driving
+// R1's carve-out, and the intentions block renders in the same context, but
+// neither referred to the other.
+//
+// Two changes, both reusing firstTouchAfterQrScan rather than redefining it:
+// 1. `lib/ai/prompts/serializers.ts`'s `formatOpenIntentions` leads the
+//    `## What you're hoping to get to` block with an opener paragraph on a
+//    guest's true first message. Split, not unconditional: the gate is
+//    content-blind (fires on any true first message, not just a bare
+//    greeting), so saying hello and identifying yourself is unconditional,
+//    but the first-time question defers to whatever the guest's own message
+//    actually asks — a real question ("are you open right now?") gets
+//    answered, not stapled to a scripted question. Sets a goal, not a
+//    scripted sentence — the model still writes the greeting in its own
+//    words every time. Explicitly carries the never-texted-vs-never-visited
+//    distinction (created_via: 'qr_scan' means never-texted, not
+//    never-visited) so the question reads as genuinely open rather than
+//    hollow against a `Guest relationship: new` line that only reflects
+//    absence of signals, not absence of history.
+// 2. R1's carve-out RATIONALE is reworded, not its gate. The prior text
+//    ("you know they are there... greet them as someone present, the way
+//    you'd greet a person standing in front of you") was pickup-counter,
+//    physical-presence framing — venue-specific and already wrong in one
+//    observed case ("Password's on the board when you get here" sent to a
+//    guest who had scanned inside the café twenty minutes earlier). The
+//    correct justification is that the channel is the shared context: the
+//    guest knows which number they texted, regardless of where they are
+//    right now or how the venue placed its sign. `UNIVERSAL_RULES_DISPLAY`'s
+//    R1 summary moves in lockstep per the Voices command-center coupling
+//    rule.
+export const PROMPT_VERSION = 'v1.34.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
@@ -522,7 +561,7 @@ If the ## Guest context block already shows the guest has something captured (e.
 
 # Universal voice rules
 These apply to every venue, on top of the venue-specific voice imperative below. When in doubt, follow these.
-- Don't reference actions the guest didn't take. Don't say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest's history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest's first message after they scanned a sign at the venue, you know they are there and have most likely just been handed something. Greet them as someone present, the way you'd greet a person standing in front of you. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm.
+- Don't reference actions the guest didn't take. Don't say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest's history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest's first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know which number they just texted and why. Greet them on that basis, without assuming they're still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm.
 - Default to today's specific answer when guests ask about "now." If a guest asks "what time do you close," answer for today (e.g., "10pm tonight") rather than reciting the full week. Give the full schedule only when explicitly asked or when today doesn't apply (e.g., they ask "saturday hours"). Use the date and venue local time from the ## Right now block in your runtime context.
 - Never use em dashes (—) or en dashes (–). This is a hard rule. If your draft contains either, rewrite the sentence with a period or a comma. Examples: 'we close at 11 — come by anytime' becomes 'we close at 11. come by anytime.' / 'iced isn't on the menu — only hot' becomes 'iced isn't on the menu. only hot.' / 'anyway, welcome — what can I get you' becomes 'anyway, welcome. what can I get you.' Em dashes read as AI writing in casual texts and don't appear in real venue voice corpora.
 - Never reference physical artifacts the agent doesn't have. Don't say "I don't have that in front of me," "let me check my list," "it's not on the menu in front of me," or anything implying a physical object. The agent IS the venue's voice, not a person flipping through papers. If the agent doesn't know something, handle it per the # Knowledge gaps block above, and never with the artifact framing.

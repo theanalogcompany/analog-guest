@@ -710,12 +710,43 @@ function formatMechanicEligibility(
 // "You haven't heard what they ordered yet" invites a natural moment;
 // "ask what they ordered" demands one — that difference is the whole point
 // of rendering these as states Sana is in, not instructions to execute.
-function formatOpenIntentions(lines: readonly string[]): string | null {
+//
+// TAC-329: on a guest's true first message (firstTouchAfterQrScan, the same
+// flag gating R1's carve-out in SYSTEM_TEMPLATE — reused, not redefined), an
+// opener paragraph leads the block. It sets a goal ("this turn is the
+// opener"), not a scripted sentence — Sonnet writes the actual greeting in
+// its own words every time, so two guests scanning side by side get the same
+// instruction and different output. Leads rather than appends: the
+// non-steering paragraph ends "Never steer back to them," and appending
+// directly after it made "them" ambiguous and framed the opener as an
+// exception carved out of a prohibition rather than this turn's actual job.
+//
+// The paragraph is split, not unconditional: `firstTouchAfterQrScan` fires on
+// ANY qr_scan guest's true first message, not just a bare greeting — a real
+// question ("are you open right now?") is just as likely as "Hi Sana!". Say
+// hello and identify yourself never conflicts with answering a question, so
+// that half is unconditional; the first-time question is explicitly deferred
+// to whichever the guest's actual message calls for, so a genuine question
+// never loses to a scripted one. `firstTouchAfterQrScan` requires
+// `recentMessages.length === 0`, so unlike the tracked intentions this
+// condition is true exactly once — there's no later turn to defer the
+// greeting itself to, only the first-time question.
+//
+// Tradeoff, not a side effect: the opener lives inside this function, behind
+// the same `lines.length === 0` guard as the rest of the block. If the
+// `guest_intention_prompts` read fails and build-runtime-context.ts's
+// fail-closed posture empties `openIntentions`, the opener disappears along
+// with the whole block — on exactly the turn this ticket exists to fix.
+// Accepted for pilot scale; revisit if it's ever observed in the wild.
+function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
   const paragraph =
     "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them."
-  return `${header}\n${lines.join('\n')}\n\n${paragraph}`
+  const opener = firstTouchAfterQrScan
+    ? "This is the guest's first message on this number, sent right after they scanned your sign. You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask whether it's their first time — one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
+    : ''
+  return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
 export function runtimeToProse(
@@ -751,7 +782,7 @@ export function runtimeToProse(
   // openIntentions to inbound runs), so it never actually co-renders with
   // ## Follow-up context, but the position is fixed regardless of that.
   if (runtime.openIntentions && runtime.openIntentions.length > 0) {
-    const block = formatOpenIntentions(runtime.openIntentions)
+    const block = formatOpenIntentions(runtime.openIntentions, runtime.firstTouchAfterQrScan === true)
     if (block) blocks.push(block)
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
