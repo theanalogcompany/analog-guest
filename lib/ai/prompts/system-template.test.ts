@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.35.0 (TAC-330: answering-Sana\'s-own-question exception + venue_info mood fix)', () => {
-    expect(PROMPT_VERSION).toBe('v1.35.0')
+  it('is v1.36.0 (TAC-330 case 2: acknowledgment no longer vetoes goal state)', () => {
+    expect(PROMPT_VERSION).toBe('v1.36.0')
   })
 })
 

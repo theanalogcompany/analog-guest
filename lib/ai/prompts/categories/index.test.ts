@@ -331,9 +331,29 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('one to three words')
   })
 
-  it('forbids pivoting or starting a new thread', () => {
+  it('forbids pivoting to an invented topic, unqualified', () => {
+    // Unqualified deliberately (TAC-330 case 2 fix): an early draft read "do
+    // not pivot... on your own initiative", which picked the wrong axis —
+    // raising a held goal is exactly as much "her own initiative" as
+    // inventing a topic from nothing. The ban stays plain; the carve-out
+    // lives entirely in the jurisdictional sentence that follows, not in a
+    // qualifier on the ban itself.
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not start a new thread')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('on your own initiative')
+    // Canary against a revert to the pre-TAC-330 absolute phrasing, which had
+    // no carve-out at all and silently vetoed goal state.
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('do not start a new thread')
+  })
+
+  it('carries the goal-state jurisdictional carve-out (TAC-330 case 2)', () => {
+    // Scoped to "a goal you're already carrying," not "whatever the rest of
+    // this prompt tells you" — the broad version would have quietly
+    // re-authorized venue_info, the exact content that beat the intention in
+    // case 2. Asserted verbatim: this sentence is load-bearing the same way
+    // the intentions block's own non-steering paragraph is.
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      "This is register guidance, how a close should sound, not authority over whether you act on a goal you're already carrying: that call belongs elsewhere, and this line has no say in it.",
+    )
   })
 
   it('no longer references "venue cannot respond" framing', () => {
@@ -510,15 +530,23 @@ describe('category blocks carry no form authority (TAC-314)', () => {
 //
 // The test below is intentionally narrow (mirrors the SPECIFIC deleted
 // phrasing, not a generic "no pursuit-shaped words anywhere" rule) because
-// three lines elsewhere in this file are DELIBERATE KEEPS, not leaks:
+// two lines elsewhere in this file are DELIBERATE KEEPS, not leaks:
 // event_question's "come anyway" and follow_up's "push a return visit"
 // restrain a goal (generic return-visit nudging) that no current intention
-// models, so there is nothing for them to duplicate; acknowledgment's
-// return-visit/new-topic ban exists independent of any intentions mechanism
-// (it would exist even with zero intentions) and is safe only by
-// COINCIDENCE with the current two intentions, not by design — see CLAUDE.md
+// models, so there is nothing for them to duplicate — see CLAUDE.md
 // "Category instruction layer carries NO pursuit authority (TAC-327)" for
-// the full classification and the fragility note on both of those keeps.
+// the full classification.
+//
+// acknowledgment's return-visit/new-topic ban was a THIRD keep of this kind
+// until TAC-330 (case 2, live UAT): it was safe only by COINCIDENCE with the
+// current two intentions, not by design, and the coincidence broke — a bare
+// one-word reply classified as `acknowledgment` instead of `reply`, and the
+// absolute ban silently vetoed `learn_first_order` on exactly the turn it
+// was supposed to be free to raise. Resolved by narrowing, not deleting
+// (`lib/ai/prompts/categories/acknowledgment.ts` carries the full history):
+// the return-visit half stays absolute, the new-topic half now carries an
+// explicit jurisdictional carve-out for goal state. See CLAUDE.md for the
+// updated classification.
 // THIS IS A LITERAL-REVERT CANARY, NOT A SEMANTIC GUARD: it catches the
 // exact two deleted phrases (whitespace/comma-tolerant) coming back verbatim
 // or via a copy-paste revert. A differently-worded reintroduction of the
@@ -542,10 +570,15 @@ describe('category blocks carry no pursuit authority (TAC-327)', () => {
     expect(FOLLOW_UP_INSTRUCTIONS).toContain('Do not push a return visit explicitly')
   })
 
-  it('deliberate keep is unaffected: acknowledgment still bans pivoting off a close', () => {
-    // Safe by coincidence with the current two intentions, not by design —
-    // see CLAUDE.md fragility note before assuming this stays safe forever.
+  it('acknowledgment still bans an invented pivot, but no longer vetoes goal state (TAC-330)', () => {
+    // No longer a "deliberate keep" — the coincidence it relied on broke
+    // (case 2) and was fixed by narrowing. The return-visit ban is untouched
+    // (no current mechanism conflicts with it); the new-topic ban is now
+    // unqualified and jurisdictionally scoped rather than absolute.
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not push for a return visit')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      "not authority over whether you act on a goal you're already carrying",
+    )
   })
 })
