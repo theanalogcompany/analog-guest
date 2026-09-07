@@ -384,7 +384,18 @@
 // changes. New user-prompt block `## What you're hoping to get to` (derived,
 // per-guest first-touch intentions) is additive and doesn't touch any
 // existing rule.
-export const PROMPT_VERSION = 'v1.32.0'
+//
+// v1.33.0 (TAC-327): category-instruction-only change, zero lines touched in
+// SYSTEM_TEMPLATE's own body — same shape as v1.29.0 (TAC-314), which is the
+// precedent for bumping here. Deletes two lines from CASUAL_CHATTER_INSTRUCTIONS
+// ("don't pivot to perks, events, or a service offer" / "don't try to read a
+// service intent into a friendly remark") that duplicated, absolutely, what
+// the v1.32.0 first-touch intentions block already states conditionally.
+// Category instructions carry no PURSUIT authority, sibling to TAC-314's no
+// FORM authority rule — see CLAUDE.md "Category instruction layer carries NO
+// pursuit authority (TAC-327)". No other category file's rendered text
+// changes.
+export const PROMPT_VERSION = 'v1.33.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
