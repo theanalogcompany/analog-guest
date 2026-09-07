@@ -471,7 +471,32 @@
 //    UPDATE, not a code change — no migration, `venue_info`'s shape is
 //    unchanged. The extractor that produced the imperative mood in the
 //    first place is out of scope here; TAC-331 owns it.
-export const PROMPT_VERSION = 'v1.35.0'
+//
+// v1.36.0 (TAC-330, case 2): live UAT on v1.35.0 surfaced a second cause of
+// the same turn going wrong — a bare one-word reply ("first") to Sana's
+// opener classified as `acknowledgment` instead of `reply`, and
+// `lib/ai/prompts/categories/acknowledgment.ts`'s absolute "do not pivot /
+// do not start a new thread" silently vetoed the v1.35.0 exception before it
+// ever got evaluated. This is the TAC-327 "safe by coincidence, not by
+// design" fragility breaking — not because a new intention arrived (the
+// scenario that comment anticipated) but because `learn_first_order` was
+// already exactly the kind of goal a closer turn could open a door for.
+// Narrowed rather than deleted, matching TAC-327's own precedent but applied
+// more surgically: the return-visit half of the ban is untouched (nothing
+// conflicts with it), the new-topic half is now unqualified prose followed
+// by an explicit jurisdictional carve-out ("not authority over whether you
+// act on a goal you're already carrying") rather than a same-sentence
+// qualifier — an earlier draft qualified the ban itself ("on your own
+// initiative"), caught in review as self-contradicting, since raising a
+// held goal is exactly as much her own initiative as inventing a topic from
+// nothing. The carve-out is scoped to goal state specifically, not to
+// "whatever the rest of this prompt tells you" — the broad version would
+// have quietly re-authorized `venue_info`, the exact content that won in
+// case 2. See `acknowledgment.ts`'s own comment for the full history. Not
+// live-UAT-verified as of this version — sequenced behind TAC-332 (a
+// separate, unrelated defect in the intention-recording write path that
+// makes a passing UAT result uninterpretable until it lands too).
+export const PROMPT_VERSION = 'v1.36.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
