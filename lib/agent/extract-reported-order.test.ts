@@ -219,6 +219,116 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
     const realMenu = [{ name: 'Piña' }]
     expect(bodyMentionsMenuItem('i got a pina colada', realMenu)).toBe(true)
   })
+
+  // TAC-326: live production bug, surfaced via TAC-324 UAT. A menu-derived
+  // significant word was a strict prefix of an unrelated, longer word in the
+  // guest's message, and plain substring containment had no way to tell the
+  // difference. Fixed by boundary-checking (bodyContainsWord) rather than
+  // raw .includes().
+  it('does not match a menu word that is a strict prefix of an unrelated word (Sana / San Pellegrino)', () => {
+    // The exact production case: guest ad1bb542-37d3-4579-b543-358222fa8d60
+    // greeted the venue's own persona by name on their first message.
+    const realMenu = [{ name: 'San Pellegrino' }]
+    expect(bodyMentionsMenuItem('Hi Sana!', realMenu)).toBe(false)
+  })
+
+  it('does not match a menu word that is a strict prefix of an unrelated word (nice / Hibiscus Ice Tea)', () => {
+    // The more realistic recurring trigger — "nice" is ordinary guest chat,
+    // unlike a venue-specific persona name. Same mechanism, same live menu.
+    const realMenu = [{ name: 'Hibiscus Ice Tea' }]
+    expect(bodyMentionsMenuItem('sounds nice, thanks', realMenu)).toBe(false)
+  })
+
+  it('still matches a genuine mention of San Pellegrino (sanity check on the fix)', () => {
+    const realMenu = [{ name: 'San Pellegrino' }]
+    expect(bodyMentionsMenuItem('can i get a san pellegrino', realMenu)).toBe(true)
+  })
+
+  it('still matches a genuine mention of ice (sanity check on the fix)', () => {
+    const realMenu = [{ name: 'Hibiscus Ice Tea' }]
+    expect(bodyMentionsMenuItem('can i get extra ice', realMenu)).toBe(true)
+  })
+
+  // Code review (TAC-326): hyphen and apostrophe were claimed in the code
+  // comment / CLAUDE.md as already-covered boundary characters, but that was
+  // reasoned through manually, not actually asserted here. Closing the gap
+  // rather than softening the claim to match — these are the two boundary
+  // characters most likely to regress if `bodyContainsWord`'s character
+  // class is ever touched.
+  it('matches a hyphenated mention without the hyphen breaking the boundary check', () => {
+    const realMenu = [{ name: 'Carrot-Orange Juice' }]
+    expect(bodyMentionsMenuItem('i got a carrot-orange juice', realMenu)).toBe(true)
+  })
+
+  it('matches a possessive-suffixed mention without the apostrophe breaking the boundary check', () => {
+    const realMenu = [{ name: 'Latte' }]
+    expect(bodyMentionsMenuItem("the latte's great today", realMenu)).toBe(true)
+  })
+})
+
+// TAC-326: the QR prefilled body is not an ordinary organic message — it's a
+// static, per-venue-configured string guaranteed to be the guest's literal
+// first-ever inbound, every time, for every guest at that venue. Unlike an
+// incidental collision on some later turn (turn-scoped, recovers on the next
+// non-colliding turn), a prefilled-body collision fires deterministically on
+// the one turn the whole first-touch-intentions mechanism exists to serve,
+// with no later turn to recover on. This guard is the cheap version: a pure
+// unit test over a hardcoded snapshot of each venue's live
+// qrEnrollmentMessage + menu, not a live DB query (this repo's tests don't
+// hit external services) and not a seed-time validation (the elegant
+// version — a check inside scripts/onboarding/seed-supabase.ts or
+// scripts/seed-venue.ts that runs automatically whenever a venue's config is
+// (re-)seeded — deferred as a follow-up).
+//
+// STALENESS RISK, accepted deliberately: if a venue's qrEnrollmentMessage or
+// menu changes in Studio without this table being updated to match, a new
+// collision could go uncaught. Revisit if that risk bites in practice.
+describe('QR prefilled-body collision guard (TAC-326)', () => {
+  // Snapshot captured directly from the live venues/venue_configs tables at
+  // ticket time. Full real menu, not a trimmed subset — a partial menu would
+  // not faithfully reproduce the actual collision check for this venue.
+  const knownVenueConfigs: { slug: string; qrEnrollmentMessage: string; menuItemNames: string[] }[] = [
+    {
+      slug: 'mock-sextant-coffee-roasters',
+      qrEnrollmentMessage: 'Hi Sana!',
+      menuItemNames: [
+        'Red Eye', 'Au Lait', 'Pour Over', 'Traveler Coffee', 'Espresso',
+        'Americano', 'Macchiato', 'Gibraltar / Cortado', 'Cappuccino',
+        'Flat White', 'Latte', 'Mocha', 'Frosty Gandhi', 'Golden Latte',
+        'English Breakfast Tea', 'Turmeric Ginger Tea', 'Jasmine Green Tea',
+        'Mystic Mint Tea', 'Chamomile Tea', 'Spicy Chai Tea', 'London Fog Tea',
+        'Chai Latte', 'Matcha Latte', 'Iced Strawberry Matcha',
+        'Hibiscus Ice Tea', 'Hot Chocolate', 'Steamed Milk',
+        'Almond Croissant', 'Connoisseur- Colombia', 'Windsor - Whole Beans',
+        'WALIA IBEX - Whole Beans', 'TopoChico', 'Olipop',
+        'Vive Immunity boost', 'San Pellegrino',
+        'Wild Wonder Organic Peach Ginger Prebiotic & Probiotic Drink',
+        'Fresh Orange Juice', 'Mixed Greens Juice', 'Beet Juice',
+        'Carrot-Orange Juice', 'Beanie', 'T-shirt', 'Tote Bag',
+        'HARIO V60 COFFEE PAPER FILTER', 'HARIO V60 Dripper', 'HARIO V60 DRIPPER',
+        'Hario V60 Range server', 'OXO Brew', 'Might Small Glass Carafe',
+        'Wired Wonka',
+      ],
+    },
+  ]
+
+  for (const venue of knownVenueConfigs) {
+    it(`${venue.slug}'s QR prefilled body does not collide with its own menu`, () => {
+      const menu = venue.menuItemNames.map((name) => ({ name }))
+      expect(bodyMentionsMenuItem(venue.qrEnrollmentMessage, menu)).toBe(false)
+    })
+  }
+
+  // Proves the guard has teeth — not green only because nothing collides
+  // today. This is a genuine, unambiguous match (not a boundary-violation
+  // bug like Sana/San Pellegrino, which the fix above now correctly clears)
+  // — a prefilled greeting that literally names a menu item, which is
+  // exactly the class of config error this guard exists to catch.
+  it('fires on a deliberately colliding prefilled body (guard has teeth)', () => {
+    expect(
+      bodyMentionsMenuItem('Welcome! Enjoy a free cortado on us.', [{ name: 'Cortado' }]),
+    ).toBe(true)
+  })
 })
 
 describe('resolveReportedItems (pure resolution)', () => {

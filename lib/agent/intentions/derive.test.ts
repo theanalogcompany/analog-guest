@@ -189,3 +189,59 @@ describe('applyCurrentTurnSuppression', () => {
     expect(bothOpen).toEqual(copy)
   })
 })
+
+// TAC-326: regression corpus at the level where the production symptom
+// actually appeared — the real, unmocked bodyMentionsMenuItem (this file
+// imports applyCurrentTurnSuppression, which imports bodyMentionsMenuItem
+// directly from lib/agent/extract-reported-order.ts; nothing here stubs it
+// out), not just the isolated unit. This is the corpus that would have
+// caught the production bug, not merely the fix.
+describe('applyCurrentTurnSuppression — real-word-collision regression corpus (TAC-326)', () => {
+  const bothOpen: OpenIntention[] = [
+    { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
+    { key: 'invite_contact_save', promptLine: "You haven't told them to save your number." },
+  ]
+
+  it('"Hi Sana!" against a menu containing San Pellegrino does not suppress learn_first_order (the production symptom)', () => {
+    const menu = [{ name: 'San Pellegrino' }]
+    const result = applyCurrentTurnSuppression(bothOpen, 'Hi Sana!', menu)
+    expect(result.map((o) => o.key)).toContain('learn_first_order')
+  })
+
+  it('"nice, thanks" against a menu containing Hibiscus Ice Tea does not suppress learn_first_order (the realistic recurring trigger)', () => {
+    const menu = [{ name: 'Hibiscus Ice Tea' }]
+    const result = applyCurrentTurnSuppression(bothOpen, 'nice, thanks', menu)
+    expect(result.map((o) => o.key)).toContain('learn_first_order')
+  })
+
+  // Known gap, NOT a pass: "san" is a genuinely, correctly-boundaried
+  // standalone word in "San Francisco" — there's no boundary violation for
+  // bodyContainsWord to catch, unlike the Sana/nice cases above. Closing
+  // this needs a distinctiveness/granularity model for multi-word menu
+  // names (does "san" alone mean "San Pellegrino"?), not a matching-
+  // precision fix, and is deliberately deferred per TAC-326's plan. Accepted
+  // because suppression is turn-scoped: this costs one turn's rendering, not
+  // the intention itself — learn_first_order derives open again on the next
+  // turn that doesn't also collide.
+  //
+  // If you're tempted to make this test pass, the tempting fixes are NOT a
+  // loosened boundary check (bodyContainsWord is already correct here — the
+  // match IS correctly boundaried) but one of: requiring the full menu-name
+  // phrase, requiring >=2 significant words for multi-word names, or raising
+  // the standalone-match length floor above 3. Each of those was checked
+  // against the existing suite during TAC-326's plan review and each breaks
+  // an existing, deliberately-shipped single-word match: "ginger" alone must
+  // still match "Wild Wonder Peach Ginger" (bodyMentionsMenuItem's own test
+  // suite), "cortado" alone must still match the slash-alternate-names
+  // "Gibraltar / Cortado", and "v60" is exactly 3 characters so any raised
+  // floor that excludes "san" excludes it too. Don't add one of these three
+  // without re-opening TAC-326's granularity discussion first. This test
+  // asserts CURRENT behavior so a future change to the matcher that
+  // accidentally starts passing this gets noticed and re-evaluated
+  // deliberately, not silently.
+  it('a "San Francisco" mention against a menu containing San Pellegrino still suppresses learn_first_order today (known, deferred gap)', () => {
+    const menu = [{ name: 'San Pellegrino' }]
+    const result = applyCurrentTurnSuppression(bothOpen, 'anyone been to San Francisco', menu)
+    expect(result.map((o) => o.key)).not.toContain('learn_first_order')
+  })
+})
