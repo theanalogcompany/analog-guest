@@ -110,6 +110,41 @@ function extractSignificantWords(name: string): string[] {
   return [...withSingularVariants]
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// TAC-326: boundary-checked word match, not raw substring containment. The
+// leading side always requires a real boundary; the trailing side allows a
+// real boundary OR exactly one recognized plural suffix (s/es — the SAME
+// suffix vocabulary extractSignificantWords already uses for its own
+// de-pluralization above, not a new concept) then a boundary. Boundary is
+// "not a-z0-9", matching extractSignificantWords' own split regex exactly,
+// so hyphen and apostrophe count as boundaries on both sides ("cold-brew"
+// and "latte's" both still match correctly). Deliberately NOT the native
+// `\b` anchor used in lib/agent/comp-backstop.ts and
+// lib/agent/complaint-floor.ts: `\b` treats underscore as a word character
+// (no boundary at "_"), which would disagree with extractSignificantWords'
+// `[^a-z0-9]+` splitter treating underscore as a separator. Unlikely to
+// matter on real menu/message text, but the explicit class keeps this
+// function's notion of "boundary" identical to the tokenizer's, rather than
+// two subtly different definitions in the same file.
+//
+// This is what stops "san" (from "San Pellegrino") matching inside "Sana",
+// or "ice" (from "Hibiscus Ice Tea") matching inside "nice" — both were live
+// production false positives (TAC-326) where a menu-derived word was a
+// strict prefix of a longer, unrelated word. It does NOT stop a menu word
+// that is a genuinely separate, correctly-boundaried word elsewhere with a
+// different meaning ("san" inside "San Francisco") — that is a distinct,
+// larger problem (single-word matching on a multi-word proper noun) and is
+// deliberately deferred; see TAC-326's plan for why narrowing that is unsafe
+// to bundle here (it breaks existing, deliberately-shipped single-word
+// matches like "ginger" alone for "Wild Wonder Peach Ginger").
+function bodyContainsWord(normalizedBody: string, word: string): boolean {
+  const escaped = escapeRegExp(word)
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:es|s)?(?:$|[^a-z0-9])`).test(normalizedBody)
+}
+
 /**
  * Pure prefilter: does the inbound body mention any of the venue's menu item
  * names? Matches on individual significant WORDS drawn from each menu name,
@@ -118,9 +153,27 @@ function extractSignificantWords(name: string): string[] {
  * "cortado" or "oat cortado", and 47 of Mock Sextant's 69 menu items are
  * multi-word (confirmed against production data in UAT). Matching on the
  * whole name here was a real bug, not an accepted tradeoff — it left the
- * feature effectively dead for the majority of real menu items. Substring-
- * containment (not exact word-boundary matching) on both sides is still the
- * mechanism at the word level: "cortados" (plural) still contains "cortado".
+ * feature effectively dead for the majority of real menu items. Word-level
+ * matching uses `bodyContainsWord` (boundary-checked, TAC-326) rather than
+ * raw substring containment: "cortados" (plural) still contains "cortado"
+ * via the allowed plural-suffix tail, but "sana" no longer contains "san".
+ *
+ * ASYMMETRY — read before tuning this function further. Its two callers want
+ * opposite things from a wrong answer:
+ *   - extractReportedOrder (this file, TAC-323) tolerates a false positive:
+ *     it costs one wasted Haiku call that correctly returns zero items. It
+ *     is hurt by a false negative: that silently kills order extraction for
+ *     that message, permanently, with no second chance.
+ *   - applyCurrentTurnSuppression (lib/agent/intentions/derive.ts, TAC-324)
+ *     is the reverse. A false positive there silently drops the
+ *     "## What you're hoping to get to" line for learn_first_order on the
+ *     exact turn it exists to cover, with nothing to signal that it
+ *     happened. A false negative there just means the block renders on a
+ *     turn where it maybe didn't strictly need to — redundant, not harmful.
+ * Any future change to this function should move in the direction of fewer
+ * false positives, even at the cost of occasionally more false negatives —
+ * that trade helps the suppression caller and only mildly costs the
+ * extractor (one more wasted call), never the reverse.
  */
 export function bodyMentionsMenuItem(
   body: string,
@@ -129,7 +182,7 @@ export function bodyMentionsMenuItem(
   const normalizedBody = stripDiacritics(normalizeMenuItemName(body))
   if (normalizedBody.length === 0) return false
   return menuItems.some((item) =>
-    extractSignificantWords(item.name).some((word) => normalizedBody.includes(word)),
+    extractSignificantWords(item.name).some((word) => bodyContainsWord(normalizedBody, word)),
   )
 }
 
