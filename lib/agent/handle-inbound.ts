@@ -25,6 +25,7 @@ import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
   classifyStage,
+  computeFirstTouchAfterQrScan,
   findPendingDraft,
   generateStage,
   isKnowledgeGapCard,
@@ -952,7 +953,25 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       // never calls the classifier. Uses the SENT body, not the drafted one —
       // this only ever fires on the 'sent' path, never queued/dropped/refused,
       // because those bodies never reached the guest.
-      if (ctx.openIntentions.length > 0) {
+      //
+      // TAC-332: ALSO gated on !computeFirstTouchAfterQrScan — the true
+      // opener turn, on which both intentions are freshly open, can never
+      // legitimately raise one: the opener block instructs the model to
+      // greet + ask newness, never order, so running the classifier against
+      // that turn's sent body can only produce a correct negative or a
+      // destructive false positive, never a true positive. Reuses the same
+      // flag that drives R1's carve-out and the opener paragraph itself
+      // (computeFirstTouchAfterQrScan, lib/agent/stages.ts) rather than a
+      // new turn-index check, so "is this the opener turn" can't silently
+      // diverge between what renders the opener and what's allowed to
+      // record against it. This closes the case-3 class of false positive
+      // (learn_first_order recorded against the opener) by construction —
+      // the classifier is never even called on that turn, not merely less
+      // likely to misfire.
+      if (
+        ctx.openIntentions.length > 0 &&
+        !computeFirstTouchAfterQrScan(ctx, ctx.recognition.computedAt)
+      ) {
         waitUntil(
           recordIntentionPrompts({
             venueId: ctx.venue.id,
