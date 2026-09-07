@@ -434,7 +434,44 @@
 //    right now or how the venue placed its sign. `UNIVERSAL_RULES_DISPLAY`'s
 //    R1 summary moves in lockstep per the Voices command-center coupling
 //    rule.
-export const PROMPT_VERSION = 'v1.34.0'
+//
+// v1.35.0 (TAC-330): fixes the turn TAC-329's own UAT list named as the next
+// beat — guest replies "first time!" to Sana's opener, and instead of
+// following up on the order, Sana recommended a drink. Two independent
+// causes, both fixed:
+//
+// 1. `lib/ai/prompts/serializers.ts`'s `formatOpenIntentions` non-steering
+//    paragraph is symmetric — it had no way to distinguish the guest raising
+//    their own topic from the guest replying to something Sana herself just
+//    asked. A bounded exception is appended (the original four sentences
+//    stay byte-identical): when Sana's own last message asked the guest
+//    something about themselves (new vs. regular) and the reply answers it,
+//    following up is not a pivot, it's continuing the exchange she started.
+//    Deliberately narrower than "Sana's last message was any question" —
+//    plan review caught that condition licensing a pivot after almost any
+//    exchange (a parking Q&A closing with "you heading in soon?" would have
+//    qualified), which is close to the exact TAC-324 pivot the paragraph
+//    exists to prevent. See the serializers.ts comment above
+//    `formatOpenIntentions` for the full reasoning and the residual risk
+//    that's accepted rather than solved (the exemplar carries the
+//    narrowing, not a crisp category boundary).
+// 2. `venue_configs.venue_info` for Mock Sextant had the model's own
+//    recommendation source: `menu.notes` and `menu.highlights` phrased the
+//    owner's first-timer pick as an imperative addressed to the persona
+//    ("don't over-program the first visit, let them meet the Maiden Voyage
+//    in something familiar") rather than an attributed fact. An imperative
+//    in the prompt beats a goal that invites judgement — Sana didn't weigh
+//    the note against the intention, she followed it. Rewritten to
+//    indicative, attributed form; nothing dropped, the owner's pick still
+//    survives as knowledge Sana holds. Three more instances of the identical
+//    pattern found auditing the rest of the column (`hours.notes` and two
+//    `menu.items[].description` fields) fixed the same way, conservatively —
+//    preserving the informational content ("the bar knows what's currently
+//    loaded"), not just stripping the imperative. This is a live data
+//    UPDATE, not a code change — no migration, `venue_info`'s shape is
+//    unchanged. The extractor that produced the imperative mood in the
+//    first place is out of scope here; TAC-331 owns it.
+export const PROMPT_VERSION = 'v1.35.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
