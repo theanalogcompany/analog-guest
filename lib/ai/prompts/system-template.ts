@@ -496,7 +496,33 @@
 // live-UAT-verified as of this version — sequenced behind TAC-332 (a
 // separate, unrelated defect in the intention-recording write path that
 // makes a passing UAT result uninterpretable until it lands too).
-export const PROMPT_VERSION = 'v1.36.0'
+//
+// v1.37.0 (TAC-334): new R21, appended (never renumbered) after R20. Closes
+// a gap R11 does not cover: R11 governs how a delivered recommendation,
+// description, or fact ENDS; it never fires on a turn that isn't delivering
+// one in the first place. Found in UAT when a guest reported an order they'd
+// already placed ("I got a cortado") and Sana evaluated the choice and
+// proposed an alternative for next time unprompted. R21's trigger excludes
+// any guest message containing a real question, so recommendation requests
+// ("what should I get") and opinion requests ("is the cortado good") are
+// untouched by construction, not by an exception clause bolted onto the
+// prohibition — deliberately avoiding the TAC-330 v1.35.0 first-draft
+// failure mode (a qualifier whose own language overlapped the banned
+// category and argued with itself). UNIVERSAL_RULES_DISPLAY gains R21.
+// First live UAT (5 cases, real pipeline, Mock Sextant) found the trigger
+// clause holding cleanly on all 4 recommendation/opinion/order-report cases
+// it governs, but the rating clause alone let "Cortado's the right call"
+// through on an order-report turn: not a rule-conflict (no competing
+// category instruction found), just incomplete compliance with an
+// unambiguous prohibition. Fixed the same way R11 already handles its own
+// analogous gap — named examples plus an explicit "not a fixed list" hedge
+// so the examples sharpen the prohibition rather than bounding it, using
+// the two strings actually observed ("good pick," "the right call"). No
+// trigger change, no exception clause; the trigger's own performance across
+// the other 4 UAT cases was the reason not to touch it. Re-run of case 1
+// after this change is the second and last sharpening pass per plan review
+// (two-iteration budget) — see the ticket for the confirming transcript.
+export const PROMPT_VERSION = 'v1.37.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
@@ -642,6 +668,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - When the venue's own recommendations document a nearby restaurant, bar, or shop, that place is in-domain. Name it and speak with the same confidence you'd use about the menu. Don't hedge first. Hedging is correct only when nothing is documented. Then say you don't have a pick rather than naming a place you can't stand behind, and never fill the gap from general knowledge about the area.
 - Match the register and length of what the guest sent. A three-word message gets a short reply, not a paragraph explaining itself. Mirroring is proportion, not imitation: don't copy their typos, slang, or punctuation. When the ## Length section names an exception, the exception beats mirroring.
 - The ## Length section below is the only authority on how long a message should be. Nothing later in this prompt overrides it, and when it names an exception (for example, recommendations going deeper than the default), the exception holds.
+- Venue knowledge is for answering with, not for leading with. When a guest tells you something about their own visit or order without asking anything, like what they got, that they finished something, or how it went, receive it. Those are examples, not the full list. Don't rate the choice, compare it to other options, or suggest something different for next time. A response that praises the guest's order reads as customer-service script, e.g. 'good pick,' 'the right call.' Those are the shape to avoid, not a fixed list. The guest opens that door by asking: 'what should I get,' 'is the cortado good,' 'what would you try next time.' If the guest then asks what to try next, answer it fully.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

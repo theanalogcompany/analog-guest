@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.36.0 (TAC-330 case 2: acknowledgment no longer vetoes goal state)', () => {
-    expect(PROMPT_VERSION).toBe('v1.36.0')
+  it('is v1.37.0 (TAC-334: new R21, no volunteered advice on an unprompted guest statement)', () => {
+    expect(PROMPT_VERSION).toBe('v1.37.0')
   })
 })
 
@@ -51,17 +51,17 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // R19-R20 are the undisplayed form-authority bullets. So the displayed
     // sequence has a deliberate gap. The old assertion here demanded
     // contiguity, which would have forced exactly the renumbering the policy
-    // forbids.
+    // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
-      'R17', 'R18',
+      'R17', 'R18', 'R21',
     ])
   })
 
-  it('curates 13 rules ending at R18 (TAC-319 retired R12)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(13)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R18')
+  it('curates 14 rules ending at R21 (TAC-334)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(14)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R21')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -90,6 +90,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
       "speak with the same confidence you'd use about the menu",
     )
     expect(SYSTEM_TEMPLATE).toContain('never fill the gap from general knowledge')
+  })
+
+  it('shares the R21 anchor phrase across both sources (TAC-334)', () => {
+    const r21 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R21')
+    expect(r21).toBeDefined()
+    expect(r21?.summary).toContain('answering with, not for leading with')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Venue knowledge is for answering with, not for leading with',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't rate the choice, compare it to other options, or suggest something different for next time",
+    )
   })
 
   // TAC-324, added per QA suggestion: R1's overall summary is a paraphrase
@@ -735,5 +747,77 @@ describe('SYSTEM_TEMPLATE — splitting removed from the prompt (TAC-319, v1.31.
     expect(SYSTEM_TEMPLATE).not.toContain('Frosty Gandhi')
     expect(SYSTEM_TEMPLATE).toContain('When delivering a recommendation, a description, or a fact')
     expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message')
+  })
+})
+
+// R21 (TAC-334): closes a gap R11 does not cover. R11 governs how a
+// delivered recommendation, description, or fact ENDS; it never fires on a
+// turn that isn't delivering one in the first place. R21's trigger is
+// scoped to a guest statement containing no question, so a recommendation
+// request or opinion request never reaches the prohibition — by construction
+// of the trigger clause, not by an exception bolted onto it (the TAC-330
+// first-draft failure mode this rule deliberately avoids).
+describe('SYSTEM_TEMPLATE — R21: no volunteered advice on an unprompted guest statement (TAC-334)', () => {
+  it('states venue knowledge is for answering with, not leading with', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Venue knowledge is for answering with, not for leading with',
+    )
+  })
+
+  it('scopes the trigger to a guest statement made without asking anything', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When a guest tells you something about their own visit or order without asking anything',
+    )
+  })
+
+  it('frames the trigger examples as illustrative, not exhaustive', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'like what they got, that they finished something, or how it went',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Those are examples, not the full list')
+  })
+
+  it('prohibits rating, comparing, or proposing an alternative', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't rate the choice, compare it to other options, or suggest something different for next time",
+    )
+  })
+
+  // First live UAT (Mock Sextant) found the trigger clause holding cleanly
+  // but the rating clause alone letting "Cortado's the right call" through
+  // on an order-report turn. Sharpened with named examples + a "not a fixed
+  // list" hedge, the same construction R11 already uses for its own closer
+  // examples, using the two strings actually observed rather than invented
+  // ones.
+  it('names the observed rating phrases as the shape to avoid, not a fixed banlist (post-UAT sharpening)', () => {
+    expect(SYSTEM_TEMPLATE).toContain('good pick')
+    expect(SYSTEM_TEMPLATE).toContain('the right call')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A response that praises the guest's order reads as customer-service script",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+  })
+
+  it('names the door-opening questions the trigger excludes (overcorrection guard)', () => {
+    expect(SYSTEM_TEMPLATE).toContain("'what should I get,'")
+    expect(SYSTEM_TEMPLATE).toContain("'is the cortado good,'")
+    expect(SYSTEM_TEMPLATE).toContain("'what would you try next time.'")
+  })
+
+  it('answers a genuine next-time question in full (UAT case 4 anchor)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If the guest then asks what to try next, answer it fully',
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    // R21 is the last bullet in the block, so slice to the next heading
+    // rather than "the next rule" as prior per-rule tests do.
+    const start = SYSTEM_TEMPLATE.indexOf('Venue knowledge is for answering with, not for leading with')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const r21Body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(r21Body).not.toMatch(/[—–]/)
   })
 })
