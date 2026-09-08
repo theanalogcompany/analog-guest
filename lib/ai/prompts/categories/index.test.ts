@@ -336,8 +336,9 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     // not pivot... on your own initiative", which picked the wrong axis —
     // raising a held goal is exactly as much "her own initiative" as
     // inventing a topic from nothing. The ban stays plain; the carve-out
-    // lives entirely in the jurisdictional sentence that follows, not in a
-    // qualifier on the ban itself.
+    // that used to follow it in this same string was promoted to universal
+    // R22 (TAC-314 second round) and no longer lives here at all — see the
+    // next test.
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('on your own initiative')
     // Canary against a revert to the pre-TAC-330 absolute phrasing, which had
@@ -345,14 +346,15 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('do not start a new thread')
   })
 
-  it('carries the goal-state jurisdictional carve-out (TAC-330 case 2)', () => {
-    // Scoped to "a goal you're already carrying," not "whatever the rest of
-    // this prompt tells you" — the broad version would have quietly
-    // re-authorized venue_info, the exact content that beat the intention in
-    // case 2. Asserted verbatim: this sentence is load-bearing the same way
-    // the intentions block's own non-steering paragraph is.
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
-      "This is register guidance, how a close should sound, not authority over whether you act on a goal you're already carrying: that call belongs elsewhere, and this line has no say in it.",
+  it('no longer carries the goal-state jurisdictional carve-out locally (promoted to universal R22, TAC-314)', () => {
+    // TAC-330 (case 2) added this sentence here; TAC-314 (second round)
+    // promoted it to SYSTEM_TEMPLATE as R22 because it's a general
+    // prompt-authority rule, not category-specific content — see
+    // compose-prompt.test.ts for the assertion that it renders on every
+    // category, not just this one. Named in the direction that matters: the
+    // sentence must be ABSENT here now that it lives one layer up.
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain(
+      "not authority over whether you act on a goal you're already carrying",
     )
   })
 
@@ -570,14 +572,17 @@ describe('category blocks carry no pursuit authority (TAC-327)', () => {
     expect(FOLLOW_UP_INSTRUCTIONS).toContain('Do not push a return visit explicitly')
   })
 
-  it('acknowledgment still bans an invented pivot, but no longer vetoes goal state (TAC-330)', () => {
+  it('acknowledgment still bans an invented pivot, and no longer vetoes goal state via a promoted universal rule (TAC-330, TAC-314)', () => {
     // No longer a "deliberate keep" — the coincidence it relied on broke
     // (case 2) and was fixed by narrowing. The return-visit ban is untouched
-    // (no current mechanism conflicts with it); the new-topic ban is now
-    // unqualified and jurisdictionally scoped rather than absolute.
+    // (no current mechanism conflicts with it); the new-topic ban is
+    // unqualified. The jurisdictional carve-out that used to sit here was
+    // promoted to universal R22 (TAC-314 second round) — see
+    // compose-prompt.test.ts for the assertion that it now protects EVERY
+    // category, not just this one.
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not push for a return visit')
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain(
       "not authority over whether you act on a goal you're already carrying",
     )
   })
