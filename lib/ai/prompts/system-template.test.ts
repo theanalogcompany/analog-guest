@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.38.0 (TAC-314 second round: new R22, category instructions carry no authority over goal state)', () => {
-    expect(PROMPT_VERSION).toBe('v1.38.0')
+  it('is v1.40.0 (TAC-340: drop forward-commitment guest-example phrasing from two prompt sites)', () => {
+    expect(PROMPT_VERSION).toBe('v1.40.0')
   })
 })
 
@@ -210,6 +210,15 @@ describe('SYSTEM_TEMPLATE — arrivalCapture emission discipline (TAC-302 follow
     expect(SYSTEM_TEMPLATE).toContain('Worked example')
     expect(SYSTEM_TEMPLATE).toContain('ok i\'ll come in tomorrow around 8')
     expect(SYSTEM_TEMPLATE).toContain('even though the heads-up was already asked')
+  })
+
+  it('does not use "see you then" or "see you tomorrow" in the guest-utterance example list (TAC-340)', () => {
+    // Same leak as acknowledgment.ts's guest sign-off list (see that file's
+    // TAC-340 comment): a guest-example string that doubles as a plausible
+    // agent line. Canary against reintroducing it here, not a claim this
+    // block caused the observed incident.
+    expect(SYSTEM_TEMPLATE).not.toContain('see you then')
+    expect(SYSTEM_TEMPLATE).not.toContain('sounds good — see you tomorrow')
   })
 })
 

@@ -362,6 +362,16 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('venue cannot respond')
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('owner is busy')
   })
+
+  it('does not use "see you tomorrow" as a guest sign-off example (TAC-340)', () => {
+    // A v1.38.0 audit turn produced Sana replying "See you tomorrow" to a
+    // guest's "kk thank u!!" with no prior mention of a visit; the literal
+    // phrase sat in this guest-example list, a few words from the
+    // return-visit ban. Co-occurrence, not a proven cause, but cheap to
+    // remove. Canary against reintroducing it, not a claim it was the cause.
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('see you tomorrow')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('"later"')
+  })
 })
 
 describe('unknown instructions — inbound catch-all (v1.10.0)', () => {
