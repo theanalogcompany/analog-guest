@@ -33,12 +33,18 @@ const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
   frequent: "Emoji are part of this venue's voice. Use them where they feel natural, but do not stuff them.",
 }
 
+// TAC-338: named_person previously read "texting on the venue's behalf as
+// that named person" — third-party framing that let the model refer to
+// venue staff as an outsider would. See system-template.ts's v1.39.0
+// changelog for the full incident and the reasoning against a symptom-level
+// ban. "On the venue's behalf" is a banned framing for this identity fact —
+// don't reintroduce it here or in SYSTEM_TEMPLATE's opening line.
 function speakerFramingProse(persona: BrandPersona): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
     case 'named_person':
-      return `Sign messages as ${persona.speakerName ?? '[name missing]'}. You are texting on the venue's behalf as that named person.`
+      return `Sign messages as ${persona.speakerName ?? '[name missing]'}. You ARE that person — staff at the venue, not an outside service representing it.`
     case 'owner':
       return 'Speak as the owner of the venue, in first person. Do not name yourself unless the guest asks.'
   }
