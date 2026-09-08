@@ -6,7 +6,7 @@ import {
   VenueInfoSchema,
 } from '../schemas'
 import { composePrompt } from './compose-prompt'
-import type { GenerateMessageInput, KnowledgeCorpusChunk } from './types'
+import type { GenerateMessageInput, KnowledgeCorpusChunk, MessageCategory } from './types'
 
 function makePersona(): BrandPersona {
   return BrandPersonaSchema.parse({
@@ -90,7 +90,7 @@ describe('composePrompt — knowledge block rendering (TAC-242)', () => {
 // one that passed. The promoted rules must render on ALL of them.
 const UAT_CATEGORIES = ['reply', 'recommendation_request', 'new_question'] as const
 
-function systemPromptFor(category: (typeof UAT_CATEGORIES)[number]): string {
+function systemPromptFor(category: MessageCategory): string {
   return composePrompt(makeInput({ category })).systemPrompt
 }
 
@@ -125,6 +125,22 @@ describe('composePrompt — promoted universal rules render on every category (T
     expect(universalIdx).toBeGreaterThan(-1)
     expect(categoryIdx).toBeGreaterThan(universalIdx)
   })
+
+  // TAC-314 second round: R22 promoted the jurisdictional carve-out sentence
+  // out of acknowledgment.ts (added by TAC-330 case 2) into the universal
+  // layer. The sentence had only ever rendered on `acknowledgment` turns;
+  // the point of promoting it is that it now protects every category from
+  // the same silent-veto failure class TAC-327/TAC-330 found. `acknowledgment`
+  // itself is asserted alongside a category the sentence never used to touch
+  // (`reply`) so a regression that scopes it back to one category fails here.
+  it.each([...UAT_CATEGORIES, 'acknowledgment'] as const)(
+    'goal-state authority carve-out (R22) renders for %s',
+    (category) => {
+      expect(systemPromptFor(category)).toContain(
+        "never authority over whether you act on an open goal from the ## What you're hoping to get to block",
+      )
+    },
+  )
 
   it('the assembled prompt carries no length directive after the category heading', () => {
     // End-to-end statement of the governing principle: whatever renders after

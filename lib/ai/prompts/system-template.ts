@@ -492,10 +492,13 @@
 // nothing. The carve-out is scoped to goal state specifically, not to
 // "whatever the rest of this prompt tells you" — the broad version would
 // have quietly re-authorized `venue_info`, the exact content that won in
-// case 2. See `acknowledgment.ts`'s own comment for the full history. Not
-// live-UAT-verified as of this version — sequenced behind TAC-332 (a
-// separate, unrelated defect in the intention-recording write path that
-// makes a passing UAT result uninterpretable until it lands too).
+// case 2. Not live-UAT-verified as of this version — sequenced behind
+// TAC-332 (a separate, unrelated defect in the intention-recording write
+// path that makes a passing UAT result uninterpretable until it lands too).
+// (The jurisdictional carve-out sentence itself was promoted out of
+// `acknowledgment.ts` to universal R22 in v1.38.0, below — see that entry
+// and CLAUDE.md's "Category instruction layer carries NO form authority
+// (TAC-314)" for what happened to it.)
 //
 // v1.37.0 (TAC-334): new R21, appended (never renumbered) after R20. Closes
 // a gap R11 does not cover: R11 governs how a delivered recommendation,
@@ -522,7 +525,36 @@
 // the other 4 UAT cases was the reason not to touch it. Re-run of case 1
 // after this change is the second and last sharpening pass per plan review
 // (two-iteration budget) — see the ticket for the confirming transcript.
-export const PROMPT_VERSION = 'v1.37.0'
+//
+// v1.38.0 (TAC-314, second round): new R22, appended undisplayed after R21.
+// TAC-330 (case 2) fixed a live failure by adding a jurisdictional carve-out
+// sentence to `acknowledgment.ts`'s no-pivot ban: a category's register
+// guidance is never authority over whether the model acts on an open goal
+// from the intentions block. That sentence asserted a general principle
+// about which layer of the prompt gets to decide pursuit, from inside a
+// single category file — exactly the kind of category-level authority this
+// ticket's governing principle exists to strip, just on the PURSUIT axis
+// (TAC-327) rather than FORM. Promoted here rather than left local because
+// the failure it closes is structural, not `acknowledgment`-specific: any
+// future category block that bans a pivot or scopes a close could
+// reintroduce the same silent veto TAC-327/TAC-330 found, and a universal
+// rule closes the whole class at once instead of requiring the same
+// audit-and-patch cycle per category. The local sentence is deleted from
+// `acknowledgment.ts` as a paired move, not a deletion — same treatment R17
+// (price scoping) got. The ban itself in `acknowledgment.ts` (do not pivot
+// to a new topic, do not push for a return visit, do not turn the closer
+// into a fresh exchange) stays local: that's category-specific content
+// (what a close is), not the jurisdictional part. Undisplayed (same tier as
+// R13-R16) because this is internal authority-arbitration between prompt
+// layers, not operator-facing voice guidance — UNIVERSAL_RULES_DISPLAY is
+// unchanged. A second candidate for the same "policy generalizes" logic —
+// the "don't push a return visit" restraint duplicated across
+// `acknowledgment.ts`, `event-question.ts`, and `follow-up.ts` — was
+// evaluated and deliberately NOT promoted: `comp-complaint.ts`'s approved
+// default remedy is explicitly a return-visit invitation, so a universal
+// ban would contradict the one category that most needs to make it. Stays
+// local in all three files, unchanged.
+export const PROMPT_VERSION = 'v1.38.0'
 
 export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
 
@@ -669,6 +701,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - Match the register and length of what the guest sent. A three-word message gets a short reply, not a paragraph explaining itself. Mirroring is proportion, not imitation: don't copy their typos, slang, or punctuation. When the ## Length section names an exception, the exception beats mirroring.
 - The ## Length section below is the only authority on how long a message should be. Nothing later in this prompt overrides it, and when it names an exception (for example, recommendations going deeper than the default), the exception holds.
 - Venue knowledge is for answering with, not for leading with. When a guest tells you something about their own visit or order without asking anything, like what they got, that they finished something, or how it went, receive it. Those are examples, not the full list. Don't rate the choice, compare it to other options, or suggest something different for next time. A response that praises the guest's order reads as customer-service script, e.g. 'good pick,' 'the right call.' Those are the shape to avoid, not a fixed list. The guest opens that door by asking: 'what should I get,' 'is the cortado good,' 'what would you try next time.' If the guest then asks what to try next, answer it fully.
+- A category instruction's register guidance (how a close, decline, or answer should sound) is never authority over whether you act on an open goal from the ## What you're hoping to get to block; that call belongs to that block alone.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

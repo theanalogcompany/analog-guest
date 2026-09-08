@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.37.0 (TAC-334: new R21, no volunteered advice on an unprompted guest statement)', () => {
-    expect(PROMPT_VERSION).toBe('v1.37.0')
+  it('is v1.38.0 (TAC-314 second round: new R22, category instructions carry no authority over goal state)', () => {
+    expect(PROMPT_VERSION).toBe('v1.38.0')
   })
 })
 
@@ -811,13 +811,51 @@ describe('SYSTEM_TEMPLATE — R21: no volunteered advice on an unprompted guest 
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    // R21 is the last bullet in the block, so slice to the next heading
-    // rather than "the next rule" as prior per-rule tests do.
+    // R21 was the last bullet in the block when this test was written; R22
+    // (TAC-314 second round) now sits between it and the next heading, so
+    // this range also covers R22's body. That's fine for this assertion —
+    // R3 self-consistency should hold across the whole tail, not just R21.
     const start = SYSTEM_TEMPLATE.indexOf('Venue knowledge is for answering with, not for leading with')
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
-    const r21Body = SYSTEM_TEMPLATE.slice(start, end)
-    expect(r21Body).not.toMatch(/[—–]/)
+    const tailBody = SYSTEM_TEMPLATE.slice(start, end)
+    expect(tailBody).not.toMatch(/[—–]/)
+  })
+})
+
+// R22 (TAC-314, second round): promoted from acknowledgment.ts's TAC-330
+// case-2 carve-out sentence. The principle — a category's register guidance
+// is never authority over whether the model acts on an open intention — is
+// general, not acknowledgment-specific, so it moved to the universal layer
+// where it protects every category rather than just the one it was first
+// observed failing on. Undisplayed (same tier as R13-R16): this is
+// prompt-layer authority arbitration, not operator-facing voice guidance.
+describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-state authority (TAC-314)', () => {
+  it('states the jurisdictional boundary between register guidance and goal-pursuit authority', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A category instruction's register guidance (how a close, decline, or answer should sound) is never authority over whether you act on an open goal from the ## What you're hoping to get to block; that call belongs to that block alone.",
+    )
+  })
+
+  it('names the intentions block by its rendered heading, not a paraphrase', () => {
+    // Matches formatOpenIntentions's actual header string (serializers.ts) so
+    // the two can't silently drift if the block is ever renamed.
+    expect(SYSTEM_TEMPLATE).toContain("## What you're hoping to get to")
+  })
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r22Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
+    const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
+    // Exactly one bullet line, then nothing but whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  })
+
+  it('is undisplayed: UNIVERSAL_RULES_DISPLAY still ends at R21', () => {
+    expect(UNIVERSAL_RULES_DISPLAY.some((r) => r.id === 'R22')).toBe(false)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R21')
   })
 })
