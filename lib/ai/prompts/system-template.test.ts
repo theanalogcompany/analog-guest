@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.38.0 (TAC-314 second round: new R22, category instructions carry no authority over goal state)', () => {
-    expect(PROMPT_VERSION).toBe('v1.38.0')
+  it('is v1.39.0 (TAC-338: identity framing fix, "on the venue\'s behalf" removed)', () => {
+    expect(PROMPT_VERSION).toBe('v1.39.0')
   })
 })
 
