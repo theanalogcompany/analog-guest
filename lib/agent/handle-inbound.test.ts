@@ -410,7 +410,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.39.0',
+    promptVersion: 'v1.40.0',
     dashViolationPersisted: false,
   }
 }

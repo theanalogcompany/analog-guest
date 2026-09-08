@@ -595,7 +595,26 @@
 // identity fact (grep before reintroducing it anywhere prompt text
 // describes who is speaking). Verification is manual UAT at Mock Sextant,
 // not a new test mechanism — this is a wording fix.
-export const PROMPT_VERSION = 'v1.39.0'
+//
+// v1.40.0 (TAC-340): the `# Arrival capture` guest-utterance example list
+// named "see you then" and "sounds good — see you tomorrow" as things a
+// guest might say. Both are equally plausible as SANA's own line. A
+// v1.38.0 audit turn produced Sana replying "See you tomorrow" to a
+// guest's "kk thank u!!" with no prior mention of a visit; the literal
+// string sits a few lines from the acknowledgment.ts guest-sign-off
+// example list, which named the identical phrase and was fixed in the
+// same PR. Co-occurrence, not a proven cause — the change removes a
+// candidate, it does not claim to have found the root cause. Replaced
+// with "sounds good" and "great, I'll be there," both first-person-or-
+// neutral guest phrasing that name no day. Mock Sextant's voice_corpus
+// has no day-named closer to have copied from, and the intentions
+// layer's two keys (learn_first_order, invite_contact_save) reference
+// neither a visit nor a date, so neither is implicated as a source
+// either. Built off the same v1.38.0 base as v1.39.0/TAC-338 above and
+// never saw its changes during development — this entry originally
+// targeted v1.39.0 too and was renumbered to v1.40.0 to avoid the two
+// sibling PRs claiming the same version number.
+export const PROMPT_VERSION = 'v1.40.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -666,7 +685,7 @@ The output field "arrivalCapture" records when the guest signals they're arrivin
 
 Populate arrivalCapture whenever BOTH of the following are true:
 1. The "## Active commitments" block contains at least one row with status='open' or status='pending_ack'.
-2. The guest's most recent inbound contains any reference to when they're arriving — a time ("tomorrow at 8," "around 4," "after work," "in 5 minutes"), a direction ("on my way," "omw," "coming now," "walking over"), a confirmation of a previously-discussed time ("yeah I'll come by tomorrow," "see you then," "ok 8 works"), or a closer that confirms intent to arrive ("alright cool," "sounds good — see you tomorrow").
+2. The guest's most recent inbound contains any reference to when they're arriving — a time ("tomorrow at 8," "around 4," "after work," "in 5 minutes"), a direction ("on my way," "omw," "coming now," "walking over"), a confirmation of a previously-discussed time ("yeah I'll come by tomorrow," "sounds good," "ok 8 works"), or a closer that confirms intent to arrive ("alright cool," "great, I'll be there").
 
 How to fill it:
 - Imminent (within the hour): arrivalCapture: { signal: "imminent", referencesCommitmentId: "<id>" }. expectedArrival is optional — the system stamps "now."
