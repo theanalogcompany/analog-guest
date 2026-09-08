@@ -1164,6 +1164,42 @@ describe('personaToProse — voice anti-patterns', () => {
   })
 })
 
+// TAC-338: the named_person branch previously read "texting on the venue's
+// behalf as that named person" — third-party framing that let the model
+// refer to venue staff as an outsider would (observed: "tell them Sana said
+// to try the cortado"). Only named_person had zero coverage before this;
+// venue/owner are untouched by the fix and stay unbackfilled per scope.
+describe('personaToProse — speaker framing (TAC-338)', () => {
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  it('named_person: signs with speakerName and states staff identity, not "on the venue\'s behalf"', () => {
+    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const out = personaToProse(persona)
+    expect(out).toContain('Sign messages as Sana')
+    expect(out).toContain('You ARE that person')
+    expect(out).not.toMatch(/on the venue's behalf/)
+  })
+
+  it('named_person: falls back to "[name missing]" when speakerName is absent', () => {
+    // speakerName is schema-required whenever speakerFraming is
+    // 'named_person' (BrandPersonaSchema's .refine), so this exercises the
+    // serializer's own defensive fallback directly rather than going through
+    // a persona shape the schema would reject.
+    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const out = personaToProse({ ...persona, speakerName: undefined })
+    expect(out).toContain('Sign messages as [name missing]')
+  })
+})
+
 // PR-C: `## Critique to incorporate` block fires only when the regen path
 // passes runtime.critiqueToIncorporate. Production agent runs never set
 // this. The block sits above `## Right now` so the model treats it as the

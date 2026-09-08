@@ -555,31 +555,75 @@
 // ban would contradict the one category that most needs to make it. Stays
 // local in all three files, unchanged.
 //
-// v1.40.0 (TAC-340; jumps from v1.38.0 — v1.39.0 is claimed by the
-// not-yet-merged TAC-338 branch cut from this same commit, so bumping to it
-// here would collide at merge time): the `# Arrival capture` guest-utterance
-// example list named "see you then" and "sounds good — see you tomorrow" as
-// things a guest might say. Both are equally plausible as SANA's own line.
-// A v1.38.0 audit turn produced Sana replying "See you tomorrow" to a
+// v1.39.0 (TAC-338): identity framing fix. The prompt never stated that the
+// agent works at the venue. The opening line said "messaging agent
+// representing a hospitality venue... on the venue's behalf," and the
+// speakerFraming='named_person' branch of speakerFramingProse
+// (lib/ai/prompts/serializers.ts) said "texting on the venue's behalf as
+// that named person." Both are literally third-party, agent-for-hire
+// framing. Found in a 20-turn voice audit at Mock Sextant (v1.38.0): Sana
+// (named_person, speakerName='Sana') told a guest "come in and tell them
+// Sana said to try the cortado first" — venue staff as "them" excluding
+// herself, and herself by name in the third person, in one sentence.
+//
+// Root cause was the misstatement itself, not a missing prohibition, and the
+// fix is scoped to that: remove "on the venue's behalf," state plainly that
+// the agent works at the venue. Explicit bans on the two observed symptoms
+// (third-person self-reference, "them" excluding self) were considered and
+// deliberately rejected in plan review — the same technique hit its ceiling
+// in R21 (TAC-334, "good pick" / "the right call" named but "good call"
+// still got through), and a "them" ban would misfire on ordinary, correct
+// staff speech ("Kinani will have it ready, ask him at the counter"). A
+// prohibition gets added later, with UAT evidence, only if a symptom
+// survives this fix.
+//
+// Two legitimate speakerFraming='named_person' deployments exist and
+// BrandPersonaSchema doesn't distinguish them: a real staff member replying
+// as themselves, and a fictional persona standing in for a real role (Sana,
+// a maître d', is the latter). Both are "you work here" and the fix text is
+// written to hold for either without needing to know which applies — no new
+// schema field. Also resolved in plan review: voiceName
+// (BrandPersonaSchema, Command-Center display label only) is confirmed NEVER
+// rendered into the prompt, but the model is not anonymous — speakerName is
+// the separate field speakerFramingProse actually renders ("Sign messages
+// as ${speakerName}"), so the third-person slip was never a missing-name
+// problem. The other two speakerFraming branches ('venue': "speak as the
+// venue itself"; 'owner': "speak as the owner... in first person") were
+// already unambiguous insiders and are unchanged.
+//
+// "On the venue's behalf" is now a banned framing repo-wide for this
+// identity fact (grep before reintroducing it anywhere prompt text
+// describes who is speaking). Verification is manual UAT at Mock Sextant,
+// not a new test mechanism — this is a wording fix.
+//
+// v1.40.0 (TAC-340): the `# Arrival capture` guest-utterance example list
+// named "see you then" and "sounds good — see you tomorrow" as things a
+// guest might say. Both are equally plausible as SANA's own line. A
+// v1.38.0 audit turn produced Sana replying "See you tomorrow" to a
 // guest's "kk thank u!!" with no prior mention of a visit; the literal
-// string sits a few lines from the acknowledgment.ts guest-sign-off example
-// list, which named the identical phrase and was fixed in the same PR.
-// Co-occurrence, not a proven cause — the change removes a candidate, it
-// does not claim to have found the root cause. Replaced with "sounds good"
-// and "great, I'll be there," both first-person-or-neutral guest phrasing
-// that name no day. Mock Sextant's voice_corpus has no day-named closer to
-// have copied from, and the intentions layer's two keys (learn_first_order,
-// invite_contact_save) reference neither a visit nor a date, so neither is
-// implicated as a source either.
+// string sits a few lines from the acknowledgment.ts guest-sign-off
+// example list, which named the identical phrase and was fixed in the
+// same PR. Co-occurrence, not a proven cause — the change removes a
+// candidate, it does not claim to have found the root cause. Replaced
+// with "sounds good" and "great, I'll be there," both first-person-or-
+// neutral guest phrasing that name no day. Mock Sextant's voice_corpus
+// has no day-named closer to have copied from, and the intentions
+// layer's two keys (learn_first_order, invite_contact_save) reference
+// neither a visit nor a date, so neither is implicated as a source
+// either. Built off the same v1.38.0 base as v1.39.0/TAC-338 above and
+// never saw its changes during development — this entry originally
+// targeted v1.39.0 too and was renumbered to v1.40.0 to avoid the two
+// sibling PRs claiming the same version number.
 export const PROMPT_VERSION = 'v1.40.0'
 
-export const SYSTEM_TEMPLATE = `You are a messaging agent representing a hospitality venue (cafe, bakery, restaurant). You communicate with the venue's guests via iMessage, on the venue's behalf.
+export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
 # Core principles
 - This is recognition, not loyalty. Guests do not "earn" things from you. They get recognized as people.
 - The voice you speak in belongs to the venue, not to you. Match it faithfully.
 - Never sound like a punch card, a marketing email, or a corporate brand. No exclamation-stuffed enthusiasm, no "Hey there!", no calls-to-action.
-- Sound like the venue's owner or named staff member would actually text. Short, native, human.
+- You work here. Depending on how this venue is configured below, you are its owner, a named staff member, or the venue's own collective voice. That named staff member may be a real person replying as themselves, or a persona standing in for a role that isn't a specific real individual (a maître d', for instance) — either way, you are staff, not an outside assistant, concierge, or intermediary representing the venue from outside it.
+- Sound like whichever of those would actually text: short, native, human.
 
 # Output expectations
 - Plain text suitable for iMessage. No HTML, no markdown formatting in the message body, no headers or bullet points.
