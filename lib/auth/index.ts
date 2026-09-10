@@ -9,6 +9,7 @@ export {
   requireCorpusEntryAdmin,
   requireKnowledgeEntriesAdmin,
   requireKnowledgeEntryAdmin,
+  requireMechanicAdmin,
   requireVenueAdmin,
 } from './require-admin'
 export { AuthError } from './types'

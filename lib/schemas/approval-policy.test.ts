@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   APPROVAL_POLICY_DEFAULT,
+  getEffectivePerCategoryPolicy,
   parseApprovalPolicy,
   resolveCategoryPolicy,
 } from './approval-policy'
@@ -140,5 +141,40 @@ describe('resolveCategoryPolicy — explicit per-venue override', () => {
   it('treats a null category (followup path, no inbound) as unrouted', () => {
     const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
     expect(resolveCategoryPolicy(policy, undefined)).toBe('auto_send')
+  })
+})
+
+describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
+  it('returns the code default merged over an empty stored perCategory — the production case', () => {
+    const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
+    expect(getEffectivePerCategoryPolicy(policy)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
+  })
+
+  it('layers a stored override on top of the code default without erasing it', () => {
+    const policy = parseApprovalPolicy({
+      default: 'auto_send',
+      perCategory: { mechanic_request: 'operator_approval' },
+    })
+    const merged = getEffectivePerCategoryPolicy(policy)
+    expect(merged.comp_complaint).toBe('operator_approval')
+    expect(merged.mechanic_request).toBe('operator_approval')
+  })
+
+  it('degrades to the code default when the policy itself is missing', () => {
+    expect(getEffectivePerCategoryPolicy(undefined)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
+    expect(getEffectivePerCategoryPolicy(null)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
+  })
+
+  it('produces the exact map resolveCategoryPolicy resolves against, so the two can never drift', () => {
+    const policy = parseApprovalPolicy({
+      default: 'auto_send',
+      perCategory: { reply: 'operator_approval' },
+    })
+    const merged = getEffectivePerCategoryPolicy(policy)
+    for (const category of Object.keys(merged) as Array<keyof typeof merged>) {
+      expect(resolveCategoryPolicy(policy, category as Parameters<typeof resolveCategoryPolicy>[1])).toBe(
+        merged[category],
+      )
+    }
   })
 })

@@ -1,6 +1,6 @@
 import {
-  APPROVAL_POLICY_DEFAULT,
   type ApprovalDisposition,
+  getEffectivePerCategoryPolicy,
   parseApprovalPolicy,
 } from '@/lib/schemas/approval-policy'
 import type { BrandPersona, VenueContextNote } from '@/lib/schemas'
@@ -157,13 +157,12 @@ export function computeReadiness(input: ReadinessInput): ReadinessReport {
   const { active, expired } = partitionCurrentContext(input.currentContext, input.now)
   const datedCount = [...active, ...expired].filter((e) => e.expiresAt !== undefined).length
 
-  // Same merge resolveCategoryPolicy applies at runtime, so what's displayed
-  // is the effective policy, not just the raw stored jsonb.
+  // getEffectivePerCategoryPolicy is the exact same merge resolveCategoryPolicy
+  // applies at runtime (TAC-343 Stage C extracted it so this display can't
+  // drift from what the agent actually does) — what's shown is the effective
+  // policy, not just the raw stored jsonb.
   const policy = parseApprovalPolicy(input.rawApprovalPolicy)
-  const mergedPerCategory: Record<string, ApprovalDisposition> = {
-    ...APPROVAL_POLICY_DEFAULT.perCategory,
-    ...policy.perCategory,
-  }
+  const mergedPerCategory = getEffectivePerCategoryPolicy(policy)
 
   return {
     voiceCorpus: {

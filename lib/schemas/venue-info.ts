@@ -91,42 +91,57 @@ export const MenuItemSchema = z
 
 export type MenuItem = z.infer<typeof MenuItemSchema>
 
+// Sub-schemas named and exported (TAC-343 Stage C) so the venue admin
+// page's venue_info PATCH boundary validates against the exact same shapes
+// VenueInfoSchema composes, rather than a hand-duplicated copy that could
+// drift. Purely an extraction — VenueInfoSchema's composed shape (defaults,
+// optionality) is unchanged; every existing parse behaves identically.
+export const VenueAddressSchema = z.object({
+  line1: z.string().min(1),
+  line2: z.string().optional(),
+  city: z.string().min(1),
+  region: z.string().min(1),
+  postalCode: z.string().min(1),
+})
+
+export const VenueContactSchema = z.object({
+  publicPhone: z.string().optional(),
+  publicEmail: z.string().email().optional(),
+  website: z.string().url().optional(),
+})
+
+export const VenueHoursSchema = z.object({
+  monday: z.string().optional(),
+  tuesday: z.string().optional(),
+  wednesday: z.string().optional(),
+  thursday: z.string().optional(),
+  friday: z.string().optional(),
+  saturday: z.string().optional(),
+  sunday: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const VenueAmenitiesSchema = z.object({
+  wifi: z.boolean().optional(),
+  petFriendly: z.boolean().optional(),
+  parking: z.string().optional(),
+  seating: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const VenueMenuSchema = z.object({
+  highlights: z.array(z.string()).default([]),
+  notes: z.string().optional(),
+  items: z.array(MenuItemSchema).default([]),
+})
+
 export const VenueInfoSchema = z.object({
-  address: z.object({
-    line1: z.string().min(1),
-    line2: z.string().optional(),
-    city: z.string().min(1),
-    region: z.string().min(1),
-    postalCode: z.string().min(1),
-  }),
-  contact: z.object({
-    publicPhone: z.string().optional(),
-    publicEmail: z.string().email().optional(),
-    website: z.string().url().optional(),
-  }).default({}),
-  hours: z.object({
-    monday: z.string().optional(),
-    tuesday: z.string().optional(),
-    wednesday: z.string().optional(),
-    thursday: z.string().optional(),
-    friday: z.string().optional(),
-    saturday: z.string().optional(),
-    sunday: z.string().optional(),
-    notes: z.string().optional(),
-  }).default({}),
-  menu: z.object({
-    highlights: z.array(z.string()).default([]),
-    notes: z.string().optional(),
-    items: z.array(MenuItemSchema).default([]),
-  }).default({ highlights: [], items: [] }),
+  address: VenueAddressSchema,
+  contact: VenueContactSchema.default({}),
+  hours: VenueHoursSchema.default({}),
+  menu: VenueMenuSchema.default({ highlights: [], items: [] }),
   staff: z.array(z.string()).default([]),
-  amenities: z.object({
-    wifi: z.boolean().optional(),
-    petFriendly: z.boolean().optional(),
-    parking: z.string().optional(),
-    seating: z.string().optional(),
-    notes: z.string().optional(),
-  }).optional(),
+  amenities: VenueAmenitiesSchema.optional(),
   currentContext: z.array(VenueContextNoteSchema).default([]),
   // TAC-323: the exact prefilled-message string a guest sends by scanning the
   // venue's static QR sign (e.g. "Hi Sana!" for Mock Sextant). Used by the
