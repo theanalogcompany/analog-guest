@@ -8,6 +8,7 @@ import {
   Home,
   MessagesSquare,
   SlidersHorizontal,
+  Store,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -37,6 +38,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin': Home,
   '/admin/conversations': MessagesSquare,
   '/admin/voices': AudioLines,
+  '/admin/venues': Store,
   '/admin/tunables': SlidersHorizontal,
   '/admin/health': Activity,
 }

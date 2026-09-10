@@ -22,6 +22,35 @@ export const VenueContextNoteSchema = z.object({
 export type VenueContextNote = z.infer<typeof VenueContextNoteSchema>
 
 /**
+ * Classify a single currentContext entry against `now`. Extracted from
+ * filterActiveContext (TAC-343) so the admin venue page's expiry queue can
+ * partition entries into active/expired/malformed without re-deriving the
+ * date logic a second time — the two callers share this one primitive
+ * instead of drifting apart on what "expired" means.
+ *
+ * 'malformed' logs a warning (per-entry resilience — never crash the agent
+ * run for one bad date) and is treated as non-active by filterActiveContext,
+ * same as before this was extracted.
+ *
+ * Comparison is strictly-future: `expiresAt > now` is 'active'. An entry
+ * whose expiresAt equals now is 'expired', not 'active'.
+ */
+export function classifyContextEntry(
+  entry: VenueContextNote,
+  now: Date,
+): 'active' | 'expired' | 'malformed' {
+  if (entry.expiresAt === undefined) return 'active'
+  const expiry = new Date(entry.expiresAt)
+  if (Number.isNaN(expiry.getTime())) {
+    console.warn(
+      `[venue-info] dropping currentContext entry "${entry.id}": malformed expiresAt "${entry.expiresAt}"`,
+    )
+    return 'malformed'
+  }
+  return expiry.getTime() > now.getTime() ? 'active' : 'expired'
+}
+
+/**
  * Drop currentContext entries whose expiresAt has elapsed. Entries with no
  * expiresAt are treated as permanent. Entries with a malformed expiresAt are
  * logged and dropped (per-entry resilience — never crash the agent run for one
@@ -34,17 +63,7 @@ export function filterActiveContext(
   entries: readonly VenueContextNote[],
   now: Date,
 ): VenueContextNote[] {
-  return entries.filter((entry) => {
-    if (entry.expiresAt === undefined) return true
-    const expiry = new Date(entry.expiresAt)
-    if (Number.isNaN(expiry.getTime())) {
-      console.warn(
-        `[venue-info] dropping currentContext entry "${entry.id}": malformed expiresAt "${entry.expiresAt}"`,
-      )
-      return false
-    }
-    return expiry.getTime() > now.getTime()
-  })
+  return entries.filter((entry) => classifyContextEntry(entry, now) === 'active')
 }
 
 // A single row from the venue's menu CSV (04-{slug}-menu in Drive). Items are

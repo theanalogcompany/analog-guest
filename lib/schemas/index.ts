@@ -14,6 +14,7 @@ export {
   type ReviewedVia,
 } from './message-review'
 export {
+  classifyContextEntry,
   filterActiveContext,
   MenuItemSchema,
   type MenuItem,

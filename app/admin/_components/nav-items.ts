@@ -22,6 +22,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: '/admin', label: 'Home' },
       { href: '/admin/conversations', label: 'Conversations' },
       { href: '/admin/voices', label: 'Voices' },
+      { href: '/admin/venues', label: 'Venues' },
     ],
   },
   {
