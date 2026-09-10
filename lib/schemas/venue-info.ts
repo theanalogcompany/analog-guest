@@ -6,7 +6,7 @@ import { z } from 'zod'
 export const VenueContextNoteSchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
-  // Free-form provenance string (e.g. 'interview_section_9', 'text', 'file').
+  // Free-form provenance string (e.g. 'interview_operating_reality', 'text', 'file').
   source: z.string().min(1),
   fileUrl: z.url().optional(),
   fileName: z.string().optional(),

@@ -180,21 +180,21 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
   {
     "id": "[snake_case_id]",
     "content": "[transient operational fact — equipment status, seasonal item, event date]",
-    "source": "interview_section_9",
+    "source": "interview_operating_reality",
     "addedAt": "2026-01-01T00:00:00Z",
     "expiresAt": "2026-02-01T00:00:00Z"
   },
   {
     "id": "[snake_case_id]",
     "content": "[another transient operational fact]",
-    "source": "interview_section_9",
+    "source": "interview_operating_reality",
     "addedAt": "2026-01-01T00:00:00Z",
     "expiresAt": "2026-03-01T00:00:00Z"
   },
   {
     "id": "[snake_case_id]",
     "content": "[another transient operational fact]",
-    "source": "interview_section_9",
+    "source": "interview_operating_reality",
     "addedAt": "2026-01-01T00:00:00Z",
     "expiresAt": "2026-02-15T00:00:00Z"
   }

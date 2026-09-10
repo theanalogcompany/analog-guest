@@ -4,6 +4,26 @@ import { describe, expect, it } from 'vitest'
 import { buildExtractionSystemPrompt } from './extract'
 
 const fixtureMarkdown = readFileSync(resolve(__dirname, 'fixtures/venue-spec-example.md'), 'utf-8')
+const venueInfoSchemaSource = readFileSync(resolve(__dirname, '../../lib/schemas/venue-info.ts'), 'utf-8')
+
+describe('venue-spec-example.md fixture (TAC-342 regression canary)', () => {
+  // v03 of the onboarding question set renumbered "operating reality" from
+  // section 9 to section 12, stranding the fixture's currentContext.source
+  // example at a section that no longer exists. Guard against reintroducing
+  // a section-numbered provenance string in either the fixture or the schema
+  // docstring that documents it.
+  it('contains no "interview_section_9" vocabulary', () => {
+    expect(fixtureMarkdown).not.toContain('interview_section_9')
+  })
+
+  it('uses the semantic "interview_operating_reality" provenance string', () => {
+    expect(fixtureMarkdown).toContain('interview_operating_reality')
+  })
+
+  it('VenueContextNoteSchema docstring contains no "interview_section_9" vocabulary', () => {
+    expect(venueInfoSchemaSource).not.toContain('interview_section_9')
+  })
+})
 
 describe('venue-spec-example.md fixture (TAC-331 regression canary)', () => {
   // The live bad string at Mock Sextant Coffee Roasters was
