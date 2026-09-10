@@ -4,10 +4,21 @@ import { SectionShell } from './section-shell'
 // The 'other' primary tag's own named section — distinct from the
 // structural catch-all in catch-all-section.tsx, which is for entries no
 // section (including this one) claims at all.
-export function OtherSection({ entries }: { entries: readonly KnowledgeEntryListRow[] }) {
+export function OtherSection({
+  venueId,
+  entries,
+}: {
+  venueId: string
+  entries: readonly KnowledgeEntryListRow[]
+}) {
   return (
     <SectionShell title="Other" subtitle="other">
-      <KnowledgeEntryList entries={entries} emptyMessage="Nothing tagged 'other' yet." />
+      <KnowledgeEntryList
+        venueId={venueId}
+        entries={entries}
+        emptyMessage="Nothing tagged 'other' yet."
+        defaultPrimaryTag="other"
+      />
     </SectionShell>
   )
 }

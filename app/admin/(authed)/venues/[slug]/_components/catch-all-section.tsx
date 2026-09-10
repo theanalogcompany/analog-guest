@@ -9,9 +9,11 @@ import { EmptySectionNote, SectionShell } from './section-shell'
 // about. Per-row unclaimed mechanics columns render inline in
 // MechanicsSection instead, next to the mechanic they belong to.
 export function CatchAllSection({
+  venueId,
   unclaimedVenueInfoFields,
   unclaimedKnowledgeEntries,
 }: {
+  venueId: string
   unclaimedVenueInfoFields: readonly UnclaimedField[]
   unclaimedKnowledgeEntries: readonly KnowledgeEntryListRow[]
 }) {
@@ -50,8 +52,11 @@ export function CatchAllSection({
                 knowledge_corpus entries
               </p>
               <KnowledgeEntryList
+                venueId={venueId}
                 entries={unclaimedKnowledgeEntries}
                 emptyMessage="None."
+                defaultPrimaryTag="other"
+                allowAdd={false}
               />
             </div>
           )}

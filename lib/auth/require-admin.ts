@@ -149,3 +149,139 @@ export async function requireCorpusEntryAdmin(
     entryId,
   }
 }
+
+/**
+ * Resolve cookie-session admin auth and look up a knowledge_corpus entry's
+ * parent venue, checking it's in the allowlist. TAC-343 sibling of
+ * requireCorpusEntryAdmin — same shape, different table (knowledge_corpus
+ * instead of voice_corpus).
+ *
+ * Returns 404 when the entry doesn't exist; 403 when it does but the
+ * operator can't reach its venue.
+ */
+export async function requireKnowledgeEntryAdmin(
+  entryId: string,
+): Promise<RequireAdminResult<{ venueId: string; entryId: string }>> {
+  const auth = await authenticateAdmin()
+  if (!auth.ok) return auth
+
+  if (!UuidSchema.safeParse(entryId).success) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'invalid entryId' }, { status: 400 }),
+    }
+  }
+
+  const supabase = createAdminClient()
+  const { data: row, error: lookupErr } = await supabase
+    .from('knowledge_corpus')
+    .select('id, venue_id')
+    .eq('id', entryId)
+    .maybeSingle()
+  if (lookupErr) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'knowledge entry lookup failed', detail: lookupErr.message },
+        { status: 500 },
+      ),
+    }
+  }
+  if (!row) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'knowledge entry not found' }, { status: 404 }),
+    }
+  }
+  if (
+    auth.allowedVenueIds.length > 0 &&
+    !auth.allowedVenueIds.includes(row.venue_id)
+  ) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+    }
+  }
+
+  return {
+    ok: true,
+    operatorId: auth.operatorId,
+    venueId: row.venue_id,
+    entryId,
+  }
+}
+
+/**
+ * Resolve cookie-session admin auth for a MERGE across multiple
+ * knowledge_corpus entries. Resolves the target venue from the entries
+ * themselves (never a client-supplied venueId) so a tampered request can't
+ * point the merge at a venue the operator doesn't actually have access to.
+ * Refuses (400) if fewer than 2 ids are given, if the ids don't all resolve
+ * to rows, or if the rows don't all share one venue_id — a cross-venue
+ * merge would violate the "every venue is its own isolated block" rule.
+ */
+export async function requireKnowledgeEntriesAdmin(
+  entryIds: string[],
+): Promise<RequireAdminResult<{ venueId: string; entryIds: string[] }>> {
+  const auth = await authenticateAdmin()
+  if (!auth.ok) return auth
+
+  const idsSchema = z.array(z.string().uuid()).min(2)
+  const parsedIds = idsSchema.safeParse(entryIds)
+  if (!parsedIds.success) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'invalid entryIds', detail: 'at least 2 valid UUIDs required' },
+        { status: 400 },
+      ),
+    }
+  }
+
+  const supabase = createAdminClient()
+  const { data: rows, error: lookupErr } = await supabase
+    .from('knowledge_corpus')
+    .select('id, venue_id')
+    .in('id', parsedIds.data)
+  if (lookupErr) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'knowledge entries lookup failed', detail: lookupErr.message },
+        { status: 500 },
+      ),
+    }
+  }
+  if (!rows || rows.length !== parsedIds.data.length) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'one or more knowledge entries not found' }, { status: 404 }),
+    }
+  }
+
+  const venueIds = new Set(rows.map((r) => r.venue_id))
+  if (venueIds.size !== 1) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'entries span more than one venue' },
+        { status: 400 },
+      ),
+    }
+  }
+  const venueId = rows[0].venue_id
+
+  if (auth.allowedVenueIds.length > 0 && !auth.allowedVenueIds.includes(venueId)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+    }
+  }
+
+  return {
+    ok: true,
+    operatorId: auth.operatorId,
+    venueId,
+    entryIds: parsedIds.data,
+  }
+}

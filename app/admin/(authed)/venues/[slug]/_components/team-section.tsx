@@ -5,9 +5,11 @@ import { EmptySectionNote, SectionShell } from './section-shell'
 // venue_info.staff to carry notes"). This section renders the thin roster
 // and the staff_[name] chunks together, but they stay two separate stores.
 export function TeamSection({
+  venueId,
   staff,
   entries,
 }: {
+  venueId: string
   staff: readonly string[]
   entries: readonly KnowledgeEntryListRow[]
 }) {
@@ -29,8 +31,10 @@ export function TeamSection({
           </div>
         )}
         <KnowledgeEntryList
+          venueId={venueId}
           entries={entries}
           emptyMessage="No per-person knowledge chunks captured yet."
+          defaultPrimaryTag="staff"
         />
       </div>
     </SectionShell>
