@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { filterActiveContext, type VenueContextNote } from './venue-info'
+import { classifyContextEntry, filterActiveContext, type VenueContextNote } from './venue-info'
 
 const NOW = new Date('2026-04-29T12:00:00Z')
 
@@ -58,5 +58,39 @@ describe('filterActiveContext', () => {
 
   it('returns an empty array when given an empty array', () => {
     expect(filterActiveContext([], NOW)).toEqual([])
+  })
+})
+
+describe('classifyContextEntry', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('classifies a strictly-future expiresAt as active', () => {
+    const entry = note({ expiresAt: '2026-04-29T12:00:01Z' })
+    expect(classifyContextEntry(entry, NOW)).toBe('active')
+  })
+
+  it('classifies no expiresAt as active (permanent)', () => {
+    expect(classifyContextEntry(note(), NOW)).toBe('active')
+  })
+
+  it('classifies an expiresAt equal to now as expired', () => {
+    const entry = note({ expiresAt: '2026-04-29T12:00:00Z' })
+    expect(classifyContextEntry(entry, NOW)).toBe('expired')
+  })
+
+  it('classifies a past expiresAt as expired', () => {
+    const entry = note({ expiresAt: '2026-04-29T11:59:59Z' })
+    expect(classifyContextEntry(entry, NOW)).toBe('expired')
+  })
+
+  it('classifies a malformed expiresAt as malformed and warns once', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const entry = note({ id: 'bad', expiresAt: 'not-a-date' })
+    expect(classifyContextEntry(entry, NOW)).toBe('malformed')
+    expect(warnSpy).toHaveBeenCalledOnce()
+    expect(warnSpy.mock.calls[0][0]).toContain('bad')
+    expect(warnSpy.mock.calls[0][0]).toContain('not-a-date')
   })
 })
