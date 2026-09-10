@@ -285,3 +285,64 @@ export async function requireKnowledgeEntriesAdmin(
     entryIds: parsedIds.data,
   }
 }
+
+/**
+ * Resolve cookie-session admin auth and look up a mechanics row's parent
+ * venue, checking it's in the allowlist. TAC-343 Stage C sibling of
+ * requireKnowledgeEntryAdmin/requireCorpusEntryAdmin — same shape, `mechanics`
+ * instead of `knowledge_corpus`/`voice_corpus`.
+ *
+ * Returns 404 when the mechanic doesn't exist; 403 when it does but the
+ * operator can't reach its venue.
+ */
+export async function requireMechanicAdmin(
+  mechanicId: string,
+): Promise<RequireAdminResult<{ venueId: string; mechanicId: string }>> {
+  const auth = await authenticateAdmin()
+  if (!auth.ok) return auth
+
+  if (!UuidSchema.safeParse(mechanicId).success) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'invalid mechanicId' }, { status: 400 }),
+    }
+  }
+
+  const supabase = createAdminClient()
+  const { data: row, error: lookupErr } = await supabase
+    .from('mechanics')
+    .select('id, venue_id')
+    .eq('id', mechanicId)
+    .maybeSingle()
+  if (lookupErr) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'mechanic lookup failed', detail: lookupErr.message },
+        { status: 500 },
+      ),
+    }
+  }
+  if (!row) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'mechanic not found' }, { status: 404 }),
+    }
+  }
+  if (
+    auth.allowedVenueIds.length > 0 &&
+    !auth.allowedVenueIds.includes(row.venue_id)
+  ) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+    }
+  }
+
+  return {
+    ok: true,
+    operatorId: auth.operatorId,
+    venueId: row.venue_id,
+    mechanicId,
+  }
+}

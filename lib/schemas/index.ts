@@ -18,10 +18,15 @@ export {
   filterActiveContext,
   MenuItemSchema,
   type MenuItem,
+  VenueAddressSchema,
+  VenueAmenitiesSchema,
+  VenueContactSchema,
   VenueContextNoteSchema,
   type VenueContextNote,
+  VenueHoursSchema,
   VenueInfoSchema,
   type VenueInfo,
+  VenueMenuSchema,
 } from './venue-info'
 export {
   type ActiveCommitment,
@@ -78,3 +83,15 @@ export {
   type ThreadMessage,
   ThreadMessageSchema,
 } from './thread-message'
+export {
+  MECHANIC_REDEMPTION_POLICIES,
+  MECHANIC_TRIGGER_TYPES,
+  MECHANIC_TYPES,
+  type MechanicCreate,
+  MechanicCreateSchema,
+  type MechanicFull,
+  MechanicFullSchema,
+  type MechanicPatch,
+  MechanicPatchSchema,
+  type MechanicTriggerType,
+} from './mechanic'

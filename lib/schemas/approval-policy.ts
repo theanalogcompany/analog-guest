@@ -101,6 +101,24 @@ export function parseApprovalPolicy(value: unknown): ApprovalPolicy {
 }
 
 /**
+ * The full effective perCategory map — code defaults with any stored
+ * overrides layered on top, per the load-bearing merge documented at the
+ * top of this file. Extracted (TAC-343 Stage C) so a read-only display —
+ * the venue admin page's Readiness panel — can show the exact same merge
+ * resolveCategoryPolicy uses internally, rather than recomputing the same
+ * expression a second time and risking the two drifting apart.
+ */
+export function getEffectivePerCategoryPolicy(
+  policy: ApprovalPolicy | null | undefined,
+): Record<string, ApprovalDisposition> {
+  const effective = policy ?? APPROVAL_POLICY_DEFAULT
+  return {
+    ...APPROVAL_POLICY_DEFAULT.perCategory,
+    ...effective.perCategory,
+  }
+}
+
+/**
  * Effective disposition for a category. Resolution order:
  *   1. explicit stored perCategory entry
  *   2. code-level APPROVAL_POLICY_DEFAULT.perCategory entry
@@ -121,9 +139,6 @@ export function resolveCategoryPolicy(
   // which route comp_complaint to review, so degrading adds oversight.
   const effective = policy ?? APPROVAL_POLICY_DEFAULT
   if (category === undefined) return effective.default
-  const merged: Partial<Record<MessageCategory, ApprovalDisposition>> = {
-    ...APPROVAL_POLICY_DEFAULT.perCategory,
-    ...effective.perCategory,
-  }
+  const merged = getEffectivePerCategoryPolicy(policy)
   return merged[category] ?? effective.default
 }

@@ -126,9 +126,9 @@ export default async function VenueDetailPage({ params }: PageProps) {
 
       <ReadinessPanel readiness={readiness} />
 
-      <VenueFactsSection venueInfo={data.venueInfo} />
+      <VenueFactsSection venueId={data.venue.id} venueInfo={data.venueInfo} />
       <TheStorySection venueId={data.venue.id} entries={bySection.the_story} />
-      <MenuRosterSection venueInfo={data.venueInfo} />
+      <MenuRosterSection venueId={data.venue.id} venueInfo={data.venueInfo} />
       <MenuKnowledgeSection venueId={data.venue.id} entries={bySection.menu_knowledge} />
       <TeamSection
         venueId={data.venue.id}
@@ -141,6 +141,7 @@ export default async function VenueDetailPage({ params }: PageProps) {
       />
       <EventsSection venueId={data.venue.id} entries={bySection.events_merch} />
       <MechanicsSection
+        venueId={data.venue.id}
         mechanics={data.mechanics}
         unclaimedColumnsPerRow={unclaimedMechanicColumnsPerRow}
       />
