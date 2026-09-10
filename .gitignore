@@ -24,6 +24,10 @@
 .DS_Store
 *.pem
 
+# Google OAuth client secret (Drive ADC) — never committed, per CLAUDE.md
+# "Drive integration → ADC token refresh"
+client_secret_*.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -325,17 +325,26 @@ Drive helpers are in `scripts/onboarding/drive.ts`:
 
 ### ADC token refresh (when Drive scripts fail)
 
-When `run-test-scenarios`, `extract-venue-spec`, `seed-supabase`, `extract-test-scenarios`, or `ingest-response-review` fails with `Request had insufficient authentication scopes`, ADC needs reauth with explicit Drive scope:
+Two distinct failure modes land here, both fixed by the same command:
+
+- `Request had insufficient authentication scopes` — ADC has never been granted Drive scope at all (or was granted it, then re-authed without `--scopes` and lost it).
+- `invalid_grant` / `reauth related error (invalid_rapt)` — ADC previously had Drive scope, but the token expired or the reauth policy (RAPT) lapsed. This is time-based, not a one-time setup gap — expect to hit it again after enough elapsed time even with everything configured correctly before.
+
+Either symptom means: `run-test-scenarios`, `extract-venue-spec`, `seed-supabase`, `extract-test-scenarios`, or `ingest-response-review` needs reauth with explicit Drive scope:
 
 ```bash
 gcloud auth application-default login \
-  --client-id-file='/path/to/client_secret_*.apps.googleusercontent.com.json' \
+  --client-id-file='~/.config/analog/oauth-client.json' \
   --scopes='openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive'
 ```
 
-**Why this is needed:** the default scopes for `gcloud auth application-default login` (with no `--scopes` flag) do NOT include `drive`. The bare command authenticates successfully but every Drive API call returns `Request had insufficient authentication scopes`. The `--scopes` flag is mandatory for any script that touches Drive.
+**Canonical client file path:** `~/.config/analog/oauth-client.json`. Client ID `262219665239-3fi6pt39u9m8i0nh9vfcouhqi0t6n9qt`, GCP project `analog-venue-onboarding`. **Never write the client secret itself into CLAUDE.md or any tracked file** — the path above points at it, this file does not contain it. `client_secret_*.json` is in `.gitignore` as a backstop against it landing in the repo by accident (e.g. downloaded fresh from GCP console into a repo-local directory).
+
+**Why this is needed:** the default scopes for `gcloud auth application-default login` (with no `--scopes` flag) do NOT include `drive` — **plain `gcloud auth application-default login` with no flags succeeds and reports a healthy login, then every Drive API call still fails.** gcloud's built-in ADC OAuth client cannot request Drive scope at all, regardless of flags — that's what the project-owned client (below) is for. The `--scopes` flag is mandatory for any script that touches Drive; there's no way to add it after the fact short of re-running the full command again.
 
 **Why the `--client-id-file`:** Workspace org policy blocks the stock gcloud OAuth client. The project-owned OAuth client (Desktop app type, `client_secret_*.apps.googleusercontent.com.json`) bypasses that policy because Workspace's third-party policy doesn't apply to your own org's apps.
+
+**This procedure is interactive and human-only.** It opens a browser consent flow — there is no non-interactive or scripted path around it. Claude Code cannot complete this reauth itself; when a session hits `invalid_rapt` or the insufficient-scopes error, it should stop and hand off to the operator rather than attempting a workaround.
 
 ---
 
