@@ -13,17 +13,11 @@ export interface ExtractInput {
 }
 
 /**
- * Single Claude call producing a venue-spec markdown draft. The output
- * format is enforced by including the gold-standard fixture as a few-shot
- * example with hard rules. The returned string is what gets written back to
- * Drive as 06-{slug}-venue-spec-draft.md.
+ * Pure prompt builder, split out from extractVenueSpec (TAC-331) so the
+ * routing/mood rules below are unit-testable without a network call.
  */
-export async function extractVenueSpec(input: ExtractInput): Promise<string> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('Missing env var: ANTHROPIC_API_KEY')
-  }
-
-  const systemPrompt = `You are extracting a venue specification document from raw inputs into a single markdown document.
+export function buildExtractionSystemPrompt(fixtureMarkdown: string): string {
+  return `You are extracting a venue specification document from raw inputs into a single markdown document.
 
 The output MUST be a markdown document that exactly matches the structure of the EXAMPLE below. Every section must be present and filled. Do not add new sections. Do not omit sections — use placeholders like "*(not provided)*" if information is missing. Do not change section numbering or section titles.
 
@@ -36,12 +30,21 @@ Hard rules:
     - venue_info = STRUCTURED FACTS the agent can look up directly. Hours, address, menu items with prices, payment methods, named staff in the staff list. Goes in section 4.
     - voice_corpus = HOW the venue texts guests. Texting exemplars, demonstrated tone, signature phrases the operator showed they'd use in a message. If the interview doesn't include real texting samples, voice_corpus should be sparse — that's correct, not a failure. Do not pad with paraphrased "voice-flavored" content that's really factual.
     - knowledge_corpus = NARRATIVE knowledge — the *stories, explanations, and context behind the venue*, not bare facts. Why and how, not what and when. Origin story, sourcing relationships and the personalities involved, staff personality details, mechanic explanations, philosophy, opinionated recommendations. Self-contained chunks the agent retrieves when grounding answers to substantive guest questions.
+    - OPINIONATED RECOMMENDATIONS ALWAYS ROUTE TO knowledge_corpus, NEVER venue_info — no exceptions, regardless of how factual the phrasing sounds. If the content answers "what should this guest get" or "who is this venue's food/drink right for," it is a recommendation, not a fact, even when it's phrased as one. This applies most often to menu.highlights and menu.notes in section 4 — those fields are for STRUCTURED FACTS about items (name, price, format, flavor), never for picks, endorsements, or "right choice for X" framing. When the operator says something like "for a first-timer I'd start them on the latte, don't over-program the first visit," the destination is knowledge_corpus with primary_tags: ["recommendations"], and the FORM is attributed indicative knowledge — something Sana holds and can choose to mention, not an instruction she must follow:
+        - WRONG (imperative, addressed to the assistant, do not write this into venue_info): "For a first-timer, a latte is the right entry point — don't over-program the first visit."
+        - RIGHT (attributed indicative, in knowledge_corpus): "The owner's pick for a first-timer is the latte — familiar, and it shows off the blend."
+    - Mood rule for content that legitimately stays in venue_info prose (e.g. the perfect-order narrative or sourcing description in menu.notes): even venue-fact prose must read as DESCRIPTION of the venue, never as an INSTRUCTION addressed to the assistant. Same underlying fact, different grammatical mood:
+        - WRONG: "When a guest asks what to get, always mention the pour-over first."
+        - RIGHT: "Regulars default to the pour-over before anything else — it's the most-ordered item at open."
+      If you notice yourself writing "always," "don't," "make sure to," or any other imperative verb addressed to the assistant anywhere in section 4, stop — either rephrase as description, or (if it's actually someone's opinion about what a guest should order) move it to knowledge_corpus per the rule above instead.
     - Examples to disambiguate:
         - Operator says "We open at 7am" → venue_info hours field. NOT knowledge_corpus.
         - Operator says "I'd text a regular saying 'hey, glad you're back'" → voice_corpus.
         - Operator says "Our flagship blend is two Ethiopian coffees roasted by a friend who learned the trade in Addis" → knowledge_corpus (it's a story, not a bare fact).
         - Operator says "Phoebe runs the bar and is famously into seasonal matcha experiments" → knowledge_corpus.
         - Operator says "I'd never use exclamation marks" → already lives in brand_persona.voiceAntiPatterns; do NOT also put it in either corpus.
+        - Operator says "For a first-timer I'd start them on the latte, don't over-program the first visit" → knowledge_corpus, primary_tags: ["recommendations"], rewritten as "The owner's pick for a first-timer is the latte — familiar, and it shows off the blend." NOT venue_info.menu.highlights, NOT venue_info.menu.notes, and NOT copied in with the imperative mood intact.
+        - Operator says "Regulars always get the pour-over, it's basically the house thing" → venue_info.menu.notes, phrased as "Regulars default to the pour-over" — a fact about what happens, not advice about what to do.
 - For voice_corpus: extract 5-12 entries. Lean LOW (5-7) when the transcript has no real texting examples, HIGHER (8-12) only when the operator demonstrated actual messages or specific phrasing. source_type='voicenote_transcript' for direct verbatim quotes that depict texting voice, 'manual_entry' for synthesized illustrations. confidence_score: 0.95 for direct verbatim owner quotes, 0.9 for paraphrased, 0.85 for synthesized illustrations. voice_corpus tags = situation/style ('welcome', 'follow_up', 'perk_surface', 'anti_pattern'); single \`tags\` array.
 - For knowledge_corpus: extract 8-25 substantive narrative chunks covering origin/sourcing/staff/ceremony/mechanics/recommendations from the transcript and Airtable record. Range depends on transcript depth — deeper interviews yield more entries. source_type='voicenote_transcript' for direct quotes from the transcript, 'manual_entry' for synthesized chunks composed from multiple parts of the conversation. confidence_score: 0.9 for direct/near-direct transcript quotes, 0.85 for synthesized chunks.
     - Each knowledge entry has TWO tag arrays:
@@ -53,9 +56,23 @@ Hard rules:
 
 EXAMPLE STRUCTURE (placeholders only — DO NOT copy values verbatim):
 
-${input.fixtureMarkdown}
+${fixtureMarkdown}
 
 REMINDER: every [BRACKET] above must be replaced with content from the venue's transcript, menu, and Airtable record. Never copy bracket text verbatim. Never invent content not supported by source materials.`
+}
+
+/**
+ * Single Claude call producing a venue-spec markdown draft. The output
+ * format is enforced by including the gold-standard fixture as a few-shot
+ * example with hard rules. The returned string is what gets written back to
+ * Drive as 06-{slug}-venue-spec-draft.md.
+ */
+export async function extractVenueSpec(input: ExtractInput): Promise<string> {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('Missing env var: ANTHROPIC_API_KEY')
+  }
+
+  const systemPrompt = buildExtractionSystemPrompt(input.fixtureMarkdown)
 
   const userPrompt = `Slug to extract: ${input.slug}
 

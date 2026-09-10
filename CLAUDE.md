@@ -80,7 +80,7 @@ Token extraction into runtime code happens in `app/globals.css` under `@theme in
 ### Scripts
 
 - `scripts/` — top-level CLI entry points. Each is a thin orchestrator that reads args, sets up clients, calls helpers, logs progress.
-- `scripts/onboarding/` — helpers used by the onboarding pipeline scripts. One helper module per pipeline step. Helpers may be split into `<name>-pure.ts` (no `@/*` imports, vitest-loadable) and `<name>.ts` (DB-touching wrapper) when tests need to load the pure logic — see "Module split for testability" below. Modules: `airtable.ts` (transcript fetch), `menu-csv.ts` (CSV parser), `parse-venue-spec.ts` (Zod-strict venue-spec parser; the offline boundary referenced in the permissive-schema gotcha), `seed-supabase.ts` (helper imported by `scripts/seed-venue.ts`), `extract.ts` (LLM-extraction orchestrator), plus `extract-test-scenarios.ts`, `run-test-scenarios.ts`, and `ingest-response-review-pure.ts`.
+- `scripts/onboarding/` — helpers used by the onboarding pipeline scripts. One helper module per pipeline step. Helpers may be split into `<name>-pure.ts` (no `@/*` imports, vitest-loadable) and `<name>.ts` (DB-touching wrapper) when tests need to load the pure logic — see "Module split for testability" below. Modules: `airtable.ts` (transcript fetch), `menu-csv.ts` (CSV parser), `parse-venue-spec.ts` (Zod-strict venue-spec parser; the offline boundary referenced in the permissive-schema gotcha), `seed-supabase.ts` (helper imported by `scripts/seed-venue.ts`), `extract.ts` (LLM-extraction orchestrator; exports `buildExtractionSystemPrompt` (TAC-331) as a same-file pure split — no `@/*` imports to strip here, just a network call to keep out of the unit-testable prompt-content path — so the extraction routing/mood rules are covered by `extract.test.ts` without hitting Anthropic), plus `extract-test-scenarios.ts`, `run-test-scenarios.ts`, and `ingest-response-review-pure.ts`.
 - `scripts/onboarding/fixtures/` — repo-resident input fixtures consumed by extraction scripts (e.g., `venue-spec-example.md`, `test-scenarios-example.md`)
 - `scripts/onboarding/drive.ts` — shared Drive integration. Exports `getDrive`, `findVenueFolder`, `listVenueFiles`, `findByPrefix`, `readDriveFileAsText`, `writeMarkdownFile`, `writeJsonFile`, `writeSheetFile`. Use these instead of inlining Drive calls.
 
@@ -275,7 +275,7 @@ One-off scripts live in `scripts/` and run via `tsx` with env loading from `.env
 ### Available scripts
 
 - `npm run send-test -- <phone> [body]` — sends a test message via the messaging module to the given E.164 phone number. Requires `TEST_VENUE_ID` in `.env.local` pointing to a venue row that has `messaging_phone_number` set.
-- `npm run extract-venue-spec -- <slug>` — reads the venue's onboarding transcript + Airtable record + menu CSV from Drive, calls Sonnet to extract a structured venue spec, writes `06-{slug}-venue-spec-draft.md` to the venue's Drive folder.
+- `npm run extract-venue-spec -- <slug> [--dry-run]` — reads the venue's onboarding transcript + Airtable record + menu CSV from Drive, calls Sonnet to extract a structured venue spec, writes `06-{slug}-venue-spec-draft.md` to the venue's Drive folder. `--dry-run` (TAC-331) skips only the Drive write — transcript/menu/Airtable reads still hit real data — and saves the draft under `os.tmpdir()` instead, logging the path. Use this for any test extraction against a venue that already has a live 06-file; re-extracting without it overwrites and destroys the file you'd otherwise diff against.
 - `npm run extract-test-scenarios -- <slug> [--force]` — reads the venue spec + the categories fixture, calls Sonnet to generate venue-tailored test scenarios (THE-180), writes `07-{slug}-test-scenarios.json` to Drive. `--force` overwrites an existing 07-file.
 - `npm run seed-venue -- <slug> [--messaging-phone <e164>]` — reads the 06-spec markdown from Drive, parses it via Zod schemas, ingests into the database (venue, venue_configs, mechanics, voice_corpus + embeddings via Voyage). Optional `--messaging-phone` sets `venues.messaging_phone_number` at seed time. Idempotent guards against accidental re-seed. CLI entry point is `scripts/seed-venue.ts`; the heavy lifting lives in `scripts/onboarding/seed-supabase.ts`.
 - `npm run run-test-scenarios -- <slug> [--force]` — seeds the four synthetic guests for the venue (deterministic phones per state), runs each scenario from the 07-file through the agent runtime synchronously (no Sendblue, no human-feel delay, no fidelity gate), writes `08-{slug}-response-review` as a native Google Sheet to Drive (THE-181). Throws after logging all four synthetic-guest tuning outcomes if any state landed in the wrong band.
@@ -295,6 +295,8 @@ Phase 5 is the voice-quality cycle that completes venue onboarding. Five files i
 - `08-{slug}-response-review` (gsheet) — populated by `run-test-scenarios`. Owner reviews collaboratively during the Phase 5 meeting, marks `verdict` (approve/edit), provides `edited_message` for rejections, adds `rule:`-prefixed comments for anti-patterns. Then `ingest-response-review` reads it back and updates the corpus + persona surgically.
 
 The pipeline is idempotent at every step. Re-running any script is safe.
+
+**Extraction routes opinionated recommendations to `knowledge_corpus`, never `venue_info` (TAC-331).** Owners describing their business speak in advice ("for a first-timer I'd start them on the latte, don't over-program the first visit") — extraction was recording that faithfully into `venue_info.menu.highlights` / `menu.notes`, where it renders into every prompt turn as if it were a structured fact, indistinguishable from one by the time it reaches the model. `extract.ts`'s system prompt already listed "opinionated recommendations" under `knowledge_corpus` (it's a narrative-knowledge store, gated by retrieval — it only surfaces when the guest's message is actually about what to order), but had no worked example for this exact pattern and the few-shot fixture's own `menu.highlights` placeholder used the leaked vocabulary ("first-timer pick", "perfect-order anchor") as an "e.g." hint, which the model echoed verbatim. Fixed by (1) an explicit routing rule in `extract.ts` with a WRONG/RIGHT worked example matching the live incident, (2) a separate, narrower mood rule for content that legitimately stays in `venue_info` prose (the perfect-order narrative, sourcing description) — must read as description of the venue, never an instruction to the assistant, and (3) a new `knowledge_corpus` fixture example (Entry 5) modeling the correct attributed-indicative form with `primary_tags: ["recommendations"]` — a positive template, not just prose instruction. No schema change, no migration, no serializer change: the `recommendations` primary tag and the `knowledge_corpus` section-7 parser both already existed (see `lib/schemas/knowledge-tags.ts`, `parse-venue-spec.ts`); this was a placement defect in the extraction prompt, not a missing destination. `scripts/onboarding/extract.test.ts` canaries the fixture against reintroducing the leaked vocabulary. Deliberately does not re-extract any live venue — see the ticket for why Mock Sextant's `venue_info` (already hand-fixed in place per TAC-330) and this fix now intentionally disagree in form.
 
 ### File-naming convention
 
@@ -323,17 +325,26 @@ Drive helpers are in `scripts/onboarding/drive.ts`:
 
 ### ADC token refresh (when Drive scripts fail)
 
-When `run-test-scenarios`, `extract-venue-spec`, `seed-supabase`, `extract-test-scenarios`, or `ingest-response-review` fails with `Request had insufficient authentication scopes`, ADC needs reauth with explicit Drive scope:
+Two distinct failure modes land here, both fixed by the same command:
+
+- `Request had insufficient authentication scopes` — ADC has never been granted Drive scope at all (or was granted it, then re-authed without `--scopes` and lost it).
+- `invalid_grant` / `reauth related error (invalid_rapt)` — ADC previously had Drive scope, but the token expired or the reauth policy (RAPT) lapsed. This is time-based, not a one-time setup gap — expect to hit it again after enough elapsed time even with everything configured correctly before.
+
+Either symptom means: `run-test-scenarios`, `extract-venue-spec`, `seed-supabase`, `extract-test-scenarios`, or `ingest-response-review` needs reauth with explicit Drive scope:
 
 ```bash
 gcloud auth application-default login \
-  --client-id-file='/path/to/client_secret_*.apps.googleusercontent.com.json' \
+  --client-id-file='~/.config/analog/oauth-client.json' \
   --scopes='openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive'
 ```
 
-**Why this is needed:** the default scopes for `gcloud auth application-default login` (with no `--scopes` flag) do NOT include `drive`. The bare command authenticates successfully but every Drive API call returns `Request had insufficient authentication scopes`. The `--scopes` flag is mandatory for any script that touches Drive.
+**Canonical client file path:** `~/.config/analog/oauth-client.json`. Client ID `262219665239-3fi6pt39u9m8i0nh9vfcouhqi0t6n9qt`, GCP project `analog-venue-onboarding`. **Never write the client secret itself into CLAUDE.md or any tracked file** — the path above points at it, this file does not contain it. `client_secret_*.json` is in `.gitignore` as a backstop against it landing in the repo by accident (e.g. downloaded fresh from GCP console into a repo-local directory).
+
+**Why this is needed:** the default scopes for `gcloud auth application-default login` (with no `--scopes` flag) do NOT include `drive` — **plain `gcloud auth application-default login` with no flags succeeds and reports a healthy login, then every Drive API call still fails.** gcloud's built-in ADC OAuth client cannot request Drive scope at all, regardless of flags — that's what the project-owned client (below) is for. The `--scopes` flag is mandatory for any script that touches Drive; there's no way to add it after the fact short of re-running the full command again.
 
 **Why the `--client-id-file`:** Workspace org policy blocks the stock gcloud OAuth client. The project-owned OAuth client (Desktop app type, `client_secret_*.apps.googleusercontent.com.json`) bypasses that policy because Workspace's third-party policy doesn't apply to your own org's apps.
+
+**This procedure is interactive and human-only.** It opens a browser consent flow — there is no non-interactive or scripted path around it. Claude Code cannot complete this reauth itself; when a session hits `invalid_rapt` or the insufficient-scopes error, it should stop and hand off to the operator rather than attempting a workaround.
 
 ---
 
@@ -345,7 +356,7 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
 
-Test count baseline: **2042 tests across 132 files as of 2026-09-08** (TAC-340, FORBIDDEN_PURSUIT / FORBIDDEN_FORM canary additions — 2 new tests in existing files, file count unchanged; this entry wasn't updated when PR #131 merged, which is why a TAC-337 verification run reported 2042 against a stale documented 2040 and read as a false alarm) (measured via `npx vitest run`). Don't let regressions land — every PR should keep tests green.
+Test count baseline: **2049 tests across 133 files as of 2026-09-09** (TAC-331 added `scripts/onboarding/extract.test.ts`, a 7-test regression canary on the fixture vocabulary + routing/mood rules — 1 new file, up from the prior 2042/132) (measured via `npx vitest run`). Don't let regressions land — every PR should keep tests green.
 
 **Update this line when you add or remove test files, and measure rather than estimate.** A stale baseline is what let an "after" count be reported without an "if the delta doesn't match, a file isn't being collected" check — and an uncollected test file is indistinguishable from a passing one in the summary output. To get a trustworthy before/after on a branch: `git stash push -u -- <the paths you touched>`, run `npx vitest run`, record, `git stash pop`, re-run. `npx vitest list | grep <filename>` proves a specific file is actually collected rather than silently skipped.
 

@@ -155,15 +155,15 @@
 
 ### menu.highlights
 
-- [Item name — price — brief context (e.g., "perfect-order anchor", "first-timer pick")]
-- [Item name — price — context]
-- [Item name — price — context]
-- [Item name — price — context]
-- [Item name — price — context]
+- [Item name — price — a short factual note: flavor profile, format, or what makes it notable. A structured fact about the item, not a recommendation or endorsement.]
+- [Item name — price — factual note]
+- [Item name — price — factual note]
+- [Item name — price — factual note]
+- [Item name — price — factual note]
 
 ### menu.notes
 
-[PARAGRAPH 1 — perfect-order narrative or signature combination: what regulars order, what the venue is "in three things", any iconic pairings or rituals.]
+[PARAGRAPH 1 — perfect-order narrative or signature combination: what regulars order, what the venue is "in three things", any iconic pairings or rituals. Phrase as description of the venue ("regulars default to X"), not as advice to the reader ("suggest X to newcomers"). If the operator instead gave an opinionated pick or recommendation for a type of guest, that belongs in knowledge_corpus (section 7) with primary_tags: ["recommendations"], not here.]
 
 [PARAGRAPH 2 — off-menu items and how they're requested: regulars-only items, by-request specials, the social rules around them.]
 
@@ -425,6 +425,18 @@ Each entry has TWO tag arrays:
   "content": "[NARRATIVE CHUNK — a chunk that spans topics, e.g., a story about a named staff member's seasonal drink experiments. Belongs to BOTH `menu` (it's about a drink) AND `staff_<name>` (it's about who makes it). Carry both primary tags so retrieval surfaces it for either routing path.]",
   "primary_tags": ["menu", "staff_[name]"],
   "secondary_tags": ["seasonal", "[drink type]"],
+  "confidence_score": 0.9
+}
+```
+
+### Entry 5 (opinionated recommendation — routes here, never to venue_info)
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[NARRATIVE CHUNK — the operator's own opinionated pick or recommendation, attributed and in indicative mood: knowledge Sana holds and may choose to mention, not an instruction she must follow. E.g., what the operator would point a first-timer toward and why. Phrase it as 'the owner's pick is...' or 'the operator would point a first-timer toward...' — never as 'always suggest...' or 'don't over-program...'. This content NEVER belongs in venue_info.menu.highlights or menu.notes, even when the operator phrased it as a plain fact.]",
+  "primary_tags": ["recommendations"],
+  "secondary_tags": ["[topic, e.g. menu item]", "[occasion, e.g. first_visit]"],
   "confidence_score": 0.9
 }
 ```
