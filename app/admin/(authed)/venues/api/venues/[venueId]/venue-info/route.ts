@@ -11,6 +11,7 @@ import {
   VenueInfoSchema,
   VenueMenuSchema,
 } from '@/lib/schemas'
+import { loadVenueInfo } from '../../../../../_lib/venue-info'
 
 // PATCH /admin/venues/api/venues/[venueId]/venue-info — single writer for
 // everything editable in venue_info (TAC-343 Stage C). Mirrors
@@ -66,27 +67,12 @@ export async function PATCH(
   }
 
   const supabase = createAdminClient()
-  const { data: row, error: readErr } = await supabase
-    .from('venue_configs')
-    .select('venue_info')
-    .eq('venue_id', venueId)
-    .single()
-  if (readErr || !row) {
-    return NextResponse.json(
-      { error: 'venue_configs lookup failed', detail: readErr?.message ?? 'no row' },
-      { status: 500 },
-    )
+  const loaded = await loadVenueInfo(supabase, venueId)
+  if (!loaded.ok) {
+    return NextResponse.json({ error: 'venue_info lookup failed', detail: loaded.error }, { status: 500 })
   }
 
-  const venueInfoParsed = VenueInfoSchema.safeParse(row.venue_info)
-  if (!venueInfoParsed.success) {
-    return NextResponse.json(
-      { error: 'venue_info parse failed', detail: venueInfoParsed.error.message },
-      { status: 500 },
-    )
-  }
-
-  const merged = { ...venueInfoParsed.data, ...body }
+  const merged = { ...loaded.venueInfo, ...body }
   const validated = VenueInfoSchema.safeParse(merged)
   if (!validated.success) {
     return NextResponse.json(

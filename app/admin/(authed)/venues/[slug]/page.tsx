@@ -25,12 +25,11 @@ import { VenueFactsSection } from './_components/venue-facts-section'
 import { VoiceLinkSection } from './_components/voice-link-section'
 
 // TAC-343: /admin/venues/[slug] — the per-venue page. This component itself
-// stays a server component that only loads and computes; Stage B's
-// knowledge_corpus add/edit/delete/split/merge lives entirely inside the
-// client-side <KnowledgeEntryList> islands each knowledge-tag-backed
-// section renders (see knowledge-entry-list.tsx). venue_info/mechanics
-// editing and the currentContext expiry queue's Drop/Promote actions are
-// still read-only, tracked for a later stage.
+// stays a server component that only loads and computes; all editing lives
+// in client-side islands the sections render: knowledge_corpus
+// add/edit/delete/split/merge in <KnowledgeEntryList>, venue_info/mechanics
+// editing in their respective section components, and the currentContext
+// expiry queue's Add/Drop/Promote actions in <RightNowSection>.
 //
 // Section order mirrors the §2 table exactly, so reviewing a venue after an
 // interview follows the same order as the interview.
@@ -147,7 +146,11 @@ export default async function VenueDetailPage({ params }: PageProps) {
       />
       <VoiceLinkSection slug={data.venue.slug} />
       <OtherSection venueId={data.venue.id} entries={bySection.other} />
-      <RightNowSection currentContext={data.venueInfo.currentContext} now={now} />
+      <RightNowSection
+        venueId={data.venue.id}
+        currentContext={data.venueInfo.currentContext}
+        now={now}
+      />
 
       <CatchAllSection
         venueId={data.venue.id}
