@@ -29,6 +29,18 @@ export interface SeedVenueOptions {
   // venue_info.menu.items before the venue_configs row is written; the spec
   // markdown's menu.notes and menu.highlights stay as-is.
   menuItems: MenuItem[]
+  // TAC-343 Phase 0b: seed-venue is first-write-only by default (see the
+  // already-exists guard below). `force: true` is the explicit escape hatch —
+  // narrowed on plan review to CONFIG stores only (venue_configs, mechanics,
+  // voice_corpus + embeddings, knowledge_corpus + embeddings). It never
+  // touches the `venues` row itself or any guest-relationship table (guests,
+  // messages, transactions, engagement_events, guest_states), and it refuses
+  // outright — even with force — if the venue has any guests or messages, so
+  // it can never be used to erase real guest history. The only real use is
+  // re-seeding a mock venue during development; a live venue is edited on the
+  // venue config page (§0), never re-seeded. Nothing in this repo calls it
+  // yet.
+  force?: boolean
 }
 
 export interface SeedVenueResult {
@@ -49,7 +61,7 @@ export interface SeedVenueResult {
  * Server-only. Uses the admin DB client.
  */
 export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueResult> {
-  const { parsed, messagingPhoneNumber, menuItems } = options
+  const { parsed, messagingPhoneNumber, menuItems, force = false } = options
   const supabase = createAdminClient()
 
   // Merge CSV-sourced menu items into the parsed spec's venue_info before
@@ -63,7 +75,12 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
     },
   }
 
-  // Idempotency: hard-fail if venue with this slug exists.
+  // TAC-343 Phase 0b: seed-venue is first-write-only. Under the "this page is
+  // the ongoing source of truth" framing (once seeded, every edit happens on
+  // the venue config surface, not via re-extraction), a silent re-seed would
+  // destroy every edit made since — to ANY store this function writes, not
+  // just menu.items. Hard-fail by default; `force` is the explicit escape
+  // hatch, and it says plainly what it is about to overwrite before doing so.
   const { data: existing, error: checkError } = await supabase
     .from('venues')
     .select('id, slug')
@@ -72,7 +89,7 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
   if (checkError) {
     throw new Error(`seed: failed to check for existing venue: ${checkError.message}`)
   }
-  if (existing) {
+  if (existing && !force) {
     throw new Error(
       [
         `seed: venue "${parsed.slug}" already exists (id=${existing.id}).`,
@@ -95,48 +112,93 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
         `      etc.). Run them directly against the live row.`,
         ``,
         `───────────────────────────────────────────────────────────────────`,
-        `If you proceed anyway`,
+        `If you are certain you want to wipe and reseed this venue's config`,
         `───────────────────────────────────────────────────────────────────`,
         ``,
-        `DELETE FROM venues WHERE slug = '<slug>' cascades through:`,
+        `Re-run with --force. It will DELETE and rewrite CONFIG STORES ONLY:`,
         `  - venue_configs (brand persona, venue_info, thresholds)`,
         `  - mechanics`,
         `  - voice_corpus AND voice_embeddings (including all Phase 5`,
         `    review additions written by ingest-response-review)`,
-        `  - guests (real guest profiles tied to phone numbers)`,
-        `  - messages (every conversation ever held with every guest)`,
-        `  - transactions (visit history)`,
-        `  - engagement_events (recognition signal trail, including`,
-        `    mechanic_redeemed events)`,
-        `  - guest_states (current relationship band per guest)`,
+        `  - knowledge_corpus AND knowledge_embeddings`,
         ``,
-        `This is irreversible without a database backup. Do NOT do this on`,
-        `a live pilot venue. Only on test venues with is_test=true and no`,
-        `real guest data.`,
-        ``,
-        `If you are sure this is a test venue and you want to proceed,`,
-        `delete the rows manually in Supabase Studio first, then re-run.`,
+        `It never touches the venues row itself, or any guest-relationship`,
+        `table — guests, messages, transactions, engagement_events,`,
+        `guest_states. If this venue has any guests or messages, --force`,
+        `refuses outright (see below): re-seeding a venue with real guest`,
+        `history is not a thing we do. Once a venue has guests, config`,
+        `changes happen on the venue config page, not by re-seeding.`,
       ].join('\n'),
     )
   }
+  let venueId: string
+  if (existing && force) {
+    // TAC-343 (plan review): --force must never be able to erase guest
+    // history, so it refuses outright — even with the flag — the moment any
+    // guest or message row exists for this venue. The only legitimate use is
+    // re-seeding a mock venue during development, which by construction has
+    // neither yet.
+    const [guestsCheck, messagesCheck] = await Promise.all([
+      supabase.from('guests').select('id').eq('venue_id', existing.id).limit(1),
+      supabase.from('messages').select('id').eq('venue_id', existing.id).limit(1),
+    ])
+    if (guestsCheck.error) {
+      throw new Error(`seed: --force guest-history check failed: ${guestsCheck.error.message}`)
+    }
+    if (messagesCheck.error) {
+      throw new Error(`seed: --force guest-history check failed: ${messagesCheck.error.message}`)
+    }
+    if ((guestsCheck.data ?? []).length > 0 || (messagesCheck.data ?? []).length > 0) {
+      throw new Error(
+        [
+          `seed: --force refused for venue "${parsed.slug}" (id=${existing.id}).`,
+          ``,
+          `This venue has real guest history (a guests or messages row exists).`,
+          `--force only rewrites config stores and will never touch guest data,`,
+          `so re-seeding a venue with guest history is not something it can do`,
+          `safely — the config it would write may no longer match what those`,
+          `guests have actually experienced. Edit this venue's config directly`,
+          `instead (Supabase Studio, or the venue config page once it ships).`,
+        ].join('\n'),
+      )
+    }
 
-  // 1. venues row
-  const { data: venue, error: venueError } = await supabase
-    .from('venues')
-    .insert({
-      name: parsed.name,
-      slug: parsed.slug,
-      status: 'pending',
-      messaging_phone_number: messagingPhoneNumber,
-      timezone: parsed.timezone,
-      is_test: true,
-    })
-    .select('id')
-    .single()
-  if (venueError || !venue) {
-    throw new Error(`seed: venues insert failed: ${venueError?.message ?? 'no row returned'}`)
+    console.warn(
+      [
+        `[seed] --force: rewriting config stores for existing venue "${parsed.slug}" (id=${existing.id})`,
+        `[seed] this deletes and re-inserts venue_configs, mechanics,`,
+        `[seed] voice_corpus/voice_embeddings, and knowledge_corpus/`,
+        `[seed] knowledge_embeddings. The venues row and all guest-relationship`,
+        `[seed] tables (guests, messages, transactions, engagement_events,`,
+        `[seed] guest_states) are left untouched.`,
+      ].join('\n'),
+    )
+    for (const table of ['venue_configs', 'mechanics', 'voice_corpus', 'knowledge_corpus'] as const) {
+      const { error: deleteError } = await supabase.from(table).delete().eq('venue_id', existing.id)
+      if (deleteError) {
+        throw new Error(`seed: --force delete of ${table} failed: ${deleteError.message}`)
+      }
+    }
+    venueId = existing.id
+  } else {
+    // 1. venues row
+    const { data: venue, error: venueError } = await supabase
+      .from('venues')
+      .insert({
+        name: parsed.name,
+        slug: parsed.slug,
+        status: 'pending',
+        messaging_phone_number: messagingPhoneNumber,
+        timezone: parsed.timezone,
+        is_test: true,
+      })
+      .select('id')
+      .single()
+    if (venueError || !venue) {
+      throw new Error(`seed: venues insert failed: ${venueError?.message ?? 'no row returned'}`)
+    }
+    venueId = venue.id
   }
-  const venueId = venue.id
 
   // 2. venue_configs row
   const { error: configError } = await supabase.from('venue_configs').insert({
