@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isCanonicalPrimaryTag,
   KNOWLEDGE_PRIMARY_TAGS,
+  PrimaryTagSchema,
 } from './knowledge-tags'
 
 describe('isCanonicalPrimaryTag', () => {
@@ -50,5 +51,26 @@ describe('isCanonicalPrimaryTag', () => {
     // against accidental drift; bump it (and the spec's tag taxonomy) when
     // intentionally adding a tag.
     expect(KNOWLEDGE_PRIMARY_TAGS.length).toBe(12)
+  })
+})
+
+describe('PrimaryTagSchema', () => {
+  it('accepts every canonical tag', () => {
+    for (const tag of KNOWLEDGE_PRIMARY_TAGS) {
+      expect(PrimaryTagSchema.safeParse(tag).success).toBe(true)
+    }
+  })
+
+  it('accepts a valid namespaced tag', () => {
+    expect(PrimaryTagSchema.safeParse('staff_phoebe').success).toBe(true)
+  })
+
+  it('rejects a non-canonical tag (TAC-343 add/edit/split/merge boundary)', () => {
+    const result = PrimaryTagSchema.safeParse('personality')
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a non-canonical namespaced tag', () => {
+    expect(PrimaryTagSchema.safeParse('personality_warm').success).toBe(false)
   })
 })

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 // Canonical primary tags for knowledge_corpus entries (TAC-242, v1.12.0).
 //
 // Closed enum. Used at the parse boundary (fail-loud on non-canonical) and
@@ -57,3 +59,15 @@ export function isCanonicalPrimaryTag(tag: string): KnowledgePrimaryTag | null {
   }
   return null
 }
+
+// Zod wrapper around isCanonicalPrimaryTag for the TAC-343 admin write
+// boundary (add/edit/split/merge on knowledge_corpus). Validates a tag is
+// canonical or a valid `<canonical>_<suffix>` namespaced form — the same
+// rule the pure function already enforces, exposed at the schema boundary
+// so route handlers get a real Zod error rather than reimplementing this
+// check inline per route.
+export const PrimaryTagSchema = z
+  .string()
+  .refine((tag) => isCanonicalPrimaryTag(tag) !== null, {
+    message: 'not a canonical primary tag (see KNOWLEDGE_PRIMARY_TAGS)',
+  })

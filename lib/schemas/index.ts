@@ -71,6 +71,7 @@ export {
   isCanonicalPrimaryTag,
   KNOWLEDGE_PRIMARY_TAGS,
   type KnowledgePrimaryTag,
+  PrimaryTagSchema,
 } from './knowledge-tags'
 export {
   THREAD_MESSAGE_LIMIT,
