@@ -381,6 +381,8 @@ Each entry has TWO tag arrays:
 - **`primary_tags`** — closed enum, used for retrieval routing. Choose one or more from: `sourcing`, `staff`, `mechanic`, `menu`, `philosophy`, `recommendations`, `events`, `history`, `space`, `policies`, `logistics`, `other`. Namespacing allowed: `staff_phoebe` (matches `staff`), `mechanic_perk_card` (matches `mechanic`). A chunk that spans topics carries multiple primary tags.
 - **`secondary_tags`** — free-form, descriptive. 2–5 typical. Doesn't drive routing; helps the agent contextualize what was matched.
 
+**Granularity: one entry per self-contained claim, not one entry per topic.** If the operator discusses several items in one breath — five signature drinks, three neighborhood policies — write one entry per item. A single entry covering all five drinks retrieves on every question about any one of them and dilutes the match; five entries let a question about the cortado retrieve only the cortado. Each entry's content must name its own subject — it is embedded and retrieved alone, with no memory of the surrounding conversation. "Good entry point, lets the coffee speak" is not a usable entry on its own; "The pour-over is a good entry point — it lets the coffee speak for itself" is. Do not rely on chunking to separate subjects for you; split at extraction time.
+
 ### Entry 1
 
 ```json

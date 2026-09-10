@@ -5,7 +5,7 @@ import { parseVenueSpec } from './parse-venue-spec'
 // parser accepts. Section 7 is templated by the caller so each test can vary
 // it. Tests are hermetic — they don't read the fixture file, since fixtures
 // drift over time.
-function buildSpec(section7: string): string {
+function buildSpec(section7: string, section4Extra = ''): string {
   return [
     '## 1. Venue identification',
     '',
@@ -38,6 +38,7 @@ function buildSpec(section7: string): string {
     '',
     '## 4. venue_info',
     '',
+    section4Extra,
     '## 5. mechanics',
     '',
     '```json',
@@ -180,5 +181,83 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
     expect(() => parseVenueSpec(buildSpec(section7))).toThrow(
       /knowledge_corpus entry invalid/,
     )
+  })
+})
+
+describe('parseVenueSpec — staff[].notes routing (TAC-343 Phase 0)', () => {
+  function withStaff(staffEntries: Array<Record<string, unknown>>): string {
+    const section4Extra = [
+      '### staff',
+      '',
+      '```json',
+      JSON.stringify(staffEntries),
+      '```',
+      '',
+    ].join('\n')
+    return buildSpec('', section4Extra)
+  }
+
+  it('routes non-empty staff notes into a staff_<slug> knowledge_corpus entry instead of dropping them', () => {
+    const parsed = parseVenueSpec(
+      withStaff([
+        {
+          name: 'Phoebe Chen',
+          role: 'Bar lead',
+          notes: 'Runs seasonal matcha experiments; been here since 2019.',
+        },
+      ]),
+    )
+
+    // The flattened roster string is unchanged — notes never widen venue_info.staff.
+    expect(parsed.venueInfo.staff).toEqual(['Phoebe Chen — Bar lead'])
+
+    const staffChunk = parsed.knowledgeCorpus.find((c) =>
+      c.primary_tags.includes('staff_phoebe_chen'),
+    )
+    expect(staffChunk).toBeDefined()
+    expect(staffChunk?.content).toContain('Runs seasonal matcha experiments')
+    expect(staffChunk?.secondary_tags).toContain('staff_notes')
+  })
+
+  it('does not synthesize a chunk when notes is empty or absent', () => {
+    const parsed = parseVenueSpec(withStaff([{ name: 'Sam', role: 'Owner' }]))
+
+    expect(parsed.venueInfo.staff).toEqual(['Sam — Owner'])
+    expect(
+      parsed.knowledgeCorpus.filter((c) => c.primary_tags.some((t) => t.startsWith('staff_'))),
+    ).toHaveLength(0)
+  })
+
+  it('still synthesizes a chunk per staff member with notes, alongside extraction-authored entries', () => {
+    const section4Extra = [
+      '### staff',
+      '',
+      '```json',
+      JSON.stringify([
+        { name: 'Phoebe', role: 'Bar lead', notes: 'Seasonal matcha experiments.' },
+        { name: 'Sam', role: 'Owner', notes: '' },
+      ]),
+      '```',
+      '',
+    ].join('\n')
+    const section7 = [
+      '## 7. knowledge_corpus',
+      '',
+      '```json',
+      JSON.stringify({
+        source_type: 'voicenote_transcript',
+        content: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
+        primary_tags: ['sourcing'],
+        secondary_tags: ['ethiopia'],
+        confidence_score: 0.9,
+      }),
+      '```',
+    ].join('\n')
+
+    const parsed = parseVenueSpec(buildSpec(section7, section4Extra))
+
+    expect(parsed.knowledgeCorpus).toHaveLength(2)
+    expect(parsed.knowledgeCorpus.some((c) => c.primary_tags.includes('sourcing'))).toBe(true)
+    expect(parsed.knowledgeCorpus.some((c) => c.primary_tags.includes('staff_phoebe'))).toBe(true)
   })
 })

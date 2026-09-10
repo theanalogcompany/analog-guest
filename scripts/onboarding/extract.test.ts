@@ -63,3 +63,29 @@ describe('buildExtractionSystemPrompt (TAC-331)', () => {
     expect(prompt).toContain(fixtureMarkdown)
   })
 })
+
+describe('buildExtractionSystemPrompt (TAC-343 Phase 0 — knowledge_corpus granularity)', () => {
+  const prompt = buildExtractionSystemPrompt(fixtureMarkdown)
+
+  it('states the one-entry-per-self-contained-claim granularity rule', () => {
+    expect(prompt).toContain('one entry per self-contained claim')
+  })
+
+  it('instructs splitting a multi-item passage into multiple entries, not one', () => {
+    expect(prompt).toContain('Five signature drinks discussed is five entries, not one')
+  })
+
+  it('requires each entry to name its own subject', () => {
+    expect(prompt).toContain("entry's content must name its own subject")
+  })
+
+  it('warns against relying on chunkText() to separate subjects downstream', () => {
+    expect(prompt).toContain('chunkText()')
+  })
+})
+
+describe('venue-spec-example.md fixture (TAC-343 Phase 0 — granularity)', () => {
+  it('documents the granularity rule inline in section 7', () => {
+    expect(fixtureMarkdown).toContain('one entry per self-contained claim')
+  })
+})

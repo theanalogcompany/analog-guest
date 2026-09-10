@@ -12,7 +12,7 @@ import { seedVenue } from './onboarding/seed-supabase'
 async function main(): Promise<void> {
   const slug = process.argv[2]
   if (!slug) {
-    console.error('Usage: npm run seed-venue -- <slug> [--messaging-phone <e164>]')
+    console.error('Usage: npm run seed-venue -- <slug> [--messaging-phone <e164>] [--force]')
     process.exit(1)
   }
 
@@ -22,6 +22,11 @@ async function main(): Promise<void> {
   if (phoneFlagIdx !== -1 && process.argv[phoneFlagIdx + 1]) {
     messagingPhoneNumber = process.argv[phoneFlagIdx + 1]
   }
+
+  // TAC-343 Phase 0b: escape hatch for a deliberate wipe-and-reseed. Nothing
+  // in this repo passes it today — see seedVenue's already-exists guard for
+  // what it does and why the default is refuse.
+  const force = process.argv.includes('--force')
 
   const parentFolderId = process.env.GOOGLE_DRIVE_VENUES_FOLDER_ID
   if (!parentFolderId) {
@@ -63,7 +68,7 @@ async function main(): Promise<void> {
   )
 
   console.log(`[seed] writing to Supabase...`)
-  const result = await seedVenue({ parsed, messagingPhoneNumber, menuItems })
+  const result = await seedVenue({ parsed, messagingPhoneNumber, menuItems, force })
 
   const totalVoiceEmbedded = result.embeddedChunkCounts.reduce((a, b) => a + b, 0)
   const totalKnowledgeEmbedded = result.knowledgeEmbeddedChunkCounts.reduce((a, b) => a + b, 0)

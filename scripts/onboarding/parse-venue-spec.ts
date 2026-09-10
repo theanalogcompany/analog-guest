@@ -182,6 +182,15 @@ function stripParenAnnotation(value: string): string {
   return value.replace(/\s*\*?\(.*?\)\*?\s*$/, '').trim()
 }
 
+// "Phoebe Chen" → "phoebe_chen", for the staff_<slug> primary_tags namespace.
+function slugifyStaffName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
 type HoursObject = {
   monday?: string
   tuesday?: string
@@ -304,9 +313,16 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   if (!sectionInfo) throw new Error('parse-venue-spec: missing section "4. venue_info"')
   const infoH3s = splitByHeading(sectionInfo.content, 3)
 
-  // staff: JSON array of {name, role, notes} → flatten to "name — role" strings
+  // staff: JSON array of {name, role, notes} → flatten to "name — role" strings.
+  // `notes` used to be dropped silently here (TAC-343 Phase 0) — the thing that
+  // makes a person recognizable would only survive if extraction independently
+  // wrote a matching staff_[name] knowledge_corpus chunk. Instead, route any
+  // non-empty notes into a synthesized staff_<slug> chunk so the content
+  // always survives, whether or not extraction already covered it elsewhere.
+  // Staff depth lives in chunks, not in venue_info, per CLAUDE.md.
   const staffSection = infoH3s.find((s) => /^staff/i.test(s.title))
   let staff: string[] = []
+  const staffNotesChunks: KnowledgeCorpusSpec[] = []
   if (staffSection) {
     const staffBlocks = extractJsonBlocks(staffSection.content)
     if (staffBlocks.length > 0 && Array.isArray(staffBlocks[0])) {
@@ -314,7 +330,18 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
         .map((s) => {
           const n = String(s.name ?? '').trim()
           const r = String(s.role ?? '').trim()
+          const notes = typeof s.notes === 'string' ? s.notes.trim() : ''
           if (!n) return ''
+          if (notes.length > 0) {
+            const slug = slugifyStaffName(n)
+            staffNotesChunks.push({
+              source_type: 'manual_entry',
+              content: r ? `${n} (${r}): ${notes}` : `${n}: ${notes}`,
+              primary_tags: [slug.length > 0 ? `staff_${slug}` : 'staff'],
+              secondary_tags: ['staff_notes'],
+              confidence_score: DEFAULT_CONFIDENCE_SCORE,
+            })
+          }
           return r ? `${n} — ${r}` : n
         })
         .filter((s) => s.length > 0)
@@ -453,5 +480,14 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
     }
   }
 
-  return { slug, name, timezone, brandPersona, venueInfo, mechanics, voiceCorpus, knowledgeCorpus }
+  return {
+    slug,
+    name,
+    timezone,
+    brandPersona,
+    venueInfo,
+    mechanics,
+    voiceCorpus,
+    knowledgeCorpus: [...knowledgeCorpus, ...staffNotesChunks],
+  }
 }
