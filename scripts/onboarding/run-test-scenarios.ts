@@ -1,17 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { z } from 'zod'
 import type { Database } from '@/db/types'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { classifyStage, retrieveCorpusStage } from '@/lib/agent/stages'
-import type { RuntimeContext as AgentRuntimeContext } from '@/lib/agent/types'
-import {
-  generateMessage,
-  type RuntimeContext as AiRuntimeContext,
-  type VoiceCorpusChunk as AiVoiceCorpusChunk,
-} from '@/lib/ai'
+import { classifyStage, generateStage, retrieveCorpusStage, retrieveKnowledgeStage } from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
 import { computeGuestState, type GuestState } from '@/lib/recognition'
+import { evaluateApprovalDecision } from './evaluate-approval-decision'
+import type { ScenarioSheetRow } from './scenario-schema'
 
 type TransactionInsert = Database['public']['Tables']['transactions']['Insert']
 type MessageInsert = Database['public']['Tables']['messages']['Insert']
@@ -28,36 +23,12 @@ export const SYNTHETIC_PHONES: Record<GuestState, string> = {
   raving_fan: '+15550001300',
 }
 
-const FALLBACK_TIMEZONE = 'America/Los_Angeles'
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 // Seed-message dating: pinned >30 days ago so the recent-conversation block
 // (THE-173, 14-day window) doesn't pick them up. Recognition signal counts
 // are time-unfiltered, so old messages still drive responseRate.
 const SEED_MESSAGE_AGE_DAYS = 35
-
-// ---------------------------------------------------------------------------
-// 07-file schema validation
-// ---------------------------------------------------------------------------
-
-const Scenario07Schema = z.object({
-  sample_id: z.string().min(1),
-  category: z.string().min(1),
-  guest_state: z.enum(['new', 'returning', 'regular', 'raving_fan']),
-  scenario: z.string().min(1),
-  inbound_message: z.string().min(1),
-  expected_failure: z.string().nullable(),
-  is_mechanic_derived: z.boolean(),
-})
-export type Scenario07 = z.infer<typeof Scenario07Schema>
-
-export const TestScenariosFileSchema = z.object({
-  slug: z.string().min(1),
-  generated_at: z.string().min(1),
-  prompt_version: z.string().min(1),
-  scenarios: z.array(Scenario07Schema).min(1),
-})
-export type TestScenariosFile = z.infer<typeof TestScenariosFileSchema>
 
 // ---------------------------------------------------------------------------
 // Synthetic guest seeding
@@ -77,6 +48,15 @@ interface SeedOutcome {
  * each with enough seeded signal data for the recognition module to compute
  * the right state. Idempotent — safe to call repeatedly. Returns a per-state
  * map of guestIds plus per-state outcome rows for the operator log.
+ *
+ * States are seeded and verified SEQUENTIALLY (this loop, one state at a
+ * time) — this is the "settle state before running in parallel" guardrail
+ * from the Stage 2 authorization: computeGuestState writes a guest_states
+ * transition row the first time it sees a changed state, and doing that
+ * settling here, before the concurrent scenario loop starts, means the
+ * zero-delta guardrail check on guest_states/engagement_events (preflight.ts)
+ * covers only the concurrent portion — no state transition can race a
+ * concurrent buildRuntimeContext call into a duplicate row.
  */
 export async function seedSyntheticGuests(
   venueId: string,
@@ -345,63 +325,108 @@ function buildEngagementEventsForState(
 }
 
 // ---------------------------------------------------------------------------
-// Per-scenario execution
+// Per-scenario execution (TAC-347 Stage 2)
 // ---------------------------------------------------------------------------
 
-export interface RowOutput {
-  sample_id: string
-  run_date: string
+/**
+ * Terminal outcome of one scenario run. 'refused' and 'failed' are both
+ * RESULTS, not runner errors — a generateStage voice-fidelity refusal is
+ * exactly the kind of thing this harness exists to surface, and a real
+ * production stage throw (e.g. retrieveCorpusStage's insufficient-corpus
+ * gate) is faithfully-reproduced production behavior, not a bug in this
+ * script. Per the Stage 2 authorization: "A generateStage refusal (voice
+ * fidelity below the floor) is recorded as its own outcome and graded, not
+ * treated as a runner error."
+ */
+export type ScenarioOutcome = 'sent' | 'queued' | 'dropped' | 'refused' | 'failed'
+
+export interface RetrievedKnowledgeChunk {
+  text: string
+  primaryTags: string[]
+}
+
+export interface ScenarioResult {
+  sampleId: string
+  topic: string
   category: string
-  guest_state: GuestState
-  scenario: string
-  inbound_message: string
-  generated_message: string
-  voice_fidelity: number | null
-  verdict: string
-  edited_message: string
-  comment: string
+  scenarioSource: string
+  mode: 'graded' | 'exploratory'
+  guestState: GuestState
+  inboundMessage: string
+  expectedRoute: string
+  expectedBehavior: string
+  outcome: ScenarioOutcome
+  replyBody: string | null
+  voiceFidelity: number | null
+  route: 'send' | 'queue' | 'drop' | null
+  triggers: string[] | null
+  primaryTrigger: string | null
+  // True when the approval decision would blank this body before persisting
+  // in production (TAC-309, knowledge_gap cards). replyBody above still
+  // carries what the model actually generated, for pilot-review purposes —
+  // this flag is what tells the reader "production would have shown the
+  // guest nothing."
+  wouldBlankBody: boolean
+  errorMessage: string | null
+  elapsedMs: number
+  // TAC-347 Stage 3 grader fix: the SAME retrieval the generation call
+  // itself grounded on, threaded through so the grader judges "invented"
+  // and "voice" against what was actually available, not just the
+  // scenario's own (sometimes narrower) expected_facts. Empty when
+  // retrieval never ran (a stage threw before it, e.g. classifyStage).
+  retrievedVoiceExamples: string[]
+  retrievedKnowledge: RetrievedKnowledgeChunk[]
 }
 
 export interface RunScenarioInput {
-  scenario: Scenario07
+  scenario: ScenarioSheetRow
   venueId: string
   guestId: string
 }
 
 /**
- * Run a single scenario synchronously: build runtime context, classify,
- * retrieve corpus, generate. Captures the message body + voice_fidelity even
- * when fidelity is below the 0.4 send floor (we want bad outputs visible in
- * the review file). Pre-fills `comment` with `expected_failure: {value}` for
- * known-broken categories so THE-178 ingestion can skip them.
+ * Run a single scenario through the real agent pipeline: build runtime
+ * context, classify, retrieve corpus, retrieve knowledge, generate, then
+ * evaluate the approval decision — decision only, via
+ * evaluateApprovalDecision (never persists, never dispatches, never pushes).
  *
- * On failure: returns a row with generated_message: '<ERROR>',
- * voice_fidelity: null, comment: 'runner_error: {message}'. Doesn't throw —
- * the caller iterates.
+ * Never throws — every failure mode (a stage throw, a generation failure, a
+ * voice-fidelity refusal) is captured as its own ScenarioResult.outcome so
+ * the caller can iterate without a try/catch of its own.
  */
-export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
+export async function runScenario(input: RunScenarioInput): Promise<ScenarioResult> {
   const { scenario, venueId, guestId } = input
-  const runDateIso = new Date().toISOString()
-  const baseRow = {
-    sample_id: scenario.sample_id,
-    run_date: runDateIso,
+  const start = Date.now()
+  const base = {
+    sampleId: scenario.sample_id,
+    topic: scenario.topic,
     category: scenario.category,
-    guest_state: scenario.guest_state,
-    scenario: scenario.scenario,
-    inbound_message: scenario.inbound_message,
-    verdict: '',
-    edited_message: '',
-    comment: scenario.expected_failure ? `expected_failure: ${scenario.expected_failure}` : '',
+    scenarioSource: scenario.scenario_source,
+    mode: scenario.mode,
+    guestState: scenario.guest_state,
+    inboundMessage: scenario.inbound_message,
+    expectedRoute: scenario.expected_route,
+    expectedBehavior: scenario.expected_behavior,
   }
+  const empty = {
+    replyBody: null,
+    voiceFidelity: null,
+    route: null,
+    triggers: null,
+    primaryTrigger: null,
+    wouldBlankBody: false,
+    errorMessage: null,
+  } as const
+  let retrievedVoiceExamples: string[] = []
+  let retrievedKnowledge: RetrievedKnowledgeChunk[] = []
 
   try {
-    console.log(`  [runScenario:${scenario.sample_id}] start`)
     const agentRunId = randomUUID()
     const ctx = await buildRuntimeContext({
       agentRunId,
       guestId,
       venueId,
-      // Synthetic-guest tuning runs aren't real agent flows — no need to write
+      // Synthetic-guest test runs aren't real agent flows — no need to write
       // to Langfuse. startAgentTrace returns a no-op trace when LANGFUSE_*
       // env vars are unset (and these scripts run with .env.local, which we
       // expect to leave the keys blank locally).
@@ -413,153 +438,85 @@ export async function runScenario(input: RunScenarioInput): Promise<RowOutput> {
         receivedAt: new Date(),
       },
     })
-    console.log(`  [runScenario:${scenario.sample_id}] context built`)
     ctx.classification = await classifyStage(ctx)
-    console.log(`  [runScenario:${scenario.sample_id}] classified: ${ctx.classification.category}`)
     ctx.corpus = await retrieveCorpusStage(ctx)
-    console.log(`  [runScenario:${scenario.sample_id}] corpus retrieved: ${ctx.corpus.length} chunks`)
+    ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx, ctx.classification.category)
+    retrievedVoiceExamples = ctx.corpus.map((c) => c.text)
+    retrievedKnowledge = ctx.knowledgeCorpus.map((c) => ({ text: c.text, primaryTags: c.primaryTags }))
 
-    const aiRuntime = inlineBuildAiRuntime(ctx)
-    const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
-      id: c.id,
-      text: c.text,
-      sourceType: c.sourceType as AiVoiceCorpusChunk['sourceType'],
-      relevanceScore: c.similarity,
-    }))
+    const outcome = await generateStage(ctx, ctx.classification.category)
+    const elapsedMs = Date.now() - start
 
-    console.log(`  [runScenario:${scenario.sample_id}] calling generateMessage...`)
-    const result = await generateMessage({
-      category: ctx.classification.category,
-      persona: ctx.venue.brandPersona,
-      venueInfo: ctx.venue.venueInfo,
-      ragChunks,
-      runtime: aiRuntime,
-    })
-    console.log(`  [runScenario:${scenario.sample_id}] generateMessage returned: ok=${result.ok}`)
-    if (!result.ok) {
+    if (outcome.status === 'failed') {
+      return { ...base, ...empty, outcome: 'failed', errorMessage: outcome.error, elapsedMs, retrievedVoiceExamples, retrievedKnowledge }
+    }
+    if (outcome.status === 'refused') {
       return {
-        ...baseRow,
-        generated_message: '<ERROR>',
-        voice_fidelity: null,
-        comment: `runner_error: ${result.error}`,
+        ...base,
+        ...empty,
+        outcome: 'refused',
+        voiceFidelity: outcome.finalScore,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
       }
     }
 
+    // status === 'success' — evaluate the approval decision. Decision only:
+    // this never persists a draft, dispatches to Sendblue, or fires a push.
+    const decision = await evaluateApprovalDecision(ctx, outcome.result)
+    const generated = outcome.result
+
+    if (decision.action === 'send') {
+      return {
+        ...base,
+        outcome: 'sent',
+        replyBody: generated.body,
+        voiceFidelity: generated.voiceFidelity,
+        route: 'send',
+        triggers: [],
+        primaryTrigger: decision.reason ?? null,
+        wouldBlankBody: false,
+        errorMessage: null,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
+    }
+    if (decision.action === 'queue') {
+      return {
+        ...base,
+        outcome: 'queued',
+        replyBody: generated.body,
+        voiceFidelity: generated.voiceFidelity,
+        route: 'queue',
+        triggers: decision.triggers,
+        primaryTrigger: decision.primaryTrigger,
+        wouldBlankBody: decision.blankBody,
+        errorMessage: null,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
+    }
+    // action === 'drop' (TAC-308: knowledge-gap card protection)
     return {
-      ...baseRow,
-      generated_message: result.data.body,
-      voice_fidelity: result.data.voiceFidelity,
+      ...base,
+      outcome: 'dropped',
+      replyBody: generated.body,
+      voiceFidelity: generated.voiceFidelity,
+      route: 'drop',
+      triggers: decision.triggers,
+      primaryTrigger: decision.reason,
+      wouldBlankBody: false,
+      errorMessage: null,
+      elapsedMs,
+      retrievedVoiceExamples,
+      retrievedKnowledge,
     }
   } catch (e) {
+    const elapsedMs = Date.now() - start
     const message = e instanceof Error ? e.message : String(e)
-    return {
-      ...baseRow,
-      generated_message: '<ERROR>',
-      voice_fidelity: null,
-      comment: `runner_error: ${message}`,
-    }
+    return { ...base, ...empty, outcome: 'failed', errorMessage: message, elapsedMs, retrievedVoiceExamples, retrievedKnowledge }
   }
-}
-
-/**
- * Inline port of lib/agent/stages.ts::buildAiRuntime. Kept private to the
- * runner per the design decision to not broaden lib/agent's public surface
- * for a one-off testing script. If this drifts from the real one in stages.ts,
- * the symptom is the runner producing different prompts than production —
- * worth keeping the two visually similar so review catches drift.
- */
-function inlineBuildAiRuntime(ctx: AgentRuntimeContext): AiRuntimeContext {
-  let additionalContext: string | undefined
-  if (ctx.followupTrigger) {
-    const meta = ctx.followupTrigger.metadata
-    additionalContext = meta
-      ? `Followup trigger: ${ctx.followupTrigger.reason} (${JSON.stringify(meta)})`
-      : `Followup trigger: ${ctx.followupTrigger.reason}`
-  }
-
-  let timezone = ctx.venue.timezone
-  if (!isValidTimezone(timezone)) {
-    console.warn(
-      `inlineBuildAiRuntime: invalid timezone "${timezone}" for venue ${ctx.venue.id}, falling back to ${FALLBACK_TIMEZONE}`,
-    )
-    timezone = FALLBACK_TIMEZONE
-  }
-
-  return {
-    guestName: ctx.guest.firstName ?? undefined,
-    inboundMessage: ctx.currentMessage?.body,
-    additionalContext,
-    today: computeToday(timezone),
-    recentMessages: ctx.recentMessages,
-  }
-}
-
-function isValidTimezone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiRuntimeContext['today']> {
-  const isoDate = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now)
-  const dayOfWeek = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'long' }).format(now)
-  const venueLocalTime = new Intl.DateTimeFormat('en-GB', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(now)
-  return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
-}
-
-// ---------------------------------------------------------------------------
-// CSV assembly
-// ---------------------------------------------------------------------------
-
-const CSV_COLUMNS: ReadonlyArray<keyof RowOutput> = [
-  'sample_id',
-  'run_date',
-  'category',
-  'guest_state',
-  'scenario',
-  'inbound_message',
-  'generated_message',
-  'voice_fidelity',
-  'verdict',
-  'edited_message',
-  'comment',
-]
-
-/**
- * RFC-4180 escape: wrap in double-quotes if the cell contains a comma,
- * double-quote, or newline; double up internal double-quotes.
- */
-function csvEscape(cell: string): string {
-  if (/[",\n\r]/.test(cell)) {
-    return `"${cell.replace(/"/g, '""')}"`
-  }
-  return cell
-}
-
-function cellToString(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'number') return String(value)
-  if (typeof value === 'string') return value
-  return String(value)
-}
-
-export function buildCsv(rows: RowOutput[]): string {
-  const headerLine = CSV_COLUMNS.join(',')
-  const dataLines = rows.map((row) =>
-    CSV_COLUMNS.map((col) => csvEscape(cellToString(row[col]))).join(','),
-  )
-  return [headerLine, ...dataLines].join('\n')
 }
