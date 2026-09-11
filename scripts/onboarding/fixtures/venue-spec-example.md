@@ -217,8 +217,9 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
   "reward_description": "[what the guest receives, in concrete terms]",
   "expiration_rule": "[when/how it expires]",
   "redemption_policy": "one_time",
+  "requires_operator_approval": true,
   "trigger": {
-    "type": "[trigger type — e.g., guest_initiated_request, manual_invite, date_match]",
+    "type": "[trigger type — one of: guest_initiated_request, manual_invite]",
     "method": "[delivery method or other trigger-specific field]"
   },
   "redemption": {
@@ -241,7 +242,7 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
   "redemption_policy": "renewable",
   "redemption_window_days": 30,
   "trigger": {
-    "type": "[trigger type]",
+    "type": "[trigger type — one of: guest_initiated_request, manual_invite]",
     "cadence": "[e.g., monthly]",
     "schedule": "[e.g., third_saturday]"
   },
@@ -255,6 +256,7 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 > - `min_state`: gates eligibility by the guest's relationship band. Mechanic does not appear in the agent's prompt for guests below this band.
 > - `redemption_policy`: `one_time` blocks future re-offers permanently after a single `mechanic_redeemed` event. `renewable` resets after `redemption_window_days` days (e.g. 30 = monthly, 7 = weekly). Most mechanics are `one_time`; renewable is for repeating perks like a free first drink each month.
 > - Omit `redemption_policy` and `redemption_window_days` to default to `one_time` / null. Renewable mechanics MUST set both.
+> - `requires_operator_approval` (TAC-346): bias toward `true` — set it when the operator wants to decide personally, or the mechanic commits their time/a limited slot/their personal discretion. Omit (defaults `false`) only when staff or the agent can grant it freely, as Mechanic 2 above does. Every mechanic's value is listed in Needs confirmation with its source quote (or "none, defaulted") regardless of which way it's set.
 
 ---
 
@@ -330,17 +332,6 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 
 ```json
 {
-  "source_type": "manual_entry",
-  "content": "[SYNTHESIZED VOICE EXAMPLE — a paraphrased message in the operator's voice, useful when transcript doesn't have a directly applicable quote for a common interaction (e.g., a follow-up after a first visit)]",
-  "tags": ["follow_up", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.85
-}
-```
-
-### Entry 8
-
-```json
-{
   "source_type": "voicenote_transcript",
   "content": "[VERBATIM QUOTE — operator on how they actually talk: register, what they say to a regular vs. a stranger, what they don't say]",
   "tags": ["voice", "[topic tag]", "[section tag]"],
@@ -348,7 +339,7 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 }
 ```
 
-### Entry 9
+### Entry 8
 
 ```json
 {
@@ -359,7 +350,7 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 }
 ```
 
-### Entry 10
+### Entry 9
 
 ```json
 {
@@ -443,25 +434,33 @@ Each entry has TWO tag arrays:
 }
 ```
 
+### Entry 6 (operational fact — policy)
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[OPERATIONAL FACT — a plain policy the operator stated: tipping, walk-ins-only, no delivery, or similar. A complete, self-contained fact — it does not need a story around it to belong here.]",
+  "primary_tags": ["policies"],
+  "secondary_tags": ["[topic, e.g. tipping]"],
+  "confidence_score": 0.9
+}
+```
+
+### Entry 7 (operational fact — logistics)
+
+```json
+{
+  "source_type": "voicenote_transcript",
+  "content": "[OPERATIONAL FACT — a logistics detail: how ordering, shipping, wholesale, catering, or private events actually work, distinct from the venue's posted hours or address.]",
+  "primary_tags": ["logistics"],
+  "secondary_tags": ["[topic, e.g. catering_lead_time]"],
+  "confidence_score": 0.9
+}
+```
+
 ---
 
-## 8. Pre-seed validation checklist
-
-Before running `npm run seed [venue-slug]`, verify:
-
-- [x] Narrative is 2–4 paragraphs
-- [x] All 10 BrandPersonaSchema fields populated
-- [x] All required VenueInfoSchema fields populated
-- [x] At least 1 mechanic with structured trigger + redemption
-- [x] At least 5 voice_corpus entries
-- [x] At least 5 knowledge_corpus entries (substantive narrative chunks for grounding)
-- [x] Every knowledge_corpus entry has at least one canonical `primary_tags` value (drawn from the 12 allowed tags or namespaced like `staff_<name>` / `mechanic_<slug>`); parser fails loud on non-canonical primary tags
-- [x] At least 1 currentContext entry
-- [x] Menu CSV referenced and exists in Drive
-
----
-
-## 9. Notes for processing admin
+## 8. Notes for processing admin
 
 Things flagged during synthesis worth knowing:
 
@@ -470,6 +469,6 @@ Things flagged during synthesis worth knowing:
 
 ---
 
-## 10. Revision history
+## 9. Revision history
 
 - **v01** ([YYYY-MM-DD]) — initial extraction from transcript + menu CSV + Airtable record.

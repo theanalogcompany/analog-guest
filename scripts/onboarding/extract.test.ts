@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildExtractionSystemPrompt } from './extract'
+import { MECHANIC_TRIGGER_TYPES } from '@/lib/schemas'
+import { buildExtractionSystemPrompt, MECHANIC_APPROVAL_CRITERIA } from './extract'
 
 const fixtureMarkdown = readFileSync(resolve(__dirname, 'fixtures/venue-spec-example.md'), 'utf-8')
 const venueInfoSchemaSource = readFileSync(resolve(__dirname, '../../lib/schemas/venue-info.ts'), 'utf-8')
@@ -87,5 +88,109 @@ describe('buildExtractionSystemPrompt (TAC-343 Phase 0 — knowledge_corpus gran
 describe('venue-spec-example.md fixture (TAC-343 Phase 0 — granularity)', () => {
   it('documents the granularity rule inline in section 7', () => {
     expect(fixtureMarkdown).toContain('one entry per self-contained claim')
+  })
+})
+
+describe('venue-spec-example.md fixture (TAC-346 regression canaries)', () => {
+  // Mechanic 1's trigger.type placeholder used to list "date_match" as an
+  // example value alongside the two real canonical ones — it was never a
+  // valid MECHANIC_TRIGGER_TYPES member, and the fixture had been teaching
+  // the model a fake third trigger type. Guard against reintroducing it.
+  it('contains no "date_match" vocabulary', () => {
+    expect(fixtureMarkdown).not.toContain('date_match')
+  })
+
+  // Voice corpus Entry 7 used to be a manual_entry "SYNTHESIZED VOICE
+  // EXAMPLE" — exactly the padding-via-synthesis pattern this ticket
+  // removes. Scoped to the voice_corpus section specifically, since
+  // knowledge_corpus's Entry 3 legitimately uses manual_entry.
+  it('contains no manual_entry source_type inside the voice_corpus section', () => {
+    const start = fixtureMarkdown.indexOf('## 6. voice_corpus')
+    const end = fixtureMarkdown.indexOf('## 7. knowledge_corpus')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const voiceCorpusSection = fixtureMarkdown.slice(start, end)
+    expect(voiceCorpusSection).not.toContain('"source_type": "manual_entry"')
+  })
+
+  it('the Pre-seed validation checklist section has been removed (superseded by Needs confirmation)', () => {
+    expect(fixtureMarkdown).not.toContain('Pre-seed validation checklist')
+  })
+
+  it('models two operational-fact knowledge_corpus entries tagged policies and logistics', () => {
+    expect(fixtureMarkdown).toContain('"primary_tags": ["policies"]')
+    expect(fixtureMarkdown).toContain('"primary_tags": ["logistics"]')
+  })
+
+  it('models requires_operator_approval on Mechanic 1 and omits it from Mechanic 2', () => {
+    const mechanic1Start = fixtureMarkdown.indexOf('### Mechanic 1')
+    const mechanic2Start = fixtureMarkdown.indexOf('### Mechanic 2')
+    const mechanic2End = fixtureMarkdown.indexOf('> Notes on the new fields')
+    expect(fixtureMarkdown.slice(mechanic1Start, mechanic2Start)).toContain('"requires_operator_approval": true')
+    expect(fixtureMarkdown.slice(mechanic2Start, mechanic2End)).not.toContain('requires_operator_approval')
+  })
+})
+
+describe('buildExtractionSystemPrompt (TAC-346)', () => {
+  const prompt = buildExtractionSystemPrompt(fixtureMarkdown)
+
+  it('bans manual_entry and padding for voice_corpus', () => {
+    expect(prompt).toContain('Do NOT use source_type=\'manual_entry\' for voice_corpus under any circumstance')
+    expect(prompt).toContain('Do not manufacture entries to reach 5')
+  })
+
+  it('bans joking, sarcastic, or hypothetical scenario answers in voice_corpus', () => {
+    expect(prompt).toContain('Do NOT include joking, sarcastic, or hypothetical scenario answers')
+  })
+
+  it('removes the 8-25 knowledge_corpus cap and covers operational facts', () => {
+    expect(prompt).not.toContain('8-25 substantive narrative chunks')
+    expect(prompt).toContain('There is no target range and no cap')
+    expect(prompt).toContain('EVERYTHING TRUE ABOUT THE VENUE THAT ISN\'T A STRUCTURED FIELD IN venue_info')
+  })
+
+  it('states the currentContext-vs-permanent exclusivity rule and the ISO-only expiresAt rule', () => {
+    expect(prompt).toContain('a fact belongs in EXACTLY ONE place, never both')
+    expect(prompt).toContain('it MUST be a full ISO 8601 date (YYYY-MM-DD) — never a relative phrase')
+  })
+
+  it('resolves relative dates against the interview date input, never leaving a relative phrase unresolved', () => {
+    expect(prompt).toContain('Resolve every relative date in the transcript')
+    expect(prompt).toContain('never leave a relative phrase in a date field')
+  })
+
+  it('bans routing/handoff instructions in persona fields without naming Needs confirmation as a destination', () => {
+    expect(prompt).toContain('Never a routing or handoff instruction')
+    expect(prompt).toContain('omit it from brand_persona entirely')
+    // Change #2: extraction should never be told a category of content
+    // "belongs in" Needs confirmation — it should just omit it. Needs
+    // confirmation is populated by the separate verification pass.
+    expect(prompt).not.toMatch(/belongs (in|to) Needs confirmation/)
+  })
+
+  it('bans brainstormed mechanics without naming Needs confirmation as a destination', () => {
+    expect(prompt).toContain('Do NOT extract a mechanic from a brainstorm')
+    expect(prompt).toContain('Omit it from section 5 entirely')
+  })
+
+  it('restricts staff roster to employees only', () => {
+    expect(prompt).toContain('list ONLY people actually employed at the venue')
+  })
+
+  it('constrains trigger.type to the canonical MECHANIC_TRIGGER_TYPES values, imported not hand-copied', () => {
+    for (const t of MECHANIC_TRIGGER_TYPES) {
+      expect(prompt).toContain(`'${t}'`)
+    }
+    expect(prompt).toContain('never invent a third value')
+  })
+
+  it('states the requires_operator_approval bias-toward-true rule', () => {
+    expect(prompt).toContain('When genuinely unclear, true is the safer answer')
+  })
+
+  // TAC-346 fix: the approval criteria must come from the shared constant,
+  // not a hand-typed duplicate that could drift from verify.ts's copy.
+  it('embeds the shared MECHANIC_APPROVAL_CRITERIA constant verbatim', () => {
+    expect(prompt).toContain(MECHANIC_APPROVAL_CRITERIA)
   })
 })
