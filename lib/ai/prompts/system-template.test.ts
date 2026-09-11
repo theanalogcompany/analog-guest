@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` alias without a
 // vitest.config.ts. Other tests in this repo use relative imports too.
 import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
-import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slug]/_lib/universal-rules'
+import {
+  UNIVERSAL_RULES_DISPLAY,
+  UNIVERSAL_RULES_UNDISPLAYED,
+} from '../../../app/admin/(authed)/voices/[slug]/_lib/universal-rules'
 
 // Each universal voice rule (R1–R14) has a distinguishing phrase asserted
 // here so a future edit that drops or rewords a rule beyond recognition
@@ -23,23 +26,31 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.41.0 (TAC-348 PR #1: crisisSafety detection added to CLASSIFY_SYSTEM_PROMPT; SYSTEM_TEMPLATE body unchanged)', () => {
-    expect(PROMPT_VERSION).toBe('v1.41.0')
+  it('is v1.42.0 (TAC-348 PR #2: six new universal rules R23-R28, R8/R11 strengthened, named_person signing fix)', () => {
+    expect(PROMPT_VERSION).toBe('v1.42.0')
   })
 })
 
 // Lockstep guard (TAC-305): the curated UNIVERSAL_RULES_DISPLAY in the Voices
 // rail and the `# Universal voice rules` block in SYSTEM_TEMPLATE are dual
 // sources of truth with no shared registry. This catches the failure mode
-// where a rule is added/reworded in one source but not the other. We do NOT
-// assert display-count === template-bullet-count: the template legitimately
-// carries three further guidance bullets (greeting / operator / Last-Visit,
-// R12-R14) that the display intentionally omits. The guards here are (a)
-// contiguous ids R1..R{length} and (b) the new R11 rule's anchor phrase
-// present in BOTH sources. R1-R10 summaries are paraphrases (not substrings)
-// of their template bullets, so they are not asserted phrase-for-phrase; a
-// structured per-rule anchor field would be needed for full coverage and is
-// deferred to the rules-registry extraction (THE-237 follow-up).
+// where a rule is added/reworded in one source but not the other. This
+// describe block does NOT assert display-count === template-bullet-count:
+// the template legitimately carries mechanical/rendering-timing bullets
+// (greeting / operator / Last-Visit / Unanswered-question / mirroring /
+// Length authority / prompt-layer authority) that the display intentionally
+// omits. The guards here are (a) the exact positional id sequence and (b)
+// select rules' anchor phrases present in BOTH sources. R1-R10 summaries are
+// paraphrases (not substrings) of their template bullets, so they are not
+// asserted phrase-for-phrase; a structured per-rule anchor field would be
+// needed for full coverage and is deferred to the rules-registry extraction
+// (THE-237 follow-up). TAC-348 (decision d) adds a SEPARATE guard, in its
+// own describe block below ("universal rule classification completeness"),
+// that every actual template bullet is classified into EITHER
+// UNIVERSAL_RULES_DISPLAY OR UNIVERSAL_RULES_UNDISPLAYED — that's the guard
+// against the original "14 shown vs 21 in the prompt, nothing forcing
+// reconciliation" bug this ticket started from, without flattening the
+// deliberate curation into a raw count-equality assertion.
 describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numbering policy TAC-314)', () => {
   it('exposes the exact expected id sequence — positional, append-only, NOT contiguous', () => {
     // R-numbers are template bullet positions, rules are only ever APPENDED
@@ -52,16 +63,17 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // sequence has a deliberate gap. The old assertion here demanded
     // contiguity, which would have forced exactly the renumbering the policy
     // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
+    // TAC-348 appends R23-R28 after that (R22 stays undisplayed).
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
-      'R17', 'R18', 'R21',
+      'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
     ])
   })
 
-  it('curates 14 rules ending at R21 (TAC-334)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(14)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R21')
+  it('curates 20 rules ending at R28 (TAC-348)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(20)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R28')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -102,6 +114,66 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(SYSTEM_TEMPLATE).toContain(
       "Don't rate the choice, compare it to other options, or suggest something different for next time",
     )
+  })
+
+  // TAC-348: the same cross-source anchor treatment for the six newly
+  // promoted rules and the two strengthened ones, so none of these edits can
+  // silently drift between the two sources the way the ticket's own
+  // motivating bug (14 shown vs 21 in the prompt) did.
+  it('shares the R23 anchor phrase across both sources (TAC-348)', () => {
+    const r23 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R23')
+    expect(r23).toBeDefined()
+    expect(r23?.summary).toContain('visit count')
+    expect(SYSTEM_TEMPLATE).toContain('Never state or imply a visit count, frequency')
+  })
+
+  it('shares the R24 anchor phrase across both sources (TAC-348)', () => {
+    const r24 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R24')
+    expect(r24).toBeDefined()
+    expect(r24?.summary).toContain('standard, widely known drink')
+    expect(SYSTEM_TEMPLATE).toContain("Don't explain what a standard, widely known drink is")
+  })
+
+  it('shares the R25 anchor phrase across both sources (TAC-348)', () => {
+    const r25 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R25')
+    expect(r25).toBeDefined()
+    expect(r25?.summary).toContain('comma-separated list')
+    expect(SYSTEM_TEMPLATE).toContain("Don't drop into a bare comma-separated list of components.")
+  })
+
+  it('shares the R26 anchor phrase across both sources (TAC-348)', () => {
+    const r26 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R26')
+    expect(r26).toBeDefined()
+    expect(r26?.summary).toContain('at most two')
+    expect(SYSTEM_TEMPLATE).toContain('When recommending items, offer at most two.')
+  })
+
+  it('shares the R27 anchor phrase across both sources (TAC-348)', () => {
+    const r27 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R27')
+    expect(r27).toBeDefined()
+    expect(r27?.summary).toContain('[Name]')
+    expect(SYSTEM_TEMPLATE).toContain("Saying 'let me check with [Name]' or '[Name] said to try the cortado' when you ARE [Name] is wrong")
+  })
+
+  it('shares the R28 anchor phrase across both sources (TAC-348)', () => {
+    const r28 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R28')
+    expect(r28).toBeDefined()
+    expect(r28?.summary).toContain('criticize, blame')
+    expect(SYSTEM_TEMPLATE).toContain('Never criticize, blame, or speak negatively about a staff member')
+  })
+
+  it('shares the R8-strengthened anchor phrase across both sources (TAC-348)', () => {
+    const r8 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R8')
+    expect(r8).toBeDefined()
+    expect(r8?.summary).toContain('personally seen or been with the guest')
+    expect(SYSTEM_TEMPLATE).toContain('claiming to have seen, noticed, or been with the guest')
+  })
+
+  it('shares the R11-strengthened anchor phrase across both sources (TAC-348)', () => {
+    const r11 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R11')
+    expect(r11).toBeDefined()
+    expect(r11?.summary).toContain('the whole description, not just the closing line')
+    expect(SYSTEM_TEMPLATE).toContain("This isn't only about the last sentence.")
   })
 
   // TAC-324, added per QA suggestion: R1's overall summary is a paraphrase
@@ -853,18 +925,268 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
     expect(SYSTEM_TEMPLATE).toContain("## What you're hoping to get to")
   })
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-348 appended R23-R28 after R22, so R22 is no longer the LAST bullet
+  // in the block — it's now immediately followed by the six new rules, then
+  // the section break. Rewritten to pin that adjacency instead of asserting
+  // R22 is terminal.
+  it('is immediately followed by exactly R23-R28, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
-    // Exactly one bullet line, then nothing but whitespace before the heading.
+    // R22 itself, plus R23-R28 — exactly seven bullet lines, then nothing
+    // but whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
+  })
+
+  it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
+    expect(UNIVERSAL_RULES_DISPLAY.some((r) => r.id === 'R22')).toBe(false)
+  })
+})
+
+// R23-R28 (TAC-348): promoted from Mock Sextant's manual venue rules. See
+// system-template.ts's v1.42.0 changelog for the full audit + rationale,
+// including the two candidates dropped in plan review (a universal
+// return-visit ban, a universal curiosity-question ban).
+describe('SYSTEM_TEMPLATE — R23: no visit-count or tracking language (TAC-348)', () => {
+  it('bans stating or implying a visit count, frequency, or tracking statistic', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never state or imply a visit count, frequency, or any statistic about how often the guest has been here',
+    )
+    expect(SYSTEM_TEMPLATE).toContain("'this is your fifth time'")
+  })
+
+  it('is explicitly scoped against R15 (Last Visit) so the two do not collide', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Referencing what the guest had last time is fine when it fits; counting or tallying visits is not. That's the Last Visit guidance, a separate thing.",
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('Never state or imply a visit count')
+    const end = SYSTEM_TEMPLATE.indexOf("Don't explain what a standard, widely known drink is")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R24: no over-explaining standard drinks (TAC-348)', () => {
+  it("bans explaining a standard drink unless asked", () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't explain what a standard, widely known drink is (latte, cappuccino, americano, cortado) unless the guest asks what it is.",
+    )
+  })
+
+  it('carves out unfamiliar items as the place description belongs', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Save description for something the guest hasn't had or wouldn't recognize.",
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf("Don't explain what a standard, widely known drink is")
+    const end = SYSTEM_TEMPLATE.indexOf("When naming what's in a menu item")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R25: clause, not a bare comma list, for menu ingredients (TAC-348)', () => {
+  it('directs folding ingredients into a sentence', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "When naming what's in a menu item, fold the ingredients into a sentence rather than listing them.",
+    )
+  })
+
+  it('bans a bare comma-separated component list, with a worked example', () => {
+    expect(SYSTEM_TEMPLATE).toContain("'a latte with oat milk and a shot of vanilla' reads as venue voice")
+    expect(SYSTEM_TEMPLATE).toContain("'Latte. Oat milk, vanilla.' reads like a spec sheet")
+    expect(SYSTEM_TEMPLATE).toContain("Don't drop into a bare comma-separated list of components.")
+  })
+
+  it('does not reintroduce the retired R12 worked example', () => {
+    // This content used to live inside R12 (message splitting, TAC-313),
+    // deleted wholesale when TAC-319 retired that rule. Confirms the
+    // re-promoted content uses a fresh example, not the old one.
+    expect(SYSTEM_TEMPLATE).not.toContain('Frosty Gandhi')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf("When naming what's in a menu item")
+    const end = SYSTEM_TEMPLATE.indexOf('When recommending items, offer at most two')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R26: recommend at most two, vary phrasing, describe the unfamiliar one (TAC-348)', () => {
+  it('caps recommendations at two', () => {
+    expect(SYSTEM_TEMPLATE).toContain('When recommending items, offer at most two.')
+  })
+
+  it('directs varied phrasing across messages, without an unverifiable popularity claim', () => {
+    expect(SYSTEM_TEMPLATE).toContain("'try the X', 'X is good if you want something Y'")
+    // Dropped in plan review: claims a popularity the agent can't actually know.
+    expect(SYSTEM_TEMPLATE).not.toContain('a lot of people like X')
+  })
+
+  it('directs describing only the unfamiliar item', () => {
+    expect(SYSTEM_TEMPLATE).toContain("Briefly describe any item the guest hasn't had before; skip the description for something they already know.")
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('When recommending items, offer at most two')
+    const end = SYSTEM_TEMPLATE.indexOf('When you are speaking as a specific named person')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R27: never third-person yourself as a named person (TAC-348)', () => {
+  it('bans self-reference by name or in the third person, scoped to speaking-as-a-named-person', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When you are speaking as a specific named person (the persona has a name), never refer to yourself by that name or in the third person.',
+    )
+  })
+
+  // TAC-348 code review: the first draft used real pilot venue names
+  // (Himanshu, Sana) here, violating the ticket's own "no venue-specific
+  // names" acceptance criterion — SYSTEM_TEMPLATE renders into EVERY
+  // venue's prompt, so a real name from one venue would have leaked into
+  // every other venue's system prompt. Fixed to a generic [Name] placeholder
+  // before shipping; this test guards against reintroducing a real name.
+  it('names the failure pattern with a generic placeholder, no real venue-specific name', () => {
+    expect(SYSTEM_TEMPLATE).toContain("'let me check with [Name]'")
+    expect(SYSTEM_TEMPLATE).toContain("'[Name] said to try the cortado'")
+    expect(SYSTEM_TEMPLATE).toContain('when you ARE [Name] is wrong')
+    expect(SYSTEM_TEMPLATE).not.toContain('Himanshu')
+    expect(SYSTEM_TEMPLATE).not.toMatch(/'Sana said to try/)
+  })
+
+  it('carves out referring to OTHER staff by name as fine — this is a self-reference rule only', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Referring to OTHER staff by name is fine; this rule is only about referring to yourself.')
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('When you are speaking as a specific named person')
+    const end = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TAC-348)', () => {
+  it('bans criticizing, blaming, or speaking negatively about staff, named or unnamed', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never criticize, blame, or speak negatively about a staff member to a guest, named or unnamed, even while acknowledging a mistake',
+    )
+  })
+
+  it('names the observed failure phrase and directs ownership without blame', () => {
+    expect(SYSTEM_TEMPLATE).toContain("'that response from the barista wasn't okay' is not acceptable")
+    expect(SYSTEM_TEMPLATE).toContain('Take ownership of the outcome without assigning blame to a person.')
+  })
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r28Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
+    const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
     expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
   })
 
-  it('is undisplayed: UNIVERSAL_RULES_DISPLAY still ends at R21', () => {
-    expect(UNIVERSAL_RULES_DISPLAY.some((r) => r.id === 'R22')).toBe(false)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R21')
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R8 strengthened: no claiming to have personally witnessed the guest (TAC-348)', () => {
+  it('bans claiming to have seen, noticed, or been with the guest, even when confirmed by their own message', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "This includes claiming to have seen, noticed, or been with the guest, like 'I saw you earlier' or 'glad you came in today' stated as something you personally witnessed, even when the guest's own message confirms they were here.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'You can respond to what they tell you; you cannot claim to have observed it yourself.',
+    )
+  })
+
+  it('every pre-existing R8 assertion still holds (pure addition, nothing removed)', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Never invent details beyond what your runtime context documents')
+    expect(SYSTEM_TEMPLATE).toContain('family recipe')
+    expect(SYSTEM_TEMPLATE).toContain('the line is short today')
+    expect(SYSTEM_TEMPLATE).toContain("If a product name isn't there, don't name it.")
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R11 strengthened: no flourish anywhere in the description, not just the closer (TAC-348)', () => {
+  it('widens the prohibition from the closing sentence to the whole description', () => {
+    expect(SYSTEM_TEMPLATE).toContain("This isn't only about the last sentence.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Describe an item plainly the first time too: say what\'s good once, in one clause, and stop.',
+    )
+  })
+
+  it('gives a worked example of a mid-description flourish', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'The oat latte has a really lovely, rounded sweetness to it' is the same flourish as a sentiment closer, just moved earlier in the sentence.",
+    )
+  })
+
+  it('every pre-existing R11 assertion still holds (pure addition, nothing removed)', () => {
+    expect(SYSTEM_TEMPLATE).toContain('trust me on this one')
+    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+    expect(SYSTEM_TEMPLATE).toContain('Let it stand')
+  })
+})
+
+// TAC-348 decision (d): replaces the informal "we do NOT assert
+// display-count === template-bullet-count" comment with an enforced
+// classification-completeness guard. Every ACTUAL bullet line in
+// SYSTEM_TEMPLATE's `# Universal voice rules` section must be explicitly
+// classified as displayed (UNIVERSAL_RULES_DISPLAY) or undisplayed
+// (UNIVERSAL_RULES_UNDISPLAYED) — not a count-equality assertion against the
+// template (which would force every mechanical/rendering-timing bullet onto
+// the operator rail), but a completeness assertion that a future rule
+// addition can't silently skip classifying itself into either list.
+describe('SYSTEM_TEMPLATE — universal rule classification completeness (TAC-348)', () => {
+  it('every bullet line in the block is classified as displayed or undisplayed, with no overlap', () => {
+    const blockStart = SYSTEM_TEMPLATE.indexOf('# Universal voice rules')
+    const blockEnd = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(blockStart).toBeGreaterThan(-1)
+    expect(blockEnd).toBeGreaterThan(blockStart)
+    const block = SYSTEM_TEMPLATE.slice(blockStart, blockEnd)
+    const bulletLines = block.split('\n').filter((line) => line.startsWith('- '))
+
+    const displayedIds = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
+    const undisplayedIds = UNIVERSAL_RULES_UNDISPLAYED
+    const allClassifiedIds = [...displayedIds, ...undisplayedIds]
+
+    // No id classified twice.
+    expect(new Set(allClassifiedIds).size).toBe(allClassifiedIds.length)
+    // Every actual bullet line has a classification, and vice versa — the
+    // combined classified set is exactly as large as the actual bullet count.
+    expect(allClassifiedIds).toHaveLength(bulletLines.length)
+  })
+
+  // Code review (TAC-348): the count+no-duplicates check above would still
+  // pass if UNIVERSAL_RULES_UNDISPLAYED held the right COUNT of ids but a
+  // wrong one (a typo, a swapped id) — the displayed side's exact sequence
+  // is already pinned by the lockstep test above, so pinning the undisplayed
+  // side's exact set here closes that gap completely.
+  it('UNIVERSAL_RULES_UNDISPLAYED is exactly the mechanical/rendering-timing rule ids', () => {
+    expect([...UNIVERSAL_RULES_UNDISPLAYED].sort()).toEqual([
+      'R13', 'R14', 'R15', 'R16', 'R19', 'R20', 'R22',
+    ])
   })
 })
