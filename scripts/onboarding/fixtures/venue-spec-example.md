@@ -149,7 +149,7 @@
   "petFriendly": false,
   "parking": "[parking situation, e.g., street only / lot / valet / *(none)*]",
   "seating": "[capacity + seating layout — concrete details about chairs, tables, contested spots, etc.]",
-  "notes": "[any other amenity-adjacent context — equipment status, venue quirks, etc.]"
+  "notes": "[any other amenity-adjacent context — venue quirks, etc.]"
 }
 ```
 
@@ -267,8 +267,8 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 ```json
 {
   "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — 1-3 sentences from the transcript that captures distinctive operator voice — origin/identity flavor]",
-  "tags": ["narrative", "[topic tag]", "[section tag]"],
+  "content": "[VERBATIM OR NEAR-VERBATIM TEXT — a message the operator actually sent, or would send, welcoming a guest back after a previous visit. Addressed TO a guest, not about the business.]",
+  "tags": ["welcome", "[topic tag]", "[section tag]"],
   "confidence_score": 0.95
 }
 ```
@@ -278,9 +278,9 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 ```json
 {
   "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — operator's framing of why the venue exists or its mission, in their own words]",
-  "tags": ["narrative", "mission", "[section tag]"],
-  "confidence_score": 0.95
+  "content": "[VERBATIM OR NEAR-VERBATIM TEXT — a message the operator actually sent, or would send, answering a guest's question (hours, an item, a request). Addressed TO a guest, not a description of how they'd answer.]",
+  "tags": ["reply", "[topic tag]", "[section tag]"],
+  "confidence_score": 0.9
 }
 ```
 
@@ -289,8 +289,8 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 ```json
 {
   "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — about the menu: perfect-order narrative, signature item, or how the operator describes it]",
-  "tags": ["menu", "[topic tag]", "[section tag]"],
+  "content": "[VERBATIM OR NEAR-VERBATIM TEXT — a short follow-up message the operator actually sent, or would send, after a guest's visit. Addressed TO a guest, not the operator narrating that they follow up.]",
+  "tags": ["follow_up", "[topic tag]", "[section tag]"],
   "confidence_score": 0.9
 }
 ```
@@ -300,63 +300,8 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 ```json
 {
   "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — operator's recommendation for first-timers, or framing of a particular menu item]",
-  "tags": ["menu", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.9
-}
-```
-
-### Entry 5
-
-```json
-{
-  "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — sourcing or supplier relationships: where ingredients come from, neighborhood ties]",
-  "tags": ["sourcing", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.9
-}
-```
-
-### Entry 6
-
-```json
-{
-  "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — operator's recommendations for nearby places, things they like, their corner of the world]",
-  "tags": ["recommendations", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.9
-}
-```
-
-### Entry 7
-
-```json
-{
-  "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — operator on how they actually talk: register, what they say to a regular vs. a stranger, what they don't say]",
-  "tags": ["voice", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.9
-}
-```
-
-### Entry 8
-
-```json
-{
-  "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — operator describing a mechanic or recurring gesture they do for regulars]",
-  "tags": ["mechanic", "[topic tag]", "[section tag]"],
-  "confidence_score": 0.85
-}
-```
-
-### Entry 9
-
-```json
-{
-  "source_type": "voicenote_transcript",
-  "content": "[VERBATIM QUOTE — a behind-the-scenes detail or obsession the operator has, captures their character]",
-  "tags": ["narrative", "[topic tag]", "[section tag]"],
+  "content": "[SHORT SPOKEN LINE — something the operator would plausibly say to a guest across the counter: a recommendation, an invitation, or a house rule said warmly. Second person, one or two sentences, trimmed of filler. Not a text message — a line of spoken voice. Not a long narrative or reflective passage about the business, and not addressed to the interviewer.]",
+  "tags": ["recommendation", "[topic tag]", "[section tag]"],
   "confidence_score": 0.9
 }
 ```
@@ -365,7 +310,7 @@ See `04-[venue-slug]-menu.csv` in the Drive folder. CSV is the source-of-truth f
 
 ## 7. knowledge_corpus
 
-Narrative content the agent retrieves when grounding answers to substantive guest questions. Distinct from voice_corpus (style examples) and from venue_info (structured facts like hours/menu/staff list): these are the **stories, explanations, and context** behind the venue — origin, sourcing relationships, staff personalities, mechanic explanations, philosophy, opinionated recommendations.
+Content the agent retrieves when grounding answers to substantive guest questions — both NARRATIVE (**stories, explanations, and context** behind the venue: origin, sourcing relationships, staff personalities, mechanic explanations, philosophy, opinionated recommendations) and OPERATIONAL FACTS (plain policies and logistics venue_info has no field for: tipping, walk-ins-only, delivery, shipping, wholesale, catering, private events, merch, and similar). Distinct from voice_corpus (style examples) and from venue_info (structured facts like hours/menu/staff list).
 
 Each entry has TWO tag arrays:
 

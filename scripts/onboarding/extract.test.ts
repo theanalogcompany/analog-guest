@@ -131,6 +131,72 @@ describe('venue-spec-example.md fixture (TAC-346 regression canaries)', () => {
   })
 })
 
+// UAT round 1 (Le Mil's): an 8-entry voice_corpus with zero real texting
+// voice cleared the raw-count floor. Part of the fix is the fixture itself —
+// a 9-example corpus shaped as origin/mission/menu-quote content (the exact
+// shapes the new voice-qualification check disqualifies: interview
+// monologue, describing the business) kept teaching extraction to write
+// that. Cut to 3 guest-addressed text entries. Revision (owner decision):
+// voice also comes from short spoken lines to a guest, not only texts —
+// added a 4th entry modeling that shape.
+describe('venue-spec-example.md fixture — voice_corpus is guest-facing (UAT round 1 fix + revision)', () => {
+  function voiceCorpusSection(): string {
+    const start = fixtureMarkdown.indexOf('## 6. voice_corpus')
+    const end = fixtureMarkdown.indexOf('## 7. knowledge_corpus')
+    return fixtureMarkdown.slice(start, end)
+  }
+
+  it('has exactly 4 entries, not 9', () => {
+    const matches = voiceCorpusSection().match(/^### Entry \d+/gm) ?? []
+    expect(matches).toHaveLength(4)
+  })
+
+  it('every entry is framed as addressed TO a guest, not about the business', () => {
+    const section = voiceCorpusSection()
+    expect(section).toContain('welcoming a guest back')
+    expect(section).toContain("answering a guest's question")
+    expect(section).toContain("after a guest's visit")
+    // Regression canary: none of the removed origin/mission/menu-quote
+    // framing (interview-register content the new check disqualifies)
+    // should reappear here.
+    expect(section).not.toContain('origin/identity flavor')
+    expect(section).not.toContain('framing of why the venue exists')
+  })
+
+  it('models a short spoken line to a guest, distinct from a text message', () => {
+    const section = voiceCorpusSection()
+    expect(section).toContain('SHORT SPOKEN LINE')
+    expect(section).toContain('across the counter')
+    expect(section).toContain('Not a text message — a line of spoken voice')
+  })
+
+  it('does not contain the pre-fix vocabulary teaching extraction to model interview monologue as voice_corpus', () => {
+    const section = voiceCorpusSection()
+    expect(section).not.toContain('operator on how they actually talk')
+    expect(section).not.toContain('a behind-the-scenes detail or obsession')
+  })
+})
+
+// UAT round 1 finding 2 (Le Mil's): the changing table and Bombay sandwich
+// were duplicated into permanent fields as well as currentContext. The
+// amenities.notes placeholder's own "equipment status" example was itself
+// an invitation to write exactly that pattern.
+describe('venue-spec-example.md fixture — permanent-field placement fixes (UAT round 1 fix)', () => {
+  it('amenities.notes placeholder no longer suggests "equipment status" (currentContext keeping it as its own example is correct — that IS the right home for it)', () => {
+    const start = fixtureMarkdown.indexOf('### amenities')
+    const end = fixtureMarkdown.indexOf('### menu.highlights')
+    expect(fixtureMarkdown.slice(start, end)).not.toContain('equipment status')
+  })
+
+  it('section 7 intro covers operational facts, not narrative only', () => {
+    const start = fixtureMarkdown.indexOf('## 7. knowledge_corpus')
+    const end = fixtureMarkdown.indexOf('### Entry 1', start)
+    const intro = fixtureMarkdown.slice(start, end)
+    expect(intro).toContain('OPERATIONAL FACTS')
+    expect(intro).toContain('policies and logistics venue_info has no field for')
+  })
+})
+
 describe('buildExtractionSystemPrompt (TAC-346)', () => {
   const prompt = buildExtractionSystemPrompt(fixtureMarkdown)
 
@@ -141,6 +207,19 @@ describe('buildExtractionSystemPrompt (TAC-346)', () => {
 
   it('bans joking, sarcastic, or hypothetical scenario answers in voice_corpus', () => {
     expect(prompt).toContain('Do NOT include joking, sarcastic, or hypothetical scenario answers')
+  })
+
+  // Revision to change A (owner decision): voice comes from how the
+  // operator talks to guests generally, not only from texts.
+  it('accepts short spoken lines addressed to a guest as qualifying voice_corpus content', () => {
+    expect(prompt).toContain('a short SPOKEN line addressed to a guest')
+    expect(prompt).toContain('something the operator would plausibly say to a guest across the counter')
+    expect(prompt).toContain('Texting-specific conventions (length, emojis, tone) already live in brand_persona')
+  })
+
+  it('still bans long narrative/reflective passages and lines addressed to the interviewer in voice_corpus', () => {
+    expect(prompt).toContain('Do NOT include long narrative or reflective passages about the business\'s history, mission, or sourcing')
+    expect(prompt).toContain('the operator explaining a perk or policy TO THE INTERVIEWER rather than saying it TO a guest')
   })
 
   it('removes the 8-25 knowledge_corpus cap and covers operational facts', () => {
