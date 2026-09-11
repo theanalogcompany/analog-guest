@@ -1,4 +1,4 @@
-import { google, type drive_v3 } from 'googleapis'
+import { google, type drive_v3, type sheets_v4 } from 'googleapis'
 
 export interface DriveFileMeta {
   id: string
@@ -8,7 +8,7 @@ export interface DriveFileMeta {
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const GDOC_MIME = 'application/vnd.google-apps.document'
-const GSHEET_MIME = 'application/vnd.google-apps.spreadsheet'
+export const GSHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 
 /**
  * Returns a Drive client authed via Application Default Credentials.
@@ -19,6 +19,124 @@ export function getDrive(): drive_v3.Drive {
     scopes: ['https://www.googleapis.com/auth/drive'],
   })
   return google.drive({ version: 'v3', auth })
+}
+
+/**
+ * Returns a Sheets API v4 client, same ADC auth as getDrive(). TAC-347
+ * Stage 1 (redesign) — the `drive` scope covers Sheets API v4 calls too
+ * (confirmed via a live smoke test against this project before this module
+ * was written); the only real risk was the Sheets API not being enabled on
+ * the GCP project, which the smoke test also cleared. Needed for multi-tab
+ * spreadsheets — writeSheetFile's CSV-upload-and-convert trick only ever
+ * produces a single tab.
+ */
+export function getSheets(): sheets_v4.Sheets {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  })
+  return google.sheets({ version: 'v4', auth })
+}
+
+/**
+ * Create a new native Google Sheet with the given tabs (empty), inside
+ * `folderId`. Returns the new spreadsheet's id (same as its Drive file id).
+ */
+export async function createMultiTabSheet(
+  drive: drive_v3.Drive,
+  sheets: sheets_v4.Sheets,
+  folderId: string,
+  name: string,
+  tabTitles: readonly string[],
+): Promise<string> {
+  const created = await sheets.spreadsheets.create({
+    requestBody: {
+      properties: { title: name },
+      sheets: tabTitles.map((title) => ({ properties: { title } })),
+    },
+  })
+  const spreadsheetId = created.data.spreadsheetId
+  if (!spreadsheetId) throw new Error(`drive: spreadsheet create returned no id for "${name}"`)
+  await drive.files.update({
+    fileId: spreadsheetId,
+    addParents: folderId,
+    fields: 'id, parents',
+  })
+  return spreadsheetId
+}
+
+/**
+ * Overwrite a tab's entire contents with `rows` (row-major, first row is
+ * the header). Clears the tab first so a shrinking row count doesn't leave
+ * stale trailing rows from a previous write.
+ */
+export async function writeTabValues(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabTitle: string,
+  rows: readonly (readonly string[])[],
+): Promise<void> {
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: tabTitle,
+    requestBody: {},
+  })
+  if (rows.length === 0) return
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${tabTitle}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows.map((r) => [...r]) },
+  })
+}
+
+/**
+ * Read a tab's full contents back as row-major string arrays.
+ *
+ * `valueRenderOption: 'UNFORMATTED_VALUE'` is deliberate, not the default —
+ * the Sheets API defaults to FORMATTED_VALUE, which returns a cell as it
+ * would be DISPLAYED after Sheets' own type inference (numbers, dates,
+ * times, percentages), even for a cell written with valueInputOption: RAW.
+ * A generated scenario's text can plausibly contain something that reads as
+ * a time or ratio (confirmed live: this repo's own voice-corpus content has
+ * "2:45", "1:15") — FORMATTED_VALUE risks silently reformatting that on
+ * read, corrupting the content-hash round trip merge-scenario-sheet-pure.ts
+ * depends on. Investigated as a candidate cause of TAC-347's "false kept as
+ * edited" bug (disproven for the specific rows checked — a live A/B diff
+ * against the same sheet showed zero cell differences — but the risk is
+ * real for content this repo doesn't control the shape of, so hardening
+ * here regardless).
+ */
+export async function readTabValues(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabTitle: string,
+): Promise<string[][]> {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: tabTitle,
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  })
+  return (res.data.values ?? []).map((row) => row.map((cell) => String(cell ?? '')))
+}
+
+/**
+ * Adds a new tab to an already-existing spreadsheet if it doesn't already
+ * have one with this title — idempotent, safe to call every run. Used by
+ * TAC-347 Stage 3 to add the 'Report' tab to a 07-sheet that was originally
+ * created (via createMultiTabSheet) with only Topics/Scenarios/_meta.
+ */
+export async function ensureTabExists(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabTitle: string,
+): Promise<void> {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' })
+  const existingTitles = new Set((meta.data.sheets ?? []).map((s) => s.properties?.title))
+  if (existingTitles.has(tabTitle)) return
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests: [{ addSheet: { properties: { title: tabTitle } } }] },
+  })
 }
 
 export async function findVenueFolder(

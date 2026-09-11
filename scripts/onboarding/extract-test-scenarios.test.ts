@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   assignSampleIds,
-  extractMechanicNames,
   normalizeName,
   parseFixtureCategoryOrder,
   type RawScenario,
-  validateMechanicsCategoriesAreReal,
-  validateMechanicsCoverage,
   validateUniversalCategories,
 } from './extract-test-scenarios'
 
@@ -16,7 +13,6 @@ const baseScenario = (overrides: Partial<RawScenario> = {}): RawScenario => ({
   scenario: 'test scenario',
   inbound_message: 'hi',
   expected_failure: null,
-  is_mechanic_derived: false,
   ...overrides,
 })
 
@@ -58,57 +54,6 @@ describe('normalizeName', () => {
   })
 })
 
-describe('extractMechanicNames', () => {
-  it('extracts mechanic names from section 5 headers, normalized', () => {
-    const md = `
-## 5. mechanics
-
-### Mechanic 1: Couch Hold for Regulars
-
-stuff
-
-### Mechanic 2: First Visit Perk
-
-more stuff
-`
-    expect(extractMechanicNames(md)).toEqual(
-      new Set(['couch_hold_for_regulars', 'first_visit_perk']),
-    )
-  })
-
-  it('returns an empty Set when no mechanic headers are present', () => {
-    const md = `
-## 4. venue_info
-
-### staff
-- Alice
-`
-    expect(extractMechanicNames(md)).toEqual(new Set())
-  })
-
-  it('deduplicates when the same mechanic name appears twice', () => {
-    const md = `
-### Mechanic 1: Free Drink
-### Mechanic 2: Free Drink
-`
-    const result = extractMechanicNames(md)
-    expect(result.size).toBe(1)
-    expect(result.has('free_drink')).toBe(true)
-  })
-
-  it('strips apostrophes from mechanic header names (regression for mock-central-perk)', () => {
-    const md = `
-## 5. mechanics
-
-### Mechanic 1: Friend's First Drink on the House
-### Mechanic 2: Phoebe’s Open Mic — Regular Slot Priority
-`
-    const result = extractMechanicNames(md)
-    expect(result.has('friends_first_drink_on_the_house')).toBe(true)
-    expect(result.has('phoebes_open_mic_regular_slot_priority')).toBe(true)
-  })
-})
-
 describe('parseFixtureCategoryOrder', () => {
   it('returns category names in fixture order, snake-cased', () => {
     const md = `
@@ -133,7 +78,7 @@ describe('parseFixtureCategoryOrder', () => {
 describe('validateUniversalCategories', () => {
   const valid = new Set(['greeting', 'hours', 'menu_fact'])
 
-  it('passes when every universal scenario uses a known category', () => {
+  it('passes when every scenario uses a known category', () => {
     expect(() =>
       validateUniversalCategories({
         scenarios: [baseScenario({ category: 'greeting' }), baseScenario({ category: 'hours' })],
@@ -157,106 +102,6 @@ describe('validateUniversalCategories', () => {
       expect(msg).toContain('menu_fact')
     }
   })
-
-  it('ignores mechanic-derived scenarios', () => {
-    expect(() =>
-      validateUniversalCategories({
-        scenarios: [
-          baseScenario({ category: 'mechanic_anything', is_mechanic_derived: true }),
-        ],
-        validCategories: valid,
-      }),
-    ).not.toThrow()
-  })
-})
-
-describe('validateMechanicsCoverage (forward)', () => {
-  it('passes when every expected mechanic has at least one scenario', () => {
-    expect(() =>
-      validateMechanicsCoverage({
-        scenarios: [
-          baseScenario({ category: 'mechanic_couch_hold', is_mechanic_derived: true }),
-          baseScenario({ category: 'mechanic_free_drink', is_mechanic_derived: true }),
-        ],
-        expectedMechanics: new Set(['couch_hold', 'free_drink']),
-      }),
-    ).not.toThrow()
-  })
-
-  it('throws with the missing mechanic names when one is uncovered', () => {
-    try {
-      validateMechanicsCoverage({
-        scenarios: [
-          baseScenario({ category: 'mechanic_couch_hold', is_mechanic_derived: true }),
-        ],
-        expectedMechanics: new Set(['couch_hold', 'free_drink']),
-      })
-      throw new Error('expected throw')
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      expect(msg).toContain('mechanics coverage validation failed')
-      expect(msg).toContain('free_drink')
-    }
-  })
-
-  it('passes trivially when expected set is empty', () => {
-    expect(() =>
-      validateMechanicsCoverage({
-        scenarios: [baseScenario({ category: 'greeting' })],
-        expectedMechanics: new Set(),
-      }),
-    ).not.toThrow()
-  })
-})
-
-describe('validateMechanicsCategoriesAreReal (reverse)', () => {
-  it('passes when every derived category is in the expected set', () => {
-    expect(() =>
-      validateMechanicsCategoriesAreReal({
-        scenarios: [
-          baseScenario({ category: 'mechanic_couch_hold', is_mechanic_derived: true }),
-        ],
-        expectedMechanics: new Set(['couch_hold']),
-      }),
-    ).not.toThrow()
-  })
-
-  it('throws with the bad category and the valid mechanic set', () => {
-    try {
-      validateMechanicsCategoriesAreReal({
-        scenarios: [
-          baseScenario({ category: 'mechanic_secret_menu', is_mechanic_derived: true }),
-        ],
-        expectedMechanics: new Set(['couch_hold', 'free_drink']),
-      })
-      throw new Error('expected throw')
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      expect(msg).toContain('unknown mechanic category "mechanic_secret_menu"')
-      expect(msg).toContain('couch_hold')
-      expect(msg).toContain('free_drink')
-    }
-  })
-
-  it('throws when is_mechanic_derived is true but category lacks the mechanic_ prefix', () => {
-    expect(() =>
-      validateMechanicsCategoriesAreReal({
-        scenarios: [
-          baseScenario({ category: 'greeting', is_mechanic_derived: true }),
-        ],
-        expectedMechanics: new Set(['couch_hold']),
-      }),
-    ).toThrow(/unknown mechanic category "greeting"/)
-  })
-
-  it('passes trivially when there are zero is_mechanic_derived scenarios', () => {
-    expect(() =>
-      validateMechanicsCategoriesAreReal({
-        scenarios: [baseScenario({ category: 'greeting' })],
-        expectedMechanics: new Set(),
-      }),
-    ).not.toThrow()
-  })
 })
 
 describe('assignSampleIds', () => {
@@ -270,19 +115,16 @@ describe('assignSampleIds', () => {
     ]
     const out = assignSampleIds(scenarios, 'mock-cp', order)
     expect(out.map((s) => s.sample_id)).toEqual(['mock-cp-001', 'mock-cp-002', 'mock-cp-003'])
-    // Sorted by fixture-category index.
-    expect(out.map((s) => s.category)).toEqual(['greeting', 'hours', 'menu_fact'])
+    // Sorted by fixture-category index. category is prefixed behavior_ per
+    // the unified Scenario shape (scenario-schema.ts).
+    expect(out.map((s) => s.category)).toEqual(['behavior_greeting', 'behavior_hours', 'behavior_menu_fact'])
   })
 
   it('is idempotent — the same input twice produces the same output mapping', () => {
     const scenarios = [
       baseScenario({ category: 'menu_fact', inbound_message: 'tea?' }),
       baseScenario({ category: 'greeting', inbound_message: 'hi' }),
-      baseScenario({
-        category: 'mechanic_couch_hold',
-        is_mechanic_derived: true,
-        inbound_message: 'save me a couch',
-      }),
+      baseScenario({ category: 'hours', inbound_message: 'open?' }),
     ]
     const a = assignSampleIds(scenarios, 'foo', order)
     // Reverse the input to prove sort stability is what's driving determinism.
@@ -290,21 +132,18 @@ describe('assignSampleIds', () => {
     expect(a).toEqual(b)
   })
 
-  it('places mechanic-derived scenarios after universal ones', () => {
-    const scenarios = [
-      baseScenario({
-        category: 'mechanic_couch_hold',
-        is_mechanic_derived: true,
-        inbound_message: 'save me a couch',
-      }),
-      baseScenario({ category: 'greeting', inbound_message: 'hi' }),
-    ]
-    const out = assignSampleIds(scenarios, 'foo', order)
-    expect(out[0].is_mechanic_derived).toBe(false)
-    expect(out[1].is_mechanic_derived).toBe(true)
+  it('stamps the unified Scenario fixed fields (behavior source, unknown route)', () => {
+    const out = assignSampleIds([baseScenario()], 'foo', order)
+    expect(out[0]).toMatchObject({
+      scenario_source: 'behavior',
+      expected_facts: [],
+      forbidden_claims: [],
+      source_row_ids: [],
+      expected_route: 'unknown',
+    })
   })
 
-  it('sorts within a (category, state) by inbound_message lexicographically', () => {
+  it('sorts within a category by inbound_message lexicographically', () => {
     const scenarios = [
       baseScenario({ category: 'greeting', inbound_message: 'sup' }),
       baseScenario({ category: 'greeting', inbound_message: 'hi' }),

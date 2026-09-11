@@ -5,6 +5,7 @@ import { z } from 'zod'
 // test file. lib/recognition/types is leaf code (no DB deps); safe to import
 // directly. Per the module-split-for-testability convention in CLAUDE.md.
 import { GUEST_STATES, type GuestState } from '../../lib/recognition/types'
+import type { Scenario } from './scenario-schema'
 
 const EXTRACTION_MODEL = 'claude-sonnet-4-6'
 const TEMPERATURE = 0.7
@@ -13,23 +14,25 @@ const SYSTEM_PROMPT = 'You generate test scenarios for a hospitality messaging a
 
 export { GUEST_STATES, type GuestState }
 
+// TAC-347: this module now generates ONLY the behavior-category slice
+// (the 17-category fixture) — mechanics-derived generation ("Pass 2") moved
+// to generate-db-scenarios-pure.ts's generateMechanicScenarios, which reads
+// mechanics.min_state / requires_operator_approval directly from the DB
+// instead of asking Sonnet to infer them from spec-markdown prose. So the
+// LLM output shape no longer carries is_mechanic_derived — every scenario
+// this module produces is scenario_source: 'behavior' by construction.
 const ScenarioSchema = z.object({
   category: z.string().min(1),
   guest_state: z.enum(GUEST_STATES),
   scenario: z.string().min(1),
   inbound_message: z.string().min(1),
   expected_failure: z.string().nullable(),
-  is_mechanic_derived: z.boolean(),
 })
 export type RawScenario = z.infer<typeof ScenarioSchema>
 
 const ScenariosOutputSchema = z.object({
   scenarios: z.array(ScenarioSchema).min(1),
 })
-
-export interface Scenario extends RawScenario {
-  sample_id: string
-}
 
 /**
  * Normalize a category or mechanic name to snake_case ascii: lowercase, strip
@@ -57,24 +60,6 @@ export function normalizeName(name: string): string {
     .replace(/['‘’]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
-}
-
-/**
- * Pull mechanic NAMES from the spec markdown's section 5. Regex-only —
- * full Zod parsing lives in scripts/onboarding/parse-venue-spec.ts and isn't
- * needed here. Names are normalized so they match the `category` strings
- * Sonnet emits (after stripping the `mechanic_` prefix).
- */
-export function extractMechanicNames(specMarkdown: string): Set<string> {
-  const re = /^###\s+Mechanic\s+\d+:\s*(.+?)\s*$/gm
-  const names = new Set<string>()
-  let m: RegExpExecArray | null
-  while ((m = re.exec(specMarkdown)) !== null) {
-    const raw = m[1].trim()
-    if (!raw) continue
-    names.add(normalizeName(raw))
-  }
-  return names
 }
 
 /**
@@ -133,9 +118,9 @@ You will receive two inputs:
 1. **Test categories fixture**: A list of 17 universal test categories with their descriptions, target_count, guest_states, optional expected_failure markers, and example_phrasings.
 2. **Venue spec**: A markdown file describing the specific venue including brand persona, menu, mechanics, and operational facts.
 
-Generate scenarios in two passes:
+Generate scenarios for the universal categories only — mechanics-derived scenarios are generated separately, directly from the database, and are not part of your job here.
 
-## Pass 1: Universal categories
+## Universal categories
 
 For each of the 17 categories in the fixture, generate scenarios according to its rules:
 
@@ -148,24 +133,7 @@ For each of the 17 categories in the fixture, generate scenarios according to it
   - Match the register and phrasing patterns implied by \`example_phrasings\` without copying them verbatim
 - The \`scenario\` field is a one-line plain-English description of what the test situation is (e.g., "First-time guest asks for a recommendation").
 - Set \`expected_failure\` from the category's marker if present, otherwise null.
-- Set \`is_mechanic_derived: false\`.
 - For the \`category\` field, use the category's name from the fixture, lowercased and snake-cased. E.g., "menu fact" becomes "menu_fact"; "out of scope" becomes "out_of_scope".
-
-## Pass 2: Mechanics-derived scenarios
-
-For each mechanic, infer the minimum guest state required to access it from the mechanic's qualification or description text. Use one of: 'new', 'returning', 'regular', 'raving_fan'. Apply common-sense mapping: text like 'regulars only', 'for our regulars', or 'after a few visits' becomes 'regular'. Text like 'for our most loyal' or 'VIP' becomes 'raving_fan'. If the mechanic appears available to anyone (no qualification mentioned), use 'new' and skip the second scenario per the rules above.
-
-For each mechanic in the venue-spec's "mechanics" section, generate two scenarios:
-
-1. One scenario at the mechanic's inferred minimum state. The \`inbound_message\` should be a natural-sounding request for the mechanic in this venue's voice. Set \`expected_failure: null\` (the agent should honor the mechanic at this state).
-2. One additional scenario at \`guest_state: "new"\`, generated whenever the mechanic's inferred min_state is one of: returning, regular, or raving_fan. (Skip this scenario only when min_state is new.) The \`inbound_message\` should be the same kind of natural request, but at the new-guest state the agent should decline because the guest hasn't yet earned access. Set \`expected_failure: null\` — THE-170's min_state filter ships the eligibility gate; the agent declines deterministically.
-
-For each mechanic-derived scenario:
-- Set \`category\` to \`mechanic_{normalized_mechanic_name}\` (snake_case). Use the mechanic's full name, snake-cased. E.g., a mechanic named "Couch Hold for Regulars" becomes category "mechanic_couch_hold_for_regulars".
-- When converting a mechanic name to snake_case for the category field: drop apostrophes entirely (so "Friend's" becomes "friends"), and collapse all other punctuation including em-dashes, parens, hyphens, and periods into a single underscore. Trim edge underscores.
-- Inbound messages should reflect how real guests would naturally text. Most should be requests phrased without knowledge of the mechanic's internal rules — a guest asks for what they want ("can i get the couch when i come in?") rather than referencing the mechanic by name. A minority of inbounds can explicitly invoke a perk where realistic ("isn't my first drink free?", "don't i get a free tea this time?"), but this should not be the default. Avoid phrasings that read as venue-insider awareness ("do regulars still get the better slots?") unless the guest would plausibly know the rule from prior conversation.
-- Set \`is_mechanic_derived: true\`.
-- The \`scenario\` field describes the situation including which mechanic is being requested.
 
 ## Output rules
 
@@ -173,7 +141,6 @@ For each mechanic-derived scenario:
 - Do not use em dashes anywhere. This is a hard rule across the entire system.
 - Do not invent categories or expected_failure values. Use only what the fixture and these instructions specify.
 - Generate the exact target_count per category per state. No more, no fewer.
-- Mechanic-derived scenarios are in addition to, not replacing, the 17 universal categories.
 
 Below is the test categories fixture, followed by the venue-spec.
 
@@ -191,73 +158,10 @@ ${spec}`
 }
 
 /**
- * Defensive check against Sonnet truncation or oversight: every mechanic
- * named in the spec must appear in at least one mechanic-derived scenario.
- *
- * Empty `expectedMechanics` is a valid case — a venue with zero mechanics
- * passes trivially (no-op). Uncommon but not a failure.
- */
-export function validateMechanicsCoverage(args: {
-  scenarios: RawScenario[]
-  expectedMechanics: Set<string>
-}): void {
-  const { scenarios, expectedMechanics } = args
-  if (expectedMechanics.size === 0) return
-
-  const covered = new Set<string>()
-  for (const s of scenarios) {
-    if (!s.is_mechanic_derived) continue
-    if (!s.category.startsWith('mechanic_')) continue
-    covered.add(s.category.slice('mechanic_'.length))
-  }
-  const missing: string[] = []
-  for (const expected of expectedMechanics) {
-    if (!covered.has(expected)) missing.push(expected)
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `extract-test-scenarios: mechanics coverage validation failed. Missing mechanics-derived scenarios for: ${missing.join(', ')}`,
-    )
-  }
-}
-
-/**
- * Fail-closed validation that every mechanic-derived scenario references a
- * mechanic that actually exists in the spec. Symmetric with
- * `validateUniversalCategories` — Sonnet emitting a hallucinated
- * `mechanic_xyz` category for a venue whose mechanics don't include xyz is a
- * real bug and must not propagate downstream.
- *
- * Trivially passes when there are zero `is_mechanic_derived` scenarios in
- * the input (loop never enters), regardless of expectedMechanics size.
- */
-export function validateMechanicsCategoriesAreReal(args: {
-  scenarios: RawScenario[]
-  expectedMechanics: Set<string>
-}): void {
-  const { scenarios, expectedMechanics } = args
-  for (const s of scenarios) {
-    if (!s.is_mechanic_derived) continue
-    const valid = Array.from(expectedMechanics).sort().join(', ') || '(none)'
-    if (!s.category.startsWith('mechanic_')) {
-      throw new Error(
-        `extract-test-scenarios: unknown mechanic category "${s.category}" emitted by Sonnet. Valid mechanic names: ${valid}`,
-      )
-    }
-    const name = s.category.slice('mechanic_'.length)
-    if (!expectedMechanics.has(name)) {
-      throw new Error(
-        `extract-test-scenarios: unknown mechanic category "${s.category}" emitted by Sonnet. Valid mechanic names: ${valid}`,
-      )
-    }
-  }
-}
-
-/**
- * Fail-closed validation that every universal-category scenario uses a
- * category name that exists in the fixture. An unknown category from Sonnet
- * is a real bug (hallucination, or fixture/prompt drift) and must not
- * propagate downstream.
+ * Fail-closed validation that every scenario uses a category name that
+ * exists in the fixture. An unknown category from Sonnet is a real bug
+ * (hallucination, or fixture/prompt drift) and must not propagate
+ * downstream.
  */
 export function validateUniversalCategories(args: {
   scenarios: RawScenario[]
@@ -265,7 +169,6 @@ export function validateUniversalCategories(args: {
 }): void {
   const { scenarios, validCategories } = args
   for (const s of scenarios) {
-    if (s.is_mechanic_derived) continue
     if (!validCategories.has(s.category)) {
       const valid = Array.from(validCategories).sort().join(', ')
       throw new Error(
@@ -276,24 +179,26 @@ export function validateUniversalCategories(args: {
 }
 
 /**
- * Sort scenarios deterministically and assign sample IDs.
+ * Sort scenarios deterministically, assign sample IDs, and stamp the fixed
+ * fields every behavior-category scenario carries in the unified Scenario
+ * shape (scenario-schema.ts): scenario_source is always 'behavior' here —
+ * mechanics-derived scenarios no longer come through this module (see
+ * generate-db-scenarios-pure.ts's generateMechanicScenarios) — and the
+ * fact/route/source-row fields are empty/'unknown' since an LLM-authored
+ * behavior scenario has no single grounding row and no statically knowable
+ * route.
  *
- * Universal scenarios first, ordered by:
- *   1. fixture-category index (Category 1 first, Category 17 last)
- *   2. guest_state in GUEST_STATES order ('new' < 'returning' < 'regular' < 'raving_fan')
- *   3. inbound_message lexicographically
- *
- * Mechanic-derived scenarios last, ordered by:
- *   1. category name alphabetically
- *   2. guest_state in GUEST_STATES order
- *   3. inbound_message lexicographically
+ * Order: fixture-category index (Category 1 first, Category 17 last), then
+ * guest_state in GUEST_STATES order, then inbound_message lexicographically.
  *
  * NOTE on idempotency: re-runs of this script can produce different
  * sample_id → inbound_message mappings, because Sonnet phrasings vary across
  * calls (even at temperature 0.7). This is intentional and harmless.
  * Downstream THE-178 ingestion keys off the 08-file's sample IDs (the
  * runner's output), not the 07-file's. The 07-file's sample IDs are only
- * meaningful within a single run-and-review cycle.
+ * meaningful within a single run-and-review cycle — unlike the DB-driven
+ * sources' content-stable ids (knowledge:{id}, mechanic:{id}:{state}, ...),
+ * which are meant to stay stable across regenerations.
  */
 export function assignSampleIds(
   scenarios: RawScenario[],
@@ -306,18 +211,9 @@ export function assignSampleIds(
   const stateOrder = new Map<GuestState, number>(GUEST_STATES.map((s, i) => [s, i]))
 
   const cmp = (a: RawScenario, b: RawScenario): number => {
-    const aMech = a.is_mechanic_derived ? 1 : 0
-    const bMech = b.is_mechanic_derived ? 1 : 0
-    if (aMech !== bMech) return aMech - bMech
-
-    if (!a.is_mechanic_derived) {
-      const ai = fixtureIdx.get(a.category) ?? Number.MAX_SAFE_INTEGER
-      const bi = fixtureIdx.get(b.category) ?? Number.MAX_SAFE_INTEGER
-      if (ai !== bi) return ai - bi
-    } else {
-      const cat = a.category.localeCompare(b.category)
-      if (cat !== 0) return cat
-    }
+    const ai = fixtureIdx.get(a.category) ?? Number.MAX_SAFE_INTEGER
+    const bi = fixtureIdx.get(b.category) ?? Number.MAX_SAFE_INTEGER
+    if (ai !== bi) return ai - bi
 
     const as = stateOrder.get(a.guest_state) ?? Number.MAX_SAFE_INTEGER
     const bs = stateOrder.get(b.guest_state) ?? Number.MAX_SAFE_INTEGER
@@ -330,5 +226,14 @@ export function assignSampleIds(
   return sorted.map((s, i) => ({
     sample_id: `${slug}-${String(i + 1).padStart(3, '0')}`,
     ...s,
+    topic: 'behavior',
+    category: `behavior_${s.category}`,
+    mode: 'graded' as const,
+    scenario_source: 'behavior' as const,
+    expected_facts: [],
+    forbidden_claims: [],
+    source_row_ids: [],
+    expected_route: 'unknown' as const,
+    expected_behavior: '',
   }))
 }
