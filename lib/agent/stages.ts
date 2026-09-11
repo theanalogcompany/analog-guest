@@ -299,6 +299,10 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
     category: autoRoutedToUnknown ? 'unknown' : r.data.category,
     classifierConfidence: r.data.classifierConfidence,
     reasoning: r.data.reasoning,
+    // TAC-348: passed through unmodified — independent of the confidence
+    // reroute above. A crisis signal should hold even when the category call
+    // itself is uncertain.
+    crisisSafety: r.data.crisisSafety,
   }
 }
 

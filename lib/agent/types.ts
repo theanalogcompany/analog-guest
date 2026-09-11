@@ -157,6 +157,9 @@ export interface Classification {
   category: MessageCategory
   classifierConfidence: number
   reasoning: string
+  // TAC-348: independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.crisisSafety for the full contract.
+  crisisSafety: boolean
 }
 
 export interface RuntimeContext {

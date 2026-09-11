@@ -31,6 +31,7 @@ const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn()
 const captureDraftQueuedMock = vi.fn()
+const captureCrisisSafetyReplySentMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
@@ -120,6 +121,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
   AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
+  captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: vi.fn(),
   // Also consumed by the real ./stages, loaded via importActual below.
@@ -239,6 +241,7 @@ beforeEach(() => {
     category: 'new_question',
     classifierConfidence: 0.9,
     reasoning: 'q',
+    crisisSafety: false,
   })
   retrieveCorpusStageMock.mockResolvedValue([])
   retrieveKnowledgeStageMock.mockResolvedValue([])
@@ -410,7 +413,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.40.0',
+    promptVersion: 'v1.41.0',
     dashViolationPersisted: false,
   }
 }
@@ -541,5 +544,87 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
     buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
+  })
+})
+
+describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
+  it('sends the fixed reply directly, skipping retrieval, generation, and the approval gate', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'casual_chatter',
+      classifierConfidence: 0.8,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-1',
+      providerMessageId: 'p',
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-1' })
+    expect(retrieveCorpusStageMock).not.toHaveBeenCalled()
+    expect(generateStageMock).not.toHaveBeenCalled()
+    expect(applyApprovalPolicyStageMock).not.toHaveBeenCalled()
+  })
+
+  it('dispatches the exact fixed body via scheduleAndSend, skipping the human-feel delay and stamping review_reason', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'unknown',
+      classifierConfidence: 0.5,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-2', providerMessageId: 'p' })
+    await handleInbound(INBOUND_ID)
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    const [, result, options] = scheduleAndSendMock.mock.calls[0] as [
+      unknown,
+      { body: string },
+      { skipHumanFeelDelay?: boolean; reviewReason?: string },
+    ]
+    expect(result.body).toContain('911')
+    expect(result.body).toContain('988')
+    expect(options).toMatchObject({ skipHumanFeelDelay: true, reviewReason: 'crisis_safety_reply' })
+  })
+
+  it('fires captureCrisisSafetyReplySent on a successful send', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'comp_complaint',
+      classifierConfidence: 0.7,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-3', providerMessageId: 'p' })
+    await handleInbound(INBOUND_ID)
+    expect(captureCrisisSafetyReplySentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        outboundMessageId: 'crisis-3',
+        category: 'comp_complaint',
+      }),
+    )
+  })
+
+  it('does not fire when crisisSafety is false — normal pipeline runs unchanged', async () => {
+    // Default beforeEach classifyStageMock already sets crisisSafety: false.
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'normal-1', providerMessageId: 'p' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'normal-1' })
+    expect(generateStageMock).toHaveBeenCalledTimes(1)
+    expect(captureCrisisSafetyReplySentMock).not.toHaveBeenCalled()
+  })
+
+  it('maps a scheduleAndSend failure to status failed, stage send', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'unknown',
+      classifierConfidence: 0.5,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    scheduleAndSendMock.mockRejectedValue(new Error('sendblue down'))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'failed', stage: 'send' })
   })
 })

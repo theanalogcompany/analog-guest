@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from '@/db/types'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from '@/lib/agent/crisis-safety'
 import { classifyStage, generateStage, retrieveCorpusStage, retrieveKnowledgeStage } from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
@@ -439,6 +440,30 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
       },
     })
     ctx.classification = await classifyStage(ctx)
+
+    // TAC-348: harness parity with handle-inbound.ts's crisis-safety short
+    // circuit. Fires in the SAME place relative to classifyStage (before any
+    // retrieval or generation) so a scenario that trips crisisSafety is
+    // graded against the actual fixed reply the pipeline would send, not
+    // against a full-pipeline generation the shipped code never runs.
+    if (ctx.classification.crisisSafety) {
+      const result = buildCrisisSafetyResult()
+      return {
+        ...base,
+        outcome: 'sent',
+        replyBody: result.body,
+        voiceFidelity: result.voiceFidelity,
+        route: 'send',
+        triggers: [],
+        primaryTrigger: CRISIS_SAFETY_REVIEW_REASON,
+        wouldBlankBody: false,
+        errorMessage: null,
+        elapsedMs: Date.now() - start,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
+    }
+
     ctx.corpus = await retrieveCorpusStage(ctx)
     ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx, ctx.classification.category)
     retrievedVoiceExamples = ctx.corpus.map((c) => c.text)

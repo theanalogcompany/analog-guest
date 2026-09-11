@@ -49,7 +49,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? 404
         : result.errorCode === 'not_an_outbound_reply'
           ? 400
-          : 500
+          : result.errorCode === 'crisis_safety_ineligible'
+            ? 403
+            : 500
     return NextResponse.json(
       { error: 'regenerate failed', detail: result.error, errorCode: result.errorCode },
       { status },

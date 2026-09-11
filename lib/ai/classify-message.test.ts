@@ -35,6 +35,7 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'noop',
+        crisisSafety: false,
       },
     })
   })
@@ -178,14 +179,14 @@ describe('classifyMessage — schema accepts new categories', () => {
   ] as const) {
     it(`accepts category=${cat}`, async () => {
       generateObjectMock.mockResolvedValueOnce({
-        object: { category: cat, classifierConfidence: 0.9, reasoning: 'mock' },
+        object: { category: cat, classifierConfidence: 0.9, reasoning: 'mock', crisisSafety: false },
       })
       const r = await classifyMessage({ inboundBody: 'sample' })
       expect(r.ok).toBe(true)
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.40.0')
+      expect(r.data.promptVersion).toBe('v1.41.0')
     })
   }
 })
@@ -198,6 +199,7 @@ describe('CLASSIFY_SYSTEM_PROMPT — new inbound categories (v1.10.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'noop',
+        crisisSafety: false,
       },
     })
   })
@@ -270,7 +272,7 @@ describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
     })
   })
 
@@ -309,7 +311,7 @@ describe('classifyMessage — guest state rendering (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
     })
   })
 
@@ -330,7 +332,7 @@ describe('classifyMessage — temperature (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
     })
   })
 
@@ -347,19 +349,21 @@ describe('classifyMessage — inbound truncation (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
     })
   })
 
-  it('truncates inbound at 1000 chars before classification', async () => {
+  it('truncates the category-facing block at 1000 chars before classification', async () => {
     const longBody = 'a'.repeat(1500)
     await classifyMessage({ inboundBody: longBody })
     const prompt = await getCapturedUserPrompt()
-    expect(prompt).toContain(' [...truncated]')
-    // Original 1500-char run should not appear; the truncated form is 1000
-    // chars + suffix. Asserting absence of a 1100-char run is sufficient.
-    expect(prompt).not.toContain('a'.repeat(1100))
-    expect(prompt).toContain('a'.repeat(1000))
+    // The category-facing block is exactly 1000 chars + the truncation
+    // suffix — not the full 1500-char body. (TAC-348: the full body DOES
+    // still reach the model, in a separate crisis-check block asserted
+    // below — this test is scoped to the category-facing block only.)
+    expect(prompt).toContain(
+      `Inbound message from guest:\n"${'a'.repeat(1000)} [...truncated]"`,
+    )
   })
 
   it('does not truncate inbound under 1000 chars', async () => {
@@ -369,13 +373,27 @@ describe('classifyMessage — inbound truncation (v1.11.0)', () => {
     expect(prompt).toContain(normalBody)
     expect(prompt).not.toContain('[...truncated]')
   })
+
+  // TAC-348 (code review follow-up): the category cap above must not
+  // silently drop crisis-relevant text past char 1000 — see the dedicated
+  // 'crisis-check bypass of the classifier length cap' describe block for
+  // the full behavior. This test only pins the co-existence: truncated
+  // category block + untruncated (up to the second cap) crisis-check block,
+  // in the same prompt, for the same call.
+  it('still carries the full body in a separate crisis-check block even though the category block truncates', async () => {
+    const longBody = 'a'.repeat(1500)
+    await classifyMessage({ inboundBody: longBody })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('crisisSafety determination ONLY')
+    expect(prompt).toContain(`"${'a'.repeat(1500)}"`)
+  })
 })
 
 describe('CLASSIFY_SYSTEM_PROMPT — outbound exclusion reinforcement (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop' },
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
     })
   })
 
@@ -388,5 +406,137 @@ describe('CLASSIFY_SYSTEM_PROMPT — outbound exclusion reinforcement (v1.11.0)'
     expect(prompt).toContain('welcome, follow_up, perk_unlock, and event_invite')
     expect(prompt).toContain('venue-initiated outbound triggers')
     expect(prompt).toContain('Never select them when classifying an inbound')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-348: crisisSafety detection, independent of category.
+// ---------------------------------------------------------------------------
+
+describe('CLASSIFY_SYSTEM_PROMPT — crisisSafety instruction (TAC-348)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+    })
+  })
+
+  it('describes self-harm/suicidal ideation as a trigger', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('crisisSafety')
+    expect(prompt).toContain('Self-harm or suicidal ideation')
+  })
+
+  it('describes an immediate medical emergency as a trigger', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('immediate medical emergency or physical danger')
+  })
+
+  it('guards against hyperbole false positives with named examples', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('this coffee is to die for')
+    expect(prompt).toContain('dying to try this place')
+  })
+
+  it('states the field is independent of category', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('Separately from category, set crisisSafety')
+    expect(prompt).toContain('regardless of what category you picked')
+  })
+
+  it('biases ambiguous cases toward true (false negatives are the worse failure)', async () => {
+    await classifyMessage({ inboundBody: 'hi' })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const prompt = callArgs?.system as string
+    expect(prompt).toContain('prefer true')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-348 (code review follow-up): crisisSafety must not be defeated by the
+// classifier's 1000-char category cap on a long, escalating message.
+// ---------------------------------------------------------------------------
+
+describe('classifyMessage — crisis-check bypass of the classifier length cap (TAC-348)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+    })
+  })
+
+  it('adds no extra prompt block for a body under the classification cap', async () => {
+    await classifyMessage({ inboundBody: 'a normal short message' })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).not.toContain('crisisSafety determination ONLY')
+  })
+
+  it('appends the full untruncated body in a dedicated block when the body exceeds the cap', async () => {
+    // 1500 chars: past MAX_CLASSIFIER_INPUT_CHARS (1000), well under
+    // MAX_CRISIS_CHECK_INPUT_CHARS (4000) — the crisis-check block should
+    // carry the text in full, unlike the category-facing block above it.
+    const longBody = `${'a'.repeat(1050)} I don't want to be here anymore ${'b'.repeat(400)}`
+    await classifyMessage({ inboundBody: longBody })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('crisisSafety determination ONLY')
+    // The crisis-relevant phrase sits past the 1000-char category cutoff —
+    // it must still reach the model somewhere in the prompt.
+    expect(prompt).toContain("I don't want to be here anymore")
+  })
+
+  it('caps the crisis-check block itself at MAX_CRISIS_CHECK_INPUT_CHARS on a pathologically long body', async () => {
+    const veryLongBody = 'a'.repeat(10_000)
+    await classifyMessage({ inboundBody: veryLongBody })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('crisisSafety determination ONLY')
+    expect(prompt).toContain(' [...truncated]')
+    // The crisis-check block itself is bounded, not unbounded.
+    expect(prompt).not.toContain('a'.repeat(4001))
+  })
+})
+
+describe('classifyMessage — crisisSafety round-trip (TAC-348)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it('threads crisisSafety=true through to the returned result', async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        category: 'casual_chatter',
+        classifierConfidence: 0.8,
+        reasoning: 'mock',
+        crisisSafety: true,
+      },
+    })
+    const r = await classifyMessage({ inboundBody: "I don't see the point of anything anymore" })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.crisisSafety).toBe(true)
+    // Independent of category — the classifier still picked a normal category.
+    expect(r.data.category).toBe('casual_chatter')
+  })
+
+  it('threads crisisSafety=false through to the returned result', async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'mock',
+        crisisSafety: false,
+      },
+    })
+    const r = await classifyMessage({ inboundBody: 'sounds good, thanks' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.crisisSafety).toBe(false)
   })
 })

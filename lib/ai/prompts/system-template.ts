@@ -614,7 +614,17 @@
 // never saw its changes during development — this entry originally
 // targeted v1.39.0 too and was renumbered to v1.40.0 to avoid the two
 // sibling PRs claiming the same version number.
-export const PROMPT_VERSION = 'v1.40.0'
+//
+// v1.41.0 (TAC-348, PR #1): no SYSTEM_TEMPLATE body change — bump only
+// because CLASSIFY_SYSTEM_PROMPT (lib/ai/classify-message.ts) gained a
+// `crisisSafety` detection instruction, and both classify and generate share
+// this constant. A self-harm / medical-emergency signal on an inbound now
+// short-circuits BEFORE this template is ever rendered: the reply is a fixed
+// string (lib/agent/crisis-safety.ts), not a generation, specifically
+// because three prior rounds in this file's own history (v1.27.0-v1.31.0)
+// show a prompt-level rule can lose to venue persona content rendered later.
+// See CLAUDE.md and the TAC-348 ticket thread for the full design rationale.
+export const PROMPT_VERSION = 'v1.41.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

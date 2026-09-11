@@ -977,3 +977,31 @@ export async function captureGenerationTruncated(
       .join('\n'),
   )
 }
+
+// ---------------------------------------------------------------------------
+// TAC-348: a crisis-safety reply was sent (self-harm / medical-emergency
+// signal, fixed hardcoded body, bypasses generation and the approval gate
+// entirely — see lib/agent/crisis-safety.ts and handle-inbound.ts).
+// ---------------------------------------------------------------------------
+
+export interface CrisisSafetyReplySentProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  outboundMessageId: string
+  /** The classifier's category call on this turn — unrelated to the crisis
+   * flag itself, kept for observability (e.g. a comp_complaint that also
+   * tripped crisisSafety). */
+  category: string
+}
+
+/**
+ * PostHog-only, no Slack relay (owner decision, TAC-348 plan review: "no
+ * separate mechanism" beyond the standard event). The reply itself is fixed
+ * and unconditional — this event is audit/count visibility, not an alert.
+ */
+export async function captureCrisisSafetyReplySent(
+  props: CrisisSafetyReplySentProps,
+): Promise<void> {
+  await capturePostHogEvent('crisis_safety_reply_sent', props.guestId, { ...props })
+}

@@ -3,6 +3,7 @@ import { waitUntil } from '@vercel/functions'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
+  captureCrisisSafetyReplySent,
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
@@ -17,6 +18,7 @@ import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifica
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
+import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import { extractReportedOrder } from './extract-reported-order'
 import { recordIntentionPrompts } from './intentions/record'
@@ -416,6 +418,57 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         errorMessage: errMsg,
       })
       return { status: 'failed', stage: 'classification', error: errMsg }
+    }
+
+    // TAC-348: crisis-safety short-circuit. Fires immediately after
+    // classification, before retrieval or generation. retrieveCorpusStage
+    // fails CLOSED on the inbound path (throws below MIN_STRONG_MATCHES), and
+    // a crisis message has no reason to resemble venue voice-corpus
+    // exemplars, so this cannot wait until inside generateStage — silence on
+    // exactly the turn where silence is worst. Bypasses corpus/knowledge
+    // retrieval, generateStage, guest-context capture, arrival-capture
+    // dispatch, extractReportedOrder, intention recording, and — the
+    // important one — applyApprovalPolicyStage entirely: no operator flag,
+    // per the owner decision, because the approval gate never runs at all
+    // (not because a trigger was suppressed). As a direct consequence this
+    // also bypasses venues.hold_all_outbound and category_requires_approval
+    // routing — same category of exception migration 031 already carves out
+    // for opt-out confirmations (content-free, deterministic,
+    // non-negotiable). The reply is a fixed string, never generated — see
+    // lib/agent/crisis-safety.ts for why.
+    if (ctx.classification.crisisSafety) {
+      const crisisSpan = trace.span('crisis_safety', { category: ctx.classification.category })
+      try {
+        const result = buildCrisisSafetyResult()
+        const { outboundMessageId } = await scheduleAndSend(ctx, result, {
+          skipHumanFeelDelay: true,
+          reviewReason: CRISIS_SAFETY_REVIEW_REASON,
+        })
+        crisisSpan.end({ output: { outboundMessageId } })
+        console.log('[agent] inbound crisis-safety reply sent', {
+          agentRunId,
+          outboundMessageId,
+        })
+        await captureCrisisSafetyReplySent({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          outboundMessageId,
+          category: ctx.classification.category,
+        })
+        generatedBody = result.body
+        trace.update({
+          output: { status: 'sent', outboundMessageId, crisisSafety: true },
+          content: { outboundDraft: result.body },
+        })
+        return { status: 'sent', outboundMessageId }
+      } catch (e) {
+        // scheduleAndSend already fired the appropriate stage-specific alert.
+        const errMsg = e instanceof Error ? e.message : String(e)
+        const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
+        crisisSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
+        return { status: 'failed', stage, error: errMsg }
+      }
     }
 
     // TAC-323: fire the self-reported-order extractor. Non-blocking by

@@ -9,6 +9,20 @@ import type { AIResult, ClassifyMessageInput, ClassifyMessageResult, RecentMessa
 // Exported so the tunables manifest (TAC-183) can surface the cap to operators.
 export const MAX_CLASSIFIER_INPUT_CHARS = 1000
 
+// TAC-348: the crisisSafety determination must not be silently defeated by the
+// cap above. That cap exists for cost/latency on an analytical task where the
+// category rarely depends on anything past the first ~1000 chars — but a
+// guest genuinely in crisis may write a long, escalating message where the
+// actual self-harm or emergency statement lands past that cutoff, and a
+// truncated view would give the classifier no chance to see it. When the body
+// exceeds MAX_CLASSIFIER_INPUT_CHARS, a second, more generous cap is applied
+// and the fuller text is appended as its OWN block, explicitly scoped to the
+// crisisSafety check only — category classification still works primarily off
+// the truncated view, unchanged from before. Bounded (not unbounded) so a
+// pathological input can't inflate classifier cost/latency unpredictably;
+// 4x the classification cap is well beyond any plausible real guest message.
+export const MAX_CRISIS_CHECK_INPUT_CHARS = 4000
+
 const ClassifiedMessageSchema = z.object({
   category: z.enum([
     'reply',
@@ -33,6 +47,10 @@ const ClassifiedMessageSchema = z.object({
     .number()
     .refine((n) => n >= 0 && n <= 1, { message: 'must be between 0 and 1' }),
   reasoning: z.string(),
+  // TAC-348: independent of category — set true alongside whatever category
+  // fits best. Never `.optional()`, matching the repo's explicit-presence
+  // convention for structured-output fields (THE-157 / TAC-212 precedent).
+  crisisSafety: z.boolean(),
 })
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
@@ -54,6 +72,11 @@ const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests o
 When a message could fit multiple categories, prefer the more specific one: a complaint about service is comp_complaint even if phrased as a reply; a question that is opinion-shaped ("what's good") is recommendation_request rather than new_question; an unprompted casual remark is casual_chatter rather than reply. Personal-history questions ("what did I get last time", "do you remember me") route to personal_history_question, NOT to manual or new_question. Use unknown only when the message genuinely doesn't fit any other category and the agent has no clear path to respond. Use manual only when the message contains content that genuinely needs an operator's eyes, not as a fallback for ambiguous classification.
 
 The categories welcome, follow_up, perk_unlock, and event_invite are venue-initiated outbound triggers and are intentionally absent from this list. Never select them when classifying an inbound. If a guest's first contact looks like an opening pleasantry, route to casual_chatter or new_question depending on what they're saying. If a guest's message looks like a response to an event invite or perk offer, route to reply (or event_question / perk_inquiry if they're asking ABOUT an event or perk).
+
+Separately from category, set crisisSafety to true when the message expresses either of these, regardless of what category you picked:
+  - Self-harm or suicidal ideation: the guest indicates they may hurt themselves, wants to die, doesn't see the point of continuing, or similar. ("I don't really see the point of anything anymore", "I want to end it", "I don't want to be here anymore" used in a self-harm sense.)
+  - An immediate medical emergency or physical danger: a severe allergic reaction, difficulty breathing, chest pain, choking, an injury in progress, or a similar statement that someone needs help right now.
+Set crisisSafety to false for everything else, including hyperbole and idiom that merely uses this language ("this coffee is to die for", "dying to try this place", "I'm dying laughing", "this latte is a matter of life and death"). When genuinely ambiguous between hyperbole and a real signal, prefer true — a false positive here costs one unnecessary safety message; a false negative costs missing a guest who needs help.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
@@ -111,6 +134,18 @@ export async function classifyMessage(
     userPromptParts.push(`Guest relationship: ${input.guestState}`)
   }
   userPromptParts.push(`Inbound message from guest:\n"${inboundForClassifier}"`)
+  // TAC-348: see MAX_CRISIS_CHECK_INPUT_CHARS above. Only appended when the
+  // body was actually truncated for the block above, so a normal-length
+  // message (the common case) sees no prompt change at all.
+  if (input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS) {
+    const crisisCheckBody =
+      input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
+        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) + ' [...truncated]'
+        : input.inboundBody
+    userPromptParts.push(
+      `Full message, untruncated (for the crisisSafety determination ONLY — the shortened version above is what informs category):\n"${crisisCheckBody}"`,
+    )
+  }
   userPromptParts.push('Classify this message.')
   const userPrompt = userPromptParts.join('\n\n')
 
@@ -133,6 +168,7 @@ export async function classifyMessage(
         classifierConfidence: object.classifierConfidence,
         reasoning: object.reasoning,
         promptVersion: PROMPT_VERSION,
+        crisisSafety: object.crisisSafety,
       },
     }
   } catch (e) {
