@@ -30,6 +30,7 @@ const UnsupportedClaimReasonSchema = z.enum([
   'hedged_in_source',
   'generalized_beyond_source',
   'brainstorm_not_practice',
+  'experiment_not_final',
 ])
 
 const UnsupportedClaimSchema = z.object({
@@ -37,6 +38,26 @@ const UnsupportedClaimSchema = z.object({
   claim: z.string().min(1),
   reason: UnsupportedClaimReasonSchema,
   sourceQuote: z.string().optional(),
+})
+
+const VoiceQualificationReasonSchema = z.enum([
+  'style_description',
+  'joking_or_hypothetical',
+  'interview_monologue',
+  'describes_perk_or_policy',
+])
+
+const VoiceDisqualificationSchema = z.object({
+  source: z.enum(['voice_corpus', 'signaturePhrase']),
+  location: z.string().min(1),
+  content: z.string().min(1),
+  reason: VoiceQualificationReasonSchema,
+})
+
+const PlacementViolationSchema = z.object({
+  section: z.string().min(1),
+  claim: z.string().min(1),
+  sourceQuote: z.string().min(1),
 })
 
 const UncoveredAnswerSchema = z.object({
@@ -74,6 +95,8 @@ const VerifyModelOutputSchema = z.object({
   missingInformation: z.array(MissingInformationSchema).default([]),
   resolvedDates: z.array(ResolvedDateSchema).default([]),
   mechanicApprovalReview: z.array(MechanicApprovalReviewSchema).default([]),
+  voiceDisqualifications: z.array(VoiceDisqualificationSchema).default([]),
+  placementViolations: z.array(PlacementViolationSchema).default([]),
 })
 
 export const VerifyResultSchema = VerifyModelOutputSchema.extend({
@@ -93,14 +116,19 @@ export type VerifyResult = z.infer<typeof VerifyResultSchema>
 export function buildVerifySystemPrompt(): string {
   return `You are verifying a venue-spec markdown draft against the raw materials it was extracted from: an owner interview transcript, a menu CSV, and an Airtable intake record. The draft was produced by a separate extraction pass and may contain mistakes. Your job is to find them — you do NOT rewrite the draft, you only report structured flags.
 
-Check for exactly five things:
+CRITICAL — every quote field you fill in (sourceQuote, sourceText, or any other quoted evidence) MUST be copied verbatim from the SOURCE MATERIALS ONLY: the transcript, the menu CSV, or the Airtable record. NEVER quote the draft under verification, even when the draft's own wording looks like it could be a quote. Quoting the draft's own invented claim back as its "source" is exactly the mistake this pass exists to catch, not commit — it makes an unsupported claim look supported to whoever reads Needs confirmation. If nothing in the source materials is even related to a claim, omit the quote field (where optional) rather than filling it with text from the draft.
 
-1. UNSUPPORTED CLAIMS — any claim in the draft that isn't actually supported by the source materials. Four reasons, pick exactly one per claim:
+Check for exactly seven things:
+
+1. UNSUPPORTED CLAIMS — any claim in the draft that isn't actually supported by the source materials. Five reasons, pick exactly one per claim:
    - not_in_source: nothing in the transcript, menu, or Airtable record supports this claim at all.
    - hedged_in_source: the source is uncertain or hedged ("I think", "maybe", "I believe") but the draft states it as settled fact.
    - generalized_beyond_source: the source describes something narrower or more conditional than what the draft claims (e.g. the source describes one occasion, the draft implies it always happens).
    - brainstorm_not_practice: the source describes an idea, a hypothetical, or something the operator was thinking out loud about, not something they actually do — and the draft nonetheless wrote it in as an established fact, mechanic, or practice.
+   - experiment_not_final: the source describes an early version, an experiment, or an inspiration for something (an ingredient list, a recipe, a formulation) — not the finished, current version — and the draft states the early details as if they were final.
    For each: the section it appears in, the claim as written, the reason, and the source quote it should have matched (omit sourceQuote only when nothing in the source is even related).
+
+   Pay particular attention to ingredient lists and recipe details in menu.highlights (section 4) and knowledge_corpus (section 7): if the source ties specific ingredients or a recipe only to an earlier version, an experiment, or an inspiration, and the draft states them as the current/final recipe, that is experiment_not_final, not a pass.
 
 2. UNCOVERED ANSWERS — anything the operator stated in the transcript that no section of the draft captures. This explicitly includes: (a) hedged statements that got silently dropped rather than flagged, (b) brainstormed or hypothetical ideas the operator floated that were correctly NOT written in as mechanics (report these here as background even though correctly omitting them from section 5 was right), and (c) handoff or routing instructions the operator described — who should handle a category of guest request — that were correctly NOT written into brand_persona (report these here too — the fact that a category of request needs a human is worth the operator knowing about, even though it doesn't belong in a persona field). For each: the transcript quote and a short topic label.
 
@@ -109,6 +137,15 @@ Check for exactly five things:
 4. DATES — every date that got resolved from a relative phrase in the transcript ("next month", "this Saturday") into an absolute value anywhere in the draft. For each: the section, the resolved date as written in the draft, the original source text it came from, and which anchor date was used to resolve it (report "none stated" if the draft's inputs didn't specify one). List every resolved date, not just ones you think are wrong — a human confirms all of them.
 
 5. MECHANIC APPROVAL REVIEW — for every mechanic in section 5 of the draft, restate its requires_operator_approval value exactly as written (or false if the field is omitted), and independently assess what the transcript actually supports using the IDENTICAL criteria extraction is instructed to apply — do not invent your own standard: ${MECHANIC_APPROVAL_CRITERIA} Give a source quote for your assessment, or omit sourceQuote if nothing on-topic exists. Only set recommendedValue when your independent assessment genuinely disagrees with the value already in the draft — leave it unset when you agree or the transcript is silent on this mechanic. List every mechanic, regardless of whether anything else is flagged about it.
+
+6. VOICE QUALIFICATION — evaluate every voice_corpus entry (section 6) and every brand_persona.signaturePhrases entry (section 3) against this rule: a qualifying entry is EITHER (a) a real or near-verbatim TEXT the operator actually sent, or would send, to a guest, OR (b) a short SPOKEN line addressed to a guest — second person, or something the operator would plausibly say to a guest across the counter (a recommendation, an invitation, a house rule said warmly, a one-line explanation), one or two sentences, trimmed of filler. Voice is captured from how the operator talks to guests generally, not only from texts. Disqualify an entry for exactly one of these reasons:
+   - style_description: it describes HOW the operator communicates ("I always use emojis", "I keep it short") rather than showing an actual line said or written.
+   - joking_or_hypothetical: it's a joke, a hypothetical scenario answer, or a made-up example, not something the operator described as real.
+   - interview_monologue: it's a LONG narrative or reflective passage about the business's history, mission, or sourcing, OR a line addressed to the INTERVIEWER about the business — not a short line addressed to a guest. A short guest-addressed line qualifies even though it was said during the interview; what disqualifies it is length/register and WHO it's addressed to, not the setting it was said in. Example: "come by on a slow morning and try the pour-over, it's better when we're not slammed" (a short second-person recommendation) qualifies. "We started this place because I wanted Indian beans to have their own place in a cafe, and it took years to get the sourcing right" (a multi-sentence account of how the business started, addressed to the interviewer) does not — that belongs in knowledge_corpus.
+   - describes_perk_or_policy: it explains what a perk or policy IS to the interviewer, rather than saying it to a guest.
+   Report every disqualified entry with its source, location, the flagged content, and the reason. Do NOT disqualify an entry for needing light cleanup — a genuine line with some surrounding filler still qualifies once trimmed; only disqualify entries that don't meet either qualifying shape at all. List every disqualification you find.
+
+7. PERMANENT-FIELD PLACEMENT — check every permanent field (venue_info EXCLUDING currentContext, and knowledge_corpus) for a fact that is upcoming, in-development, or not-yet-true according to the transcript (a menu item that hasn't launched, an amenity not yet installed, an event with no confirmed date). Flag it if it appears in a permanent field. Do NOT flag the reverse: a fact that IS currently true and also happens to appear in currentContext is harmless and not a defect — only the direction where a not-yet-true fact sits in a permanent field is wrong, because once the matching currentContext entry expires, the permanent copy is the only thing left and it will be wrong. For each violation: the section/field where it wrongly appears, the claim as stated there, and the transcript quote establishing it hasn't happened yet.
 
 Ground every flag in an actual quote or a specific absence — do not speculate beyond what the source materials say.`
 }
@@ -178,6 +215,26 @@ function renderMechanicLine(m: VerifyResult['mechanicApprovalReview'][number]): 
 }
 
 /**
+ * Order-preserving dedupe by `location`, keeping the first occurrence.
+ * Guards the qualifying-count math (and the rendered list) against a
+ * duplicate report of the same entry pushing the count below reality.
+ */
+function dedupeByLocation<T extends { location: string }>(items: readonly T[]): T[] {
+  const seen = new Set<string>()
+  const result: T[] = []
+  for (const item of items) {
+    if (seen.has(item.location)) continue
+    seen.add(item.location)
+    result.push(item)
+  }
+  return result
+}
+
+function renderVoiceDisqualificationLine(d: VerifyResult['voiceDisqualifications'][number]): string {
+  return `- **[${d.location}]** (${d.source}): ${d.reason.replace(/_/g, ' ')} — "${d.content}"`
+}
+
+/**
  * Pure markdown renderer for the `## Needs confirmation` section appended
  * to the draft. Unnumbered (not "## 11.") to match the ticket's own literal
  * heading and to read as visually distinct from the numbered 1-9 spec
@@ -187,8 +244,11 @@ function renderMechanicLine(m: VerifyResult['mechanicApprovalReview'][number]): 
  * production by sections 8/9 being silently ignored today.
  *
  * Every subsection header always renders, even when empty, so a reviewer can
- * tell "checked, nothing found" from "not checked" — except Voice corpus,
- * which renders only when the count is below the floor.
+ * tell "checked, nothing found" from "not checked" — except "Voice corpus &
+ * signature phrases", which renders only when the qualifying count (raw code
+ * count minus deduped voice_corpus-sourced disqualifications) is below the
+ * floor, or when any disqualification exists at all (visibility even when
+ * the corpus still clears the floor).
  */
 export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpusCount: number): string {
   const lines: string[] = []
@@ -206,6 +266,16 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
     for (const c of result.unsupportedClaims) {
       const quote = c.sourceQuote ? ` Source: "${c.sourceQuote}"` : ''
       lines.push(`- **[${c.section}]** "${c.claim}" — ${c.reason.replace(/_/g, ' ')}.${quote}`)
+    }
+  }
+  lines.push('')
+
+  lines.push('### Permanent-field placement')
+  if (result.placementViolations.length === 0) {
+    lines.push('*(none)*')
+  } else {
+    for (const p of result.placementViolations) {
+      lines.push(`- **[${p.section}]** "${p.claim}" — source: "${p.sourceQuote}"`)
     }
   }
   lines.push('')
@@ -250,12 +320,29 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
     }
   }
 
-  if (voiceCorpusCount < VOICE_CORPUS_FLOOR) {
+  // Qualifying count = raw code-counted entries minus voice_corpus-sourced
+  // disqualifications (deduped by location so a duplicate report can't push
+  // the count below reality). signaturePhrase disqualifications never
+  // subtract — signaturePhrases aren't gated by the voice_corpus floor.
+  const voiceCorpusDisqualifications = dedupeByLocation(
+    result.voiceDisqualifications.filter((d) => d.source === 'voice_corpus'),
+  )
+  const signaturePhraseDisqualifications = result.voiceDisqualifications.filter(
+    (d) => d.source === 'signaturePhrase',
+  )
+  const qualifyingVoiceCount = Math.max(0, voiceCorpusCount - voiceCorpusDisqualifications.length)
+
+  if (qualifyingVoiceCount < VOICE_CORPUS_FLOOR || result.voiceDisqualifications.length > 0) {
     lines.push('')
-    lines.push('### Voice corpus')
-    lines.push(
-      `- ${voiceCorpusCount} of ${VOICE_CORPUS_FLOOR} minimum real texting entries. Seeding will fail until at least ${VOICE_CORPUS_FLOOR} are present.`,
-    )
+    lines.push('### Voice corpus & signature phrases')
+    if (qualifyingVoiceCount < VOICE_CORPUS_FLOOR) {
+      lines.push(
+        `- ${qualifyingVoiceCount} of ${VOICE_CORPUS_FLOOR} minimum real texting entries. Seeding will fail until at least ${VOICE_CORPUS_FLOOR} are present.`,
+      )
+    }
+    for (const d of [...voiceCorpusDisqualifications, ...signaturePhraseDisqualifications]) {
+      lines.push(renderVoiceDisqualificationLine(d))
+    }
   }
 
   return lines.join('\n')
