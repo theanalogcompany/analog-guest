@@ -23,8 +23,8 @@ import { UNIVERSAL_RULES_DISPLAY } from '../../../app/admin/(authed)/voices/[slu
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.40.0 (TAC-340: drop forward-commitment guest-example phrasing from two prompt sites)', () => {
-    expect(PROMPT_VERSION).toBe('v1.40.0')
+  it('is v1.41.0 (TAC-348 PR #1: crisisSafety detection added to CLASSIFY_SYSTEM_PROMPT; SYSTEM_TEMPLATE body unchanged)', () => {
+    expect(PROMPT_VERSION).toBe('v1.41.0')
   })
 })
 

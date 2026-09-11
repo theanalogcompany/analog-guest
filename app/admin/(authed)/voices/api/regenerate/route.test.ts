@@ -108,6 +108,24 @@ describe('POST /admin/voices/api/regenerate', () => {
     expect(res.status).toBe(400)
   })
 
+  it('403 when the original message was a crisis-safety reply (TAC-348)', async () => {
+    vi.mocked(regenerateWithCritique).mockResolvedValue({
+      ok: false,
+      errorCode: 'crisis_safety_ineligible',
+      error: 'This message was a crisis-safety reply and is not eligible for voice regeneration.',
+    })
+    const res = await POST(
+      buildRequest({
+        venueId: VENUE_ID,
+        originalMessageId: MSG_ID,
+        critique: 'x',
+      }),
+    )
+    expect(res.status).toBe(403)
+    const json = await res.json()
+    expect(json.errorCode).toBe('crisis_safety_ineligible')
+  })
+
   it('passes through 401 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,

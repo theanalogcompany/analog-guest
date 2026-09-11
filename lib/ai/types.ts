@@ -457,6 +457,12 @@ export type ClassifyMessageResult = {
   classifierConfidence: number
   reasoning: string
   promptVersion: string
+  // TAC-348: independent of category. True when the guest's message expresses
+  // self-harm/suicidal ideation or an immediate medical emergency. Consumed
+  // by the orchestrator to short-circuit into a fixed, non-generated safety
+  // reply (lib/agent/crisis-safety.ts) before retrieval or generation ever
+  // run — never suppressed by the 3-tier confidence reroute.
+  crisisSafety: boolean
 }
 
 export type AIResult<T> =

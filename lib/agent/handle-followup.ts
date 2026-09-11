@@ -192,6 +192,10 @@ export async function handleFollowup(input: {
       category,
       classifierConfidence: 1.0,
       reasoning: `Followup trigger: ${input.trigger.reason}`,
+      // TAC-348: synthetic classification of an operator/system-initiated
+      // trigger, not a guest message — the crisis signal is never applicable
+      // on this path.
+      crisisSafety: false,
     }
 
     // Retrieve corpus

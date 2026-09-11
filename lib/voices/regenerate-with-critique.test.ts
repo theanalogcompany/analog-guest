@@ -202,6 +202,56 @@ describe('regenerateWithCritique — error paths up front', () => {
   })
 })
 
+// TAC-348 (code review follow-up): a crisis-safety inbound must refuse
+// BEFORE retrieval or generation ever run — mirrors handle-inbound.ts's
+// short circuit. The original message triggered a fixed, hardcoded reply
+// specifically so no persona/corpus/category instruction would touch it;
+// regenerating it here would run exactly the generateMessage call that
+// mechanism exists to bypass.
+describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
+  beforeEach(() => {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    vi.mocked(buildRuntimeContext).mockResolvedValue(
+      baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
+    )
+    vi.mocked(classifyMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        category: 'casual_chatter',
+        classifierConfidence: 0.8,
+        reasoning: 'r',
+        crisisSafety: true,
+        promptVersion: 'v1.41.0',
+      },
+    })
+  })
+
+  it('returns crisis_safety_ineligible instead of proceeding to retrieval or generation', async () => {
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'this reads generic, make it warmer',
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.errorCode).toBe('crisis_safety_ineligible')
+    expect(r.error).toContain('crisis-safety')
+  })
+
+  it('never calls retrieveContext or generateMessage for a crisis-safety inbound', async () => {
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(retrieveContext).not.toHaveBeenCalled()
+    expect(retrieveKnowledgeContext).not.toHaveBeenCalled()
+    expect(generateMessage).not.toHaveBeenCalled()
+  })
+})
+
 describe('regenerateWithCritique — happy path', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
@@ -228,6 +278,7 @@ describe('regenerateWithCritique — happy path', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
+        crisisSafety: false,
         promptVersion: 'v1.8.0',
       },
     })
@@ -387,6 +438,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         category: 'mechanic_request',
         classifierConfidence: 0.9,
         reasoning: 'r',
+        crisisSafety: false,
         promptVersion: 'v1.13.0',
       },
     })
@@ -420,6 +472,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
+        crisisSafety: false,
         promptVersion: 'v1.13.0',
       },
     })
@@ -451,6 +504,7 @@ describe('regenerateWithCritique — corpus thinness', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'r',
+        crisisSafety: false,
         promptVersion: 'v1.8.0',
       },
     })

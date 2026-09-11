@@ -65,6 +65,13 @@ export type RegenerateWithCritiqueOutcome =
         | 'classify_failed'
         | 'retrieve_failed'
         | 'generate_failed'
+        // TAC-348 (code review follow-up): the triggering inbound is a
+        // crisis-safety signal. Refuses BEFORE retrieval or generation ever
+        // run — same posture as handle-inbound.ts's short circuit, and for
+        // the same reason: a persona-driven regeneration of a crisis reply
+        // would defeat the entire point of hardcoding that reply, and its
+        // output could be committed to voice_corpus as a style exemplar.
+        | 'crisis_safety_ineligible'
     }
 
 interface OriginalOutboundLoad {
@@ -210,6 +217,22 @@ export async function regenerateWithCritique(
       ok: false,
       errorCode: 'classify_failed',
       error: classification.error,
+    }
+  }
+
+  // TAC-348 (code review follow-up): refuse a crisis-safety regen BEFORE
+  // retrieval or generation ever run. The original inbound triggered a
+  // fixed, hardcoded reply specifically so no persona/corpus/category
+  // instruction would ever touch it (see lib/agent/crisis-safety.ts and
+  // handle-inbound.ts's identical short circuit) — regenerating it here
+  // would run exactly the generateMessage call that mechanism exists to
+  // bypass, on a message this repo has decided must never be persona-styled.
+  if (classification.data.crisisSafety) {
+    return {
+      ok: false,
+      errorCode: 'crisis_safety_ineligible',
+      error:
+        'This message was a crisis-safety reply (self-harm or medical-emergency signal). It sends a fixed, hardcoded response and is not eligible for voice regeneration.',
     }
   }
 

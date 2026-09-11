@@ -316,6 +316,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         classifierConfidence: 0.25,
         reasoning: 'too ambiguous',
         promptVersion: 'v1.13.0',
+        crisisSafety: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -344,6 +345,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         classifierConfidence: 0.5,
         reasoning: 'ambiguous but defensible',
         promptVersion: 'v1.13.0',
+        crisisSafety: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -363,6 +365,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         classifierConfidence: 0.85,
         reasoning: 'clear',
         promptVersion: 'v1.13.0',
+        crisisSafety: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -378,6 +381,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         classifierConfidence: 0.9,
         reasoning: 'r',
         promptVersion: 'v1.13.0',
+        crisisSafety: false,
       },
     })
     const recent = [
@@ -400,6 +404,41 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
     }
     expect(callArg.recentMessages).toBe(recent)
     expect(callArg.guestState).toBe('raving_fan')
+  })
+
+  // TAC-348: crisisSafety is orthogonal to the confidence-based category
+  // reroute above — it must pass through unmodified in all three tiers.
+  it('passes crisisSafety=true through unmodified even when confidence triggers the unknown reroute', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'casual_chatter',
+        classifierConfidence: 0.2,
+        reasoning: 'ambiguous',
+        promptVersion: 'v1.41.0',
+        crisisSafety: true,
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    // Category still reroutes to unknown at this confidence tier...
+    expect(out.category).toBe('unknown')
+    // ...but the crisis signal is never suppressed by that reroute.
+    expect(out.crisisSafety).toBe(true)
+  })
+
+  it('passes crisisSafety=false through unmodified at high confidence', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'clear',
+        promptVersion: 'v1.41.0',
+        crisisSafety: false,
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.crisisSafety).toBe(false)
   })
 })
 
@@ -1646,6 +1685,7 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
         category: 'new_question',
         classifierConfidence: 0.9,
         reasoning: 'question',
+        crisisSafety: false,
       },
     })
 
@@ -1740,6 +1780,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         category: 'new_question',
         classifierConfidence: 0.9,
         reasoning: 'question',
+        crisisSafety: false,
       },
     })
 
@@ -1880,6 +1921,7 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
         category: 'new_question',
         classifierConfidence: 0.9,
         reasoning: 'question',
+        crisisSafety: false,
       },
     })
 

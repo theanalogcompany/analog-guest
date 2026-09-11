@@ -195,6 +195,8 @@ export async function handleOperatorDecline(input: {
       category,
       classifierConfidence: 1.0,
       reasoning: `Operator-initiated decline of commitment ${input.commitmentId}`,
+      // TAC-348: operator-initiated, not a guest message — never applicable.
+      crisisSafety: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's

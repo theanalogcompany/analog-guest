@@ -179,6 +179,8 @@ export async function handleHoldingMessage(input: {
       category: HOLDING_MESSAGE_CATEGORY,
       classifierConfidence: 1,
       reasoning: 'TAC-308 holding message (system-initiated, not classified)',
+      // TAC-348: system-initiated, not a guest message — never applicable.
+      crisisSafety: false,
     }
 
     try {
