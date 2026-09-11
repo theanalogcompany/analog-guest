@@ -1181,12 +1181,22 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
     })
   }
 
-  it('named_person: signs with speakerName and states staff identity, not "on the venue\'s behalf"', () => {
+  it('named_person: states staff identity as first person, not "on the venue\'s behalf"', () => {
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
     const out = personaToProse(persona)
-    expect(out).toContain('Sign messages as Sana')
+    expect(out).toContain('You are Sana, staff at the venue, texting as yourself.')
     expect(out).toContain('You ARE that person')
     expect(out).not.toMatch(/on the venue's behalf/)
+  })
+
+  // TAC-348: real iMessage/SMS threads don't carry signatures. named_person
+  // previously told the model to sign every message, which at least one
+  // venue needed a manual anti-pattern rule to undo.
+  it('named_person: does not instruct signing messages', () => {
+    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const out = personaToProse(persona)
+    expect(out).not.toContain('Sign messages')
+    expect(out).toContain('Do not sign messages with your name.')
   })
 
   it('named_person: falls back to "[name missing]" when speakerName is absent', () => {
@@ -1196,7 +1206,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
     // a persona shape the schema would reject.
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
     const out = personaToProse({ ...persona, speakerName: undefined })
-    expect(out).toContain('Sign messages as [name missing]')
+    expect(out).toContain('You are [name missing], staff at the venue')
   })
 })
 

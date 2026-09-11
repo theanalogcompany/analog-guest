@@ -39,12 +39,18 @@ const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
 // changelog for the full incident and the reasoning against a symptom-level
 // ban. "On the venue's behalf" is a banned framing for this identity fact —
 // don't reintroduce it here or in SYSTEM_TEMPLATE's opening line.
+//
+// TAC-348: named_person previously told the model to "Sign messages as
+// {name}." Real iMessage/SMS threads don't carry signatures — a signed
+// text reads like an email, not a text from a person — and at least one
+// venue needed a manual anti-pattern rule to undo this. Removed outright
+// rather than reworded; the sentence had no other job.
 function speakerFramingProse(persona: BrandPersona): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
     case 'named_person':
-      return `Sign messages as ${persona.speakerName ?? '[name missing]'}. You ARE that person — staff at the venue, not an outside service representing it.`
+      return `You are ${persona.speakerName ?? '[name missing]'}, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.`
     case 'owner':
       return 'Speak as the owner of the venue, in first person. Do not name yourself unless the guest asks.'
   }
