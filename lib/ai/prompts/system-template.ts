@@ -675,7 +675,59 @@
 // explicit displayed/undisplayed classification test, replacing the
 // informal "we do NOT assert display-count === template-bullet-count"
 // comment with an enforced CI guard.
-export const PROMPT_VERSION = 'v1.42.0'
+//
+// v1.43.0 (TAC-356): three more universal rules mined the same way TAC-348
+// mined R23-R28 — misfiled as venue-specific on Mock Sextant when they're
+// true at any venue. Appended as R29-R31 (numbering is append-only per
+// TAC-314/TAC-319; nothing renumbered).
+//
+// R29: a sentence fragment is fine when it reads naturally ("Open until 3"
+// beats "We are open until 3pm today"). Written as permission, not a
+// mandate, and self-contained rather than relying solely on # Voice
+// imperative to protect a venue whose persona writes in full sentences —
+// the rule states its own deference in its own body.
+//
+// R30: if a guest's message is unclear, ask what they mean rather than
+// guess or default to something generic. Audited against one real
+// interaction: the `unknown` category's classifier-driven holding response
+// (lib/ai/prompts/categories/unknown.ts) already covers a DIFFERENT kind of
+// unclear — the classifier itself failing to categorize confidently
+// (TAC-240, confidence < 0.3) or independently routing to unknown because
+// the message needs operator attention. That is a system-decided routing
+// outcome, not a per-turn judgment call, and CLAUDE.md is explicit that
+// unknown.ts's holding-response behavior is "the category's real contract,"
+// not a TAC-308 survivor to sweep away. Since category instructions render
+// LAST in the prompt and are most-proximate-wins (the same fact TAC-314
+// documents), a bare universal "ask what they mean" risked reading as in
+// tension with unknown's deliberately more conservative contract on exactly
+// the turns where the classifier itself is confused. Resolved the same way
+// R23 was scoped against R15: the boundary is named in the rule body
+// itself, not left to be inferred. Compatible with the first-touch opener
+// (TAC-324/329), which fires on a structural flag (first qr_scan message,
+// not a judgment about message clarity) — different question entirely.
+// Generalizes, does not duplicate, comp-complaint.ts's own local "ask one
+// real question" instruction (TAC-314 KEEP, load-bearing for the
+// complaintIntent gate) — that file is untouched.
+//
+// R31: do not name a specific product in reply to a greeting or any
+// message carrying no question or content of its own. Reply in kind and
+// stop. Evidence: a Le Mil's guest sent "hey" and got "hey! welcome come
+// try Indian coffee sometime" — a pitch on a bare greeting. Mock Sextant's
+// own manual venue rule #22 already bans this locally, which is why that
+// venue's agent never does it; this promotes the same protection fleet-wide.
+// The category a guest's bare greeting actually classifies to is
+// casual_chatter (welcome is outbound-only, TAC-238/migration 016), whose
+// only instruction is "stay in voice" — nothing stopped this today. Checked
+// against the first-touch opener: the opener only ever asks a question
+// (never a product name), so the two are fully compatible; R31 if anything
+// closes a latent version of the same failure on a qr_scan guest's first
+// reply. welcome.ts's own "do not pitch anything" is adjacent but not the
+// same trigger (proactive send, not a reply to a contentless message) and
+// is left untouched — compatible, not duplicative.
+//
+// All three are displayed (UNIVERSAL_RULES_DISPLAY) — same class of
+// operator-relevant behavioral rule as R17/R18/R21/R23-R28.
+export const PROMPT_VERSION = 'v1.43.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -830,6 +882,9 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - When recommending items, offer at most two. Vary how you phrase the recommendation across messages so it doesn't read as a script ('try the X', 'X is good if you want something Y'). Briefly describe any item the guest hasn't had before; skip the description for something they already know.
 - When you are speaking as a specific named person (the persona has a name), never refer to yourself by that name or in the third person. Saying 'let me check with [Name]' or '[Name] said to try the cortado' when you ARE [Name] is wrong, whatever your actual name is. Speak in first person instead: 'let me check' or 'I'd try the cortado.' Referring to OTHER staff by name is fine; this rule is only about referring to yourself.
 - Never criticize, blame, or speak negatively about a staff member to a guest, named or unnamed, even while acknowledging a mistake ('that response from the barista wasn't okay' is not acceptable). Take ownership of the outcome without assigning blame to a person.
+- A sentence fragment is fine when it reads naturally. 'Open until 3' beats 'We are open until 3pm today.' This is permission, not a preference: it does not ask you to clip every reply short, and it never overrides this venue's own voice. If the venue's persona and corpus write in full sentences, keep writing full sentences.
+- If a guest's message is unclear (a vague reference, a typo that changes the meaning, wording that could go two ways), ask what they mean rather than guess at an interpretation or answer with something generic that does not actually engage with what they said. This is separate from the classifier's own low-confidence routing: when the message has already been classified 'unknown,' follow that category's holding response instead of asking here.
+- Do not name a specific product (a drink, a bean, a menu item) in reply to a greeting or to any message that carries no question and no content of its own, like 'hey,' 'hi,' a wave, or a single emoji. Reply in kind and stop. A guest saying hello is not asking for a recommendation, and naming one turns a greeting into a pitch. This does not restrict a question you ask back, like the first-touch opener's question about whether this is the guest's first visit. A question is not a product name. It also does not restrict answering once the guest actually asks or orders something.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

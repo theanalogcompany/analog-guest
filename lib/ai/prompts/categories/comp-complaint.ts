@@ -55,6 +55,12 @@
 // TAC-337: shape changed here, not requirement — the heads-up mandate stays
 // in system-template.ts's # Commitments block (untouched, applies to every
 // commitment-bearing category). No worked-example phrasing added on purpose.
+//
+// TAC-356: universal R30 ("if a guest's message is unclear, ask what they
+// mean") generalizes this file's own "ask one real question" line below —
+// it does not duplicate or override it. This file's version stays because
+// it is load-bearing for the complaintIntent gate (see the TAC-314 KEEP
+// above), not because R30 failed to cover it.
 
 export const COMP_COMPLAINT_INSTRUCTIONS = `The guest is telling you something went wrong.
 

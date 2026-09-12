@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.42.0 (TAC-348 PR #2: six new universal rules R23-R28, R8/R11 strengthened, named_person signing fix)', () => {
-    expect(PROMPT_VERSION).toBe('v1.42.0')
+  it('is v1.43.0 (TAC-356: three more universal rules R29-R31 — fragments, ask-when-unclear, no product pitch on greeting)', () => {
+    expect(PROMPT_VERSION).toBe('v1.43.0')
   })
 })
 
@@ -63,17 +63,19 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // sequence has a deliberate gap. The old assertion here demanded
     // contiguity, which would have forced exactly the renumbering the policy
     // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
-    // TAC-348 appends R23-R28 after that (R22 stays undisplayed).
+    // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
+    // appends R29-R31 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
+      'R29', 'R30', 'R31',
     ])
   })
 
-  it('curates 20 rules ending at R28 (TAC-348)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(20)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R28')
+  it('curates 23 rules ending at R31 (TAC-356)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(23)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R31')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -160,6 +162,29 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(r28).toBeDefined()
     expect(r28?.summary).toContain('criticize, blame')
     expect(SYSTEM_TEMPLATE).toContain('Never criticize, blame, or speak negatively about a staff member')
+  })
+
+  // TAC-356: the same cross-source anchor treatment for the three newly
+  // promoted rules, mirroring the TAC-348 pattern immediately above.
+  it('shares the R29 anchor phrase across both sources (TAC-356)', () => {
+    const r29 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R29')
+    expect(r29).toBeDefined()
+    expect(r29?.summary).toContain('sentence fragment is fine')
+    expect(SYSTEM_TEMPLATE).toContain('A sentence fragment is fine when it reads naturally')
+  })
+
+  it('shares the R30 anchor phrase across both sources (TAC-356)', () => {
+    const r30 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R30')
+    expect(r30).toBeDefined()
+    expect(r30?.summary).toContain('ask what they mean')
+    expect(SYSTEM_TEMPLATE).toContain("ask what they mean rather than guess at an interpretation")
+  })
+
+  it('shares the R31 anchor phrase across both sources (TAC-356)', () => {
+    const r31 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R31')
+    expect(r31).toBeDefined()
+    expect(r31?.summary).toContain('specific product')
+    expect(SYSTEM_TEMPLATE).toContain('Do not name a specific product (a drink, a bean, a menu item)')
   })
 
   it('shares the R8-strengthened anchor phrase across both sources (TAC-348)', () => {
@@ -928,16 +953,17 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // TAC-348 appended R23-R28 after R22, so R22 is no longer the LAST bullet
   // in the block — it's now immediately followed by the six new rules, then
   // the section break. Rewritten to pin that adjacency instead of asserting
-  // R22 is terminal.
-  it('is immediately followed by exactly R23-R28, then # Voice imperative', () => {
+  // R22 is terminal. TAC-356 appended R29-R31 after that, so the count grows
+  // again (still the same adjacency shape, just three more lines).
+  it('is immediately followed by exactly R23-R31, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
-    // R22 itself, plus R23-R28 — exactly seven bullet lines, then nothing
-    // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
+    // R22 itself, plus R23-R31 — exactly ten bullet lines, then nothing but
+    // whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(10)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1093,17 +1119,120 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
     expect(SYSTEM_TEMPLATE).toContain('Take ownership of the outcome without assigning blame to a person.')
   })
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-356 appended R29-R31 after R28, so R28 is no longer the LAST bullet
+  // in the block. Rewritten to pin adjacency to the new rules instead of
+  // asserting R28 is terminal — same treatment R22's own test got in
+  // TAC-348 when R23-R28 landed after it.
+  it('is immediately followed by exactly R29, R30, R31, then # Voice imperative (TAC-356)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+    // R28 itself, plus R29-R31 — exactly four bullet lines, then nothing but
+    // whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    const end = SYSTEM_TEMPLATE.indexOf('A sentence fragment is fine when it reads naturally')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+// R29-R31 (TAC-356): three more rules mined the same way TAC-348 mined
+// R23-R28 — misfiled as venue-specific on Mock Sextant when they're true at
+// any venue. See system-template.ts's v1.43.0 changelog for the full audit
+// against the first-touch intentions opener and every category instruction
+// file, including the two dropped-nothing outcome and the one scoping
+// carve-out (R30 against the `unknown` category).
+describe('SYSTEM_TEMPLATE — R29: sentence fragments are permitted, not mandated (TAC-356)', () => {
+  it('permits a fragment with the worked example', () => {
+    expect(SYSTEM_TEMPLATE).toContain('A sentence fragment is fine when it reads naturally.')
+    expect(SYSTEM_TEMPLATE).toContain("'Open until 3' beats 'We are open until 3pm today.'")
+  })
+
+  it('states this is permission, not a mandate, and defers to a full-sentence venue voice', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This is permission, not a preference: it does not ask you to clip every reply short, and it never overrides this venue\'s own voice.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "If the venue's persona and corpus write in full sentences, keep writing full sentences.",
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('A sentence fragment is fine when it reads naturally')
+    const end = SYSTEM_TEMPLATE.indexOf("If a guest's message is unclear")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R30: ask what a guest means rather than guess (TAC-356)', () => {
+  it('directs asking rather than guessing or defaulting to something generic', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "ask what they mean rather than guess at an interpretation or answer with something generic that does not actually engage with what they said.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('a vague reference, a typo that changes the meaning, wording that could go two ways')
+  })
+
+  // This is the one real interaction the audit found: unknown.ts's
+  // classifier-driven holding response is a different, system-decided kind
+  // of "unclear" (routing confidence, not content ambiguity) and must not
+  // read as in tension with this rule. Scoped explicitly in the rule body,
+  // the same technique R23 used against R15.
+  it('is explicitly scoped against the unknown category so the two do not collide', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "This is separate from the classifier's own low-confidence routing: when the message has already been classified 'unknown,' follow that category's holding response instead of asking here.",
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf("If a guest's message is unclear")
+    const end = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or content-less message (TAC-356)', () => {
+  it('bans naming a specific product in reply to a greeting or content-less message, with a reply-in-kind directive', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not name a specific product (a drink, a bean, a menu item) in reply to a greeting or to any message that carries no question and no content of its own',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Reply in kind and stop.')
+  })
+
+  // Audited against the first-touch opener (TAC-324/329): the opener only
+  // ever asks a question, never names a product, so the two are compatible
+  // by construction. This carve-out states that compatibility in the rule
+  // body itself rather than leaving it to be inferred.
+  it('does not restrict a question asked back, or answering once the guest actually asks or orders something', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "This does not restrict a question you ask back, like the first-touch opener's question about whether this is the guest's first visit.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'It also does not restrict answering once the guest actually asks or orders something.',
+    )
+  })
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r31Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r31Idx)
+    const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
