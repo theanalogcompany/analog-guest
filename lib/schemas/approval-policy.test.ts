@@ -15,8 +15,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   APPROVAL_POLICY_DEFAULT,
   getEffectivePerCategoryPolicy,
+  isPolicyExemptCategory,
   parseApprovalPolicy,
+  POLICY_EXEMPT_CATEGORIES,
   resolveCategoryPolicy,
+  resolvePolicyDecision,
 } from './approval-policy'
 
 /** The literal value on every venue in production today. */
@@ -147,7 +150,14 @@ describe('resolveCategoryPolicy — explicit per-venue override', () => {
 describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
   it('returns the code default merged over an empty stored perCategory — the production case', () => {
     const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
-    expect(getEffectivePerCategoryPolicy(policy)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
+    // TAC-307: the merge now also pins every POLICY_EXEMPT_CATEGORIES entry to
+    // auto_send, so the read-only admin display can't claim a hold the runtime
+    // refuses to honour. Asserted as code-default-plus-exemptions rather than
+    // an exact match on APPROVAL_POLICY_DEFAULT.perCategory.
+    expect(getEffectivePerCategoryPolicy(policy)).toEqual({
+      ...APPROVAL_POLICY_DEFAULT.perCategory,
+      opt_out: 'auto_send',
+    })
   })
 
   it('layers a stored override on top of the code default without erasing it', () => {
@@ -161,8 +171,9 @@ describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
   })
 
   it('degrades to the code default when the policy itself is missing', () => {
-    expect(getEffectivePerCategoryPolicy(undefined)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
-    expect(getEffectivePerCategoryPolicy(null)).toEqual(APPROVAL_POLICY_DEFAULT.perCategory)
+    const expected = { ...APPROVAL_POLICY_DEFAULT.perCategory, opt_out: 'auto_send' }
+    expect(getEffectivePerCategoryPolicy(undefined)).toEqual(expected)
+    expect(getEffectivePerCategoryPolicy(null)).toEqual(expected)
   })
 
   it('produces the exact map resolveCategoryPolicy resolves against, so the two can never drift', () => {
@@ -174,6 +185,126 @@ describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
     for (const category of Object.keys(merged) as Array<keyof typeof merged>) {
       expect(resolveCategoryPolicy(policy, category as Parameters<typeof resolveCategoryPolicy>[1])).toBe(
         merged[category],
+      )
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-307
+// ---------------------------------------------------------------------------
+
+describe('POLICY_EXEMPT_CATEGORIES (TAC-307)', () => {
+  it('contains opt_out — a compliance reply can never be held', () => {
+    expect(POLICY_EXEMPT_CATEGORIES).toContain('opt_out')
+  })
+
+  it('resolves an exempt category to auto_send even when the venue stored a hold', () => {
+    const policy = parseApprovalPolicy({
+      default: 'auto_send',
+      perCategory: { opt_out: 'operator_approval' },
+    })
+    expect(resolveCategoryPolicy(policy, 'opt_out')).toBe('auto_send')
+    expect(resolvePolicyDecision(policy, 'opt_out').source).toBe('exempt')
+  })
+
+  it('resolves an exempt category to auto_send even under a blanket hold', () => {
+    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    expect(resolveCategoryPolicy(policy, 'opt_out')).toBe('auto_send')
+  })
+
+  it('isPolicyExemptCategory is false for a normal category and for undefined', () => {
+    expect(isPolicyExemptCategory('comp_complaint')).toBe(false)
+    expect(isPolicyExemptCategory(undefined)).toBe(false)
+    expect(isPolicyExemptCategory('opt_out')).toBe(true)
+  })
+})
+
+describe('resolvePolicyDecision — source attribution (TAC-307)', () => {
+  // The source is what applyApprovalPolicyStage uses to decide whether the
+  // clarifying-question carve-out may apply at all, so each branch is pinned
+  // independently. A mislabelled source is invisible in the disposition and
+  // silently changes whether a hold is absolute.
+
+  it('labels an explicit stored entry "stored"', () => {
+    const policy = parseApprovalPolicy({
+      default: 'auto_send',
+      perCategory: { comp_complaint: 'operator_approval' },
+    })
+    expect(resolvePolicyDecision(policy, 'comp_complaint')).toEqual({
+      disposition: 'operator_approval',
+      source: 'stored',
+    })
+  })
+
+  it('labels the fleet-wide comp_complaint route "code_default" on a production-seeded venue', () => {
+    // The case that must stay a no-op: every venue in production stores an
+    // empty perCategory, so comp_complaint has to keep its carve-out.
+    const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
+    expect(resolvePolicyDecision(policy, 'comp_complaint')).toEqual({
+      disposition: 'operator_approval',
+      source: 'code_default',
+    })
+  })
+
+  it('labels a degraded (null/undefined) policy "code_default", NOT "stored"', () => {
+    // Regression: reading the stored entry off the fallback object rather than
+    // off the caller's policy reported the code default as an explicit venue
+    // choice, which made every degraded context absolute and silently disabled
+    // the carve-out for any caller that had not populated a policy.
+    expect(resolvePolicyDecision(undefined, 'comp_complaint').source).toBe('code_default')
+    expect(resolvePolicyDecision(null, 'comp_complaint').source).toBe('code_default')
+  })
+
+  it('labels a fall-through to the venue default "policy_default"', () => {
+    const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
+    expect(resolvePolicyDecision(policy, 'casual_chatter')).toEqual({
+      disposition: 'auto_send',
+      source: 'policy_default',
+    })
+  })
+
+  it('labels an absent category (followup path) "policy_default"', () => {
+    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    expect(resolvePolicyDecision(policy, undefined)).toEqual({
+      disposition: 'operator_approval',
+      source: 'policy_default',
+    })
+  })
+
+  it('makes the master switch outrank the code default for comp_complaint', () => {
+    // Without the default-before-code-default ordering, comp_complaint would
+    // resolve as 'code_default' under a blanket hold, keep the carve-out, and
+    // auto-send past the master switch — in the one category this ticket's
+    // originating incident was about.
+    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    expect(resolvePolicyDecision(policy, 'comp_complaint')).toEqual({
+      disposition: 'operator_approval',
+      source: 'policy_default',
+    })
+  })
+
+  it('still lets an explicit stored auto_send override the master switch', () => {
+    // Stored entries are checked before the default, so a venue can carve a
+    // category out of its own blanket hold by storing auto_send explicitly.
+    const policy = parseApprovalPolicy({
+      default: 'operator_approval',
+      perCategory: { casual_chatter: 'auto_send' },
+    })
+    expect(resolvePolicyDecision(policy, 'casual_chatter')).toEqual({
+      disposition: 'auto_send',
+      source: 'stored',
+    })
+  })
+
+  it('agrees with resolveCategoryPolicy on every category it is asked about', () => {
+    const policy = parseApprovalPolicy({
+      default: 'auto_send',
+      perCategory: { reply: 'operator_approval', opt_out: 'operator_approval' },
+    })
+    for (const category of ['reply', 'opt_out', 'comp_complaint', 'casual_chatter'] as const) {
+      expect(resolvePolicyDecision(policy, category).disposition).toBe(
+        resolveCategoryPolicy(policy, category),
       )
     }
   })

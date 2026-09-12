@@ -49,9 +49,11 @@ export interface VenueContext {
   // v1.24.0: per-category approval routing, parsed from
   // venue_configs.approval_policy (a column seeded fleet-wide since
   // 2026-04-27 that had no reader until now). Consumed by
-  // applyApprovalPolicyStage's CATEGORY_REQUIRES_APPROVAL trigger and by
+  // applyApprovalPolicyStage's CATEGORY_REQUIRES_APPROVAL trigger, by
   // buildAiRuntime to decide whether the generation prompt may be
-  // comp-forward. parseApprovalPolicy fails OPEN to defaults, and the
+  // comp-forward, and — less obviously, TAC-307 — by handleHoldingMessage,
+  // which suppresses the knowledge-gap holding message entirely when policy
+  // holds its category. parseApprovalPolicy fails OPEN to defaults, and the
   // defaults route comp_complaint to review — so a malformed policy produces
   // MORE operator oversight, never less.
   approvalPolicy: ApprovalPolicy

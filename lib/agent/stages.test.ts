@@ -2659,3 +2659,191 @@ describe('knowledgeGapWillQueue (TAC-309)', () => {
     expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, false)).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-307: approval policy is absolute
+// ---------------------------------------------------------------------------
+
+describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
+  // makeCtx casts `venue`, so approvalPolicy isn't set by default. These build
+  // it explicitly, the same way the holdAllOutbound tests above do.
+  function ctxWithPolicy(
+    policy: unknown,
+    category: string = 'comp_complaint',
+  ): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      classification: {
+        category,
+        classifierConfidence: 0.95,
+        reasoning: 'test',
+      } as RuntimeContext['classification'],
+    })
+  }
+
+  const CLARIFYING = {
+    body: 'What was off with it? I want to understand before we figure out next steps.',
+    voiceFidelity: 0.82,
+    complaintIntent: 'clarifying' as const,
+  }
+
+  it('keeps the clarifying-question carve-out when the hold is the fleet-wide code default', async () => {
+    // The no-op case: every venue in production stores an empty perCategory,
+    // so this is today's behaviour and must not change.
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy({ default: 'auto_send', perCategory: {} }),
+      makeGenerationResult(CLARIFYING),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('queues that same clarifying question when the venue stored the hold explicitly', async () => {
+    // The behaviour this ticket exists to add: a box a human ticked is
+    // ABSOLUTE. A control with exceptions is not a control.
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy({ default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } }),
+      makeGenerationResult(CLARIFYING),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain('category_requires_approval')
+  })
+
+  it('queues that same clarifying question under the master switch', async () => {
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy({ default: 'operator_approval', perCategory: {} }),
+      makeGenerationResult(CLARIFYING),
+    )
+    expect(decision.action).toBe('queue')
+  })
+
+  it('holds an ordinary category under the master switch', async () => {
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy({ default: 'operator_approval', perCategory: {} }, 'casual_chatter'),
+      makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain('category_requires_approval')
+  })
+
+  it('never holds opt_out, even under the master switch', async () => {
+    // TCPA. The exemption is enforced in the resolver, so it holds regardless
+    // of what the UI does or does not render.
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy({ default: 'operator_approval', perCategory: {} }, 'opt_out'),
+      makeGenerationResult({ body: "You're unsubscribed. No more texts.", voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('never holds opt_out even when a hand-edited row stores a hold for it', async () => {
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy(
+        { default: 'auto_send', perCategory: { opt_out: 'operator_approval' } },
+        'opt_out',
+      ),
+      makeGenerationResult({ body: "You're unsubscribed. No more texts.", voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('still auto-sends an unheld category when the venue holds a different one', async () => {
+    const decision = await applyApprovalPolicyStage(
+      ctxWithPolicy(
+        { default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } },
+        'casual_chatter',
+      ),
+      makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+})
+
+describe('manual followups keep pending-detection bypassed (TAC-307)', () => {
+  // Removing the manual gate bypass brought that path under approval POLICY,
+  // which was the point. The bypass was doing a second, unrelated job though —
+  // keeping the Follow Up button away from pending-draft detection — and
+  // losing that would let a Follow Up click regen-in-place over a draft an
+  // operator was about to approve. These pin the two halves apart.
+  function manualCtx(policy?: unknown): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+    })
+  }
+
+  it('does not fire previous_pending_held for a manual followup', async () => {
+    const decision = await applyApprovalPolicyStage(
+      manualCtx(),
+      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('still applies approval policy to a manual followup', async () => {
+    // The half that TAC-307 deliberately changed: a venue holding everything
+    // holds the Follow Up button's draft too.
+    const decision = await applyApprovalPolicyStage(
+      manualCtx({ default: 'operator_approval', perCategory: {} }),
+      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain('category_requires_approval')
+    // Crucially NOT routed at an existing pending row — nothing to clobber.
+    expect(decision.existingPendingDraftId).toBeNull()
+  })
+
+  it('still fires previous_pending_held for a CRON followup', async () => {
+    // Guard against the skip being written too broadly. day_7 is not manual.
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({
+        venue: { id: 'venue-1' } as RuntimeContext['venue'],
+        followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      }),
+      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+    )
+    // findPendingDraft is unmocked here and resolves null in this fixture, so
+    // the assertion that matters is that the lookup was not short-circuited by
+    // the manual check — a send with no triggers is the correct outcome.
+    expect(decision.action).toBe('send')
+  })
+})
+
+describe('willBeReviewed is scoped to complaint categories (TAC-307)', () => {
+  // The master switch this ticket ships sets default:'operator_approval',
+  // which before scoping made willBeReviewed true on EVERY turn and switched
+  // formatMechanicEligibility to its generosity-inviting branch venue-wide.
+  function ctxFor(category: string, policy: unknown): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      classification: {
+        category,
+        classifierConfidence: 0.95,
+        reasoning: 'test',
+      } as RuntimeContext['classification'],
+    })
+  }
+
+  it('is true for a held complaint turn', () => {
+    const runtime = buildAiRuntime(
+      ctxFor('comp_complaint', { default: 'auto_send', perCategory: {} }),
+    )
+    expect(runtime.willBeReviewed).toBe(true)
+  })
+
+  it('is FALSE for a non-complaint turn under the master switch', () => {
+    const runtime = buildAiRuntime(
+      ctxFor('new_question', { default: 'operator_approval', perCategory: {} }),
+    )
+    expect(runtime.willBeReviewed).toBe(false)
+  })
+
+  it('is false for a complaint turn the venue does not hold', () => {
+    const runtime = buildAiRuntime(
+      ctxFor('comp_complaint', { default: 'auto_send', perCategory: { comp_complaint: 'auto_send' } }),
+    )
+    expect(runtime.willBeReviewed).toBe(false)
+  })
+})

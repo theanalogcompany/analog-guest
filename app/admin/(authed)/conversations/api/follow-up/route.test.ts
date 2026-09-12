@@ -434,6 +434,42 @@ describe('POST /admin/conversations/api/follow-up', () => {
     expect(res.status).toBe(200)
   })
 
+  // TAC-307: manual followups run the approval gate now, so 'queued' is
+  // reachable from this route for the first time. Before the fix it fell
+  // through the if-chain to the terminal skipped_duplicate tail and surfaced
+  // to the operator as 409 "duplicate: pipeline reported skipped_duplicate" —
+  // a draft successfully queued for review, reported as a failure, on every
+  // approval trigger there is.
+  it('returns 200 with queued:true when the approval gate holds the draft', async () => {
+    vi.mocked(createServerClient).mockResolvedValue(
+      makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
+    )
+    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      isAnalogAdmin: true,
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock({
+        guestRow: { id: GUEST_ID, opted_out_at: null },
+      }) as never,
+    )
+    vi.mocked(handleFollowup).mockResolvedValue({
+      status: 'queued',
+      outboundMessageId: 'msg-queued-1',
+      triggers: ['category_requires_approval'],
+      primaryTrigger: 'category_requires_approval',
+    })
+
+    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.success).toBe(true)
+    expect(body.queued).toBe(true)
+    expect(body.messageId).toBe('msg-queued-1')
+    expect(body.error).toBeUndefined()
+  })
+
   it('returns 422 when handleFollowup refuses on low fidelity', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
       makeSessionMock({ user: { id: 'auth-user-1' } }) as never,

@@ -383,220 +383,222 @@ export async function handleFollowup(input: {
       )
     }
 
-    // TAC-212: approval-policy gate. Bypassed entirely on the Follow Up
-    // button path (trigger.reason='manual') — operator already approved by
-    // clicking. Cron-triggered followups (day_* / event) run the gate.
+    // TAC-212: approval-policy gate. Runs on EVERY followup path.
+    //
+    // TAC-307 REMOVED THE MANUAL BYPASS. The Follow Up button
+    // (trigger.reason='manual') used to skip this gate entirely on the
+    // reasoning that the operator had already approved by clicking. That
+    // conflates two different approvals: clicking authorises THE ACT OF
+    // REACHING OUT, not the text — the body is model-generated and nobody
+    // reads it before it ships. A venue that has switched on an approval
+    // hold asked for eyes on everything reaching its guests, and "a member
+    // of Analog staff clicked a button" is not that review.
+    //
+    // Consequence worth knowing before you debug it: at a venue with a hold
+    // configured, clicking Follow Up now produces a QUEUED CARD rather than a
+    // sent message. That is the intended meaning of the switch.
     //
     // TAC-264: when the gate decides queue AND existingPendingDraftId is
     // set, persistOrRegenQueuedDraft routes to UPDATE-in-place rather than
     // INSERT (regenerate the existing pending card with the cron-triggered
-    // followup's body). The card stays pending — no demotion. The manual
-    // followup bypass is intentional: operator clicked "send"; partial
-    // unique index doesn't block because manual goes via scheduleAndSend
-    // which writes review_state='auto_sent', not 'pending'. Pending card +
-    // operator-sent manual outbound can legitimately coexist on the same
-    // guest.
-    // TAC-284: when the gate runs (cron-triggered followups) and
-    // short-circuits for a demo guest, approval.reason carries
-    // 'demo_bypass'; threaded into scheduleAndSend below so the auto-send
-    // row is stamped review_reason='demo_bypass'. Manual followups bypass
-    // the gate entirely and leave this undefined (a manual outbound is an
-    // explicit operator send, not a bypass of anything).
-    let demoBypassReviewReason: 'demo_bypass' | undefined
-    if (input.trigger.reason !== 'manual') {
-      // TAC-355: independent mechanic-offer backstop. Runs on the followup
-      // path too — a mechanic can be offered on a proactive outbound message
-      // exactly as easily as in reply to a guest's question, unlike
-      // knowledge-gap grounding (inherently about answering a question the
-      // guest asked, so inbound-only). Skipped entirely for manual
-      // followups above, same as the gate itself.
-      const mechanicOfferBackstop = await verifyMechanicOfferStage(ctx, gen.result)
-      if (
-        mechanicOfferBackstop.status === 'flagged' ||
-        mechanicOfferBackstop.status === 'check_failed'
-      ) {
-        console.warn('[agent] followup mechanic-offer backstop fired', {
-          agentRunId,
-          status: mechanicOfferBackstop.status,
-        })
-      }
-      const approval = await applyApprovalPolicyStage(ctx, gen.result, null, mechanicOfferBackstop)
-      console.log('[agent] followup approval decision', {
+    // followup's body). The card stays pending — no demotion.
+    //
+    // TAC-284: when the gate short-circuits for a demo guest,
+    // approval.reason carries 'demo_bypass'; threaded into scheduleAndSend
+    // below so the auto-send row is stamped review_reason='demo_bypass'.
+    // TAC-355: independent mechanic-offer backstop. Runs on the followup
+    // path too — a mechanic can be offered on a proactive outbound message
+    // exactly as easily as in reply to a guest's question, unlike
+    // knowledge-gap grounding (inherently about answering a question the
+    // guest asked, so inbound-only). Runs for manual followups too since
+    // TAC-307, same as the gate itself.
+    const mechanicOfferBackstop = await verifyMechanicOfferStage(ctx, gen.result)
+    if (
+      mechanicOfferBackstop.status === 'flagged' ||
+      mechanicOfferBackstop.status === 'check_failed'
+    ) {
+      console.warn('[agent] followup mechanic-offer backstop fired', {
         agentRunId,
-        triggerReason: input.trigger.reason,
-        action: approval.action,
-        primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
-        triggers: approval.action === 'queue' ? approval.triggers : [],
-        voiceFidelity: gen.result.voiceFidelity,
-        modelRequiresApproval: gen.result.requiresOperatorApproval,
+        status: mechanicOfferBackstop.status,
       })
-      if (approval.action === 'queue') {
-        const queueSpan = trace.span('queue', {
-          primaryTrigger: approval.primaryTrigger,
-          triggerCount: approval.triggers.length,
-          existingPendingDraftId: approval.existingPendingDraftId,
-        })
-        try {
-          const persistResult = await persistOrRegenQueuedDraft(
-            ctx,
-            gen.result,
-            approval.primaryTrigger,
-            approval.existingPendingDraftId,
-            // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
-            // trigger is inbound-only), passed for call-site symmetry so the
-            // two orchestrators can't drift.
-            { pendingUntil: approval.pendingUntil },
-          )
-          const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
-          queueSpan.end({
-            output: {
-              outboundMessageId,
-              primaryTrigger: approval.primaryTrigger,
-              triggers: approval.triggers,
-              persistAction,
-              priorReviewReason,
-              bodyLength: gen.result.body.length,
-            },
-            content: { body: gen.result.body },
-          })
-          console.log(
-            persistAction === 'updated'
-              ? '[agent] followup regenerated existing pending draft'
-              : '[agent] followup queued for review',
-            {
-              agentRunId,
-              outboundMessageId,
-              primaryTrigger: approval.primaryTrigger,
-              triggers: approval.triggers,
-              persistAction,
-              priorReviewReason,
-            },
-          )
-          if (persistAction === 'updated') {
-            await captureDraftRegenerated({
-              agentRunId,
-              venueId: ctx.venue.id,
-              guestId: ctx.guest.id,
-              originalDraftId: outboundMessageId,
-              triggers: approval.triggers,
-              primaryTrigger: approval.primaryTrigger,
-              priorReviewReason,
-              voiceFidelity: gen.result.voiceFidelity,
-              modelRequiresApproval: gen.result.requiresOperatorApproval,
-              modelApprovalReason: gen.result.approvalReason,
-              compRegexMatchedPattern: approval.compMatchedPattern,
-              kind: 'followup',
-              category,
-              inboundBody: null,
-              generatedBody: gen.result.body,
-            })
-          } else {
-            await captureDraftQueued({
-              agentRunId,
-              venueId: ctx.venue.id,
-              guestId: ctx.guest.id,
-              triggers: approval.triggers,
-              primaryTrigger: approval.primaryTrigger,
-              voiceFidelity: gen.result.voiceFidelity,
-              modelRequiresApproval: gen.result.requiresOperatorApproval,
-              modelApprovalReason: gen.result.approvalReason,
-              compRegexMatchedPattern: approval.compMatchedPattern,
-              hasPreviousPending: approval.triggers.includes(
-                APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
-              ),
-              kind: 'followup',
-              category,
-              inboundBody: null,
-              generatedBody: gen.result.body,
-            })
-          }
-          // TAC-207: cron-triggered followups (day_* / event) that hit the
-          // queue path get a push too. Manual-followup bypasses the gate
-          // entirely above (operator already approved by clicking), so this
-          // never fires for reason='manual'.
-          if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
-            waitUntil(
-              sendDraftFlaggedPush({
-                agentRunId,
-                venueId: ctx.venue.id,
-                guestId: ctx.guest.id,
-                guestFirstName: ctx.guest.firstName,
-                draftId: outboundMessageId,
-                primaryTrigger: approval.primaryTrigger,
-              }).catch((e) => {
-                console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
-                  agentRunId,
-                  draftId: outboundMessageId,
-                  error: e instanceof Error ? e.message : String(e),
-                })
-              }),
-            )
-          }
-          trace.update({
-            output: {
-              status: 'queued',
-              outboundMessageId,
-              primaryTrigger: approval.primaryTrigger,
-              voiceFidelity: gen.result.voiceFidelity,
-              persistAction,
-            },
-            content: { outboundDraft: gen.result.body },
-          })
-          return {
-            status: 'queued',
+    }
+    const approval = await applyApprovalPolicyStage(ctx, gen.result, null, mechanicOfferBackstop)
+    console.log('[agent] followup approval decision', {
+      agentRunId,
+      triggerReason: input.trigger.reason,
+      action: approval.action,
+      primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
+      triggers: approval.action === 'queue' ? approval.triggers : [],
+      voiceFidelity: gen.result.voiceFidelity,
+      modelRequiresApproval: gen.result.requiresOperatorApproval,
+    })
+    if (approval.action === 'queue') {
+      const queueSpan = trace.span('queue', {
+        primaryTrigger: approval.primaryTrigger,
+        triggerCount: approval.triggers.length,
+        existingPendingDraftId: approval.existingPendingDraftId,
+      })
+      try {
+        const persistResult = await persistOrRegenQueuedDraft(
+          ctx,
+          gen.result,
+          approval.primaryTrigger,
+          approval.existingPendingDraftId,
+          // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
+          // trigger is inbound-only), passed for call-site symmetry so the
+          // two orchestrators can't drift.
+          { pendingUntil: approval.pendingUntil },
+        )
+        const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
+        queueSpan.end({
+          output: {
             outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            triggers: approval.triggers,
+            persistAction,
+            priorReviewReason,
+            bodyLength: gen.result.body.length,
+          },
+          content: { body: gen.result.body },
+        })
+        console.log(
+          persistAction === 'updated'
+            ? '[agent] followup regenerated existing pending draft'
+            : '[agent] followup queued for review',
+          {
+            agentRunId,
+            outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            triggers: approval.triggers,
+            persistAction,
+            priorReviewReason,
+          },
+        )
+        if (persistAction === 'updated') {
+          await captureDraftRegenerated({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            originalDraftId: outboundMessageId,
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
-          }
-        } catch (e) {
-          const errMsg = e instanceof Error ? e.message : String(e)
-          queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
-          return { status: 'failed', stage: 'persist', error: errMsg }
+            priorReviewReason,
+            voiceFidelity: gen.result.voiceFidelity,
+            modelRequiresApproval: gen.result.requiresOperatorApproval,
+            modelApprovalReason: gen.result.approvalReason,
+            compRegexMatchedPattern: approval.compMatchedPattern,
+            kind: 'followup',
+            category,
+            inboundBody: null,
+            generatedBody: gen.result.body,
+          })
+        } else {
+          await captureDraftQueued({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            triggers: approval.triggers,
+            primaryTrigger: approval.primaryTrigger,
+            voiceFidelity: gen.result.voiceFidelity,
+            modelRequiresApproval: gen.result.requiresOperatorApproval,
+            modelApprovalReason: gen.result.approvalReason,
+            compRegexMatchedPattern: approval.compMatchedPattern,
+            hasPreviousPending: approval.triggers.includes(
+              APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+            ),
+            kind: 'followup',
+            category,
+            inboundBody: null,
+            generatedBody: gen.result.body,
+          })
         }
-      }
-      // TAC-308: this guest has a knowledge-gap card awaiting an operator
-      // answer. A cron-triggered followup that would otherwise queue must not
-      // take the pending slot — regen-in-place would overwrite the question.
-      // Drop it; the next tick re-evaluates once the card clears.
-      //
-      // Reachable on this path only via a NON-gap trigger, since the
-      // KNOWLEDGE_GAP trigger is inbound-only. Manual followups never get
-      // here at all — they bypass the gate entirely above.
-      if (approval.action === 'drop') {
-        console.warn('[agent] followup dropped to protect knowledge-gap card', {
-          agentRunId,
-          triggerReason: input.trigger.reason,
-          protectedDraftId: approval.protectedDraftId,
-          triggers: approval.triggers,
-        })
-        await captureDraftDropped({
-          agentRunId,
-          venueId: ctx.venue.id,
-          guestId: ctx.guest.id,
-          protectedDraftId: approval.protectedDraftId,
-          triggers: approval.triggers,
-          kind: 'followup',
-          category,
-          droppedBody: gen.result.body,
-        })
+        // TAC-207: cron-triggered followups (day_* / event) that hit the
+        // queue path get a push too. TAC-307: this now fires for
+        // reason='manual' as well, since manual followups run the gate — a
+        // Follow Up click that a policy hold queues should reach the operator
+        // the same way any other queued draft does.
+        if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
+          waitUntil(
+            sendDraftFlaggedPush({
+              agentRunId,
+              venueId: ctx.venue.id,
+              guestId: ctx.guest.id,
+              guestFirstName: ctx.guest.firstName,
+              draftId: outboundMessageId,
+              primaryTrigger: approval.primaryTrigger,
+            }).catch((e) => {
+              console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
+                agentRunId,
+                draftId: outboundMessageId,
+                error: e instanceof Error ? e.message : String(e),
+              })
+            }),
+          )
+        }
         trace.update({
           output: {
-            status: 'dropped',
-            reason: approval.reason,
-            protectedDraftId: approval.protectedDraftId,
-            triggers: approval.triggers,
+            status: 'queued',
+            outboundMessageId,
+            primaryTrigger: approval.primaryTrigger,
+            voiceFidelity: gen.result.voiceFidelity,
+            persistAction,
           },
-          content: { droppedDraft: gen.result.body },
+          content: { outboundDraft: gen.result.body },
         })
         return {
+          status: 'queued',
+          outboundMessageId,
+          triggers: approval.triggers,
+          primaryTrigger: approval.primaryTrigger,
+        }
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e)
+        queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
+        return { status: 'failed', stage: 'persist', error: errMsg }
+      }
+    }
+    // TAC-308: this guest has a knowledge-gap card awaiting an operator
+    // answer. A cron-triggered followup that would otherwise queue must not
+    // take the pending slot — regen-in-place would overwrite the question.
+    // Drop it; the next tick re-evaluates once the card clears.
+    //
+    // Reachable on this path only via a NON-gap trigger, since the
+    // KNOWLEDGE_GAP trigger is inbound-only. Since TAC-307 manual followups
+    // reach here too — they no longer bypass the gate.
+    if (approval.action === 'drop') {
+      console.warn('[agent] followup dropped to protect knowledge-gap card', {
+        agentRunId,
+        triggerReason: input.trigger.reason,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
+      })
+      await captureDraftDropped({
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
+        kind: 'followup',
+        category,
+        droppedBody: gen.result.body,
+      })
+      trace.update({
+        output: {
           status: 'dropped',
           reason: approval.reason,
           protectedDraftId: approval.protectedDraftId,
           triggers: approval.triggers,
-        }
+        },
+        content: { droppedDraft: gen.result.body },
+      })
+      return {
+        status: 'dropped',
+        reason: approval.reason,
+        protectedDraftId: approval.protectedDraftId,
+        triggers: approval.triggers,
       }
-      demoBypassReviewReason = approval.reason
     }
+    const demoBypassReviewReason: 'demo_bypass' | undefined = approval.reason
 
     // Send + persist. TAC-284: demo guests skip the human-feel delay (in
     // addition to the existing Follow Up button skip) and carry the

@@ -170,16 +170,31 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 422 },
     )
   }
+  // TAC-307: reachable as of this ticket. Manual followups used to bypass the
+  // approval gate, so 'queued' could never come back here and the tail below
+  // relabelled anything unrecognised as a duplicate. Now any approval trigger
+  // — a fidelity band, a comp regex hit, an explicit venue policy hold — can
+  // queue an operator-initiated followup, and that is a SUCCESS: the draft
+  // exists and is waiting for review, it just hasn't been sent.
+  if (result.status === 'queued') {
+    return NextResponse.json({
+      success: true,
+      queued: true,
+      messageId: result.outboundMessageId,
+      primaryTrigger: result.primaryTrigger,
+    })
+  }
   if (result.status === 'failed') {
     return NextResponse.json(
       { error: 'pipeline failed', stage: result.stage, detail: result.error },
       { status: 502 },
     )
   }
-  // TAC-308 widened AgentResult with 'dropped'. Unreachable from here (manual
-  // followups bypass the approval gate entirely, so nothing can protect a
-  // knowledge-gap card against them), but named explicitly so this tail can't
-  // silently relabel it — and any future member — as a duplicate.
+  // TAC-308 widened AgentResult with 'dropped'. Reachable from here as of
+  // TAC-307 (manual followups run the approval gate now), so a knowledge-gap
+  // card can protect itself against an operator-initiated followup. Named
+  // explicitly so this tail can't silently relabel it — or any future member
+  // — as a duplicate.
   if (result.status === 'dropped') {
     return NextResponse.json(
       {
