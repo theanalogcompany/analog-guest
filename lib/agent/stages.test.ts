@@ -7,13 +7,16 @@ import {
   deriveFollowupContext,
   findPendingDraft,
   generateStage,
+  isCommitmentTypeGated,
   isKnowledgeGapCard,
+  isModelFlagged,
   KNOWLEDGE_RELEVANCE_FLOOR,
   knowledgeGapWillQueue,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
+  verifyMechanicOfferStage,
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
@@ -33,6 +36,11 @@ const generateMessageMock = vi.fn()
 // captureUngroundedClaimCaught (posthog) fires when it catches something.
 const verifyGroundingMock = vi.fn()
 const captureUngroundedClaimCaughtMock = vi.fn()
+// TAC-355: verifyMechanicOffer (lib/ai) is the mechanic-offer backstop's
+// model call; captureMechanicOfferBackstopCaught (posthog) fires when it
+// catches something.
+const verifyMechanicOfferMock = vi.fn()
+const captureMechanicOfferBackstopCaughtMock = vi.fn()
 // TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
 // when a demo guest's bypass overrides a would-have-queued decision. Mocked
 // so the demo-bypass tests can assert the payload without a PostHog call.
@@ -79,6 +87,8 @@ vi.mock('@/lib/ai', () => ({
   generateMessage: (...args: unknown[]) => generateMessageMock(...args),
   // TAC-350: the grounding backstop's model call.
   verifyGrounding: (...args: unknown[]) => verifyGroundingMock(...args),
+  // TAC-355: the mechanic-offer backstop's model call.
+  verifyMechanicOffer: (...args: unknown[]) => verifyMechanicOfferMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -93,6 +103,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
   captureUngroundedClaimCaught: (...args: unknown[]) => captureUngroundedClaimCaughtMock(...args),
+  captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
+    captureMechanicOfferBackstopCaughtMock(...args),
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
@@ -666,6 +678,7 @@ function makeGenerationResult(
     userPrompt: '',
     promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
     ...overrides,
   }
 }
@@ -2065,6 +2078,267 @@ describe('verifyGroundingStage (TAC-350)', () => {
     expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
     const args = verifyGroundingMock.mock.calls[0][0] as { knowledgeChunks?: unknown[] }
     expect(args.knowledgeChunks).toEqual([chunk])
+  })
+})
+
+describe('isModelFlagged / isCommitmentTypeGated (TAC-355)', () => {
+  it('isModelFlagged is true only when requiresOperatorApproval is true', () => {
+    expect(isModelFlagged(makeGenerationResult({ requiresOperatorApproval: true }))).toBe(true)
+    expect(isModelFlagged(makeGenerationResult({ requiresOperatorApproval: false }))).toBe(false)
+  })
+
+  it('isCommitmentTypeGated requires both a gated type AND a non-empty description', () => {
+    expect(
+      isCommitmentTypeGated(
+        makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+      ),
+    ).toBe(true)
+    expect(
+      isCommitmentTypeGated(makeGenerationResult({ commitment: { type: 'comp', description: '' } })),
+    ).toBe(false)
+    expect(
+      isCommitmentTypeGated(
+        makeGenerationResult({ commitment: { type: 'recommendation', description: 'the duck' } }),
+      ),
+    ).toBe(false)
+    expect(isCommitmentTypeGated(makeGenerationResult({ commitment: {} }))).toBe(false)
+  })
+})
+
+describe('applyApprovalPolicyStage — self_talk_detected trigger (TAC-355)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  it('queues with self_talk_detected when the generation persisted self-talk', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ selfTalkViolationPersisted: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+  })
+
+  it('does not queue for self-talk when the flag is false', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ selfTalkViolationPersisted: false }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('ranks below model_flagged / comp_regex_backstop / commitment_type_gated for the operator label', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        selfTalkViolationPersisted: true,
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+})
+
+describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  it('queues with mechanic_offer_backstop when the stage result is "flagged"', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      null,
+      { status: 'flagged', mechanicId: 'mech-1' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+  })
+
+  it('FAILS CLOSED — queues with mechanic_offer_backstop when the stage result is "check_failed"', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      null,
+      { status: 'check_failed' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+  })
+
+  it('does not queue when the stage result is "clean"', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      null,
+      { status: 'clean' },
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('does not queue when the stage result is "skipped" (default when omitted)', async () => {
+    const decision = await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({}))
+    expect(decision.action).toBe('send')
+  })
+
+  it('outranks comp_regex_backstop and model_flagged for the operator label, but not commitment_type_gated', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        body: "that one's on us today",
+        requiresOperatorApproval: true,
+      }),
+      null,
+      { status: 'flagged', mechanicId: 'mech-1' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+
+    const decisionWithCommitment = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+      null,
+      { status: 'flagged', mechanicId: 'mech-1' },
+    )
+    expect(decisionWithCommitment.action).toBe('queue')
+    if (decisionWithCommitment.action !== 'queue') return
+    expect(decisionWithCommitment.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+})
+
+describe('verifyMechanicOfferStage (TAC-355)', () => {
+  beforeEach(() => {
+    verifyMechanicOfferMock.mockReset()
+    captureMechanicOfferBackstopCaughtMock.mockReset()
+  })
+
+  const gatedMechanic = {
+    id: 'mech-1',
+    type: 'perk' as const,
+    name: 'Referral Surprise',
+    description: null,
+    qualification: 'A regular brings a friend in for the first time.',
+    rewardDescription: 'A complimentary item for the first-time guest.',
+    minState: 'regular' as const,
+    requiresOperatorApproval: true,
+  }
+
+  it('skips without calling the model when no eligible mechanic requires approval', async () => {
+    const ctx = makeCtx({ mechanics: [] })
+    const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyMechanicOfferMock).not.toHaveBeenCalled()
+  })
+
+  it('skips without calling the model for a demo guest', async () => {
+    const ctx = makeCtx({
+      mechanics: [gatedMechanic],
+      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+    })
+    const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyMechanicOfferMock).not.toHaveBeenCalled()
+  })
+
+  it('skips without calling the model when the generation already self-flagged', async () => {
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(
+      ctx,
+      makeGenerationResult({ requiresOperatorApproval: true }),
+    )
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyMechanicOfferMock).not.toHaveBeenCalled()
+  })
+
+  it('skips without calling the model when commitment_type_gated already applies', async () => {
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(
+      ctx,
+      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+    )
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyMechanicOfferMock).not.toHaveBeenCalled()
+  })
+
+  it('returns "clean" when the model finds nothing', async () => {
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: true,
+      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+    })
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    expect(result).toEqual({ status: 'clean' })
+    expect(captureMechanicOfferBackstopCaughtMock).not.toHaveBeenCalled()
+  })
+
+  it('returns "flagged" with the mechanicId and fires the PostHog event when the model catches an offer', async () => {
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: true,
+      data: { offersGatedMechanic: true, mechanicId: 'mech-1', promptVersion: 'v1.0.0' },
+    })
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(
+      ctx,
+      makeGenerationResult({ body: 'since your friend came in, something special is on us' }),
+    )
+    expect(result).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
+    expect(captureMechanicOfferBackstopCaughtMock).toHaveBeenCalledTimes(1)
+    const call = captureMechanicOfferBackstopCaughtMock.mock.calls[0][0]
+    expect(call.mechanicId).toBe('mech-1')
+  })
+
+  // [CODE REVIEW / operator follow-up] Defense-in-depth against the exact bug
+  // that was found and fixed: even if the AI-module layer's own defensive
+  // substitution (lib/ai/verify-mechanic-offer.ts) were ever removed or
+  // regressed, this stage's own check is keyed on `offersGatedMechanic`
+  // alone, so an ambiguous raw response (flagged=true, no identified
+  // mechanic) still resolves to 'flagged' here, never 'clean'.
+  it('still resolves to "flagged" (not "clean") on the ambiguous raw shape offersGatedMechanic=true + mechanicId="none"', async () => {
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: true,
+      data: { offersGatedMechanic: true, mechanicId: 'none', promptVersion: 'v1.0.0' },
+    })
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    expect(result.status).toBe('flagged')
+  })
+
+  it('FAILS CLOSED — returns "check_failed" and logs a warning when the model call degrades', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyMechanicOfferMock.mockResolvedValueOnce({ ok: false, error: 'model unavailable' })
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    expect(result).toEqual({ status: 'check_failed' })
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('only passes requires_operator_approval mechanics to the verifier, not the full eligible set', async () => {
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: true,
+      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+    })
+    const ungatedMechanic = { ...gatedMechanic, id: 'mech-2', requiresOperatorApproval: false }
+    const ctx = makeCtx({ mechanics: [gatedMechanic, ungatedMechanic] })
+    await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
+    const args = verifyMechanicOfferMock.mock.calls[0][0] as {
+      eligibleGatedMechanics: Array<{ id: string }>
+    }
+    expect(args.eligibleGatedMechanics).toHaveLength(1)
+    expect(args.eligibleGatedMechanics[0].id).toBe('mech-1')
   })
 })
 

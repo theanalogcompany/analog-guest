@@ -392,5 +392,6 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // behavior, even though no prompt built the body.
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }

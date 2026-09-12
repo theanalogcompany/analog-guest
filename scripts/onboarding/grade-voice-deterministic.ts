@@ -1,4 +1,5 @@
 import { splitIntoSentences } from '@/lib/agent/sentence-split'
+import { matchSelfTalk } from '@/lib/ai/self-talk-detector'
 import type { VenueInfo } from '@/lib/schemas/venue-info'
 
 /**
@@ -38,6 +39,12 @@ export type DeterministicVoiceCheck =
   | 'signed_name'
   | 'phone_or_link'
   | 'third_person_self'
+  // TAC-355: self-correction / reasoning-leakage in the reply body, e.g.
+  // "...dandelion root — actually wait, no dashes." Shares its pattern list
+  // with lib/ai/self-talk-detector.ts (imported, not duplicated) so the
+  // harness and the production regen path can't independently drift on what
+  // counts as self-talk.
+  | 'self_talk'
 
 export interface DeterministicVoiceFinding {
   check: DeterministicVoiceCheck
@@ -117,6 +124,14 @@ export function gradeVoiceDeterministic(input: DeterministicVoiceInput): Determi
 
   if (DASH_RE.test(replyBody)) {
     findings.push({ check: 'dash', detail: 'reply contains an em or en dash' })
+  }
+
+  const selfTalk = matchSelfTalk(replyBody)
+  if (selfTalk.matched) {
+    findings.push({
+      check: 'self_talk',
+      detail: `reply contains self-correction or a reference to the agent's own rules/instructions (pattern: ${selfTalk.pattern})`,
+    })
   }
 
   const sentenceCount = extractCountedSentences(replyBody)

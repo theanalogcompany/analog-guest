@@ -93,5 +93,6 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     userPrompt: '',
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }

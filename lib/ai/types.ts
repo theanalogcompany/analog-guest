@@ -433,6 +433,12 @@ export type GenerateMessageResult = {
   // PostHog when this is true so the failure is visible without blocking the
   // send path.
   dashViolationPersisted: boolean
+  // TAC-355: true when the final shipped body still contains self-correction
+  // or a reference to the agent's own instructions/rules/AI-nature after
+  // MAX_ATTEMPTS regenerations (see lib/ai/self-talk-detector.ts). UNLIKE
+  // dashViolationPersisted, this must never ship — lib/agent/stages.ts's
+  // SELF_TALK_DETECTED trigger queues the draft instead of sending it.
+  selfTalkViolationPersisted: boolean
 }
 
 export type ClassifyMessageInput = {
@@ -525,5 +531,31 @@ export type VerifyGroundingInput = {
 export type VerifyGroundingResult = {
   hasUngroundedClaim: boolean
   ungroundedClaims: string[]
+  promptVersion: string
+}
+
+// TAC-355: independent mechanic-approval verification backstop. Same
+// independence rationale as VerifyGroundingInput above — a self-report field
+// (requiresOperatorApproval / commitment.type) has already missed a real
+// approval-gated mechanic grant twice, so this checks the drafted body
+// against the SAME eligible-mechanics bullets rendered into the prompt
+// (formatMechanicEligibility), never a re-derived summary.
+export type VerifyMechanicOfferGatedMechanic = {
+  id: string
+  name: string
+  rewardDescription: string | null
+  qualification: string | null
+}
+
+export type VerifyMechanicOfferInput = {
+  replyBody: string
+  /** This turn's eligible mechanics with requiresOperatorApproval=true. Never empty — the caller (verifyMechanicOfferStage) skips the call entirely when there's nothing gated to check against. */
+  eligibleGatedMechanics: VerifyMechanicOfferGatedMechanic[]
+}
+
+export type VerifyMechanicOfferResult = {
+  offersGatedMechanic: boolean
+  /** The id of the offered mechanic, or 'none' when offersGatedMechanic is false. */
+  mechanicId: string
   promptVersion: string
 }

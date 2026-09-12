@@ -191,6 +191,7 @@ function makeGenerationResult() {
     commitment: {},
     arrivalCapture: {},
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }
 

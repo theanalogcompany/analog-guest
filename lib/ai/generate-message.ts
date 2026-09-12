@@ -9,6 +9,7 @@ import { captureGenerationTruncated } from '@/lib/analytics/posthog'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { PROMPT_VERSION } from './prompts/system-template'
+import { matchSelfTalk } from './self-talk-detector'
 import type {
   AIResult,
   GenerateMessageAttempt,
@@ -65,6 +66,19 @@ export const AI_ERROR_TRUNCATED = 'ai_generation_truncated'
 const DASH_REGEX = /[—–]/
 const DASH_REGEN_FEEDBACK =
   'Your previous attempt contained a dash character (— or –). Rewrite without it, using a period or comma instead.'
+
+// TAC-355: deterministic backstop for reasoning/self-correction leaking into
+// a guest-facing body ("...dandelion root — actually wait, no dashes."). Runs
+// in the SAME per-attempt loop as the dash check, sharing its attempt budget
+// deliberately — the two failures are correlated (the motivating incident
+// WAS dash avoidance), so a message that trips one is likely to trip the
+// other, and the terminal state here is a queue, not a send, so a shared
+// small budget is already safe. Unlike a dash, a self-talk violation that
+// persists through every attempt must NOT ship — see
+// GenerateMessageResult.selfTalkViolationPersisted and
+// lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
+const SELF_TALK_REGEN_FEEDBACK =
+  'Your previous attempt included a self-correction or a reference to your own instructions, rules, or nature as an AI (e.g. "actually wait, no dashes" or "as an AI"). Rewrite it as a normal reply with no visible reasoning and no reference to yourself as an AI or to your own rules.'
 
 // THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
 // schema uses .refine() (per THE-157) so .min/.max don't get serialized into
@@ -260,13 +274,17 @@ export async function generateMessage(
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
       const hasDash = DASH_REGEX.test(object.body)
+      const hasSelfTalk = matchSelfTalk(object.body).matched
       const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
-      if (fidelityPass && !hasDash) break
-      // Set feedback for the next iteration. Dash always wins — even if
-      // fidelity also failed, the rewrite directive is the more actionable
-      // signal. When neither dash nor a fidelity-specific feedback message
-      // applies, clear so a stale dash directive doesn't carry forward.
-      regenFeedback = hasDash ? DASH_REGEN_FEEDBACK : null
+      if (fidelityPass && !hasDash && !hasSelfTalk) break
+      // Set feedback for the next iteration. Dash and self-talk feedback
+      // compose (a body can trip both at once — the motivating incident did)
+      // rather than one winning over the other. When neither applies, clear
+      // so a stale directive doesn't carry forward into a fidelity-only retry.
+      const feedbackParts: string[] = []
+      if (hasDash) feedbackParts.push(DASH_REGEN_FEEDBACK)
+      if (hasSelfTalk) feedbackParts.push(SELF_TALK_REGEN_FEEDBACK)
+      regenFeedback = feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
 
     if (lastResult === null) {
@@ -316,6 +334,10 @@ export async function generateMessage(
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
         dashViolationPersisted: DASH_REGEX.test(lastResult.body),
+        // TAC-355: same recompute-on-final-body pattern as dashViolationPersisted.
+        // Unlike the dash case, a true here means the draft must NOT ship —
+        // see lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
+        selfTalkViolationPersisted: matchSelfTalk(lastResult.body).matched,
       },
     }
   } catch (e) {

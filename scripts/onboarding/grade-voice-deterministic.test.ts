@@ -27,6 +27,23 @@ describe('gradeVoiceDeterministic', () => {
     expect(result.findings.map((f) => f.check)).toContain('dash')
   })
 
+  it('flags self-talk — the literal le-mils-coffee-010 failing reply (TAC-355)', () => {
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody:
+        "No coffee-based decaf, but the Almost Latte is caffeine-free. It's made with chicory, nutmeg, and dandelion root — actually wait, no dashes. Chicory, nutmeg, and dandelion root extract. Tastes a lot like filter coffee though 🙂",
+    })
+    expect(result.findings.map((f) => f.check)).toContain('self_talk')
+  })
+
+  it('does not flag an ordinary reply for self-talk', () => {
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'we open at 7 and close at 3 on weekdays, come by any time',
+    })
+    expect(result.findings.map((f) => f.check)).not.toContain('self_talk')
+  })
+
   it('flags a reply over three sentences (of 5+ words each)', () => {
     const result = gradeVoiceDeterministic({
       ...base,

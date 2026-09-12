@@ -47,6 +47,9 @@ describe('POST /admin/voices/api/regenerate', () => {
         knowledgeGap: false,
         hasUngroundedClaim: false,
         ungroundedClaims: [],
+        selfTalkViolationPersisted: false,
+        offersGatedMechanic: false,
+        offeredMechanicId: null,
       },
     })
 
@@ -68,6 +71,12 @@ describe('POST /admin/voices/api/regenerate', () => {
       hasUngroundedClaim: false,
       ungroundedClaims: [],
     })
+    // TAC-355: assert these three directly rather than folding into the
+    // toMatchObject above — a partial match wouldn't catch the route
+    // silently dropping a field on the way into NextResponse.json.
+    expect(json.selfTalkViolationPersisted).toBe(false)
+    expect(json.offersGatedMechanic).toBe(false)
+    expect(json.offeredMechanicId).toBeNull()
   })
 
   // TAC-350
@@ -83,6 +92,9 @@ describe('POST /admin/voices/api/regenerate', () => {
         knowledgeGap: false,
         hasUngroundedClaim: true,
         ungroundedClaims: ['invents a wifi network name not in venue facts'],
+        selfTalkViolationPersisted: false,
+        offersGatedMechanic: false,
+        offeredMechanicId: null,
       },
     })
 
@@ -96,6 +108,37 @@ describe('POST /admin/voices/api/regenerate', () => {
     const json = await res.json()
     expect(json.hasUngroundedClaim).toBe(true)
     expect(json.ungroundedClaims).toEqual(['invents a wifi network name not in venue facts'])
+  })
+
+  // TAC-355
+  it('surfaces a caught mechanic offer through the response', async () => {
+    vi.mocked(regenerateWithCritique).mockResolvedValue({
+      ok: true,
+      data: {
+        body: 'since your friend came in, something special is on us',
+        voiceFidelity: 0.85,
+        attempts: 1,
+        attemptScores: [0.85],
+        generatedAt: new Date('2026-05-08T10:00:00.000Z'),
+        knowledgeGap: false,
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        selfTalkViolationPersisted: false,
+        offersGatedMechanic: true,
+        offeredMechanicId: 'mech-1',
+      },
+    })
+
+    const res = await POST(
+      buildRequest({
+        venueId: VENUE_ID,
+        originalMessageId: MSG_ID,
+        critique: 'x',
+      }),
+    )
+    const json = await res.json()
+    expect(json.offersGatedMechanic).toBe(true)
+    expect(json.offeredMechanicId).toBe('mech-1')
   })
 
   it('400 on empty critique', async () => {

@@ -98,6 +98,7 @@ function goodGeneration(body = "still tracking that down for you") {
       userPrompt: '',
       promptVersion: 'v1.25.0',
       dashViolationPersisted: false,
+      selfTalkViolationPersisted: false,
     },
   }
 }

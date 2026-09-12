@@ -71,5 +71,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     knowledgeGap: result.data.knowledgeGap,
     hasUngroundedClaim: result.data.hasUngroundedClaim,
     ungroundedClaims: result.data.ungroundedClaims,
+    // TAC-355: same advisory-only posture as the TAC-350 fields above.
+    selfTalkViolationPersisted: result.data.selfTalkViolationPersisted,
+    offersGatedMechanic: result.data.offersGatedMechanic,
+    offeredMechanicId: result.data.offeredMechanicId,
   })
 }

@@ -257,6 +257,122 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   })
 })
 
+describe('generateMessage — self-talk check (TAC-355)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('passes through a clean body on the first attempt', async () => {
+    queueResponses({
+      body: 'we close at 11. come by anytime.',
+      voiceFidelity: 0.85,
+      reasoning: 'matches venue voice',
+    })
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.attempts).toBe(1)
+    expect(r.data.selfTalkViolationPersisted).toBe(false)
+  })
+
+  it('regenerates when a body contains self-talk and passes fidelity', async () => {
+    // The literal TAC-355 failing reply shape (le-mils-coffee-010).
+    queueResponses(
+      {
+        body: "made with chicory and dandelion root — actually wait, no dashes. chicory and dandelion root extract.",
+        voiceFidelity: 0.9,
+        reasoning: 'first try',
+      },
+      {
+        body: 'made with chicory and dandelion root extract.',
+        voiceFidelity: 0.88,
+        reasoning: 'rewritten',
+      },
+    )
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.attempts).toBe(2)
+    expect(r.data.body).toBe('made with chicory and dandelion root extract.')
+    expect(r.data.selfTalkViolationPersisted).toBe(false)
+
+    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondCallPrompt).toContain(
+      'a self-correction or a reference to your own instructions',
+    )
+  })
+
+  it('does NOT include self-talk feedback when fidelity-only retry happens', async () => {
+    queueResponses(
+      { body: 'sure thing', voiceFidelity: 0.4, reasoning: 'too generic' },
+      { body: 'yeah, of course', voiceFidelity: 0.85, reasoning: 'better' },
+    )
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.selfTalkViolationPersisted).toBe(false)
+    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondCallPrompt).not.toContain('a self-correction or a reference')
+  })
+
+  it('MUST NOT ship silently — persists selfTalkViolationPersisted=true when MAX_ATTEMPTS exhausted', async () => {
+    // All three attempts leak self-talk. generateMessage itself still
+    // returns the final body (it never refuses) — the "never send" behavior
+    // this ticket requires is enforced one layer up, by
+    // lib/agent/stages.ts's SELF_TALK_DETECTED trigger reading this flag.
+    queueResponses(
+      { body: 'as an AI I should say a', voiceFidelity: 0.85, reasoning: '1' },
+      { body: 'as an AI I should say b', voiceFidelity: 0.86, reasoning: '2' },
+      { body: 'as an AI I should say c', voiceFidelity: 0.87, reasoning: '3' },
+    )
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.attempts).toBe(3)
+    expect(r.data.body).toBe('as an AI I should say c')
+    expect(r.data.selfTalkViolationPersisted).toBe(true)
+  })
+
+  it('composes dash AND self-talk feedback when a single attempt trips both (shared attempt budget)', async () => {
+    queueResponses(
+      {
+        body: 'chicory — actually wait, no dashes',
+        voiceFidelity: 0.9,
+        reasoning: 'first try',
+      },
+      {
+        body: 'chicory, nutmeg, and dandelion root extract',
+        voiceFidelity: 0.88,
+        reasoning: 'rewritten',
+      },
+    )
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.attempts).toBe(2)
+    expect(r.data.dashViolationPersisted).toBe(false)
+    expect(r.data.selfTalkViolationPersisted).toBe(false)
+
+    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondCallPrompt).toContain('Your previous attempt contained a dash character')
+    expect(secondCallPrompt).toContain('a self-correction or a reference to your own instructions')
+  })
+})
+
 describe('generateMessage — basic shape', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()

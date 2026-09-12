@@ -19,6 +19,7 @@ vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
   verifyGrounding: vi.fn(),
+  verifyMechanicOffer: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
   retrieveContext: vi.fn(),
@@ -30,7 +31,7 @@ vi.mock('@/lib/observability', () => ({
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import { buildAiRuntime } from '@/lib/agent/stages'
-import { classifyMessage, generateMessage, verifyGrounding } from '@/lib/ai'
+import { classifyMessage, generateMessage, verifyGrounding, verifyMechanicOffer } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
@@ -150,6 +151,7 @@ beforeEach(() => {
   vi.mocked(retrieveContext).mockReset()
   vi.mocked(retrieveKnowledgeContext).mockReset()
   vi.mocked(verifyGrounding).mockReset()
+  vi.mocked(verifyMechanicOffer).mockReset()
 })
 
 afterEach(() => {
@@ -329,6 +331,7 @@ describe('regenerateWithCritique — happy path', () => {
         userPrompt: '',
         promptVersion: 'v1.8.0',
         dashViolationPersisted: false,
+        selfTalkViolationPersisted: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
@@ -421,6 +424,99 @@ describe('regenerateWithCritique — happy path', () => {
     ])
   })
 
+  // TAC-355: mechanic-offer backstop, advisory only on this path (no gate
+  // to feed — the operator reviews the raw attempt directly). Deliberately
+  // does NOT skip on requiresOperatorApproval/commitment.type, unlike the
+  // production stage — see RegenerateWithCritiqueResult's own comment.
+  const gatedMechanic = {
+    id: 'mech-1',
+    type: 'perk' as const,
+    name: 'Referral Surprise',
+    description: null,
+    qualification: 'A regular brings a friend in for the first time.',
+    rewardDescription: 'A complimentary item for the first-time guest.',
+    minState: 'regular' as const,
+    requiresOperatorApproval: true,
+  }
+
+  it('surfaces a caught mechanic offer from the backstop', async () => {
+    vi.mocked(buildRuntimeContext).mockResolvedValue({
+      ...baseCtx,
+      mechanics: [gatedMechanic],
+    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
+    vi.mocked(verifyMechanicOffer).mockResolvedValue({
+      ok: true,
+      data: { offersGatedMechanic: true, mechanicId: 'mech-1', promptVersion: 'v1.0.0' },
+    })
+
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(verifyMechanicOffer).toHaveBeenCalledTimes(1)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.offersGatedMechanic).toBe(true)
+    expect(r.data.offeredMechanicId).toBe('mech-1')
+  })
+
+  it('does not flag a mechanic offer when the backstop finds nothing', async () => {
+    vi.mocked(buildRuntimeContext).mockResolvedValue({
+      ...baseCtx,
+      mechanics: [gatedMechanic],
+    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
+    vi.mocked(verifyMechanicOffer).mockResolvedValue({
+      ok: true,
+      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+    })
+
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.offersGatedMechanic).toBe(false)
+    expect(r.data.offeredMechanicId).toBeNull()
+  })
+
+  it('skips the mechanic-offer backstop entirely when no eligible mechanic requires approval', async () => {
+    // baseCtx.mechanics is [] by default in this describe block's setup.
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(verifyMechanicOffer).not.toHaveBeenCalled()
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.offersGatedMechanic).toBe(false)
+    expect(r.data.offeredMechanicId).toBeNull()
+  })
+
+  it('degrades to offersGatedMechanic=false (advisory, no throw) when the backstop call errors', async () => {
+    vi.mocked(buildRuntimeContext).mockResolvedValue({
+      ...baseCtx,
+      mechanics: [gatedMechanic],
+    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
+    vi.mocked(verifyMechanicOffer).mockResolvedValue({
+      ok: false,
+      error: 'model unavailable',
+    })
+
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.offersGatedMechanic).toBe(false)
+    expect(r.data.offeredMechanicId).toBeNull()
+  })
+
   it('skips the grounding backstop entirely when the model already self-reported a gap', async () => {
     vi.mocked(generateMessage).mockResolvedValue({
       ok: true,
@@ -442,6 +538,7 @@ describe('regenerateWithCritique — happy path', () => {
         userPrompt: '',
         promptVersion: 'v1.8.0',
         dashViolationPersisted: false,
+        selfTalkViolationPersisted: false,
       },
     })
     const r = await regenerateWithCritique({
@@ -528,6 +625,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         userPrompt: '',
         promptVersion: 'v1.13.0',
         dashViolationPersisted: false,
+        selfTalkViolationPersisted: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)

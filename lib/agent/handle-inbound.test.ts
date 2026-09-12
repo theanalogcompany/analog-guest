@@ -30,6 +30,10 @@ const applyApprovalPolicyStageMock = vi.fn()
 // every test in this file that doesn't care about it — `clearAllMocks()`
 // (used below) clears call history but not this default implementation.
 const verifyGroundingStageMock = vi.fn().mockResolvedValue(null)
+// TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
+// every test in this file that doesn't care about it, mirroring
+// verifyGroundingStageMock's default-null posture above.
+const verifyMechanicOfferStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
 const findPendingDraftMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
@@ -80,6 +84,7 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
+    verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
     findPendingDraft: (...a: unknown[]) => findPendingDraftMock(...a),
   }
 })
@@ -420,6 +425,7 @@ function successResult() {
     userPrompt: '',
     promptVersion: 'v1.44.0',
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }
 
@@ -676,5 +682,94 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(groundingBackstopArg).toBeNull()
+  })
+})
+
+describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
+  it('threads a "flagged" verifyMechanicOfferStage result into applyApprovalPolicyStage as the fourth argument', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'flagged', mechanicId: 'mech-1' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
+      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
+    const [, , , mechanicOfferBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(mechanicOfferBackstopArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
+  })
+
+  it('runs verifyGroundingStage and verifyMechanicOfferStage concurrently, both threaded through on a clean turn', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-3', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
+    expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
+    const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toBeNull()
+    expect(mechanicOfferBackstopArg).toEqual({ status: 'skipped' })
+  })
+
+  // [Operator follow-up] verifyGroundingStage and verifyMechanicOfferStage
+  // are proven never to throw (every call inside each is independently
+  // try/catch-safe — see the code comment at the Promise.allSettled call
+  // site), but that invariant lives in other files. These two tests prove
+  // the COMPOSITION itself degrades safely if that invariant were ever
+  // violated: allSettled means one stage rejecting does not discard the
+  // other stage's real finding, and each one's rejection degrades to
+  // exactly what that stage's own internal catch already returns for a
+  // degraded call (null for grounding, check_failed for mechanic-offer) —
+  // never a silent pass-through to send.
+  it('does not lose the mechanic-offer finding if verifyGroundingStage unexpectedly throws', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'flagged', mechanicId: 'mech-1' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
+      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
+    const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toBeNull()
+    expect(mechanicOfferBackstopArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
+  })
+
+  it('degrades to check_failed (still queues) if verifyMechanicOfferStage unexpectedly throws', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockResolvedValueOnce(null)
+    verifyMechanicOfferStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
+      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
+    const [, , , mechanicOfferBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(mechanicOfferBackstopArg).toEqual({ status: 'check_failed' })
   })
 })
