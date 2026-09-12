@@ -7,12 +7,25 @@ import {
   type CostTrackerState,
 } from './onboarding/cost-tracker'
 import { mapWithConcurrency } from './onboarding/concurrency'
-import { ensureTabExists, findByPrefix, findVenueFolder, getDrive, getSheets, GSHEET_MIME, listVenueFiles, writeTabValues } from './onboarding/drive'
+import {
+  ensureTabExists,
+  findByPrefix,
+  findVenueFolder,
+  getDrive,
+  getSheets,
+  GSHEET_MIME,
+  listVenueFiles,
+  pruneTabsByPrefix,
+  writeSheetFile,
+  writeTabValues,
+} from './onboarding/drive'
 import { gradeScenario } from './onboarding/grade-scenario'
 import { extractKnownContactData, gradeVoiceDeterministic } from './onboarding/grade-voice-deterministic'
 import { gradeRouting } from './onboarding/grade-routing'
 import { assertVenueGuard, loadBrandPersona, loadVenueContext } from './onboarding/load-venue-context'
 import { filterRunnableScenarios, loadExistingSheet } from './onboarding/merge-scenario-sheet'
+import { buildOwnerReviewRows, rowsToCsv } from './onboarding/owner-review-sheet'
+import { selectOwnerReviewCandidates, selectOwnerReviewFinal } from './onboarding/owner-review-selection'
 import { checkCleanState, clearMessagingCredentials, countGuardrailState, diffGuardrailState } from './onboarding/preflight'
 import { buildReportRows } from './onboarding/report-sheet'
 import { runScenario, seedSyntheticGuests, SYNTHETIC_PHONES, type ScenarioResult } from './onboarding/run-test-scenarios'
@@ -25,11 +38,18 @@ import {
   sampleForVoiceRead,
   type GradedScenario,
 } from './onboarding/scorecard'
+import { buildTimestampedTabName } from './onboarding/tab-retention'
 
 const SHEET_NAME_PREFIX = '07-'
 const DEFAULT_CONCURRENCY = 4
-const REPORT_TAB = 'Report'
-const RUN_TAB = 'Run'
+const REPORT_TAB_PREFIX = 'Report'
+const RUN_TAB_PREFIX = 'Run'
+// Each run writes its own timestamped Report/Run tab (see tab-retention.ts)
+// rather than reusing one tab — a single reused tab meant every run silently
+// destroyed the previous run's result set (a 455-scenario run was lost this
+// way). Keep the most recent TAB_RETENTION_COUNT of each; older ones are
+// pruned after the new tab is written.
+const TAB_RETENTION_COUNT = 10
 
 interface ParsedArgs {
   slug: string
@@ -40,6 +60,7 @@ interface ParsedArgs {
   limit: number | null
   concurrency: number
   maxCostUsd: number | null
+  ownerReview: boolean
 }
 
 function parseArgs(argv: string[]): ParsedArgs | null {
@@ -52,10 +73,13 @@ function parseArgs(argv: string[]): ParsedArgs | null {
   let limit: number | null = null
   let concurrency = DEFAULT_CONCURRENCY
   let maxCostUsd: number | null = null
+  let ownerReview = false
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
-    if (a === '--sample-ids') {
+    if (a === '--owner-review') {
+      ownerReview = true
+    } else if (a === '--sample-ids') {
       sampleIds = (args[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean)
     } else if (a === '--topic') {
       topics = (args[++i] ?? '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -92,7 +116,13 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     }
   }
   if (!slug) return null
-  return { slug, sampleIds, topics, categories, modes, limit, concurrency, maxCostUsd }
+  if (ownerReview && (sampleIds || topics || categories || modes || limit !== null)) {
+    console.error(
+      '[run-test-scenarios] --owner-review cannot be combined with --sample-ids/--topic/--category/--mode/--limit — it selects scenarios itself',
+    )
+    return null
+  }
+  return { slug, sampleIds, topics, categories, modes, limit, concurrency, maxCostUsd, ownerReview }
 }
 
 function applyFilters(rows: ScenarioSheetRow[], parsed: ParsedArgs): ScenarioSheetRow[] {
@@ -128,7 +158,7 @@ async function main(): Promise<void> {
   const parsed = parseArgs(process.argv)
   if (!parsed) {
     console.error(
-      'Usage: npm run run-test-scenarios -- <slug> [--sample-ids id1,id2,...] [--topic t1,t2] [--category c1,c2] [--mode graded|exploratory] [--limit N] [--concurrency N] [--max-cost USD]',
+      'Usage: npm run run-test-scenarios -- <slug> [--sample-ids id1,id2,...] [--topic t1,t2] [--category c1,c2] [--mode graded|exploratory] [--limit N] [--concurrency N] [--max-cost USD] [--owner-review]',
     )
     process.exit(1)
   }
@@ -168,11 +198,13 @@ async function main(): Promise<void> {
   console.log(`[run-test-scenarios] sheet: ${sheetFile.name} — ${existing.currentRows.length} rows`)
 
   const runnable = filterRunnableScenarios(existing.currentRows)
-  const selected = applyFilters(runnable, parsed)
+  const selected = parsed.ownerReview ? selectOwnerReviewCandidates(runnable) : applyFilters(runnable, parsed)
   if (selected.length === 0) {
     throw new Error('[run-test-scenarios] filters matched zero scenarios — nothing to run')
   }
-  console.log(`[run-test-scenarios] selected ${selected.length} scenario(s) to run`)
+  console.log(
+    `[run-test-scenarios] selected ${selected.length} scenario(s) to run${parsed.ownerReview ? ' (owner-review candidate pool)' : ''}`,
+  )
 
   // ---- Seed synthetic guests (sequential state settling happens inside) ----
   const venueId = venueCtx.venueId
@@ -316,14 +348,20 @@ async function main(): Promise<void> {
     graderSpotCheckSample,
   })
 
-  await ensureTabExists(sheets, sheetFile.id, REPORT_TAB)
-  await writeTabValues(sheets, sheetFile.id, REPORT_TAB, reportRows)
-  console.log(`[run-test-scenarios] wrote Report tab (${reportRows.length} rows) to sheet ${sheetFile.id}`)
+  const reportTabName = buildTimestampedTabName(REPORT_TAB_PREFIX, runDateIso)
+  await ensureTabExists(sheets, sheetFile.id, reportTabName)
+  await writeTabValues(sheets, sheetFile.id, reportTabName, reportRows)
+  console.log(`[run-test-scenarios] wrote ${reportTabName} tab (${reportRows.length} rows) to sheet ${sheetFile.id}`)
+  const reportPrune = await pruneTabsByPrefix(sheets, sheetFile.id, REPORT_TAB_PREFIX, TAB_RETENTION_COUNT)
+  if (reportPrune.deletedTitles.length > 0) {
+    console.log(`[run-test-scenarios] pruned old Report tabs (kept ${TAB_RETENTION_COUNT}): ${reportPrune.deletedTitles.join(', ')}`)
+  }
 
   // ---- Run tab: one row per scenario, the full detail Report's samples/
-  // caps leave out. Overwritten wholesale each run (writeTabValues clears
-  // the tab first), same as Report — this is a snapshot of the LATEST run,
-  // not an accumulating history.
+  // caps leave out. Each run gets its own timestamped tab (tab-retention.ts)
+  // rather than overwriting a single reused tab — a reused tab meant every
+  // run silently destroyed the previous run's result set. The most recent
+  // TAB_RETENTION_COUNT are kept; older ones are pruned below.
   const runRows: RunRow[] = graded.map((g): RunRow => {
     const voicePass = g.deterministicVoice.pass && g.llmGrade.voiceVerdict === 'pass'
     const voiceReasonParts = [...g.deterministicVoice.findings.map((f) => `${f.check}: ${f.detail}`), g.llmGrade.voiceReason].filter(
@@ -354,9 +392,35 @@ async function main(): Promise<void> {
       expectedBehaviorReason: g.llmGrade.expectedBehaviorReason,
     }
   })
-  await ensureTabExists(sheets, sheetFile.id, RUN_TAB)
-  await writeTabValues(sheets, sheetFile.id, RUN_TAB, buildRunRows(runRows))
-  console.log(`[run-test-scenarios] wrote Run tab (${runRows.length} rows) to sheet ${sheetFile.id}`)
+  const runTabName = buildTimestampedTabName(RUN_TAB_PREFIX, runDateIso)
+  await ensureTabExists(sheets, sheetFile.id, runTabName)
+  await writeTabValues(sheets, sheetFile.id, runTabName, buildRunRows(runRows))
+  console.log(`[run-test-scenarios] wrote ${runTabName} tab (${runRows.length} rows) to sheet ${sheetFile.id}`)
+  const runPrune = await pruneTabsByPrefix(sheets, sheetFile.id, RUN_TAB_PREFIX, TAB_RETENTION_COUNT)
+  if (runPrune.deletedTitles.length > 0) {
+    console.log(`[run-test-scenarios] pruned old Run tabs (kept ${TAB_RETENTION_COUNT}): ${runPrune.deletedTitles.join(', ')}`)
+  }
+
+  // ---- Owner-review export (TAC-347 Stage 4): a separate 08-{slug}-response-
+  // review gsheet, in the exact shape ingest-response-review's parseReviewSheet
+  // expects, blank verdict/edited_message/comment for the owner to fill in.
+  if (parsed.ownerReview) {
+    const finalSelection = selectOwnerReviewFinal(graded)
+    if (finalSelection.length === 0) {
+      console.warn('[run-test-scenarios] owner-review: zero scenarios passed knowledge+routing grading — writing an empty sheet')
+    } else if (finalSelection.length < 30) {
+      console.warn(
+        `[run-test-scenarios] owner-review: only ${finalSelection.length} scenario(s) passed grading + eligibility (target ~30)`,
+      )
+    }
+    const csv = rowsToCsv(buildOwnerReviewRows(finalSelection, runDateIso))
+    const ownerReviewFileName = `08-${slug}-response-review`
+    const { id: ownerReviewFileId } = await writeSheetFile(drive, folder.id, ownerReviewFileName, csv)
+    const ownerReviewLink = `https://docs.google.com/spreadsheets/d/${ownerReviewFileId}/edit`
+    console.log(
+      `[run-test-scenarios] wrote owner-review sheet "${ownerReviewFileName}" (${finalSelection.length} rows): ${ownerReviewLink}`,
+    )
+  }
 
   printReport({
     slug,
