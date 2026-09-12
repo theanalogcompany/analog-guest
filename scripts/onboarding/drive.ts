@@ -1,4 +1,5 @@
 import { google, type drive_v3, type sheets_v4 } from 'googleapis'
+import { selectTabsToDelete } from './tab-retention'
 
 export interface DriveFileMeta {
   id: string
@@ -137,6 +138,54 @@ export async function ensureTabExists(
     spreadsheetId,
     requestBody: { requests: [{ addSheet: { properties: { title: tabTitle } } }] },
   })
+}
+
+export interface SheetTabMeta {
+  sheetId: number
+  title: string
+}
+
+/** Every tab on a spreadsheet with its numeric sheetId (deleteSheet needs the id, not the title). */
+export async function listTabs(sheets: sheets_v4.Sheets, spreadsheetId: string): Promise<SheetTabMeta[]> {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties(sheetId,title)' })
+  return (meta.data.sheets ?? []).flatMap((s) => {
+    const sheetId = s.properties?.sheetId
+    const title = s.properties?.title
+    if (sheetId === undefined || sheetId === null || title === undefined || title === null) return []
+    return [{ sheetId, title }]
+  })
+}
+
+export async function deleteTabs(sheets: sheets_v4.Sheets, spreadsheetId: string, sheetIds: readonly number[]): Promise<void> {
+  if (sheetIds.length === 0) return
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests: sheetIds.map((sheetId) => ({ deleteSheet: { sheetId } })) },
+  })
+}
+
+/**
+ * Prune old timestamped tabs under `prefix` (see tab-retention.ts) beyond
+ * `keep`, on an already-existing spreadsheet. Call after writing the
+ * current run's tab so the just-written tab is counted toward `keep`.
+ */
+export async function pruneTabsByPrefix(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  prefix: string,
+  keep: number,
+): Promise<{ deletedTitles: string[] }> {
+  const tabs = await listTabs(sheets, spreadsheetId)
+  const toDelete = selectTabsToDelete(
+    tabs.map((t) => t.title),
+    prefix,
+    keep,
+  )
+  if (toDelete.length === 0) return { deletedTitles: [] }
+  const deleteSet = new Set(toDelete)
+  const idsToDelete = tabs.filter((t) => deleteSet.has(t.title)).map((t) => t.sheetId)
+  await deleteTabs(sheets, spreadsheetId, idsToDelete)
+  return { deletedTitles: toDelete }
 }
 
 export async function findVenueFolder(
