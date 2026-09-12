@@ -32,10 +32,12 @@ import {
   generateStage,
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_WINDOW_MS,
+  type MechanicOfferBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
+  verifyMechanicOfferStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -251,6 +253,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     userPrompt: '',
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }
 
@@ -789,8 +792,54 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // into the gate's own knowledge-gap-card handling (body blanking, clock
     // arming, protected-card carve-out) via the isGapTurn union of both
     // signals.
+    //
+    // TAC-355: verifyMechanicOfferStage runs alongside it via Promise.allSettled
+    // — both are independent Haiku calls with no dependency on each other, so
+    // running them sequentially would only add latency for a guest who's
+    // waiting. allSettled, not all: verifyGroundingStage and
+    // verifyMechanicOfferStage are both verified to never throw today (every
+    // call inside each — the AI-module call and the PostHog/Slack capture —
+    // is independently wrapped in its own try/catch and degrades to a safe
+    // return value on failure), but that invariant lives in OTHER files. If a
+    // future change to either ever violated it, Promise.all would let one
+    // stage's rejection silently discard the other stage's finding — on the
+    // one gate in this file required to fail closed, that is a fail-open by
+    // accident. allSettled means a hypothetical future throw degrades to
+    // exactly what that stage's own internal catch already returns for a
+    // degraded call, instead of losing the sibling stage's result too.
     const verifySpan = trace.span('verify_grounding', { knowledgeGap: gen.result.knowledgeGap })
-    const groundingBackstop = await verifyGroundingStage(ctx, gen.result)
+    const gatedMechanicCount = ctx.mechanics.filter((m) => m.requiresOperatorApproval).length
+    const mechanicSpan = trace.span('verify_mechanic_offer', { gatedMechanicCount })
+    const [groundingSettled, mechanicOfferSettled] = await Promise.allSettled([
+      verifyGroundingStage(ctx, gen.result),
+      verifyMechanicOfferStage(ctx, gen.result),
+    ])
+    if (groundingSettled.status === 'rejected') {
+      console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to null)', {
+        agentRunId,
+        error:
+          groundingSettled.reason instanceof Error
+            ? groundingSettled.reason.message
+            : String(groundingSettled.reason),
+      })
+    }
+    if (mechanicOfferSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyMechanicOfferStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            mechanicOfferSettled.reason instanceof Error
+              ? mechanicOfferSettled.reason.message
+              : String(mechanicOfferSettled.reason),
+        },
+      )
+    }
+    const groundingBackstop = groundingSettled.status === 'fulfilled' ? groundingSettled.value : null
+    const mechanicOfferBackstop: MechanicOfferBackstopResult =
+      mechanicOfferSettled.status === 'fulfilled'
+        ? mechanicOfferSettled.value
+        : { status: 'check_failed' }
     verifySpan.end({
       output: {
         ran: gen.result.knowledgeGap === false && ctx.guest.isDemo !== true,
@@ -801,10 +850,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         ? { ungroundedClaims: groundingBackstop?.claims ?? [] }
         : undefined,
     })
+    mechanicSpan.end({ output: { status: mechanicOfferBackstop.status } })
     if (groundingBackstop !== null) {
       console.warn('[agent] inbound grounding backstop caught an unverified claim', {
         agentRunId,
         claimCount: groundingBackstop.claims.length,
+      })
+    }
+    if (mechanicOfferBackstop.status === 'flagged' || mechanicOfferBackstop.status === 'check_failed') {
+      console.warn('[agent] inbound mechanic-offer backstop fired', {
+        agentRunId,
+        status: mechanicOfferBackstop.status,
       })
     }
 
@@ -814,7 +870,14 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // TAC-297: 5th trigger commitment_type_gated also lands here.
     // TAC-350: 6th (independent) trigger knowledge_gap_backstop also lands
     // here, fed by groundingBackstop above.
-    const approval = await applyApprovalPolicyStage(ctx, gen.result, groundingBackstop)
+    // TAC-355: 7th and 8th (self_talk_detected, mechanic_offer_backstop) also
+    // land here, the latter fed by mechanicOfferBackstop above.
+    const approval = await applyApprovalPolicyStage(
+      ctx,
+      gen.result,
+      groundingBackstop,
+      mechanicOfferBackstop,
+    )
     console.log('[agent] inbound approval decision', {
       agentRunId,
       action: approval.action,

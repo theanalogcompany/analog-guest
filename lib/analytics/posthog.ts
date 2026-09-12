@@ -379,6 +379,41 @@ function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string 
   return lines.join('\n')
 }
 
+// TAC-355: independent mechanic-offer verification backstop caught a reply
+// promising an approval-gated mechanic the model didn't self-flag via either
+// existing signal (requiresOperatorApproval or commitment.type). Mirrors
+// UngroundedClaimCaughtProps/captureUngroundedClaimCaught's shape — same
+// "how often is the model caught doing the thing self-report was supposed to
+// catch" observability need, different failure mode.
+export interface MechanicOfferBackstopCaughtProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  mechanicId: string
+  // The reply text that was caught — still queued for operator review (not
+  // blanked, unlike the knowledge-gap backstop), safe to log here.
+  replyBody: string
+}
+
+export async function captureMechanicOfferBackstopCaught(
+  props: MechanicOfferBackstopCaughtProps,
+): Promise<void> {
+  await capturePostHogEvent('mechanic_offer_backstop_caught', props.guestId, { ...props })
+  await postToSlack(formatMechanicOfferBackstopCaught(props))
+}
+
+function formatMechanicOfferBackstopCaught(props: MechanicOfferBackstopCaughtProps): string {
+  const lines = [
+    `*Mechanic offer caught without approval* — queued for review`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `mechanic: \`${props.mechanicId}\``,
+    `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
+  return lines.join('\n')
+}
+
 export interface AgentLatencyHighProps {
   agentRunId: string
   venueId: string

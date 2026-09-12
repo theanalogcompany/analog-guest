@@ -216,6 +216,7 @@ function makeGeneration(): GenerateMessageResult {
     userPrompt: '',
     promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
   }
 }
 

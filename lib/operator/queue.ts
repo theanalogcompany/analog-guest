@@ -98,6 +98,17 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // something and got overridden" — same clock/blank-body treatment either
   // way (see isKnowledgeGapCard in lib/agent/stages.ts).
   knowledge_gap_backstop: 'Reply contained an unverified claim',
+  // TAC-355: deterministic self-talk backstop. Operator-vocabulary label —
+  // the operator card already shows the full draft body, so this just tells
+  // them what to look for before they send it.
+  self_talk_detected: 'Reply needs an edit before sending',
+  // TAC-355: independent mechanic-offer backstop. Deliberately generic
+  // (doesn't name the specific mechanic) — naming it would need the
+  // identified mechanic id persisted on the row, which this ticket
+  // scoped out (see TAC-360). Covers both the confirmed-offer and the
+  // check-failed-fail-closed branches with one label, since there's no
+  // sub-state to distinguish without that extra plumbing.
+  mechanic_offer_backstop: 'Possible mechanic offer — check needed',
 }
 
 const REVIEW_REASON_FALLBACK = 'Needs review'

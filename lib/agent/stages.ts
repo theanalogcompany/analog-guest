@@ -3,6 +3,7 @@ import {
   captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
+  captureMechanicOfferBackstopCaught,
   captureRegenerationTriggered,
   captureUngroundedClaimCaught,
   captureVoiceFidelityLow,
@@ -21,6 +22,7 @@ import {
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
   verifyGrounding,
+  verifyMechanicOffer,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
@@ -168,6 +170,31 @@ export const APPROVAL_TRIGGERS = {
   // regardless of which one fires. See isKnowledgeGapCard and
   // knowledgeGapWillQueue's sibling logic below.
   KNOWLEDGE_GAP_BACKSTOP: 'knowledge_gap_backstop',
+  // TAC-355: deterministic backstop. Fires unconditionally when
+  // GenerateMessageResult.selfTalkViolationPersisted is true — the reply
+  // still contains self-correction or a reference to the agent's own
+  // instructions/rules/AI-nature after every regen attempt inside
+  // generateMessage's loop (lib/ai/self-talk-detector.ts). Never a send:
+  // unlike the dash regex (THE-225), which ships anyway on exhaustion, a
+  // guest reading agent self-talk learns they're texting a bot, which is
+  // categorical harm regardless of rate.
+  SELF_TALK_DETECTED: 'self_talk_detected',
+  // TAC-355: independent verification-call backstop for the mechanic-
+  // approval gate. `requiresOperatorApproval` self-flag and the structural
+  // COMMITMENT_TYPE_GATED trigger both missed a real approval-gated mechanic
+  // grant (Referral Surprise, le-mils-coffee) — audited and confirmed
+  // structural, not a misconfiguration: nothing in the prompt links a
+  // mechanic grant from "## What this guest can access" to commitment.type,
+  // and at least one live venue has zero of its gated mechanics mapping
+  // cleanly onto that vocabulary. This is the PRIMARY mechanism for that
+  // failure mode, not a secondary layer (unlike COMP_REGEX_BACKSTOP's
+  // relationship to MODEL_FLAGGED) — see lib/ai/verify-mechanic-offer.ts and
+  // verifyMechanicOfferStage below. FAILS CLOSED: an errored, timed-out, or
+  // unparseable check queues rather than degrading to pre-check behavior —
+  // a deliberate divergence from verifyGroundingStage (TAC-350), which fails
+  // open. An unauthorized perk grant costs the owner money and control; a
+  // failed check costs one unnecessary review.
+  MECHANIC_OFFER_BACKSTOP: 'mechanic_offer_backstop',
 } as const
 
 /**
@@ -198,6 +225,12 @@ export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_T
  */
 export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+  // TAC-355: ranked directly after COMMITMENT_TYPE_GATED — parity with it,
+  // not below it. This backstop is the PRIMARY defense for the mechanic-
+  // grant failure mode (see its own comment on APPROVAL_TRIGGERS above), so
+  // an unauthorized-perk signal should carry the same operator-facing
+  // priority as an unauthorized comp/hold/discount.
+  APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
   // TAC-308: second, deliberately not first. The ticket asked for "top of
   // priority," but that request was reasoning about the TIMER — and the timer
   // anchors on messages.pending_until, not on review_reason, so rank decides
@@ -219,6 +252,15 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
+  // TAC-355: a hard, deterministic catch (once it fires, the guest-facing
+  // text is confirmed broken), but ranked below every resource/financial-
+  // commitment trigger above — this is a voice-quality/product-premise
+  // failure, not a money-or-perk exposure. Confirmed via the operator card
+  // (analog-operator/components/queue/queue-card.tsx) already rendering the
+  // full draft body regardless of which trigger wins the primary label, so
+  // this ranking only affects the displayed reason string, never visibility
+  // of the actual self-talk text.
+  APPROVAL_TRIGGERS.SELF_TALK_DETECTED,
   // v1.23.0: below MODEL_FLAGGED so a self-flagged or structurally-typed
   // commitment keeps the more specific operator label; ABOVE
   // PREVIOUS_PENDING_HELD so a regenerated draft carrying a fresh complaint
@@ -750,6 +792,131 @@ export async function verifyGroundingStage(
 }
 
 /**
+ * TAC-355: true when the model self-flagged a resource commitment via
+ * requiresOperatorApproval. Extracted so verifyMechanicOfferStage's skip
+ * condition ("don't spend a Haiku call re-confirming a signal that already
+ * fired") can't independently drift from the trigger's own push logic inside
+ * applyApprovalPolicyStage below.
+ */
+export function isModelFlagged(
+  generation: Pick<GenerateMessageResult, 'requiresOperatorApproval'>,
+): boolean {
+  return generation.requiresOperatorApproval === true
+}
+
+/**
+ * TAC-355: true when the structural commitment.type gate (TAC-297) would
+ * fire — type is comp/hold/discount AND description is non-empty. Same
+ * extraction rationale as isModelFlagged above.
+ */
+export function isCommitmentTypeGated(
+  generation: Pick<GenerateMessageResult, 'commitment'>,
+): boolean {
+  const commitmentType = generation.commitment.type
+  const commitmentDescription = generation.commitment.description?.trim()
+  return Boolean(
+    commitmentDescription &&
+      (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount'),
+  )
+}
+
+/**
+ * TAC-355: what verifyMechanicOfferStage found, when it ran. Four states,
+ * not two — the fail-closed decision (see MECHANIC_OFFER_BACKSTOP's own
+ * comment on APPROVAL_TRIGGERS) means "the check errored" is a DISTINCT,
+ * queue-worthy outcome from "the check ran and found nothing," unlike
+ * GroundingBackstopFinding's two-state shape (null covers both skip and
+ * clean-error-degradation because that backstop fails OPEN).
+ */
+export type MechanicOfferBackstopResult =
+  | { status: 'skipped' }
+  | { status: 'clean' }
+  | { status: 'flagged'; mechanicId: string }
+  | { status: 'check_failed' }
+
+/**
+ * TAC-355: independent verification backstop for the mechanic-approval gate.
+ * Runs a second, Haiku-based check (lib/ai/verify-mechanic-offer.ts) against
+ * a reply the model has NOT already self-flagged as a resource commitment
+ * via either existing signal — the exact population the TAC-355 audit found
+ * both existing gates structurally unable to cover (a mechanic grant with no
+ * nameable item, or no product at all, never maps onto commitment.type, and
+ * nothing in the prompt links a mechanic grant to that field in the first
+ * place; see the audit trail on the ticket).
+ *
+ * Unlike verifyGroundingStage (TAC-350), this runs on BOTH the inbound and
+ * followup paths — a mechanic can be offered on a proactive outbound message
+ * exactly as easily as in reply to a guest's question, so there is no
+ * inbound-only concept to gate on here (contrast knowledge-gap grounding,
+ * which is inherently about answering a guest's question).
+ *
+ * Skips (returns 'skipped' without calling the model) when:
+ *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
+ *     trigger, so spending a Haiku call here buys nothing.
+ *   - isModelFlagged or isCommitmentTypeGated is already true — trust the
+ *     existing signal; the draft is already going to queue.
+ *   - no eligible mechanic this turn has requiresOperatorApproval=true — the
+ *     overwhelmingly common case (per the TAC-355 audit's live-data pull,
+ *     only 7 mechanics across 3 venues carry the flag at all), so most turns
+ *     pay zero added cost.
+ *
+ * FAILS CLOSED on an AI-call error ('check_failed', not 'skipped' or
+ * 'clean') — the deliberate divergence from every other backstop in this
+ * file. An unauthorized perk grant costs the owner money and control; a
+ * failed check costs one unnecessary review.
+ */
+export async function verifyMechanicOfferStage(
+  ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'mechanics'>,
+  generation: Pick<GenerateMessageResult, 'body' | 'requiresOperatorApproval' | 'commitment'>,
+): Promise<MechanicOfferBackstopResult> {
+  if (ctx.guest.isDemo === true) return { status: 'skipped' }
+  if (isModelFlagged(generation) || isCommitmentTypeGated(generation)) {
+    return { status: 'skipped' }
+  }
+
+  const gatedMechanics = ctx.mechanics.filter((m) => m.requiresOperatorApproval)
+  if (gatedMechanics.length === 0) return { status: 'skipped' }
+
+  const r = await verifyMechanicOffer({
+    replyBody: generation.body,
+    eligibleGatedMechanics: gatedMechanics.map((m) => ({
+      id: m.id,
+      name: m.name,
+      rewardDescription: m.rewardDescription,
+      qualification: m.qualification,
+    })),
+  })
+  if (!r.ok) {
+    console.warn(
+      `[agent] mechanic-offer backstop degraded (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    return { status: 'check_failed' }
+  }
+  // Keyed on offersGatedMechanic ALONE, not also on mechanicId !== 'none' —
+  // lib/ai/verify-mechanic-offer.ts already resolves the ambiguous
+  // "flagged but couldn't identify which one" shape defensively (substitutes
+  // a placeholder id rather than ever returning 'none' alongside
+  // offersGatedMechanic=true), so trusting the boolean here is both
+  // sufficient and correct. Code review caught an earlier version of this
+  // check ALSO testing `r.data.mechanicId === 'none'` — with the OR, that
+  // ambiguous shape resolved to 'clean' (a false negative), the exact
+  // failure mode a fail-closed backstop cannot afford.
+  if (!r.data.offersGatedMechanic) {
+    return { status: 'clean' }
+  }
+
+  await captureMechanicOfferBackstopCaught({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    mechanicId: r.data.mechanicId,
+    replyBody: generation.body,
+  })
+
+  return { status: 'flagged', mechanicId: r.data.mechanicId }
+}
+
+/**
  * TAC-212 approval-policy gate. Runs after generateStage returns success;
  * decides whether to dispatch via Sendblue (action='send') or persist as a
  * pending draft for operator review (action='queue').
@@ -842,6 +1009,12 @@ export async function applyApprovalPolicyStage(
   // signal — includes every skip case (followup, demo, model already
   // self-reported) as well as a clean AI-call result with nothing flagged.
   groundingBackstop: GroundingBackstopFinding | null = null,
+  // TAC-355: result of verifyMechanicOfferStage, run by the orchestrator
+  // alongside verifyGroundingStage (both are independent Haiku calls with no
+  // dependency on each other). 'skipped' | 'clean' never fire the trigger;
+  // 'flagged' | 'check_failed' both do — the fail-closed branch is
+  // deliberate, see MECHANIC_OFFER_BACKSTOP's own comment above.
+  mechanicOfferBackstop: MechanicOfferBackstopResult = { status: 'skipped' },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -853,7 +1026,7 @@ export async function applyApprovalPolicyStage(
 
   // Trigger 2: model self-flagged a resource commitment via the structured
   // output's requiresOperatorApproval field.
-  if (generation.requiresOperatorApproval) {
+  if (isModelFlagged(generation)) {
     triggers.push(APPROVAL_TRIGGERS.MODEL_FLAGGED)
   }
 
@@ -883,12 +1056,7 @@ export async function applyApprovalPolicyStage(
   // Recommendation type does NOT gate. Requires the commitment to be
   // actionable (type + non-empty description) — a partial emission is treated
   // as no-op and won't fire the trigger.
-  const commitmentType = generation.commitment.type
-  const commitmentDescription = generation.commitment.description?.trim()
-  if (
-    commitmentDescription &&
-    (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount')
-  ) {
+  if (isCommitmentTypeGated(generation)) {
     triggers.push(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
   }
 
@@ -960,6 +1128,24 @@ export async function applyApprovalPolicyStage(
   const backstopFired = groundingBackstop !== null
   if (backstopFired) {
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+  }
+
+  // Trigger 10 (TAC-355): deterministic self-talk backstop. Unconditional —
+  // no category scoping, no demo-guest exemption beyond the bypass below.
+  if (generation.selfTalkViolationPersisted) {
+    triggers.push(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+  }
+
+  // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
+  // Fires on 'flagged' (the check found a gated mechanic offered) OR
+  // 'check_failed' (the check errored/timed out/didn't parse) — fail CLOSED,
+  // the deliberate divergence from the grounding backstop's fail-open
+  // posture. 'skipped' and 'clean' never fire.
+  if (
+    mechanicOfferBackstop.status === 'flagged' ||
+    mechanicOfferBackstop.status === 'check_failed'
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
   }
 
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,

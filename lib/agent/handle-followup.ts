@@ -24,6 +24,7 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
+  verifyMechanicOfferStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -403,7 +404,23 @@ export async function handleFollowup(input: {
     // explicit operator send, not a bypass of anything).
     let demoBypassReviewReason: 'demo_bypass' | undefined
     if (input.trigger.reason !== 'manual') {
-      const approval = await applyApprovalPolicyStage(ctx, gen.result)
+      // TAC-355: independent mechanic-offer backstop. Runs on the followup
+      // path too — a mechanic can be offered on a proactive outbound message
+      // exactly as easily as in reply to a guest's question, unlike
+      // knowledge-gap grounding (inherently about answering a question the
+      // guest asked, so inbound-only). Skipped entirely for manual
+      // followups above, same as the gate itself.
+      const mechanicOfferBackstop = await verifyMechanicOfferStage(ctx, gen.result)
+      if (
+        mechanicOfferBackstop.status === 'flagged' ||
+        mechanicOfferBackstop.status === 'check_failed'
+      ) {
+        console.warn('[agent] followup mechanic-offer backstop fired', {
+          agentRunId,
+          status: mechanicOfferBackstop.status,
+        })
+      }
+      const approval = await applyApprovalPolicyStage(ctx, gen.result, null, mechanicOfferBackstop)
       console.log('[agent] followup approval decision', {
         agentRunId,
         triggerReason: input.trigger.reason,

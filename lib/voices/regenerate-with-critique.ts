@@ -23,6 +23,7 @@ import {
   generateMessage,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   verifyGrounding,
+  verifyMechanicOffer,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
@@ -69,6 +70,25 @@ export interface RegenerateWithCritiqueResult {
   // already self-reported) or ran and found nothing.
   hasUngroundedClaim: boolean
   ungroundedClaims: string[]
+  // TAC-355: final-attempt self-talk flag, surfaced here for the first time
+  // (generateMessage already computes it via the shared regen loop; this
+  // path just wasn't reading it — same situation knowledgeGap was in before
+  // TAC-350). Advisory only: regen has no approval queue, the operator
+  // reviews the raw attempt directly.
+  selfTalkViolationPersisted: boolean
+  // TAC-355: independent mechanic-offer backstop, same underlying check
+  // (lib/ai/verify-mechanic-offer.ts) as lib/agent/stages.ts's
+  // verifyMechanicOfferStage, but ADVISORY here and with a NARROWER skip
+  // condition — this path only skips on "no eligible gated mechanic this
+  // turn" and demo guest. It deliberately does NOT skip on
+  // requiresOperatorApproval/commitment.type already being set, unlike the
+  // production gate's skip — regen has no other surface that shows those
+  // fields to the operator, so skipping here would silently drop the only
+  // visibility into a self-flagged mechanic offer on this path. false when
+  // the check didn't run (no eligible gated mechanic, or a demo guest) or
+  // ran and found nothing.
+  offersGatedMechanic: boolean
+  offeredMechanicId: string | null
 }
 
 export type RegenerateWithCritiqueOutcome =
@@ -378,6 +398,40 @@ export async function regenerateWithCritique(
     }
   }
 
+  // 9. TAC-355: independent mechanic-offer backstop, advisory only. No skip
+  // on requiresOperatorApproval/commitment.type (see the type's own comment
+  // for why) — only "nothing gated eligible this turn" and demo guest, same
+  // as the production stage's other two skip conditions.
+  let offersGatedMechanic = false
+  let offeredMechanicId: string | null = null
+  const gatedMechanics = ctx.mechanics.filter((m) => m.requiresOperatorApproval)
+  if (ctx.guest.isDemo !== true && gatedMechanics.length > 0) {
+    const mechanicCheck = await verifyMechanicOffer({
+      replyBody: gen.data.body,
+      eligibleGatedMechanics: gatedMechanics.map((m) => ({
+        id: m.id,
+        name: m.name,
+        rewardDescription: m.rewardDescription,
+        qualification: m.qualification,
+      })),
+    })
+    if (mechanicCheck.ok) {
+      // Keyed on offersGatedMechanic alone — see stages.ts's
+      // verifyMechanicOfferStage for why (verify-mechanic-offer.ts already
+      // resolves the ambiguous "flagged but no id" shape defensively, and an
+      // additional `mechanicId !== 'none'` check here would silently drop
+      // that same flagged case advisory-side too).
+      if (mechanicCheck.data.offersGatedMechanic) {
+        offersGatedMechanic = true
+        offeredMechanicId = mechanicCheck.data.mechanicId
+      }
+    } else {
+      console.warn(
+        `[voices/regen] mechanic-offer backstop degraded for venue=${input.venueId}: ${mechanicCheck.error}`,
+      )
+    }
+  }
+
   return {
     ok: true,
     data: {
@@ -389,6 +443,9 @@ export async function regenerateWithCritique(
       knowledgeGap: gen.data.knowledgeGap,
       hasUngroundedClaim,
       ungroundedClaims,
+      selfTalkViolationPersisted: gen.data.selfTalkViolationPersisted,
+      offersGatedMechanic,
+      offeredMechanicId,
     },
   }
 }

@@ -3,6 +3,7 @@ export { classifyMessage } from './classify-message'
 export { extractReportedOrder } from './extract-reported-order'
 export { classifyIntentionPrompts } from './classify-intention-prompts'
 export { verifyGrounding } from './verify-grounding'
+export { verifyMechanicOffer } from './verify-mechanic-offer'
 
 export type {
   AIResult,
@@ -25,5 +26,8 @@ export type {
   RuntimeContext,
   VerifyGroundingInput,
   VerifyGroundingResult,
+  VerifyMechanicOfferGatedMechanic,
+  VerifyMechanicOfferInput,
+  VerifyMechanicOfferResult,
   VoiceCorpusChunk,
 } from './types'

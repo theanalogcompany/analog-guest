@@ -109,6 +109,15 @@ const PUSH_POLICY = {
   // No reason for this one to be quieter than the self-reported case.
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]: 'push',
 
+  // TAC-355. The reply itself is broken (self-talk/reasoning leakage) and
+  // ships broken unless an operator edits it — no reason to hold the push.
+  [APPROVAL_TRIGGERS.SELF_TALK_DETECTED]: 'push',
+
+  // TAC-355. Independent mechanic-offer backstop — the primary mechanism for
+  // this failure mode (see the trigger's own comment in stages.ts), so it
+  // gets the same urgency as the other primary/structural triggers above.
+  [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator
