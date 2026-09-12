@@ -11,7 +11,7 @@
 // mid-list — because renumbering live rule IDs stales every external
 // reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
 // consequence: displayed IDs are NOT contiguous. This list curates R1-R11
-// plus R17-R18 plus R21 plus R23-R31. R12 (message splitting, TAC-313) is
+// plus R17-R18 plus R21 plus R23-R34. R12 (message splitting, TAC-313) is
 // RETIRED: TAC-319 moved splitting out of the prompt into deterministic
 // dispatch code after two prompt-side rounds failed to make the rule fire,
 // so the undisplayed gap is R12-R16 (retired splitting slot, then greeting /
@@ -71,6 +71,26 @@
 // "come try Indian coffee sometime" back). See system-template.ts's
 // v1.43.0 changelog comment for the full audit against the first-touch
 // intentions opener and every category instruction file.
+//
+// TAC-359 appended R32-R34, a third round of the same promotion pattern,
+// also from a Le Mil's owner-review run. All three are displayed — same
+// class as R17/R18/R21/R23-R31. R32 bans telling the guest to send a
+// message or reach out when they're already texting, with an explicit
+// carve-out for `invite_contact_save` (future contact is legitimate) and a
+// boundary note against R5 (alt-channels is a different axis). R33
+// redirects rather than prohibits when retrieved venue knowledge narrates a
+// first-visit order as a multi-step sequence — a straight prohibition would
+// lose to that knowledge, which renders later in the prompt than this
+// section — and carries a boundary note against R26 (item count vs.
+// framing). R34 bans accepting, confirming, or acknowledging an order,
+// with carve-outs for `# Commitments` holds (existing items only; a
+// made-to-order drink is not a hold) and for a guest reporting an order
+// already placed (points at R21 rather than restating it). A redundancy
+// pass against all 30 pre-existing bullets found none fully subsumed by
+// R32-R34; see system-template.ts's v1.44.0 changelog comment for the full
+// accounting, including the two boundary notes above and a genericization
+// fix (an early R34 draft leaked a venue-specific drink name and assumed
+// counter service).
 //
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
@@ -218,5 +238,20 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R31',
     summary:
       "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. Reply in kind and stop. Doesn't restrict a question you ask back, or answering once the guest actually asks or orders something.",
+  },
+  {
+    id: 'R32',
+    summary:
+      "Don't tell the guest to send a message, reach out, or get in touch as if that's a separate, future action — they're already texting you, right now. Ask directly. Doesn't restrict inviting them to save this number or text again later; that's a different, legitimate thing.",
+  },
+  {
+    id: 'R33',
+    summary:
+      "When venue knowledge describes a first-visit order as a sequence, recommend only the first step. Don't relay the whole progression, and don't name items marked unavailable or coming soon, or something that already comes included with what you just recommended. Separate from the at-most-two cap: that's how many, this is how one is framed.",
+  },
+  {
+    id: 'R34',
+    summary:
+      "You cannot place, confirm, or take an order. Acknowledge what the guest wants and tell them to place it with the venue directly, the way that venue takes orders. Doesn't restrict offering a comp or holding aside an item that already exists (a made-to-order drink isn't a hold), or receiving a guest's report of an order they already placed.",
   },
 ]

@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.43.0 (TAC-356: three more universal rules R29-R31 — fragments, ask-when-unclear, no product pitch on greeting)', () => {
-    expect(PROMPT_VERSION).toBe('v1.43.0')
+  it('is v1.44.0 (TAC-359: three more universal rules R32-R34 — already-in-conversation, first-visit recommendation shape, cannot take orders)', () => {
+    expect(PROMPT_VERSION).toBe('v1.44.0')
   })
 })
 
@@ -64,18 +64,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // contiguity, which would have forced exactly the renumbering the policy
     // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
     // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
-    // appends R29-R31 after that.
+    // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31',
+      'R29', 'R30', 'R31', 'R32', 'R33', 'R34',
     ])
   })
 
-  it('curates 23 rules ending at R31 (TAC-356)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(23)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R31')
+  it('curates 26 rules ending at R34 (TAC-359)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(26)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R34')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -185,6 +185,29 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(r31).toBeDefined()
     expect(r31?.summary).toContain('specific product')
     expect(SYSTEM_TEMPLATE).toContain('Do not name a specific product (a drink, a bean, a menu item)')
+  })
+
+  // TAC-359: the same cross-source anchor treatment for the three newly
+  // promoted rules, mirroring the TAC-348/TAC-356 pattern above.
+  it('shares the R32 anchor phrase across both sources (TAC-359)', () => {
+    const r32 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R32')
+    expect(r32).toBeDefined()
+    expect(r32?.summary).toContain('reach out')
+    expect(SYSTEM_TEMPLATE).toContain('Never tell the guest to send a message, reach out, or get in touch')
+  })
+
+  it('shares the R33 anchor phrase across both sources (TAC-359)', () => {
+    const r33 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R33')
+    expect(r33).toBeDefined()
+    expect(r33?.summary).toContain('first step')
+    expect(SYSTEM_TEMPLATE).toContain('recommend only the first step')
+  })
+
+  it('shares the R34 anchor phrase across both sources (TAC-359)', () => {
+    const r34 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R34')
+    expect(r34).toBeDefined()
+    expect(r34?.summary).toContain('cannot place, confirm, or take an order')
+    expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
   })
 
   it('shares the R8-strengthened anchor phrase across both sources (TAC-348)', () => {
@@ -953,17 +976,18 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // TAC-348 appended R23-R28 after R22, so R22 is no longer the LAST bullet
   // in the block — it's now immediately followed by the six new rules, then
   // the section break. Rewritten to pin that adjacency instead of asserting
-  // R22 is terminal. TAC-356 appended R29-R31 after that, so the count grows
-  // again (still the same adjacency shape, just three more lines).
-  it('is immediately followed by exactly R23-R31, then # Voice imperative', () => {
+  // R22 is terminal. TAC-356 appended R29-R31 after that, and TAC-359
+  // appended R32-R34 after that, so the count grows again each time (still
+  // the same adjacency shape, just more lines).
+  it('is immediately followed by exactly R23-R34, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
-    // R22 itself, plus R23-R31 — exactly ten bullet lines, then nothing but
-    // whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(10)
+    // R22 itself, plus R23-R34 — exactly thirteen bullet lines, then nothing
+    // but whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(13)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1122,16 +1146,17 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // TAC-356 appended R29-R31 after R28, so R28 is no longer the LAST bullet
   // in the block. Rewritten to pin adjacency to the new rules instead of
   // asserting R28 is terminal — same treatment R22's own test got in
-  // TAC-348 when R23-R28 landed after it.
-  it('is immediately followed by exactly R29, R30, R31, then # Voice imperative (TAC-356)', () => {
+  // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
+  // that, so the count grows again.
+  it('is immediately followed by exactly R29-R34, then # Voice imperative (TAC-359)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
-    // R28 itself, plus R29-R31 — exactly four bullet lines, then nothing but
-    // whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
+    // R28 itself, plus R29-R34 — exactly seven bullet lines, then nothing
+    // but whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1222,17 +1247,150 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     )
   })
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-359 appended R32-R34 after R31, so R31 is no longer the LAST bullet
+  // in the block. Rewritten to pin adjacency instead of asserting R31 is
+  // terminal — same treatment R22's and R28's own tests got when rules
+  // landed after them.
+  it('is immediately followed by exactly R32, R33, R34, then # Voice imperative (TAC-359)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r31Idx)
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+    // R31 itself, plus R32-R34 — exactly four bullet lines, then nothing but
+    // whitespace before the heading.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
+    const end = SYSTEM_TEMPLATE.indexOf('Never tell the guest to send a message')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+// R32-R34 (TAC-359): three more rules mined the same way TAC-348 mined
+// R23-R28 and TAC-356 mined R29-R31 — misfiled as venue-specific on Le
+// Mil's when they're true at any venue. See system-template.ts's v1.44.0
+// changelog for the full audit, including the invite_contact_save
+// compatibility check (R32), the render-order rationale for directing
+// rather than prohibiting (R33), and the two R34 carve-outs plus the
+// genericization fix applied during review (an early draft leaked a
+// venue-specific drink name and assumed counter service).
+describe('SYSTEM_TEMPLATE — R32: already in the conversation (TAC-359)', () => {
+  it('bans telling the guest to message, reach out, or get in touch as a separate action', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('If you have a question, ask it directly and expect the answer here.')
+  })
+
+  // Checked against lib/agent/intentions/definitions.ts's invite_contact_save,
+  // which legitimately invites a guest to save the number and text again
+  // later — a blanket ban would fight it. Not assertable against
+  // SYSTEM_TEMPLATE alone since the intention text lives in a different
+  // module; the carve-out sentence below is the compatibility mechanism.
+  it('carries an explicit carve-out for inviting future contact, and a boundary against the alt-channels rule', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'It also does not restrict inviting them to save this number or text again in the future for a different visit.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This is different from the alternative-channels rule above, which is about routing the guest elsewhere.',
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('Never tell the guest to send a message')
+    const end = SYSTEM_TEMPLATE.indexOf('When venue knowledge describes a first-visit order')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R33: first-visit recommendation shape (TAC-359)', () => {
+  it('directs compressing a sequence to one step rather than prohibiting sequences outright', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When venue knowledge describes a first-visit order as a sequence or progression, recommend only the first step.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('do not name items the knowledge marks as unavailable or coming soon')
+  })
+
+  it('bans naming a bundled-free item as a separate recommendation', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never name something that already comes included with something else you just recommended in the same message',
+    )
+  })
+
+  // Boundary against R26 (offer at most two items), the same technique R23
+  // uses against R15: R26 governs how many, R33 governs how one is framed.
+  it('states its boundary against the at-most-two-items cap (R26)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This is separate from the at-most-two-items cap above; that governs how many, this governs how one is framed.',
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('When venue knowledge describes a first-visit order')
+    const end = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
+  it('bans placing, confirming, or acknowledging an order, with a generic example', () => {
+    expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "If a guest tells you the specifics of what they want ('a large oat latte, extra hot'), do not accept or acknowledge it as an order",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('tell them to place it with the venue directly, the way this venue actually takes orders')
+  })
+
+  // Decision: a hold applies only to an item that already exists and can be
+  // set aside. A made-to-order drink is not held, it is made, so prep
+  // instructions stay on the order-taking side, not the hold side.
+  it('carves out # Commitments holds, scoped to items that already exist', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This does not restrict offering a comp or holding aside an item that already exists (see # Commitments).',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A made-to-order drink is not held, it is made, so prep instructions like this stay on the order-taking side.',
+    )
+  })
+
+  // TAC-323's extract-reported-order.ts fires only on past-tense reports of
+  // an order already placed. Points at R21 (venue-knowledge-receiving)
+  // rather than restating its content, per the redundancy pass.
+  it('carves out a guest reporting an order already placed, by pointing at R21 rather than restating it', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'It also does not restrict a guest reporting an order they already placed, which the venue-knowledge rule above already covers',
+    )
+  })
+
+  it('is free of venue-specific product names and ingredients from the motivating case', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
+    for (const term of ['sofi', 'masala jaggery', 'jaggery', 'pink panther', 'khari', 'nankhatai']) {
+      expect(body).not.toContain(term)
+    }
+  })
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r34Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
+    const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
