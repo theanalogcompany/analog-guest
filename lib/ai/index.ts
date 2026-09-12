@@ -2,6 +2,7 @@ export { generateMessage } from './generate-message'
 export { classifyMessage } from './classify-message'
 export { extractReportedOrder } from './extract-reported-order'
 export { classifyIntentionPrompts } from './classify-intention-prompts'
+export { verifyGrounding } from './verify-grounding'
 
 export type {
   AIResult,
@@ -22,5 +23,7 @@ export type {
   PendingQuestion,
   RecentMessage,
   RuntimeContext,
+  VerifyGroundingInput,
+  VerifyGroundingResult,
   VoiceCorpusChunk,
 } from './types'

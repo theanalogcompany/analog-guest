@@ -89,6 +89,18 @@
  *     hours, but only when there's been at least one prior inbound (i.e.,
  *     skipped on initial venue state). Filtered to non-test venues.
  *     Properties: { hoursWithoutWebhook, lastWebhookAt }
+ *
+ * - ungrounded_claim_caught
+ *     TAC-350. Fires from verifyGroundingStage (lib/agent/stages.ts) when the
+ *     independent grounding backstop flags a reply the model itself had
+ *     already self-certified as grounded (knowledgeGap=false) — distinct
+ *     from draft_queued's generic primaryTrigger field so "how often is the
+ *     model getting caught fabricating, per venue" is directly queryable
+ *     without filtering the whole queue-decision stream. Slack-relays: this
+ *     is exactly the failure class (a guest almost receiving an invented
+ *     fact) TAC-350 exists to make visible.
+ *     Properties: { agentRunId, venueId, guestId, inboundBody, replyBody,
+ *                   ungroundedClaims }
  */
 
 import { PostHog } from 'posthog-node'
@@ -327,6 +339,43 @@ function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThreshol
   if (props.topMatchPreview) {
     lines.push(`top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`)
   }
+  return lines.join('\n')
+}
+
+// TAC-350: emitted from verifyGroundingStage (lib/agent/stages.ts) when the
+// independent grounding backstop catches an unverified claim in a reply the
+// model already self-certified as grounded. Slack relay yes — this is the
+// exact failure (a guest nearly receiving an invented fact) TAC-350 exists
+// to surface, same posture as captureDraftQueued.
+export interface UngroundedClaimCaughtProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  inboundBody: string
+  // The reply text that was caught — never sent to the guest (the approval
+  // gate blanks it before persisting), safe to log here for debugging.
+  replyBody: string
+  ungroundedClaims: string[]
+}
+
+export async function captureUngroundedClaimCaught(
+  props: UngroundedClaimCaughtProps,
+): Promise<void> {
+  await capturePostHogEvent('ungrounded_claim_caught', props.guestId, { ...props })
+  await postToSlack(formatUngroundedClaimCaught(props))
+}
+
+function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {
+  const claimList = props.ungroundedClaims.map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`).join(', ')
+  const lines = [
+    `*Ungrounded claim caught* — reply never sent, queued for review`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    `caught claim(s): ${claimList}`,
+    `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
   return lines.join('\n')
 }
 

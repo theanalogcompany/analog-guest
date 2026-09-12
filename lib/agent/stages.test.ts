@@ -8,10 +8,12 @@ import {
   findPendingDraft,
   generateStage,
   isKnowledgeGapCard,
+  KNOWLEDGE_RELEVANCE_FLOOR,
   knowledgeGapWillQueue,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
+  verifyGroundingStage,
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
@@ -27,6 +29,10 @@ const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
 const generateMessageMock = vi.fn()
+// TAC-350: verifyGrounding (lib/ai) is the grounding backstop's model call;
+// captureUngroundedClaimCaught (posthog) fires when it catches something.
+const verifyGroundingMock = vi.fn()
+const captureUngroundedClaimCaughtMock = vi.fn()
 // TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
 // when a demo guest's bypass overrides a would-have-queued decision. Mocked
 // so the demo-bypass tests can assert the payload without a PostHog call.
@@ -71,6 +77,8 @@ vi.mock('@/lib/ai', () => ({
   // import doesn't pull in real SDK init. TAC-309 gave it a named handle so
   // the fidelity-exemption tests can drive generateStage directly.
   generateMessage: (...args: unknown[]) => generateMessageMock(...args),
+  // TAC-350: the grounding backstop's model call.
+  verifyGrounding: (...args: unknown[]) => verifyGroundingMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -84,6 +92,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
+  captureUngroundedClaimCaught: (...args: unknown[]) => captureUngroundedClaimCaughtMock(...args),
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
@@ -559,6 +568,72 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // TAC-350: relevance floor. Calibrated at 0.5 against real Le Mil's corpus
+  // data — see KNOWLEDGE_RELEVANCE_FLOOR's own comment in stages.ts.
+  describe('relevance floor (TAC-350)', () => {
+    it('drops all chunks and renders as no-match when every chunk is below the floor', async () => {
+      retrieveKnowledgeContextMock.mockResolvedValueOnce({
+        ok: true,
+        data: [row('weak1', ['other']), row('weak2', ['other'])].map((r) => ({
+          ...r,
+          similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.01,
+        })),
+      })
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      expect(out).toEqual([])
+    })
+
+    it('keeps chunks at or above the floor', async () => {
+      retrieveKnowledgeContextMock.mockResolvedValueOnce({
+        ok: true,
+        data: [{ ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR }],
+      })
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      expect(out).toHaveLength(1)
+      expect(out[0].id).toBe('strong')
+    })
+
+    it('drops only the weak chunks when a mix of strong and weak chunks is returned', async () => {
+      retrieveKnowledgeContextMock.mockResolvedValueOnce({
+        ok: true,
+        data: [
+          { ...row('strong', ['menu']), similarity: 0.68 },
+          { ...row('weak', ['menu']), similarity: 0.35 },
+        ],
+      })
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      expect(out).toHaveLength(1)
+      expect(out[0].id).toBe('strong')
+    })
+
+    it('falls back to the no-filter retry when preferenced results are all below the floor', async () => {
+      retrieveKnowledgeContextMock
+        .mockResolvedValueOnce({
+          ok: true,
+          data: [{ ...row('weak', ['mechanic']), similarity: 0.35 }],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: [{ ...row('fallback-strong', ['menu']), similarity: 0.6 }],
+        })
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+      expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
+      expect(out).toHaveLength(1)
+      expect(out[0].id).toBe('fallback-strong')
+    })
+
+    it('filters the fallback result by the floor too, not just the preferenced call', async () => {
+      retrieveKnowledgeContextMock
+        .mockResolvedValueOnce({ ok: true, data: [] })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: [{ ...row('fallback-weak', ['menu']), similarity: 0.4 }],
+        })
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+      expect(out).toEqual([])
+    })
   })
 })
 
@@ -1760,6 +1835,239 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
   })
 })
 
+describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const inboundCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: 'what are the four SoFi variations?',
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'question',
+        crisisSafety: false,
+      },
+    })
+
+  it('queues, arms the clock, and blanks the body when the backstop catches an unverified claim', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { claims: ['invents four SoFi variation names not in the corpus'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+    expect(decision.blankBody).toBe(true)
+  })
+
+  it('sends normally when there is no backstop finding (null)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      null,
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('sends normally when the third argument is omitted (backward compatible default)', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // The two triggers are mutually exclusive by construction (the backstop is
+  // only ever invoked by the orchestrator when knowledgeGap is false), but
+  // the gate itself must not assume that — it should handle whatever it's
+  // given. commitment_type_gated still outranks the backstop, same as it
+  // outranks the self-reported trigger.
+  it('yields the operator label to commitment_type_gated when both fire', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({
+        knowledgeGap: false,
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+      { claims: ['invents a fact'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+    // Blanking still fires — the comp detail survives on pending_commitment,
+    // not on the body, same rule TAC-309 already established for the
+    // self-reported case.
+    expect(decision.blankBody).toBe(true)
+  })
+
+  it('outranks fidelity_below_auto_send_floor for the operator label', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      { claims: ['invents a fact'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+  })
+
+  // A backstop-caught turn must protect the card and preserve the clock on
+  // regen, identically to a self-reported gap turn (TAC-308 case 3 / case 2
+  // shape, now exercised via the backstop path).
+  it('preserves an existing gap card\'s clock when regenerated via a fresh backstop catch', async () => {
+    const gapCard = {
+      id: 'gap-card-1',
+      body: 'best guess at the answer',
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { claims: ['invents a different fact this turn'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    expect(decision.pendingUntil).toBeUndefined()
+    expect(decision.blankBody).toBe(true)
+  })
+
+  // A self-reported gap card must not be dropped by a turn the BACKSTOP (not
+  // self-report) catches — both are "gapping itself" from the card-
+  // protection carve-out's point of view.
+  it('does not drop an existing self-reported gap card when this turn is caught by the backstop instead', async () => {
+    const gapCard = {
+      id: 'gap-card-1',
+      body: 'best guess at the answer',
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { claims: ['a different unverified claim'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+  })
+})
+
+describe('verifyGroundingStage (TAC-350)', () => {
+  beforeEach(() => {
+    verifyGroundingMock.mockReset()
+    captureUngroundedClaimCaughtMock.mockReset()
+  })
+
+  const inboundCtx = (overrides: Partial<RuntimeContext> = {}) =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: "what's the wifi password?",
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+      },
+      knowledgeCorpus: [],
+      ...overrides,
+    })
+
+  function makeGen(overrides: { knowledgeGap?: boolean; body?: string } = {}) {
+    return { knowledgeGap: false, body: 'Le Mils Guest', ...overrides }
+  }
+
+  it('returns null without calling the model on the outbound (followup) path', async () => {
+    const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
+    const result = await verifyGroundingStage(ctx, makeGen())
+    expect(result).toBeNull()
+    expect(verifyGroundingMock).not.toHaveBeenCalled()
+  })
+
+  it('returns null without calling the model for a demo guest', async () => {
+    const ctx = inboundCtx({ guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'] })
+    const result = await verifyGroundingStage(ctx, makeGen())
+    expect(result).toBeNull()
+    expect(verifyGroundingMock).not.toHaveBeenCalled()
+  })
+
+  it('returns null without calling the model when the generation already self-reported a gap', async () => {
+    const result = await verifyGroundingStage(inboundCtx(), makeGen({ knowledgeGap: true }))
+    expect(result).toBeNull()
+    expect(verifyGroundingMock).not.toHaveBeenCalled()
+  })
+
+  it('returns null and logs a warning when the model call degrades (fail-open)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({ ok: false, error: 'model unavailable' })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toBeNull()
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('returns null and does NOT fire the PostHog event when nothing is found', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toBeNull()
+    expect(captureUngroundedClaimCaughtMock).not.toHaveBeenCalled()
+  })
+
+  it('returns the finding and fires the PostHog event when the backstop catches something', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        hasUngroundedClaim: true,
+        ungroundedClaims: ['invents a wifi network name and password'],
+        promptVersion: 'v1.0.0',
+      },
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ claims: ['invents a wifi network name and password'] })
+    expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
+    const call = captureUngroundedClaimCaughtMock.mock.calls[0][0]
+    expect(call.ungroundedClaims).toEqual(['invents a wifi network name and password'])
+    expect(call.replyBody).toBe('Le Mils Guest')
+  })
+
+  it('passes ctx.knowledgeCorpus through to the verifier as knowledgeChunks', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+    })
+    const chunk = {
+      id: 'k1',
+      knowledgeCorpusId: 'kc1',
+      text: 'chunk',
+      sourceType: 'x',
+      confidence: 0.9,
+      primaryTags: [],
+      secondaryTags: [],
+      similarity: 0.6,
+    }
+    await verifyGroundingStage(inboundCtx({ knowledgeCorpus: [chunk] as RuntimeContext['knowledgeCorpus'] }), makeGen())
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
+    const args = verifyGroundingMock.mock.calls[0][0] as { knowledgeChunks?: unknown[] }
+    expect(args.knowledgeChunks).toEqual([chunk])
+  })
+})
+
 describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)', () => {
   const gapCard = {
     id: 'gap-card-1',
@@ -1882,6 +2190,18 @@ describe('isKnowledgeGapCard (TAC-308)', () => {
   it('identifies a fired card by its review_reason', () => {
     expect(
       isKnowledgeGapCard({ pending_until: null, review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP }),
+    ).toBe(true)
+  })
+
+  // TAC-350: a card the backstop caught must get identical eviction
+  // protection to a self-reported one — otherwise a regen could silently
+  // lose its clock the moment the label won by a co-firing trigger changed.
+  it('identifies a fired backstop card by its review_reason', () => {
+    expect(
+      isKnowledgeGapCard({
+        pending_until: null,
+        review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+      }),
     ).toBe(true)
   })
 

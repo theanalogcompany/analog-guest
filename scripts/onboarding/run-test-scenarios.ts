@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { Database } from '@/db/types'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from '@/lib/agent/crisis-safety'
-import { classifyStage, generateStage, retrieveCorpusStage, retrieveKnowledgeStage } from '@/lib/agent/stages'
+import {
+  classifyStage,
+  generateStage,
+  retrieveCorpusStage,
+  retrieveKnowledgeStage,
+  verifyGroundingStage,
+} from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
 import { computeGuestState, type GuestState } from '@/lib/recognition'
@@ -487,9 +493,17 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
       }
     }
 
+    // TAC-350: harness parity with handle-inbound.ts's grounding backstop —
+    // called in the same place, same skip condition (verifyGroundingStage
+    // itself checks knowledgeGap / currentMessage / isDemo), so a scenario
+    // that trips the backstop is graded against the actual gate the shipped
+    // pipeline would apply, not against a knowledgeGap-only decision the
+    // real pipeline no longer makes on its own.
+    const groundingBackstop = await verifyGroundingStage(ctx, outcome.result)
+
     // status === 'success' — evaluate the approval decision. Decision only:
     // this never persists a draft, dispatches to Sendblue, or fires a push.
-    const decision = await evaluateApprovalDecision(ctx, outcome.result)
+    const decision = await evaluateApprovalDecision(ctx, outcome.result, groundingBackstop)
     const generated = outcome.result
 
     if (decision.action === 'send') {

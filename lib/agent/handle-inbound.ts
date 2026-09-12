@@ -35,6 +35,7 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
+  verifyGroundingStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -781,11 +782,39 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
     }
 
+    // TAC-350: independent grounding backstop. Only ever calls the model when
+    // the generation itself claimed confidence (knowledgeGap=false) on an
+    // inbound, non-demo turn — see verifyGroundingStage for the full skip
+    // list. Runs BEFORE the approval gate because its finding feeds directly
+    // into the gate's own knowledge-gap-card handling (body blanking, clock
+    // arming, protected-card carve-out) via the isGapTurn union of both
+    // signals.
+    const verifySpan = trace.span('verify_grounding', { knowledgeGap: gen.result.knowledgeGap })
+    const groundingBackstop = await verifyGroundingStage(ctx, gen.result)
+    verifySpan.end({
+      output: {
+        ran: gen.result.knowledgeGap === false && ctx.guest.isDemo !== true,
+        hasUngroundedClaim: groundingBackstop !== null,
+        claimCount: groundingBackstop?.claims.length ?? 0,
+      },
+      content: trace.captureContent
+        ? { ungroundedClaims: groundingBackstop?.claims ?? [] }
+        : undefined,
+    })
+    if (groundingBackstop !== null) {
+      console.warn('[agent] inbound grounding backstop caught an unverified claim', {
+        agentRunId,
+        claimCount: groundingBackstop.claims.length,
+      })
+    }
+
     // TAC-212: approval-policy gate decides send vs. queue. Composable —
     // 4 triggers (fidelity_below_auto_send_floor, model_flagged,
     // comp_regex_backstop, previous_pending_held); any one queues.
     // TAC-297: 5th trigger commitment_type_gated also lands here.
-    const approval = await applyApprovalPolicyStage(ctx, gen.result)
+    // TAC-350: 6th (independent) trigger knowledge_gap_backstop also lands
+    // here, fed by groundingBackstop above.
+    const approval = await applyApprovalPolicyStage(ctx, gen.result, groundingBackstop)
     console.log('[agent] inbound approval decision', {
       agentRunId,
       action: approval.action,

@@ -16,6 +16,7 @@ import { filterRunnableScenarios, loadExistingSheet } from './onboarding/merge-s
 import { checkCleanState, clearMessagingCredentials, countGuardrailState, diffGuardrailState } from './onboarding/preflight'
 import { buildReportRows } from './onboarding/report-sheet'
 import { runScenario, seedSyntheticGuests, SYNTHETIC_PHONES, type ScenarioResult } from './onboarding/run-test-scenarios'
+import { buildRunRows, type RunRow } from './onboarding/run-sheet'
 import type { ScenarioSheetRow } from './onboarding/scenario-schema'
 import {
   buildReviewList,
@@ -28,6 +29,7 @@ import {
 const SHEET_NAME_PREFIX = '07-'
 const DEFAULT_CONCURRENCY = 4
 const REPORT_TAB = 'Report'
+const RUN_TAB = 'Run'
 
 interface ParsedArgs {
   slug: string
@@ -317,6 +319,44 @@ async function main(): Promise<void> {
   await ensureTabExists(sheets, sheetFile.id, REPORT_TAB)
   await writeTabValues(sheets, sheetFile.id, REPORT_TAB, reportRows)
   console.log(`[run-test-scenarios] wrote Report tab (${reportRows.length} rows) to sheet ${sheetFile.id}`)
+
+  // ---- Run tab: one row per scenario, the full detail Report's samples/
+  // caps leave out. Overwritten wholesale each run (writeTabValues clears
+  // the tab first), same as Report — this is a snapshot of the LATEST run,
+  // not an accumulating history.
+  const runRows: RunRow[] = graded.map((g): RunRow => {
+    const voicePass = g.deterministicVoice.pass && g.llmGrade.voiceVerdict === 'pass'
+    const voiceReasonParts = [...g.deterministicVoice.findings.map((f) => `${f.check}: ${f.detail}`), g.llmGrade.voiceReason].filter(
+      (s): s is string => Boolean(s),
+    )
+    return {
+      sampleId: g.result.sampleId,
+      topic: g.result.topic,
+      category: g.result.category,
+      scenarioSource: g.result.scenarioSource,
+      mode: g.result.mode,
+      guestState: g.result.guestState,
+      inboundMessage: g.result.inboundMessage,
+      outcome: g.result.outcome,
+      route: g.result.route ?? '',
+      primaryTrigger: g.result.primaryTrigger ?? '',
+      allTriggers: (g.result.triggers ?? []).join(', '),
+      voiceFidelity: g.result.voiceFidelity !== null ? g.result.voiceFidelity.toFixed(2) : '',
+      replyBody: g.result.replyBody ?? '',
+      knowledgeVerdict: g.llmGrade.knowledgeVerdict,
+      knowledgeReason: g.llmGrade.knowledgeReason,
+      voiceVerdict: voicePass ? 'pass' : 'fail',
+      voiceReason: voiceReasonParts.join(' | '),
+      routingVerdict: g.routing.verdict,
+      expectedRoute: g.routing.expectedRoute,
+      actualRoute: g.routing.actualRoute ?? '',
+      expectedBehaviorVerdict: g.llmGrade.expectedBehaviorVerdict,
+      expectedBehaviorReason: g.llmGrade.expectedBehaviorReason,
+    }
+  })
+  await ensureTabExists(sheets, sheetFile.id, RUN_TAB)
+  await writeTabValues(sheets, sheetFile.id, RUN_TAB, buildRunRows(runRows))
+  console.log(`[run-test-scenarios] wrote Run tab (${runRows.length} rows) to sheet ${sheetFile.id}`)
 
   printReport({
     slug,

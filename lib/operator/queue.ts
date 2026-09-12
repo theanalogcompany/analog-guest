@@ -92,6 +92,12 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // this is the one card in the queue where a guest is actively waiting on a
   // clock — if it isn't answered, a holding message goes out instead.
   knowledge_gap: 'Waiting on an answer',
+  // TAC-350: independent grounding backstop caught a claim the model didn't
+  // self-report. Distinct label from knowledge_gap so the operator can tell
+  // "the model was honest about not knowing" from "the model stated
+  // something and got overridden" — same clock/blank-body treatment either
+  // way (see isKnowledgeGapCard in lib/agent/stages.ts).
+  knowledge_gap_backstop: 'Reply contained an unverified claim',
 }
 
 const REVIEW_REASON_FALLBACK = 'Needs review'

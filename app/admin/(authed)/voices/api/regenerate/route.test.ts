@@ -44,6 +44,9 @@ describe('POST /admin/voices/api/regenerate', () => {
         attempts: 1,
         attemptScores: [0.85],
         generatedAt: new Date('2026-05-08T10:00:00.000Z'),
+        knowledgeGap: false,
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
       },
     })
 
@@ -61,7 +64,38 @@ describe('POST /admin/voices/api/regenerate', () => {
       body: 'yeah. oat is on.',
       voiceFidelity: 0.85,
       attempts: 1,
+      knowledgeGap: false,
+      hasUngroundedClaim: false,
+      ungroundedClaims: [],
     })
+  })
+
+  // TAC-350
+  it('surfaces a caught ungrounded claim through the response', async () => {
+    vi.mocked(regenerateWithCritique).mockResolvedValue({
+      ok: true,
+      data: {
+        body: 'the wifi is Le Mils Guest',
+        voiceFidelity: 0.85,
+        attempts: 1,
+        attemptScores: [0.85],
+        generatedAt: new Date('2026-05-08T10:00:00.000Z'),
+        knowledgeGap: false,
+        hasUngroundedClaim: true,
+        ungroundedClaims: ['invents a wifi network name not in venue facts'],
+      },
+    })
+
+    const res = await POST(
+      buildRequest({
+        venueId: VENUE_ID,
+        originalMessageId: MSG_ID,
+        critique: 'x',
+      }),
+    )
+    const json = await res.json()
+    expect(json.hasUngroundedClaim).toBe(true)
+    expect(json.ungroundedClaims).toEqual(['invents a wifi network name not in venue facts'])
   })
 
   it('400 on empty critique', async () => {
