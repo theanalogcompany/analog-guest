@@ -22,6 +22,7 @@ import {
   classifyMessage,
   generateMessage,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
+  verifyGrounding,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
@@ -50,6 +51,24 @@ export interface RegenerateWithCritiqueResult {
   attempts: number
   attemptScores: number[]
   generatedAt: Date
+  // TAC-350: the model's own self-report, surfaced here for the first time
+  // (generateMessage already computed it; this path just wasn't reading it).
+  knowledgeGap: boolean
+  // TAC-350: independent grounding backstop, same underlying check
+  // (lib/ai/verify-grounding.ts) as lib/agent/stages.ts's
+  // verifyGroundingStage, but ADVISORY here rather than gating and with a
+  // NARROWER skip condition — this path only checks knowledgeGap, not
+  // currentMessage-null or isDemo (verifyGroundingStage's other two skips),
+  // because a regen always has a real triggering inbound and there's no
+  // send/queue decision here to protect a demo guest from. A demo guest's
+  // regen does still pay for the extra Haiku call; accepted, since regen is
+  // an operator-initiated, low-volume action, not live guest traffic. There
+  // is no send/queue decision on the regen path to gate — the operator
+  // reviews the raw attempt directly — so this is a signal for the Voices
+  // UI to surface, not a trigger. false when the check didn't run (gap
+  // already self-reported) or ran and found nothing.
+  hasUngroundedClaim: boolean
+  ungroundedClaims: string[]
 }
 
 export type RegenerateWithCritiqueOutcome =
@@ -332,6 +351,33 @@ export async function regenerateWithCritique(
     return { ok: false, errorCode: 'generate_failed', error: gen.error }
   }
 
+  // 8. TAC-350: independent grounding backstop — only spend the extra Haiku
+  // call when the model didn't already self-report a gap (see
+  // RegenerateWithCritiqueResult's own comment for how this narrows
+  // verifyGroundingStage's full skip condition). No PostHog event here
+  // (analytics isolation, see this file's header comment) — the operator is
+  // staring at the screen and IS the observability surface for regen, same
+  // reasoning the route's own header gives for skipping PostHog/Langfuse
+  // entirely on this path.
+  let hasUngroundedClaim = false
+  let ungroundedClaims: string[] = []
+  if (!gen.data.knowledgeGap) {
+    const verify = await verifyGrounding({
+      inboundBody: load.data.inbound.body,
+      replyBody: gen.data.body,
+      venueInfo: ctx.venue.venueInfo,
+      knowledgeChunks,
+    })
+    if (verify.ok) {
+      hasUngroundedClaim = verify.data.hasUngroundedClaim
+      ungroundedClaims = verify.data.ungroundedClaims
+    } else {
+      console.warn(
+        `[voices/regen] grounding backstop degraded for venue=${input.venueId}: ${verify.error}`,
+      )
+    }
+  }
+
   return {
     ok: true,
     data: {
@@ -340,6 +386,9 @@ export async function regenerateWithCritique(
       attempts: gen.data.attempts,
       attemptScores: gen.data.attemptScores,
       generatedAt: new Date(),
+      knowledgeGap: gen.data.knowledgeGap,
+      hasUngroundedClaim,
+      ungroundedClaims,
     },
   }
 }

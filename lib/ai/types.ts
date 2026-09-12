@@ -506,3 +506,24 @@ export type ClassifyIntentionPromptsResult = {
   raisedKeys: string[]
   promptVersion: string
 }
+
+// TAC-350: independent grounding backstop, deliberately decoupled from the
+// classify/generate contract — same posture as ExtractReportedOrderInput
+// above. venueInfo + knowledgeChunks are the SAME values the orchestrator
+// passed to generateMessage for this turn (not re-fetched), so "what the
+// verifier checks against" can never drift from "what the generator saw."
+// knowledgeChunks omitted/undefined is treated as [] (no knowledge retrieved
+// or retrieval gated off) — verify-grounding.ts renders the same explicit
+// no-match framing knowledgeChunksToProse uses for generation.
+export type VerifyGroundingInput = {
+  inboundBody: string
+  replyBody: string
+  venueInfo: VenueInfo
+  knowledgeChunks?: KnowledgeCorpusChunk[]
+}
+
+export type VerifyGroundingResult = {
+  hasUngroundedClaim: boolean
+  ungroundedClaims: string[]
+  promptVersion: string
+}

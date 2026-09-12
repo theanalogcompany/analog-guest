@@ -26,6 +26,10 @@ const retrieveCorpusStageMock = vi.fn()
 const retrieveKnowledgeStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
+// TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
+// every test in this file that doesn't care about it — `clearAllMocks()`
+// (used below) clears call history but not this default implementation.
+const verifyGroundingStageMock = vi.fn().mockResolvedValue(null)
 const findPendingDraftMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
@@ -75,6 +79,7 @@ vi.mock('./stages', async () => {
     shouldRetrieveKnowledge: () => false,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+    verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     findPendingDraft: (...a: unknown[]) => findPendingDraftMock(...a),
   }
 })
@@ -626,5 +631,50 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
     scheduleAndSendMock.mockRejectedValue(new Error('sendblue down'))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'failed', stage: 'send' })
+  })
+})
+
+// TAC-350: code-review follow-up. Every other test in this file relies on
+// verifyGroundingStageMock's default (null) — nothing previously asserted
+// that a NON-null finding actually reaches applyApprovalPolicyStage's third
+// argument. Without this test, a future refactor that dropped
+// `groundingBackstop` from the handleInbound call site would silently
+// disable the backstop for all live inbound traffic while every other test
+// in this file (and every pure-function test in stages.test.ts) kept passing.
+describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
+  it('threads a non-null verifyGroundingStage finding into applyApprovalPolicyStage as the third argument', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockResolvedValueOnce({
+      claims: ['invents a wifi network name not in venue facts'],
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP],
+      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      pendingUntil: new Date(),
+      blankBody: true,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
+    const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toEqual({
+      claims: ['invents a wifi network name not in venue facts'],
+    })
+  })
+
+  it('passes null through when the backstop finds nothing', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-2', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
+    const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toBeNull()
   })
 })

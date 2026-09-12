@@ -18,6 +18,7 @@ vi.mock('@/lib/agent/stages', () => ({
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
+  verifyGrounding: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
   retrieveContext: vi.fn(),
@@ -29,10 +30,18 @@ vi.mock('@/lib/observability', () => ({
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import { buildAiRuntime } from '@/lib/agent/stages'
-import { classifyMessage, generateMessage } from '@/lib/ai'
+import { classifyMessage, generateMessage, verifyGrounding } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
+
+// TAC-350: default grounding-backstop result — "nothing to flag" — used by
+// every describe block below unless a test explicitly overrides it to
+// exercise the catch path.
+const NO_UNGROUNDED_CLAIM = {
+  ok: true as const,
+  data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+}
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OUTBOUND_ID = '22222222-2222-4222-8222-222222222222'
@@ -140,6 +149,7 @@ beforeEach(() => {
   vi.mocked(generateMessage).mockReset()
   vi.mocked(retrieveContext).mockReset()
   vi.mocked(retrieveKnowledgeContext).mockReset()
+  vi.mocked(verifyGrounding).mockReset()
 })
 
 afterEach(() => {
@@ -321,6 +331,7 @@ describe('regenerateWithCritique — happy path', () => {
         dashViolationPersisted: false,
       },
     })
+    vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
   })
 
   it('threads historyEndIso = inbound.created_at into buildRuntimeContext', async () => {
@@ -371,6 +382,96 @@ describe('regenerateWithCritique — happy path', () => {
     expect(r.data.attempts).toBe(1)
     expect(r.data.attemptScores).toEqual([0.85])
     expect(r.data.generatedAt).toBeInstanceOf(Date)
+  })
+
+  // TAC-350
+  it('surfaces knowledgeGap and calls the grounding backstop when it is false', async () => {
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(verifyGrounding).toHaveBeenCalledTimes(1)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.knowledgeGap).toBe(false)
+    expect(r.data.hasUngroundedClaim).toBe(false)
+    expect(r.data.ungroundedClaims).toEqual([])
+  })
+
+  it('surfaces a caught ungrounded claim from the backstop', async () => {
+    vi.mocked(verifyGrounding).mockResolvedValue({
+      ok: true,
+      data: {
+        hasUngroundedClaim: true,
+        ungroundedClaims: ['invents an oat milk surcharge not in venue facts'],
+        promptVersion: 'v1.0.0',
+      },
+    })
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.hasUngroundedClaim).toBe(true)
+    expect(r.data.ungroundedClaims).toEqual([
+      'invents an oat milk surcharge not in venue facts',
+    ])
+  })
+
+  it('skips the grounding backstop entirely when the model already self-reported a gap', async () => {
+    vi.mocked(generateMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        body: 'not sure, let me check',
+        voiceFidelity: 0.85,
+        reasoning: 'good',
+        requiresOperatorApproval: false,
+        approvalReason: '',
+        complaintIntent: 'none' as const,
+        knowledgeGap: true,
+        contextUpdate: {},
+        commitment: {},
+        arrivalCapture: {},
+        attempts: 1,
+        attemptScores: [0.85],
+        attemptHistory: [],
+        systemPrompt: '',
+        userPrompt: '',
+        promptVersion: 'v1.8.0',
+        dashViolationPersisted: false,
+      },
+    })
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(verifyGrounding).not.toHaveBeenCalled()
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.knowledgeGap).toBe(true)
+    expect(r.data.hasUngroundedClaim).toBe(false)
+    expect(r.data.ungroundedClaims).toEqual([])
+  })
+
+  it('degrades gracefully (hasUngroundedClaim=false) when the backstop call fails', async () => {
+    vi.mocked(verifyGrounding).mockResolvedValue({
+      ok: false,
+      error: 'model unavailable',
+      errorCode: 'ai_verify_grounding_failed',
+    })
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.hasUngroundedClaim).toBe(false)
+    expect(r.data.ungroundedClaims).toEqual([])
   })
 })
 
@@ -429,6 +530,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         dashViolationPersisted: false,
       },
     })
+    vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
   })
 
   it('threads the mapped preference into retrieveKnowledgeContext for mechanic_request', async () => {

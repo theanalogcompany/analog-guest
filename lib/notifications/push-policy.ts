@@ -103,6 +103,12 @@ const PUSH_POLICY = {
   // never sees a holding note) reachable at all.
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'push',
 
+  // TAC-350. Same clock, same urgency as KNOWLEDGE_GAP above — the
+  // independent grounding backstop caught a claim the model didn't
+  // self-report, and the card carries the identical pending_until timer.
+  // No reason for this one to be quieter than the self-reported case.
+  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator

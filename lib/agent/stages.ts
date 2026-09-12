@@ -4,6 +4,7 @@ import {
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
   captureRegenerationTriggered,
+  captureUngroundedClaimCaught,
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
@@ -19,6 +20,7 @@ import {
   type GenerateMessageResult,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
+  verifyGrounding,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
@@ -50,6 +52,42 @@ export const SEND_FIDELITY_FLOOR = 0.4
 export const AUTO_SEND_FIDELITY_FLOOR = 0.6
 export const CORPUS_RETRIEVE_LIMIT = 8
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
+
+/**
+ * TAC-350: minimum cosine similarity for a knowledge_corpus chunk to be
+ * treated as actually relevant to the guest's question, rather than padding.
+ *
+ * `lib/rag/retrieve.ts`'s own `SIMILARITY_FLOOR` (0.3) is a much looser bar
+ * shared with voice-corpus retrieval, and in practice it almost never
+ * excludes anything once a venue's knowledge corpus has more than a handful
+ * of rows — every one of 12 representative queries run against Le Mil's live
+ * corpus during the TAC-350 audit returned a full KNOWLEDGE_RETRIEVE_LIMIT
+ * chunks above 0.3, including for a genuinely unanswerable question (wifi
+ * password) where every returned chunk was topically unrelated. That matters
+ * because `knowledgeChunksToProse` frames whatever it's given as "facts...
+ * you can ground replies in" — presenting four irrelevant chunks under that
+ * header on a genuinely unanswerable question invites fabrication instead of
+ * the "no specific venue knowledge matched" framing that should fire.
+ *
+ * 0.5 is calibrated against that same audit data: across 7 queries with a
+ * genuinely on-topic answer in Le Mil's corpus (menu items, sourcing,
+ * catering, pastries, roasting cadence) the weakest top match was 0.5170;
+ * across 5 genuinely off-topic queries (wifi, bathroom, weather, dog-
+ * friendly, parking) the strongest top match was 0.4900 — a clean, if
+ * narrow, empirical gap. This is calibrated against ONE venue's corpus and
+ * embedding distribution; revisit if a differently-sized or differently-
+ * written corpus shows the gap doesn't hold.
+ *
+ * Applied per-chunk (not just as an all-or-nothing top-match gate) so a
+ * strong match isn't diluted by weaker padding chunks riding along beside it.
+ *
+ * Side effect worth knowing: the tag-preference fallback retry in
+ * retrieveKnowledgeStage now fires on zero RELEVANT results rather than zero
+ * RETURNED results, so it fires measurably more often than before this floor
+ * existed — an accepted cost (one extra Voyage embed call, no caching between
+ * the two calls) of a floor calibrated against real production data.
+ */
+export const KNOWLEDGE_RELEVANCE_FLOOR = 0.5
 
 /**
  * TAC-308: how long an operator has to answer a knowledge-gap card before the
@@ -112,6 +150,24 @@ export const APPROVAL_TRIGGERS = {
   // elapses, the timer cron sends the guest a holding message. Inbound-only:
   // a followup has no guest question to leave unanswered.
   KNOWLEDGE_GAP: 'knowledge_gap',
+  // TAC-350: independent grounding backstop. `KNOWLEDGE_GAP` is pure
+  // self-report (GenerateMessageResult.knowledgeGap) — the TAC-350 audit
+  // found 8/8 observed fabrications had knowledgeGap=false, so self-report
+  // alone missed every one of them. This trigger fires from a SECOND,
+  // independent check (verifyGroundingStage / lib/ai/verify-grounding.ts)
+  // that inspects the reply against the same source material the generator
+  // saw, and is only ever invoked when the model's own self-report was
+  // false — same relationship COMP_REGEX_BACKSTOP has to MODEL_FLAGGED.
+  // Deliberately a DISTINCT trigger rather than folding into KNOWLEDGE_GAP,
+  // so analytics can separate "the model was honest about not knowing" from
+  // "the model was caught stating something it shouldn't have." The two are
+  // mutually exclusive on any single turn (this trigger only runs when
+  // knowledgeGap is false), but every OTHER piece of knowledge-gap-card
+  // behavior — body blanking, clock arming, protected-card carve-out, the
+  // SEND_FIDELITY_FLOOR exemption — must treat both triggers identically
+  // regardless of which one fires. See isKnowledgeGapCard and
+  // knowledgeGapWillQueue's sibling logic below.
+  KNOWLEDGE_GAP_BACKSTOP: 'knowledge_gap_backstop',
 } as const
 
 /**
@@ -151,6 +207,15 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // and above everything else because a knowledge-gap card is the only card
   // with a running clock and a guest sitting in silence. A gap-only turn —
   // the overwhelmingly common case — still wins the label.
+  //
+  // TAC-350: KNOWLEDGE_GAP_BACKSTOP ranks ABOVE the self-reported
+  // KNOWLEDGE_GAP, mirroring COMP_REGEX_BACKSTOP's rank above MODEL_FLAGGED
+  // — a caught claim is a more specific, more useful operator label than an
+  // honest "I don't know." The two can never co-fire on the same turn (the
+  // backstop only runs when knowledgeGap is already false), so this ordering
+  // is a documentation choice today, not a live tie-break — but a real one,
+  // consistent with the existing backstop-outranks-self-report pattern.
+  APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
   APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
@@ -229,6 +294,12 @@ export function knowledgeGapWillQueue(
  * longer recognized. Rare (the model has to do both in one turn) and it
  * degrades to pre-TAC-308 behavior rather than to something worse. Closing it
  * needs a column, which the ticket ruled out.
+ *
+ * TAC-350: the review_reason leg checks BOTH `knowledge_gap` (self-reported)
+ * and `knowledge_gap_backstop` (independently caught) — a card protected by
+ * the backstop trigger must get identical eviction protection to one the
+ * model flagged itself, or a regen of a backstop-caught card would silently
+ * lose its clock the moment the label won by a co-firing trigger changed.
  */
 export function isKnowledgeGapCard(row: {
   review_reason?: string | null
@@ -243,7 +314,8 @@ export function isKnowledgeGapCard(row: {
   // pre-TAC-308 behavior, not the new one.
   return (
     typeof row.pending_until === 'string' ||
-    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP
+    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP ||
+    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP
   )
 }
 
@@ -407,6 +479,13 @@ export function shouldRetrieveKnowledge(ctx: RuntimeContext): boolean {
  * preference yields zero matches (sparse corpus for that topic), retry
  * without the filter — cosine on the raw query is the universal floor.
  */
+// TAC-350: drop chunks that cleared lib/rag's looser SIMILARITY_FLOOR but
+// aren't actually relevant enough to this specific query to ground an
+// answer. See KNOWLEDGE_RELEVANCE_FLOOR's own comment for the calibration.
+function filterByRelevance(chunks: KnowledgeMatch[]): KnowledgeMatch[] {
+  return chunks.filter((c) => c.similarity >= KNOWLEDGE_RELEVANCE_FLOOR)
+}
+
 export async function retrieveKnowledgeStage(
   ctx: RuntimeContext,
   category: MessageCategory | null,
@@ -433,7 +512,13 @@ export async function retrieveKnowledgeStage(
     return []
   }
 
-  if (preference !== undefined && r.data.length === 0) {
+  const filtered = filterByRelevance(r.data)
+
+  // TAC-350: the zero-result fallback now triggers on zero RELEVANT results,
+  // not just zero returned rows — a tag-filtered search whose only hits are
+  // below the relevance floor deserves the same untagged cosine-only retry a
+  // literally-empty result already got, before giving up entirely.
+  if (preference !== undefined && filtered.length === 0) {
     const fallback = await retrieveKnowledgeContext({
       venueId: ctx.venue.id,
       query,
@@ -445,10 +530,10 @@ export async function retrieveKnowledgeStage(
       )
       return []
     }
-    return fallback.data
+    return filterByRelevance(fallback.data)
   }
 
-  return r.data
+  return filtered
 }
 
 export type GenerateOutcome =
@@ -590,6 +675,81 @@ export async function generateStage(
 }
 
 /**
+ * TAC-350: what verifyGroundingStage found, when it found something. `null`
+ * from the stage means "no backstop signal" — covers being skipped entirely,
+ * the AI call degrading, and the AI call running and finding nothing to
+ * flag. The caller (applyApprovalPolicyStage) only ever needs to know
+ * whether there's a finding to act on, never why there isn't one.
+ */
+export type GroundingBackstopFinding = { claims: string[] }
+
+/**
+ * TAC-350: independent grounding backstop. Runs a second, deterministic-in-
+ * spirit check (lib/ai/verify-grounding.ts) against a reply the model has
+ * ALREADY self-certified as grounded (`knowledgeGap === false`) — the exact
+ * population the TAC-350 audit found fabricating: all 8 observed cases had
+ * knowledgeGap=false, so self-report alone caught none of them. Same
+ * relationship the COMP_REGEX_BACKSTOP trigger has to MODEL_FLAGGED — a
+ * second, independent check for a self-report that's already proven
+ * unreliable under real traffic.
+ *
+ * Skips (returns null without calling the model) when:
+ *   - not inbound (ctx.currentMessage === null) — a followup isn't
+ *     answering a specific guest question, mirrors knowledgeGapWillQueue.
+ *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
+ *     trigger, so spending a Haiku call here buys nothing.
+ *   - the model already self-reported knowledgeGap=true — trust it; this is
+ *     also what keeps the added cost to roughly half of inbound traffic
+ *     (only turns where the model claims confidence pay for the check).
+ *
+ * Fails OPEN on an AI-call error (network hiccup, Voyage-shaped failure,
+ * etc.) — logged via console.warn, not fireRedAlert. This is a SECOND,
+ * additional safety net on top of the model's own self-report; a failure
+ * here degrades to exactly today's pre-TAC-350 behavior (trust the model),
+ * never to something worse. Queuing every transient failure closed would
+ * turn a rare Haiku hiccup into a broad, unrelated availability regression
+ * for a check whose entire population already passed self-report.
+ *
+ * Deliberately reuses the SAME venueInfo + knowledgeCorpus the generator saw
+ * (ctx.venue.venueInfo, ctx.knowledgeCorpus) rather than re-fetching either —
+ * "what the verifier checks against" must never drift from "what the
+ * generator actually had."
+ */
+export async function verifyGroundingStage(
+  ctx: Pick<RuntimeContext, 'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus'>,
+  generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body'>,
+): Promise<GroundingBackstopFinding | null> {
+  if (ctx.currentMessage === null) return null
+  if (ctx.guest.isDemo === true) return null
+  if (generation.knowledgeGap === true) return null
+
+  const r = await verifyGrounding({
+    inboundBody: ctx.currentMessage.body,
+    replyBody: generation.body,
+    venueInfo: ctx.venue.venueInfo,
+    knowledgeChunks: ctx.knowledgeCorpus ?? undefined,
+  })
+  if (!r.ok) {
+    console.warn(
+      `[agent] grounding backstop degraded for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    return null
+  }
+  if (!r.data.hasUngroundedClaim) return null
+
+  await captureUngroundedClaimCaught({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    inboundBody: ctx.currentMessage.body,
+    replyBody: generation.body,
+    ungroundedClaims: r.data.ungroundedClaims,
+  })
+
+  return { claims: r.data.ungroundedClaims }
+}
+
+/**
  * TAC-212 approval-policy gate. Runs after generateStage returns success;
  * decides whether to dispatch via Sendblue (action='send') or persist as a
  * pending draft for operator review (action='queue').
@@ -676,6 +836,12 @@ export type ApprovalDecision =
 export async function applyApprovalPolicyStage(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
+  // TAC-350: result of verifyGroundingStage, run by the orchestrator between
+  // generateStage and this gate (needs an async AI call the gate itself
+  // can't make mid-synchronous-evaluation). `null` when there's no backstop
+  // signal — includes every skip case (followup, demo, model already
+  // self-reported) as well as a clean AI-call result with nothing flagged.
+  groundingBackstop: GroundingBackstopFinding | null = null,
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -786,6 +952,24 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
   }
 
+  // Trigger 9b (TAC-350): independent grounding backstop. groundingBackstop
+  // is only ever non-null when the orchestrator ran verifyGroundingStage AND
+  // it found something — which itself only happens when generation.knowledgeGap
+  // was false. Mutually exclusive with trigger 9 by construction, same as
+  // COMP_REGEX_BACKSTOP is independent of MODEL_FLAGGED.
+  const backstopFired = groundingBackstop !== null
+  if (backstopFired) {
+    triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+  }
+
+  // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
+  // covering EITHER the self-reported trigger or the independent backstop.
+  // Every place below that used to key on knowledgeGapFired alone (body
+  // blanking, clock arming, the protected-card drop) now keys on this
+  // instead, so a caught-but-unflagged fabrication gets identical treatment
+  // to an honest self-report — never sent, always queued, always blanked.
+  const isGapTurn = knowledgeGapFired || backstopFired
+
   // ---- Pending-row resolution (TAC-308) ----
   //
   // Trigger 4's lookup ran in enumeration order above; its PUSH happens here,
@@ -852,7 +1036,10 @@ export async function applyApprovalPolicyStage(
   // for some reason OTHER than gapping itself. Regen-in-place would overwrite
   // the question an operator is about to answer, and migration 020 forbids a
   // second pending row, so the draft is discarded rather than stored.
-  if (existingPending !== null && existingIsKnowledgeGapCard && !knowledgeGapFired) {
+  // TAC-350: `!isGapTurn` (not `!knowledgeGapFired`) — a turn the backstop
+  // caught is just as much "gapping itself" as a self-reported one, and must
+  // NOT be dropped as if it were an unrelated reason to queue.
+  if (existingPending !== null && existingIsKnowledgeGapCard && !isGapTurn) {
     return {
       action: 'drop',
       reason: 'knowledge_gap_card_protected',
@@ -875,8 +1062,12 @@ export async function applyApprovalPolicyStage(
   //     card as of this write, so it needs a clock; that overwrite is the
   //     pre-existing TAC-264 clobber, out of scope here)
   //   - any non-gap queue                   → undefined, column untouched
+  //
+  // TAC-350: keyed on isGapTurn, not knowledgeGapFired alone — a fresh
+  // backstop catch arms the clock exactly like a fresh self-reported gap;
+  // both are "the guest asked something and got no grounded answer."
   const pendingUntil =
-    knowledgeGapFired && !existingIsKnowledgeGapCard
+    isGapTurn && !existingIsKnowledgeGapCard
       ? new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
       : undefined
 
@@ -887,7 +1078,11 @@ export async function applyApprovalPolicyStage(
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
     pendingUntil,
-    blankBody: knowledgeGapFired,
+    // TAC-350: blank the body on a backstop catch too — the whole point is
+    // that this text is an unverified claim; showing it to the operator as
+    // a one-swipe-approvable draft is the exact failure TAC-309 already
+    // fixed for the self-reported case.
+    blankBody: isGapTurn,
   }
 }
 

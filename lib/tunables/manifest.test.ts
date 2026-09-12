@@ -33,7 +33,8 @@ const VALID_TYPES: readonly TunableType[] = [
 
 describe('TUNABLES manifest', () => {
   it('contains exactly 46 entries (locks the audit set)', () => {
-    expect(TUNABLES.length).toBe(48)
+    // TAC-350 added knowledge_relevance_floor.
+    expect(TUNABLES.length).toBe(49)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -55,7 +56,8 @@ describe('TUNABLES manifest', () => {
       classification: 3,
       timing: 8,
       recognition: 8,
-      retrieval: 10,
+      // TAC-350 added knowledge_relevance_floor.
+      retrieval: 11,
       mechanics: 0,
     })
   })

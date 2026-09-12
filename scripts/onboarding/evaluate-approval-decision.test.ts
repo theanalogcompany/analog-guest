@@ -69,7 +69,15 @@ describe('evaluate-approval-decision structural invariants (TAC-347)', () => {
     // Positive assertion first: the whole point of this module is to be
     // small enough that a human can verify it by eye. If this list grows,
     // that's the signal the module has stopped being decision-only.
-    expect(imports).toEqual(new Set(['applyApprovalPolicyStage', 'ApprovalDecision', 'RuntimeContext', 'GenerateMessageResult']))
+    expect(imports).toEqual(
+      new Set([
+        'applyApprovalPolicyStage',
+        'ApprovalDecision',
+        'GroundingBackstopFinding',
+        'RuntimeContext',
+        'GenerateMessageResult',
+      ]),
+    )
   })
 
   for (const name of BANNED_IMPORTS) {

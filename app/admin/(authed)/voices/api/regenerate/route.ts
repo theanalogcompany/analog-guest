@@ -65,5 +65,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     attempts: result.data.attempts,
     attemptScores: result.data.attemptScores,
     generatedAt: result.data.generatedAt.toISOString(),
+    // TAC-350: advisory grounding signals — the Voices playground can flag
+    // these to the operator, but nothing on this path gates or blanks
+    // anything (the operator reviews the raw attempt directly).
+    knowledgeGap: result.data.knowledgeGap,
+    hasUngroundedClaim: result.data.hasUngroundedClaim,
+    ungroundedClaims: result.data.ungroundedClaims,
   })
 }

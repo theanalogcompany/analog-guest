@@ -22,6 +22,7 @@ import {
   AUTO_SEND_FIDELITY_FLOOR,
   CORPUS_RETRIEVE_LIMIT,
   KNOWLEDGE_GAP_WINDOW_MS,
+  KNOWLEDGE_RELEVANCE_FLOOR,
   KNOWLEDGE_RETRIEVE_LIMIT,
   MIN_STRONG_MATCHES,
   SEND_FIDELITY_FLOOR,
@@ -359,6 +360,15 @@ export const TUNABLES = [
     source: 'lib/rag/retrieve.ts',
     description: 'Default min_confidence applied to match_knowledge_corpus when the caller does not override. Excludes low-confidence chunks from the prompt; matches the classifier low-confidence threshold for symmetry.',
     relatedTickets: ['TAC-242'],
+  },
+  {
+    name: 'knowledge_relevance_floor',
+    value: KNOWLEDGE_RELEVANCE_FLOOR,
+    type: 'number',
+    category: 'retrieval',
+    source: 'lib/agent/stages.ts',
+    description: 'Minimum per-query cosine similarity for a knowledge_corpus chunk to be treated as relevant, rather than dropped so the "no venue knowledge matched" framing renders instead. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query relevance).',
+    relatedTickets: ['TAC-350'],
   },
   {
     name: 'knowledge_retrieve_limit',

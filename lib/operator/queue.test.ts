@@ -223,6 +223,9 @@ describe('listPendingQueue', () => {
       ['previous_pending_held', 'Earlier draft still pending'],
       // TAC-308: the only card in the queue with a running clock.
       ['knowledge_gap', 'Waiting on an answer'],
+      // TAC-350: independent grounding backstop, distinct label from
+      // knowledge_gap so the operator can tell the two apart.
+      ['knowledge_gap_backstop', 'Reply contained an unverified claim'],
       ['gibberish_unknown_code', 'Needs review'],
     ])('maps review_reason %s to %s', async (raw, expected) => {
       rpcMock.mockResolvedValue({
