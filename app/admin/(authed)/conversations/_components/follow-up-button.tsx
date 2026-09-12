@@ -41,6 +41,9 @@ import { Textarea } from '@/components/ui/textarea'
 //   on admin.theanalog.company. Mirrors the existing trace fetch route at
 //   /admin/conversations/api/trace/[traceId].)
 //   200 → { success: true, messageId }
+//   200 → { success: true, queued: true, messageId, primaryTrigger }
+//         TAC-307: the approval gate held this draft for review instead of
+//         sending it. Still a success — the draft exists and is in the queue.
 //   422 → { error: 'refused', detail, attemptScores }   — voice fidelity floor
 //   429 → { error: 'rate limited', detail }             — 1/5min rate limit
 //   403 → { error: 'guest opted out' | 'venue not allowed' }
@@ -56,7 +59,7 @@ interface FollowUpButtonProps {
   guestId: string
 }
 
-type Status = 'idle' | 'open' | 'sending' | 'sent' | 'error'
+type Status = 'idle' | 'open' | 'sending' | 'sent' | 'queued' | 'error'
 
 interface ApiErrorBody {
   error?: string
@@ -74,9 +77,10 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
   const sending = status === 'sending'
   const overLimit = hint.length > MAX_HINT_LENGTH
 
-  // Auto-collapse after a successful send. Cleared on unmount or status change.
+  // Auto-collapse after a successful send or queue. Cleared on unmount or
+  // status change.
   useEffect(() => {
-    if (status !== 'sent') return
+    if (status !== 'sent' && status !== 'queued') return
     const t = setTimeout(() => {
       setStatus('idle')
       setHint('')
@@ -99,7 +103,16 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
         }),
       })
       if (res.ok) {
-        setStatus('sent')
+        // TAC-307: a 200 no longer implies the guest received anything. An
+        // approval hold queues the draft for review, and reporting that as
+        // "Sent" would tell the operator a message went out when it didn't.
+        let ok: { queued?: boolean } = {}
+        try {
+          ok = (await res.json()) as { queued?: boolean }
+        } catch {
+          // ignore — treat an unparseable success body as a plain send
+        }
+        setStatus(ok.queued === true ? 'queued' : 'sent')
         setHint('')
         return
       }
@@ -135,12 +148,12 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
     else cancel()
   }
 
-  if (status === 'sent') {
+  if (status === 'sent' || status === 'queued') {
     return (
       <div className="ml-auto self-end mb-1.5">
         <span className="inline-flex items-center gap-1.5 text-sm text-clay-deep px-3 py-1.5">
           <span aria-hidden>✓</span>
-          <span>Sent</span>
+          <span>{status === 'queued' ? 'Queued for review' : 'Sent'}</span>
         </span>
       </div>
     )

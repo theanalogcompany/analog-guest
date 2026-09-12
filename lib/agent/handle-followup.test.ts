@@ -176,8 +176,20 @@ afterEach(() => {
 })
 
 describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
-  it('skips verifyMechanicOfferStage entirely for a manual followup (Follow Up button)', async () => {
+  // TAC-307 REVERSED THIS TEST. It previously asserted that a manual followup
+  // skipped both the backstop and the whole approval gate, on the reasoning
+  // that clicking Follow Up was itself the operator's approval. That conflates
+  // authorising the ACT of reaching out with authorising the TEXT, which is
+  // model-generated and unreviewed — so a venue holding everything could still
+  // be auto-sent past by a button click. The gate now runs on every followup
+  // path; the assertions below are the inverse of what they used to be.
+  it('runs the gate and the mechanic-offer backstop for a manual followup (Follow Up button)', async () => {
     applyApprovalPolicyStageMock.mockClear()
+    // Both mocks need real returns now. Before TAC-307 the manual path
+    // short-circuited past both, so their undefined defaults were never
+    // dereferenced — the test passed for a reason that has stopped being true.
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
 
     await handleFollowup({
       venueId: VENUE_ID,
@@ -185,10 +197,10 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       trigger: { reason: 'manual', triggeredAt: new Date(), metadata: { hint: 'checking in' } },
     })
 
-    expect(verifyMechanicOfferStageMock).not.toHaveBeenCalled()
-    // The whole gate (not just the backstop) is bypassed for manual — this
-    // just confirms the backstop specifically never fires on that path.
-    expect(applyApprovalPolicyStageMock).not.toHaveBeenCalled()
+    expect(verifyMechanicOfferStageMock).toHaveBeenCalled()
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalled()
+    // Still sends here because this fixture's gate returns action:'send'. The
+    // point is that the decision was ASKED FOR, not that it came back 'send'.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
   })
 

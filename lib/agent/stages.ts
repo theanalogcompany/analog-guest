@@ -26,7 +26,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
-import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
+import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
@@ -143,8 +143,10 @@ export const APPROVAL_TRIGGERS = {
   // BEFORE the model has said anything meaningful — it inspects the
   // classification, not the draft. Today it routes comp_complaint, so a guest
   // reporting a bad experience gets a warm, comp-forward draft that a human
-  // authorizes rather than an agent deciding on its own. The one exemption is
-  // a genuine clarifying question (canAutoSendComplaintTurn).
+  // authorizes rather than an agent deciding on its own. One exemption — a
+  // genuine clarifying question (canAutoSendComplaintTurn) — and since
+  // TAC-307 it applies ONLY when the hold came from the fleet-wide code
+  // default. A hold a venue chose explicitly is absolute.
   CATEGORY_REQUIRES_APPROVAL: 'category_requires_approval',
   // TAC-308: the model answered a guest question it could not ground in venue
   // knowledge. Queues the draft AND arms messages.pending_until, which is the
@@ -1049,7 +1051,24 @@ export async function applyApprovalPolicyStage(
   // rather than fourth. `triggers[]` order is observability only —
   // primaryTrigger is priority-selected via PRIMARY_TRIGGER_PRIORITY — so
   // nothing downstream keys on the position.
-  const existingPending = await findPendingDraft(ctx.venue.id, ctx.guest.id)
+  //
+  // TAC-307: SKIPPED ENTIRELY for a manual followup (the Command Center
+  // Follow Up button). Removing that path's gate bypass brought it under
+  // approval POLICY, which was the ticket's intent — but the bypass was doing
+  // two unrelated jobs, and pending-detection was the other one. Left in, a
+  // Follow Up click on a guest who already has a pending card would fire
+  // previous_pending_held, route to persistOrRegenQueuedDraft's UPDATE-in-place
+  // branch, and overwrite the draft the operator was about to approve — body,
+  // review_reason and pending_commitment replaced, created_at preserved so the
+  // card looks untouched in the queue. That is data loss on a human's work,
+  // and it is a different axis from "does approval policy apply", so it keeps
+  // its pre-TAC-307 behaviour: a pending card and an operator-sent manual
+  // outbound can legitimately coexist on the same guest (migration 020's
+  // partial index permits it — a manual send writes review_state='auto_sent').
+  const isManualFollowup = ctx.followupTrigger?.reason === 'manual'
+  const existingPending = isManualFollowup
+    ? null
+    : await findPendingDraft(ctx.venue.id, ctx.guest.id)
 
   // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
   // discount}. Fires regardless of requiresOperatorApproval self-flag.
@@ -1097,17 +1116,44 @@ export async function applyApprovalPolicyStage(
   // The single exemption is a genuine clarifying question: making a guest wait
   // on an operator before you'll even ask what went wrong is worse service
   // than the cold reply this shipped to fix. Every check inside
-  // canAutoSendComplaintTurn fails toward queue.
-  if (
-    resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
-      'operator_approval' &&
-    !canAutoSendComplaintTurn({
-      complaintIntent: generation.complaintIntent,
-      body: generation.body,
-      commitment: generation.commitment,
-    })
-  ) {
-    triggers.push(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
+  // canAutoSendComplaintTurn fails toward queue. Since TAC-307 that exemption
+  // is available only on a code_default hold — see below.
+  //
+  // TAC-307 SUBORDINATES THE CARVE-OUT. It used to run alongside the policy
+  // check (`policy === 'operator_approval' && !canAutoSendComplaintTurn(...)`),
+  // which meant a turn the model labelled `clarifying` could auto-send THROUGH
+  // a hold an operator had deliberately switched on. A control with exceptions
+  // is not a control: the master switch is what gets reached for when
+  // something is already wrong, so it has to mean what it says.
+  //
+  // The line is drawn at WHO CHOSE THE HOLD, not at which category it is:
+  //   - source 'stored' / 'policy_default' → a human ticked this box or threw
+  //     the master switch for this venue. ABSOLUTE. Nothing passes.
+  //   - source 'code_default' → APPROVAL_POLICY_DEFAULT's fleet-wide
+  //     comp_complaint route, which nobody chose per-venue. The carve-out
+  //     still applies, because making a guest wait on an operator before
+  //     you'll even ask what went wrong is worse service than the cold reply
+  //     v1.24.0 shipped to fix.
+  //
+  // Every venue stores `perCategory: {}` today, so this is a no-op against
+  // current behaviour — and the moment a category is ticked in Command
+  // Center it becomes strictly stronger than the default it replaces.
+  const policyDecision = resolvePolicyDecision(
+    ctx.venue.approvalPolicy,
+    ctx.classification?.category,
+  )
+  if (policyDecision.disposition === 'operator_approval') {
+    const carveOutAvailable = policyDecision.source === 'code_default'
+    const exemptedByClarifyingQuestion =
+      carveOutAvailable &&
+      canAutoSendComplaintTurn({
+        complaintIntent: generation.complaintIntent,
+        body: generation.body,
+        commitment: generation.commitment,
+      })
+    if (!exemptedByClarifyingQuestion) {
+      triggers.push(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
+    }
   }
 
   // Trigger 9 (TAC-308): the model answered a question it could not ground in
@@ -1209,6 +1255,12 @@ export async function applyApprovalPolicyStage(
         wouldHaveQueuedTriggers: triggers,
         voiceFidelity: generation.voiceFidelity,
         generatedBody: generation.body,
+        // TAC-307: distinguishes a hold this venue actually chose from the
+        // fleet-wide comp_complaint code default. Drives the Slack relay —
+        // see the note on DemoBypassedApprovalGateProps.
+        policyHoldWasExplicit:
+          policyDecision.disposition === 'operator_approval' &&
+          policyDecision.source !== 'code_default',
       })
     }
     return { action: 'send', reason: 'demo_bypass' }
@@ -1665,8 +1717,21 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     // and overrides every trigger, so telling a demo guest's generation "a
     // human will review this" would produce a comp-forward draft that then
     // auto-sends to a real phone. Demo guests keep the restrictive prompt.
+    //
+    // TAC-307 SCOPES THIS TO COMPLAINT CATEGORIES. It used to be "policy holds
+    // this category", full stop — which was harmless while a venue-wide
+    // `default: 'operator_approval'` required hand-written SQL and no venue
+    // had one. This ticket ships a master switch that sets exactly that, and
+    // an unscoped flag would turn the comp-forward branch of
+    // formatMechanicEligibility on for EVERY turn at a holding venue: the
+    // agent would start proposing to make it up to a guest who asked whether
+    // the cafe is open. Review being guaranteed is a necessary condition for
+    // inviting generosity, never a sufficient one — the turn also has to be
+    // the kind of turn generosity belongs in, which is what FLOOR_CATEGORIES
+    // (comp_complaint today) names.
     willBeReviewed:
       ctx.guest.isDemo !== true &&
+      isFloorCategory(ctx.classification?.category) &&
       resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
         'operator_approval',
   }

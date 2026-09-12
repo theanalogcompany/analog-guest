@@ -21,24 +21,43 @@ import type {
 // event_invite triggers) and unknown (inbound catch-all that replaces the
 // old practice of routing ambiguous inbounds to manual). Migration 016
 // widens the constraint.
-export type MessageCategory =
-  | 'welcome'
-  | 'follow_up'
-  | 'reply'
-  | 'new_question'
-  | 'opt_out'
-  | 'perk_unlock'
-  | 'perk_inquiry'
-  | 'event_invite'
-  | 'event_question'
-  | 'manual'
-  | 'acknowledgment'
-  | 'comp_complaint'
-  | 'mechanic_request'
-  | 'recommendation_request'
-  | 'casual_chatter'
-  | 'personal_history_question'
-  | 'unknown'
+//
+// TAC-307: this was a hand-written type union with no companion const array,
+// which meant the category set could not be enumerated at RUNTIME — only
+// checked at compile time. The approval-policy surface in Command Center has
+// to render one control per category and must not carry a hardcoded list
+// that silently drifts from this one, so the array is now the source of
+// truth and the type is derived from it. Adding a category here makes it
+// appear in that UI with no change to the surface.
+//
+// ORDER IS MEANINGFUL: it drives the render order of the Command Center
+// approval-policy controls. Inbound-classifiable categories first (the set
+// lib/ai/classify-message.ts can actually return), then outbound-only ones.
+// Keep new entries in the matching group.
+export const MESSAGE_CATEGORIES = [
+  // Inbound — the classifier's own enum (lib/ai/classify-message.ts).
+  'reply',
+  'new_question',
+  'opt_out',
+  'manual',
+  'acknowledgment',
+  'comp_complaint',
+  'mechanic_request',
+  'recommendation_request',
+  'casual_chatter',
+  'personal_history_question',
+  'perk_inquiry',
+  'event_question',
+  'unknown',
+  // Outbound-only — set by the orchestrator (triggerToCategory), never by
+  // the classifier. Still reachable by the approval gate, so still holdable.
+  'welcome',
+  'follow_up',
+  'perk_unlock',
+  'event_invite',
+] as const
+
+export type MessageCategory = (typeof MESSAGE_CATEGORIES)[number]
 
 export type VoiceCorpusSourceType =
   | 'sample_text'
@@ -383,6 +402,10 @@ export type GenerateMessageResult = {
   // applyApprovalPolicyStage via canAutoSendComplaintTurn — it is the only
   // exemption from comp_complaint's category routing, and it is necessary
   // but not sufficient (three deterministic checks sit behind it).
+  // TAC-307: the exemption is now also conditional on WHERE the hold came
+  // from. It applies only when the category resolved through the fleet-wide
+  // code default; a hold a venue chose explicitly is absolute and this field
+  // is not consulted at all.
   complaintIntent: ComplaintIntent
   // TAC-308: final-attempt knowledge-gap flag. True when the reply answers a
   // question the model could not ground in venue knowledge. Consumed by

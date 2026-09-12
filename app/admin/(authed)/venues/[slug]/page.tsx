@@ -9,6 +9,8 @@ import {
   computeUnclaimedMechanicColumns,
   computeUnclaimedVenueInfoFields,
 } from '../_lib/unclaimed-fields'
+import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
+import { ApprovalPolicySection } from './_components/approval-policy-section'
 import { CatchAllSection } from './_components/catch-all-section'
 import { EventsSection } from './_components/events-section'
 import { MechanicsSection } from './_components/mechanics-section'
@@ -124,6 +126,11 @@ export default async function VenueDetailPage({ params }: PageProps) {
       )}
 
       <ReadinessPanel readiness={readiness} />
+
+      <ApprovalPolicySection
+        venueId={data.venue.id}
+        policy={parseApprovalPolicy(data.rawApprovalPolicy)}
+      />
 
       <VenueFactsSection venueId={data.venue.id} venueInfo={data.venueInfo} />
       <TheStorySection venueId={data.venue.id} entries={bySection.the_story} />

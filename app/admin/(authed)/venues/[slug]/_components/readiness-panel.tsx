@@ -112,7 +112,7 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
 
         <div>
           <p className="mb-1.5 text-xs uppercase tracking-wide text-ink-faint">
-            approval_policy · read-only
+            approval_policy
           </p>
           <p className="text-sm text-ink-soft">
             Default: {approvalPolicy.default}
@@ -124,6 +124,9 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
                   .join(', ')}
               </>
             )}
+          </p>
+          <p className="mt-1 text-xs text-ink-faint">
+            Effective policy, code defaults included. Edit in the Approval policy section.
           </p>
         </div>
       </div>

@@ -60,7 +60,8 @@ export interface ProcessDueKnowledgeGapsResult {
   sent: number
   /** Holding messages sent as the plain fallback line. */
   fallbackSent: number
-  /** Cards where policy suppressed the send (guest opted out, venue holds all outbound). */
+  /** Cards where policy suppressed the send (guest opted out, venue holds all
+   * outbound, or approval policy holds this category — TAC-307). */
   suppressed: number
   /** Cards that errored after being claimed. */
   errored: number

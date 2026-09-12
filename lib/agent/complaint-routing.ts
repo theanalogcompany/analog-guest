@@ -18,6 +18,14 @@
 // Every check below therefore fails toward QUEUE, and the model's claim is
 // necessary but never sufficient.
 //
+// TAC-307 — WHEN THIS MODULE IS CONSULTED AT ALL. applyApprovalPolicyStage
+// calls it only when the category's hold resolved with source 'code_default'
+// (the fleet-wide APPROVAL_POLICY_DEFAULT route). When a venue chose the hold
+// itself — a ticked category in Command Center, or the master switch — the
+// hold is ABSOLUTE and nothing here runs. So the answer to "does a clarifying
+// question auto-send?" is: yes on a venue that hasn't configured its own
+// policy, no on one that has.
+//
 // KNOWN RESIDUAL (deliberately deferred): an offer-shaped interrogative like
 // "want me to make you another?" carries a question mark, no first-person
 // modal, and possibly no commitment emission, so it can pass all four checks.

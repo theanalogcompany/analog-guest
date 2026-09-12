@@ -585,6 +585,15 @@ function formatDraftRegenerated(props: DraftRegeneratedProps): string {
 // disabling it should be loud in Slack. Fidelity-band / model-flagged-only
 // bypasses stay PostHog-only so Slack doesn't drown in routine demo traffic
 // (every mid-fidelity demo reply trips the fidelity band).
+//
+// TAC-307 adds a SECOND relay condition: an approval hold a human explicitly
+// chose for this venue (a ticked category, or the master switch) that the
+// demo flag then overrode. Demo guests deliberately stay exempt from approval
+// policy — they're a teammate's own phone — but "the switch you flipped did
+// not apply here" is exactly the kind of silent divergence this repo has been
+// bitten by before, so it gets said out loud. Deliberately gated on
+// `policyHoldWasExplicit`: the fleet-wide comp_complaint code default is on
+// every venue and would relay constantly without anyone having chosen it.
 export interface DemoBypassedApprovalGateProps {
   agentRunId: string
   venueId: string
@@ -596,6 +605,11 @@ export interface DemoBypassedApprovalGateProps {
   wouldHaveQueuedTriggers: string[]
   voiceFidelity: number
   generatedBody: string
+  // TAC-307. True when CATEGORY_REQUIRES_APPROVAL fired from a policy entry a
+  // human set for this venue, rather than from the fleet-wide code default.
+  // Drives the second Slack relay condition above. Optional so existing
+  // callers and fixtures are unaffected; absent reads as "not explicit".
+  policyHoldWasExplicit?: boolean
 }
 
 // Literal kept in sync with APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP in
@@ -604,19 +618,33 @@ export interface DemoBypassedApprovalGateProps {
 // reverse the direction and create a cycle (stages.ts imports this file).
 const COMP_REGEX_BACKSTOP_TRIGGER = 'comp_regex_backstop'
 
+// Same kept-in-sync-by-hand rule as the line above, for the same
+// dependency-direction reason. Mirrors APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL.
+const CATEGORY_REQUIRES_APPROVAL_TRIGGER = 'category_requires_approval'
+
 export async function captureDemoBypassedApprovalGate(
   props: DemoBypassedApprovalGateProps,
 ): Promise<void> {
   await capturePostHogEvent('demo_bypassed_approval_gate', props.guestId, { ...props })
-  if (props.wouldHaveQueuedTriggers.includes(COMP_REGEX_BACKSTOP_TRIGGER)) {
-    await postToSlack(formatDemoBypassedApprovalGate(props))
+  const compBackstopBypassed = props.wouldHaveQueuedTriggers.includes(COMP_REGEX_BACKSTOP_TRIGGER)
+  const explicitPolicyBypassed =
+    props.policyHoldWasExplicit === true &&
+    props.wouldHaveQueuedTriggers.includes(CATEGORY_REQUIRES_APPROVAL_TRIGGER)
+  if (compBackstopBypassed || explicitPolicyBypassed) {
+    await postToSlack(formatDemoBypassedApprovalGate(props, { compBackstopBypassed }))
   }
 }
 
-function formatDemoBypassedApprovalGate(props: DemoBypassedApprovalGateProps): string {
+function formatDemoBypassedApprovalGate(
+  props: DemoBypassedApprovalGateProps,
+  opts: { compBackstopBypassed: boolean },
+): string {
   const triggerList = props.wouldHaveQueuedTriggers.map((t) => `\`${t}\``).join(', ')
+  const cause = opts.compBackstopBypassed
+    ? 'comp regex backstop would have queued this draft'
+    : "this venue's explicit approval policy would have queued this draft"
   return [
-    `*Demo guest bypassed approval gate* — comp regex backstop would have queued this draft`,
+    `*Demo guest bypassed approval gate* — ${cause}`,
     `would-have-queued triggers: ${triggerList}`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,

@@ -43,6 +43,7 @@ import {
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
 } from './stages'
+import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult, PendingQuestion } from '@/lib/ai'
@@ -77,7 +78,7 @@ export type HoldingMessageResult =
   // Deliberately not sent. The guest opted out, or the venue holds every
   // outbound for review. Distinct from 'failed' so the processor can count
   // policy suppression separately from breakage.
-  | { status: 'suppressed'; reason: 'opted_out' | 'hold_all_outbound' }
+  | { status: 'suppressed'; reason: 'opted_out' | 'hold_all_outbound' | 'policy_hold' }
   | { status: 'failed'; stage: 'context_build' | 'send'; error: string }
 
 /**
@@ -158,6 +159,31 @@ export async function handleHoldingMessage(input: {
         venueId: input.venueId,
       })
       return { status: 'suppressed', reason: 'hold_all_outbound' }
+    }
+
+    // TAC-307: the same reasoning on the approval-policy axis.
+    //
+    // THIS CHECK HAS TO LIVE HERE, NOT AT THE GATE, and that is the whole
+    // point of it. tryGenerateHolding below DOES call
+    // applyApprovalPolicyStage — but it treats a `queue` verdict as a
+    // FAILURE, and the failure ladder ends in sendFallback, which bypasses
+    // generation and the gate entirely and ships FALLBACK_HOLDING_BODY. So a
+    // policy hold enforced at the gate would be converted into an ungated
+    // send by the very next line of the ladder. Suppressing before
+    // generation is the only placement that actually holds.
+    //
+    // Category is HOLDING_MESSAGE_CATEGORY ('manual') — ctx.classification is
+    // not set until further down, so it is passed explicitly rather than read
+    // off the context. Resolves through perCategory.manual, then `default`.
+    if (
+      resolveCategoryPolicy(ctx.venue.approvalPolicy, HOLDING_MESSAGE_CATEGORY) ===
+      'operator_approval'
+    ) {
+      console.log('[agent] holding message suppressed — approval policy holds this category', {
+        agentRunId,
+        venueId: input.venueId,
+      })
+      return { status: 'suppressed', reason: 'policy_hold' }
     }
 
     // Override whatever build-runtime-context loaded. It reports

@@ -331,6 +331,68 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
+  // TAC-307: the same reasoning on the approval-policy axis. This MUST be a
+  // suppression rather than a gate outcome — tryGenerateHolding treats a queue
+  // verdict as a failure and the failure ladder ends in sendFallback, which
+  // bypasses the gate entirely. A policy hold enforced at the gate would be
+  // converted straight into an ungated send one line later.
+  it('suppresses when the venue holds everything by approval policy', async () => {
+    buildRuntimeContextMock.mockResolvedValue({
+      ...makeCtx(),
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        holdAllOutbound: false,
+        approvalPolicy: { default: 'operator_approval', perCategory: {} },
+      },
+    })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(r).toEqual({ status: 'suppressed', reason: 'policy_hold' })
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  it("suppresses when the venue holds the holding message's own category", async () => {
+    // HOLDING_MESSAGE_CATEGORY is 'manual'; a venue that ticked that box has
+    // said this exact kind of message waits.
+    buildRuntimeContextMock.mockResolvedValue({
+      ...makeCtx(),
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        holdAllOutbound: false,
+        approvalPolicy: { default: 'auto_send', perCategory: { manual: 'operator_approval' } },
+      },
+    })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(r).toEqual({ status: 'suppressed', reason: 'policy_hold' })
+  })
+
+  it('still sends when approval policy holds some OTHER category', async () => {
+    buildRuntimeContextMock.mockResolvedValue({
+      ...makeCtx(),
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        holdAllOutbound: false,
+        approvalPolicy: { default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } },
+      },
+    })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(r.status).not.toBe('suppressed')
+  })
+
   // HOLDING_MESSAGE_CATEGORY drove generation but never reached the row —
   // messages.category is nullable, so it failed silently.
   it('persists the row under the manual category, not null', async () => {
