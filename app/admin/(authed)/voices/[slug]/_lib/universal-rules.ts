@@ -11,7 +11,7 @@
 // mid-list — because renumbering live rule IDs stales every external
 // reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
 // consequence: displayed IDs are NOT contiguous. This list curates R1-R11
-// plus R17-R18 plus R21 plus R23-R28. R12 (message splitting, TAC-313) is
+// plus R17-R18 plus R21 plus R23-R31. R12 (message splitting, TAC-313) is
 // RETIRED: TAC-319 moved splitting out of the prompt into deterministic
 // dispatch code after two prompt-side rounds failed to make the rule fire,
 // so the undisplayed gap is R12-R16 (retired splitting slot, then greeting /
@@ -59,6 +59,18 @@
 // originally motivated this ticket (14 shown vs. 21 in the prompt, with
 // nothing forcing anyone to reconcile them) without flattening the
 // deliberate curation.
+//
+// TAC-356 appended R29-R31, three more rules mined the same way (misfiled
+// as venue-specific on Mock Sextant when they're true at any venue). All
+// three are displayed — same class as R17/R18/R21/R23-R28. R29 permits
+// sentence fragments; R30 asks the model to ask what a guest means rather
+// than guess, explicitly scoped against the `unknown` category's own
+// classifier-driven holding response so the two don't read as in tension;
+// R31 bans naming a specific product in reply to a greeting or any
+// content-less message (the fix for a real Le Mil's incident: "hey" got
+// "come try Indian coffee sometime" back). See system-template.ts's
+// v1.43.0 changelog comment for the full audit against the first-touch
+// intentions opener and every category instruction file.
 //
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
@@ -191,5 +203,20 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R28',
     summary:
       "Never criticize, blame, or speak negatively about a staff member to a guest, even while acknowledging a mistake. Take ownership of the outcome without assigning blame to a person.",
+  },
+  {
+    id: 'R29',
+    summary:
+      "A sentence fragment is fine when it reads naturally ('Open until 3' beats 'We are open until 3pm today'). Permission, not a preference — if the venue's own voice writes in full sentences, keep writing full sentences.",
+  },
+  {
+    id: 'R30',
+    summary:
+      "If a guest's message is unclear, ask what they mean rather than guess or answer with something generic. Separate from the classifier's own 'unknown' routing, which keeps its own holding response.",
+  },
+  {
+    id: 'R31',
+    summary:
+      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. Reply in kind and stop. Doesn't restrict a question you ask back, or answering once the guest actually asks or orders something.",
   },
 ]
