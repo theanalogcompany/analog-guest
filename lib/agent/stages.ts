@@ -616,12 +616,20 @@ export function filterByRelevance(chunks: KnowledgeMatch[]): KnowledgeMatch[] {
 export async function retrieveKnowledgeStage(
   ctx: RuntimeContext,
   category: MessageCategory | null,
+  // TAC-367: the retrieval query is now the CALLER'S, stated explicitly, and
+  // there is no fallback. This parameter replaces a derived query that ended
+  // `?? \`Followup ${reason} for ${firstName}\`` — a template string with no
+  // referent in any corpus, which nonetheless returned a full 4/4 slate on
+  // every measured variant at Le Mil's because cosine always ranks something
+  // highest. That default was the defect this ticket began from, and it was
+  // reachable by any caller without a guest message.
+  //
+  // Required, not optional-with-a-default, deliberately: the next caller on a
+  // path with no inbound must DECIDE what its query is, and be unable to
+  // inherit a wrong one by saying nothing. An empty string is a legitimate
+  // answer meaning "do not retrieve" and returns [] below.
+  query: string,
 ): Promise<KnowledgeMatch[]> {
-  const query =
-    ctx.currentMessage?.body ??
-    (ctx.followupTrigger
-      ? `Followup ${ctx.followupTrigger.reason} for ${ctx.guest.firstName ?? 'guest'}`
-      : '')
   if (!query) return []
 
   const preference = getPrimaryTagPreference(category)
@@ -1815,6 +1823,28 @@ export function computeFirstTouchAfterQrScan(ctx: RuntimeContext, now: Date): bo
  * returned object — this function deliberately doesn't know about that
  * field so the standard agent paths stay identical.
  */
+/**
+ * TAC-367: the operator's note on a manual followup, normalized — or null.
+ *
+ * Exported and shared rather than reimplemented, because it now has two
+ * consumers that must agree: `buildAiRuntime` renders it as the
+ * `## Operator instruction` block, and `handle-followup.ts` uses it as the
+ * knowledge-retrieval query. If those two ever disagreed, the model would be
+ * grounded against text other than the instruction it was given — the exact
+ * class of drift this ticket spent the day removing elsewhere.
+ *
+ * Scoped to `reason === 'manual'` because that is the only trigger the
+ * Command Center button produces and the only one carrying a hint. Returns
+ * null for a missing, non-string, or whitespace-only note.
+ */
+export function operatorInstructionQuery(
+  trigger: Pick<FollowupTrigger, 'reason' | 'metadata'> | null,
+): string | null {
+  if (!trigger || trigger.reason !== 'manual') return null
+  const raw = trigger.metadata?.hint
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+}
+
 export function buildAiRuntime(
   ctx: RuntimeContext,
   // TAC-362: injectable so tests can pin both branches of the emoji coin
@@ -1838,9 +1868,10 @@ export function buildAiRuntime(
       // agent speaks in the venue persona regardless of how the operator
       // phrased their note. That voice discipline is reinforced in the
       // manual-category instructions and the new prompt block.
-      const rawHint = ctx.followupTrigger.metadata?.hint
-      const hint =
-        typeof rawHint === 'string' && rawHint.trim().length > 0 ? rawHint.trim() : null
+      // TAC-367: shared with handle-followup.ts's retrieval query, so the
+      // text the model is instructed with and the text it is grounded
+      // against cannot diverge.
+      const hint = operatorInstructionQuery(ctx.followupTrigger)
       if (hint) {
         operatorInstruction = hint
       } else if (ctx.pendingQuestion?.mode === 'writing_holding') {

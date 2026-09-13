@@ -488,7 +488,13 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     }
 
     ctx.corpus = await retrieveCorpusStage(ctx)
-    ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx, ctx.classification.category)
+    // TAC-367: explicit query. The harness runs inbound scenarios, so the
+    // scenario's own inbound text is the query — same as production.
+    ctx.knowledgeCorpus = await retrieveKnowledgeStage(
+      ctx,
+      ctx.classification.category,
+      ctx.currentMessage?.body ?? '',
+    )
     retrievedVoiceExamples = ctx.corpus.map((c) => c.text)
     retrievedKnowledge = ctx.knowledgeCorpus.map((c) => ({
       text: c.text,

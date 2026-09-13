@@ -161,6 +161,30 @@ export type RuntimeContext = {
     qualification: string
     rewardDescription: string
   }
+  /**
+   * UNBUILT SCAFFOLDING — nothing in production sets this (TAC-367).
+   *
+   * Verified, not inferred: the only assignments anywhere are two fixtures in
+   * `serializers.test.ts`, so the `## Event being invited` block this feeds
+   * has never rendered to a guest. Its companion `FollowupTrigger` reason
+   * `'event'` is equally unreachable — `handleFollowup`'s only two production
+   * callers hardcode `'manual'` (the Command Center button) or map through
+   * `primaryReasonToTriggerReason`, a total switch that never returns
+   * `'event'`.
+   *
+   * Kept rather than deleted because event invites are plainly an intended
+   * capability — venues carry real events in `knowledge_corpus`, and the
+   * `event_invite` / `event_question` message categories exist. Annotated
+   * because the failure mode of a dead layer is silence: TAC-367 nearly
+   * designed a schema association on top of this before checking whether it
+   * had a producer, which is the same trap `approval_policy` (unread for 102
+   * days) and `is_test_synthetic` set.
+   *
+   * Before building on it, read TAC-375: an event invite cannot retrieve the
+   * RIGHT event's knowledge today, because nothing associates an event with
+   * its `knowledge_corpus` rows and the `events` primary tag is venue-wide.
+   * That is a schema question, not a query-tuning one.
+   */
   eventBeingInvited?: {
     name: string
     description: string
