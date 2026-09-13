@@ -12,7 +12,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
-const retrieveKnowledgeStageMock = vi.fn()
+// Resolves NON-EMPTY deliberately: with [] it would return exactly the value
+// an "expect empty" assertion checks, and could not tell "skipped retrieval"
+// from "retrieved nothing". Never called by the fixed implementation.
+const retrieveKnowledgeStageMock = vi.fn(async () => [
+  {
+    id: 'k1',
+    knowledgeCorpusId: 'kc1',
+    text: 'The Masala Mixer is a Desi community social event planned for the loft.',
+    sourceType: 'synthesized',
+    confidence: 0.9,
+    similarity: 0.34,
+    primaryTags: ['events'],
+    secondaryTags: [],
+  },
+])
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
@@ -43,8 +57,14 @@ vi.mock('./stages', async () => {
   return {
     APPROVAL_TRIGGERS: actual.APPROVAL_TRIGGERS,
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
-    shouldRetrieveKnowledge: () => false,
+    retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
+    // TAC-367: TRUE, matching production for the `event` and `manual` triggers
+    // these tests actually exercise. It was `() => false` — the opposite — so
+    // retrieveKnowledgeStage was unreachable in every test here and the live
+    // synthetic-query retrieval was invisible to the suite. Second instance of
+    // that exact defect found in one sitting (handle-holding-message.test.ts
+    // was the first); see CLAUDE.md's rule on mocked behaviour flags.
+    shouldRetrieveKnowledge: () => true,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
@@ -236,6 +256,31 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(result.status).toBe('queued')
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
+
+  // TAC-367. A followup has no guest message, so retrieveKnowledgeStage falls
+  // through to its synthetic-query branch and embeds `Followup {reason} for
+  // {name}` — a string with no referent in the corpus, which nonetheless
+  // returned a FULL 4/4 slate on every measured variant at Le Mil's. And
+  // verifyGroundingStage returns early when currentMessage is null, so this
+  // path has NO grounding backstop: at a venue with no hold configured a
+  // fabricated fact auto-sends. Interim narrowing until TAC-367 PR 3 decides
+  // what followups should actually query on.
+  //
+  // shouldRetrieveKnowledge is mocked TRUE above (as production behaves for
+  // both reasons below), so this fails the moment the conditional returns.
+  it.each(['manual', 'event'] as const)(
+    'never retrieves knowledge on a %s followup — the generator gets no chunks',
+    async (reason) => {
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: { reason, triggeredAt: new Date(), metadata: { hint: 'checking in' } },
+      })
+      expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
+      const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown }
+      expect(ctx.knowledgeCorpus).toEqual([])
+    },
+  )
 
   it('FAILS CLOSED — a "check_failed" result still queues rather than sending', async () => {
     verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'check_failed' })
