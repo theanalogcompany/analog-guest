@@ -1,4 +1,5 @@
 import type { EligibleMechanic, GuestState } from '@/lib/recognition'
+import type { EmojiDirective } from './emoji-cadence'
 import type {
   ActiveCommitment,
   ArrivalCaptureEmission,
@@ -272,6 +273,26 @@ export type RuntimeContext = {
   // current-turn-suppressed. undefined or empty = block omitted entirely
   // (zero tokens).
   openIntentions?: string[]
+  // TAC-362: what this one message may do about emoji, flipped in code by
+  // buildAiRuntime (lib/agent/stages.ts) — the only place holding both the
+  // venue's emojiPolicy and the rng. The serializer renders `## Emoji for
+  // this message` as the last BLOCK of the user prompt — ahead of the
+  // runtime-facts tail, so it is the last INSTRUCTION the model reads, not
+  // literally the last text. Suppressed entirely for opt_out and
+  // comp_complaint (shouldRenderEmojiDirective).
+  //
+  // OPTIONAL, and the reason is worth knowing before making it required.
+  // Absence renders no block, which leaves the persona's own standing
+  // `## Emojis` statement governing the turn unchanged — including `never`'s
+  // absolute prohibition, which always renders. So absence can never ADD an
+  // emoji where a venue forbade one; the compliance direction is safe by
+  // construction rather than by the type. Making it required would instead
+  // force a ~150-site mechanical edit across serializers.test.ts's 113
+  // runtimeToProse fixtures, which are the primary guard for prompt content
+  // — a worse risk than the one it removes. buildAiRuntime sets it for every
+  // policy that varies, and a test in stages.test.ts pins that for all three
+  // enum values so "always set" is guarded rather than assumed.
+  emojiDirective?: EmojiDirective
   // TAC-324: true only when this is a qr_scan guest's first-ever inbound,
   // inside the R1 carve-out's freshness window. Lets the R1 exception in
   // SYSTEM_TEMPLATE have a real, narrow condition — the model has no other
@@ -470,6 +491,14 @@ export type GenerateMessageResult = {
   // dashViolationPersisted, this must never ship — lib/agent/stages.ts's
   // SELF_TALK_DETECTED trigger queues the draft instead of sending it.
   selfTalkViolationPersisted: boolean
+  // TAC-362: true when this turn's emoji directive was 'none' and the final
+  // shipped body carries an emoji anyway. Same recompute-on-final-body shape
+  // as dashViolationPersisted above, and the same posture: it SHIPS. The
+  // measured violation rate for a per-message emoji prohibition is 0 in 240
+  // responses, so this exists to make a change in that rate announce itself
+  // rather than to gate on it. False whenever the directive was 'allowed' or
+  // absent — there is nothing to violate in either case.
+  emojiDirectiveViolated: boolean
 }
 
 export type ClassifyMessageInput = {

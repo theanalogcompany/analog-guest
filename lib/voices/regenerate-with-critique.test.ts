@@ -255,7 +255,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         classifierConfidence: 0.8,
         reasoning: 'r',
         crisisSafety: true,
-        promptVersion: 'v1.47.0',
+        promptVersion: 'v1.48.0',
       },
     })
   })
@@ -357,6 +357,7 @@ describe('regenerateWithCritique — happy path', () => {
         promptVersion: 'v1.8.0',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
+        emojiDirectiveViolated: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
@@ -426,6 +427,31 @@ describe('regenerateWithCritique — happy path', () => {
     expect(r.data.attempts).toBe(1)
     expect(r.data.attemptScores).toEqual([0.85])
     expect(r.data.generatedAt).toBeInstanceOf(Date)
+  })
+
+  // TAC-362. The third field to arrive on this result type by the same route
+  // (knowledgeGap before TAC-350, selfTalkViolationPersisted before TAC-355):
+  // generateMessage computed it all along and this path wasn't reading it.
+  //
+  // `emojiDirective` is the half that matters more than the violation flag.
+  // buildAiRuntime re-draws the coin on every regen call, so two attempts in
+  // one critique session can differ in emoji permission for reasons unrelated
+  // to the operator's critique — and this loop is what writes voice_corpus
+  // rows and anti-pattern rules, so an operator misattributing that to their
+  // own critique becomes persisted venue config.
+  it('surfaces the emoji directive and violation flag on the attempt', async () => {
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.emojiDirectiveViolated).toBe(false)
+    // The fixture persona is `never`, so no coin is flipped and the field is
+    // undefined rather than a directive — which is itself the signal the UI
+    // needs ("this venue doesn't vary per message").
+    expect(r.data.emojiDirective).toBeUndefined()
   })
 
   // TAC-350
@@ -580,6 +606,7 @@ describe('regenerateWithCritique — happy path', () => {
         promptVersion: 'v1.8.0',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
+        emojiDirectiveViolated: false,
       },
     })
     const r = await regenerateWithCritique({
@@ -667,6 +694,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         promptVersion: 'v1.13.0',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
+        emojiDirectiveViolated: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
@@ -843,6 +871,7 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
         promptVersion: 'v1.13.0',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
+        emojiDirectiveViolated: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)

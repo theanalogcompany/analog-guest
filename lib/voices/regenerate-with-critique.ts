@@ -41,6 +41,7 @@ import {
   MIN_STRONG_MATCHES,
   STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
+import type { EmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
@@ -82,6 +83,25 @@ export interface RegenerateWithCritiqueResult {
   // TAC-350). Advisory only: regen has no approval queue, the operator
   // reviews the raw attempt directly.
   selfTalkViolationPersisted: boolean
+  // TAC-362: this attempt's emoji call, and whether the body ignored it.
+  // The THIRD field to arrive on this type by the same route — computed by
+  // generateMessage all along, not read here (knowledgeGap before TAC-350,
+  // selfTalkViolationPersisted before TAC-355). Advisory, like its
+  // neighbours: regen has no approval queue.
+  //
+  // `emojiDirective` is surfaced alongside the violation flag, and that is
+  // the load-bearing half. buildAiRuntime re-draws the coin on every regen
+  // call — deliberately NOT pinned across a critique session, since each
+  // attempt is a fresh generation and pinning would hide the variation the
+  // feature exists to produce — so two attempts in one session can differ in
+  // emoji permission for reasons that have nothing to do with the
+  // operator's critique. Without the directive in the response the operator
+  // would attribute that to their critique, and this loop is what writes
+  // voice_corpus rows and anti-pattern rules, so a misattribution here
+  // becomes persisted venue config. undefined when the venue's policy
+  // doesn't vary per message (never / sparingly).
+  emojiDirective?: EmojiDirective
+  emojiDirectiveViolated: boolean
   // TAC-355: independent mechanic-offer backstop, same underlying check
   // (lib/ai/verify-mechanic-offer.ts) as lib/agent/stages.ts's
   // verifyMechanicOfferStage, but ADVISORY here and with a NARROWER skip
@@ -468,6 +488,8 @@ export async function regenerateWithCritique(
       hasUngroundedClaim,
       ungroundedClaims,
       selfTalkViolationPersisted: gen.data.selfTalkViolationPersisted,
+      emojiDirective: runtime.emojiDirective,
+      emojiDirectiveViolated: gen.data.emojiDirectiveViolated,
       offersGatedMechanic,
       offeredMechanicId,
     },

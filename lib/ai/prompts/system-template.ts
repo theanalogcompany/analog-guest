@@ -825,6 +825,16 @@
 //
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
+// v1.48.0 (TAC-362): emoji cadence moved out of the model's judgement and
+// into a per-message coin flipped in code (lib/ai/emoji-cadence.ts,
+// resolved in buildAiRuntime, rendered as the user prompt's final
+// `## Emoji for this message` block). The `frequent` persona guidance lost
+// its standing licence ("Use them where they feel natural") — evaluated
+// identically every turn, it produced an emoji in 10 of 11 responses at Le
+// Mil's. `never` and `sparingly` are untouched: both measure 0 emoji across
+// 240 responses, which also means the enum currently has three values and
+// two behaviours. That second finding is recorded, not fixed here.
+//
 // v1.47.0 (TAC-358): the `## Venue knowledge` header no longer calls what it
 // renders "facts you can ground replies in". KNOWLEDGE_RELEVANCE_FLOOR drops
 // from 0.5 to 0.30 in the same change, and the old wording asserted that every
@@ -865,7 +875,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.47.0'
+export const PROMPT_VERSION = 'v1.48.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

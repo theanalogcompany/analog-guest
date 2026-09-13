@@ -99,6 +99,7 @@ function goodGeneration(body = "still tracking that down for you") {
       promptVersion: 'v1.25.0',
       dashViolationPersisted: false,
       selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
     },
   }
 }

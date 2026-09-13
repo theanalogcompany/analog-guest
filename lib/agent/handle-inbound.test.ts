@@ -423,9 +423,10 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.47.0',
+    promptVersion: 'v1.48.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
   }
 }
 

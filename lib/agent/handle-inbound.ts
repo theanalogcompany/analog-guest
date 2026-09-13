@@ -254,6 +254,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
   }
 }
 

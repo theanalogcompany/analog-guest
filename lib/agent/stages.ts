@@ -3,6 +3,7 @@ import {
   captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
+  captureEmojiDirectiveViolated,
   captureMechanicOfferBackstopCaught,
   captureRegenerationTriggered,
   captureUngroundedClaimCaught,
@@ -25,6 +26,7 @@ import {
   verifyMechanicOffer,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
+import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { resolveOpenState } from '@/lib/schemas'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
@@ -718,6 +720,20 @@ export async function generateStage(
       attemptScores: r.data.attemptScores,
       finalFidelity: r.data.voiceFidelity,
       inboundBody: ctx.currentMessage?.body ?? null,
+      finalGeneratedBody: r.data.body,
+    })
+  }
+
+  // TAC-362: the per-message emoji prohibition was ignored. Ships anyway
+  // (same posture as the dash check above) — this exists so a change in the
+  // measured 0-in-240 compliance rate is queryable instead of invisible.
+  if (r.data.emojiDirectiveViolated) {
+    await captureEmojiDirectiveViolated({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category,
+      emojiPolicy: ctx.venue.brandPersona.emojiPolicy,
       finalGeneratedBody: r.data.body,
     })
   }
@@ -1659,7 +1675,14 @@ export function computeFirstTouchAfterQrScan(ctx: RuntimeContext, now: Date): bo
  * returned object — this function deliberately doesn't know about that
  * field so the standard agent paths stay identical.
  */
-export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
+export function buildAiRuntime(
+  ctx: RuntimeContext,
+  // TAC-362: injectable so tests can pin both branches of the emoji coin
+  // without stubbing globals, defaulted here at the boundary so the pure
+  // module stays pure. Same split scheduleAndSend uses for
+  // resolveDispatchBubbles.
+  rng: () => number = Math.random,
+): AiRuntimeContext {
   let additionalContext: string | undefined
   let operatorInstruction: string | undefined
   if (ctx.followupTrigger) {
@@ -1751,6 +1774,16 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       }
     : undefined
 
+  // TAC-362: flip this message's emoji coin. This function is the only place
+  // holding BOTH halves — the venue's emojiPolicy and the rng — the same
+  // reason TAC-301's open/closed join lives here rather than in a serializer.
+  // Returns null for policies that don't vary per message (never,
+  // sparingly), which renders no block and leaves the persona's standing
+  // statement in charge. `?? undefined` because the runtime field is
+  // optional, not nullable.
+  const emojiDirective =
+    resolveEmojiDirective(ctx.venue.brandPersona.emojiPolicy, rng) ?? undefined
+
   // TAC-332: extracted to the standalone computeFirstTouchAfterQrScan above
   // so handle-inbound.ts can reuse the same signal to gate
   // recordIntentionPrompts. `new Date()` here matches the prior inline
@@ -1805,6 +1838,9 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     openIntentions:
       ctx.openIntentions.length > 0 ? ctx.openIntentions.map((o) => o.promptLine) : undefined,
     firstTouchAfterQrScan,
+    // TAC-362: this message's emoji call. undefined for the policies that
+    // don't vary (never, sparingly) — the serializer then renders no block.
+    emojiDirective,
     // TAC-308: the outstanding knowledge-gap question. Rendered as
     // `## Unanswered question` immediately before `## Recent conversation`.
     // null → undefined so the serializer's presence check omits the block.

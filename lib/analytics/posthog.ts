@@ -228,6 +228,33 @@ function formatRegenerationTriggered(props: RegenerationTriggeredProps): string 
   return lines.join('\n')
 }
 
+// TAC-362: this turn's emoji directive was 'none' and the body shipped with
+// an emoji anyway. Observation only — the body is NOT rewritten, matching
+// the dash posture below: a post-generation body mutation would be this
+// repo's first on the generation path, and the measured violation rate for a
+// per-message emoji prohibition is 0 across 240 responses.
+//
+// PostHog only, NO Slack relay. This is a voice-quality observation, not an
+// operational alert — nobody needs waking for one stray emoji. Its value is
+// that a CHANGE in that 0-in-240 rate becomes queryable rather than
+// invisible; if it turns out non-zero in practice, the deterministic strip
+// backstop lands in a follow-up with evidence behind it instead of on a
+// guess.
+export interface EmojiDirectiveViolatedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string
+  emojiPolicy: string
+  finalGeneratedBody: string
+}
+
+export async function captureEmojiDirectiveViolated(
+  props: EmojiDirectiveViolatedProps,
+): Promise<void> {
+  await capturePostHogEvent('emoji_directive_violated', props.guestId, { ...props })
+}
+
 // THE-225: dash regex check inside generateMessage's regen loop forces a
 // rewrite when an em or en dash sneaks past R3 in the system prompt. If
 // MAX_ATTEMPTS exhaust without a clean reply, we ship the final body anyway

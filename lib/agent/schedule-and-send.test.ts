@@ -217,6 +217,7 @@ function makeGeneration(): GenerateMessageResult {
     promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
   }
 }
 
