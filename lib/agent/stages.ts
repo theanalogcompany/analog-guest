@@ -26,6 +26,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
+import { resolveOpenState } from '@/lib/schemas'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
@@ -1618,6 +1619,12 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   // fallback. Fire-and-forget — fireRedAlert never throws, and we don't want
   // generation to block on a webhook roundtrip.
   let timezone = ctx.venue.timezone
+  // TAC-301: a substituted timezone is, by definition, input we did not
+  // positively understand — resolving a confident open/closed verdict against
+  // Los Angeles for a venue that isn't there is exactly the wrong-CLOSED the
+  // resolver's governing rule exists to prevent. Track the substitution and
+  // suppress the status line when it happened.
+  let timezoneSubstituted = false
   if (!isValidTimezone(timezone)) {
     console.warn(
       `computeToday: invalid timezone "${timezone}" for venue ${ctx.venue.id}, falling back to ${FALLBACK_TIMEZONE}`,
@@ -1636,6 +1643,7 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
       },
     })
     timezone = FALLBACK_TIMEZONE
+    timezoneSubstituted = true
   }
 
   // TAC-123: when the engine attached a perkMechanic to a perk_unlock
@@ -1657,7 +1665,12 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
   // so handle-inbound.ts can reuse the same signal to gate
   // recordIntentionPrompts. `new Date()` here matches the prior inline
   // `Date.now()` call exactly — no behavior change.
-  const firstTouchAfterQrScan = computeFirstTouchAfterQrScan(ctx, new Date())
+  // One `now` for everything time-derived in this mapper, so the rendered
+  // clock and the open/closed verdict can't straddle a minute boundary and
+  // disagree — same single-timestamp discipline as the recognition snapshot's
+  // `computedAt`.
+  const now = new Date()
+  const firstTouchAfterQrScan = computeFirstTouchAfterQrScan(ctx, now)
 
   return {
     guestName: ctx.guest.firstName ?? undefined,
@@ -1665,7 +1678,17 @@ export function buildAiRuntime(ctx: RuntimeContext): AiRuntimeContext {
     perkBeingUnlocked,
     additionalContext,
     operatorInstruction,
-    today: computeToday(timezone),
+    // TAC-301: openState is resolved here rather than in the serializer
+    // because this is the only place that holds both halves — the venue's
+    // hours (ctx.venue.venueInfo) and the validated timezone. `venueInfoToProse`
+    // sees the hours but not the clock; `runtimeToProse` sees the clock but not
+    // the hours. Leaving the join to the model is what produced the bug.
+    today: {
+      ...computeToday(timezone, now),
+      openState: timezoneSubstituted
+        ? { state: 'unknown' }
+        : resolveOpenState(ctx.venue.venueInfo.hours, timezone, now),
+    },
     recentMessages: ctx.recentMessages,
     mechanics: ctx.mechanics,
     // TAC-234: thread the recent transactions through to the AI module's

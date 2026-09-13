@@ -106,6 +106,12 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
   captureVoiceFidelityLow: vi.fn(),
+  // TAC-301: the invalid-timezone test reaches fireRedAlert (lib/agent/alerts.ts),
+  // which calls this directly. Without the stub it throws as an UNHANDLED
+  // REJECTION rather than a test failure — `vitest run` still prints "passed"
+  // and only the trailing "Errors 1 error" line gives it away. Caught by the
+  // pre-commit hook, not by the full-suite run.
+  capturePostHogEvent: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
   CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
@@ -116,8 +122,25 @@ vi.mock('@/lib/analytics/posthog', () => ({
 // agentRunId, guest.{id,firstName}, currentMessage, followupTrigger — cast
 // the rest as never to avoid hand-building VenueContext / RecognitionSnapshot
 // / etc. for a focused test.
+// TAC-301: buildAiRuntime reads venue.venueInfo.hours to resolve open/closed.
+// Production always has it (buildRuntimeContext safeParses venue_info and
+// throws on failure; `hours` carries a .default({})), but every fixture in
+// this file casts `venue` partially, so makeCtx backfills it below. Hours are
+// deliberately unparseable-by-omission here — an empty hours map resolves to
+// 'unknown', which renders no status line, so none of the pre-existing
+// assertions in this file shift. Tests that care about open/closed pass their
+// own venueInfo and it wins.
+const TEST_VENUE_INFO: RuntimeContext['venue']['venueInfo'] = {
+  address: { line1: '1 Test St', city: 'Testville', region: 'CA', postalCode: '90000' },
+  contact: {},
+  hours: {},
+  menu: { highlights: [], items: [] },
+  staff: [],
+  currentContext: [],
+}
+
 function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
-  return {
+  const ctx = {
     agentRunId: 'run-1',
     venue: { id: 'venue-1' } as RuntimeContext['venue'],
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
@@ -136,6 +159,14 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     trace: { id: '' } as RuntimeContext['trace'],
     ...overrides,
   }
+  // The `Partial` cast is the honest part: the type says venueInfo is always
+  // present, and for production it is, but these fixtures cast `venue`
+  // partially so at runtime it frequently isn't. Written as an explicit ??
+  // rather than spread ordering so tsc doesn't (correctly) flag the default as
+  // unreachable — TS2783.
+  const venueInfo =
+    (ctx.venue as Partial<RuntimeContext['venue']>).venueInfo ?? TEST_VENUE_INFO
+  return { ...ctx, venue: { ...ctx.venue, venueInfo } }
 }
 
 function makeMatch(similarity: number, id = 'c1'): CorpusMatch {
@@ -436,7 +467,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.44.0',
+        promptVersion: 'v1.45.0',
         crisisSafety: true,
       },
     })
@@ -454,7 +485,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.44.0',
+        promptVersion: 'v1.45.0',
         crisisSafety: false,
       },
     })
@@ -1365,6 +1396,93 @@ describe('deriveFollowupContext (TAC-244)', () => {
       NOW_DERIVE,
     )
     expect(out?.reasons).toEqual(['perk_unlock'])
+  })
+})
+
+// TAC-301: integration check at the buildAiRuntime seam. Behavioural coverage
+// of the resolver lives in lib/schemas/venue-hours.test.ts; this asserts
+// buildAiRuntime actually CALLS it with the venue's OWN hours and timezone and
+// threads the verdict onto today.openState. The bug this closes was precisely
+// a join that nobody made, so the wiring is the thing worth pinning.
+describe('buildAiRuntime — open/closed wiring (TAC-301)', () => {
+  const LE_MILS_HOURS = {
+    monday: '7:00 AM – 3:00 PM',
+    tuesday: '7:00 AM – 3:00 PM',
+    wednesday: '7:00 AM – 3:00 PM',
+    thursday: '7:00 AM – 3:00 PM',
+    friday: '7:00 AM – 3:00 PM',
+    saturday: '7:00 AM – 3:00 PM',
+    sunday: '7:00 AM – 3:00 PM',
+  }
+
+  function ctxWithHours(hours: Record<string, string>, timezone = 'America/Los_Angeles') {
+    return makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone,
+        venueInfo: { ...TEST_VENUE_INFO, hours },
+      } as RuntimeContext['venue'],
+      currentMessage: { id: 'm1', body: 'omw' } as RuntimeContext['currentMessage'],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('resolves OPEN from the venue hours during business hours', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-11T17:30:00Z')) // Friday 10:30 LA
+    const aiRuntime = buildAiRuntime(ctxWithHours(LE_MILS_HOURS))
+    expect(aiRuntime.today?.openState).toEqual({ state: 'open', closesAt: '3:00 PM' })
+  })
+
+  it('resolves CLOSED after hours — the UAT repro moment', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-12T02:57:00Z')) // Friday 19:57 LA
+    const aiRuntime = buildAiRuntime(ctxWithHours(LE_MILS_HOURS))
+    expect(aiRuntime.today?.openState).toEqual({
+      state: 'closed',
+      opensAt: { day: 'tomorrow', time: '7:00 AM' },
+    })
+  })
+
+  it("uses the venue's timezone, not the server's", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-11T17:30:00Z'))
+    // Same instant: 10:30 in LA (open), 03:30 in Berlin (closed).
+    expect(buildAiRuntime(ctxWithHours(LE_MILS_HOURS)).today?.openState?.state).toBe('open')
+    expect(
+      buildAiRuntime(ctxWithHours(LE_MILS_HOURS, 'Europe/Berlin')).today?.openState?.state,
+    ).toBe('closed')
+  })
+
+  it('suppresses the verdict entirely when the timezone was substituted', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-11T17:30:00Z'))
+    // An invalid timezone falls back to America/Los_Angeles (and red-alerts).
+    // Resolving open/closed against a SUBSTITUTED zone would state a confident
+    // verdict for a venue that may be nowhere near it — the same wrong-CLOSED
+    // the resolver's own governing rule exists to prevent, arriving through
+    // the one input the resolver never gets to see is wrong.
+    const aiRuntime = buildAiRuntime(ctxWithHours(LE_MILS_HOURS, 'Not/AZone'))
+    expect(aiRuntime.today?.openState).toEqual({ state: 'unknown' })
+  })
+
+  it('resolves unknown when the venue has no usable hours', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-11T17:30:00Z'))
+    const aiRuntime = buildAiRuntime(ctxWithHours({}))
+    expect(aiRuntime.today?.openState).toEqual({ state: 'unknown' })
+  })
+
+  it('reports the clock and the verdict from the same instant', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-11T17:30:00Z'))
+    const aiRuntime = buildAiRuntime(ctxWithHours(LE_MILS_HOURS))
+    expect(aiRuntime.today?.venueLocalTime).toBe('10:30')
+    expect(aiRuntime.today?.openState?.state).toBe('open')
   })
 })
 

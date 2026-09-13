@@ -29,6 +29,13 @@ export {
   VenueMenuSchema,
 } from './venue-info'
 export {
+  type DayRange,
+  formatMinutes,
+  type OpenState,
+  parseDayRange,
+  resolveOpenState,
+} from './venue-hours'
+export {
   type ActiveCommitment,
   type ArrivalCaptureEmission,
   ArrivalCaptureEmissionSchema,
