@@ -350,6 +350,23 @@ export type ScenarioOutcome = 'sent' | 'queued' | 'dropped' | 'refused' | 'faile
 export interface RetrievedKnowledgeChunk {
   text: string
   primaryTags: string[]
+  /**
+   * TAC-358: the `knowledge_corpus` row id, NOT the `knowledge_embeddings`
+   * chunk id. Both are on the retrieved chunk and they are 1:1 on today's
+   * data, but the corpus id is the one a human can act on — it's what the
+   * admin venues page shows and what a retag targets. A corpus row that
+   * chunks into several embeddings would repeat its id here, which is the
+   * correct reading: the same source entry reached the prompt twice.
+   */
+  corpusId: string
+  /**
+   * Per-query cosine similarity, the number KNOWLEDGE_RELEVANCE_FLOOR is
+   * compared against. Recorded because its absence is why the TAC-358
+   * miscalibration went unnoticed: retrieval could only ever be inferred
+   * from the generated text, and a reply grounded in `venue_info` reads
+   * identically to one grounded in a retrieved chunk.
+   */
+  similarity: number
 }
 
 export interface ScenarioResult {
@@ -473,7 +490,12 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     ctx.corpus = await retrieveCorpusStage(ctx)
     ctx.knowledgeCorpus = await retrieveKnowledgeStage(ctx, ctx.classification.category)
     retrievedVoiceExamples = ctx.corpus.map((c) => c.text)
-    retrievedKnowledge = ctx.knowledgeCorpus.map((c) => ({ text: c.text, primaryTags: c.primaryTags }))
+    retrievedKnowledge = ctx.knowledgeCorpus.map((c) => ({
+      text: c.text,
+      primaryTags: c.primaryTags,
+      corpusId: c.knowledgeCorpusId,
+      similarity: c.similarity,
+    }))
 
     const outcome = await generateStage(ctx, ctx.classification.category)
     const elapsedMs = Date.now() - start
