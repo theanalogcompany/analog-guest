@@ -825,6 +825,17 @@
 //
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
+// v1.47.0 (TAC-358): the `## Venue knowledge` header no longer calls what it
+// renders "facts you can ground replies in". KNOWLEDGE_RELEVANCE_FLOOR drops
+// from 0.5 to 0.30 in the same change, and the old wording asserted that every
+// admitted chunk was a usable fact — survivable while the floor admitted
+// little, not survivable once it admits nearly everything. The header now says
+// plainly that these are passages that RESEMBLED the message and that
+// resemblance is not relevance. Measured first: at 0.30 an off-topic question
+// arriving with four irrelevant chunks still declined cleanly rather than
+// building an answer out of the nearest passage. The floor and the header ship
+// together because those declines were measured under the old header.
+//
 // v1.46.0 (TAC-301, part 2 of 2): resolves a contradiction the prompt had been
 // carrying, and stops asserting a service many venues do not provide.
 //
@@ -854,7 +865,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.46.0'
+export const PROMPT_VERSION = 'v1.47.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

@@ -57,40 +57,67 @@ export const CORPUS_RETRIEVE_LIMIT = 8
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
- * TAC-350: minimum cosine similarity for a knowledge_corpus chunk to be
- * treated as actually relevant to the guest's question, rather than padding.
+ * The agent's knowledge gate: minimum per-query cosine similarity for a
+ * knowledge_corpus chunk to reach the prompt.
  *
- * `lib/rag/retrieve.ts`'s own `SIMILARITY_FLOOR` (0.3) is a much looser bar
- * shared with voice-corpus retrieval, and in practice it almost never
- * excludes anything once a venue's knowledge corpus has more than a handful
- * of rows — every one of 12 representative queries run against Le Mil's live
- * corpus during the TAC-350 audit returned a full KNOWLEDGE_RETRIEVE_LIMIT
- * chunks above 0.3, including for a genuinely unanswerable question (wifi
- * password) where every returned chunk was topically unrelated. That matters
- * because `knowledgeChunksToProse` frames whatever it's given as "facts...
- * you can ground replies in" — presenting four irrelevant chunks under that
- * header on a genuinely unanswerable question invites fabrication instead of
- * the "no specific venue knowledge matched" framing that should fire.
+ * **CURRENTLY IDENTICAL TO `lib/rag`'s `SIMILARITY_FLOOR` (0.3), THEREFORE
+ * FILTERS NOTHING TODAY.** `retrieveKnowledgeContext` already drops anything
+ * below 0.3 on the same field with the same `>=`, so every chunk reaching
+ * `filterByRelevance` has cleared this bar before it is applied. Stated first
+ * because a constant whose guard silently does nothing is how a field goes
+ * 102 days unread while everyone assumes it works (see `approval_policy` in
+ * CLAUDE.md). It is inert. Do not reason from it as a live filter.
  *
- * 0.5 is calibrated against that same audit data: across 7 queries with a
- * genuinely on-topic answer in Le Mil's corpus (menu items, sourcing,
- * catering, pastries, roasting cadence) the weakest top match was 0.5170;
- * across 5 genuinely off-topic queries (wifi, bathroom, weather, dog-
- * friendly, parking) the strongest top match was 0.4900 — a clean, if
- * narrow, empirical gap. This is calibrated against ONE venue's corpus and
- * embedding distribution; revisit if a differently-sized or differently-
- * written corpus shows the gap doesn't hold.
+ * **It exists anyway, and not as a raise-it-later placeholder** — that
+ * argument is the trap, not the escape from it. `SIMILARITY_FLOOR` lives in
+ * `lib/rag/retrieve.ts` and serves retrieval generally, voice corpus
+ * included. This is the agent's knowledge threshold specifically. They
+ * coincide at 0.3 today and the coincidence is not a guarantee: someone
+ * tuning `SIMILARITY_FLOOR` for a different caller must not silently move
+ * what the agent will ground a guest-facing reply in.
  *
- * Applied per-chunk (not just as an all-or-nothing top-match gate) so a
- * strong match isn't diluted by weaker padding chunks riding along beside it.
+ * ── Why it is 0.3 and not 0.5 ──────────────────────────────────────────
  *
- * Side effect worth knowing: the tag-preference fallback retry in
- * retrieveKnowledgeStage now fires on zero RELEVANT results rather than zero
- * RETURNED results, so it fires measurably more often than before this floor
- * existed — an accepted cost (one extra Voyage embed call, no caching between
- * the two calls) of a floor calibrated against real production data.
+ * The change from 0.5 was NOT a no-op. At 0.5 this filter was deleting the
+ * 0.3–0.5 band that `SIMILARITY_FLOOR` had already admitted. Measured on the
+ * headline query, "whats underrated here" went from 0 chunks to 4.
+ *
+ * TAC-350 set 0.5 as a proxy for topicality: below is off-topic, above is
+ * on-topic. TAC-358 measured that proxy against Le Mil's live corpus and
+ * **the distributions invert.** "where is the bathroom" — genuinely
+ * unanswerable here — scores 0.5439, above EVERY answerable terse
+ * recommendation question (max 0.4971: the Blossom Tonic chunk, which
+ * literally reads "the most underrated item on the menu", ranked #1 and
+ * deleted three thousandths under the floor).
+ *
+ * No threshold fixes that, and three were tested. An absolute floor is boxed
+ * in (any guard above 0.3250 kills a real answer, any below 0.3991 admits a
+ * weather question). A relative margin admits the top match for every query
+ * by construction. Peak shape separates no better — "where is the bathroom"
+ * has a sharper peak than every on-topic query but one. A chunk rewritten to
+ * contain the question verbatim still scored 0.4871. Cosine here tracks query
+ * length and specificity, not answerability.
+ *
+ * So this stopped trying to judge relevance, and the semantic call moved to
+ * `verify-grounding` (`knowledge_gap_backstop`), which reads meaning.
+ *
+ * Measured before the change rather than assumed: queue volume does not rise.
+ * 5/36 queued at 0.5 versus 3/36 at 0.30 across two runs of 18 queries
+ * through the real generate + verify path, and off-topic questions arriving
+ * with four irrelevant chunks declined cleanly rather than fabricating. n=2
+ * at temperature 0.7, so the supported claim is no evidence of an increase,
+ * not evidence of a decrease.
+ *
+ * `knowledgeChunksToProse`'s header was reframed in the SAME change and the
+ * two cannot be separated: those declines were measured under the old "facts
+ * you can ground replies in" wording, and admitting weaker chunks under a
+ * header that calls them facts is what invites building on them.
+ *
+ * Applied per-chunk, not as an all-or-nothing top-match gate. Shared with
+ * `lib/voices/regenerate-with-critique.ts` via the exported
+ * `filterByRelevance` (TAC-366) — changing this value reaches both paths.
  */
-export const KNOWLEDGE_RELEVANCE_FLOOR = 0.5
+export const KNOWLEDGE_RELEVANCE_FLOOR = 0.3
 
 /**
  * TAC-308: how long an operator has to answer a knowledge-gap card before the
