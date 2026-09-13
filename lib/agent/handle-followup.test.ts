@@ -15,7 +15,7 @@ const retrieveCorpusStageMock = vi.fn()
 // Resolves NON-EMPTY deliberately: with [] it would return exactly the value
 // an "expect empty" assertion checks, and could not tell "skipped retrieval"
 // from "retrieved nothing". Never called by the fixed implementation.
-const retrieveKnowledgeStageMock = vi.fn(async () => [
+const retrieveKnowledgeStageMock = vi.fn<(...a: unknown[]) => Promise<unknown[]>>(async () => [
   {
     id: 'k1',
     knowledgeCorpusId: 'kc1',
@@ -56,8 +56,13 @@ vi.mock('./stages', async () => {
   const actual = await vi.importActual<typeof import('./stages')>('./stages')
   return {
     APPROVAL_TRIGGERS: actual.APPROVAL_TRIGGERS,
+    // TAC-367: pure helper, passed through REAL rather than stubbed. It
+    // decides whether this path retrieves at all, so a mocked version would
+    // be testing the mock's opinion of the operator's note rather than the
+    // shared extractor buildAiRuntime uses. Same posture as APPROVAL_TRIGGERS.
+    operatorInstructionQuery: actual.operatorInstructionQuery,
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
+    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
     // TAC-367: TRUE, matching production for the `event` and `manual` triggers
     // these tests actually exercise. It was `() => false` — the opposite — so
     // retrieveKnowledgeStage was unreachable in every test here and the live
@@ -257,30 +262,53 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
-  // TAC-367. A followup has no guest message, so retrieveKnowledgeStage falls
-  // through to its synthetic-query branch and embeds `Followup {reason} for
-  // {name}` — a string with no referent in the corpus, which nonetheless
-  // returned a FULL 4/4 slate on every measured variant at Le Mil's. And
-  // verifyGroundingStage returns early when currentMessage is null, so this
-  // path has NO grounding backstop: at a venue with no hold configured a
-  // fabricated fact auto-sends. Interim narrowing until TAC-367 PR 3 decides
-  // what followups should actually query on.
-  //
-  // shouldRetrieveKnowledge is mocked TRUE above (as production behaves for
-  // both reasons below), so this fails the moment the conditional returns.
-  it.each(['manual', 'event'] as const)(
-    'never retrieves knowledge on a %s followup — the generator gets no chunks',
-    async (reason) => {
-      await handleFollowup({
-        venueId: VENUE_ID,
-        guestId: GUEST_ID,
-        trigger: { reason, triggeredAt: new Date(), metadata: { hint: 'checking in' } },
-      })
-      expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
-      const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown }
-      expect(ctx.knowledgeCorpus).toEqual([])
-    },
-  )
+  // TAC-367 PR 3 (option B). The original defect was retrieving against
+  // `Followup {reason} for {name}` — a template with no referent in any
+  // corpus that still returned a full 4/4 slate. An operator's note is real
+  // content about a real topic, so it IS a legitimate query; everything else
+  // on this path has no free text at all.
+  it('retrieves knowledge using the operator note as the query on a manual followup', async () => {
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: {
+        reason: 'manual',
+        triggeredAt: new Date(),
+        metadata: { hint: 'tell her about the new Panama lot' },
+      },
+    })
+    expect(retrieveKnowledgeStageMock).toHaveBeenCalledTimes(1)
+    // The THIRD argument is the query, and it must be the operator's own
+    // text. Asserting the value, not just that retrieval happened — the
+    // template-string defect would also have "retrieved".
+    const [, , query] = retrieveKnowledgeStageMock.mock.calls[0]
+    expect(query).toBe('tell her about the new Panama lot')
+  })
+
+  // The two cases with no free text to query on. A cron followup's content is
+  // structured (visit history, guest context, the perk's reward_description)
+  // and already in the prompt; a hintless manual followup has nothing at all.
+  it.each([
+    ['manual with no note', { reason: 'manual' as const, triggeredAt: new Date() }],
+    ['a cron day_7 followup', { reason: 'day_7' as const, triggeredAt: new Date() }],
+  ])('does not retrieve knowledge for %s', async (_label, trigger) => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger })
+    expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
+    const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown }
+    expect(ctx.knowledgeCorpus).toEqual([])
+  })
+
+  // A whitespace-only note is not a note. Without this, `metadata: {hint: ' '}`
+  // would query on an empty-ish string and retrieve whatever ranks highest —
+  // the template-string failure in a different costume.
+  it('treats a whitespace-only note as no note', async () => {
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'manual', triggeredAt: new Date(), metadata: { hint: '   ' } },
+    })
+    expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
+  })
 
   it('FAILS CLOSED — a "check_failed" result still queues rather than sending', async () => {
     verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'check_failed' })

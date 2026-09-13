@@ -19,6 +19,8 @@ import { buildRuntimeContext } from './build-runtime-context'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
+  operatorInstructionQuery,
+  retrieveKnowledgeStage,
   APPROVAL_TRIGGERS,
   generateStage,
   retrieveCorpusStage,
@@ -28,6 +30,7 @@ import {
   buildCorpusContent,
   buildGenerateAttemptContent,
   buildGenerateContent,
+  buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
 import type {
@@ -227,40 +230,58 @@ export async function handleFollowup(input: {
     }
 
     // Retrieve knowledge (conditional). For followups: only fires for
-    // Knowledge corpus: SKIPPED, unconditionally (TAC-367).
+    // Knowledge corpus: retrieved ONLY against the operator's own instruction
+    // (TAC-367 PR 3, replacing PR 2's blanket skip).
     //
-    // This used to retrieve for `event` and `manual` triggers. There is no
-    // guest message on this path, so `retrieveKnowledgeStage` falls through to
-    // its synthetic-query branch and embeds the literal string
-    // `Followup {reason} for {name}`. Measured against Le Mil's live corpus
-    // that returns a FULL 4/4 slate on every variant tried — chunks selected
-    // by a string with no referent in the corpus, then rendered under a header
-    // telling the model they are material to ground replies in.
+    // The original defect was not "followups retrieve" — it was retrieving
+    // against `Followup {reason} for {name}`, a template with no referent in
+    // any corpus, which still returned a full 4/4 slate on every measured
+    // variant because cosine always ranks something highest. Every chunk it
+    // produced was coincidence.
     //
-    // Why that is worse here than on the inbound path: `verifyGroundingStage`
-    // returns early when `currentMessage === null`, so NO followup has a
-    // grounding backstop. The approval gate still runs, but no trigger keys on
-    // fabrication for an outbound, so at a venue with no hold configured a
-    // fabricated fact auto-sends. Le Mil's is live to real guests.
+    // An operator note ("tell her about the new Panama lot") is real content
+    // about a real topic, so retrieval against it is retrieval working as
+    // designed. It is also the case that has the MOST to lose from the
+    // blanket skip: a note asking the model to be specific, with nothing
+    // behind it, removes the grounding while leaving the pressure — on a path
+    // that still has no grounding backstop. Vague or invented, with nothing
+    // checking. That is worse than the state PR 2 fixed.
     //
-    // An INTERIM narrowing, not the designed answer. TAC-367's PR 3 decides
-    // what followups should query on — the operator's own instruction for
-    // `manual`, the event being invited for `event` — both of which are real
-    // text rather than a template string. Until then this removes the input
-    // rather than leaving it wrong, because the correct design is a review
-    // cycle away and the exposure is live.
-    //
-    // ACCEPTED LOSS, stated because it is not pure narrowing: the `event`
-    // query did pull event-tagged chunks (the word "event" is in the template
-    // string), so some were topically adjacent. They were about SOME event at
-    // the venue, not necessarily the one being invited to, which is its own
-    // failure mode — but this is a real capability removed, not just noise.
-    //
-    // `[]`, not `null`: renders TAC-242's explicit "No specific venue
-    // knowledge matched this query... do not invent specifics" instead of
-    // omitting the block. Same reasoning as handle-holding-message.ts and
-    // handle-operator-decline.ts.
-    ctx.knowledgeCorpus = []
+    // No note, or any engine reason (day_*, cold_lapsed, perk_unlock) → no
+    // query, so no retrieval. Those runs have no free text to query on at all;
+    // their content is structured (visit history, guest context, the perk's
+    // own reward_description) and is already in the prompt. `''` is the
+    // explicit "do not retrieve" answer retrieveKnowledgeStage now requires.
+    const knowledgeQuery = operatorInstructionQuery(input.trigger)
+    if (knowledgeQuery) {
+      const knowledgeSpan = trace.span('retrieve_knowledge', {
+        triggerReason: input.trigger.reason,
+        queryLength: knowledgeQuery.length,
+      })
+      ctx.knowledgeCorpus = await retrieveKnowledgeStage(
+        ctx,
+        ctx.classification?.category ?? null,
+        knowledgeQuery,
+      )
+      knowledgeSpan.end({
+        output: {
+          matchCount: ctx.knowledgeCorpus.length,
+          topSimilarity:
+            ctx.knowledgeCorpus.length > 0
+              ? Math.max(...ctx.knowledgeCorpus.map((c) => c.similarity))
+              : 0,
+        },
+        content: trace.captureContent
+          ? buildKnowledgeCorpusContent(ctx.knowledgeCorpus)
+          : undefined,
+      })
+      console.log('[agent] followup knowledge retrieved', {
+        agentRunId,
+        matchCount: ctx.knowledgeCorpus.length,
+      })
+    } else {
+      ctx.knowledgeCorpus = []
+    }
 
     // Generate
     const generateSpan = trace.span('generate', { category })

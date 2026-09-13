@@ -552,6 +552,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       ctx.knowledgeCorpus = await retrieveKnowledgeStage(
         ctx,
         ctx.classification?.category ?? null,
+        // TAC-367: the guest's own message. Explicit now — this path always
+        // has one (shouldRetrieveKnowledge returns true precisely because
+        // currentMessage is non-null), so the `?? ''` never fires here.
+        ctx.currentMessage?.body ?? '',
       )
       knowledgeSpan.end({
         output: {

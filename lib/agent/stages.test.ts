@@ -534,11 +534,16 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     vi.restoreAllMocks()
   })
 
+  // TAC-367: retrieveKnowledgeStage takes its query explicitly now, so the
+  // fixture and the argument have to say the same thing. Bound to one
+  // constant rather than repeated, so they cannot drift apart.
+  const KNOWLEDGE_QUERY = 'do you have any free drink perks?'
+
   function makeKnowledgeCtx(): RuntimeContext {
     return makeCtx({
       currentMessage: {
         id: 'm1',
-        body: 'do you have any free drink perks?',
+        body: KNOWLEDGE_QUERY,
         providerMessageId: 'p1',
       } as RuntimeContext['currentMessage'],
     })
@@ -562,7 +567,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       ok: true,
       data: [row('k1', ['mechanic'])],
     })
-    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
     const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
       primaryTagPreference?: string[]
@@ -572,7 +577,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
 
   it('passes undefined preference for an unmapped category (cosine-only)', async () => {
     retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
-    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
     const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
       primaryTagPreference?: string[]
     }
@@ -581,7 +586,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
 
   it('passes undefined preference when category is null', async () => {
     retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
-    await retrieveKnowledgeStage(makeKnowledgeCtx(), null)
+    await retrieveKnowledgeStage(makeKnowledgeCtx(), null, KNOWLEDGE_QUERY)
     const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
       primaryTagPreference?: string[]
     }
@@ -595,7 +600,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       .mockResolvedValueOnce({ ok: true, data: [] })
       .mockResolvedValueOnce({ ok: true, data: [row('fallback', ['menu'])] })
 
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
 
     const firstArgs = retrieveKnowledgeContextMock.mock.calls[0][0] as {
@@ -613,7 +618,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
   it('does NOT fall back when no preference was set even on zero matches', async () => {
     // No preference → no fallback retry. One call total.
     retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
     expect(out).toEqual([])
   })
@@ -625,7 +630,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       error: 'voyage timeout',
       errorCode: 'embedding_failed',
     })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalled()
   })
@@ -635,7 +640,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     retrieveKnowledgeContextMock
       .mockResolvedValueOnce({ ok: true, data: [] })
       .mockResolvedValueOnce({ ok: false, error: 'voyage timeout' })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
@@ -655,7 +660,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
           similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.01,
         })),
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
       expect(out).toEqual([])
     })
 
@@ -664,7 +669,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
         ok: true,
         data: [{ ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR }],
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('strong')
     })
@@ -682,7 +687,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
           { ...row('weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05 },
         ],
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('strong')
     })
@@ -697,7 +702,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
           ok: true,
           data: [{ ...row('fallback-strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.1 }],
         })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
       expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('fallback-strong')
@@ -711,7 +716,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
           ok: true,
           data: [{ ...row('fallback-weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.02 }],
         })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
+      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
       expect(out).toEqual([])
     })
 
