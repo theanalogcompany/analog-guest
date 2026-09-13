@@ -560,12 +560,80 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     // verification code and the arrival push announcing "recommendation".
     // The index forbids a second open row, so the upgrade has to happen here.
     expect(state.insertCallCount).toBe(0)
-    expect(state.updatePayload).toMatchObject({
+
+    // toEqual, NOT toMatchObject. This is the assertion that pins the FULL
+    // field set: a partial match passes while `code` silently goes missing,
+    // which is the exact shape of the defect being fixed — a comp on the
+    // ledger with no verification code. Both arrival-push call sites
+    // (handle-inbound.ts:754, commitments-due.ts:234) read `type` and `code`
+    // OFF THE ROW, so these four columns are what decides whether the push
+    // says "comp ... Q4X9" or "recommendation" with nothing.
+    expect(state.updatePayload).toEqual({
       type: 'comp',
       code: 'Q4X9',
+      expires_at: null,
       source_message_id: MESSAGE_ID,
+      updated_at: NOW.toISOString(),
     })
     expect(r.ok).toBe(true)
+  })
+
+  it('leaves every field an upgrade must NOT move', async () => {
+    const state = newState({ selectReturn: [OPEN_REC] })
+    mockWith(state)
+
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: COMP_ON_SAME_ITEM,
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+
+    const payload = state.updatePayload ?? {}
+    // The negative half of the toEqual above, named field by field so a
+    // future reader sees the reasoning rather than just an exact-match blob.
+    //
+    //   created_at   — renders as "promised N ago"; TAC-341 keys the expiry
+    //                  horizon off it. Bumping makes a stale row immortal.
+    //   status       — a comp also starts 'open', and the CAS filter below
+    //                  requires it; writing it would be a no-op at best.
+    //   created_by   — hardcoded 'agent' at the only insert site (and the
+    //                  column defaults to 'agent'), so it is invariant on
+    //                  this path. Nothing to carry.
+    //   description  — equal to the incoming one under commitmentDedupKey by
+    //                  construction; only case/whitespace can differ.
+    //   expected_arrival / arrival_signal — belong to this row's own arrival
+    //                  lifecycle. If the guest already signalled against the
+    //                  recommendation, that signal is still about the same
+    //                  visit and survives the type change.
+    for (const field of [
+      'created_at',
+      'status',
+      'created_by',
+      'description',
+      'expected_arrival',
+      'arrival_signal',
+      'guest_id',
+      'venue_id',
+      'id',
+    ]) {
+      expect(payload).not.toHaveProperty(field)
+    }
+  })
+
+  it('has no gating field to carry — gating happens before the row exists', () => {
+    // Recorded as a test so the question does not get re-asked. There is no
+    // gating column on guest_commitments (migration 026): the gate is
+    // isCommitmentTypeGated(generation) in stages.ts, which reads the
+    // EMISSION and runs pre-dispatch. By the time an upgrade runs the
+    // operator has already approved, so there is nothing gating-shaped left
+    // to move onto the row.
+    const columns = Object.keys(makeRow())
+    expect(columns).not.toContain('requires_operator_approval')
+    expect(columns).not.toContain('gated')
+    expect(columns).toContain('code')
+    expect(columns).toContain('type')
   })
 
   it('never downgrades a comp to a recommendation', async () => {
