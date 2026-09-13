@@ -73,7 +73,7 @@ describe('evaluate-approval-decision structural invariants (TAC-347)', () => {
       new Set([
         'applyApprovalPolicyStage',
         'ApprovalDecision',
-        'GroundingBackstopFinding',
+        'GroundingBackstopResult',
         'RuntimeContext',
         'GenerateMessageResult',
       ]),

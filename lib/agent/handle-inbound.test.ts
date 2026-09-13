@@ -29,7 +29,7 @@ const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
 // every test in this file that doesn't care about it — `clearAllMocks()`
 // (used below) clears call history but not this default implementation.
-const verifyGroundingStageMock = vi.fn().mockResolvedValue(null)
+const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
@@ -652,6 +652,7 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
   it('threads a non-null verifyGroundingStage finding into applyApprovalPolicyStage as the third argument', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
     verifyGroundingStageMock.mockResolvedValueOnce({
+      status: 'flagged',
       claims: ['invents a wifi network name not in venue facts'],
     })
     applyApprovalPolicyStageMock.mockResolvedValue({
@@ -669,11 +670,12 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(groundingBackstopArg).toEqual({
+      status: 'flagged',
       claims: ['invents a wifi network name not in venue facts'],
     })
   })
 
-  it('passes null through when the backstop finds nothing', async () => {
+  it('passes the skipped state through when the backstop finds nothing', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-2', providerMessageId: 'p' })
@@ -682,7 +684,45 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
 
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toBeNull()
+    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
+  })
+
+  // TAC-367: the truncated state has to survive the orchestrator hop. It is
+  // the only grounding state that changes the send/queue outcome without
+  // carrying any payload, so a hop that flattened it to 'skipped' would look
+  // correct everywhere and silently restore fail-open.
+  it('threads the truncated state through to applyApprovalPolicyStage', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'truncated' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED],
+      primaryTrigger: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toEqual({ status: 'truncated' })
+  })
+
+  // TAC-367: an unexpected throw is OUR bug, not evidence about the reply.
+  // It must degrade to 'skipped', never to the fail-closed 'truncated' —
+  // otherwise any future defect in this stage becomes a fleet-wide queue
+  // flood rather than a logged degradation.
+  it('degrades an unexpected throw to skipped, not to truncated', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-3', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
   })
 })
 
@@ -718,7 +758,7 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
       applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toBeNull()
+    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
     expect(mechanicOfferBackstopArg).toEqual({ status: 'skipped' })
   })
 
@@ -750,13 +790,13 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
       applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toBeNull()
+    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
     expect(mechanicOfferBackstopArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
   })
 
   it('degrades to check_failed (still queues) if verifyMechanicOfferStage unexpectedly throws', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    verifyGroundingStageMock.mockResolvedValueOnce(null)
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'skipped' })
     verifyMechanicOfferStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',

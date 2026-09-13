@@ -1,7 +1,7 @@
 import {
   applyApprovalPolicyStage,
   type ApprovalDecision,
-  type GroundingBackstopFinding,
+  type GroundingBackstopResult,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
 import type { GenerateMessageResult } from '@/lib/ai'
@@ -29,7 +29,7 @@ export type { ApprovalDecision }
 export async function evaluateApprovalDecision(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  groundingBackstop?: GroundingBackstopFinding | null,
+  groundingBackstop?: GroundingBackstopResult | null,
 ): Promise<ApprovalDecision> {
   return applyApprovalPolicyStage(ctx, generation, groundingBackstop)
 }

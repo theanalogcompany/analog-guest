@@ -63,6 +63,13 @@ type ExtraReviewReason = 'operator_decline_initiated'
 // initiated reason without a label here fails tsc.
 const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> = {
   comp_regex_backstop: 'Compensation language detected',
+  // TAC-367: says what the operator actually has to do — read it themselves —
+  // rather than naming the mechanism or implying a finding. Deliberately NOT
+  // folded under knowledge_gap_backstop's "Unverified claim" copy: nothing
+  // was caught here, the check just didn't complete, and telling an operator
+  // a claim was caught when none was is the wrong-reason-copy problem
+  // TAC-364 exists for.
+  grounding_check_failed: 'Fact check did not complete — review manually',
   model_flagged: 'Model flagged for approval',
   fidelity_below_auto_send_floor: 'Voice match below auto-send threshold',
   previous_pending_held: 'Earlier draft still pending',

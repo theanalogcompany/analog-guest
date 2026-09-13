@@ -84,6 +84,17 @@
  *     Properties: { agentRunId, venueId, guestId, wouldHaveQueuedTriggers,
  *                   voiceFidelity, generatedBody }
  *
+ * - grounding_verifier_unavailable
+ *     TAC-367. Fires from verifyGroundingStage (lib/agent/stages.ts) when the
+ *     grounding backstop returned no verdict — `outcome: 'truncated'` (output
+ *     cap hit mid-JSON; fails CLOSED, draft queued) or `outcome: 'degraded'`
+ *     (transient fault; fails OPEN, reply proceeds). Slack-relays both: the
+ *     property that let the truncation hole survive was that nothing was
+ *     emitted at all. Query `failedClosed=false` for turns that shipped with
+ *     no grounding verdict.
+ *     Properties: { agentRunId, venueId, guestId, outcome, failedClosed,
+ *                   error, errorCode }
+ *
  * - webhook_silence
  *     Daily cron event. Fires when no inbound webhook has landed in 24+
  *     hours, but only when there's been at least one prior inbound (i.e.,
@@ -390,6 +401,68 @@ export async function captureUngroundedClaimCaught(
 ): Promise<void> {
   await capturePostHogEvent('ungrounded_claim_caught', props.guestId, { ...props })
   await postToSlack(formatUngroundedClaimCaught(props))
+}
+
+/**
+ * TAC-367: emitted from verifyGroundingStage when the grounding backstop did
+ * NOT return a verdict — i.e. the only fabrication check that fires under
+ * real traffic did not run for this turn.
+ *
+ * Two outcomes, deliberately ONE event with a discriminator rather than two
+ * events, because the question anyone actually asks is "how often is the
+ * backstop not running", and that should be one PostHog query rather than a
+ * union the next person has to know to write.
+ *
+ *   - `truncated`  — the model produced a verdict and the output cap cut it
+ *                    off mid-JSON. Fails CLOSED: the draft is queued.
+ *   - `degraded`   — a transient fault (network, provider error, timeout).
+ *                    Fails OPEN: the draft proceeds through the rest of the
+ *                    gate exactly as it did before TAC-350.
+ *
+ * `failedClosed` carries that consequence explicitly rather than leaving it
+ * to be re-derived from `outcome`, so a query for "turns that sent without a
+ * grounding verdict" is a single boolean filter.
+ *
+ * BOTH Slack-relay. The degraded case is the one worth arguing about, and it
+ * relays because fail-open means a guest-facing message shipped with a safety
+ * check skipped — the same class as captureUngroundedClaimCaught, and the
+ * precise property that let the truncation bug survive unnoticed was that
+ * nothing was emitted at all. Known cost: a sustained provider outage will
+ * relay once per inbound. That is noisy by design — the alternative is a
+ * fleet-wide silent bypass — but if the volume proves unworkable the lever is
+ * a PostHog-side filter on `outcome`, not deleting the emit.
+ */
+export interface GroundingVerifierUnavailableProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  outcome: 'truncated' | 'degraded'
+  /** True when the draft was queued as a result; false when it proceeded. */
+  failedClosed: boolean
+  /** Provider/SDK error text. Never contains guest or venue content. */
+  error: string
+  errorCode?: string
+}
+
+export async function captureGroundingVerifierUnavailable(
+  props: GroundingVerifierUnavailableProps,
+): Promise<void> {
+  await capturePostHogEvent('grounding_verifier_unavailable', props.guestId, { ...props })
+  await postToSlack(formatGroundingVerifierUnavailable(props))
+}
+
+function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableProps): string {
+  const headline = props.failedClosed
+    ? '*Grounding check truncated* — no verdict, draft queued for review'
+    : '*Grounding check unavailable* — no verdict, reply proceeded ungated'
+  return [
+    headline,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `outcome: ${props.outcome}${props.errorCode ? ` (${props.errorCode})` : ''}`,
+    `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ].join('\n')
 }
 
 function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {

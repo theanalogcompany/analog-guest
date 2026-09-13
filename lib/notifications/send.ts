@@ -71,6 +71,15 @@ const CONTEXT_BY_TRIGGER = {
   // rather than the mechanism. Stays categorical: the guest's actual question
   // never goes in the payload.
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'needs an answer',
+  // TAC-367. The one trigger where the operator genuinely has to be told that
+  // NOTHING was found — the grounding check didn't complete, so the draft is
+  // queued on an absence of information rather than a finding against it.
+  // Without a label this push reads "Reply to Sam" with no hint at all, and
+  // this card carries no timer to surface it later the way KNOWLEDGE_GAP does.
+  // (KNOWLEDGE_GAP_BACKSTOP, SELF_TALK_DETECTED and MECHANIC_OFFER_BACKSTOP
+  // are also unlabelled here — pre-existing, deliberately left alone rather
+  // than swept into this PR.)
+  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
 } as const satisfies Partial<Record<ApprovalTrigger, string>>
 
 const CONTEXT_LOOKUP: Record<string, string | undefined> = CONTEXT_BY_TRIGGER

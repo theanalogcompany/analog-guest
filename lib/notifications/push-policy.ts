@@ -118,6 +118,13 @@ const PUSH_POLICY = {
   // gets the same urgency as the other primary/structural triggers above.
   [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP]: 'push',
 
+  // TAC-367. The grounding check produced a verdict we couldn't read, so the
+  // draft is queued without anyone having established anything about it. That
+  // is precisely a card nobody will look at unless told to — unlike
+  // KNOWLEDGE_GAP above it carries no timer, so there is no cron fallback
+  // that eventually surfaces it. Push.
+  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'push',
+
   // The ONLY skip. A pending draft already exists for this (venue, guest),
   // and migration 020's partial unique index means persistOrRegenQueuedDraft
   // UPDATEs that row IN PLACE rather than inserting a new one. The operator

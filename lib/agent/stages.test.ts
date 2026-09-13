@@ -20,6 +20,9 @@ import {
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
+// TAC-367: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
+// source under test imports it the same way for the same reason.
+import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
 import { BrandPersonaSchema } from '@/lib/schemas'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
@@ -37,6 +40,7 @@ const generateMessageMock = vi.fn()
 // captureUngroundedClaimCaught (posthog) fires when it catches something.
 const verifyGroundingMock = vi.fn()
 const captureUngroundedClaimCaughtMock = vi.fn()
+const captureGroundingVerifierUnavailableMock = vi.fn()
 // TAC-355: verifyMechanicOffer (lib/ai) is the mechanic-offer backstop's
 // model call; captureMechanicOfferBackstopCaught (posthog) fires when it
 // catches something.
@@ -104,6 +108,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
   captureUngroundedClaimCaught: (...args: unknown[]) => captureUngroundedClaimCaughtMock(...args),
+  captureGroundingVerifierUnavailable: (...args: unknown[]) =>
+    captureGroundingVerifierUnavailableMock(...args),
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
   captureVoiceFidelityLow: vi.fn(),
@@ -2043,7 +2049,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { claims: ['invents four SoFi variation names not in the corpus'] },
+      { status: 'flagged' as const, claims: ['invents four SoFi variation names not in the corpus'] },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2051,6 +2057,141 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.pendingUntil).toBeInstanceOf(Date)
     expect(decision.blankBody).toBe(false)
+  })
+
+  // ---- TAC-367: truncated verdict ----
+
+  it('queues with grounding_check_failed when the grounding check truncated', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  })
+
+  // TAC-367. The load-bearing negative. A truncated check is an ABSENCE of
+  // information about the reply, not a finding against it — so it must not
+  // inherit any of the knowledge-gap consequences, each of which has a
+  // guest-facing effect that would be wrong here: an armed clock puts a
+  // "still looking into it" holding message in front of a guest whose reply
+  // was probably fine, and a blanked body destroys a reply nobody found
+  // anything wrong with. Folding this into `isGapTurn` is the natural-looking
+  // edit that breaks both at once.
+  it('does NOT arm the clock, blank the body, or claim a gap on a truncated check', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.pendingUntil).toBeUndefined()
+    expect(decision.blankBody).toBe(false)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+  })
+
+  // TAC-367: a truncated check reports nothing about the draft, so any
+  // concrete finding that co-fires must win the operator-facing label.
+  it('yields the primary label to a concrete co-firing trigger', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+  })
+
+  // TAC-367 REGRESSION GUARD (code review, MAJOR). Excluding `truncated` from
+  // isGapTurn is correct forward and wrong backward: the trigger cancels the
+  // protected-card carve-out, which lands the turn on the TAC-308 drop and
+  // DESTROYS the reply. Before this ticket the same turn fired no trigger and
+  // SENT, so the naive version converts a delivered reply into guest silence.
+  it('queues rather than DROPPING when a gap card is pending and this turn truncated', async () => {
+    const gapCard = {
+      id: 'gap-card-1',
+      body: '',
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    // Regen in place over the card, and the card's own clock is untouched.
+    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    expect(decision.pendingUntil).toBeUndefined()
+    expect(decision.blankBody).toBe(false)
+  })
+
+  // TAC-367 (code review, MAJOR). The two tests above this one both survive
+  // deleting GROUNDING_CHECK_FAILED from PRIMARY_TRIGGER_PRIORITY, because
+  // pickPrimaryTrigger falls through to triggers[0] and that happens to be
+  // the right answer in both. This is the only assertion that distinguishes
+  // "ranked where the comment says" from "absent and rescued by the
+  // fallback": it must OUTRANK a co-firing policy trigger.
+  it('outranks hold_all_outbound for the operator-facing label', async () => {
+    const ctx = inboundCtx()
+    const decision = await applyApprovalPolicyStage(
+      { ...ctx, venue: { ...ctx.venue, holdAllOutbound: true } } as RuntimeContext,
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  })
+
+  // TAC-367: a truncation card carries no clock and its own review_reason, so
+  // it must NOT be treated as a protected knowledge-gap card on a later turn.
+  // Cheap, and it pins the forward half of the isGapTurn exclusion.
+  it('does not treat a grounding_check_failed card as a protected gap card', async () => {
+    const truncationCard = {
+      id: 'trunc-card-1',
+      body: 'a perfectly fine reply',
+      pending_until: null,
+      review_reason: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: truncationCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'clean' as const },
+    )
+    // Not protected => ordinary sticky-pending queue, never a drop.
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  })
+
+  // TAC-367: 'clean' is what a transient fault degrades to, so it must be
+  // indistinguishable from a verdict that ran and found nothing. If this ever
+  // starts queueing, the fail-open line has moved without anyone saying so.
+  it('sends on a clean grounding result, exactly as when the stage was skipped', async () => {
+    const clean = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'clean' as const },
+    )
+    const skipped = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'skipped' as const },
+    )
+    expect(clean.action).toBe('send')
+    expect(skipped.action).toBe('send')
   })
 
   // The asymmetry is the whole point of the change, so pin both sides of it
@@ -2063,7 +2204,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const backstop = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { claims: ['invents a fact'] },
+      { status: 'flagged' as const, claims: ['invents a fact'] },
     )
     if (selfReported.action !== 'queue' || backstop.action !== 'queue') {
       throw new Error('both should queue')
@@ -2104,7 +2245,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         knowledgeGap: false,
         commitment: { type: 'comp', description: 'oat latte' },
       }),
-      { claims: ['invents a fact'] },
+      { status: 'flagged' as const, claims: ['invents a fact'] },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2122,7 +2263,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
-      { claims: ['invents a fact'] },
+      { status: 'flagged' as const, claims: ['invents a fact'] },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2143,7 +2284,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { claims: ['invents a different fact this turn'] },
+      { status: 'flagged' as const, claims: ['invents a different fact this turn'] },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2167,7 +2308,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { claims: ['a different unverified claim'] },
+      { status: 'flagged' as const, claims: ['a different unverified claim'] },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2179,6 +2320,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   beforeEach(() => {
     verifyGroundingMock.mockReset()
     captureUngroundedClaimCaughtMock.mockReset()
+    captureGroundingVerifierUnavailableMock.mockReset()
   })
 
   const inboundCtx = (overrides: Partial<RuntimeContext> = {}) =>
@@ -2206,42 +2348,113 @@ describe('verifyGroundingStage (TAC-350)', () => {
     }
   }
 
-  it('returns null without calling the model on the outbound (followup) path', async () => {
+  it('returns skipped without calling the model on the outbound (followup) path', async () => {
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toBeNull()
+    expect(result).toEqual({ status: 'skipped' })
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
 
-  it('returns null without calling the model for a demo guest', async () => {
+  it('returns skipped without calling the model for a demo guest', async () => {
     const ctx = inboundCtx({ guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'] })
     const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toBeNull()
+    expect(result).toEqual({ status: 'skipped' })
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
 
-  it('returns null without calling the model when the generation already self-reported a gap', async () => {
+  it('returns skipped without calling the model when the generation already self-reported a gap', async () => {
     const result = await verifyGroundingStage(inboundCtx(), makeGen({ knowledgeGap: true }))
-    expect(result).toBeNull()
+    expect(result).toEqual({ status: 'skipped' })
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
 
-  it('returns null and logs a warning when the model call degrades (fail-open)', async () => {
+  // TAC-367: the fail-OPEN half. A transient fault must still return a
+  // non-queueing state — this is the line the truncation carve-out is
+  // deliberately NOT allowed to cross, because grounding runs on every
+  // inbound and queuing every provider hiccup would be a fleet-wide flood.
+  it('returns clean and logs a warning when the model call degrades (fail-open)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({ ok: false, error: 'model unavailable' })
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'model unavailable',
+      errorCode: 'ai_verify_grounding_failed',
+    })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toBeNull()
+    expect(result).toEqual({ status: 'clean' })
     expect(warnSpy).toHaveBeenCalled()
   })
 
-  it('returns null and does NOT fire the PostHog event when nothing is found', async () => {
+  // TAC-367: a degraded call ships a guest-facing reply with the only
+  // fabrication check skipped. It must EMIT — silence on this path is the
+  // exact property that let the truncation hole survive unobserved.
+  it('emits grounding_verifier_unavailable with failedClosed=false when it degrades', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'socket hang up',
+      errorCode: 'ai_verify_grounding_failed',
+    })
+    await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
+    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
+    expect(call.outcome).toBe('degraded')
+    expect(call.failedClosed).toBe(false)
+  })
+
+  // TAC-367: the fail-CLOSED half. Truncation is a verdict the model produced
+  // that we could not read, so it queues instead of being discarded.
+  it('returns truncated when the call fails with the truncation errorCode', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'No object generated: could not parse the response.',
+      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ status: 'truncated' })
+  })
+
+  it('emits grounding_verifier_unavailable with failedClosed=true on truncation', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'No object generated: could not parse the response.',
+      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
+    })
+    await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
+    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
+    expect(call.outcome).toBe('truncated')
+    expect(call.failedClosed).toBe(true)
+  })
+
+  // TAC-367. Pins the DEFAULT DIRECTION: an errorCode this stage doesn't
+  // recognize must degrade to fail-open, never be treated as truncation.
+  // (An earlier version of this comment claimed it guarded against the
+  // constant being renamed on one side only — it doesn't: stages.ts imports
+  // VERIFY_GROUNDING_TRUNCATED_ERROR_CODE by name, so a one-sided rename
+  // fails tsc. Reworded rather than left as a fourth entry in this repo's
+  // list of tests whose stated rationale was never true.)
+  it('treats an unrecognized errorCode as degraded, not truncated', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'something else entirely',
+      errorCode: 'some_other_code',
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ status: 'clean' })
+  })
+
+  it('returns clean and does NOT fire the PostHog event when nothing is found', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
       data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toBeNull()
+    expect(result).toEqual({ status: 'clean' })
     expect(captureUngroundedClaimCaughtMock).not.toHaveBeenCalled()
+    expect(captureGroundingVerifierUnavailableMock).not.toHaveBeenCalled()
   })
 
   // TAC-301 part 1.5. The identity is the fix: the verifier must receive the
@@ -2271,7 +2484,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
       },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ claims: ['invents a wifi network name and password'] })
+    expect(result).toEqual({ status: 'flagged' as const, claims: ['invents a wifi network name and password'] })
     expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
     const call = captureUngroundedClaimCaughtMock.mock.calls[0][0]
     expect(call.ungroundedClaims).toEqual(['invents a wifi network name and password'])
