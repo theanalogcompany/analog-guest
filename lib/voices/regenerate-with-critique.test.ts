@@ -328,13 +328,34 @@ describe('regenerateWithCritique — happy path', () => {
         attemptScores: [0.85],
         attemptHistory: [],
         systemPrompt: '',
-        userPrompt: '',
+        // TAC-301 part 1.5: non-empty on purpose. Every fixture in this file
+        // used '' , which meant the mirrored `runtimeContext: gen.data.userPrompt`
+        // line could be DELETED with all 20 tests still passing — proved by
+        // mutation during code review. An empty string is indistinguishable
+        // from a missing field at the assertion boundary.
+        userPrompt: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
         promptVersion: 'v1.8.0',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
       },
     })
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
+  })
+
+  // This file carries a standing obligation to mirror lib/agent/stages.ts's
+  // gating. TAC-301 part 1.5 added runtimeContext there; without this
+  // assertion the mirror has no test pressure at all.
+  it("forwards the generator's composed userPrompt to the grounding check", async () => {
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'too eager',
+    })
+    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      }),
+    )
   })
 
   it('threads historyEndIso = inbound.created_at into buildRuntimeContext', async () => {

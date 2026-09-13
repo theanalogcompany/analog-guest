@@ -167,11 +167,13 @@ export const APPROVAL_TRIGGERS = {
   // so analytics can separate "the model was honest about not knowing" from
   // "the model was caught stating something it shouldn't have." The two are
   // mutually exclusive on any single turn (this trigger only runs when
-  // knowledgeGap is false), but every OTHER piece of knowledge-gap-card
-  // behavior — body blanking, clock arming, protected-card carve-out, the
-  // SEND_FIDELITY_FLOOR exemption — must treat both triggers identically
-  // regardless of which one fires. See isKnowledgeGapCard and
-  // knowledgeGapWillQueue's sibling logic below.
+  // knowledgeGap is false). Clock arming, the protected-card carve-out and
+  // the SEND_FIDELITY_FLOOR exemption treat both triggers identically. BODY
+  // BLANKING NO LONGER DOES (TAC-301 part 1.5): a self-reported gap blanks,
+  // a backstop catch KEEPS its body, because on this path the model never
+  // admitted to guessing and the flag can be wrong. See the blankBody
+  // rationale at the queue return below. See also isKnowledgeGapCard and
+  // knowledgeGapWillQueue's sibling logic.
   KNOWLEDGE_GAP_BACKSTOP: 'knowledge_gap_backstop',
   // TAC-355: deterministic backstop. Fires unconditionally when
   // GenerateMessageResult.selfTalkViolationPersisted is true — the reply
@@ -762,7 +764,7 @@ export type GroundingBackstopFinding = { claims: string[] }
  */
 export async function verifyGroundingStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus'>,
-  generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body'>,
+  generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body' | 'userPrompt'>,
 ): Promise<GroundingBackstopFinding | null> {
   if (ctx.currentMessage === null) return null
   if (ctx.guest.isDemo === true) return null
@@ -773,6 +775,17 @@ export async function verifyGroundingStage(
     replyBody: generation.body,
     venueInfo: ctx.venue.venueInfo,
     knowledgeChunks: ctx.knowledgeCorpus ?? undefined,
+    // TAC-301 part 1.5: hand over the generator's OWN composed user prompt,
+    // unmodified. Do not rebuild this from ctx — the identity is the point.
+    // Everything the generator knew about this guest and this moment lives
+    // here (## Right now, ## What this guest can access, ## Active
+    // commitments, ## Visit history, ## Guest context, ## Recent
+    // conversation), and without it every fact drawn from those blocks reads
+    // to the verifier as unsupported. Six of six were measured doing exactly
+    // that against Le Mil's live config. (## Operator instruction renders
+    // only on the followup path, which this stage returns null for, so it
+    // never actually appears here.)
+    runtimeContext: generation.userPrompt,
   })
   if (!r.ok) {
     console.warn(
@@ -982,10 +995,15 @@ export type ApprovalDecision =
       // trigger and must NOT re-arm the clock it just fired.
       pendingUntil?: Date
       // TAC-309: persist this card with NO body, discarding what the model
-      // wrote. True whenever the knowledge_gap trigger fired — no exceptions,
-      // including when it co-fires with commitment_type_gated (the comp detail
-      // survives on pending_commitment, and a model that couldn't ground the
-      // answer has no business pre-writing one).
+      // wrote. True whenever the SELF-REPORTED knowledge_gap trigger fired,
+      // including when it co-fires with commitment_type_gated — a model that
+      // admitted it couldn't ground the answer has no business pre-writing a
+      // comp, so pending_commitment is nulled alongside the body.
+      //
+      // FALSE for knowledge_gap_backstop (TAC-301 part 1.5), which is the one
+      // asymmetry between the two gap triggers. There the model claimed no
+      // gap and the verifier's flag is a second opinion that can be wrong;
+      // blanking destroyed correct replies in production.
       blankBody: boolean
     }
   // TAC-308: the guest already has a knowledge-gap card holding the one
@@ -1197,10 +1215,12 @@ export async function applyApprovalPolicyStage(
 
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
   // covering EITHER the self-reported trigger or the independent backstop.
-  // Every place below that used to key on knowledgeGapFired alone (body
-  // blanking, clock arming, the protected-card drop) now keys on this
-  // instead, so a caught-but-unflagged fabrication gets identical treatment
-  // to an honest self-report — never sent, always queued, always blanked.
+  // Clock arming and the protected-card drop key on this, so a
+  // caught-but-unflagged fabrication is never sent and always queued, exactly
+  // like an honest self-report.
+  //
+  // BODY BLANKING IS THE EXCEPTION and no longer keys on this (TAC-301 part
+  // 1.5) — see the blankBody rationale at the return below.
   const isGapTurn = knowledgeGapFired || backstopFired
 
   // ---- Pending-row resolution (TAC-308) ----
@@ -1317,11 +1337,48 @@ export async function applyApprovalPolicyStage(
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
     pendingUntil,
-    // TAC-350: blank the body on a backstop catch too — the whole point is
-    // that this text is an unverified claim; showing it to the operator as
-    // a one-swipe-approvable draft is the exact failure TAC-309 already
-    // fixed for the self-reported case.
-    blankBody: isGapTurn,
+    // TAC-301 part 1.5 REVERSES TAC-350 here, deliberately: blank on a
+    // self-reported gap, KEEP the body on a backstop catch.
+    //
+    // TAC-309's reason for blanking is specific to the self-report path. There
+    // the model ADMITTED it could not ground the answer, so the body is an
+    // acknowledged guess and an operator approving it in one swipe is the
+    // failure being prevented.
+    //
+    // On the backstop path the model admitted nothing. The body is its
+    // confident answer, and the verifier's flag is a second opinion that can
+    // be WRONG — on 2026-09-13 it was wrong twice in the first two minutes
+    // after deploy, on replies that were entirely correct ("we're closed for
+    // the night, back at 7 tomorrow"). Blanking destroyed a correct message
+    // and left the operator an empty card with nothing to approve or edit,
+    // so the guest got silence instead of an answer that already existed.
+    //
+    // Keeping the body makes a false positive recoverable in one swipe instead
+    // of destructive. Two costs are accepted knowingly rather than by
+    // omission, both surfaced in code review:
+    //
+    //   1. `ungroundedClaims` does NOT reach the card. It goes to PostHog /
+    //      Slack (captureUngroundedClaimCaught) and the Langfuse span; the
+    //      operator sees a fluent draft plus the generic "unverified claim"
+    //      label and has to spot which part is wrong themselves. Worse on a
+    //      co-firing turn, where PRIMARY_TRIGGER_PRIORITY hands the label to
+    //      commitment_type_gated and nothing on the card mentions grounding
+    //      at all. Blanking used to make one-swipe approval structurally
+    //      impossible; it no longer is. Surfacing the claim list on the card
+    //      is the real fix and is deliberately NOT in this change.
+    //   2. pending_commitment now rides along with the body. It was stripped
+    //      before because it was INVISIBLE on a blank card; the body being
+    //      visible is a convention that it names the commitment, not a
+    //      guarantee that it does.
+    //
+    // Both are judged better than destroying a correct reply, which is what
+    // the previous behavior did twice in production within two minutes.
+    //
+    // pendingUntil above stays keyed on isGapTurn. Deliberate even though the
+    // card now holds a viable answer: nothing has been SENT, so from the
+    // guest's side they are still waiting, and the holding message ("still on
+    // it") stays accurate about their experience rather than about the card.
+    blankBody: knowledgeGapFired,
   }
 }
 

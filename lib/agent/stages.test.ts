@@ -1988,7 +1988,13 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       },
     })
 
-  it('queues, arms the clock, and blanks the body when the backstop catches an unverified claim', async () => {
+  // TAC-301 part 1.5 REVERSED the blanking half of this, deliberately. The
+  // clock still arms (the guest is still owed an answer); the body now
+  // SURVIVES. On the backstop path the model never admitted to guessing —
+  // the flag is a second opinion, and on 2026-09-13 it was wrong twice in
+  // the first two minutes after deploy, on replies that were correct.
+  // Blanking destroyed a correct message and left the operator an empty card.
+  it('queues and arms the clock but KEEPS the body when the backstop catches a claim', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -1999,7 +2005,29 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.pendingUntil).toBeInstanceOf(Date)
-    expect(decision.blankBody).toBe(true)
+    expect(decision.blankBody).toBe(false)
+  })
+
+  // The asymmetry is the whole point of the change, so pin both sides of it
+  // in one place: identical gate call, only the SOURCE of the gap differs.
+  it('blanks a self-reported gap but not a backstop catch, on otherwise identical input', async () => {
+    const selfReported = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    const backstop = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { claims: ['invents a fact'] },
+    )
+    if (selfReported.action !== 'queue' || backstop.action !== 'queue') {
+      throw new Error('both should queue')
+    }
+    expect(selfReported.blankBody).toBe(true)
+    expect(backstop.blankBody).toBe(false)
+    // Both still arm the clock — a guest owed an answer is owed one either way.
+    expect(selfReported.pendingUntil).toBeInstanceOf(Date)
+    expect(backstop.pendingUntil).toBeInstanceOf(Date)
   })
 
   it('sends normally when there is no backstop finding (null)', async () => {
@@ -2038,10 +2066,11 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
     expect(decision.pendingUntil).toBeInstanceOf(Date)
-    // Blanking still fires — the comp detail survives on pending_commitment,
-    // not on the body, same rule TAC-309 already established for the
-    // self-reported case.
-    expect(decision.blankBody).toBe(true)
+    // TAC-301 part 1.5: no longer blanked. pending_commitment now rides along
+    // WITH a visible body, which is the safe combination — TAC-309's concern
+    // was an invisible commitment on a blank card the operator would
+    // authorize without seeing. The operator can see it here.
+    expect(decision.blankBody).toBe(false)
   })
 
   it('outranks fidelity_below_auto_send_floor for the operator label', async () => {
@@ -2075,7 +2104,8 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     if (decision.action !== 'queue') return
     expect(decision.existingPendingDraftId).toBe('gap-card-1')
     expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(true)
+    // TAC-301 part 1.5: backstop path keeps the body on regen too.
+    expect(decision.blankBody).toBe(false)
   })
 
   // A self-reported gap card must not be dropped by a turn the BACKSTOP (not
@@ -2118,8 +2148,17 @@ describe('verifyGroundingStage (TAC-350)', () => {
       ...overrides,
     })
 
-  function makeGen(overrides: { knowledgeGap?: boolean; body?: string } = {}) {
-    return { knowledgeGap: false, body: 'Le Mils Guest', ...overrides }
+  function makeGen(
+    overrides: { knowledgeGap?: boolean; body?: string; userPrompt?: string } = {},
+  ) {
+    return {
+      knowledgeGap: false,
+      body: 'Le Mils Guest',
+      // TAC-301 part 1.5: the generator's composed user prompt is now part of
+      // what the verifier is given.
+      userPrompt: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      ...overrides,
+    }
   }
 
   it('returns null without calling the model on the outbound (followup) path', async () => {
@@ -2158,6 +2197,23 @@ describe('verifyGroundingStage (TAC-350)', () => {
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toBeNull()
     expect(captureUngroundedClaimCaughtMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-301 part 1.5. The identity is the fix: the verifier must receive the
+  // string the GENERATOR actually got, not one this stage rebuilds. A rebuild
+  // is how the verifier's view drifts from the generator's, which is what
+  // produced six false-positive classes.
+  it("passes the generator's own composed userPrompt through verbatim", async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.1.0' },
+    })
+    const userPrompt =
+      '## Right now\n- Status: CLOSED right now. Next open tomorrow at 7:00 AM.\n\n## Visit history\n- cortado [3 days ago]'
+    await verifyGroundingStage(inboundCtx(), makeGen({ userPrompt }))
+    expect(verifyGroundingMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeContext: userPrompt }),
+    )
   })
 
   it('returns the finding and fires the PostHog event when the backstop catches something', async () => {
