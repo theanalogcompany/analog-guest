@@ -2009,3 +2009,104 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
     expect(out).not.toMatch(/\n {2}\S/)
   })
 })
+
+// TAC-301 part 2/3. The venue-capability block. Before this, Le Mil's
+// "walk-in only, ordering at the counter only" reached the prompt as one
+// indented sub-bullet under Amenities and the agent confirmed a pickup anyway.
+describe("venueInfoToProse — what this venue does and doesn't offer", () => {
+  const base = makeVenueInfo()
+
+  it('renders explicit negatives for services marked false', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: {
+        aheadOrdering: false,
+        holds: false,
+        reservations: false,
+        delivery: false,
+        alsoOffers: [],
+        alsoDoesNotOffer: [],
+      },
+    })
+    expect(out).toContain("## What this venue does and doesn't offer")
+    expect(out).toContain('- Ordering ahead: NOT available')
+    expect(out).toContain('- Holding or setting items aside: NOT available')
+    expect(out).toContain('- Reservations: NOT available')
+    expect(out).toContain('- Delivery: NOT available')
+  })
+
+  it('renders positives for services marked true, so a venue that DOES hold is not denied', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: { holds: true, alsoOffers: [], alsoDoesNotOffer: [] },
+    })
+    expect(out).toContain('- Holding or setting items aside: available')
+    expect(out).not.toContain('Holding or setting items aside: NOT available')
+  })
+
+  // THE LOAD-BEARING CASE. Absence means nobody said. Rendering it as a
+  // negative would have the agent deny real services at every venue nobody has
+  // configured — more frequent, and worse, than the bug being fixed.
+  it('renders NOTHING for a service nobody has stated either way', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: { holds: false, alsoOffers: [], alsoDoesNotOffer: [] },
+    })
+    expect(out).toContain('- Holding or setting items aside: NOT available')
+    for (const absent of ['Ordering ahead', 'Reservations', 'Delivery', 'Catering']) {
+      expect(out).not.toContain(absent)
+    }
+  })
+
+  it('omits the whole section when services is absent', () => {
+    expect(venueInfoToProse(base)).not.toContain("## What this venue does and doesn't offer")
+  })
+
+  it('omits the whole section when every field is unstated', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: { alsoOffers: [], alsoDoesNotOffer: [] },
+    })
+    expect(out).not.toContain("## What this venue does and doesn't offer")
+  })
+
+  it('carries free-form entries the closed list does not model', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: {
+        alsoOffers: ['Wholesale beans by the bag'],
+        alsoDoesNotOffer: ['Private events'],
+      },
+    })
+    expect(out).toContain('- Wholesale beans by the bag: available')
+    expect(out).toContain('- Private events: NOT available')
+  })
+
+  // Deliberately weaker than formatMechanicEligibility's completeness claim —
+  // that list is generated from a full table, this one is hand-curated.
+  it('states a don\'t-invent default without claiming the list is exhaustive', () => {
+    const out = venueInfoToProse({
+      ...base,
+      services: { holds: false, alsoOffers: [], alsoDoesNotOffer: [] },
+    })
+    // Absence must read as ABSENCE. An earlier wording ("not listed is
+    // unknown, not available") re-read every unstated service as a denial the
+    // moment a venue filled in one field, which is the failure the three-state
+    // design exists to prevent, just narrowed to partially-configured venues.
+    expect(out).toContain('has not been stated either way')
+    expect(out).toContain('do not tell the guest it is unavailable')
+    expect(out).not.toContain('complete set')
+  })
+
+  it('renders as its own section, not a sub-bullet of Amenities', () => {
+    const out = venueInfoToProse({
+      ...base,
+      amenities: { wifi: true },
+      services: { holds: false, alsoOffers: [], alsoDoesNotOffer: [] },
+    })
+    expect(out).toContain("\n## What this venue does and doesn't offer")
+    expect(out.indexOf('- Amenities:')).toBeLessThan(
+      out.indexOf("## What this venue does and doesn't offer"),
+    )
+  })
+})

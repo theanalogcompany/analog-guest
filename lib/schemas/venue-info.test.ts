@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { classifyContextEntry, filterActiveContext, type VenueContextNote } from './venue-info'
+import {
+  classifyContextEntry,
+  filterActiveContext,
+  type VenueContextNote,
+  VenueInfoSchema,
+} from './venue-info'
 
 const NOW = new Date('2026-04-29T12:00:00Z')
 
@@ -92,5 +97,64 @@ describe('classifyContextEntry', () => {
     expect(warnSpy).toHaveBeenCalledOnce()
     expect(warnSpy.mock.calls[0][0]).toContain('bad')
     expect(warnSpy.mock.calls[0][0]).toContain('not-a-date')
+  })
+})
+// TAC-301 part 2.
+describe('VenueInfoSchema — services', () => {
+  const minimal = {
+    address: { line1: '1 Test St', city: 'SF', region: 'CA', postalCode: '94109' },
+  }
+
+  it('parses a venue with no services key at all (every venue predating this)', () => {
+    const r = VenueInfoSchema.safeParse(minimal)
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.services).toBeUndefined()
+  })
+
+  it('preserves the three states distinctly', () => {
+    const r = VenueInfoSchema.safeParse({
+      ...minimal,
+      services: { holds: false, reservations: true },
+    })
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    expect(r.data.services?.holds).toBe(false)
+    expect(r.data.services?.reservations).toBe(true)
+    // Unstated must stay undefined, NOT default to false — the serializer
+    // renders false as an explicit "NOT available" and absent as nothing.
+    expect(r.data.services?.delivery).toBeUndefined()
+  })
+
+  it('defaults the free-form arrays so callers never handle undefined', () => {
+    const r = VenueInfoSchema.safeParse({ ...minimal, services: { holds: false } })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.services?.alsoOffers).toEqual([])
+      expect(r.data.services?.alsoDoesNotOffer).toEqual([])
+    }
+  })
+
+  // Permissive at the LIVE boundary, per CLAUDE.md. This field is hand-edited
+  // in Studio today and buildRuntimeContext throws on a venue_info parse
+  // failure, so a strict reject here would take down every agent run for the
+  // venue over a typo. Degrading to "nobody said" renders nothing, which is
+  // the same safe state as unconfigured.
+  it('degrades a malformed services object to undefined instead of failing the venue', () => {
+    const r = VenueInfoSchema.safeParse({ ...minimal, services: { holds: 'no' } })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.services).toBeUndefined()
+  })
+
+  it('does not let a malformed services object take the rest of venue_info with it', () => {
+    const r = VenueInfoSchema.safeParse({
+      ...minimal,
+      hours: { monday: '7:00 AM – 3:00 PM' },
+      services: 'walk-in only',
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.services).toBeUndefined()
+      expect(r.data.hours.monday).toBe('7:00 AM – 3:00 PM')
+    }
   })
 })

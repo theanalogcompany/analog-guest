@@ -27,6 +27,8 @@ export {
   VenueInfoSchema,
   type VenueInfo,
   VenueMenuSchema,
+  type VenueServices,
+  VenueServicesSchema,
 } from './venue-info'
 export {
   type DayRange,

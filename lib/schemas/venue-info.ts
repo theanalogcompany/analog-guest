@@ -129,6 +129,55 @@ export const VenueAmenitiesSchema = z.object({
   notes: z.string().optional(),
 })
 
+/**
+ * TAC-301 part 2: what the venue actually does and doesn't do for a guest.
+ *
+ * Exists because capability was systemically unconstrained. Nothing in the
+ * runtime stopped the agent offering a service the venue doesn't provide —
+ * `formatMechanicEligibility` constrains PERKS and nothing did the equivalent
+ * for services. The incident: at a counter-only, walk-in venue with no hold
+ * mechanism, the agent confirmed it would have a guest's order ready.
+ *
+ * THREE-STATE, and the distinction is the whole design:
+ *   true      offered. Say so, offer it.
+ *   false     explicitly NOT offered. Renders as an unmissable negative.
+ *   absent    nobody has said. Renders NOTHING.
+ *
+ * Absent must never render as a negative. Doing so would have the agent deny
+ * real services at every venue nobody has configured yet, which is a worse and
+ * far more frequent failure than the one being fixed. The prompt's own default
+ * (# Commitments: don't offer what the venue facts don't say it does) covers
+ * the unconfigured case without this schema claiming anything false.
+ *
+ * A CLOSED list of named fields rather than Record<string, boolean>, because
+ * `services.holds === false` should be a compile-checked expression the day
+ * commitment vocabulary is conditioned on venue capability. A Record reads the
+ * same at runtime and gives tsc nothing. Adding a sixth service is then a
+ * deliberate schema edit, which is the right amount of friction.
+ */
+export const VenueServicesSchema = z.object({
+  // Ordering before arrival, by any channel.
+  aheadOrdering: z.boolean().optional(),
+  // Setting an item aside for later pickup. The one the incident turned on,
+  // and the one `# Commitments`'s `hold` type is gated behind.
+  holds: z.boolean().optional(),
+  // A booked table or time.
+  reservations: z.boolean().optional(),
+  // Venue-run or third-party.
+  delivery: z.boolean().optional(),
+  // Pre-arranged large orders. Kept on operator call: it's the shape of the
+  // failure class (a thing a cafe is plausibly asked for and may not do), and
+  // Le Mil's persona already states the owner doesn't handle it over text.
+  catering: z.boolean().optional(),
+  // Escape hatches for services the closed list doesn't model. Two arrays
+  // rather than one notes blob so the positive/negative split stays structured
+  // at the edges too — the negative is the half that does the work.
+  alsoOffers: z.array(z.string()).default([]),
+  alsoDoesNotOffer: z.array(z.string()).default([]),
+})
+
+export type VenueServices = z.infer<typeof VenueServicesSchema>
+
 export const VenueMenuSchema = z.object({
   highlights: z.array(z.string()).default([]),
   notes: z.string().optional(),
@@ -142,6 +191,17 @@ export const VenueInfoSchema = z.object({
   menu: VenueMenuSchema.default({ highlights: [], items: [] }),
   staff: z.array(z.string()).default([]),
   amenities: VenueAmenitiesSchema.optional(),
+  // TAC-301: optional, so every venue that predates this parses unchanged and
+  // renders no services section at all.
+  //
+  // `.catch(undefined)` is the repo's permissive-at-the-LIVE-boundary rule
+  // (see CLAUDE.md → Common gotchas). This field has no write path yet, so it
+  // is hand-edited in Studio, and `buildRuntimeContext` THROWS on a venue_info
+  // parse failure — meaning `"holds": "false"` (a string, the natural Studio
+  // typo) would take down every agent run for that venue rather than just
+  // dropping the block. Malformed services now degrades to "nobody said",
+  // which renders nothing, which is the same safe state as unconfigured.
+  services: VenueServicesSchema.optional().catch(undefined),
   currentContext: z.array(VenueContextNoteSchema).default([]),
   // TAC-323: the exact prefilled-message string a guest sends by scanning the
   // venue's static QR sign (e.g. "Hi Sana!" for Mock Sextant). Used by the
