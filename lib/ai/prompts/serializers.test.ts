@@ -171,6 +171,90 @@ describe('runtimeToProse — today block', () => {
     const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
     expect(out).not.toContain('## Right now')
   })
+
+  // TAC-301. The motivating incident is a confirmation sent five hours after
+  // close ("omw can you have my usual ready?" → "Got it, see you soon"), and
+  // no approval trigger keys on time, so this line is the only guard.
+  describe('open/closed status line', () => {
+    it('states OPEN and the closing time when the venue is open', () => {
+      const out = runtimeToProse(
+        { today: { ...today, openState: { state: 'open', closesAt: '3:00 PM' } } },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain('- Status: OPEN right now, closes at 3:00 PM.')
+    })
+
+    it('states CLOSED, names the next opening, and forbids confirming anything now', () => {
+      const out = runtimeToProse(
+        {
+          today: {
+            ...today,
+            openState: { state: 'closed', opensAt: { day: 'tomorrow', time: '7:00 AM' } },
+          },
+        },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain('- Status: CLOSED right now.')
+      expect(out).toContain('Next open tomorrow at 7:00 AM.')
+      // The instruction half is load-bearing, not decoration: a bare fact is
+      // something the venue persona can talk past, and the failure being fixed
+      // is specifically a confirmation.
+      expect(out).toContain('do not confirm anything for right now')
+      // SCOPED to the present moment, deliberately. An unscoped "do not tell
+      // the guest to come by" would contradict comp-complaint's own designed
+      // remedy ("asking them to come back and have another one on us"), which
+      // is an ordinary thing to say at 8pm about a drink from that morning.
+      expect(out).toContain('come by now')
+      expect(out).not.toContain('Do not tell the guest to come by,')
+      // Both facts precede the instruction: the next opening shouldn't sit on
+      // the far side of a prohibition.
+      expect(out.indexOf('Next open')).toBeLessThan(out.indexOf('Do not tell'))
+    })
+
+    it('states CLOSED with no opening claim when the next opening is unknown', () => {
+      const out = runtimeToProse(
+        { today: { ...today, openState: { state: 'closed', opensAt: null } } },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain('- Status: CLOSED right now.')
+      expect(out).not.toContain('Next open')
+    })
+
+    // The safe direction. Unparseable hours must leave the block exactly as it
+    // was pre-TAC-301 rather than guess — a wrong "closed" fires on every turn
+    // at that venue, where the bug being fixed needs a specific phrasing.
+    it('renders no status line at all when the open state is unknown', () => {
+      const out = runtimeToProse(
+        { today: { ...today, openState: { state: 'unknown' } } },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain('## Right now')
+      expect(out).not.toContain('- Status:')
+    })
+
+    it('renders no status line when openState is absent entirely', () => {
+      const out = runtimeToProse({ today }, 'reply', NOW)
+      expect(out).toContain('## Right now')
+      expect(out).not.toContain('- Status:')
+    })
+
+    it('keeps the status line inside the Right now block, after the clock', () => {
+      const out = runtimeToProse(
+        {
+          today: { ...today, openState: { state: 'open', closesAt: '3:00 PM' } },
+          inboundMessage: 'omw can you have my usual ready?',
+        },
+        'reply',
+        NOW,
+      )
+      expect(out.indexOf('- Time at venue:')).toBeLessThan(out.indexOf('- Status:'))
+      expect(out.indexOf('- Status:')).toBeLessThan(out.indexOf('The guest just sent:'))
+    })
+  })
 })
 
 describe('runtimeToProse — recent conversation block', () => {

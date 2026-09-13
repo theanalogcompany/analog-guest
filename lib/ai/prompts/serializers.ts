@@ -299,12 +299,58 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
   return `${header}\n\n${blocks.join('\n\n')}`
 }
 
+/**
+ * TAC-301: render the open/closed status line.
+ *
+ * The weekly hours table already reaches the model in the system prompt and
+ * the venue-local clock already reaches it here, and it still confirmed an
+ * imminent arrival at a venue closed five hours earlier. This line does the
+ * join for it. No approval trigger keys on time, so nothing downstream catches
+ * that reply — this is the only thing standing between a closed venue and
+ * "see you soon."
+ *
+ * 'unknown' returns null and the caller omits the line entirely, leaving the
+ * block byte-identical to its pre-TAC-301 shape. That silence is deliberate:
+ * see the governing rule in lib/schemas/venue-hours.ts.
+ */
+function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openState']): string | null {
+  if (!openState) return null
+
+  if (openState.state === 'open') {
+    return `- Status: OPEN right now, closes at ${openState.closesAt}.`
+  }
+
+  if (openState.state === 'closed') {
+    // Facts first, instruction last — the instruction sits closest to
+    // generation, and the model shouldn't have to read around it to find the
+    // next opening.
+    //
+    // "come by now" is scoped deliberately. An unscoped "do not tell the guest
+    // to come by" would contradict comp-complaint's own designed remedy
+    // (categories/comp-complaint.ts: "asking them to come back and have
+    // another one on us"), which is an entirely ordinary thing to say at 8pm
+    // about a drink from that morning. What this line exists to stop is a
+    // confirmation for RIGHT NOW, not a future invitation.
+    const next = openState.opensAt
+      ? ` Next open ${openState.opensAt.day} at ${openState.opensAt.time}.`
+      : ''
+    return `- Status: CLOSED right now.${next} Do not tell the guest to come by now, and do not confirm anything for right now.`
+  }
+
+  return null
+}
+
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
-  return [
+  const lines = [
     '## Right now',
     `- Date: ${today.dayOfWeek}, ${today.isoDate}`,
     `- Time at venue: ${today.venueLocalTime} (${today.venueTimezone})`,
-  ].join('\n')
+  ]
+
+  const status = formatOpenStatus(today.openState)
+  if (status) lines.push(status)
+
+  return lines.join('\n')
 }
 
 // Exported so formatVisitHistory below shares the same delta vocabulary

@@ -799,7 +799,33 @@
 // counter-only but this rule ships to every venue regardless of service
 // model, so it now defers to how the specific venue actually takes orders
 // rather than asserting a channel.
-export const PROMPT_VERSION = 'v1.44.0'
+// v1.45.0 (TAC-301, part 1 of 2): adds an open/closed `- Status:` line to the
+// `## Right now` user-prompt block. No SYSTEM_TEMPLATE text changes in this
+// bump — the version moves because the composed prompt does, the same reason
+// v1.13.0 (## Visit history), v1.15.0 (## Guest context) and v1.20.0
+// (## Follow-up context) moved it for serializer-only changes.
+//
+// Motivating incident: at ~7:57pm, five hours after close, a guest sent "omw
+// can you have my usual ready?" and the agent replied "Got it, see you soon."
+// Both inputs were already in the prompt — the weekly hours table in the
+// system prompt, the venue-local clock in this block — and nothing in the
+// twelve-trigger approval set keys on time, so the reply auto-sent. The model
+// was being asked to join a free-text en-dashed range against a 24h clock
+// across two prompt sections, unprompted, mid-commitment. That join now
+// happens in code (lib/schemas/venue-hours.ts) and the answer is handed over.
+//
+// The CLOSED line carries its own instruction ("do not tell the guest to come
+// by, and do not confirm anything for right now") rather than stating the fact
+// alone. A bare "CLOSED" is a fact the venue persona can talk past; the
+// failure being fixed is specifically a confirmation, so the line names it.
+//
+// Unparseable hours render NO line at all — see the governing rule in
+// venue-hours.ts. Telling an open venue's guests it's closed fires on every
+// turn, where the bug being fixed needs a specific arrival phrasing.
+//
+// Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
+// plus the venue-services block) lands in a separate PR and will bump again.
+export const PROMPT_VERSION = 'v1.45.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

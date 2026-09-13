@@ -4,6 +4,7 @@ import type {
   ArrivalCaptureEmission,
   BrandPersona,
   CommitmentEmission,
+  OpenState,
   ParsedGuestContext,
   VenueInfo,
 } from '@/lib/schemas'
@@ -200,6 +201,13 @@ export type RuntimeContext = {
     dayOfWeek: string
     venueLocalTime: string
     venueTimezone: string
+    // TAC-301: whether the venue is open at this moment, resolved in code from
+    // venue_info.hours rather than left for the model to derive from the
+    // weekly table in the system prompt. Optional, and 'unknown' renders
+    // nothing — a venue whose hours this repo can't parse gets exactly the
+    // block it had before. See lib/schemas/venue-hours.ts for why every
+    // ambiguous case resolves to silence rather than to "closed".
+    openState?: OpenState
   }
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders

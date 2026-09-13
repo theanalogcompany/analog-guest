@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.44.0 (TAC-359: three more universal rules R32-R34 — already-in-conversation, first-visit recommendation shape, cannot take orders)', () => {
-    expect(PROMPT_VERSION).toBe('v1.44.0')
+  it('is v1.45.0 (TAC-301 part 1: open/closed status line in the ## Right now block)', () => {
+    expect(PROMPT_VERSION).toBe('v1.45.0')
   })
 })
 
