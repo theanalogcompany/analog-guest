@@ -2141,3 +2141,149 @@ describe("venueInfoToProse — what this venue does and doesn't offer", () => {
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// Emoji cadence (TAC-362)
+// ---------------------------------------------------------------------------
+
+describe('emoji cadence — persona standing statement (TAC-362)', () => {
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  // The two untouched entries, pinned VERBATIM. Both measured 0 emoji across
+  // 240 live responses, so their exact strings are proven behaviour — these
+  // assertions exist to make a well-meaning reword of a working path fail
+  // loudly rather than silently change two venues.
+  it('never keeps its exact prohibition, unchanged', () => {
+    expect(personaToProse(makePersona({ emojiPolicy: 'never' }))).toContain(
+      '## Emojis\nnever — Do not use emoji.',
+    )
+  })
+
+  it('sparingly keeps its exact wording, unchanged', () => {
+    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }))).toContain(
+      '## Emojis\nsparingly — You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
+    )
+  })
+
+  // The actual fix. "Use them where they feel natural" was a STANDING
+  // licence: identical on every turn, and a model with no memory of last
+  // turn takes it every time — 10 of 11 responses at Le Mil's.
+  it('frequent no longer carries a standing licence to use emoji', () => {
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    expect(out).not.toContain('Use them where they feel natural')
+    expect(out).not.toContain('do not stuff them')
+  })
+
+  it('frequent defers the per-message call and refuses to imply a rate', () => {
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    expect(out).toContain('decided per message')
+    expect(out).toContain('Do not read a general rate into this line.')
+  })
+
+  // The persona line forward-references the per-message block, and that block
+  // is suppressed on opt_out/comp_complaint and absent whenever the runtime
+  // field isn't set. So the sentence has to carry its own default rather than
+  // pointing at an instruction that may not be there.
+  it('frequent states a default for when no per-message block renders', () => {
+    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }))).toContain(
+      'if no such instruction appears, do not use one',
+    )
+  })
+})
+
+describe('emoji cadence — per-message block (TAC-362)', () => {
+  it("renders a flat prohibition for 'none'", () => {
+    const out = runtimeToProse({ emojiDirective: 'none' }, 'reply', NOW)
+    expect(out).toContain('## Emoji for this message')
+    expect(out).toContain('No emoji in this message.')
+  })
+
+  // 'allowed' must read as permission, never a mandate. "Use an emoji here"
+  // would restore the determinism this ticket exists to remove, just at a
+  // lower rate — and the model declining sometimes is what keeps the
+  // permitted branch from becoming its own pattern.
+  it("renders permission, not a mandate, for 'allowed'", () => {
+    const out = runtimeToProse({ emojiDirective: 'allowed' }, 'reply', NOW)
+    expect(out).toContain('## Emoji for this message')
+    expect(out).toContain('An emoji is welcome in this message if one genuinely fits.')
+    expect(out).toContain('At most one')
+  })
+
+  it('renders no block at all when the directive is absent', () => {
+    expect(runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)).not.toContain(
+      '## Emoji for this message',
+    )
+  })
+
+  // Position is the point: most-proximate-wins is the failure class behind
+  // TAC-301/314/329/330/338, so the per-message call has to be the LAST
+  // thing read before the generate instruction — after the inbound, after
+  // recent conversation, after everything.
+  it('renders as the last block, after recent conversation and ahead of the generate line', () => {
+    const out = runtimeToProse(
+      {
+        emojiDirective: 'none',
+        inboundMessage: 'what time do you close?',
+        guestName: 'Sam',
+        recentMessages: [
+          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) },
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    expect(out.indexOf('## Emoji for this message')).toBeGreaterThan(
+      out.indexOf('## Recent conversation'),
+    )
+    expect(out.indexOf('## Emoji for this message')).toBeLessThan(
+      out.indexOf('Generate the message now.'),
+    )
+  })
+
+  // MAJOR from code review: this block lands LAST in the user prompt while a
+  // category instruction lives in the SYSTEM prompt, so on proximity the
+  // block wins. An opt-out confirmation is a compliance surface and must
+  // never carry "an emoji is welcome here" — at a `frequent` venue that would
+  // have fired on ~75% of opt-outs.
+  it('never renders on an opt_out turn, on either branch', () => {
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(runtimeToProse({ emojiDirective: directive }, 'opt_out', NOW)).not.toContain(
+        '## Emoji for this message',
+      )
+    }
+  })
+
+  it('never renders on a comp_complaint turn, on either branch', () => {
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(runtimeToProse({ emojiDirective: directive }, 'comp_complaint', NOW)).not.toContain(
+        '## Emoji for this message',
+      )
+    }
+  })
+
+  // The gate has to be narrow, not a silent kill switch — a version that
+  // suppressed everywhere would pass both assertions above and remove the
+  // whole feature.
+  it('still renders on the ordinary categories', () => {
+    for (const category of ['reply', 'new_question', 'recommendation_request', 'casual_chatter', 'follow_up'] as const) {
+      expect(runtimeToProse({ emojiDirective: 'allowed' }, category, NOW)).toContain(
+        '## Emoji for this message',
+      )
+    }
+  })
+
+  it('the two branches are actually different text', () => {
+    const none = runtimeToProse({ emojiDirective: 'none' }, 'reply', NOW)
+    const allowed = runtimeToProse({ emojiDirective: 'allowed' }, 'reply', NOW)
+    expect(none).not.toEqual(allowed)
+  })
+})

@@ -192,6 +192,7 @@ function makeGenerationResult() {
     arrivalCapture: {},
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
   }
 }
 

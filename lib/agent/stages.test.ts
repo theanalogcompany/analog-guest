@@ -20,6 +20,7 @@ import {
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
+import { BrandPersonaSchema } from '@/lib/schemas'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
 // captureCorpusRetrievalBelowThreshold is fire-and-forget observability —
@@ -130,6 +131,18 @@ vi.mock('@/lib/analytics/posthog', () => ({
 // 'unknown', which renders no status line, so none of the pre-existing
 // assertions in this file shift. Tests that care about open/closed pass their
 // own venueInfo and it wins.
+// TAC-362: `never` is the deliberate default — the emoji coin then returns
+// null and no per-message block renders, so every pre-existing fixture's
+// rendered prompt is unchanged by this ticket. Tests that care about the
+// flip override emojiPolicy explicitly.
+const TEST_BRAND_PERSONA = BrandPersonaSchema.parse({
+  tone: 'warm and direct',
+  formality: 'casual',
+  speakerFraming: 'venue',
+  emojiPolicy: 'never',
+  lengthGuide: 'short',
+})
+
 const TEST_VENUE_INFO: RuntimeContext['venue']['venueInfo'] = {
   address: { line1: '1 Test St', city: 'Testville', region: 'CA', postalCode: '90000' },
   contact: {},
@@ -166,7 +179,15 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
   // unreachable — TS2783.
   const venueInfo =
     (ctx.venue as Partial<RuntimeContext['venue']>).venueInfo ?? TEST_VENUE_INFO
-  return { ...ctx, venue: { ...ctx.venue, venueInfo } }
+  // TAC-362: same backfill, same reason as venueInfo above — buildAiRuntime
+  // now dereferences venue.brandPersona.emojiPolicy to flip the per-message
+  // emoji coin. Production is safe (build-runtime-context.ts parses
+  // brand_persona through BrandPersonaSchema and THROWS on failure, so it is
+  // always a real object there), so the fixtures are fixed rather than the
+  // source made defensive against a state its own type forbids.
+  const brandPersona =
+    (ctx.venue as Partial<RuntimeContext['venue']>).brandPersona ?? TEST_BRAND_PERSONA
+  return { ...ctx, venue: { ...ctx.venue, venueInfo, brandPersona } }
 }
 
 function makeMatch(similarity: number, id = 'c1'): CorpusMatch {
@@ -467,7 +488,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.47.0',
+        promptVersion: 'v1.48.0',
         crisisSafety: true,
       },
     })
@@ -485,7 +506,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.47.0',
+        promptVersion: 'v1.48.0',
         crisisSafety: false,
       },
     })
@@ -733,6 +754,7 @@ function makeGenerationResult(
     promptVersion: 'v1.16.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
     ...overrides,
   }
 }
@@ -3042,5 +3064,74 @@ describe('willBeReviewed is scoped to complaint categories (TAC-307)', () => {
       ctxFor('comp_complaint', { default: 'auto_send', perCategory: { comp_complaint: 'auto_send' } }),
     )
     expect(runtime.willBeReviewed).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildAiRuntime — emoji cadence wiring (TAC-362)
+// ---------------------------------------------------------------------------
+
+describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
+  function ctxWithPolicy(emojiPolicy: 'never' | 'sparingly' | 'frequent') {
+    return makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        venueInfo: TEST_VENUE_INFO,
+        brandPersona: BrandPersonaSchema.parse({
+          tone: 'warm and direct',
+          formality: 'casual',
+          speakerFraming: 'venue',
+          emojiPolicy,
+          lengthGuide: 'short',
+        }),
+      } as RuntimeContext['venue'],
+      currentMessage: { id: 'm1', body: 'what time do you close?' } as RuntimeContext['currentMessage'],
+      recognition: { state: 'returning' } as RuntimeContext['recognition'],
+    })
+  }
+
+  // THE "ALWAYS SET" GUARD. emojiDirective is optional on the type (making it
+  // required would force a ~150-site edit across serializers.test.ts's
+  // fixtures), so nothing in the type system says buildAiRuntime populates
+  // it. This asserts the behaviour the optionality relies on, for every enum
+  // value, so "the producer always sets it" is guarded rather than assumed.
+  it('resolves a directive for every emojiPolicy value', () => {
+    expect(buildAiRuntime(ctxWithPolicy('frequent'), () => 0).emojiDirective).toBe('allowed')
+    expect(buildAiRuntime(ctxWithPolicy('frequent'), () => 0.99).emojiDirective).toBe('none')
+    // The two non-varying policies resolve to undefined BY DESIGN — the
+    // serializer then renders no per-message block and the persona's own
+    // standing statement governs the turn, unchanged. See EMOJI_PROBABILITY.
+    expect(buildAiRuntime(ctxWithPolicy('never'), () => 0).emojiDirective).toBeUndefined()
+    expect(buildAiRuntime(ctxWithPolicy('sparingly'), () => 0).emojiDirective).toBeUndefined()
+  })
+
+  // The injected rng has to actually reach the decision. A version that
+  // defaulted internally would pass every assertion above that doesn't vary
+  // the draw.
+  it('threads the injected rng through to the flip', () => {
+    const draws = [0.1, 0.99, 0.2]
+    let i = 0
+    const rng = () => draws[i++] ?? 0
+    const ctx = ctxWithPolicy('frequent')
+    expect([
+      buildAiRuntime(ctx, rng).emojiDirective,
+      buildAiRuntime(ctx, rng).emojiDirective,
+      buildAiRuntime(ctx, rng).emojiDirective,
+    ]).toEqual(['allowed', 'none', 'allowed'])
+  })
+
+  // The acceptance criterion "a venue set to no emoji gets none" — asserted
+  // at the strongest available point: `never` never reaches a coin at all,
+  // so there is no draw that could permit one.
+  it('never yields an emoji licence for a never venue, at any draw', () => {
+    for (const draw of [0, 0.25, 0.5, 0.75, 0.999]) {
+      expect(buildAiRuntime(ctxWithPolicy('never'), () => draw).emojiDirective).not.toBe('allowed')
+    }
+  })
+
+  it('defaults the rng so production callers need not pass one', () => {
+    const directive = buildAiRuntime(ctxWithPolicy('frequent')).emojiDirective
+    expect(['allowed', 'none']).toContain(directive)
   })
 })

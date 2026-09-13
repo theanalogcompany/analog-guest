@@ -8,6 +8,7 @@ import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { captureGenerationTruncated } from '@/lib/analytics/posthog'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
+import { containsEmoji } from './emoji-cadence'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
 import type {
@@ -338,6 +339,14 @@ export async function generateMessage(
         // Unlike the dash case, a true here means the draft must NOT ship —
         // see lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
         selfTalkViolationPersisted: matchSelfTalk(lastResult.body).matched,
+        // TAC-362: same recompute-on-final-body pattern as the two above.
+        // Only meaningful when this turn's directive was 'none' — 'allowed'
+        // and absent have nothing to violate. Ships either way (the measured
+        // violation rate is 0 in 240 responses); lib/agent/stages.ts emits a
+        // PostHog observation so a change in that rate announces itself
+        // instead of being discovered in a UAT session.
+        emojiDirectiveViolated:
+          input.runtime.emojiDirective === 'none' && containsEmoji(lastResult.body),
       },
     }
   } catch (e) {

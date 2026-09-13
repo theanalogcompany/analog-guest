@@ -112,8 +112,50 @@ describe('gradeVoiceDeterministic', () => {
     expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
   })
 
-  it('frequent policy never fails on emoji count', () => {
+  // UPDATED, not deleted, by TAC-362 — this asserted the previous Infinity
+  // limit and the reversal is the point. The per-message block now says "At
+  // most one", so an unlimited grader would let a four-emoji reply violate the
+  // prompt and pass the grade.
+  it('frequent policy now fails past one emoji (was unlimited before TAC-362)', () => {
     const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'frequent', replyBody: '🙌 ☕ 😄 🎉' })
+    expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
+  })
+
+  it('frequent policy still allows exactly one emoji', () => {
+    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'frequent', replyBody: 'sure thing 🙌' })
+    expect(result.findings.map((f) => f.check)).not.toContain('emoji_policy')
+  })
+
+  // TAC-362 detector-swap coverage AT THIS LAYER. The pre-existing fixtures
+  // above are all single-codepoint emoji, which the old block-range regex and
+  // the shared detector count identically — so they cannot tell the two
+  // implementations apart, and the behaviour change would have shipped with
+  // zero tests. These three are the cases where the verdict actually flips.
+  it('counts a ZWJ-joined family as one emoji, so sparingly passes it', () => {
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'sparingly',
+      replyBody: 'bring the family 👨‍👩‍👧',
+    })
+    // The old regex counted this as 3 and failed the limit of 1.
+    expect(result.findings.map((f) => f.check)).not.toContain('emoji_policy')
+  })
+
+  it('counts a flag, which the old regex missed entirely', () => {
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'never',
+      replyBody: 'roasted in 🇪🇹',
+    })
+    expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
+  })
+
+  it('does not count a registered-trademark symbol as an emoji', () => {
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'never',
+      replyBody: 'we serve Analog® coffee',
+    })
     expect(result.findings.map((f) => f.check)).not.toContain('emoji_policy')
   })
 

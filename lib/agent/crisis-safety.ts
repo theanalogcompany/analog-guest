@@ -94,5 +94,6 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
   }
 }

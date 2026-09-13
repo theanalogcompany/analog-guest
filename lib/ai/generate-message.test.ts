@@ -386,12 +386,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
   })
 
-  it('exposes promptVersion v1.47.0 on a successful result', async () => {
+  it('exposes promptVersion v1.48.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.47.0')
+    expect(r.data.promptVersion).toBe('v1.48.0')
   })
 })
 
@@ -457,5 +457,89 @@ describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
     expect(r.data.attemptHistory[0].approvalReason).toBe('')
     expect(r.data.attemptHistory[1].requiresOperatorApproval).toBe(true)
     expect(r.data.attemptHistory[1].approvalReason).toBe('drafted a complimentary refill')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Emoji directive violation flag (TAC-362)
+// ---------------------------------------------------------------------------
+
+describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  function inputWithDirective(
+    emojiDirective: 'none' | 'allowed' | undefined,
+  ): GenerateMessageInput {
+    const base = makeInput()
+    return { ...base, runtime: { ...base.runtime, emojiDirective } }
+  }
+
+  it("flags a body that carries an emoji on a 'none' turn", async () => {
+    queueResponses({
+      body: 'we close at 3 😊',
+      voiceFidelity: 0.85,
+      reasoning: 'clean',
+    })
+    const r = await generateMessage(inputWithDirective('none'))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.emojiDirectiveViolated).toBe(true)
+    // Observation only — the body SHIPS unmodified. A post-generation body
+    // mutation would be this repo's first on the generation path, and the
+    // measured violation rate is 0 in 240 responses.
+    expect(r.data.body).toBe('we close at 3 😊')
+  })
+
+  it("does not flag a clean body on a 'none' turn", async () => {
+    queueResponses({ body: 'we close at 3', voiceFidelity: 0.85, reasoning: 'clean' })
+    const r = await generateMessage(inputWithDirective('none'))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.emojiDirectiveViolated).toBe(false)
+  })
+
+  // 'allowed' is permission, so an emoji there is the directive being obeyed,
+  // not violated. A flag that fired on both branches would make the PostHog
+  // event meaningless.
+  it("never flags on an 'allowed' turn, emoji or not", async () => {
+    queueResponses({ body: 'we close at 3 😊', voiceFidelity: 0.85, reasoning: 'clean' })
+    const withEmoji = await generateMessage(inputWithDirective('allowed'))
+    expect(withEmoji.ok).toBe(true)
+    if (!withEmoji.ok) return
+    expect(withEmoji.data.emojiDirectiveViolated).toBe(false)
+  })
+
+  it('never flags when no directive was issued', async () => {
+    queueResponses({ body: 'we close at 3 😊', voiceFidelity: 0.85, reasoning: 'clean' })
+    const r = await generateMessage(inputWithDirective(undefined))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.emojiDirectiveViolated).toBe(false)
+  })
+
+  // One message, one coin. composePrompt runs once before the regen loop, so
+  // every attempt shares the same directive — a flip re-drawn per attempt
+  // would let a retry silently change the rules mid-message.
+  it('applies one directive across every regen attempt', async () => {
+    queueResponses(
+      { body: 'we close at 11 — come by 😊', voiceFidelity: 0.9, reasoning: 'has a dash' },
+      { body: 'we close at 11. come by 😊', voiceFidelity: 0.88, reasoning: 'dash removed' },
+    )
+    const r = await generateMessage(inputWithDirective('none'))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(2)
+    const prompts = generateObjectMock.mock.calls.map(
+      (c: unknown[]) => (c[0] as { prompt: string }).prompt,
+    )
+    expect(prompts).toHaveLength(2)
+    // Both attempts carry the identical (single) emoji instruction.
+    for (const p of prompts) {
+      expect(p).toContain('No emoji in this message.')
+      expect(p).not.toContain('An emoji is welcome')
+    }
+    expect(r.data.emojiDirectiveViolated).toBe(true)
   })
 })

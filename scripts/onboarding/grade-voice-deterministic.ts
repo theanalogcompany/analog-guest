@@ -1,4 +1,5 @@
 import { splitIntoSentences } from '@/lib/agent/sentence-split'
+import { countEmoji } from '@/lib/ai/emoji-cadence'
 import { matchSelfTalk } from '@/lib/ai/self-talk-detector'
 import type { VenueInfo } from '@/lib/schemas/venue-info'
 
@@ -71,11 +72,6 @@ export interface DeterministicVoiceResult {
 
 const DASH_RE = /[—–]/ // em dash, en dash
 
-// Broad-enough emoji detector: most emoji live in these Unicode blocks.
-// Not exhaustive (flag sequences, some symbol blocks), but sufficient for a
-// "did this message use emoji" check.
-const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu
-
 // Phone: loose US-style pattern (with or without separators/country code).
 const PHONE_RE = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g
 // URL/domain: scheme-optional, requires a recognizable TLD.
@@ -142,12 +138,37 @@ export function gradeVoiceDeterministic(input: DeterministicVoiceInput): Determi
     })
   }
 
-  const emojiMatches = replyBody.match(EMOJI_RE) ?? []
-  const emojiLimit = input.emojiPolicy === 'never' ? 0 : input.emojiPolicy === 'sparingly' ? 1 : Infinity
-  if (emojiMatches.length > emojiLimit) {
+  // TAC-362: counted by the shared detector in lib/ai/emoji-cadence.ts rather
+  // than a local block-range regex, so grader and runtime can never disagree
+  // about what an emoji is (same reasoning as TAC-366's filterByRelevance
+  // extraction). Four behavioural deltas came with the switch — enumerated
+  // rather than summarised, because a first pass at this comment undercounted
+  // them:
+  //   FEWER findings: plain arrows and the non-emoji dingbat/symbol ranges no
+  //     longer count. Note this is NOT "arrows don't count" — U+2194 / U+21A9
+  //     carry Extended_Pictographic, and they are excluded too, but by the
+  //     Emoji_Presentation rule rather than by range.
+  //   FEWER findings: text-default pictographic symbols (®, ™, ©, ‼, ℹ, ▶)
+  //     no longer count unless followed by U+FE0F. "Analog®" used to be an
+  //     emoji_policy finding at a `never` venue.
+  //   FEWER findings: a ZWJ-joined sequence counts as ONE emoji rather than
+  //     as each component. This is the delta that flips a `sparingly` verdict
+  //     — a joined family used to count 3 and fail the limit of 1.
+  //   MORE findings: flag sequences now count at all. The regex this replaced
+  //     named them as a known gap in its own comment.
+  //
+  // The `frequent` limit is 1, not Infinity, as of TAC-362: the per-message
+  // block says "At most one", so leaving the grader unlimited would let a
+  // three-emoji reply violate the prompt and pass the grade. The count
+  // distinction between sparingly and frequent is no longer per-message — it
+  // is the per-message PROBABILITY (lib/ai/emoji-cadence.ts), which this
+  // single-message grader cannot see and deliberately does not try to.
+  const emojiCount = countEmoji(replyBody)
+  const emojiLimit = input.emojiPolicy === 'never' ? 0 : 1
+  if (emojiCount > emojiLimit) {
     findings.push({
       check: 'emoji_policy',
-      detail: `${emojiMatches.length} emoji (policy: ${input.emojiPolicy}, limit: ${emojiLimit === Infinity ? 'none' : emojiLimit})`,
+      detail: `${emojiCount} emoji (policy: ${input.emojiPolicy}, limit: ${emojiLimit})`,
     })
   }
 

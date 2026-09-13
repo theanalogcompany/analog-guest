@@ -75,5 +75,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     selfTalkViolationPersisted: result.data.selfTalkViolationPersisted,
     offersGatedMechanic: result.data.offersGatedMechanic,
     offeredMechanicId: result.data.offeredMechanicId,
+    // TAC-362: same advisory posture again. `emojiDirective` is here so the
+    // playground can label which way this attempt's coin fell — it re-draws
+    // per regen call, and without the label an operator would read the
+    // difference between two attempts as a result of their critique.
+    emojiDirective: result.data.emojiDirective ?? null,
+    emojiDirectiveViolated: result.data.emojiDirectiveViolated,
   })
 }

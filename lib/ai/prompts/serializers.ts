@@ -8,6 +8,7 @@ import {
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
+import type { EmojiDirective } from '../emoji-cadence'
 import type {
   FollowupContext,
   FollowupReason,
@@ -31,7 +32,19 @@ const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
 const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
   never: 'Do not use emoji.',
   sparingly: 'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
-  frequent: "Emoji are part of this venue's voice. Use them where they feel natural, but do not stuff them.",
+  // TAC-362: `never` and `sparingly` are UNCHANGED and deliberately so —
+  // both measure 0 emoji across 240 responses, and rewording a proven path
+  // is how you find out it was load-bearing. Only `frequent` moves, because
+  // only `frequent` produced the complaint (10 of 11 responses).
+  //
+  // What was removed: "Use them where they feel natural, but do not stuff
+  // them." That is a STANDING LICENCE, evaluated identically on every turn,
+  // and a model with a standing licence and no memory of last turn takes it
+  // every time. The replacement states the venue fact and then explicitly
+  // refuses to be read as a rate — the per-message block is the only thing
+  // that decides this turn.
+  frequent:
+    "Emoji fit this venue's voice. Whether this particular message carries one is decided per message and stated in that message's own instructions; if no such instruction appears, do not use one. Do not read a general rate into this line.",
 }
 
 // TAC-338: named_person previously read "texting on the venue's behalf as
@@ -959,6 +972,60 @@ function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: b
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
+/**
+ * TAC-362: categories where no per-message emoji permission may render.
+ *
+ * Mirrors shouldRenderOpenIntentions / shouldRenderVisitHistory above, and
+ * exists for the same structural reason: this block lands LAST in the user
+ * prompt, and a category instruction lives in the SYSTEM prompt, so on
+ * proximity the block wins. That is the TAC-314/329/330/338 failure class.
+ *
+ * - `opt_out` is the compliance case and the reason this gate exists at all.
+ *   OPT_OUT_INSTRUCTIONS asks for "respectful and final, like a person
+ *   quietly nodding rather than a system reading a compliance script"; a
+ *   trailing "an emoji is welcome here" would have outranked it on ~75% of
+ *   opt-outs at a `frequent` venue. Same carve-out `hold_all_outbound` and
+ *   POLICY_EXEMPT_CATEGORIES already give opt_out elsewhere.
+ * - `comp_complaint` is the voice case: an emoji on "sorry your drink was
+ *   wrong" is a defect, and permission is the wrong thing to hand the model
+ *   on an apology turn.
+ *
+ * Both are strictly NARROWER than what shipped before this ticket — the old
+ * `frequent` guidance carried a standing licence on every turn including
+ * these two — so this can only reduce emoji, never add them. Scope is
+ * otherwise unaudited: this is not a claim that these are the only two
+ * categories that should suppress the block.
+ */
+function shouldRenderEmojiDirective(category: MessageCategory): boolean {
+  return category !== 'opt_out' && category !== 'comp_complaint'
+}
+
+/**
+ * TAC-362: the per-message emoji call, rendered as the last BLOCK of the
+ * user prompt — ahead of the runtime-facts tail (guest name, the inbound
+ * line, guest relationship), so it is the last INSTRUCTION the model reads,
+ * though not literally the last text before "Generate the message now."
+ *
+ * Both branches are deliberately worded, and the asymmetry is the design:
+ *
+ *   'none'    — a flat prohibition for THIS message. Measured 0 violations
+ *               in 240 responses, which is what makes the variation real
+ *               rather than requested: whatever the model would have done,
+ *               a `none` turn reliably carries no emoji.
+ *   'allowed' — PERMISSION, never a mandate, and capped at one. "Use an
+ *               emoji here" would restore the determinism this ticket
+ *               exists to remove, just at a lower rate. Because the model
+ *               can decline, the realised rate sits below the probability
+ *               and the failure direction is fewer emoji, never more.
+ */
+function formatEmojiDirective(directive: EmojiDirective): string {
+  const body =
+    directive === 'none'
+      ? 'No emoji in this message. Write it without one.'
+      : 'An emoji is welcome in this message if one genuinely fits. At most one, and only if it fits — if it does not, leave it out.'
+  return `## Emoji for this message\n${body}`
+}
+
 export function runtimeToProse(
   runtime: RuntimeContext,
   category: MessageCategory,
@@ -1047,6 +1114,15 @@ export function runtimeToProse(
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)
     if (recent) blocks.push(recent)
+  }
+
+  // TAC-362: last block in, so it is the most-proximate instruction before
+  // the generate line. Absent directive renders nothing at all, which leaves
+  // the persona's standing `## Emojis` statement governing the turn — see
+  // the field comment on RuntimeContext.emojiDirective for why absence is
+  // the safe direction rather than a gap.
+  if (runtime.emojiDirective && shouldRenderEmojiDirective(category)) {
+    blocks.push(formatEmojiDirective(runtime.emojiDirective))
   }
 
   const lines: string[] = []
