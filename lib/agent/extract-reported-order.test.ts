@@ -15,6 +15,10 @@ interface SupabaseMockState {
   insertedRow: { id: string } | null
   insertError: { message: string; code?: string } | null
   insertPayload: Record<string, unknown> | null
+  // TAC-377: the guests.last_visit_at advance.
+  guestUpdatePayload: Record<string, unknown> | null
+  guestUpdateFilter: string | null
+  guestUpdateError: { message: string } | null
 }
 
 function newSupabaseState(overrides: Partial<SupabaseMockState> = {}): SupabaseMockState {
@@ -26,6 +30,9 @@ function newSupabaseState(overrides: Partial<SupabaseMockState> = {}): SupabaseM
     insertedRow: { id: 'tx-new' },
     insertError: null,
     insertPayload: null,
+    guestUpdatePayload: null,
+    guestUpdateFilter: null,
+    guestUpdateError: null,
     ...overrides,
   }
 }
@@ -66,6 +73,17 @@ function makeSupabaseMock(state: SupabaseMockState) {
               single: async () => ({ data: state.guestRow, error: state.guestRowError }),
             }),
           }),
+          update: (payload: Record<string, unknown>) => {
+            state.guestUpdatePayload = payload
+            return {
+              eq: () => ({
+                or: async (filter: string) => {
+                  state.guestUpdateFilter = filter
+                  return { error: state.guestUpdateError }
+                },
+              }),
+            }
+          },
         }
       }
       throw new Error(`unexpected table in test mock: ${table}`)
@@ -80,6 +98,21 @@ vi.mock('@/lib/db/admin', () => ({
 
 // Import after mocks so the module under test picks them up.
 import { bodyMentionsMenuItem, extractReportedOrder, resolveReportedItems } from './extract-reported-order'
+
+// TAC-377 time fixtures. Le Mil's runs 07:00-15:00 America/Los_Angeles.
+// 2026-06-04 is a Thursday; 17:00Z is 10:00 PDT (open) and 04:00Z is 21:00
+// PDT the previous evening (shut).
+const OPEN_HOURS = {
+  monday: '7:00 AM – 3:00 PM',
+  tuesday: '7:00 AM – 3:00 PM',
+  wednesday: '7:00 AM – 3:00 PM',
+  thursday: '7:00 AM – 3:00 PM',
+  friday: '7:00 AM – 3:00 PM',
+  saturday: '7:00 AM – 3:00 PM',
+  sunday: '7:00 AM – 3:00 PM',
+}
+const DURING_SERVICE = new Date('2026-06-04T17:00:00Z')
+const AFTER_CLOSE = new Date('2026-06-05T04:00:00Z')
 
 function makeMenuItem(overrides: Partial<MenuItem> & { name: string }): MenuItem {
   return {
@@ -97,10 +130,26 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     agentRunId: 'run-1',
     venue: {
       id: 'venue-1',
-      venueInfo: { menu: { items: [makeMenuItem({ name: 'Cortado', price: 5 })] } },
+      // TAC-377: hours + timezone are now dereferenced by
+      // resolveVisitPrecision on every recorded order. Backfilled in the
+      // fixture rather than making the source defensive against a shape its
+      // own type forbids — buildRuntimeContext safeParses venue_info and
+      // throws on failure, and `hours` carries a .default({}). Same call as
+      // the stages.test.ts makeCtx backfills (TAC-301, TAC-362).
+      // OPEN_HOURS below is 07:00-15:00 every day, matching Le Mil's.
+      timezone: 'America/Los_Angeles',
+      venueInfo: {
+        menu: { items: [makeMenuItem({ name: 'Cortado', price: 5 })] },
+        hours: OPEN_HOURS,
+      },
     } as RuntimeContext['venue'],
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
-    currentMessage: { id: 'inbound-1', body: 'i got a cortado', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+    currentMessage: {
+      id: 'inbound-1',
+      body: 'i got a cortado',
+      providerMessageId: 'p1',
+      receivedAt: DURING_SERVICE,
+    } as RuntimeContext['currentMessage'],
     followupTrigger: null,
     recentMessages: [],
     recognition: {} as RuntimeContext['recognition'],
@@ -473,7 +522,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
   })
 
   it('returns no_items_resolved when the model reports no items', async () => {
-    extractReportedOrderAiMock.mockResolvedValue({ ok: true, data: { items: [], promptVersion: 'v1' } })
+    extractReportedOrderAiMock.mockResolvedValue({ ok: true, data: { items: [], reportTiming: 'present', promptVersion: 'v1' } })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'no_items_resolved' })
   })
@@ -481,7 +530,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
   it('returns no_items_resolved when the model returns items that resolve to nothing', async () => {
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Not On The Menu', quantity: 1 }], promptVersion: 'v1' },
+      data: { items: [{ name: 'Not On The Menu', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'no_items_resolved' })
@@ -490,7 +539,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
   it('records a transaction with a priced amount on the happy path', async () => {
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], promptVersion: 'v1' },
+      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({
@@ -498,6 +547,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
       transactionId: 'tx-new',
       amountCents: 500,
       itemCount: 1,
+      precision: 'pinned',
     })
     expect(currentState.insertPayload).toMatchObject({
       source: 'guest_reported',
@@ -516,8 +566,10 @@ describe('extractReportedOrder (orchestration gate)', () => {
   it('records amount_cents: null when any resolved item has no venue price', async () => {
     const ctx = makeCtx({
       venue: {
+        timezone: 'America/Los_Angeles',
         id: 'venue-1',
         venueInfo: {
+          hours: OPEN_HOURS,
           menu: {
             items: [
               makeMenuItem({ name: 'Cortado', price: 5 }),
@@ -530,6 +582,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
         id: 'm1',
         body: 'i got a cortado and the seasonal special',
         providerMessageId: 'p1',
+        receivedAt: DURING_SERVICE,
       } as RuntimeContext['currentMessage'],
     })
     extractReportedOrderAiMock.mockResolvedValue({
@@ -539,7 +592,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
           { name: 'Cortado', quantity: 1 },
           { name: 'Seasonal special', quantity: 1 },
         ],
-        promptVersion: 'v1',
+        reportTiming: 'present', promptVersion: 'v1',
       },
     })
     const outcome = await extractReportedOrder(ctx)
@@ -553,17 +606,23 @@ describe('extractReportedOrder (orchestration gate)', () => {
     })
   })
 
-  it('uses the guest first_contacted_at as occurred_at, not now', async () => {
+  // TAC-377 REVERSES this. It previously asserted occurred_at came from the
+  // guest's first_contacted_at — sound when the row had no way to express
+  // how confident it was, and wrong once it did: a guest who enrolled three
+  // days ago and reports a visit today had that visit dated three days back.
+  // The uncertainty now lives in `precision` instead of in the timestamp.
+  it('uses the inbound message timestamp as occurred_at, not the guest first_contacted_at', async () => {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
     currentState = newSupabaseState({
       guestRow: { created_at: threeDaysAgo, first_contacted_at: threeDaysAgo },
     })
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], promptVersion: 'v1' },
+      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
     })
     await extractReportedOrder(makeCtx())
-    expect(currentState.insertPayload?.occurred_at).toBe(threeDaysAgo)
+    expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+    expect(currentState.insertPayload?.occurred_at).not.toBe(threeDaysAgo)
   })
 
   it('returns failed when the existing-transaction lookup errors', async () => {
@@ -582,10 +641,137 @@ describe('extractReportedOrder (orchestration gate)', () => {
     currentState = newSupabaseState({ insertError: { message: 'duplicate key', code: '23505' } })
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], promptVersion: 'v1' },
+      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'already_reported' })
+  })
+
+  // ------------------------------------------------------------------
+  // TAC-377: visit-time precision + the guests.last_visit_at advance.
+  // ------------------------------------------------------------------
+
+  describe('visit precision and last_visit_at (TAC-377)', () => {
+    const mockOrder = (reportTiming: 'present' | 'past') =>
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming, promptVersion: 'v1' },
+      })
+
+    it('pins a present-tense report sent while the venue is open', async () => {
+      mockOrder('present')
+      const outcome = await extractReportedOrder(makeCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'pinned' })
+      expect(currentState.insertPayload?.occurred_at_precision).toBe('pinned')
+    })
+
+    it('does NOT pin a present-tense report sent after the venue has closed', async () => {
+      mockOrder('present')
+      const outcome = await extractReportedOrder(
+        makeCtx({
+          currentMessage: {
+            id: 'm1',
+            body: 'i got a cortado',
+            providerMessageId: 'p1',
+            receivedAt: AFTER_CLOSE,
+          } as RuntimeContext['currentMessage'],
+        }),
+      )
+      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at_precision).toBe('approximate')
+    })
+
+    it('does NOT pin a past-tense report, even during open hours', async () => {
+      mockOrder('past')
+      const outcome = await extractReportedOrder(makeCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'approximate' })
+    })
+
+    // The safe direction, and the one a future "tidy" is most likely to
+    // invert: hours we cannot read are not a closure. parse-venue-spec.ts
+    // silently drops rows whose label isn't in DAY_KEY_MAP ("Sat & Sun"),
+    // so unreadable hours are a live case, and reading them as shut would
+    // permanently suppress post_visit_* for every visit reported then.
+    it('pins when the venue hours are unreadable (unknown is not a closure)', async () => {
+      mockOrder('present')
+      const outcome = await extractReportedOrder(
+        makeCtx({
+          venue: {
+            id: 'venue-1',
+            timezone: 'America/Los_Angeles',
+            venueInfo: {
+              hours: {},
+              menu: { items: [makeMenuItem({ name: 'Cortado', price: 5 })] },
+            },
+          } as RuntimeContext['venue'],
+        }),
+      )
+      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'pinned' })
+    })
+
+    it('pins when the venue timezone is unusable (same safe direction)', async () => {
+      mockOrder('present')
+      const outcome = await extractReportedOrder(
+        makeCtx({
+          venue: {
+            id: 'venue-1',
+            timezone: 'Not/AZone',
+            venueInfo: {
+              hours: OPEN_HOURS,
+              menu: { items: [makeMenuItem({ name: 'Cortado', price: 5 })] },
+            },
+          } as RuntimeContext['venue'],
+        }),
+      )
+      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'pinned' })
+    })
+
+    it('advances guests.last_visit_at to the inbound timestamp, with its precision', async () => {
+      mockOrder('present')
+      await extractReportedOrder(makeCtx())
+      expect(currentState.guestUpdatePayload).toEqual({
+        last_visit_at: DURING_SERVICE.toISOString(),
+        last_visit_precision: 'pinned',
+      })
+    })
+
+    it('writes last_visit_at for an approximate visit too — the profile is honest either way', async () => {
+      mockOrder('past')
+      await extractReportedOrder(makeCtx())
+      expect(currentState.guestUpdatePayload).toMatchObject({
+        last_visit_at: DURING_SERVICE.toISOString(),
+        last_visit_precision: 'approximate',
+      })
+    })
+
+    it('guards the advance so a fresher last_visit_at is never walked backwards', async () => {
+      mockOrder('present')
+      await extractReportedOrder(makeCtx())
+      expect(currentState.guestUpdateFilter).toBe(
+        `last_visit_at.is.null,last_visit_at.lt.${DURING_SERVICE.toISOString()}`,
+      )
+    })
+
+    // The transaction is the durable record of the visit and is already
+    // written by this point; last_visit_at is a derived cache. Failing the
+    // whole extraction over it would turn a recorded visit into a `failed`
+    // outcome for nothing.
+    it('still reports recorded when the last_visit_at update fails', async () => {
+      currentState = newSupabaseState({ guestUpdateError: { message: 'guests table down' } })
+      mockOrder('present')
+      const outcome = await extractReportedOrder(makeCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded', transactionId: 'tx-new' })
+    })
+
+    it('does not touch guests.last_visit_at when nothing was recorded', async () => {
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: { items: [], reportTiming: 'present', promptVersion: 'v1' },
+      })
+      const outcome = await extractReportedOrder(makeCtx())
+      expect(outcome).toEqual({ kind: 'no_items_resolved' })
+      expect(currentState.guestUpdatePayload).toBeNull()
+    })
   })
 
   it('never throws — a synchronous failure in ctx access is caught', async () => {
@@ -599,8 +785,10 @@ describe('extractReportedOrder (orchestration gate)', () => {
     const realMenuCtx = (body: string) =>
       makeCtx({
         venue: {
+          timezone: 'America/Los_Angeles',
           id: 'venue-1',
           venueInfo: {
+            hours: OPEN_HOURS,
             menu: {
               items: [
                 makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 }),
@@ -609,7 +797,12 @@ describe('extractReportedOrder (orchestration gate)', () => {
             },
           },
         } as RuntimeContext['venue'],
-        currentMessage: { id: 'm1', body, providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+        currentMessage: {
+          id: 'm1',
+          body,
+          providerMessageId: 'p1',
+          receivedAt: DURING_SERVICE,
+        } as RuntimeContext['currentMessage'],
       })
 
     it('records an order for a bare fragment of a multi-word item once the model canonicalizes it', async () => {
@@ -623,7 +816,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
             { name: 'Gibraltar / Cortado', quantity: 1 },
             { name: 'Almond Croissant', quantity: 1 },
           ],
-          promptVersion: 'v1',
+          reportTiming: 'present', promptVersion: 'v1',
         },
       })
       const outcome = await extractReportedOrder(
@@ -636,7 +829,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
     it('records an order for a modifier-prefixed fragment ("oat cortado")', async () => {
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
-        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], promptVersion: 'v1' },
+        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
       })
       const outcome = await extractReportedOrder(realMenuCtx('the oat cortado was great today'))
       expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 500 })
@@ -646,7 +839,7 @@ describe('extractReportedOrder (orchestration gate)', () => {
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
         // Hallucinated / non-canonical — not present in realMenuCtx's menu.
-        data: { items: [{ name: 'Oat Cortado', quantity: 1 }], promptVersion: 'v1' },
+        data: { items: [{ name: 'Oat Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
       })
       const outcome = await extractReportedOrder(realMenuCtx('i got an oat cortado'))
       expect(outcome).toEqual({ kind: 'no_items_resolved' })
@@ -655,8 +848,10 @@ describe('extractReportedOrder (orchestration gate)', () => {
     it('prices at the highest match when the canonicalized name has menu duplicates with different prices', async () => {
       const ctx = makeCtx({
         venue: {
+          timezone: 'America/Los_Angeles',
           id: 'venue-1',
           venueInfo: {
+            hours: OPEN_HOURS,
             menu: {
               items: [
                 makeMenuItem({ name: 'Gibraltar / Cortado', size: '8oz', price: 5 }),
@@ -669,11 +864,12 @@ describe('extractReportedOrder (orchestration gate)', () => {
           id: 'm1',
           body: 'i got a cortado',
           providerMessageId: 'p1',
+          receivedAt: DURING_SERVICE,
         } as RuntimeContext['currentMessage'],
       })
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
-        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], promptVersion: 'v1' },
+        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
       })
       const outcome = await extractReportedOrder(ctx)
       expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 600 })

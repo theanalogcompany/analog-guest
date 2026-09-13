@@ -1,7 +1,9 @@
 import { extractReportedOrder as callExtractReportedOrder } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { normalizeMenuItemName } from '@/lib/recognition/extract-menu-exploration'
+import { resolveOpenState, type VisitTimePrecision } from '@/lib/schemas'
 import type { MenuItem } from '@/lib/schemas'
+import type { ReportTiming } from '@/lib/ai/types'
 import type { RuntimeContext } from './types'
 
 // TAC-323: guest enrollment via static QR + self-reported orders. The venue
@@ -37,7 +39,13 @@ export type ExtractReportedOrderOutcome =
   | { kind: 'already_reported' }
   | { kind: 'window_expired' }
   | { kind: 'no_items_resolved' }
-  | { kind: 'recorded'; transactionId: string; amountCents: number | null; itemCount: number }
+  | {
+      kind: 'recorded'
+      transactionId: string
+      amountCents: number | null
+      itemCount: number
+      precision: VisitTimePrecision
+    }
   | { kind: 'failed'; error: string }
 
 interface ResolvedReportedItem {
@@ -255,6 +263,39 @@ export function resolveReportedItems(
 }
 
 /**
+ * Combine the model's tense read with the venue's own hours to decide how
+ * precisely this visit's time is known (TAC-377).
+ *
+ * `pinned` requires BOTH halves: the guest described the order as happening
+ * now, AND the venue was actually open when the message landed. A
+ * present-tense report at 9pm to a venue that shuts at 3pm is not a receipt
+ * — they may well have come in that morning and be speaking loosely — so it
+ * records the visit at `approximate` and no post_visit_* followup is
+ * scheduled off it.
+ *
+ * An `unknown` open-state resolves to `pinned`, NOT `approximate`. Only a
+ * positive `closed` downgrades. The two failure directions are not
+ * symmetric: a wrong `approximate` permanently suppresses post_visit_* for
+ * that guest, which is the exact bug this ticket exists to fix, while a
+ * wrong `pinned` costs a check-in that lands a few hours early. It is also
+ * a live case rather than a hypothetical — parse-venue-spec.ts silently
+ * drops hours rows whose label isn't in DAY_KEY_MAP ("Sat & Sun",
+ * "Weekends"), so a venue can genuinely have unreadable weekend hours, and
+ * reading that as "shut" would quietly kill every weekend visit.
+ * resolveOpenState also returns `unknown` for a timezone this runtime can't
+ * use, which lands on the same safe side for the same reason.
+ */
+function resolveVisitPrecision(
+  reportTiming: ReportTiming,
+  ctx: RuntimeContext,
+  reportedAt: Date,
+): VisitTimePrecision {
+  if (reportTiming !== 'present') return 'approximate'
+  const openState = resolveOpenState(ctx.venue.venueInfo.hours, ctx.venue.timezone, reportedAt)
+  return openState.state === 'closed' ? 'approximate' : 'pinned'
+}
+
+/**
  * Never throws. Every branch — including DB and LLM failures — returns a
  * typed outcome and is logged (console.warn/console.error), matching the
  * updateGuestContext failure-handling precedent already in handle-inbound.ts
@@ -284,7 +325,7 @@ export async function extractReportedOrder(
         .maybeSingle(),
       supabase
         .from('guests')
-        .select('created_at, first_contacted_at')
+        .select('created_at')
         .eq('id', ctx.guest.id)
         .single(),
     ])
@@ -327,11 +368,17 @@ export async function extractReportedOrder(
       ? null
       : resolved.reduce((sum, r) => sum + (r.unitPriceCents as number) * r.quantity, 0)
 
-    // Timestamp of the guest's FIRST inbound message, not this one — a guest
-    // who answers three days later ordered three days ago. Falls back to
-    // created_at for a guest whose first_contacted_at was never stamped
-    // (e.g. created via nfc_tap/csv_import/pos_match before ever texting).
-    const occurredAt = guestRowResult.data.first_contacted_at ?? guestRowResult.data.created_at
+    // TAC-377: the timestamp of THIS message. Until now this was the guest's
+    // first_contacted_at, on the reasoning that "a guest who answers three
+    // days later ordered three days ago" — a sound guess back when the row
+    // had no way to say how confident it was. It is superseded rather than
+    // wrong: `precision` below now carries that uncertainty explicitly, so
+    // the timestamp no longer has to encode it, and guessing backwards
+    // instead produced a visit time that drifts by the whole gap since
+    // enrollment for any returning guest.
+    const reportedAt = ctx.currentMessage.receivedAt
+    const occurredAt = reportedAt.toISOString()
+    const precision = resolveVisitPrecision(extraction.data.reportTiming, ctx, reportedAt)
 
     const { data: inserted, error: insertError } = await supabase
       .from('transactions')
@@ -342,6 +389,7 @@ export async function extractReportedOrder(
         amount_cents: amountCents,
         item_count: resolved.length,
         occurred_at: occurredAt,
+        occurred_at_precision: precision,
         external_id: null,
         matched_at: null,
         match_method: null,
@@ -369,11 +417,44 @@ export async function extractReportedOrder(
       return { kind: 'failed', error: insertError?.message ?? 'insert returned no row' }
     }
 
+    // TAC-377: advance the guest's last-visit cache. Before this,
+    // guests.last_visit_at was written ONLY by the two Square paths
+    // (lib/pos/reconcile.ts, lib/pos/reconcile-tap.ts), so at a venue with
+    // no POS integration every guest kept last_visit_at = null and both
+    // detectPostVisitReason and detectColdLapsedReason returned null
+    // forever — the follow-up cron ran, scanned, reported success, and could
+    // not fire.
+    //
+    // Guarded on the value being newer, mirroring reconcile.ts:72-79. It
+    // will essentially never block (occurred_at is this message's own
+    // timestamp), but it keeps a future out-of-order writer from walking a
+    // fresher visit backwards. Both columns move in ONE statement, so
+    // last_visit_precision can never end up describing a different visit
+    // than last_visit_at holds.
+    //
+    // Failure is logged and swallowed, matching reconcile.ts:80-88: the
+    // transaction row is the durable record of the visit and it is already
+    // written. This cache is derived, the next report rebuilds it, and
+    // throwing here would turn a recorded visit into a `failed` outcome.
+    const { error: lastVisitError } = await supabase
+      .from('guests')
+      .update({ last_visit_at: occurredAt, last_visit_precision: precision })
+      .eq('id', ctx.guest.id)
+      .or(`last_visit_at.is.null,last_visit_at.lt.${occurredAt}`)
+    if (lastVisitError) {
+      console.warn('[agent] guest_reported last_visit_at update failed (continuing)', {
+        guestId: ctx.guest.id,
+        transactionId: inserted.id,
+        error: lastVisitError.message,
+      })
+    }
+
     return {
       kind: 'recorded',
       transactionId: inserted.id,
       amountCents,
       itemCount: resolved.length,
+      precision,
     }
   } catch (e) {
     return { kind: 'failed', error: e instanceof Error ? e.message : String(e) }

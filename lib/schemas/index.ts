@@ -37,6 +37,7 @@ export {
   parseDayRange,
   resolveOpenState,
 } from './venue-hours'
+export { parseVisitPrecision, type VisitTimePrecision } from './visit-precision'
 export {
   type ActiveCommitment,
   type ArrivalCaptureEmission,

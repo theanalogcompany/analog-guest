@@ -110,6 +110,13 @@ describe('reconcileTapFromInbound', () => {
       guest_id: GUEST,
       card_fingerprint: 'fp_1',
     })
+    // TAC-377: the tap advances last_visit_at, and precision must move with
+    // it. A tap is a real receipt; leaving a stale 'approximate' from an
+    // earlier self-report beside it would block post_visit_* forever.
+    expect(captured.updates.guests).toEqual({
+      last_visit_at: '2026-06-15T10:00:00Z',
+      last_visit_precision: 'pinned',
+    })
   })
 
   it('still matches (transactionId null) when the tap had no linked transaction', async () => {

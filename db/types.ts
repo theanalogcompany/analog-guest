@@ -451,6 +451,7 @@ export type Database = {
           last_name: string | null
           last_outbound_at: string | null
           last_visit_at: string | null
+          last_visit_precision: string | null
           opted_out_at: string | null
           phone_number: string
           status: string
@@ -474,6 +475,7 @@ export type Database = {
           last_name?: string | null
           last_outbound_at?: string | null
           last_visit_at?: string | null
+          last_visit_precision?: string | null
           opted_out_at?: string | null
           phone_number: string
           status?: string
@@ -497,6 +499,7 @@ export type Database = {
           last_name?: string | null
           last_outbound_at?: string | null
           last_visit_at?: string | null
+          last_visit_precision?: string | null
           opted_out_at?: string | null
           phone_number?: string
           status?: string
@@ -1247,6 +1250,7 @@ export type Database = {
           match_method: string | null
           matched_at: string | null
           occurred_at: string
+          occurred_at_precision: string | null
           raw_data: Json | null
           source: string
           updated_at: string
@@ -1264,6 +1268,7 @@ export type Database = {
           match_method?: string | null
           matched_at?: string | null
           occurred_at: string
+          occurred_at_precision?: string | null
           raw_data?: Json | null
           source: string
           updated_at?: string
@@ -1281,6 +1286,7 @@ export type Database = {
           match_method?: string | null
           matched_at?: string | null
           occurred_at?: string
+          occurred_at_precision?: string | null
           raw_data?: Json | null
           source?: string
           updated_at?: string

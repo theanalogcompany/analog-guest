@@ -572,8 +572,20 @@ export type ExtractedReportedOrderItem = {
   quantity: number
 }
 
+// TAC-377: 'present' means the guest is reporting the order as happening now
+// or just now ("just grabbed a cortado", "in line waiting on my latte") —
+// the message timestamp is the visit time. 'past' is everything else,
+// including a report that names a day ("came in Tuesday"): resolving a
+// relative date to an actual one is deliberately NOT attempted in v1, so a
+// dated report is honestly `approximate` rather than falsely pinned to the
+// message time. Only the caller knows the venue's hours, so this is the
+// tense read alone — lib/agent/extract-reported-order.ts combines it with
+// the open/closed verdict to reach a VisitTimePrecision.
+export type ReportTiming = 'present' | 'past'
+
 export type ExtractReportedOrderResult = {
   items: ExtractedReportedOrderItem[]
+  reportTiming: ReportTiming
   promptVersion: string
 }
 
