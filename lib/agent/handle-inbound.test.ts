@@ -80,7 +80,16 @@ vi.mock('./stages', async () => {
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
     retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
-    shouldRetrieveKnowledge: () => false,
+    // TAC-367: TRUE, matching production. The real predicate's first line is
+    // `if (ctx.currentMessage !== null) return true`, and every test in this
+    // file exercises the inbound path, where currentMessage is non-null by
+    // definition — so this was `() => false` against a production value of
+    // true 100% of the time, and the whole knowledge-retrieval branch
+    // (including its Langfuse span and degrade path) was unreachable in every
+    // test of the repo's primary guest-facing path. Fourth instance of this
+    // defect found in one sitting; see CLAUDE.md's rule on mocked behaviour
+    // flags. Flipping it broke nothing — the branch simply had no coverage.
+    shouldRetrieveKnowledge: () => true,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
@@ -254,7 +263,20 @@ beforeEach(() => {
     crisisSafety: false,
   })
   retrieveCorpusStageMock.mockResolvedValue([])
-  retrieveKnowledgeStageMock.mockResolvedValue([])
+  // Non-empty: with [] an assertion of [] could not tell "retrieval was
+  // skipped" from "retrieval ran and matched nothing".
+  retrieveKnowledgeStageMock.mockResolvedValue([
+    {
+      id: 'k1',
+      knowledgeCorpusId: 'kc1',
+      text: 'Le Mils roasts Indian coffee in-house.',
+      sourceType: 'synthesized',
+      confidence: 0.9,
+      similarity: 0.52,
+      primaryTags: ['sourcing'],
+      secondaryTags: [],
+    },
+  ])
   findPendingDraftMock.mockResolvedValue(null)
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
@@ -648,6 +670,25 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
 // `groundingBackstop` from the handleInbound call site would silently
 // disable the backstop for all live inbound traffic while every other test
 // in this file (and every pure-function test in stages.test.ts) kept passing.
+// TAC-367. The positive half of the pair whose negatives live in
+// handle-holding-message.test.ts and handle-followup.test.ts: inbound SHOULD
+// retrieve, outbound should not. Stating it here makes the distinction a
+// tested property rather than three separate local decisions, and it is the
+// assertion that would have caught the `() => false` stub this file carried.
+describe('handleInbound — knowledge retrieval (TAC-367)', () => {
+  it('retrieves knowledge and threads the chunks onto the context', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-k', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(retrieveKnowledgeStageMock).toHaveBeenCalledTimes(1)
+    const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown[] }
+    expect(ctx.knowledgeCorpus).toHaveLength(1)
+  })
+})
+
 describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
   it('threads a non-null verifyGroundingStage finding into applyApprovalPolicyStage as the third argument', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
