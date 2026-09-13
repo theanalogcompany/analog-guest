@@ -467,7 +467,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.46.0',
+        promptVersion: 'v1.47.0',
         crisisSafety: true,
       },
     })
@@ -485,7 +485,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.46.0',
+        promptVersion: 'v1.47.0',
         crisisSafety: false,
       },
     })
@@ -613,9 +613,13 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
-  // TAC-350: relevance floor. Calibrated at 0.5 against real Le Mil's corpus
-  // data — see KNOWLEDGE_RELEVANCE_FLOOR's own comment in stages.ts.
-  describe('relevance floor (TAC-350)', () => {
+  // Relevance floor. TAC-350 calibrated it at 0.5; TAC-358 measured that
+  // calibration against the live corpus, found the distributions invert, and
+  // lowered it to 0.3 — where it coincides with lib/rag's SIMILARITY_FLOOR and
+  // therefore filters nothing today. These tests are floor-RELATIVE so they
+  // keep testing the mechanism if the value moves; the one pinned assertion
+  // below is what makes moving it deliberate. See the constant's own comment.
+  describe('relevance floor (TAC-350, recalibrated TAC-358)', () => {
     it('drops all chunks and renders as no-match when every chunk is below the floor', async () => {
       retrieveKnowledgeContextMock.mockResolvedValueOnce({
         ok: true,
@@ -639,11 +643,16 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     })
 
     it('drops only the weak chunks when a mix of strong and weak chunks is returned', async () => {
+      // TAC-358: expressed RELATIVE to the constant, not as literals. These
+      // fixtures were 0.68 / 0.35 against a 0.5 floor and silently stopped
+      // testing anything when the floor moved to 0.30 — 0.35 became a
+      // survivor and the test failed rather than adapting. A floor that is
+      // explicitly a tunable should not have hand-picked numbers orbiting it.
       retrieveKnowledgeContextMock.mockResolvedValueOnce({
         ok: true,
         data: [
-          { ...row('strong', ['menu']), similarity: 0.68 },
-          { ...row('weak', ['menu']), similarity: 0.35 },
+          { ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.18 },
+          { ...row('weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05 },
         ],
       })
       const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply')
@@ -655,11 +664,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       retrieveKnowledgeContextMock
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('weak', ['mechanic']), similarity: 0.35 }],
+          data: [{ ...row('weak', ['mechanic']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05 }],
         })
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('fallback-strong', ['menu']), similarity: 0.6 }],
+          data: [{ ...row('fallback-strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.1 }],
         })
       const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
       expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
@@ -667,15 +676,29 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       expect(out[0].id).toBe('fallback-strong')
     })
 
+
     it('filters the fallback result by the floor too, not just the preferenced call', async () => {
       retrieveKnowledgeContextMock
         .mockResolvedValueOnce({ ok: true, data: [] })
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('fallback-weak', ['menu']), similarity: 0.4 }],
+          data: [{ ...row('fallback-weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.02 }],
         })
       const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request')
       expect(out).toEqual([])
+    })
+
+    it('is 0.30 — a sanity bound, not a relevance filter (TAC-358)', () => {
+      // Pinned deliberately. Every other test here is floor-relative so it
+      // survives a change to this number; this one exists so the change is
+      // never accidental. TAC-358 measured that cosine on this corpus tracks
+      // query length rather than answerability — an unanswerable question
+      // ("where is the bathroom", 0.5439) outscored every answerable terse
+      // one (max 0.4971) — so no value separates the sets and this one is
+      // chosen to sit below the worst measured on-topic query (0.3250) and
+      // exclude essentially nothing. Raising it back toward 0.5 reinstates
+      // the bug. The semantic judgement belongs to verify-grounding.
+      expect(KNOWLEDGE_RELEVANCE_FLOOR).toBe(0.3)
     })
   })
 })

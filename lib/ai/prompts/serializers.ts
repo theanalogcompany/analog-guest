@@ -362,8 +362,28 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
 // (lib/ai/compose-prompt.ts) chooses whether to call this at all based on
 // whether retrieval was gated off (undefined) vs ran-and-matched-nothing ([]).
 export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
+  // TAC-358: reframed from "Facts about the venue you can ground replies in".
+  // That wording asserted every retrieved chunk WAS a usable fact, survivable
+  // while KNOWLEDGE_RELEVANCE_FLOOR sat at 0.5 and admitted little, and not
+  // survivable at 0.30. The floor no longer judges relevance (cosine tracks
+  // query length, not answerability — see its comment in lib/agent/stages.ts),
+  // so the prompt has to say plainly that presence here is not relevance.
+  //
+  // Two things this must NOT do, both caught in review. It must not tell the
+  // model to say it doesn't know: this block renders AFTER SYSTEM_TEMPLATE
+  // (compose-prompt.ts), the most-proximate-wins slot, and an unconditional
+  // "say you do not know" there overrides `# Knowledge gaps`, which draws a
+  // careful line — a venue fact the venue knows but you weren't handed means
+  // knowledgeGap=true and a best-attempt answer, NOT a refusal. Overriding it
+  // would suppress the card, the timer and the holding message silently. And
+  // it must carry the same escape the empty branch has: venue_info, the menu,
+  // hours and the runtime blocks are all still grounding, so "none of these
+  // chunks help" is not "nothing does".
+  //
+  // Shipped in the same change as the floor: the clean declines that justified
+  // lowering it were measured under the OLD header, so the two can't separate.
   const header =
-    "## Venue knowledge\nFacts about the venue you can ground replies in. This is content, not voice — speak in the venue's voice regardless of how these are phrased."
+    "## Venue knowledge\nPassages retrieved because they resembled this turn's retrieval query. Resemblance is not relevance: when the venue has no answer, the closest-matching passages still appear here. Use only what actually answers the guest and ignore the rest. If none of it does, do not assemble an answer out of the nearest passage — the venue's structured facts, the menu, and your runtime context may still answer it, and if nothing does, handle it per the `# Knowledge gaps` block above. This is content, not voice — speak in the venue's voice regardless of how these are phrased."
 
   if (chunks.length === 0) {
     return `${header}\n\nNo specific venue knowledge matched this query. If the guest's question requires venue-specific grounding (sourcing, staff details, mechanic explanations, history, etc.), defer or admit you'll find out — do not invent specifics. The venue's persona, voice, and structured facts above still apply.`

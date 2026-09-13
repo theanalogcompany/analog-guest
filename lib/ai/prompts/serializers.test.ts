@@ -1141,10 +1141,41 @@ describe('knowledgeChunksToProse (TAC-242)', () => {
     expect(out).toContain('do not invent specifics')
   })
 
+  // TAC-358 canary. `## Venue knowledge` renders AFTER SYSTEM_TEMPLATE
+  // (compose-prompt.ts), the most-proximate-wins slot CLAUDE.md names as the
+  // recurring failure class (TAC-314 / 329 / 330 / 338). An unconditional
+  // "say you don't know" here would outrank `# Knowledge gaps`, which requires
+  // a best-attempt ANSWER plus knowledgeGap=true when the venue knows the fact
+  // and the model wasn't handed it — suppressing the card, the pending_until
+  // clock and the holding message, silently. The populated branch must route
+  // to that block rather than issue its own verdict.
+  it('never tells the model to say it does not know — that call belongs to # Knowledge gaps', () => {
+    const populated = knowledgeChunksToProse([makeChunk()])
+    expect(populated).not.toMatch(/say (that )?you (do not|don't) know/i)
+    expect(populated).toContain('# Knowledge gaps')
+    // The empty branch may admit ignorance — it has no chunks to route around,
+    // and its wording is TAC-242's and predates this rule.
+    const empty = knowledgeChunksToProse([])
+    expect(empty).toContain('No specific venue knowledge matched')
+  })
+
+  it('keeps the other grounding sources alive when no chunk answers the guest', () => {
+    // Without this the populated branch reads as "these chunks or nothing",
+    // and venue_info / menu / runtime blocks answer plenty on their own.
+    const out = knowledgeChunksToProse([makeChunk()])
+    expect(out).toMatch(/structured facts|the menu|runtime context/)
+  })
+
   it('renders the section header and the canonical voice/content disclaimer', () => {
     const out = knowledgeChunksToProse([makeChunk()])
     expect(out).toContain('## Venue knowledge')
-    expect(out).toContain('Facts about the venue you can ground replies in')
+    // TAC-358: the header no longer calls these facts. Assert the reframing
+    // that matters — presence is not evidence of relevance — rather than the
+    // whole sentence, so ordinary rewording doesn't fail this.
+    expect(out).toContain('Resemblance is not relevance')
+    expect(out).not.toContain('Facts about the venue you can ground replies in')
+    // It must ROUTE the no-match case, not rule on it.
+    expect(out).toContain('# Knowledge gaps')
     expect(out).toContain("speak in the venue's voice")
   })
 

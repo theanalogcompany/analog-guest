@@ -11,7 +11,15 @@ import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './ty
 // v1.1.0 (TAC-301 part 1.5): source material now also carries the generator's
 // composed user prompt (see VerifyGroundingInput.runtimeContext), plus the
 // system-prompt rule below about the assistant's own prior messages.
-export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.1.0'
+// v1.2.0 (TAC-358): `knowledgeChunksToProse` is shared with the generator, so
+// its reframed "## Venue knowledge" header now renders inside this prompt's
+// source material too. That header carries assistant-directed wording ("use
+// only what actually answers the guest", "handle it per # Knowledge gaps"),
+// which this prompt's scoping paragraph must exempt by name or the verifier
+// can read it as a rule the reply broke. Bumped because the rendered prompt
+// materially changed — without it the two generations are indistinguishable
+// in analytics.
+export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.2.0'
 
 const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest, plus the source material the assistant had access to — the venue's facts, menu, and any retrieved venue knowledge. Your job is to catch specific factual claims in the reply that are NOT supported by that source material, even when the reply states them confidently.
 
@@ -31,7 +39,7 @@ Do not flag:
   - Everything under "## What this guest can access" is a real, existing offering this guest is eligible for right now. Naming one, describing it in the venue's own words, offering it, or asking whether the guest wants it is GROUNDED — that block is the support. Do not flag such an offer merely because the item is absent from the menu or the venue facts; perks are not menu items and will not appear there. What is NOT grounded: an item absent from that block entirely, or a claim that something has already been arranged, reserved, or set aside for the guest when nothing says it has.
 - The DECISION to make an offer, an invitation, or a suggestion. Whether the venue should be offering something is not yours to judge; you are not a policy check. But this exempts the decision only, never the facts inside it: a specific date, time, item, price, or availability stated as part of an offer is checked exactly like any other claim. "Want a pastry on us?" is a decision. "We'll have the new single-origin in on Friday" contains a schedule claim and is checked.
 
-The runtime context section, and the venue facts' "what this venue does and doesn't offer" block, also contain instructions written FOR the assistant about how to write its reply — style guidance, things to avoid mentioning, when to raise a topic. Those are not your concern and they are not grounding rules. You check one thing only: whether a stated fact is supported. A reply that does something the runtime context discouraged, but that states nothing unsupported, is NOT flagged. For example, guidance not to recite visit history back to the guest does not make a correct statement about what the guest ordered ungrounded — the visit history is right there, so the fact is supported, and whether mentioning it was stylistically wise is someone else's judgement, not yours.
+The runtime context section, the venue facts' "what this venue does and doesn't offer" block, and the "## Venue knowledge" header, also contain instructions written FOR the assistant about how to write its reply — style guidance, things to avoid mentioning, when to raise a topic. Those are not your concern and they are not grounding rules. You check one thing only: whether a stated fact is supported. A reply that does something the runtime context discouraged, but that states nothing unsupported, is NOT flagged. For example, guidance not to recite visit history back to the guest does not make a correct statement about what the guest ordered ungrounded — the visit history is right there, so the fact is supported, and whether mentioning it was stylistically wise is someone else's judgement, not yours.
 
 One exception inside that section: ANYTHING THE ASSISTANT ITSELF WROTE is not evidence that it was correct. It is only what the assistant said. Two places this appears, and both matter:
   - Under "## Recent conversation", lines marked [venue, ...] are the assistant's own earlier replies. Lines marked [guest, ...] are the guest's own words, and those ARE legitimate grounding.

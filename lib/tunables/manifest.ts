@@ -367,8 +367,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
-    description: 'Minimum per-query cosine similarity for a knowledge_corpus chunk to be treated as relevant, rather than dropped so the "no venue knowledge matched" framing renders instead. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query relevance).',
-    relatedTickets: ['TAC-350'],
+    description: 'Minimum per-query cosine similarity for a knowledge_corpus chunk to reach the prompt. A sanity bound, NOT a relevance filter — TAC-358 measured that cosine tracks query length rather than answerability on this corpus (an unanswerable question outscored every answerable terse one), so the floor stopped judging relevance and the semantic call moved to verify-grounding. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query similarity).',
+    relatedTickets: ['TAC-350', 'TAC-358'],
   },
   {
     name: 'knowledge_retrieve_limit',

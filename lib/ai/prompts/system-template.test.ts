@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.46.0 (TAC-301 part 2: hold contradiction resolved, venue-services block)', () => {
-    expect(PROMPT_VERSION).toBe('v1.46.0')
+  it('is v1.47.0 (TAC-358: venue-knowledge header reframed as retrieved passages, not facts)', () => {
+    expect(PROMPT_VERSION).toBe('v1.47.0')
   })
 })
 

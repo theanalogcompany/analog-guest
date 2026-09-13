@@ -30,8 +30,11 @@ vi.mock('@/lib/agent/stages', () => ({
 }))
 
 /** Mirrors KNOWLEDGE_RELEVANCE_FLOOR. Hoisted so the mock above and the
- *  fixtures below can't drift to different numbers. */
-const MOCK_RELEVANCE_FLOOR = 0.5
+ *  fixtures below can't drift to different numbers — and every fixture below
+ *  is expressed RELATIVE to it, because this file was pinned at 0.5 and kept
+ *  passing while describing behaviour production no longer had. The mock is
+ *  what let it: a hardcoded stand-in can't fail when the real constant moves. */
+const MOCK_RELEVANCE_FLOOR = 0.3
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
@@ -252,7 +255,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         classifierConfidence: 0.8,
         reasoning: 'r',
         crisisSafety: true,
-        promptVersion: 'v1.46.0',
+        promptVersion: 'v1.47.0',
       },
     })
   })
@@ -877,13 +880,18 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
   it('drops sub-floor chunks from the primary result', async () => {
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('keep', 0.62), chunk('drop', 0.4971), chunk('edge', 0.5)],
+      data: [
+        chunk('keep', MOCK_RELEVANCE_FLOOR + 0.32),
+        chunk('drop', MOCK_RELEVANCE_FLOOR - 0.003),
+        chunk('edge', MOCK_RELEVANCE_FLOOR),
+      ],
     })
 
     await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
 
-    // 0.4971 is the live TAC-358 near-miss. 0.5 is retained: the production
-    // filter is `>=`, so the boundary belongs to the survivors.
+    // The boundary case belongs to the SURVIVORS — the production filter is
+    // `>=`. The near-miss is three thousandths under, the shape of the live
+    // TAC-358 case (0.4971 against the then-floor of 0.5).
     expect(knowledgeHandedToGenerator().map((c) => c.id)).toEqual(['keep', 'edge'])
   })
 
@@ -893,11 +901,14 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
     // as a full result and the untagged retry never fired.
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('weak1', 0.42), chunk('weak2', 0.31)],
+      data: [
+        chunk('weak1', MOCK_RELEVANCE_FLOOR - 0.02),
+        chunk('weak2', MOCK_RELEVANCE_FLOOR - 0.09),
+      ],
     })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('rescued', 0.71)],
+      data: [chunk('rescued', MOCK_RELEVANCE_FLOOR + 0.41)],
     })
 
     await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
@@ -911,7 +922,7 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({ ok: true, data: [] })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('good', 0.66), chunk('weak', 0.33)],
+      data: [chunk('good', MOCK_RELEVANCE_FLOOR + 0.36), chunk('weak', MOCK_RELEVANCE_FLOOR - 0.03)],
     })
 
     await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
@@ -920,16 +931,16 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
   })
 
   it('hands the generator nothing when the fallback is also all sub-floor', async () => {
-    // The live Le Mil's shape for a terse recommendation question: production
-    // gets zero chunks, so Voices must too, or the playground disagrees with
-    // the thing it exists to reproduce.
+    // Both calls return only sub-floor rows, so the generator gets nothing —
+    // the playground must agree with production about emptiness, or it
+    // disagrees with the thing it exists to reproduce.
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('a', 0.4186)],
+      data: [chunk('a', MOCK_RELEVANCE_FLOOR - 0.04)],
     })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('b', 0.4778)],
+      data: [chunk('b', MOCK_RELEVANCE_FLOOR - 0.01)],
     })
 
     await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
@@ -946,7 +957,10 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
     // Mutation-verified: that edit fails this test and only this test.
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('weak1', 0.42), chunk('weak2', 0.31)],
+      data: [
+        chunk('weak1', MOCK_RELEVANCE_FLOOR - 0.02),
+        chunk('weak2', MOCK_RELEVANCE_FLOOR - 0.09),
+      ],
     })
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: false,
@@ -981,7 +995,7 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
   it('leaves an all-above-floor result untouched', async () => {
     vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
       ok: true,
-      data: [chunk('a', 0.8), chunk('b', 0.7)],
+      data: [chunk('a', MOCK_RELEVANCE_FLOOR + 0.5), chunk('b', MOCK_RELEVANCE_FLOOR + 0.4)],
     })
 
     await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
