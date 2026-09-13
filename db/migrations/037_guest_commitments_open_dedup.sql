@@ -1,0 +1,95 @@
+-- 037_guest_commitments_open_dedup.sql
+-- TAC-318: at most one OPEN commitment per (venue, guest, description).
+--
+-- APPLIED IN STUDIO AHEAD OF THIS FILE, together with a manual collapse of
+-- the existing duplicate rows (fleet 9 -> 7; Le Mil's left with one Blossom
+-- Tonic and one SoFi). This file is the repo-side record of that index, since
+-- db/migrations is the single source of DB truth. Re-applying it against the
+-- live database is a no-op only if the index already exists under this exact
+-- name -- check pg_indexes before running it anywhere else.
+--
+-- WHY: production carried a clean 2x duplication rate. Two Le Mil's guests,
+-- two distinct recommendations, each minted twice within ~100 seconds, the
+-- descriptions byte-identical. The cause is NOT a double-invoke: the mint
+-- (`createCommitmentFromPending`, the only INSERT into this table) fires once
+-- per DISPATCHED response, and the …0853 pair's two source messages are
+-- `auto_sent` and `approved` -- two different mint call sites, reachable only
+-- from two separate agent runs. The agent re-emitted `commitment` on a later
+-- turn because `# Commitments` triggers on "what your reply is promising",
+-- per turn, and nothing tells the model the row already exists.
+--
+-- The dedup key is (venue_id, guest_id, lower(trim(description))):
+--
+--   * venue_id leads, honouring the cross-venue isolation invariant every
+--     other composite index in this repo follows (migration 020's
+--     idx_messages_one_pending_per_guest, migration 034's
+--     idx_transactions_one_guest_reported_per_guest).
+--   * `type` is deliberately NOT in the key. Two open promises with the same
+--     description are the same promise to the guest whatever the agent
+--     labelled them, and a type-scoped key would let one turn's
+--     "recommendation: cortado" sit next to a later turn's "comp: cortado"
+--     as two live entries in the same prompt block.
+--   * lower(trim(...)) is a FUNCTIONAL index expression, which is what makes
+--     it case- and padding-insensitive. `lib/guests/commitments.ts` mirrors
+--     this expression in `commitmentDedupKey` -- the two must move together.
+--     The `guest_commitments_open_dedup -- SQL/JS mirror` block in
+--     commitments.test.ts reads THIS FILE and asserts the expression, the
+--     scope, the index name and the absence of `type` from the key. Note what
+--     that guard cannot do: migrations are append-only, so it reads 037 by
+--     name and a later migration replacing this index must update the test
+--     itself.
+--
+--   * `type` is excluded, which means a repeat promise of a DIFFERENT kind
+--     collides with the existing row. That is not a no-op: see `shouldUpgrade`
+--     in lib/guests/commitments.ts. Narrowing the app check to same-type does
+--     NOT avoid it, because this index would then reject the insert with a
+--     23505 and land in the same place.
+--
+-- WHERE status = 'open' is the scope, and it is the load-bearing half:
+--
+--   * It keeps the index sparse, and in PRINCIPLE it leaves every terminal
+--     state (acknowledged / redeemed / expired / cancelled) free to repeat.
+--
+--     READ THE NEXT PARAGRAPH BEFORE RELYING ON THAT. As of TAC-318 nothing
+--     in this repo ever writes status='expired' or status='redeemed' -- they
+--     are enum values in GuestCommitmentStatusSchema with no writer, and
+--     guest_commitments.expires_at is write-only (set on insert, read by
+--     nothing). The only transitions that exist are open -> pending_ack and
+--     pending_ack -> acknowledged | cancelled, and all of them need the guest
+--     to signal arrival.
+--
+--     Consequence, stated because it is a product fact and not a doc nit: for
+--     `recommendation` -- the whole population this ticket is about, the type
+--     that never gates, never carries a code, and that guests rarely signal
+--     arrival against -- a row enters 'open' and effectively never leaves. So
+--     deduping on a recommendation description is PERMANENT for the life of
+--     that guest's relationship with the venue. A guest recommended the
+--     Blossom Tonic in September cannot be recommended it again, and the
+--     ## Active commitments block will render it as "promised 6 months ago"
+--     indefinitely. That is the correct behaviour for this ticket's brief and
+--     the wrong steady state; TAC-341 builds the `expired` and `redeemed`
+--     writers and sets the horizons (recommendations 30 days, comps 2 years),
+--     which is what turns the sentence above from principle into fact.
+--   * pending_ack is deliberately EXCLUDED. Once the guest has signalled
+--     arrival, the row is mid-flight against a specific visit; a fresh
+--     promise on a later turn is a genuinely new promise and gets its own
+--     row. Narrower than the `## Active commitments` block's own
+--     open+pending_ack filter, and that asymmetry is intended.
+--
+-- The app-level check in `createCommitmentFromPending` is the PRIMARY
+-- enforcement -- it is what stops the write and keeps the ledger honest
+-- without relying on an error path. This index is the backstop for the
+-- check-then-insert TOCTOU window and for any divergence between Postgres
+-- `lower(trim())` and the JS mirror; the writer catches 23505 and resolves it
+-- to the existing row rather than surfacing an error.
+--
+-- Additive (index only). No column, no constraint on existing data, no
+-- backfill, and indexes do not surface in generated types, so db/types.ts is
+-- unchanged. Standard-care: guest_commitments is not on the high-stakes table
+-- list. Ordering does not matter -- deployed code tolerates the index's
+-- absence (the app-level check alone) and its presence (the 23505 branch).
+
+create unique index guest_commitments_open_dedup
+  on public.guest_commitments
+  using btree (venue_id, guest_id, lower(trim(both from description)))
+  where (status = 'open');

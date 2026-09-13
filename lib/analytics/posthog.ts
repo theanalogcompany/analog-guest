@@ -1217,3 +1217,91 @@ export async function captureCrisisSafetyReplySent(
 ): Promise<void> {
   await capturePostHogEvent('crisis_safety_reply_sent', props.guestId, { ...props })
 }
+
+// ---------------------------------------------------------------------------
+// TAC-318: a commitment was deduped against an already-open row
+// ---------------------------------------------------------------------------
+
+export interface CommitmentDedupedProps {
+  venueId: string
+  guestId: string
+  /** The row we resolved to. */
+  existingCommitmentId: string
+  existingType: string
+  /** The type the agent just emitted. Differs from existingType on an upgrade. */
+  incomingType: string
+  /** The message that carried the duplicate emission. */
+  sourceMessageId: string
+  /**
+   * How we got here. 'app_check' is the primary path (the read found it before
+   * we tried to insert); '23505' means the app check missed and the unique
+   * index caught it, which is the TOCTOU race and is worth being able to count
+   * separately.
+   */
+  via: 'app_check' | '23505'
+  /** True when a recommendation was upgraded in place to a gated type. */
+  upgraded: boolean
+}
+
+/**
+ * Fires whenever a repeat promise resolves to an existing open commitment.
+ *
+ * This exists because TAC-318's entire premise was a MEASURED duplication rate
+ * ("a clean 2x"), and without an event the fix's effect is visible only in
+ * ephemeral Vercel logs — the exact "gate whose true-positive history you
+ * cannot produce on demand" that CLAUDE.md warns against.
+ *
+ * Slack-relays ONLY on an upgrade or a type mismatch. A plain same-type dedup
+ * is the expected steady state on every repeated recommendation and would be
+ * pure noise; a type change means the ledger row's identity moved and someone
+ * may want to look.
+ */
+export async function captureCommitmentDeduped(
+  props: CommitmentDedupedProps,
+): Promise<void> {
+  await capturePostHogEvent('commitment_deduped', props.guestId, { ...props })
+  if (props.existingType === props.incomingType) return
+  await postToSlack(
+    [
+      props.upgraded
+        ? `*Open commitment upgraded in place* (${props.existingType} → ${props.incomingType})`
+        : `*Commitment deduped across types* (kept \`${props.existingType}\`, dropped \`${props.incomingType}\`)`,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `commitment: \`${props.existingCommitmentId}\``,
+      `source message: \`${props.sourceMessageId}\``,
+      `via: \`${props.via}\``,
+      props.upgraded
+        ? `_The guest keeps one live promise, now carrying the gated type's verification code._`
+        : `_The incoming promise was NOT recorded separately — guest_commitments_open_dedup permits one open row per description._`,
+    ].join('\n'),
+  )
+}
+
+/**
+ * TAC-318: the dedup read failed, so the app-level check did not run for this
+ * write and the unique index is the only thing standing between us and a
+ * duplicate.
+ *
+ * Relays because the primary enforcement being inert is exactly the condition
+ * that is otherwise invisible — the table keeps looking correct while the
+ * check does nothing.
+ */
+export async function captureCommitmentDedupCheckFailed(props: {
+  venueId: string
+  guestId: string
+  sourceMessageId: string
+  error: string
+}): Promise<void> {
+  await capturePostHogEvent('commitment_dedup_check_failed', props.guestId, { ...props })
+  await postToSlack(
+    [
+      '*Commitment dedup check failed — proceeding to insert*',
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `source message: \`${props.sourceMessageId}\``,
+      `error: ${truncate(props.error, 300)}`,
+      '_Fail-open by design. guest_commitments_open_dedup is the backstop; if this is sustained, the app-level check is inert._',
+    ].join('\n'),
+  )
+}
