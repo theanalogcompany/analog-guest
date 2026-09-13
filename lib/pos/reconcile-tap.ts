@@ -120,9 +120,12 @@ export async function reconcileTapFromInbound(opts: {
   }
 
   if (txn?.occurred_at) {
+    // TAC-377: precision moves with the timestamp — see reconcile.ts for why
+    // writing one without the other permanently suppresses post_visit_* for
+    // a guest who self-reported before their first tap.
     await supabase
       .from('guests')
-      .update({ last_visit_at: txn.occurred_at })
+      .update({ last_visit_at: txn.occurred_at, last_visit_precision: 'pinned' })
       .eq('id', opts.guestId)
       .or(`last_visit_at.is.null,last_visit_at.lt.${txn.occurred_at}`)
   }

@@ -46,8 +46,10 @@ import {
 import type { GuestState } from '@/lib/recognition'
 import {
   parseFollowupRules,
+  parseVisitPrecision,
   type EngineFollowupReason,
   type FollowupRules,
+  type VisitTimePrecision,
 } from '@/lib/schemas'
 import {
   captureFollowupScanComplete,
@@ -162,6 +164,10 @@ interface EnrolledGuestRow {
   optedOutAt: Date | null
   lastInboundAt: Date | null
   lastVisitAt: Date | null
+  // TAC-377: precision of the visit lastVisitAt points at. null means no
+  // precision was ever recorded, which detectPostVisitReason treats as
+  // permissive — see its own comment for why that direction is deliberate.
+  lastVisitPrecision: VisitTimePrecision | null
 }
 
 interface RedemptionRow {
@@ -316,7 +322,7 @@ async function scanVenue(
   const [guestsResult, mechanicsResult, redemptionsResult] = await Promise.all([
     supabase
       .from('guests')
-      .select('id, opted_out_at, last_inbound_at, last_visit_at')
+      .select('id, opted_out_at, last_inbound_at, last_visit_at, last_visit_precision')
       .eq('venue_id', ctx.id)
       .not('phone_number', 'is', null)
       .is('opted_out_at', null)
@@ -363,6 +369,7 @@ async function scanVenue(
     optedOutAt: g.opted_out_at ? new Date(g.opted_out_at) : null,
     lastInboundAt: g.last_inbound_at ? new Date(g.last_inbound_at) : null,
     lastVisitAt: g.last_visit_at ? new Date(g.last_visit_at) : null,
+    lastVisitPrecision: parseVisitPrecision(g.last_visit_precision),
   }))
 
   const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
@@ -580,7 +587,12 @@ function runDetectors(input: {
   let perkMechanic: EligibleMechanic | undefined
 
   if (input.ctx.rules.post_visit_enabled) {
-    const postVisit = detectPostVisitReason(input.guest.lastVisitAt, input.ctx.cadence, input.now)
+    const postVisit = detectPostVisitReason(
+      input.guest.lastVisitAt,
+      input.guest.lastVisitPrecision,
+      input.ctx.cadence,
+      input.now,
+    )
     if (postVisit) reasons.push(postVisit)
   }
   if (input.ctx.rules.cold_lapsed_enabled) {

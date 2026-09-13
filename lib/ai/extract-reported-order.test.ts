@@ -24,7 +24,7 @@ afterEach(() => {
 describe('extractReportedOrder', () => {
   it('returns items and a promptVersion on success', async () => {
     generateObjectMock.mockResolvedValue({
-      object: { items: [{ name: 'Cortado', quantity: 1 }] },
+      object: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present' },
     })
 
     const result = await extractReportedOrder({
@@ -40,7 +40,7 @@ describe('extractReportedOrder', () => {
   })
 
   it('returns an empty items array unchanged (question/future/hypothetical framing is the model\'s job)', async () => {
-    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
 
     const result = await extractReportedOrder({
       inboundBody: 'do you have cortados?',
@@ -54,7 +54,7 @@ describe('extractReportedOrder', () => {
   })
 
   it('passes the venue menu item names into the prompt', async () => {
-    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
 
     await extractReportedOrder({
       inboundBody: 'i got a cortado',
@@ -77,12 +77,18 @@ describe('extractReportedOrder', () => {
     // caller discipline (bodyMentionsMenuItem already short-circuits before
     // ever reaching this function on an empty menu).
     const result = await extractReportedOrder({ inboundBody: 'i got a cortado', menuItemNames: [] })
-    expect(result).toEqual({ ok: true, data: { items: [], promptVersion: expect.any(String) } })
+    // TAC-377: no model call was made, so reportTiming is the conservative
+    // filler — it resolves to `approximate` downstream, and with zero items
+    // the caller never reaches the precision decision anyway.
+    expect(result).toEqual({
+      ok: true,
+      data: { items: [], reportTiming: 'past', promptVersion: expect.any(String) },
+    })
     expect(generateObjectMock).not.toHaveBeenCalled()
   })
 
   it('constrains the name field to a z.enum of the given menu item names — behaviorally, not by inspecting Zod internals', async () => {
-    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
     await extractReportedOrder({
       inboundBody: 'i got a cortado',
       menuItemNames: ['Cortado', 'Croissant'],
@@ -91,7 +97,7 @@ describe('extractReportedOrder', () => {
       | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
       | undefined
     // Valid: a name literally in the given list.
-    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Cortado', quantity: 1 }] }).success).toBe(
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present' }).success).toBe(
       true,
     )
     // Invalid: this is the exact class of bug the enum constraint closes —
@@ -99,13 +105,13 @@ describe('extractReportedOrder', () => {
     // silently accepted (and the resolver would have silently dropped one
     // layer down, with no visibility into why).
     expect(
-      callArgs?.schema?.safeParse({ items: [{ name: 'Not A Real Menu Item', quantity: 1 }] })
+      callArgs?.schema?.safeParse({ items: [{ name: 'Not A Real Menu Item', quantity: 1 }], reportTiming: 'present' })
         .success,
     ).toBe(false)
   })
 
   it('dedupes repeated menu item names before building the enum (harmless either way, but avoids redundant enum entries)', async () => {
-    generateObjectMock.mockResolvedValue({ object: { items: [] } })
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
     await extractReportedOrder({
       inboundBody: 'i got a cortado',
       menuItemNames: ['Cortado', 'Cortado', 'Croissant'],
@@ -113,9 +119,50 @@ describe('extractReportedOrder', () => {
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
       | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
       | undefined
-    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Croissant', quantity: 1 }] }).success).toBe(
+    expect(callArgs?.schema?.safeParse({ items: [{ name: 'Croissant', quantity: 1 }], reportTiming: 'present' }).success).toBe(
       true,
     )
+  })
+
+  // TAC-377: the timing read rides the SAME call as the extraction — no
+  // second round trip, and it is required rather than optional because both
+  // possible defaults are wrong in the common case ('present' fabricates
+  // precision; 'past' discards it for every "just grabbed a cortado").
+  it('passes the model reportTiming through to the caller', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'past' },
+    })
+    const result = await extractReportedOrder({
+      inboundBody: 'got a cortado last week',
+      menuItemNames: ['Cortado'],
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.data.reportTiming).toBe('past')
+    expect(generateObjectMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an output with no reportTiming, and constrains it to the two values', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
+    await extractReportedOrder({ inboundBody: 'i got a cortado', menuItemNames: ['Cortado'] })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
+      | undefined
+    expect(callArgs?.schema?.safeParse({ items: [] }).success).toBe(false)
+    expect(callArgs?.schema?.safeParse({ items: [], reportTiming: 'yesterday' }).success).toBe(false)
+    expect(callArgs?.schema?.safeParse({ items: [], reportTiming: 'present' }).success).toBe(true)
+    expect(callArgs?.schema?.safeParse({ items: [], reportTiming: 'past' }).success).toBe(true)
+  })
+
+  // Pins the VALUE, not just "some cap". 300 was sized for `items` alone and
+  // adding an output field against a static cap is the TAC-309 / TAC-367
+  // truncation shape — walking this back has to delete a test that says why.
+  it('allows enough output tokens for the extraction plus the timing read', async () => {
+    generateObjectMock.mockResolvedValue({ object: { items: [], reportTiming: 'past' } })
+    await extractReportedOrder({ inboundBody: 'i got a cortado', menuItemNames: ['Cortado'] })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      | { maxOutputTokens?: number }
+      | undefined
+    expect(callArgs?.maxOutputTokens).toBe(600)
   })
 
   it('returns ok:false with an errorCode when the model call throws', async () => {
@@ -155,7 +202,7 @@ describe('extractReportedOrder', () => {
       // The model can only ever return "Olipop" once per item — the enum
       // has exactly one entry regardless of how many menu rows share it.
       generateObjectMock.mockResolvedValue({
-        object: { items: [{ name: 'Olipop', quantity: 1 }] },
+        object: { items: [{ name: 'Olipop', quantity: 1 }], reportTiming: 'present' },
       })
       const extraction = await extractReportedOrder({
         inboundBody: 'i got an olipop',
@@ -177,7 +224,7 @@ describe('extractReportedOrder', () => {
     // min/max on number fields) — any positivity requirement belongs to the
     // caller in lib/agent/extract-reported-order.ts, not this schema.
     generateObjectMock.mockResolvedValue({
-      object: { items: [{ name: 'Cortado', quantity: 0 }] },
+      object: { items: [{ name: 'Cortado', quantity: 0 }], reportTiming: 'present' },
     })
 
     const result = await extractReportedOrder({

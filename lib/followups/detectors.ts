@@ -19,7 +19,7 @@
 // canSendFollowup (the rules gate). Detectors stay calendar-only.
 
 import { isStateAtLeast, type EligibleMechanic, type GuestState } from '@/lib/recognition'
-import type { EngineFollowupReason, FollowupRules } from '@/lib/schemas'
+import type { EngineFollowupReason, FollowupRules, VisitTimePrecision } from '@/lib/schemas'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -59,13 +59,34 @@ const POST_VISIT_TIERS: ReadonlyArray<{ days: number; reason: EngineFollowupReas
  * detector (DUE) and the engine's claim step (NOT-YET-SENT): the
  * dedup_key `day_N:<last_visit_at_iso>` makes the per-visit-episode
  * uniqueness automatic.
+ *
+ * TAC-377 — `precision` gates this detector, and `null` is PERMISSIVE.
+ * Do not "tidy" that into a stricter default; it is the deliberate reading.
+ * Only an explicit 'approximate' blocks: that value means a guest told us
+ * they came in but nothing pinned WHEN, and scheduling a "how was it?" a day
+ * after a visit we can't place reads as the system inventing the visit.
+ * `null` means no precision was ever recorded — the state of every row
+ * predating the column and of every Square-written last_visit_at, where the
+ * timestamp is a receipt and is as pinned as it gets. Blocking on null would
+ * silently switch those off. (Forward-looking, not a live regression: as of
+ * 2026-09-13 only four guests fleet-wide have a non-null last_visit_at, all
+ * at mock venues.)
+ *
+ * `detectColdLapsedReason` deliberately does NOT take this parameter — it
+ * fires after `absence_window_days` of silence (default 21, per-venue
+ * configurable), where a few hours of drift is noise. Note the default is
+ * what makes that true: a venue configuring it down to a couple of days
+ * would weaken the argument, though the call still holds, since cold_lapsed
+ * says "we've missed you" rather than "how was your visit".
  */
 export function detectPostVisitReason(
   lastVisitAt: Date | null,
+  precision: VisitTimePrecision | null,
   cadence: MessagingCadence,
   now: Date,
 ): EngineFollowupReason | null {
   if (lastVisitAt === null) return null
+  if (precision === 'approximate') return null
   const elapsedDays = Math.floor((now.getTime() - lastVisitAt.getTime()) / MS_PER_DAY)
   if (elapsedDays < 1) return null
   for (const tier of POST_VISIT_TIERS) {

@@ -1,12 +1,16 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
-import type { AIResult, ExtractReportedOrderInput, ExtractReportedOrderResult } from './types'
+import type {
+  AIResult,
+  ExtractReportedOrderInput,
+  ExtractReportedOrderResult,
+} from './types'
 
 // TAC-323. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this extractor never touches the classify/generate contract, so bumping
 // one must not force a bump of the other.
-export const EXTRACT_REPORTED_ORDER_PROMPT_VERSION = 'v1.2.0'
+export const EXTRACT_REPORTED_ORDER_PROMPT_VERSION = 'v1.3.0'
 
 const SYSTEM_PROMPT = `You read a text message a guest sent to a cafe, bakery, or restaurant, and decide whether they are reporting a COMPLETED PAST ORDER — something they already received or are currently holding, not something they're asking about, planning, or imagining.
 
@@ -20,10 +24,17 @@ Return an item ONLY when the message reports that the guest already got it. Retu
 
 A guest can report more than one item in one message ("oat cortado and a croissant"). Include a quantity for each (default 1 if not stated; "two cortados" -> quantity 2).
 
+Separately, report the TIMING of the message — whether the guest is describing the order as happening right now, or as something that happened earlier.
+
+- "present" — they are there now or just were, and the message is the moment. "just grabbed a cortado", "in line waiting on my latte", "sitting here with a croissant", "picking up my order".
+- "past" — anything set earlier, however recently, including a named day or a vague reference. "came in Tuesday", "got a cortado yesterday", "had one of your croissants last week", "stopped by a while back".
+
+When the message gives no timing cue at all ("a cortado and a croissant"), answer "past". Timing decides whether we treat the message's own timestamp as the visit time, so "present" is a claim that they are describing right now — if it isn't clearly that, it's "past". Report timing even when you return an empty items array.
+
 This is a high-precision task: a false positive here writes a permanent, unrecoverable record of an order the guest never placed. When genuinely unsure whether a message is a completed-order report versus a question, future intent, or hypothetical, return an empty items array — recall is far less important than precision here.`
 
 function buildUserPrompt(input: ExtractReportedOrderInput): string {
-  return `Venue menu items: ${input.menuItemNames.join(', ')}\n\nGuest message: "${input.inboundBody}"\n\nDoes this message report a completed past order? Extract any reported items, or return an empty items array.`
+  return `Venue menu items: ${input.menuItemNames.join(', ')}\n\nGuest message: "${input.inboundBody}"\n\nDoes this message report a completed past order? Extract any reported items, or return an empty items array. Report the timing either way.`
 }
 
 /**
@@ -60,7 +71,17 @@ export async function extractReportedOrder(
     return { ok: false, error: 'invalid_input' }
   }
   if (input.menuItemNames.length === 0) {
-    return { ok: true, data: { items: [], promptVersion: EXTRACT_REPORTED_ORDER_PROMPT_VERSION } }
+    // No model call was made, so there is no timing read. 'past' is the
+    // conservative filler: it resolves to `approximate` downstream, and with
+    // zero items the caller never reaches the precision decision anyway.
+    return {
+      ok: true,
+      data: {
+        items: [],
+        reportTiming: 'past',
+        promptVersion: EXTRACT_REPORTED_ORDER_PROMPT_VERSION,
+      },
+    }
   }
 
   const menuItemNames = [...new Set(input.menuItemNames)] as [string, ...string[]]
@@ -75,6 +96,12 @@ export async function extractReportedOrder(
         quantity: z.number(),
       }),
     ),
+    // TAC-377. Required, not optional — a missing timing would have to
+    // default to something, and both defaults are wrong in the common case
+    // ('present' fabricates precision, 'past' silently discards it for every
+    // "just grabbed a cortado"). Declared AFTER items so the model commits
+    // to the extraction before reading the timing off it.
+    reportTiming: z.enum(['present', 'past']),
   })
 
   try {
@@ -85,13 +112,19 @@ export async function extractReportedOrder(
       schema,
       // Analytical task — keep determinism high, same as classify-message.ts.
       temperature: 0.2,
-      maxOutputTokens: 300,
+      // TAC-377 raised this from 300. 300 was sized for `items` alone, and
+      // adding an output field against a static cap is the exact shape of
+      // the TAC-309 / TAC-367 truncation bugs — there, an enlarged emission
+      // silently blew a cap nobody revisited and the whole object failed to
+      // parse. Headroom is cheap; a truncated extraction is a silent loss.
+      maxOutputTokens: 600,
     })
 
     return {
       ok: true,
       data: {
         items: object.items,
+        reportTiming: object.reportTiming,
         promptVersion: EXTRACT_REPORTED_ORDER_PROMPT_VERSION,
       },
     }

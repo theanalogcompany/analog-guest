@@ -492,6 +492,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
               transactionId: outcome.transactionId,
               amountCents: outcome.amountCents,
               itemCount: outcome.itemCount,
+              // TAC-377: 'approximate' means this visit does NOT schedule
+              // post_visit_* followups, so it's worth seeing in the log line.
+              precision: outcome.precision,
             })
           } else if (outcome.kind === 'failed') {
             console.warn('[agent] inbound self-reported order extraction failed (continuing)', {

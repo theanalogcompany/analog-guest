@@ -107,7 +107,13 @@ describe('reconcileTransactionByFingerprint', () => {
       match_confidence: 1,
     })
     expect(captured.txnUpdate?.matched_at).toBeTypeOf('string')
-    expect(captured.guestUpdate).toEqual({ last_visit_at: OCCURRED })
+    // TAC-377: precision rides along. A POS receipt is pinned by definition,
+    // and omitting it would leave a stale 'approximate' from an earlier
+    // self-report permanently blocking post_visit_* for this guest.
+    expect(captured.guestUpdate).toEqual({
+      last_visit_at: OCCURRED,
+      last_visit_precision: 'pinned',
+    })
   })
 
   it('surfaces a lookup error as ok:false', async () => {

@@ -15,46 +15,91 @@ const SEED_CADENCE: MessagingCadence = { day_1: true, day_3: false, day_7: true,
 
 describe('detectPostVisitReason', () => {
   it('returns null when lastVisitAt is null', () => {
-    expect(detectPostVisitReason(null, SEED_CADENCE, NOW)).toBeNull()
+    expect(detectPostVisitReason(null, 'pinned', SEED_CADENCE, NOW)).toBeNull()
   })
 
   it('returns null when elapsed < 1 day', () => {
-    expect(detectPostVisitReason(daysAgo(0.5), SEED_CADENCE, NOW)).toBeNull()
+    expect(detectPostVisitReason(daysAgo(0.5), 'pinned', SEED_CADENCE, NOW)).toBeNull()
   })
 
   it('returns day_1 at exactly 1 day elapsed', () => {
-    expect(detectPostVisitReason(daysAgo(1), SEED_CADENCE, NOW)).toBe('post_visit_day_1')
+    expect(detectPostVisitReason(daysAgo(1), 'pinned', SEED_CADENCE, NOW)).toBe('post_visit_day_1')
   })
 
   it('returns the highest enabled tier crossed (day_7 over day_1 at 8d)', () => {
-    expect(detectPostVisitReason(daysAgo(8), SEED_CADENCE, NOW)).toBe('post_visit_day_7')
+    expect(detectPostVisitReason(daysAgo(8), 'pinned', SEED_CADENCE, NOW)).toBe('post_visit_day_7')
   })
 
   it('skips disabled tiers (day_3 disabled in seed → day_1 returns at 3d)', () => {
-    expect(detectPostVisitReason(daysAgo(3), SEED_CADENCE, NOW)).toBe('post_visit_day_1')
+    expect(detectPostVisitReason(daysAgo(3), 'pinned', SEED_CADENCE, NOW)).toBe('post_visit_day_1')
   })
 
   it('returns day_14 at 14d', () => {
-    expect(detectPostVisitReason(daysAgo(14), SEED_CADENCE, NOW)).toBe('post_visit_day_14')
+    expect(detectPostVisitReason(daysAgo(14), 'pinned', SEED_CADENCE, NOW)).toBe('post_visit_day_14')
   })
 
   it('returns day_14 at 100d (highest tier sticks for old visits)', () => {
-    expect(detectPostVisitReason(daysAgo(100), SEED_CADENCE, NOW)).toBe('post_visit_day_14')
+    expect(detectPostVisitReason(daysAgo(100), 'pinned', SEED_CADENCE, NOW)).toBe('post_visit_day_14')
   })
 
   it('returns null when ALL tiers disabled', () => {
     expect(
-      detectPostVisitReason(daysAgo(30), { day_1: false, day_3: false, day_7: false, day_14: false }, NOW),
+      detectPostVisitReason(
+        daysAgo(30),
+        'pinned',
+        { day_1: false, day_3: false, day_7: false, day_14: false },
+        NOW,
+      ),
     ).toBeNull()
   })
 
   it('treats missing keys as disabled', () => {
-    expect(detectPostVisitReason(daysAgo(30), {}, NOW)).toBeNull()
+    expect(detectPostVisitReason(daysAgo(30), 'pinned', {}, NOW)).toBeNull()
+  })
+
+  // TAC-377: precision gate. 'approximate' means a guest told us they came in
+  // but nothing pinned when, so no post-visit touch is scheduled off it.
+  it('returns null when precision is approximate, however long ago the visit', () => {
+    expect(detectPostVisitReason(daysAgo(1), 'approximate', SEED_CADENCE, NOW)).toBeNull()
+    expect(detectPostVisitReason(daysAgo(8), 'approximate', SEED_CADENCE, NOW)).toBeNull()
+    expect(detectPostVisitReason(daysAgo(100), 'approximate', SEED_CADENCE, NOW)).toBeNull()
+  })
+
+  // The load-bearing half: null must NOT block. Every row predating the
+  // column is null, as is every Square-written last_visit_at, where the
+  // timestamp is a receipt. A stricter default would silently switch those
+  // off — flipping this assertion to toBeNull() is the mutation this guards.
+  it('does NOT block when precision is null (unrecorded is permissive)', () => {
+    expect(detectPostVisitReason(daysAgo(1), null, SEED_CADENCE, NOW)).toBe('post_visit_day_1')
+    expect(detectPostVisitReason(daysAgo(8), null, SEED_CADENCE, NOW)).toBe('post_visit_day_7')
+  })
+
+  it('blocks even at the highest tier with the longest elapsed time', () => {
+    // day_14 is enabled and 100 days have elapsed — the only thing standing
+    // between this and 'post_visit_day_14' is the precision gate. (Named for
+    // what it checks: an earlier name claimed the gate runs BEFORE the tier
+    // loop, which no test can distinguish — both orderings return the same
+    // value for every input.)
+    expect(detectPostVisitReason(daysAgo(100), 'approximate', SEED_CADENCE, NOW)).toBeNull()
+    expect(detectPostVisitReason(daysAgo(100), 'pinned', SEED_CADENCE, NOW)).toBe(
+      'post_visit_day_14',
+    )
   })
 })
 
 describe('detectColdLapsedReason', () => {
   const rules = FOLLOWUP_RULES_DEFAULT
+
+  // TAC-377, the acceptance criterion stated as one assertion: an
+  // approximate visit is still real evidence of a relationship going quiet.
+  // cold_lapsed fires at 21+ days, where a few hours of drift is noise, so
+  // it takes no precision parameter at all — while post_visit_*, scheduled
+  // to land a day or a week after a specific visit, refuses the same input.
+  it('fires on an approximate visit that post_visit_* refuses', () => {
+    const lapsed = daysAgo(40)
+    expect(detectColdLapsedReason(lapsed, 'regular', rules, NOW)).toBe('cold_lapsed')
+    expect(detectPostVisitReason(lapsed, 'approximate', SEED_CADENCE, NOW)).toBeNull()
+  })
 
   it('returns null when lastVisitAt is null', () => {
     expect(detectColdLapsedReason(null, 'regular', rules, NOW)).toBeNull()

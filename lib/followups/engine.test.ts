@@ -67,21 +67,41 @@ interface VenueLoadShape {
   venue_configs: { followup_rules: unknown; messaging_cadence: unknown } | null
 }
 
+// TAC-377: the guests SELECT string, captured so a test can assert the
+// precision column is actually requested. The mock's select() ignores its
+// argument (it returns opts.guests regardless), so without this a mutant
+// that drops the column from the query passes every behavioural test while
+// production reads `undefined` and silently degrades to always-permissive.
+let capturedGuestSelect: string | null = null
+
 function makeSupabaseMock(opts: {
   venues: VenueLoadShape[]
-  guests: Array<{ id: string; opted_out_at: string | null; last_inbound_at: string | null; last_visit_at: string | null }>
+  guests: Array<{
+    id: string
+    opted_out_at: string | null
+    last_inbound_at: string | null
+    last_visit_at: string | null
+    // TAC-377. Present in the shape because the engine SELECTs it and the
+    // post-visit detector gates on it — omitting it made every test read
+    // `undefined`, so the gate was unreachable and two wiring mutants
+    // (passing null at the call site; dropping the column from the SELECT)
+    // survived the whole suite.
+    last_visit_precision?: string | null
+  }>
 }) {
   const builders: Record<string, unknown> = {
     venues: {
       select: () => Promise.resolve({ data: opts.venues, error: null }),
     },
     guests: {
-      select: () => ({
+      select: (columns: string) => ({
         eq: (_c: string, _v: unknown) => ({
           not: (_c2: string, _op: string, _v2: unknown) => ({
             is: (_c3: string, _v3: unknown) => ({
-              in: (_c4: string, _vs: unknown[]) =>
-                Promise.resolve({ data: opts.guests, error: null }),
+              in: (_c4: string, _vs: unknown[]) => {
+                capturedGuestSelect = columns
+                return Promise.resolve({ data: opts.guests, error: null })
+              },
             }),
           }),
         }),
@@ -111,6 +131,7 @@ function makeSupabaseMock(opts: {
 }
 
 beforeEach(() => {
+  capturedGuestSelect = null
   vi.mocked(createAdminClient).mockReset()
   vi.mocked(computeGuestState).mockReset()
   vi.mocked(handleFollowup).mockReset()
@@ -192,6 +213,80 @@ describe('processDueFollowups — happy path (sent)', () => {
     expect(callArg?.trigger.reason).toBe('day_7')
     expect(callArg?.trigger.additionalReasons).toBeUndefined()
     expect(callArg?.trigger.perkMechanic).toBeUndefined()
+  })
+})
+
+// TAC-377: the engine is the ONLY production consumer of the precision gate,
+// and until these tests existed two wiring mutants survived the whole suite —
+// passing `null` at the detector call site (which restores pre-TAC-377
+// always-permissive behaviour, i.e. makes the feature inert) and dropping the
+// column from the SELECT. Both are killed here.
+describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
+  const guestWithPrecision = (precision: string | null) => ({
+    venues: [
+      {
+        id: VENUE_ID,
+        timezone: 'America/Los_Angeles',
+        venue_configs: {
+          followup_rules: null,
+          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+        },
+      },
+    ],
+    guests: [
+      {
+        id: GUEST_ID,
+        opted_out_at: null,
+        last_inbound_at: null,
+        // 7 days ago — post_visit_day_7 is due on elapsed time alone, so
+        // precision is the only thing that can stop it.
+        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        last_visit_precision: precision,
+      },
+    ],
+  })
+
+  it('does not dispatch a post-visit followup off an approximate visit', async () => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () =>
+        makeSupabaseMock(
+          guestWithPrecision('approximate'),
+        ) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    expect(result.guestsDispatched).toBe(0)
+  })
+
+  it('dispatches on a pinned visit', async () => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () =>
+        makeSupabaseMock(guestWithPrecision('pinned')) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
+    )
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(vi.mocked(handleFollowup).mock.calls[0]?.[0]?.trigger.reason).toBe('day_7')
+    expect(result.guestsDispatched).toBe(1)
+  })
+
+  it('actually SELECTs last_visit_precision (the gate is inert without it)', async () => {
+    await processDueFollowups(NOW)
+    expect(capturedGuestSelect).toContain('last_visit_precision')
+  })
+
+  it('dispatches when precision was never recorded (null is permissive)', async () => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () =>
+        makeSupabaseMock(guestWithPrecision(null)) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
+    )
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(result.guestsDispatched).toBe(1)
   })
 })
 

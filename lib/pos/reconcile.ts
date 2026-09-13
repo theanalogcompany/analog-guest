@@ -72,9 +72,18 @@ export async function reconcileTransactionByFingerprint(opts: {
   // Advance last_visit_at only when this visit is newer (re-delivered or
   // backfilled older transactions must not move it backwards). The filter does
   // the comparison in SQL so there's no read-modify-write race.
+  //
+  // TAC-377: last_visit_precision moves WITH it, always. A POS receipt is the
+  // most pinned evidence of a visit there is. Writing the timestamp without
+  // the precision would leave a stale 'approximate' from an earlier
+  // self-report sitting beside a real receipt, and detectPostVisitReason
+  // would block follow-ups for that guest forever — extractReportedOrder
+  // permanently disarms after one guest_reported row, so nothing would ever
+  // rewrite it. The two columns describe the same visit or the invariant is
+  // worthless.
   const { error: guestError } = await supabase
     .from('guests')
-    .update({ last_visit_at: opts.occurredAt })
+    .update({ last_visit_at: opts.occurredAt, last_visit_precision: 'pinned' })
     .eq('id', guestId)
     .or(`last_visit_at.is.null,last_visit_at.lt.${opts.occurredAt}`)
 
