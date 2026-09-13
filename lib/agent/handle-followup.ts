@@ -22,15 +22,12 @@ import {
   APPROVAL_TRIGGERS,
   generateStage,
   retrieveCorpusStage,
-  retrieveKnowledgeStage,
-  shouldRetrieveKnowledge,
   verifyMechanicOfferStage,
 } from './stages'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
   buildGenerateContent,
-  buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
 import type {
@@ -230,35 +227,40 @@ export async function handleFollowup(input: {
     }
 
     // Retrieve knowledge (conditional). For followups: only fires for
-    // event/manual triggers (substantive). day_* skips. Degrades gracefully
-    // on Voyage / DB error — generation proceeds without grounding.
-    if (shouldRetrieveKnowledge(ctx)) {
-      const knowledgeSpan = trace.span('retrieve_knowledge', {
-        triggerReason: input.trigger.reason,
-      })
-      ctx.knowledgeCorpus = await retrieveKnowledgeStage(
-        ctx,
-        ctx.classification?.category ?? null,
-      )
-      knowledgeSpan.end({
-        output: {
-          matchCount: ctx.knowledgeCorpus.length,
-          topSimilarity:
-            ctx.knowledgeCorpus.length > 0
-              ? Math.max(...ctx.knowledgeCorpus.map((c) => c.similarity))
-              : 0,
-        },
-        content: trace.captureContent
-          ? buildKnowledgeCorpusContent(ctx.knowledgeCorpus)
-          : undefined,
-      })
-      console.log('[agent] followup knowledge retrieved', {
-        agentRunId,
-        matchCount: ctx.knowledgeCorpus.length,
-      })
-    } else {
-      ctx.knowledgeCorpus = []
-    }
+    // Knowledge corpus: SKIPPED, unconditionally (TAC-367).
+    //
+    // This used to retrieve for `event` and `manual` triggers. There is no
+    // guest message on this path, so `retrieveKnowledgeStage` falls through to
+    // its synthetic-query branch and embeds the literal string
+    // `Followup {reason} for {name}`. Measured against Le Mil's live corpus
+    // that returns a FULL 4/4 slate on every variant tried — chunks selected
+    // by a string with no referent in the corpus, then rendered under a header
+    // telling the model they are material to ground replies in.
+    //
+    // Why that is worse here than on the inbound path: `verifyGroundingStage`
+    // returns early when `currentMessage === null`, so NO followup has a
+    // grounding backstop. The approval gate still runs, but no trigger keys on
+    // fabrication for an outbound, so at a venue with no hold configured a
+    // fabricated fact auto-sends. Le Mil's is live to real guests.
+    //
+    // An INTERIM narrowing, not the designed answer. TAC-367's PR 3 decides
+    // what followups should query on — the operator's own instruction for
+    // `manual`, the event being invited for `event` — both of which are real
+    // text rather than a template string. Until then this removes the input
+    // rather than leaving it wrong, because the correct design is a review
+    // cycle away and the exposure is live.
+    //
+    // ACCEPTED LOSS, stated because it is not pure narrowing: the `event`
+    // query did pull event-tagged chunks (the word "event" is in the template
+    // string), so some were topically adjacent. They were about SOME event at
+    // the venue, not necessarily the one being invited to, which is its own
+    // failure mode — but this is a real capability removed, not just noise.
+    //
+    // `[]`, not `null`: renders TAC-242's explicit "No specific venue
+    // knowledge matched this query... do not invent specifics" instead of
+    // omitting the block. Same reasoning as handle-holding-message.ts and
+    // handle-operator-decline.ts.
+    ctx.knowledgeCorpus = []
 
     // Generate
     const generateSpan = trace.span('generate', { category })
