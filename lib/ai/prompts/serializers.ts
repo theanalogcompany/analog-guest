@@ -6,6 +6,7 @@ import {
   type MenuItem,
   type ParsedGuestContext,
   type VenueInfo,
+  type VenueServices,
 } from '@/lib/schemas'
 import type {
   FollowupContext,
@@ -213,6 +214,82 @@ function formatContact(contact: VenueInfo['contact']): string | null {
   return lines.length > 0 ? lines.join('\n') : null
 }
 
+/**
+ * TAC-301 part 2: render what the venue does and doesn't do as its OWN
+ * section, not a sub-bullet.
+ *
+ * The capability facts were reaching the prompt before this — Le Mil's
+ * "walk-in only, ordering at the counter only" sat in `amenities.notes`, one
+ * indented line between parking and contact details, presented as an attribute
+ * of the venue rather than a constraint on what may be offered. It was read
+ * and ignored on the turn that mattered.
+ *
+ * Three-state rendering, each failing in the safe direction:
+ *   false     explicit negative. The half that does the work — absence from a
+ *             list of offerings does not stop the agent; a stated "no" does.
+ *   true      positive, so a venue that DOES hold doesn't get denied.
+ *   absent    nothing at all.
+ *
+ * The closing line is deliberately weaker than formatMechanicEligibility's
+ * "the list below is the complete set". That block can claim completeness
+ * because it's generated from a full table; this one is hand-curated and will
+ * have gaps, and a completeness claim would turn every unmodelled real service
+ * into a false denial. "Not listed is unknown, not available" gives the model
+ * a don't-invent default without asserting the list is exhaustive.
+ */
+const SERVICE_LABELS: Record<
+  keyof Omit<VenueServices, 'alsoOffers' | 'alsoDoesNotOffer'>,
+  string
+> = {
+  aheadOrdering: 'Ordering ahead',
+  holds: 'Holding or setting items aside',
+  reservations: 'Reservations',
+  delivery: 'Delivery',
+  catering: 'Catering',
+}
+
+function formatVenueServices(services: VenueServices): string | null {
+  const offered: string[] = []
+  const notOffered: string[] = []
+
+  for (const key of Object.keys(SERVICE_LABELS) as Array<keyof typeof SERVICE_LABELS>) {
+    const value = services[key]
+    // Strict boolean checks: `undefined` means nobody said, and must fall
+    // through to NEITHER list.
+    if (value === true) offered.push(SERVICE_LABELS[key])
+    else if (value === false) notOffered.push(SERVICE_LABELS[key])
+  }
+  // Trim and drop blanks: z.array(z.string()) accepts '', which would render
+  // a bare "- : available" line and still pass the emptiness guard below.
+  for (const extra of services.alsoOffers) {
+    const t = extra.trim()
+    if (t.length > 0) offered.push(t)
+  }
+  for (const extra of services.alsoDoesNotOffer) {
+    const t = extra.trim()
+    if (t.length > 0) notOffered.push(t)
+  }
+
+  if (offered.length === 0 && notOffered.length === 0) return null
+
+  const lines: string[] = [
+    "## What this venue does and doesn't offer",
+    'What this venue can and cannot do for a guest. Do not offer or confirm anything marked NOT available, however the guest asks for it, and do not propose a workaround that amounts to the same thing.',
+  ]
+  for (const label of offered) lines.push(`- ${label}: available`)
+  for (const label of notOffered) lines.push(`- ${label}: NOT available`)
+  // Absence is NOT unavailability. The earlier wording ("not listed is
+  // unknown, not available") quietly re-read every unstated service as a
+  // denial the moment a venue filled in one field — which is the exact
+  // outcome VenueServicesSchema's docstring says must never happen, just
+  // narrowed from "unconfigured venues" to "partially configured" ones. Le
+  // Mil's is partially configured on day one.
+  lines.push(
+    'Anything not listed here has not been stated either way. Do not assume it is available, and do not tell the guest it is unavailable.',
+  )
+  return lines.join('\n')
+}
+
 export function venueInfoToProse(venueInfo: VenueInfo): string {
   const lines: string[] = ['## Venue facts']
 
@@ -245,6 +322,11 @@ export function venueInfoToProse(venueInfo: VenueInfo): string {
   const menuItemsBlock = formatMenuItems(venueInfo.menu.items)
   if (menuItemsBlock) {
     result = `${result}\n\n${menuItemsBlock}`
+  }
+
+  if (venueInfo.services) {
+    const servicesBlock = formatVenueServices(venueInfo.services)
+    if (servicesBlock) result = `${result}\n\n${servicesBlock}`
   }
 
   if (venueInfo.currentContext.length > 0) {

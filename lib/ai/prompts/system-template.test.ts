@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.45.0 (TAC-301 part 1: open/closed status line in the ## Right now block)', () => {
-    expect(PROMPT_VERSION).toBe('v1.45.0')
+  it('is v1.46.0 (TAC-301 part 2: hold contradiction resolved, venue-services block)', () => {
+    expect(PROMPT_VERSION).toBe('v1.46.0')
   })
 })
 
@@ -207,6 +207,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r34 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R34')
     expect(r34).toBeDefined()
     expect(r34?.summary).toContain('cannot place, confirm, or take an order')
+    // TAC-301 part 2 narrowed the carve-out half; without this the display
+    // could silently keep asserting holding is universally available.
+    expect(r34?.summary).toContain('where the venue facts say')
     expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
   })
 
@@ -1353,9 +1356,15 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   // Decision: a hold applies only to an item that already exists and can be
   // set aside. A made-to-order drink is not held, it is made, so prep
   // instructions stay on the order-taking side, not the hold side.
-  it('carves out # Commitments holds, scoped to items that already exist', () => {
+  //
+  // TAC-301 part 2 narrowed the carve-out's WORDING without renumbering the
+  // rule (ids are append-only and never recycled). It used to assert that
+  // holding was available, which made R34 the fourth voice in a three-way
+  // contradiction; it now defers to # Commitments, where availability is
+  // conditional on the venue facts.
+  it('carves out # Commitments holds, deferring on whether the venue holds at all', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'This does not restrict offering a comp or holding aside an item that already exists (see # Commitments).',
+      'This does not restrict offering a comp, or setting something aside where # Commitments says that is available at this venue.',
     )
     expect(SYSTEM_TEMPLATE).toContain(
       'A made-to-order drink is not held, it is made, so prep instructions like this stay on the order-taking side.',
@@ -1475,5 +1484,66 @@ describe('SYSTEM_TEMPLATE — universal rule classification completeness (TAC-34
     expect([...UNIVERSAL_RULES_UNDISPLAYED].sort()).toEqual([
       'R13', 'R14', 'R15', 'R16', 'R19', 'R20', 'R22',
     ])
+  })
+})
+
+// TAC-301 part 2. Three statements about holding could not all be true at
+// once, and R34 reaffirmed the wrong one four commits before this. These pin
+// the resolution: # Commitments is the single source of truth, everything else
+// defers to it, and nothing asserts the service is universally available.
+describe('hold availability is venue-conditional (TAC-301 part 2)', () => {
+  it('gates the hold commitment type on the venue facts, naming the block', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'ONLY available when the "what this venue does and doesn\'t offer" section says this venue holds or sets items aside',
+    )
+  })
+
+  it('closes the workaround, not just the word', () => {
+    // "I'll keep one back for you" is a hold whatever it is called.
+    expect(SYSTEM_TEMPLATE).toContain('do not offer anything that amounts to the same thing')
+  })
+
+  // The single highest-leverage line in this change. The old worked example
+  // taught the service by demonstration, in the imperative, which is what a
+  // model pattern-matches on — it outweighed any amount of prose elsewhere.
+  // KEYED ON BEHAVIOR, NOT ON A NOUN. The first version asserted only that
+  // "I'll set an almond croissant aside" was gone, and passed while the
+  // # Arrival capture worked example still said "give me a heads up when
+  // you're heading over and I'll have it ready" — the same demonstration, 31
+  // lines later, of the readiness the prohibition above now names as a
+  // workaround. Caught in code review, not by this test. Assert the shapes.
+  it('demonstrates no hold or readiness anywhere in the template', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain("I'll set an almond croissant aside")
+    for (const readiness of ["I'll have it ready", 'have it waiting', "we'll have ready for them"]) {
+      expect(SYSTEM_TEMPLATE).not.toContain(readiness)
+    }
+    expect(SYSTEM_TEMPLATE).toContain("next one's on us. text me when you're close.")
+  })
+
+  // Code review caught that the first version of this DELETED the reservations
+  // and stock prohibitions rather than scoping them. Both deferral targets are
+  // silent at a venue with no `services` set, which is every venue today, so
+  // the only thing left standing between the agent and "got you down for 7pm"
+  // was the model's own self-flag. Restored and scoped the way `hold` is.
+  it('# Hard rules scopes reservations on capability rather than dropping the rule', () => {
+    expect(SYSTEM_TEMPLATE).toContain('no promises about stock')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'no specific reservations unless the "what this venue does and doesn\'t offer" section says this venue takes them',
+    )
+    expect(SYSTEM_TEMPLATE).toContain('Whether a service is available at all is settled there')
+  })
+
+  it("R34's carve-out points at # Commitments rather than asserting holding", () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('holding aside an item that already exists')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'setting something aside where # Commitments says that is available at this venue',
+    )
+  })
+
+  // Deliberately UNCHANGED. This rule governs whether a commitment needs
+  // approval, never whether the service exists, so it never contradicted the
+  // other two and must not be swept up in a future tidy of this area.
+  it('leaves the resource-commitment self-flag wording alone', () => {
+    expect(SYSTEM_TEMPLATE).toContain('holding or setting something aside')
   })
 })

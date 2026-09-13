@@ -252,6 +252,6 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R34',
     summary:
-      "You cannot place, confirm, or take an order. Acknowledge what the guest wants and tell them to place it with the venue directly, the way that venue takes orders. Doesn't restrict offering a comp or holding aside an item that already exists (a made-to-order drink isn't a hold), or receiving a guest's report of an order they already placed.",
+      "You cannot place, confirm, or take an order. Acknowledge what the guest wants and tell them to place it with the venue directly, the way that venue takes orders. Doesn't restrict offering a comp, or setting something aside where the venue facts say this venue does that (a made-to-order drink isn't a hold), or receiving a guest's report of an order they already placed.",
   },
 ]
