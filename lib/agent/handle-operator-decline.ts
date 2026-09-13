@@ -94,7 +94,9 @@ export function buildDeclineHint(commitmentDescription: string): string {
  * Skips:
  *   - classification (no inbound to classify; category synthesized to 'manual')
  *   - retrieveKnowledgeStage (declines don't cite venue facts; ctx.knowledgeCorpus
- *     stays [])
+ *     is SET to [], not left as the null buildRuntimeContext starts it at —
+ *     [] renders the explicit "no venue knowledge matched" framing, null
+ *     omits the block; TAC-367)
  *   - applyApprovalPolicyStage (operator's swipe-left IS the approval)
  *   - scheduleAndSend (NEVER called — persist-pending only)
  *
@@ -232,8 +234,12 @@ export async function handleOperatorDecline(input: {
 
     // Knowledge corpus: SKIPPED. Declines don't cite venue facts (sourcing
     // stories, staff names, mechanic explanations) — we're saying "we
-    // can't do this thing." Setting [] matches the day_* followup posture
-    // (block omitted from prompt).
+    // can't do this thing." Setting [] matches the day_* followup posture.
+    // (TAC-367 correction: [] does NOT omit the block — it renders TAC-242's
+    // explicit "No specific venue knowledge matched this query... do not
+    // invent specifics" framing. `null` is what omits it. The [] choice is
+    // still right, and for a better reason than the one recorded here: being
+    // told there is no venue knowledge beats being told nothing.)
     ctx.knowledgeCorpus = []
 
     // Generate

@@ -13,6 +13,24 @@ import { FALLBACK_HOLDING_BODY, handleHoldingMessage } from './handle-holding-me
 // queue/refuse verdict, not how the gate reaches one.
 
 const generateStageMock = vi.fn()
+// TAC-367: resolves NON-EMPTY deliberately. With `[]` the mock returns exactly
+// the value the "passes an empty array" test asserts, so that test could not
+// tell "we skipped retrieval" from "we retrieved and got nothing" — it passed
+// against the retrieval-reintroduced mutant. A non-empty return makes the two
+// tests independently failing-capable. It is never called by the fixed
+// implementation, so the value is free.
+const retrieveKnowledgeStageMock = vi.fn(async () => [
+  {
+    id: 'k1',
+    knowledgeCorpusId: 'kc1',
+    text: 'The roasting session invite is an established mechanic.',
+    sourceType: 'synthesized',
+    confidence: 0.9,
+    similarity: 0.48,
+    primaryTags: ['mechanic_roasting_session_invite'],
+    secondaryTags: [],
+  },
+])
 const applyApprovalPolicyStageMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn().mockResolvedValue(undefined)
@@ -29,12 +47,19 @@ vi.mock('@/lib/db/admin', () => ({
   }),
 }))
 
+// TAC-367: `shouldRetrieveKnowledge` returns TRUE here, matching PRODUCTION.
+// It used to be stubbed `() => false`, which is the opposite of what this path
+// actually does — it builds context with followupTrigger.reason='manual', for
+// which the real predicate returns true — so retrieveKnowledgeStage was never
+// reached in any test and the live retrieval was invisible to the whole suite.
+// Returning true is what gives the assertion below its teeth: reintroduce the
+// conditional and the call happens.
 vi.mock('./stages', () => ({
   generateStage: (...a: unknown[]) => generateStageMock(...a),
   applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
   retrieveCorpusStage: vi.fn(async () => []),
-  retrieveKnowledgeStage: vi.fn(async () => []),
-  shouldRetrieveKnowledge: () => false,
+  retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
+  shouldRetrieveKnowledge: () => true,
 }))
 vi.mock('./build-runtime-context', () => ({
   buildRuntimeContext: (...a: unknown[]) => buildRuntimeContextMock(...a),
@@ -131,6 +156,48 @@ describe('handleHoldingMessage (TAC-308)', () => {
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1', usedFallback: false })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+  })
+
+  // TAC-367. The holding message is the only outbound in this repo with no
+  // operator and no gate behind it, and that is acceptable ONLY because the
+  // message is content-free by construction. Handing its generator retrieved
+  // passages under a header framing them as grounding material is the one
+  // input most likely to make it name a fact. Measured: the synthetic query
+  // this path produced (`Followup manual for {name}`) returned a FULL slate
+  // every time against Le Mil's live corpus, two of them mechanic entries.
+  //
+  // shouldRetrieveKnowledge is mocked TRUE above (as production behaves), so
+  // this fails the moment the conditional comes back.
+  it('never retrieves knowledge — the generator gets no chunks at all', async () => {
+    await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
+  })
+
+  // `[]`, not `null`. An empty array renders TAC-242's explicit "No specific
+  // venue knowledge matched this query... do not invent specifics"; null omits
+  // the block entirely. For this message the explicit framing is the point, so
+  // pin the value rather than just "falsy".
+  it('passes an empty array, not null, so the no-knowledge framing still renders', async () => {
+    let seenKnowledgeCorpus: unknown
+    generateStageMock.mockImplementationOnce(async (ctx: { knowledgeCorpus: unknown }) => {
+      seenKnowledgeCorpus = structuredClone(ctx.knowledgeCorpus)
+      return goodGeneration()
+    })
+    await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    // Snapshotted INSIDE the mock: ctx is one object mutated in place, so
+    // reading it after the run pins the final value rather than the value
+    // generation actually received. Moving the assignment below the generate
+    // loop would leave a post-hoc read green.
+    expect(seenKnowledgeCorpus).toEqual([])
+    expect(seenKnowledgeCorpus).not.toBeNull()
   })
 
   // The mode is what flips the ## Unanswered question block from "don't
