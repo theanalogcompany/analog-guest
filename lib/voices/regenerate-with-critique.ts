@@ -11,11 +11,16 @@
 // PostHog and Langfuse with operator-driven noise.
 //
 // Analytics isolation means: don't invoke each other's telemetry paths.
-// Sharing _values_ via imports is fine and preferred — TAC-183 dedupes
-// the four retrieval thresholds by importing them from stages.ts so
-// silent drift is structurally impossible. If gating logic (e.g.
-// shouldRetrieveKnowledge) or post-generation behavior changes there,
-// mirror it here. The two paths still don't share runtime code.
+// Sharing values AND pure helpers via imports is fine and preferred —
+// TAC-183 dedupes the four retrieval thresholds by importing them from
+// stages.ts, and TAC-366 does the same for `filterByRelevance`, so silent
+// drift is structurally impossible rather than merely discouraged. If
+// gating logic (e.g. shouldRetrieveKnowledge) or post-generation behavior
+// changes there, mirror it here — and prefer IMPORTING the thing over
+// restating it, because mirror-by-discipline has already failed once on
+// this seam (TAC-350 shipped the relevance floor to stages.ts and left
+// this path on pre-TAC-350 semantics for months). The two paths share
+// pure helpers and constants, never each other's telemetry.
 
 import { randomUUID } from 'node:crypto'
 import {
@@ -31,6 +36,7 @@ import { getPrimaryTagPreference } from '@/lib/agent/knowledge-tag-mapping'
 import {
   buildAiRuntime,
   CORPUS_RETRIEVE_LIMIT,
+  filterByRelevance,
   KNOWLEDGE_RETRIEVE_LIMIT,
   MIN_STRONG_MATCHES,
   STRONG_MATCH_SIMILARITY,
@@ -312,7 +318,18 @@ export async function regenerateWithCritique(
     primaryTagPreference: knowledgePreference,
   })
   if (knowledge.ok) {
-    let rows = knowledge.data
+    // TAC-366: apply the SAME relevance floor production applies. Both halves
+    // of this matter and the second is easy to miss:
+    //
+    //   1. Chunks below KNOWLEDGE_RELEVANCE_FLOOR are dropped. Without this,
+    //      Voices showed up to four chunks on terse queries where production
+    //      showed zero — the drift ran in the direction that HID the TAC-358
+    //      bug from anyone reproducing it here.
+    //   2. The fallback triggers on zero RELEVANT rows, not zero RETURNED
+    //      rows. TAC-350 changed that deliberately in stages.ts; this path
+    //      kept the pre-TAC-350 condition. Filtering only at the end would
+    //      have fixed (1) and silently left (2) behind.
+    let rows = filterByRelevance(knowledge.data)
     if (knowledgePreference !== undefined && rows.length === 0) {
       const fallback = await retrieveKnowledgeContext({
         venueId: input.venueId,
@@ -320,7 +337,7 @@ export async function regenerateWithCritique(
         limit: KNOWLEDGE_RETRIEVE_LIMIT,
       })
       if (fallback.ok) {
-        rows = fallback.data
+        rows = filterByRelevance(fallback.data)
       } else {
         console.warn(
           `[voices/regen] knowledge retrieval (fallback) degraded for venue=${input.venueId}: ${fallback.error}`,

@@ -529,7 +529,13 @@ export function shouldRetrieveKnowledge(ctx: RuntimeContext): boolean {
 // TAC-350: drop chunks that cleared lib/rag's looser SIMILARITY_FLOOR but
 // aren't actually relevant enough to this specific query to ground an
 // answer. See KNOWLEDGE_RELEVANCE_FLOOR's own comment for the calibration.
-function filterByRelevance(chunks: KnowledgeMatch[]): KnowledgeMatch[] {
+// TAC-366: exported so lib/voices/regenerate-with-critique.ts applies the
+// IDENTICAL filter rather than reimplementing it. Sharing the helper (not a
+// copy) is what makes the two paths move together when the floor changes —
+// the same discipline TAC-183 applied to the four retrieval thresholds. The
+// analytics-isolation rule between these paths is about telemetry, not about
+// values or pure helpers.
+export function filterByRelevance(chunks: KnowledgeMatch[]): KnowledgeMatch[] {
   return chunks.filter((c) => c.similarity >= KNOWLEDGE_RELEVANCE_FLOOR)
 }
 
