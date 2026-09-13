@@ -36,6 +36,7 @@ import {
 } from '@/lib/agent/timing'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
 import { MAX_ATTEMPTS, MAX_OUTPUT_TOKENS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
+import { VERIFY_GROUNDING_MAX_OUTPUT_TOKENS } from '@/lib/ai/verify-grounding'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
@@ -530,5 +531,15 @@ export const TUNABLES = [
     description:
       "Output-token ceiling for one generation attempt. Raised 500 -> 1500 in TAC-309: the emission serializes body/voiceFidelity/reasoning first and knowledgeGap/contextUpdate/commitment/arrivalCapture last, so exhausting the budget truncates mid-JSON and the whole object fails to parse as a generic 'could not parse the response'. Every ticket since TAC-296 has appended a required field to that tail. Watch generation_truncated in PostHog.",
     relatedTickets: ['TAC-309'],
+  },
+  {
+    name: 'verify_grounding_max_output_tokens',
+    value: VERIFY_GROUNDING_MAX_OUTPUT_TOKENS,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/ai/verify-grounding.ts',
+    description:
+      'Output-token ceiling for one grounding-backstop verdict. Raised 500 -> 2000 in TAC-367, the second instance of the TAC-309 hazard above: measured live, successful calls emit 373-496 tokens against the old 500 cap (the best success cleared it by four) and ~1 in 12 ran past it, truncated mid-JSON, and failed OPEN with no event. TAC-301 part 1.5 put unbounded `reasoning` FIRST in the schema, which is load-bearing for correctness, against a cap that never moved. HEADROOM, NOT A BOUND — reasoning is still unbounded, so the fail-CLOSED handling of finishReason=length is what actually closes the hole. Watch grounding_verifier_unavailable in PostHog.',
+    relatedTickets: ['TAC-367', 'TAC-350', 'TAC-309'],
   },
 ] as const satisfies readonly Tunable[]

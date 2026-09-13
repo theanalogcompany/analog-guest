@@ -1,14 +1,29 @@
+import { NoObjectGeneratedError } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { verifyGrounding } from './verify-grounding'
+import {
+  VERIFY_GROUNDING_MAX_OUTPUT_TOKENS,
+  VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
+  verifyGrounding,
+} from './verify-grounding'
 import type { VenueInfo } from '@/lib/schemas'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 // Same pattern as extract-reported-order.test.ts / classify-intention-prompts
 // tests in this directory.
 const generateObjectMock = vi.fn()
-vi.mock('ai', () => ({
-  generateObject: (...args: unknown[]) => generateObjectMock(...args),
-}))
+// TAC-367: the REAL NoObjectGeneratedError is passed through from the actual
+// SDK rather than stubbed. The truncation carve-out keys on
+// `NoObjectGeneratedError.isInstance(e)`, so a hand-rolled stub would test our
+// stub's identity check instead of the SDK's — and would keep passing if the
+// real class's shape ever changed underneath us. Only generateObject is
+// replaced; nothing else in this file needs the network.
+vi.mock('ai', async (importActual) => {
+  const actual = await importActual<typeof import('ai')>()
+  return {
+    ...actual,
+    generateObject: (...args: unknown[]) => generateObjectMock(...args),
+  }
+})
 vi.mock('./client', () => ({
   getClassificationModel: () => 'mock-model',
 }))
@@ -130,6 +145,115 @@ describe('verifyGrounding', () => {
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
     expect(args.prompt).toContain('No specific venue knowledge matched this query')
+  })
+
+  // ---- TAC-367: truncation is its own failure ----
+
+  // The whole carve-out depends on this one discrimination. Built from the
+  // REAL NoObjectGeneratedError so it exercises the SDK's own isInstance,
+  // with finishReason 'length' — the shape observed live: 12 paced calls on
+  // a production-size prompt, 11 emitting 373-496 output tokens and one
+  // running past the 500 cap and truncating mid-JSON.
+  it('returns the truncation errorCode when the call fails with finishReason length', async () => {
+    generateObjectMock.mockRejectedValue(
+      new NoObjectGeneratedError({
+        message: 'No object generated: could not parse the response.',
+        cause: new Error('AI_JSONParseError'),
+        text: '{"reasoning": "The guest asked',
+        response: { id: 'r', timestamp: new Date(), modelId: 'm' },
+        usage: {
+          inputTokens: 5673,
+          outputTokens: 500,
+          totalTokens: 6173,
+          inputTokenDetails: {
+            noCacheTokens: undefined,
+            cacheReadTokens: undefined,
+            cacheWriteTokens: undefined,
+          },
+          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+        },
+        finishReason: 'length',
+      }),
+    )
+    const result = await verifyGrounding({
+      inboundBody: 'what is it',
+      replyBody: 'It starts with a floral base',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.errorCode).toBe(VERIFY_GROUNDING_TRUNCATED_ERROR_CODE)
+  })
+
+  // The negative half: a NoObjectGeneratedError that did NOT truncate (the
+  // model emitted prose, or stopped normally with unparseable output) is not
+  // a truncation. Mistaking it for one would fail closed on a case the
+  // fail-open rationale still covers.
+  it('does NOT report truncation when the parse failed but finishReason is stop', async () => {
+    generateObjectMock.mockRejectedValue(
+      new NoObjectGeneratedError({
+        message: 'No object generated: could not parse the response.',
+        cause: new Error('AI_JSONParseError'),
+        text: 'I cannot answer that.',
+        response: { id: 'r', timestamp: new Date(), modelId: 'm' },
+        usage: {
+          inputTokens: 100,
+          outputTokens: 12,
+          totalTokens: 112,
+          inputTokenDetails: {
+            noCacheTokens: undefined,
+            cacheReadTokens: undefined,
+            cacheWriteTokens: undefined,
+          },
+          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+        },
+        finishReason: 'stop',
+      }),
+    )
+    const result = await verifyGrounding({
+      inboundBody: 'what is it',
+      replyBody: 'It starts with a floral base',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.errorCode).toBe('ai_verify_grounding_failed')
+  })
+
+  // A plain transport error carries no finishReason at all and must stay on
+  // the fail-open code.
+  it('does NOT report truncation for an ordinary thrown Error', async () => {
+    generateObjectMock.mockRejectedValue(new Error('socket hang up'))
+    const result = await verifyGrounding({
+      inboundBody: 'what is it',
+      replyBody: 'It starts with a floral base',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.errorCode).toBe('ai_verify_grounding_failed')
+  })
+
+  // Pins the VALUE, not just that a constant exists. 500 is what this
+  // verifier outgrew; a future edit that walks it back toward the observed
+  // 373-496 output range reopens the hole, and should have to delete a test
+  // that says so.
+  it('requests VERIFY_GROUNDING_MAX_OUTPUT_TOKENS, which is well clear of the observed output range', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: { reasoning: 'r', hasUngroundedClaim: false, ungroundedClaims: [] },
+    })
+    await verifyGrounding({
+      inboundBody: 'q',
+      replyBody: 'a',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+    })
+    const args = generateObjectMock.mock.calls[0][0] as { maxOutputTokens: number }
+    expect(args.maxOutputTokens).toBe(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS)
+    expect(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS).toBe(2000)
   })
 
   it('returns ok:false with an errorCode when generateObject throws', async () => {

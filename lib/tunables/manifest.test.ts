@@ -32,9 +32,12 @@ const VALID_TYPES: readonly TunableType[] = [
 ]
 
 describe('TUNABLES manifest', () => {
-  it('contains exactly 46 entries (locks the audit set)', () => {
-    // TAC-350 added knowledge_relevance_floor.
-    expect(TUNABLES.length).toBe(49)
+  it('contains exactly 50 entries (locks the audit set)', () => {
+    // TAC-350 added knowledge_relevance_floor; TAC-367 added
+    // verify_grounding_max_output_tokens. The name of this test said 46 while
+    // it asserted 49 — fixed here rather than left as a fourth instance of
+    // the "test name is not evidence of what the test checks" pattern.
+    expect(TUNABLES.length).toBe(50)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -52,7 +55,7 @@ describe('TUNABLES manifest', () => {
     }
     for (const t of TUNABLES) counts[t.category] += 1
     expect(counts).toEqual({
-      agent_runtime: 19,
+      agent_runtime: 20,
       classification: 3,
       timing: 8,
       recognition: 8,

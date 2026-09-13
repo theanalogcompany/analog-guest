@@ -32,6 +32,7 @@ import {
   generateStage,
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_WINDOW_MS,
+  type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
@@ -816,7 +817,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       verifyMechanicOfferStage(ctx, gen.result),
     ])
     if (groundingSettled.status === 'rejected') {
-      console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to null)', {
+      console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to skipped)', {
         agentRunId,
         error:
           groundingSettled.reason instanceof Error
@@ -836,26 +837,43 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         },
       )
     }
-    const groundingBackstop = groundingSettled.status === 'fulfilled' ? groundingSettled.value : null
+    // TAC-367: an unexpected THROW degrades to 'skipped', not 'truncated'.
+    // The stage catches its own AI-call failures internally, so reaching here
+    // means something structurally unexpected happened in our own code — not
+    // evidence about the reply, and not the truncation case fail-closed was
+    // narrowed to. Degrading to the fail-closed state on an unknown bug would
+    // make any future throw here a silent fleet-wide queue flood.
+    const groundingBackstop: GroundingBackstopResult =
+      groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
     const mechanicOfferBackstop: MechanicOfferBackstopResult =
       mechanicOfferSettled.status === 'fulfilled'
         ? mechanicOfferSettled.value
         : { status: 'check_failed' }
+    const groundingClaims =
+      groundingBackstop.status === 'flagged' ? groundingBackstop.claims : []
     verifySpan.end({
       output: {
         ran: gen.result.knowledgeGap === false && ctx.guest.isDemo !== true,
-        hasUngroundedClaim: groundingBackstop !== null,
-        claimCount: groundingBackstop?.claims.length ?? 0,
+        // TAC-367: `status` is the new load-bearing field — it distinguishes
+        // a clean verdict from one that was never readable, which the old
+        // boolean pair could not. Both kept so existing trace queries don't
+        // break.
+        status: groundingBackstop.status,
+        hasUngroundedClaim: groundingBackstop.status === 'flagged',
+        claimCount: groundingClaims.length,
       },
-      content: trace.captureContent
-        ? { ungroundedClaims: groundingBackstop?.claims ?? [] }
-        : undefined,
+      content: trace.captureContent ? { ungroundedClaims: groundingClaims } : undefined,
     })
     mechanicSpan.end({ output: { status: mechanicOfferBackstop.status } })
-    if (groundingBackstop !== null) {
+    if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] inbound grounding backstop caught an unverified claim', {
         agentRunId,
         claimCount: groundingBackstop.claims.length,
+      })
+    }
+    if (groundingBackstop.status === 'truncated') {
+      console.warn('[agent] inbound grounding backstop truncated — queuing (fail closed)', {
+        agentRunId,
       })
     }
     if (mechanicOfferBackstop.status === 'flagged' || mechanicOfferBackstop.status === 'check_failed') {
@@ -873,6 +891,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // here, fed by groundingBackstop above.
     // TAC-355: 7th and 8th (self_talk_detected, mechanic_offer_backstop) also
     // land here, the latter fed by mechanicOfferBackstop above.
+    // TAC-367: 9th (grounding_check_failed) also lands here, fed by the
+    // 'truncated' state of the same groundingBackstop result.
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,

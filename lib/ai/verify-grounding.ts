@@ -1,4 +1,4 @@
-import { generateObject } from 'ai'
+import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
 import { knowledgeChunksToProse, venueInfoToProse } from './prompts/serializers'
@@ -19,7 +19,43 @@ import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './ty
 // can read it as a rule the reply broke. Bumped because the rendered prompt
 // materially changed — without it the two generations are indistinguishable
 // in analytics.
-export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.2.0'
+// v1.3.0 (TAC-367): maxOutputTokens 500 -> VERIFY_GROUNDING_MAX_OUTPUT_TOKENS
+// (2000), and truncation is now reported as its OWN errorCode so the caller
+// can fail CLOSED on it. The rendered prompt is byte-identical to v1.2.0;
+// the version moves because the generation ENVELOPE changed and the two
+// populations must be separable in analytics — at 500 an unknown fraction of
+// v1.2.0 verdicts were never produced at all.
+export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.3.0'
+
+/**
+ * TAC-367. Was 500, which this verifier had quietly outgrown: measured
+ * against Le Mil's live config the successful calls emit 373-496 output
+ * tokens, so the best run cleared the cap by FOUR tokens and ~8% (1 of 12 on
+ * a paced sample) ran past it, truncated mid-JSON, and threw. Every one of
+ * those failed OPEN — no queue, no PostHog, no Slack — so the only
+ * fabrication check that actually fires under real traffic was silently not
+ * running on a slice of inbound turns.
+ *
+ * This is the same MAX_OUTPUT_TOKENS schema-growth hazard CLAUDE.md already
+ * documents for TAC-309 (generate-message, 500 -> 1500), arriving here by a
+ * different route: TAC-301 part 1.5 moved `reasoning` — the one unbounded
+ * field — ahead of the verdict, which is load-bearing for CORRECTNESS and
+ * must stay, but it put the long field first against a cap that never moved.
+ *
+ * 2000 is ~4x the observed ceiling. It is headroom, not a bound: `reasoning`
+ * is still unbounded, so any ceiling can be hit. The fail-CLOSED handling of
+ * `finishReason: 'length'` in verifyGroundingStage is what actually closes
+ * the hole; this constant only makes hitting it rare.
+ */
+export const VERIFY_GROUNDING_MAX_OUTPUT_TOKENS = 2000
+
+/**
+ * TAC-367. `errorCode` on a failed verifyGrounding call, when the failure was
+ * specifically output truncation (`finishReason: 'length'`) rather than a
+ * transient fault. The caller keys its fail-CLOSED branch on this exact
+ * string; see verifyGroundingStage in lib/agent/stages.ts.
+ */
+export const VERIFY_GROUNDING_TRUNCATED_ERROR_CODE = 'ai_verify_grounding_truncated'
 
 const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest, plus the source material the assistant had access to — the venue's facts, menu, and any retrieved venue knowledge. Your job is to catch specific factual claims in the reply that are NOT supported by that source material, even when the reply states them confidently.
 
@@ -139,7 +175,7 @@ export async function verifyGrounding(
       schema,
       // Analytical task — keep determinism high, same as classify-message.ts.
       temperature: 0.2,
-      maxOutputTokens: 500,
+      maxOutputTokens: VERIFY_GROUNDING_MAX_OUTPUT_TOKENS,
     })
 
     // Defensive: nothing structurally stops the model from returning
@@ -170,6 +206,21 @@ export async function verifyGrounding(
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
+    // TAC-367: separate truncation from every other failure. Both still
+    // return ok:false — this function makes no policy decision — but only
+    // truncation is a verdict the model PRODUCED and we failed to read.
+    // That distinction is what lets the caller fail closed on this one case
+    // while leaving transient faults fail-open (see verifyGroundingStage).
+    //
+    // finishReason is read off the SDK's own error rather than inferred from
+    // the message text, which is provider-formatted and not a contract.
+    if (NoObjectGeneratedError.isInstance(e) && e.finishReason === 'length') {
+      return {
+        ok: false,
+        error: message,
+        errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
+      }
+    }
     return { ok: false, error: message, errorCode: 'ai_verify_grounding_failed' }
   }
 }

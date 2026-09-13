@@ -432,6 +432,21 @@ export async function regenerateWithCritique(
       // spurious warning actively teaches the wrong lesson.
       runtimeContext: gen.data.userPrompt,
     })
+    // TAC-367 was deliberately NOT mirrored here, and that is a decision
+    // rather than an oversight. The mirror obligation in this file's header
+    // is about GATING and retrieval semantics; TAC-367 changes a gate
+    // (truncation now queues via GROUNDING_CHECK_FAILED) and there is no
+    // gate on this path at all — the operator reads the raw attempt. The
+    // raised maxOutputTokens is inherited for free.
+    //
+    // The residual, recorded because the next person will otherwise re-derive
+    // it: a TRUNCATED verdict lands in the `else` below and is surfaced to
+    // the operator as hasUngroundedClaim=false, i.e. indistinguishable from
+    // clean. So the playground can no longer reproduce production for that
+    // case — the same direction of drift TAC-366 documents, where regen
+    // HID production behaviour from anyone reproducing it here. The honest
+    // fix is an advisory `groundingCheckUnavailable` alongside the existing
+    // advisory trio; it needs its own ticket, not a silent widening here.
     if (verify.ok) {
       hasUngroundedClaim = verify.data.hasUngroundedClaim
       ungroundedClaims = verify.data.ungroundedClaims
