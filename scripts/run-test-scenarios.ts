@@ -29,7 +29,7 @@ import { selectOwnerReviewCandidates, selectOwnerReviewFinal } from './onboardin
 import { checkCleanState, clearMessagingCredentials, countGuardrailState, diffGuardrailState } from './onboarding/preflight'
 import { buildReportRows } from './onboarding/report-sheet'
 import { runScenario, seedSyntheticGuests, SYNTHETIC_PHONES, type ScenarioResult } from './onboarding/run-test-scenarios'
-import { buildRunRows, type RunRow } from './onboarding/run-sheet'
+import { buildRunRows, formatRetrievedChunks, type RunRow } from './onboarding/run-sheet'
 import type { ScenarioSheetRow } from './onboarding/scenario-schema'
 import {
   buildReviewList,
@@ -364,6 +364,7 @@ async function main(): Promise<void> {
   // TAB_RETENTION_COUNT are kept; older ones are pruned below.
   const runRows: RunRow[] = graded.map((g): RunRow => {
     const voicePass = g.deterministicVoice.pass && g.llmGrade.voiceVerdict === 'pass'
+    const retrieved = formatRetrievedChunks(g.result.retrievedKnowledge)
     const voiceReasonParts = [...g.deterministicVoice.findings.map((f) => `${f.check}: ${f.detail}`), g.llmGrade.voiceReason].filter(
       (s): s is string => Boolean(s),
     )
@@ -390,6 +391,8 @@ async function main(): Promise<void> {
       actualRoute: g.routing.actualRoute ?? '',
       expectedBehaviorVerdict: g.llmGrade.expectedBehaviorVerdict,
       expectedBehaviorReason: g.llmGrade.expectedBehaviorReason,
+      retrievedChunkIds: retrieved.ids,
+      retrievedChunkScores: retrieved.scores,
     }
   })
   const runTabName = buildTimestampedTabName(RUN_TAB_PREFIX, runDateIso)
