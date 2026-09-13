@@ -557,6 +557,24 @@ export type VerifyGroundingInput = {
   replyBody: string
   venueInfo: VenueInfo
   knowledgeChunks?: KnowledgeCorpusChunk[]
+  // TAC-301 part 1.5: the generator's composed USER prompt, verbatim — i.e.
+  // `GenerateMessageResult.userPrompt`, the literal string the generating
+  // model received. NOT a re-derived summary and NOT a curated subset.
+  //
+  // Without it the verifier holds only venue_info + knowledge chunks, and
+  // every fact the generator drew from a runtime block reads as unsupported.
+  // Measured against Le Mil's live config, SIX of six fact-bearing blocks
+  // produced a false flag: the open/closed status line, eligible mechanics,
+  // active commitments, visit history, guest context, and recent
+  // conversation. All six are correct replies the backstop would suppress.
+  //
+  // REQUIRED, deliberately. A prose note asking callers to remember is the
+  // only thing that would stand between a third call site and a silent
+  // regression to all six false-positive classes, and this repo's convention
+  // for that situation is structural enforcement (see the `satisfies
+  // Record<ApprovalTrigger, ...>` total maps). Both production callers already
+  // pass it; making it required costs nothing and fails `tsc` on the next one.
+  runtimeContext: string
 }
 
 export type VerifyGroundingResult = {

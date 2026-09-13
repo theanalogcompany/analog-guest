@@ -387,6 +387,13 @@ export async function regenerateWithCritique(
       replyBody: gen.data.body,
       venueInfo: ctx.venue.venueInfo,
       knowledgeChunks,
+      // TAC-301 part 1.5: mirrored from verifyGroundingStage per this file's
+      // standing obligation to track stages.ts's gating. Without it the regen
+      // path shows the operator a false "ungrounded claim" warning on any
+      // reply grounded in a runtime block — and on THIS path the critique
+      // loop is where an operator decides what good looks like, so a
+      // spurious warning actively teaches the wrong lesson.
+      runtimeContext: gen.data.userPrompt,
     })
     if (verify.ok) {
       hasUngroundedClaim = verify.data.hasUngroundedClaim
