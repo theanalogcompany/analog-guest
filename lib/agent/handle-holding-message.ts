@@ -40,8 +40,6 @@ import {
   applyApprovalPolicyStage,
   generateStage,
   retrieveCorpusStage,
-  retrieveKnowledgeStage,
-  shouldRetrieveKnowledge,
 } from './stages'
 import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
@@ -209,6 +207,47 @@ export async function handleHoldingMessage(input: {
       crisisSafety: false,
     }
 
+    // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message
+    // has no guest question to ground — its entire content is "we're on it" —
+    // so there is nothing to gain from chunks and a specific thing to lose.
+    //
+    // This used to call retrieveKnowledgeStage, and it FIRED: this path builds
+    // context with followupTrigger.reason='manual' and no currentMessage, so
+    // shouldRetrieveKnowledge returns TRUE and retrieval falls through to the
+    // synthetic-query branch, embedding the literal string
+    // `Followup manual for {name}`. Measured against Le Mil's live corpus that
+    // returns a FULL slate every time — 4/4 chunks above the floor on every
+    // variant tried. Two of the four were MECHANIC entries: perk descriptions
+    // handed to the one generator in this repo with no operator and no gate
+    // behind it.
+    //
+    // ON WHEN THIS EXPOSURE EXISTED, because the obvious reading is wrong and
+    // a first version of this comment got it backwards. The highest score
+    // across EVERY measured variant is 0.4977 (`Followup manual for guest`);
+    // the rest sit at 0.31-0.38. All of them are BELOW 0.5, and
+    // `filterByRelevance` is `>=`, so at the old floor this path retrieved
+    // ZERO — and 'manual' has no entry in CATEGORY_TO_PRIMARY_TAG_PREFERENCE,
+    // so there is no untagged-retry branch to rescue them either. The real
+    // history is three-step: the exposure predates TAC-350 (before it there
+    // was no relevance floor at all, only lib/rag's SIMILARITY_FLOOR of 0.3,
+    // which every one of these clears), TAC-350's 0.5 floor closed it by
+    // accident, and TAC-358's drop to 0.30 reopened it. So TAC-358 IS the
+    // proximate cause of the live exposure, even though the underlying
+    // synthetic-query defect is older than both.
+    //
+    // `[]`, not `null`: an empty array renders TAC-242's explicit "No specific
+    // venue knowledge matched this query... do not invent specifics" framing,
+    // whereas null omits the block entirely. For a message whose whole
+    // guarantee is that it asserts nothing, being TOLD it has no venue
+    // knowledge is strictly better than being told nothing. Same choice, and
+    // now the same reasoning, as handle-operator-decline.ts.
+    //
+    // Assigned BEFORE the corpus retrieve so "unconditionally" is literal:
+    // the corpus-failure branch returns via sendFallback without reaching the
+    // rest of this function, and would otherwise leave the field as the null
+    // buildRuntimeContext starts it at.
+    ctx.knowledgeCorpus = []
+
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
     } catch (e) {
@@ -225,10 +264,6 @@ export async function handleHoldingMessage(input: {
       // path always resolves to the fallback's sent-or-failed, never to a
       // corpus-specific failure.
     }
-
-    ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-      ? await retrieveKnowledgeStage(ctx, HOLDING_MESSAGE_CATEGORY)
-      : []
 
     for (let attempt = 1; attempt <= HOLDING_MESSAGE_MAX_ATTEMPTS; attempt++) {
       const generated = await tryGenerateHolding(ctx, agentRunId, attempt)
