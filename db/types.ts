@@ -754,13 +754,13 @@ export type Database = {
           reply_to_message_id: string | null
           response_review: Json | null
           review_reason: string | null
-          review_triggers: string[] | null
-          ungrounded_claims: string[] | null
           review_state: string | null
+          review_triggers: string[] | null
           reviewed_at: string | null
           reviewed_by_operator_id: string | null
           sent_at: string | null
           status: string
+          ungrounded_claims: string[] | null
           updated_at: string
           venue_id: string
           voice_fidelity: number | null
@@ -790,13 +790,13 @@ export type Database = {
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
-          review_triggers?: string[] | null
-          ungrounded_claims?: string[] | null
           review_state?: string | null
+          review_triggers?: string[] | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
           status?: string
+          ungrounded_claims?: string[] | null
           updated_at?: string
           venue_id: string
           voice_fidelity?: number | null
@@ -826,13 +826,13 @@ export type Database = {
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
-          review_triggers?: string[] | null
-          ungrounded_claims?: string[] | null
           review_state?: string | null
+          review_triggers?: string[] | null
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
           status?: string
+          ungrounded_claims?: string[] | null
           updated_at?: string
           venue_id?: string
           voice_fidelity?: number | null
