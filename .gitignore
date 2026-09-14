@@ -51,3 +51,5 @@ next-env.d.ts
 # tsc would otherwise scan WIP files that haven't been wired to deps yet.
 /scripts/sandbox
 .worktrees/
+.claude/scheduled_tasks.lock
+supabase/.temp/
