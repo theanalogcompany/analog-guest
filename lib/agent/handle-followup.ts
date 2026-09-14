@@ -470,11 +470,15 @@ export async function handleFollowup(input: {
           // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
           // trigger is inbound-only), passed for call-site symmetry so the
           // two orchestrators can't drift.
-          // TAC-364: same symmetry. `ungroundedClaims` is always [] here —
-          // verifyGroundingStage returns early when currentMessage is null, so
-          // no followup has a grounding backstop (that gap is TAC-376) — but
-          // `reviewTriggers` is real and carries the same co-firing
-          // information an inbound draft does.
+          // TAC-364: same symmetry. `ungroundedClaims` is always NULL on this
+          // path — `verifyGroundingStage` returns early when currentMessage is
+          // null, so no followup has a grounding backstop at all (that gap is
+          // TAC-376) — and NULL is precisely the value that records "the check
+          // did not run", as opposed to `[]`, which would claim it ran and
+          // found nothing. Every followup row in `messages.ungrounded_claims`
+          // is therefore NULL, and that is a true statement about the feature
+          // rather than a gap in the data. `reviewTriggers` IS real here and
+          // carries the same co-firing information an inbound draft does.
           {
             pendingUntil: approval.pendingUntil,
             reviewTriggers: approval.triggers,

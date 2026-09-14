@@ -740,6 +740,11 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
       triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP],
       primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       pendingUntil: new Date(),
       blankBody: true,
@@ -779,6 +784,11 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
       triggers: [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED],
       primaryTrigger: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -815,6 +825,11 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
       primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -861,6 +876,11 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
       primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -883,6 +903,11 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
       primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })

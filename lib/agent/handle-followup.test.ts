@@ -237,6 +237,11 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: ['mechanic_offer_backstop'],
       primaryTrigger: 'mechanic_offer_backstop',
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -258,6 +263,18 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     // followup never has a grounding backstop (inbound-only) — always null here.
     expect(groundingArg).toBeNull()
     expect(mechanicOfferArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
+
+    // TAC-364: the followup path threads the gate's trigger set and claims to
+    // the persist layer exactly as inbound does. `ungroundedClaims` is NULL
+    // here rather than `[]`, and the distinction is the ruling: NULL records
+    // that the grounding check DID NOT RUN, which on a followup is true by
+    // construction (verifyGroundingStage is inbound-only — that gap is
+    // TAC-376). `[]` would claim it ran and found nothing, which would make
+    // every followup row in the column a quiet lie about a check that never
+    // happened.
+    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistOpts.reviewTriggers).toEqual(['mechanic_offer_backstop'])
+    expect(persistOpts.ungroundedClaims).toBeNull()
     expect(result.status).toBe('queued')
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
@@ -317,6 +334,11 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: ['mechanic_offer_backstop'],
       primaryTrigger: 'mechanic_offer_backstop',
       compMatchedPattern: null,
+      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+      // required on ApprovalDecision), so a fixture omitting it would feed
+      // `undefined` down a path production never produces. null is what a
+      // followup / skipped-check turn actually carries — see ruling 3.
+      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
