@@ -163,6 +163,8 @@ export type ComputeStateResult = {
   signals: RelationshipSignals
   weights: RelationshipStrengthFormula['weights']
   contributions: SignalContributions
+  // TAC-380: raw lifetime inbound count. See computeRelationshipStrength.
+  repliedMessageCount: number
   stateChanged: boolean
 }
 

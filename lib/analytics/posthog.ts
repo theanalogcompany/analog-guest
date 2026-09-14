@@ -465,6 +465,51 @@ function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableP
   ].join('\n')
 }
 
+// TAC-380: the post-send intention recorder could not record normally. Both
+// outcomes Slack-relay, because both change what a guest will be asked:
+//   - closed_pessimistically: the classifier failed on every attempt, so every
+//     rendered intention was closed without being judged. Nothing re-asks, but
+//     a run of these means intentions are closing blind.
+//   - write_failed: the database write failed. The one remaining path to a
+//     genuine re-ask, which is the failure intentions exist to prevent.
+// Before TAC-380 both were a bare console.warn, invisible in PostHog and Slack,
+// and this ticket takes the number of intentions they apply to from two to seven.
+export interface IntentionPromptRecordingFailedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  messageId: string
+  outcome: 'closed_pessimistically' | 'write_failed'
+  keys: string[]
+  /** write_failed only: which kind of close was being written. */
+  source?: 'classified' | 'pessimistic'
+  /** Provider/DB error text. Never contains guest or venue content. */
+  error: string
+}
+
+export async function captureIntentionPromptRecordingFailed(
+  props: IntentionPromptRecordingFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('intention_prompt_recording_failed', props.guestId, { ...props })
+  await postToSlack(formatIntentionPromptRecordingFailed(props))
+}
+
+function formatIntentionPromptRecordingFailed(props: IntentionPromptRecordingFailedProps): string {
+  const headline =
+    props.outcome === 'closed_pessimistically'
+      ? '*Intention classifier failed twice* — rendered intentions closed without a verdict'
+      : '*Intention prompt write failed* — these intentions may be asked again'
+  return [
+    headline,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `message: \`${props.messageId}\``,
+    `keys: ${props.keys.join(', ')}${props.source ? ` (${props.source})` : ''}`,
+    `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ].join('\n')
+}
+
 function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {
   const claimList = props.ungroundedClaims.map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`).join(', ')
   const lines = [

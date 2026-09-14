@@ -174,6 +174,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     recentVisits: [],
     activeCommitments: [],
     openIntentions: [],
+    intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -496,7 +497,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.48.0',
+        promptVersion: 'v1.49.0',
         crisisSafety: true,
       },
     })
@@ -514,7 +515,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.48.0',
+        promptVersion: 'v1.49.0',
         crisisSafety: false,
       },
     })
@@ -1747,18 +1748,50 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
     expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
   })
 
-  it('maps ctx.openIntentions promptLines onto aiRuntime.openIntentions', () => {
-    const ctx = qrScanCtx({
-      openIntentions: [
-        { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
-        { key: 'invite_contact_save', promptLine: "You haven't told them to save your number." },
-      ],
-    })
-    const aiRuntime = buildAiRuntime(ctx)
+  const TWO_OPEN: RuntimeContext['openIntentions'] = [
+    {
+      key: 'understand_order',
+      promptLine: "You haven't heard what this guest ordered yet.",
+      eligibleAt: FRESH,
+    },
+    { key: 'learn_name', promptLine: "You don't know this guest's name yet.", eligibleAt: FRESH },
+  ]
+
+  it('maps ctx.openIntentions promptLines onto aiRuntime.openIntentions, in order', () => {
+    const aiRuntime = buildAiRuntime(qrScanCtx({ openIntentions: TWO_OPEN }))
     expect(aiRuntime.openIntentions).toEqual([
       "You haven't heard what this guest ordered yet.",
-      "You haven't told them to save your number.",
+      "You don't know this guest's name yet.",
     ])
+  })
+
+  // TAC-380 trap 4: buildAiRuntime renders through renderableIntentions, the
+  // same predicate handle-inbound's recording gate reads. If this rendered on
+  // a turn recording skipped (or the reverse), a classifier failure could close
+  // an intention the guest never saw.
+  it('renders no intentions on an opt_out turn (trap 4)', () => {
+    const aiRuntime = buildAiRuntime(
+      qrScanCtx({
+        openIntentions: TWO_OPEN,
+        classification: {
+          category: 'opt_out',
+          classifierConfidence: 0.99,
+          reasoning: 'stop',
+          crisisSafety: false,
+        },
+      }),
+    )
+    expect(aiRuntime.openIntentions).toBeUndefined()
+  })
+
+  it('renders no intentions while the guest is owed an answer to an earlier question (trap 4)', () => {
+    const aiRuntime = buildAiRuntime(
+      qrScanCtx({
+        openIntentions: TWO_OPEN,
+        pendingQuestion: { question: 'is rayan working', askedAt: new Date(), mode: 'outstanding' },
+      }),
+    )
+    expect(aiRuntime.openIntentions).toBeUndefined()
   })
 
   it('leaves aiRuntime.openIntentions undefined when ctx.openIntentions is empty', () => {

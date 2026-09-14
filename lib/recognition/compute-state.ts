@@ -85,7 +85,7 @@ export async function computeGuestState(
 
   const strengthResult = await computeRelationshipStrength(input)
   if (!strengthResult.ok) return strengthResult
-  const { score, signals, weights, contributions } = strengthResult.data
+  const { score, signals, weights, contributions, repliedMessageCount } = strengthResult.data
 
   const newState = evaluateState(score, thresholds)
 
@@ -123,6 +123,14 @@ export async function computeGuestState(
 
   return {
     ok: true,
-    data: { score, state: newState, signals, weights, contributions, stateChanged },
+    data: {
+      score,
+      state: newState,
+      signals,
+      weights,
+      contributions,
+      repliedMessageCount,
+      stateChanged,
+    },
   }
 }

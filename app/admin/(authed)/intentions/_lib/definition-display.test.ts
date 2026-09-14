@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { INTENTION_DEFINITIONS } from '@/lib/agent/intentions/definitions'
-import { formatExpiryWindow, formatPromptedAt, resolveDefinition } from './definition-display'
+import {
+  formatArmsOn,
+  formatExpiryWindow,
+  formatGate,
+  formatPromptedAt,
+  resolveDefinition,
+} from './definition-display'
 
 describe('resolveDefinition', () => {
   it('resolves every live definition key', () => {
@@ -63,5 +69,42 @@ describe('formatPromptedAt', () => {
   // Never "Invalid Date" — an unreadable value should show what was stored.
   it('returns the raw value when it cannot be parsed', () => {
     expect(formatPromptedAt('not-a-date')).toBe('not-a-date')
+  })
+})
+
+describe('formatArmsOn (TAC-380)', () => {
+  it('describes every arming kind distinctly', () => {
+    const rendered = [
+      formatArmsOn({ kind: 'qr_scan_enrollment' }),
+      formatArmsOn({ kind: 'first_contact' }),
+      formatArmsOn({ kind: 'open_recommendation' }),
+      formatArmsOn({ kind: 'recorded_order' }),
+    ]
+    for (const text of rendered) expect(text.trim().length).toBeGreaterThan(0)
+    expect(new Set(rendered).size).toBe(rendered.length)
+  })
+
+  it('renders every live definition', () => {
+    for (const def of INTENTION_DEFINITIONS) {
+      expect(formatArmsOn(def.armsOn).trim().length, def.key).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('formatGate (TAC-380)', () => {
+  it('says None for an ungated intention', () => {
+    expect(formatGate({ kind: 'none' })).toBe('None')
+  })
+
+  // The reply count shown is the DEFAULT, and a venue can override it. The copy
+  // saying so is what stops the page presenting a default as the value in force.
+  it('names the default reply count and that a venue can override it', () => {
+    const text = formatGate({ kind: 'conversational', defaultMinReplies: 5 })
+    expect(text).toContain('at least 5 replies')
+    expect(text).toContain('venue can override')
+  })
+
+  it('singularizes one reply', () => {
+    expect(formatGate({ kind: 'conversational', defaultMinReplies: 1 })).toContain('at least 1 reply ')
   })
 })

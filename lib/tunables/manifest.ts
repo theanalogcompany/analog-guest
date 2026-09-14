@@ -19,6 +19,12 @@ import {
 } from '@/lib/agent/build-runtime-context'
 import { COMP_PATTERNS } from '@/lib/agent/comp-backstop'
 import {
+  EVENT_ARMED_WINDOW_DAYS,
+  FIRST_CONTACT_WINDOW_DAYS,
+  INTENTION_DEFINITIONS,
+  UNDERSTAND_ORDER_WINDOW_DAYS,
+} from '@/lib/agent/intentions/definitions'
+import {
   AUTO_SEND_FIDELITY_FLOOR,
   CORPUS_RETRIEVE_LIMIT,
   KNOWLEDGE_GAP_WINDOW_MS,
@@ -51,6 +57,7 @@ import {
   SIMILARITY_FLOOR,
 } from '@/lib/rag/retrieve'
 import { FOLLOWUP_RULES_DEFAULT } from '@/lib/schemas'
+import { INTENTION_RULES_DEFAULT } from '@/lib/schemas/intention-rules'
 import { VISIT_LOOKBACK_DAYS } from '@/lib/recognition/load-signals'
 import {
   MONEY_MAX_DOLLARS,
@@ -511,6 +518,75 @@ export const TUNABLES = [
     source: 'lib/schemas/followup-rules.ts',
     description: 'Venue-local hour (0-23) at which the daily processor fires. The cron itself fires hourly UTC; the processor filters per-venue against this value.',
     relatedTickets: ['TAC-123'],
+  },
+  // ---------------------------------------------------------------------------
+  // TAC-380: intentions. Rule defaults come from INTENTION_RULES_DEFAULT (a venue
+  // overrides them in venue_configs.intention_rules); windows and per-intention
+  // reply counts come from the definitions. Every value is a PLACEHOLDER: there
+  // was no intention traffic to calibrate against.
+  // ---------------------------------------------------------------------------
+  {
+    name: 'intention_response_rate_floor',
+    value: INTENTION_RULES_DEFAULT.response_rate_floor,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/intention-rules.ts',
+    description:
+      'Minimum normalized responseRate (0-100) before any conversational intention can become eligible. One floor for all of them; the per-intention reply count does the staggering.',
+    relatedTickets: ['TAC-380'],
+  },
+  {
+    name: 'intention_unanswered_streak',
+    value: INTENTION_RULES_DEFAULT.unanswered_streak,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/schemas/intention-rules.ts',
+    description:
+      "How many of the guest's most recent prompts must have gone unanswered before the brake suppresses every intention. A prompt counts as answered when the guest's next inbound arrives within followup_recent_conversation_hours.",
+    relatedTickets: ['TAC-380'],
+  },
+  {
+    name: 'intention_default_min_replies',
+    value: Object.fromEntries(
+      INTENTION_DEFINITIONS.flatMap((d): [string, number][] =>
+        d.gate.kind === 'conversational' ? [[d.key, d.gate.defaultMinReplies]] : [],
+      ),
+    ),
+    type: 'object',
+    category: 'agent_runtime',
+    source: 'lib/agent/intentions/definitions.ts',
+    description:
+      'Lifetime inbound messages a guest must have sent before each conversational intention can become eligible. Overridable per venue via intention_rules.min_replies.',
+    relatedTickets: ['TAC-380'],
+  },
+  {
+    name: 'intention_understand_order_window_days',
+    value: UNDERSTAND_ORDER_WINDOW_DAYS,
+    type: 'number',
+    category: 'timing',
+    source: 'lib/agent/intentions/definitions.ts',
+    description: 'understand_order stays open this many days after the guest first texted in by scanning the sign.',
+    relatedTickets: ['TAC-324', 'TAC-380'],
+  },
+  {
+    name: 'intention_event_armed_window_days',
+    value: EVENT_ARMED_WINDOW_DAYS,
+    type: 'number',
+    category: 'timing',
+    source: 'lib/agent/intentions/definitions.ts',
+    description:
+      'got_the_recommendation and did_they_like_it stay open this many days after their event (the newest open recommendation, the first transaction) becomes askable, which is once it is older than followup_recent_conversation_hours. Short because they perish.',
+    relatedTickets: ['TAC-380'],
+  },
+  {
+    name: 'intention_first_contact_window_days',
+    value: FIRST_CONTACT_WINDOW_DAYS,
+    type: 'number',
+    category: 'timing',
+    source: 'lib/agent/intentions/definitions.ts',
+    description:
+      'learn_name, are_they_local, their_rhythm and why_theyre_here stay open this many days after each first became eligible.',
+    relatedTickets: ['TAC-380'],
   },
   {
     name: 'knowledge_gap_window_ms',

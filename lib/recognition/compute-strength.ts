@@ -62,6 +62,13 @@ export async function computeRelationshipStrength({
     signals: RelationshipSignals
     weights: RelationshipStrengthFormula['weights']
     contributions: SignalContributions
+    /**
+     * Lifetime inbound message count, passed through raw. TAC-380 gates
+     * intentions on it: the normalized responseRate reads 0 until three
+     * responses have been sent and then jumps to ~100 for an engaged guest, so
+     * the ratio alone cannot stagger anything. A raw count is monotone.
+     */
+    repliedMessageCount: number
   }>
 > {
   const formulaResult = await loadFormula(venueId)
@@ -96,5 +103,14 @@ export async function computeRelationshipStrength({
 
   const score = Math.round(weightedSum)
 
-  return { ok: true, data: { score, signals, weights, contributions } }
+  return {
+    ok: true,
+    data: {
+      score,
+      signals,
+      weights,
+      contributions,
+      repliedMessageCount: signalsResult.data.repliedMessageCount,
+    },
+  }
 }

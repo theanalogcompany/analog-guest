@@ -21,13 +21,21 @@ import type {
 import type { ApprovalPolicy } from '@/lib/schemas/approval-policy'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
-import type { OpenIntention } from './intentions/derive'
+import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
 
 export type { AlertContext }
 export type { RecentMessage }
 export type { EligibleMechanic }
 export type { Visit }
 export type { OpenIntention }
+
+/** TAC-380: the parts of one turn's intention derivation that aren't the open set. */
+export interface IntentionDerivation {
+  /** Seen eligible for the first time this turn, or re-armed by a newer event. handle-inbound persists these. */
+  newlyEligible: NewlyEligibleIntention[]
+  /** True when the unanswered-prompt brake suppressed every intention this turn. */
+  brakeEngaged: boolean
+}
 
 export type AgentRunId = string
 
@@ -190,16 +198,19 @@ export interface RuntimeContext {
   // (so it can ask for arrival timing if natural — soft, woven, not a standing
   // directive).
   activeCommitments: ActiveCommitment[]
-  // TAC-324: first-touch intentions still open for this guest, rendered as
-  // the `## What you're hoping to get to` block. Derived by
-  // build-runtime-context.ts (lib/agent/intentions/derive.ts), gated to
-  // qr_scan guests and to inbound runs only (empty on every followup run —
-  // recording only happens from handle-inbound.ts, so rendering on a
-  // followup would raise an intention with no row ever written for it).
-  // Already post-current-turn-suppression: this is the exact set used for
-  // both rendering AND (later, post-send) recording eligibility. Empty array
-  // = block omitted, zero tokens.
+  // TAC-324 / TAC-380: intentions open for this guest on this inbound turn, in
+  // priority order, rendered as the `## What you're hoping to get to` block.
+  // Derived by build-runtime-context.ts (lib/agent/intentions/derive.ts). Empty
+  // on every followup run, because recording only happens from
+  // handle-inbound.ts and rendering on a followup would raise an intention
+  // nothing ever closes. Empty while the unanswered-prompt brake is engaged.
+  //
+  // This is the PRE-classification set. renderableIntentions(...) narrows it
+  // once the turn is classified, and both the prompt mapper (buildAiRuntime)
+  // and the recording gate read that narrowed set, never this one directly.
   openIntentions: OpenIntention[]
+  // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.
+  intentionDerivation: IntentionDerivation
   // TAC-308: the question this guest is still owed an answer to, when a
   // knowledge-gap card is sitting in the operator queue. Loaded by
   // build-runtime-context.ts via findPendingQuestion; mapped onto the AI

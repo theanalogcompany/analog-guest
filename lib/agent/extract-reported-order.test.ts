@@ -157,6 +157,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     recentVisits: [],
     activeCommitments: [],
     openIntentions: [],
+    intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     pendingQuestion: null,
     corpus: null,
     knowledgeCorpus: null,

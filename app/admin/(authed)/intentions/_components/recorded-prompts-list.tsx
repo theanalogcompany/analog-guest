@@ -4,14 +4,15 @@ import { formatPromptedAt, resolveDefinition } from '../_lib/definition-display'
 
 // TAC-379. One row per guest_intention_prompts record. The table's unique
 // constraint is (guest_id, intention_key), so a row here means "this guest was
-// asked this once, ever."
+// asked this". Since TAC-380 that is once, ever, for first-contact intentions;
+// an event-armed row shows only its latest prompt, and a newer event can re-arm it.
 
 export function RecordedPromptsList({ rows }: { rows: readonly IntentionPromptRow[] }) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-ink-faint italic max-w-2xl">
         No intention prompts recorded yet. A row appears here only after a sent message actually
-        raises an open intention, which the four conditions above make rare.
+        raises an open intention, which the conditions above make rare.
       </p>
     )
   }
@@ -39,6 +40,14 @@ export function RecordedPromptsList({ rows }: { rows: readonly IntentionPromptRo
                     no matching definition
                   </span>
                 )}
+                {/* TAC-380: the classifier failed twice and this was closed
+                    without anyone judging the message. It may never have been
+                    asked, so it must not read as a real prompt. */}
+                {row.promptSource === 'pessimistic' ? (
+                  <span className="text-[11px] text-ink-faint italic">
+                    closed without a verdict
+                  </span>
+                ) : null}
               </span>
             </div>
             <div className="flex flex-col gap-1 sm:items-end shrink-0">

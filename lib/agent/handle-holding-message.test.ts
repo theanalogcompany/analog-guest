@@ -98,6 +98,7 @@ function makeCtx() {
     recentVisits: [],
     activeCommitments: [],
     openIntentions: [],
+    intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     trace: { id: '' },
   }
 }

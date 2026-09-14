@@ -18,7 +18,7 @@ interface QueryCall {
 function mockQuery(result: { data: unknown; error: { message: string } | null }) {
   const calls: QueryCall[] = []
   const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'order', 'limit', 'in']) {
+  for (const method of ['select', 'order', 'limit', 'in', 'not']) {
     builder[method] = vi.fn((...args: unknown[]) => {
       calls.push({ method, args })
       return builder
@@ -36,9 +36,10 @@ function mockQuery(result: { data: unknown; error: { message: string } | null })
 
 const dbRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-  intention_key: 'learn_first_order',
+  intention_key: 'understand_order',
   prompted_at: '2026-09-13T10:00:00.000Z',
   message_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  prompt_source: 'classified',
   guest: { first_name: 'Liam', last_name: 'Chen', phone_number: '+15555550142' },
   venue: { name: "Le Mil's Coffee" },
   ...overrides,
@@ -59,9 +60,10 @@ describe('loadIntentionPrompts', () => {
     expect(rows).toEqual([
       {
         id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        intentionKey: 'learn_first_order',
+        intentionKey: 'understand_order',
         promptedAt: '2026-09-13T10:00:00.000Z',
         messageId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        promptSource: 'classified',
         guestLabel: 'Liam Chen · +15555550142',
         venueName: "Le Mil's Coffee",
       },
@@ -92,6 +94,15 @@ describe('loadIntentionPrompts', () => {
 
     const { rows } = await loadIntentionPrompts([])
     expect(rows[0].messageId).toBeNull()
+  })
+
+  // TAC-380: a pessimistic closure asked nothing for certain; the viewer marks
+  // it, so the source must survive the projection.
+  it('carries a pessimistic prompt_source through to the row', async () => {
+    mockQuery({ data: [dbRow({ prompt_source: 'pessimistic' })], error: null })
+
+    const { rows } = await loadIntentionPrompts([])
+    expect(rows[0].promptSource).toBe('pessimistic')
   })
 
   // Load-bearing. intention_key is bare text with no FK (migration 035), so a
@@ -144,6 +155,7 @@ describe('loadIntentionPrompts', () => {
     const select = calls.find((c) => c.method === 'select')?.args[0] as string
     expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number)')
     expect(select).toContain('venue:venues!inner(name)')
+    expect(select).toContain('prompt_source')
     expect(calls.find((c) => c.method === 'order')?.args).toEqual([
       'prompted_at',
       { ascending: false },
@@ -151,6 +163,21 @@ describe('loadIntentionPrompts', () => {
     // limit + 1 is load-bearing, not an off-by-one: the extra row is what
     // distinguishes exactly-at-cap from over-cap. See the hasMore tests.
     expect(calls.find((c) => c.method === 'limit')?.args).toEqual([RECORDED_PROMPTS_LIMIT + 1])
+  })
+
+  // TAC-380 trap 5. Since migration 040 the table also holds ELIGIBILITY rows
+  // (prompted_at null) — intentions that became askable and haven't been
+  // raised. This page lists what was RAISED; without the filter, every
+  // eligible intention would render here as already asked. The mock ignores
+  // its arguments, so the filter is asserted directly.
+  it('reads only rows that were actually prompted (trap 5)', async () => {
+    const { calls } = mockQuery({ data: [], error: null })
+
+    await loadIntentionPrompts([])
+
+    expect(calls.filter((c) => c.method === 'not')).toEqual([
+      { method: 'not', args: ['prompted_at', 'is', null] },
+    ])
   })
 
   // The boundary is the whole reason the query fetches limit + 1. The page

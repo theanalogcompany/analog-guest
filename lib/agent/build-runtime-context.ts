@@ -18,10 +18,18 @@ import {
 } from '@/lib/schemas'
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
+import { parseFollowupRules } from '@/lib/schemas/followup-rules'
+import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { extractRecentVisits } from './extract-recent-visits'
 import { groupIntoResponses } from './group-responses'
-import { applyCurrentTurnSuppression, deriveOpenIntentions, type OpenIntention } from './intentions/derive'
-import { INTENTION_DEFINITIONS } from './intentions/definitions'
+import {
+  applyCurrentTurnSuppression,
+  buildSatisfactionFacts,
+  deriveOpenIntentions,
+  type DeriveOpenIntentionsResult,
+  resolveInboundHistoryFrom,
+} from './intentions/derive'
+import { loadIntentionRows } from './intentions/load'
 import { findPendingQuestion } from './pending-question'
 import { MAX_BUBBLES_PER_RESPONSE } from './split-message'
 import type {
@@ -130,12 +138,12 @@ export async function buildRuntimeContext(input: {
     visitHistoryResult,
     activeCommitmentsResult,
     pendingQuestionResult,
-    intentionPromptsResult,
+    intentionRows,
   ] = await Promise.all([
     supabase
       .from('venues')
       .select(
-        'id, slug, timezone, messaging_phone_number, hold_all_outbound, venue_configs(brand_persona, venue_info, approval_policy)',
+        'id, slug, timezone, messaging_phone_number, hold_all_outbound, venue_configs(brand_persona, venue_info, approval_policy, followup_rules, intention_rules)',
       )
       .eq('id', input.venueId)
       .single(),
@@ -188,17 +196,11 @@ export async function buildRuntimeContext(input: {
     // parallel with the other eight queries; the common case is one indexed
     // lookup that matches nothing.
     findPendingQuestion(input.venueId, input.guestId),
-    // TAC-324: which first-touch intentions have already been prompted for
-    // this guest, ever (guest_intention_prompts, capped one row per intention
-    // per guest by its unique constraint). Fails CLOSED below, not open — see
-    // the error handling after Promise.all. Runs in parallel with the other
-    // nine queries; the common case (a non-qr_scan guest, or a qr_scan guest
-    // past the display gate) is one indexed lookup that matches nothing.
-    supabase
-      .from('guest_intention_prompts')
-      .select('intention_key')
-      .eq('venue_id', input.venueId)
-      .eq('guest_id', input.guestId),
+    // TAC-380: this guest's intention state rows. Inbound runs only, because
+    // intentions never render on a followup (see below). loadIntentionRows
+    // never throws and returns null on any failure; the derivation fails CLOSED
+    // on null.
+    input.currentMessage ? loadIntentionRows(input.venueId, input.guestId) : Promise.resolve(null),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -398,56 +400,100 @@ export async function buildRuntimeContext(input: {
       ),
       [])
 
-  // TAC-324: first-touch intentions. Gated to inbound runs only — intentions
-  // are goals Sana carries into a conversation she's IN, not into a scheduled
-  // nudge. A followup engine tick (day_1/day_3) can fire for exactly the
-  // qr_scan, non-responding population these intentions target, and that
-  // path never calls recordIntentionPrompts (handle-inbound.ts is the only
-  // caller), so rendering there would raise an intention with no row ever
-  // written for it — silently breaking the one-prompt-per-intention-ever cap
-  // for the modal case, not an edge case. So: empty set, no block, on any
-  // followup run, unconditionally.
-  let openIntentions: OpenIntention[] = []
+  // TAC-324 / TAC-380: intentions. Inbound runs only. Intentions are goals Sana
+  // carries into a conversation she's IN, not into a scheduled nudge, and the
+  // followup path never records a prompt (handle-inbound.ts is the only caller
+  // of recordIntentionPrompts), so rendering there would raise an intention
+  // nothing ever closes. So on any followup run: nothing open, nothing newly
+  // eligible, unconditionally.
+  let intentions: DeriveOpenIntentionsResult = { open: [], newlyEligible: [], brakeEngaged: false }
   if (input.currentMessage) {
-    // Fail CLOSED, not open: a broken read must not risk re-raising
-    // something already asked, which is the exact failure this ticket
-    // exists to prevent. "Unknown" is modeled as "everything prompted" (the
-    // full definitions key set), not "nothing prompted" — deriveOpenIntentions
-    // then closes every intention uniformly, same as a real fully-prompted
-    // guest would.
-    let promptedKeys: ReadonlySet<(typeof INTENTION_DEFINITIONS)[number]['key']>
-    if (intentionPromptsResult.error) {
-      console.warn(
-        `[agent] buildRuntimeContext: guest_intention_prompts load failed for guest ${input.guestId}: ${intentionPromptsResult.error.message}. Failing closed (rendering no intentions this turn).`,
-      )
-      promptedKeys = new Set(INTENTION_DEFINITIONS.map((d) => d.key))
-    } else {
-      promptedKeys = new Set(
-        (intentionPromptsResult.data ?? []).map(
-          (row) => row.intention_key as (typeof INTENTION_DEFINITIONS)[number]['key'],
-        ),
-      )
-    }
-
-    // hasQualifyingTransaction reuses the visit-history query already run
-    // above rather than issuing a second transactions query — the RAW row
-    // count (before extractRecentVisits's parse-projection), since "we heard
-    // what they ordered" is true even if raw_data later turns out
-    // unparseable for the ## Visit history block's purposes.
+    // "Have we heard what they ordered" reuses the visit-history query rather
+    // than issuing another: the RAW row count, before extractRecentVisits's
+    // parse-projection, since we heard it even if raw_data is unparseable.
     const hasQualifyingTransaction = (visitHistoryResult.data?.length ?? 0) > 0
 
-    const rawOpenIntentions = deriveOpenIntentions({
-      createdVia: guest.createdVia,
-      guestCreatedAt: guest.createdAt,
-      now: computedAt,
-      hasQualifyingTransaction,
-      promptedKeys,
+    // Arms got_the_recommendation; the derivation picks the newest one that is
+    // askable now (ruling 1). activeCommitments is the open + pending_ack set,
+    // and it fails open to [] on a load error, which only means nothing arms:
+    // the safe direction.
+    const openRecommendationTimes = activeCommitments
+      .filter((c) => c.type === 'recommendation')
+      .map((c) => new Date(c.created_at))
+      .filter((d) => Number.isFinite(d.getTime()))
+
+    // The mid-conversation hold also reads updated_at: a recommendation repeated
+    // in this conversation is deduped onto its existing row (TAC-318), which
+    // bumps updated_at and never created_at. Other writes to the row bump it too
+    // (arrival capture, pending_ack), which only holds more often: the direction
+    // that fails toward not asking. Raw rows, because ActiveCommitment doesn't
+    // carry updated_at.
+    const openRecommendationTouchedTimes = (activeCommitmentsResult.ok ? activeCommitmentsResult.data : [])
+      .filter((row) => row.type === 'recommendation')
+      .map((row) => new Date(row.updated_at))
+      .filter((d) => Number.isFinite(d.getTime()))
+
+    // Arms did_they_like_it off the newest order, as for recommendations. No
+    // query of its own: the visit-history rows come back newest first, so its
+    // 20-row cap only drops OLDER orders, and one older than its 90-day cutoff is
+    // long past did_they_like_it's window at any sensible conversation length.
+    // PARSED visits, unlike hasQualifyingTransaction above: the line says the
+    // agent knows what this guest ordered, and R31 only lets the model ask how
+    // an item went when it appears in ## Visit history, which is built from these.
+    const recordedOrderTimes = recentVisits.map((v) => v.visitedAt)
+
+    // The brake asks whether the guest replied within the conversation window
+    // after each prompt, so it needs every inbound it can see, including this
+    // one. recentMessages is already response-grouped; inbound rows are each
+    // their own group.
+    const inboundTimes = [
+      ...recentMessages.filter((m) => m.direction === 'inbound').map((m) => m.createdAt),
+      input.currentMessage.receivedAt,
+    ]
+
+    // The brake can only judge a prompt whose answer it can see. See
+    // resolveInboundHistoryFrom; build-runtime-context.test.ts pins this call.
+    const inboundHistoryFrom = resolveInboundHistoryFrom({
+      recentMessages,
+      responseCap: MAX_HISTORY_MESSAGES,
+      rowsFetched: messagesResult.data?.length ?? 0,
+      rowCap: MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE,
+      historyCutoff: new Date(historyCutoffIso),
     })
-    openIntentions = applyCurrentTurnSuppression(
-      rawOpenIntentions,
-      input.currentMessage.body,
-      venue.venueInfo.menu.items,
-    )
+
+    const derived = deriveOpenIntentions({
+      now: computedAt,
+      guest: { createdVia: guest.createdVia, createdAt: guest.createdAt },
+      responseRate: recognition.signals.responseRate,
+      repliedMessageCount: recognitionResult.data.repliedMessageCount,
+      rules: parseIntentionRules(config.intention_rules),
+      facts: buildSatisfactionFacts({
+        hasQualifyingTransaction,
+        firstName: guest.firstName,
+        homeBase: parsedGuestContext.guest_details?.home_base,
+      }),
+      openRecommendationTimes,
+      openRecommendationTouchedTimes,
+      recordedOrderTimes,
+      rows: intentionRows,
+      inboundTimes,
+      inboundHistoryFrom,
+      // Ruling 1: one definition of "still in the same conversation" across
+      // followups and intentions. Le Mil's followup_rules is NULL, so it runs on
+      // the code default (48h), at which the brake rarely fires. That is the
+      // intended failure direction: under-braking, since a prompt closes on
+      // being asked anyway.
+      conversationWindowMs:
+        parseFollowupRules(config.followup_rules).recent_conversation_hours * 60 * 60 * 1000,
+    })
+    intentions = {
+      ...derived,
+      open: applyCurrentTurnSuppression(
+        derived.open,
+        input.currentMessage.body,
+        venue.venueInfo.menu.items,
+      ),
+    }
   }
 
   return {
@@ -461,9 +507,13 @@ export async function buildRuntimeContext(input: {
     mechanics,
     recentVisits,
     activeCommitments,
-    // TAC-324: empty on every followup run and on every non-qr_scan guest.
+    // TAC-380: empty on every followup run and while the brake is engaged.
     // The serializer omits the block entirely when empty.
-    openIntentions,
+    openIntentions: intentions.open,
+    intentionDerivation: {
+      newlyEligible: intentions.newlyEligible,
+      brakeEngaged: intentions.brakeEngaged,
+    },
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.
     pendingQuestion: pendingQuestionResult?.question ?? null,

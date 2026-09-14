@@ -138,10 +138,12 @@ describe('intentions surface renders definitions from the constant', () => {
   })
 
   // The keys themselves are a different case: derive.ts's suppression rule is
-  // specific to learn_first_order, so the gating copy names it deliberately.
-  // Pinned so that reference is a decision rather than an accident.
-  it('names learn_first_order in the gating copy, since the rule is key-specific', () => {
+  // specific to understand_order (learn_first_order until TAC-380 renamed it),
+  // so the gating copy names it deliberately. Pinned so that reference is a
+  // decision rather than an accident, and so a stale key name fails here.
+  it('names understand_order in the gating copy, since the rule is key-specific', () => {
     const src = readFileSync(join(SURFACE_DIR, '_components', 'gating-conditions.tsx'), 'utf-8')
-    expect(src).toContain('learn_first_order')
+    expect(src).toContain('understand_order')
+    expect(src).not.toContain('learn_first_order')
   })
 })

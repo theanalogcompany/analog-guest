@@ -174,7 +174,7 @@ function bodyContainsWord(normalizedBody: string, word: string): boolean {
  *     that message, permanently, with no second chance.
  *   - applyCurrentTurnSuppression (lib/agent/intentions/derive.ts, TAC-324)
  *     is the reverse. A false positive there silently drops the
- *     "## What you're hoping to get to" line for learn_first_order on the
+ *     "## What you're hoping to get to" line for understand_order on the
  *     exact turn it exists to cover, with nothing to signal that it
  *     happened. A false negative there just means the block renders on a
  *     turn where it maybe didn't strictly need to — redundant, not harmful.

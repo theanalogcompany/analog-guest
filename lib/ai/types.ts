@@ -287,15 +287,15 @@ export type RuntimeContext = {
   // generation is written against. undefined = nothing outstanding, block
   // omitted entirely.
   pendingQuestion?: PendingQuestion
-  // TAC-324: first-touch intentions still open for this guest, one rendered
-  // line per intention (already the prompt-facing copy, not a key). The
-  // serializer renders a `## What you're hoping to get to` block between
+  // TAC-324 / TAC-380: the intentions this turn renders, one line per
+  // intention in priority order (already the prompt-facing copy, not a key).
+  // The serializer renders a `## What you're hoping to get to` block between
   // mechanics and `## Follow-up context` / `## Visit history` when this is
   // non-empty and the category is not opt_out (TAC-328). Mapped by
-  // buildAiRuntime from the agent-side RuntimeContext.openIntentions, which
-  // is already gated to qr_scan guests, inbound runs only, and
-  // current-turn-suppressed. undefined or empty = block omitted entirely
-  // (zero tokens).
+  // buildAiRuntime through renderableIntentions, so it is already gated to
+  // inbound runs, current-turn-suppressed, and empty on opt_out or while a
+  // question is pending. undefined or empty = block omitted entirely (zero
+  // tokens).
   openIntentions?: string[]
   // TAC-362: what this one message may do about emoji, flipped in code by
   // buildAiRuntime (lib/agent/stages.ts) — the only place holding both the

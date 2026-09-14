@@ -40,6 +40,7 @@ const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn()
 const captureDraftQueuedMock = vi.fn()
 const captureCrisisSafetyReplySentMock = vi.fn()
+const captureIntentionPromptRecordingFailedMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
@@ -132,6 +133,7 @@ vi.mock('./extract-reported-order', async () => {
   }
 })
 const recordIntentionPromptsMock = vi.fn()
+const recordIntentionEligibilityMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
 // effect, mocked wholesale; its own unit coverage lives in
 // lib/agent/intentions/record.test.ts. This file only needs to prove the
@@ -139,6 +141,7 @@ const recordIntentionPromptsMock = vi.fn()
 // lets a rejection propagate.
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
+  recordIntentionEligibility: (...a: unknown[]) => recordIntentionEligibilityMock(...a),
 }))
 vi.mock('@/lib/guests/context', () => ({
   isEmptyContextUpdate: () => true,
@@ -151,6 +154,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: vi.fn(),
+  captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
+    captureIntentionPromptRecordingFailedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
   captureCorpusRetrievalBelowThreshold: vi.fn(),
@@ -237,6 +242,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     recentVisits: [],
     activeCommitments: [],
     openIntentions: [],
+    intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
     knowledgeCorpus: null,
     classification: null,
@@ -293,6 +299,8 @@ beforeEach(() => {
   })
   sendDraftFlaggedPushMock.mockResolvedValue(undefined)
   recordIntentionPromptsMock.mockResolvedValue({ kind: 'no_open_intentions' })
+  recordIntentionEligibilityMock.mockResolvedValue({ kind: 'nothing_to_record' })
+  captureIntentionPromptRecordingFailedMock.mockResolvedValue(undefined)
 })
 
 describe('handleInbound — generation-failure fallback (TAC-309)', () => {
@@ -484,14 +492,14 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.48.0',
+    promptVersion: 'v1.49.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
   }
 }
 
-describe('handleInbound — intention-prompt recording call site (TAC-324)', () => {
+describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', () => {
   function setUpSentPath() {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
@@ -499,6 +507,27 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
       outboundMessageId: 'sent-1',
       providerMessageId: 'p',
     })
+  }
+
+  const UNDERSTAND = {
+    key: 'understand_order' as const,
+    promptLine: "You haven't heard what this guest ordered yet.",
+    eligibleAt: new Date('2026-09-13T12:00:00.000Z'),
+  }
+  const LEARN_NAME = {
+    key: 'learn_name' as const,
+    promptLine: "You don't know this guest's name yet.",
+    eligibleAt: new Date('2026-09-10T12:00:00.000Z'),
+  }
+  const qrScanGuest = {
+    id: GUEST_ID,
+    phoneNumber: '+15555550123',
+    firstName: null,
+    createdAt: new Date(),
+    createdVia: 'qr_scan',
+    isDemo: false,
+    context: {},
+    lastVisitAt: null,
   }
 
   it('never calls recordIntentionPrompts when ctx.openIntentions is empty', async () => {
@@ -509,11 +538,9 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
   })
 
-  it('calls recordIntentionPrompts with the sent body and open intentions after a successful send', async () => {
+  it('calls recordIntentionPrompts with the sent body, the rendered intentions, and a send-time stamp', async () => {
     setUpSentPath()
-    const openIntentions = [
-      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
-    ]
+    const openIntentions = [UNDERSTAND, LEARN_NAME]
     buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
@@ -523,36 +550,49 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
       messageId: 'sent-1',
       sentBody: successResult().body,
       openIntentions,
+      now: expect.any(Date),
     })
   })
 
-  // TAC-332: the opener turn (a true first message from a qr_scan guest)
-  // can never legitimately raise an intention — the opener block instructs
-  // the model to greet + ask newness, never order — so recordIntentionPrompts
-  // must not even be CALLED there, regardless of what openIntentions holds.
-  // This is what makes the case-3 reproduction ("opener sent -> zero rows")
-  // deterministic rather than dependent on the classifier happening not to
-  // misfire.
-  it('never calls recordIntentionPrompts on the true opener turn, even with open intentions (TAC-332)', async () => {
+  // TAC-380 trap 4. A classifier failure closes everything recording is handed,
+  // so recording must never be handed an intention that didn't render. Both
+  // tests assert the send HAPPENED, or "not called" would pass for the wrong
+  // reason.
+  it('never records on an opt_out turn, even with intentions open (trap 4)', async () => {
     setUpSentPath()
-    const openIntentions = [
-      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
-    ]
+    classifyStageMock.mockResolvedValue({
+      category: 'opt_out',
+      classifierConfidence: 0.99,
+      reasoning: 'stop',
+      crisisSafety: false,
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    await handleInbound(INBOUND_ID)
+    expect(scheduleAndSendMock).toHaveBeenCalled()
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  it('never records while the guest is owed an answer to an earlier question (trap 4)', async () => {
+    setUpSentPath()
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
-        openIntentions,
-        guest: {
-          id: GUEST_ID,
-          phoneNumber: '+15555550123',
-          firstName: null,
-          createdAt: new Date(),
-          createdVia: 'qr_scan',
-          isDemo: false,
-          context: {},
-          lastVisitAt: null,
-        },
-        recentMessages: [],
+        openIntentions: [UNDERSTAND],
+        pendingQuestion: { question: 'is rayan working', askedAt: new Date(), mode: 'outstanding' },
       }),
+    )
+    await handleInbound(INBOUND_ID)
+    expect(scheduleAndSendMock).toHaveBeenCalled()
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-332: the opener turn (a true first message from a qr_scan guest) can
+  // never legitimately raise an intention — the opener block instructs the
+  // model to greet + ask newness — so recordIntentionPrompts must not even be
+  // CALLED there, regardless of what openIntentions holds.
+  it('never calls recordIntentionPrompts on the true opener turn, even with open intentions (TAC-332)', async () => {
+    setUpSentPath()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND], guest: qrScanGuest, recentMessages: [] }),
     )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent' })
@@ -564,22 +604,10 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
   // guests generally.
   it('still calls recordIntentionPrompts for a qr_scan guest past the opener turn', async () => {
     setUpSentPath()
-    const openIntentions = [
-      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
-    ]
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
-        openIntentions,
-        guest: {
-          id: GUEST_ID,
-          phoneNumber: '+15555550123',
-          firstName: null,
-          createdAt: new Date(),
-          createdVia: 'qr_scan',
-          isDemo: false,
-          context: {},
-          lastVisitAt: null,
-        },
+        openIntentions: [UNDERSTAND],
+        guest: qrScanGuest,
         recentMessages: [
           { direction: 'outbound', body: 'Hey, first time in?', createdAt: new Date() },
         ],
@@ -597,10 +625,7 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
       triggers: [APPROVAL_TRIGGERS.MODEL_FLAGGED],
       primaryTrigger: APPROVAL_TRIGGERS.MODEL_FLAGGED,
     })
-    const openIntentions = [
-      { key: 'invite_contact_save', promptLine: "You haven't told them to save your number." },
-    ]
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'queued' })
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
@@ -611,12 +636,140 @@ describe('handleInbound — intention-prompt recording call site (TAC-324)', () 
   it('does not let a recordIntentionPrompts rejection propagate or change the result', async () => {
     setUpSentPath()
     recordIntentionPromptsMock.mockRejectedValue(new Error('anthropic timeout'))
-    const openIntentions = [
-      { key: 'learn_first_order', promptLine: "You haven't heard what this guest ordered yet." },
-    ]
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
+  })
+
+  // TAC-380: before this ticket a recording failure was a bare console.warn,
+  // invisible in PostHog and Slack. Both non-normal outcomes now alert.
+  it('alerts when the classifier failed twice and rendered intentions closed pessimistically', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'closed_pessimistically',
+      closedKeys: ['understand_order'],
+      classifierError: 'anthropic timeout',
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    await handleInbound(INBOUND_ID)
+    await vi.waitFor(() =>
+      expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
+        agentRunId: expect.any(String),
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        messageId: 'sent-1',
+        outcome: 'closed_pessimistically',
+        keys: ['understand_order'],
+        error: 'anthropic timeout',
+      }),
+    )
+  })
+
+  it('alerts when the prompt write fails', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'write_failed',
+      keys: ['learn_name'],
+      source: 'classified',
+      error: 'db down',
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    await handleInbound(INBOUND_ID)
+    await vi.waitFor(() =>
+      expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
+        agentRunId: expect.any(String),
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        messageId: 'sent-1',
+        outcome: 'write_failed',
+        keys: ['learn_name'],
+        source: 'classified',
+        error: 'db down',
+      }),
+    )
+  })
+
+  it('does not alert on a normal recording', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 1,
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    await handleInbound(INBOUND_ID)
+    await vi.waitFor(() => expect(recordIntentionPromptsMock).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(captureIntentionPromptRecordingFailedMock).not.toHaveBeenCalled()
+  })
+
+  it('persists intentions newly eligible or re-armed this turn', async () => {
+    setUpSentPath()
+    const newlyEligible = [
+      { key: 'learn_name' as const, eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false },
+      { key: 'got_the_recommendation' as const, eligibleAt: new Date('2026-09-14T10:00:00.000Z'), rearm: true },
+    ]
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ intentionDerivation: { newlyEligible, brakeEngaged: false } }),
+    )
+    await handleInbound(INBOUND_ID)
+    expect(recordIntentionEligibilityMock).toHaveBeenCalledWith({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      entries: newlyEligible,
+    })
+  })
+
+  it('never calls recordIntentionEligibility when nothing is newly eligible', async () => {
+    setUpSentPath()
+    await handleInbound(INBOUND_ID)
+    expect(recordIntentionEligibilityMock).not.toHaveBeenCalled()
+  })
+
+  // An eligibility row starts an expiry window. Opening windows for a guest who
+  // just asked to stop being contacted records intent to pursue them on the one
+  // turn nothing should be. The send is asserted so "not called" can't pass
+  // because the run ended before reaching the write.
+  it('does not record eligibility on an opt_out turn', async () => {
+    setUpSentPath()
+    classifyStageMock.mockResolvedValue({
+      category: 'opt_out',
+      classifierConfidence: 0.99,
+      reasoning: 'stop',
+      crisisSafety: false,
+    })
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        intentionDerivation: {
+          newlyEligible: [{ key: 'learn_name', eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false }],
+          brakeEngaged: false,
+        },
+      }),
+    )
+    await handleInbound(INBOUND_ID)
+    expect(scheduleAndSendMock).toHaveBeenCalled()
+    expect(recordIntentionEligibilityMock).not.toHaveBeenCalled()
+  })
+
+  it('does not record eligibility on a crisis-safety turn', async () => {
+    classifyStageMock.mockResolvedValue({
+      category: 'casual_chatter',
+      classifierConfidence: 0.8,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-1', providerMessageId: 'p' })
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        intentionDerivation: {
+          newlyEligible: [{ key: 'learn_name', eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false }],
+          brakeEngaged: false,
+        },
+      }),
+    )
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-1' })
+    expect(recordIntentionEligibilityMock).not.toHaveBeenCalled()
   })
 })
 

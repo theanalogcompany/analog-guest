@@ -496,8 +496,20 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       NOW,
     )
     expect(out).toContain(
-      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
     )
+  })
+
+  // TAC-380: several lines can render at once, in priority order, and this is
+  // the one sentence that tells the model the order means something.
+  it('tells the model to take the first-listed intention when more than one fits (TAC-380)', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions: ['alpha intention line', 'beta intention line'] },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain('If more than\none of these would fit, take the one listed first.')
+    expect(out.indexOf('alpha intention line')).toBeLessThan(out.indexOf('beta intention line'))
   })
 
   // TAC-330: the "answering Sana's own question" exception, appended after
@@ -669,7 +681,7 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       NOW,
     )
     expect(out).toContain(
-      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
     )
   })
 })
