@@ -34,8 +34,8 @@ function makeRow(overrides: Partial<GuestCommitmentRow> = {}): GuestCommitmentRo
     arrival_signal: null,
     created_by: 'agent',
     // Created 12 days before NOW, so the 7-day escalation window has passed
-    // but the 2-year horizon has not.
-    expires_at: '2028-09-08T18:00:00Z',
+    // but the 60-day horizon has not.
+    expires_at: '2026-11-07T18:00:00Z',
     escalated_at: null,
     acknowledged_at: null,
     acknowledged_by: null,

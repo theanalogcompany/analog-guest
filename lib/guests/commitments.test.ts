@@ -620,8 +620,8 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
       type: 'comp',
       code: 'Q4X9',
       source_message_id: MESSAGE_ID,
-      // Two years from the row's OWN created_at (2026-05-28), not from NOW.
-      expires_at: '2028-05-28T12:00:00.000Z',
+      // Sixty days from the row's OWN created_at (2026-05-28), not from NOW.
+      expires_at: '2026-07-27T12:00:00.000Z',
       updated_at: NOW.toISOString(),
     })
     expect(r.ok).toBe(true)
@@ -697,9 +697,9 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     //
     // Three distinct dates are in play and only one is correct:
     //   2027-01-01  the emission's own value          — ignored, server-derived
-    //   2028-05-28  created_at + 2y                   — CORRECT
-    //   2028-05-28T15:30 would be NOW + 2y            — wrong, see below
-    expect(state.updatePayload).toHaveProperty('expires_at', '2028-05-28T12:00:00.000Z')
+    //   2026-07-27  created_at + 60d                  — CORRECT
+    //   2026-07-27T15:30 would be NOW + 60d           — wrong, see below
+    expect(state.updatePayload).toHaveProperty('expires_at', '2026-07-27T12:00:00.000Z')
     expect(state.updatePayload).not.toHaveProperty(
       'expires_at',
       '2027-01-01T00:00:00.000Z',
@@ -722,10 +722,10 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
       now: NOW,
     })
 
-    const nowPlusTwoYears = new Date(NOW)
-    nowPlusTwoYears.setUTCFullYear(nowPlusTwoYears.getUTCFullYear() + 2)
-    expect(state.updatePayload?.expires_at).not.toBe(nowPlusTwoYears.toISOString())
-    expect(state.updatePayload?.expires_at).toBe('2028-05-28T12:00:00.000Z')
+    const nowPlusHorizon = new Date(NOW)
+    nowPlusHorizon.setUTCDate(nowPlusHorizon.getUTCDate() + 60)
+    expect(state.updatePayload?.expires_at).not.toBe(nowPlusHorizon.toISOString())
+    expect(state.updatePayload?.expires_at).toBe('2026-07-27T12:00:00.000Z')
   })
 
   it('has no gating field to carry — gating happens before the row exists', () => {
@@ -1247,7 +1247,7 @@ describe('createCommitmentFromPending — TAC-341 horizons', () => {
       now: NOW,
     })
     expect(state.insertedPayload).toMatchObject({
-      expires_at: '2028-05-28T15:30:00.000Z',
+      expires_at: '2026-07-27T15:30:00.000Z',
       escalated_at: null,
     })
   })
@@ -1266,7 +1266,7 @@ describe('createCommitmentFromPending — TAC-341 horizons', () => {
       sourceMessageId: MESSAGE_ID,
       now: NOW,
     })
-    expect(state.insertedPayload?.expires_at).toBe('2028-05-28T15:30:00.000Z')
+    expect(state.insertedPayload?.expires_at).toBe('2026-07-27T15:30:00.000Z')
   })
 
   // The scope cut at the creation layer. A recommendation is still created,

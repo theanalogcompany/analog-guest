@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { VenueInfo } from '@/lib/schemas/venue-info'
 import {
   COMP_ESCALATION_DAYS,
-  COMP_EXPIRY_YEARS,
+  COMP_EXPIRY_DAYS,
   HOLD_ESCALATION_LEAD_MINUTES,
   OBLIGATION_TYPES,
   deriveExpiresAt,
@@ -54,10 +54,25 @@ describe('OBLIGATION_TYPES', () => {
 
 describe('horizon constants', () => {
   // Pinned deliberately: these are judgment calls, not calibrations, and a
-  // future change to either should have to delete a test that says so.
-  it('pins the comp horizon at 2 years and the escalation window at 7 days', () => {
-    expect(COMP_EXPIRY_YEARS).toBe(2)
+  // future change to either should have to delete a test that says so. The
+  // comp horizon has already moved once (2 years → 60 days, 2026-09-14), and
+  // that change did have to come through here, which is the point.
+  it('pins the comp horizon at 60 days and the escalation window at 7 days', () => {
+    expect(COMP_EXPIRY_DAYS).toBe(60)
     expect(COMP_ESCALATION_DAYS).toBe(7)
+  })
+
+  // THE INVARIANT BETWEEN THEM, which matters more than either value and was
+  // not asserted while the two were 730 and 7 — a gap so wide nobody would
+  // think to check it. Now that the horizon has been shortened once, the
+  // ordering is worth locking: if a future horizon ever drops below the
+  // escalation window, every comp would reach its expiry before its
+  // escalation window arrived, and "never silently expired without surfacing
+  // first" would fall back to the `|| isElapsed` catch-up branch on EVERY
+  // row rather than on the pathological few. That still works, but it would
+  // silently convert a guarantee's last resort into its primary path.
+  it('escalates a comp well before it expires', () => {
+    expect(COMP_ESCALATION_DAYS).toBeLessThan(COMP_EXPIRY_DAYS)
   })
 
   it('pins the hold escalation lead at 120 minutes', () => {
@@ -172,14 +187,14 @@ describe('deriveExpiresAt — recommendations', () => {
 })
 
 describe('deriveExpiresAt — comp and discount', () => {
-  it('gives a comp two years from creation', () => {
+  it('gives a comp sixty days from creation', () => {
     const r = deriveExpiresAt({
       type: 'comp',
       createdAt: new Date('2026-09-08T18:00:00Z'),
       timezone: LA,
       hours: everyDay('7:00 AM – 3:00 PM'),
     })
-    expect(r.expiresAt?.toISOString()).toBe('2028-09-08T18:00:00.000Z')
+    expect(r.expiresAt?.toISOString()).toBe('2026-11-07T18:00:00.000Z')
     expect(r.escalateImmediately).toBe(false)
   })
 
@@ -204,7 +219,7 @@ describe('deriveExpiresAt — comp and discount', () => {
     })
     // Missing venue facts must not push a comp onto the fallback path — the
     // caller skips the venue load entirely for non-hold types.
-    expect(r.expiresAt?.toISOString()).toBe('2028-09-08T18:00:00.000Z')
+    expect(r.expiresAt?.toISOString()).toBe('2026-11-07T18:00:00.000Z')
     expect(r.escalateImmediately).toBe(false)
   })
 })
@@ -358,14 +373,14 @@ describe('escalationDueAt', () => {
     const r = escalationDueAt({
       type: 'comp',
       createdAt: new Date('2026-09-08T18:00:00Z'),
-      expiresAt: new Date('2028-09-08T18:00:00Z'),
+      expiresAt: new Date('2026-11-07T18:00:00Z'),
     })
     expect(r?.toISOString()).toBe('2026-09-15T18:00:00.000Z')
   })
 
   it('escalates a discount on the same schedule as a comp', () => {
     const createdAt = new Date('2026-09-08T18:00:00Z')
-    const expiresAt = new Date('2028-09-08T18:00:00Z')
+    const expiresAt = new Date('2026-11-07T18:00:00Z')
     expect(escalationDueAt({ type: 'discount', createdAt, expiresAt })?.toISOString()).toBe(
       escalationDueAt({ type: 'comp', createdAt, expiresAt })?.toISOString(),
     )
@@ -394,7 +409,7 @@ describe('escalationDueAt', () => {
       escalationDueAt({
         type: 'recommendation',
         createdAt: new Date('2026-09-08T18:00:00Z'),
-        expiresAt: new Date('2028-09-08T18:00:00Z'),
+        expiresAt: new Date('2026-11-07T18:00:00Z'),
       }),
     ).toBeNull()
   })
