@@ -1,6 +1,7 @@
 import {
   captureCommitmentDedupCheckFailed,
   captureCommitmentDeduped,
+  captureCommitmentEscalated,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { RAGResult } from '@/lib/rag/types'
@@ -11,6 +12,9 @@ import {
   GuestCommitmentRowSchema,
   type PendingCommitment,
 } from '@/lib/schemas/guest-commitment'
+import { VenueHoursSchema } from '@/lib/schemas/venue-info'
+import type { VenueInfo } from '@/lib/schemas/venue-info'
+import { OBLIGATION_TYPES, deriveExpiresAt } from './commitment-expiry'
 
 // TAC-297. Mirrors the shape of lib/guests/context.ts: RAGResult-typed, never
 // throws, fail-CLOSED on DB errors, fail-OPEN on malformed payloads. All
@@ -208,7 +212,20 @@ async function touchOpenCommitment(
   supabase: ReturnType<typeof createAdminClient>,
   existing: GuestCommitmentRow,
   now: Date,
-  upgrade: { pending: PendingCommitment; sourceMessageId: string } | null = null,
+  upgrade: {
+    pending: PendingCommitment
+    sourceMessageId: string
+    /**
+     * TAC-341. The horizon for the type the row is BECOMING, derived from the
+     * row's own created_at rather than `now` — the promise is as old as it
+     * always was, and keying off `now` would silently extend it every time
+     * the guest mentioned it again. Null only when the derivation could not
+     * produce one, in which case the field is left alone rather than nulled.
+     */
+    expiresAt: Date | null
+    /** True when the horizon is a fallback guess; stamps escalated_at. */
+    escalateImmediately: boolean
+  } | null = null,
 ): Promise<GuestCommitmentRow> {
   const { data, error } = await supabase
     .from('guest_commitments')
@@ -219,6 +236,12 @@ async function touchOpenCommitment(
             type: upgrade.pending.type,
             code: upgrade.pending.code,
             source_message_id: upgrade.sourceMessageId,
+            ...(upgrade.expiresAt !== null
+              ? { expires_at: upgrade.expiresAt.toISOString() }
+              : {}),
+            ...(upgrade.escalateImmediately && existing.escalated_at === null
+              ? { escalated_at: now.toISOString() }
+              : {}),
           }
         : {}),
     })
@@ -228,6 +251,93 @@ async function touchOpenCommitment(
   if (error || !data || data.length === 0) return existing
   const parsed = GuestCommitmentRowSchema.safeParse(data[0])
   return parsed.success ? parsed.data : existing
+}
+
+/**
+ * Load the two venue facts a `hold` horizon needs: the timezone (on `venues`)
+ * and the weekly hours (inside `venue_configs.venue_info`). Two tables, one
+ * round trip each.
+ *
+ * WHY THIS LIVES HERE rather than being passed in by the caller, which is the
+ * shape the rest of this file uses. The gated types — comp, hold, discount —
+ * ALWAYS route through the approval queue (the commitment_type_gated
+ * trigger), so a hold is materialized from dispatchOperatorOutbound, which
+ * holds a message row and nothing else; it never loads venue_configs and has
+ * no RuntimeContext to borrow from. The one call site that DOES have the
+ * venue in scope, scheduleAndSend, only carries obligations for demo guests.
+ * So "the caller passes it" would mean the path that needs it is the path
+ * that cannot supply it. Loading here also keeps the derivation single-sited,
+ * which is the property TAC-318 deliberately left this ticket to establish.
+ *
+ * Fails SOFT in both halves: a missing timezone or unreadable venue_info
+ * returns null and the derivation takes its documented 23:59 fallback plus an
+ * escalation, rather than throwing into a path whose message has already been
+ * sent to the guest.
+ */
+async function loadVenueClock(
+  supabase: ReturnType<typeof createAdminClient>,
+  venueId: string,
+): Promise<{ timezone: string | null; hours: VenueInfo['hours'] | null }> {
+  try {
+    const [venue, config] = await Promise.all([
+      supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle(),
+      supabase
+        .from('venue_configs')
+        .select('venue_info')
+        .eq('venue_id', venueId)
+        .maybeSingle(),
+    ])
+
+    const timezone =
+      typeof venue.data?.timezone === 'string' && venue.data.timezone.length > 0
+        ? venue.data.timezone
+        : null
+
+    // Parse the HOURS SUB-OBJECT, never the whole VenueInfoSchema. That
+    // schema requires `address`, so a venue whose venue_info is missing an
+    // unrelated field would lose its hold horizon and take the 23:59 fallback
+    // for a reason that has nothing to do with hours. Caught by a test whose
+    // fixture carried only the field this function actually reads — which is
+    // the fixture a reader would naturally write, and it was right.
+    let hours: VenueInfo['hours'] | null = null
+    const rawInfo = config.data?.venue_info
+    if (rawInfo != null && typeof rawInfo === 'object' && !Array.isArray(rawInfo)) {
+      const parsed = VenueHoursSchema.safeParse(
+        (rawInfo as Record<string, unknown>).hours ?? {},
+      )
+      hours = parsed.success ? parsed.data : null
+    }
+
+    if (timezone === null || hours === null) {
+      console.warn(
+        `[commitments] hold horizon: venue clock incomplete for venue=${venueId} (timezone=${timezone === null ? 'missing' : 'ok'}, hours=${hours === null ? 'missing' : 'ok'}). Falling back to end-of-day and escalating.`,
+      )
+    }
+    return { timezone, hours }
+  } catch (e) {
+    console.warn(
+      `[commitments] hold horizon: venue clock load threw for venue=${venueId}: ${e instanceof Error ? e.message : String(e)}. Falling back to end-of-day and escalating.`,
+    )
+    return { timezone: null, hours: null }
+  }
+}
+
+/**
+ * Derive the horizon for one commitment, loading venue hours ONLY when the
+ * type actually needs them. A comp or discount is a fixed offset from
+ * creation, so the common path costs no extra query at all.
+ */
+async function horizonFor(
+  supabase: ReturnType<typeof createAdminClient>,
+  venueId: string,
+  type: CommitmentType,
+  createdAt: Date,
+): Promise<{ expiresAt: Date | null; escalateImmediately: boolean }> {
+  if (type !== 'hold') {
+    return deriveExpiresAt({ type, createdAt, timezone: null, hours: null })
+  }
+  const clock = await loadVenueClock(supabase, venueId)
+  return deriveExpiresAt({ type, createdAt, ...clock })
 }
 
 /**
@@ -252,11 +362,25 @@ async function resolveToExisting(
   },
 ): Promise<GuestCommitmentRow> {
   const upgrade = shouldUpgrade(existing.type, pending.type)
+  // TAC-341 §3 item 6: an upgraded row arrives as an obligation with a null
+  // expires_at, because TAC-318 deliberately left the derivation to this
+  // ticket. Key it off the EXISTING row's created_at — the promise is as old
+  // as it always was.
+  const horizon = upgrade
+    ? await horizonFor(supabase, ctx.venueId, pending.type, new Date(existing.created_at))
+    : null
   const row = await touchOpenCommitment(
     supabase,
     existing,
     ctx.now,
-    upgrade ? { pending, sourceMessageId: ctx.sourceMessageId } : null,
+    upgrade && horizon !== null
+      ? {
+          pending,
+          sourceMessageId: ctx.sourceMessageId,
+          expiresAt: horizon.expiresAt,
+          escalateImmediately: horizon.escalateImmediately,
+        }
+      : null,
   )
   console.warn(
     upgrade
@@ -273,6 +397,25 @@ async function resolveToExisting(
     via: ctx.via,
     upgraded: upgrade,
   })
+  // The upgrade may have stamped escalated_at (a recommendation upgraded to
+  // a hold at a venue whose hours cannot be read). Emit the alert here too,
+  // guarded on the SAME condition touchOpenCommitment writes under — setting
+  // an idempotency marker without the thing it marks having happened would
+  // make the cron skip the row forever and then report hadEscalated: true on
+  // expiry. Caught in code review; the insert path had this and the upgrade
+  // path did not.
+  if (horizon !== null && horizon.escalateImmediately && existing.escalated_at === null) {
+    void captureCommitmentEscalated({
+      venueId: ctx.venueId,
+      guestId: ctx.guestId,
+      commitmentId: existing.id,
+      type: pending.type,
+      reason: 'hold_horizon_unknown',
+      expiresAt: horizon.expiresAt?.toISOString() ?? null,
+      createdAt: existing.created_at,
+      ageDays: 0,
+    })
+  }
   return row
 }
 
@@ -371,6 +514,13 @@ export async function createCommitmentFromPending(opts: {
       })
     }
 
+    // TAC-341. expires_at is SERVER-DERIVED, never agent-set. The emission's
+    // own `expiresAt` is deliberately ignored: the prompt has never mentioned
+    // the field (zero hits in lib/ai/prompts), so it has always arrived null,
+    // and an agent-populated expiry would be one more claim needing
+    // verification. Derived here, at the single derivation site.
+    const horizon = await horizonFor(supabase, venueId, pendingCommitment.type, now)
+
     const { data, error } = await supabase
       .from('guest_commitments')
       .insert({
@@ -381,7 +531,12 @@ export async function createCommitmentFromPending(opts: {
         code: pendingCommitment.code,
         status: 'open',
         created_by: 'agent',
-        expires_at: pendingCommitment.expiresAt,
+        expires_at: horizon.expiresAt?.toISOString() ?? null,
+        // Stamped at creation, not by the cron, and that is the only moment
+        // it can be: a fallback horizon is indistinguishable later from a
+        // venue that genuinely closes at 23:59. The cron reading this row
+        // tomorrow cannot tell the difference; this code can.
+        escalated_at: horizon.escalateImmediately ? now.toISOString() : null,
         source_message_id: sourceMessageId,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
@@ -427,6 +582,20 @@ export async function createCommitmentFromPending(opts: {
         error: `invalid commitment row shape: ${parsed.error.message}`,
         errorCode: 'db_write_invalid_shape',
       }
+    }
+    if (horizon.escalateImmediately) {
+      // The row already carries escalated_at from the insert above, so the
+      // cron will not re-escalate it. This is only the telling-a-human half.
+      void captureCommitmentEscalated({
+        venueId,
+        guestId,
+        commitmentId: parsed.data.id,
+        type: parsed.data.type,
+        reason: 'hold_horizon_unknown',
+        expiresAt: parsed.data.expires_at,
+        createdAt: parsed.data.created_at,
+        ageDays: 0,
+      })
     }
     return { ok: true, data: parsed.data }
   } catch (e) {
@@ -763,5 +932,166 @@ export async function findScheduledOpenCommitments(): Promise<
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg, errorCode: 'db_read_threw' }
+  }
+}
+
+// ===== Lifecycle: expiry + escalation (TAC-341) =====
+
+/**
+ * Every OPEN obligation carrying a horizon, fleet-wide. The lifecycle cron's
+ * scan; sibling of findScheduledOpenCommitments above, different question.
+ *
+ * Three filters and each one is load-bearing:
+ *
+ *   status = 'open'  — this alone is what makes pending_ack, acknowledged,
+ *     cancelled, expired and redeemed rows untouchable. Not a guard inside
+ *     the loop that a later edit could drop; they are never fetched.
+ *
+ *   type IN (obligations) — an ALLOWLIST, never `neq('recommendation')`. A
+ *     recommendation has no horizon and is governed by TAC-380, and a fifth
+ *     type added later must default to being left alone rather than
+ *     inheriting a negation nobody revisited.
+ *
+ *   expires_at IS NOT NULL — a row with no horizon cannot elapse. Pre-TAC-341
+ *     rows are exactly this until the backfill runs, and they must not be
+ *     swept into 'expired' on the strength of a null.
+ *
+ * UNBOUNDED AND FLEET-WIDE, deliberately at pilot scale but worth knowing:
+ * no `.limit()` and no venue scoping. Comps live two years, so the open set
+ * grows monotonically for two years before the earliest ones age out. If
+ * PostgREST's `max-rows` ever truncates this, the `.order('expires_at')`
+ * means the truncation favours the soonest-expiring rows — the right
+ * direction, and stated here rather than left as luck. Add paging when the
+ * fleet is large enough to need it.
+ */
+export async function findOpenObligations(): Promise<
+  RAGResult<GuestCommitmentRow[]>
+> {
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .select('*')
+      .eq('status', 'open')
+      .in('type', [...OBLIGATION_TYPES])
+      .not('expires_at', 'is', null)
+      .order('expires_at', { ascending: true })
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_read_failed' }
+    }
+    const rows: GuestCommitmentRow[] = []
+    for (const row of data ?? []) {
+      const parsed = GuestCommitmentRowSchema.safeParse(row)
+      if (parsed.success) {
+        rows.push(parsed.data)
+        continue
+      }
+      // Logged rather than silently skipped: GuestCommitmentRowSchema closes
+      // the type/status enums, so a future migration widening either without
+      // updating the schema would switch this scan off with nothing to show
+      // for it — the same failure TAC-318's dedup read guards against.
+      console.warn(
+        `[commitments] lifecycle scan: skipping unparseable row: ${parsed.error.message}`,
+      )
+    }
+    return { ok: true, data: rows }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_read_threw' }
+  }
+}
+
+/**
+ * Mark an obligation as having been surfaced to a human.
+ *
+ * CAS-gated on `status = 'open' AND escalated_at IS NULL`. The second half is
+ * what makes escalation fire exactly once: two overlapping cron ticks race,
+ * one gets rowcount=1 and owns the alert, the other gets 0 and stays quiet.
+ * The caller emits its event only on transitioned=true, which is the same
+ * claim-before-side-effect shape the followup engine and the knowledge-gap
+ * timer both use.
+ *
+ * Does NOT change status. An escalated commitment is still open and still
+ * owed — escalation is a notification fact, not a lifecycle state.
+ */
+export async function markEscalated(opts: {
+  commitmentId: string
+  now: Date
+}): Promise<RAGResult<TransitionResult>> {
+  const { commitmentId, now } = opts
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .update({ escalated_at: now.toISOString(), updated_at: now.toISOString() })
+      .eq('id', commitmentId)
+      .eq('status', 'open')
+      .is('escalated_at', null)
+      .select()
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_write_failed' }
+    }
+    if (!data || data.length === 0) {
+      return { ok: true, data: { transitioned: false, row: null } }
+    }
+    const parsed = GuestCommitmentRowSchema.safeParse(data[0])
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: `invalid commitment row shape: ${parsed.error.message}`,
+        errorCode: 'db_write_invalid_shape',
+      }
+    }
+    return { ok: true, data: { transitioned: true, row: parsed.data } }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_write_threw' }
+  }
+}
+
+/**
+ * Move an elapsed obligation to its terminal state.
+ *
+ * CAS-gated on `status = 'open'`, so a row that reached pending_ack between
+ * the scan and this write is left alone — the guest signalled arrival against
+ * it and it is mid-flight, which outranks the clock.
+ *
+ * The visible consequence is in the prompt, not the table: both
+ * findActiveCommitmentsForGuest and toActiveCommitment filter to
+ * open + pending_ack, so this write removes the row from the agent's
+ * ## Active commitments block by construction. That is the prompt-bloat
+ * reduction the ticket is for, and it needs no serializer change.
+ */
+export async function markExpired(opts: {
+  commitmentId: string
+  now: Date
+}): Promise<RAGResult<TransitionResult>> {
+  const { commitmentId, now } = opts
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .update({ status: 'expired', updated_at: now.toISOString() })
+      .eq('id', commitmentId)
+      .eq('status', 'open')
+      .select()
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_write_failed' }
+    }
+    if (!data || data.length === 0) {
+      return { ok: true, data: { transitioned: false, row: null } }
+    }
+    const parsed = GuestCommitmentRowSchema.safeParse(data[0])
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: `invalid commitment row shape: ${parsed.error.message}`,
+        errorCode: 'db_write_invalid_shape',
+      }
+    }
+    return { ok: true, data: { transitioned: true, row: parsed.data } }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_write_threw' }
   }
 }

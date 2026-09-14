@@ -54,6 +54,7 @@ function makeDueRow(id: string, overrides: Record<string, unknown> = {}) {
     expires_at: null,
     acknowledged_at: null,
     acknowledged_by: null,
+    escalated_at: null,
     redeemed_at: null,
     source_message_id: null,
     created_at: '2026-05-29T00:00:00Z',

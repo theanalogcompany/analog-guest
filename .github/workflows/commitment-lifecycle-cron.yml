@@ -1,0 +1,51 @@
+# TAC-341 commitment-lifecycle scheduled runner.
+#
+# The route handler at `app/api/cron/commitment-lifecycle/route.ts` is invoked
+# hourly to (a) mark open obligations that have gone stale as escalated and
+# alert a human, and (b) move elapsed obligations to `expired`. Obligations
+# only — comp, hold, discount; recommendations are excluded at the scan.
+#
+# Sibling of commitments-due-cron.yml, and on GitHub Actions for the same
+# reason: Vercel's Hobby tier caps cron granularity at daily/weekly, and this
+# project stays on Hobby, so sub-daily triggers live here.
+#
+# Reliability note (documented in CLAUDE.md): GitHub Actions scheduled runs
+# can lag the target minute under platform load. Hour-scale windows tolerate
+# it. The one case worth understanding is a hold, whose horizon is venue
+# close: lag means the row can sit open a couple of hours past close, but its
+# escalation fires BEFORE close, which is the moment a human can actually do
+# something about a physical item. The lag costs a late tidy-up, not a missed
+# alert. Revisit alongside the other crons if the project moves off Hobby.
+
+name: cron / commitment-lifecycle
+
+on:
+  schedule:
+    # hourly on the hour, UTC.
+    - cron: '0 * * * *'
+  # manual trigger for ad-hoc testing — useful for driving the UAT capture of
+  # ## Active commitments before and after an expiry lands.
+  workflow_dispatch:
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    # don't run on fork PRs — schedule/dispatch are repo-internal only
+    if: github.repository == 'theanalogcompany/analog-guest'
+    steps:
+      - name: hit /api/cron/commitment-lifecycle
+        env:
+          PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$PROD_BASE_URL" ]; then
+            echo "::error::PROD_BASE_URL repo variable is unset"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is unset"
+            exit 1
+          fi
+          curl -fsS -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${PROD_BASE_URL}/api/cron/commitment-lifecycle"

@@ -1305,3 +1305,107 @@ export async function captureCommitmentDedupCheckFailed(props: {
     ].join('\n'),
   )
 }
+
+// ---------------------------------------------------------------------------
+// TAC-341 — commitment lifecycle: escalation + expiry
+// ---------------------------------------------------------------------------
+
+export type CommitmentEscalationReason =
+  /** A comp or discount has sat open past COMP_ESCALATION_DAYS. */
+  | 'aging_obligation'
+  /** A hold is approaching close and is still unclaimed. */
+  | 'hold_nearing_close'
+  /**
+   * A hold's horizon is a guess: venue hours were unreadable, the venue is
+   * recorded closed that day, or the timezone was missing. Stamped at
+   * creation, because that is the only moment the fallback is knowable.
+   */
+  | 'hold_horizon_unknown'
+  /**
+   * The row reached its horizon having never surfaced. Should be rare — it
+   * means the lifecycle cron missed the whole escalation window — and it is
+   * the case the "never silently expired" guarantee exists for.
+   */
+  | 'expiring_unsurfaced'
+
+export interface CommitmentEscalatedProps {
+  venueId: string
+  guestId: string
+  commitmentId: string
+  type: string
+  reason: CommitmentEscalationReason
+  /** ISO. Null only in the degenerate case where no horizon could be built. */
+  expiresAt: string | null
+  createdAt: string
+  /** Whole days the obligation has been open at the moment of escalation. */
+  ageDays: number
+}
+
+/**
+ * An obligation has been surfaced to a human for the first time.
+ *
+ * SLACK-RELAYED, unlike its expiry sibling — surfacing IS the point of
+ * escalation, and an escalation nobody sees is the whole defect this ticket
+ * exists to close. Fires at most once per commitment: markEscalated's CAS on
+ * `escalated_at IS NULL` is what guarantees that, not this function.
+ *
+ * The reason rides here rather than on the row. guest_commitments.escalated_at
+ * is an idempotency marker with exactly one job; putting the reason in the
+ * event keeps the column honest and puts the detail where an analyst would
+ * actually query it.
+ */
+export async function captureCommitmentEscalated(
+  props: CommitmentEscalatedProps,
+): Promise<void> {
+  await capturePostHogEvent('commitment_escalated', props.guestId, { ...props })
+  const detail: Record<CommitmentEscalationReason, string> = {
+    aging_obligation: `open for ${props.ageDays} days with no resolution`,
+    hold_nearing_close: 'still unclaimed and the venue closes soon',
+    hold_horizon_unknown:
+      'venue hours could not be read, so this expires at 23:59 venue-local as a fallback',
+    expiring_unsurfaced:
+      'reached its expiry without ever having surfaced — the escalation window was missed',
+  }
+  await postToSlack(
+    [
+      `*Open ${props.type} needs attention*`,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `commitment: \`${props.commitmentId}\``,
+      `why: ${detail[props.reason]}`,
+      `expires: ${props.expiresAt ?? 'unknown'}`,
+      `_The venue still owes this. It stays open until redeemed or expired._`,
+    ].join('\n'),
+  )
+}
+
+export interface CommitmentExpiredProps {
+  venueId: string
+  guestId: string
+  commitmentId: string
+  type: string
+  createdAt: string
+  expiresAt: string
+  /** Whether a human had been told before this row elapsed. */
+  hadEscalated: boolean
+}
+
+/**
+ * An obligation reached its horizon and moved to `expired`.
+ *
+ * PostHog only, NO Slack relay — deliberately the opposite of its escalation
+ * sibling. Expiry is the expected, healthy end of the lifecycle for anything
+ * nobody claimed; relaying it would put a steady drip of non-actionable
+ * messages next to the escalations that ARE actionable, which is how an alert
+ * channel stops being read. The actionable half already fired, earlier, as an
+ * escalation.
+ *
+ * `hadEscalated` is the one field worth querying: a false here means the
+ * "never silently expired" guarantee leaned on the same-tick fallback rather
+ * than on the escalation window doing its job.
+ */
+export async function captureCommitmentExpired(
+  props: CommitmentExpiredProps,
+): Promise<void> {
+  await capturePostHogEvent('commitment_expired', props.guestId, { ...props })
+}
