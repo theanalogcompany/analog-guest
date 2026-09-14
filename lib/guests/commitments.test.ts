@@ -12,17 +12,22 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('@/lib/analytics/posthog', () => ({
   captureCommitmentDeduped: vi.fn(),
   captureCommitmentDedupCheckFailed: vi.fn(),
+  captureCommitmentEscalated: vi.fn(),
 }))
 
+import { captureCommitmentEscalated } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingCommitment } from '@/lib/schemas/guest-commitment'
 import {
   commitmentDedupKey,
   createCommitmentFromPending,
   findActiveCommitmentsForGuest,
+  findOpenObligations,
   findScheduledOpenCommitments,
   markAcknowledged,
   markCancelled,
+  markEscalated,
+  markExpired,
   scheduleArrival,
   transitionToPendingAck,
 } from './commitments'
@@ -49,6 +54,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     expires_at: null,
     acknowledged_at: null,
     acknowledged_by: null,
+    escalated_at: null,
     redeemed_at: null,
     source_message_id: MESSAGE_ID,
     created_at: '2026-05-28T12:00:00Z',
@@ -76,6 +82,17 @@ interface MockState {
   selectError: { message: string } | null
   selectEqCalls: Array<{ field: string; value: unknown }>
   selectInCalls: Array<{ field: string; values: unknown[] }>
+  // TAC-341: the scan's filters are not observable through returned rows —
+  // the mock ignores them — so they are captured and asserted directly. Same
+  // technique handle-operator-decline.test.ts uses for its import-set check.
+  selectNotCalls: Array<{ field: string; op: string; value: unknown }>
+  selectTables: string[]
+  updateIsCalls: Array<{ field: string; value: unknown }>
+  /** venues.timezone lookup for the hold horizon. */
+  venueRow: Record<string, unknown> | null
+  /** venue_configs.venue_info lookup for the hold horizon. */
+  configRow: Record<string, unknown> | null
+  maybeSingleCallCount: number
 }
 
 function newState(overrides: Partial<MockState> = {}): MockState {
@@ -95,13 +112,19 @@ function newState(overrides: Partial<MockState> = {}): MockState {
     selectError: null,
     selectEqCalls: [],
     selectInCalls: [],
+    selectNotCalls: [],
+    selectTables: [],
+    updateIsCalls: [],
+    venueRow: { timezone: 'America/Los_Angeles' },
+    configRow: { venue_info: { hours: { friday: '7:00 AM – 3:00 PM' } } },
+    maybeSingleCallCount: 0,
     ...overrides,
   }
 }
 
 function makeSupabaseMock(state: MockState) {
   return {
-    from: (_table: string) => ({
+    from: (table: string) => ({
       insert: (payload: Record<string, unknown>) => {
         state.insertedPayload = payload
         state.insertCallCount += 1
@@ -125,6 +148,10 @@ function makeSupabaseMock(state: MockState) {
             state.updateInCalls.push({ field, values })
             return chain
           },
+          is: (field: string, value: unknown) => {
+            state.updateIsCalls.push({ field, value })
+            return chain
+          },
           select: async () => ({
             data: state.updateReturn,
             error: state.updateError,
@@ -135,6 +162,7 @@ function makeSupabaseMock(state: MockState) {
       select: (_cols: string) => {
         const callIndex = state.selectCallCount
         state.selectCallCount += 1
+        state.selectTables.push(table)
         const chain = {
           eq: (field: string, value: unknown) => {
             state.selectEqCalls.push({ field, value })
@@ -144,8 +172,18 @@ function makeSupabaseMock(state: MockState) {
             state.selectInCalls.push({ field, values })
             return chain
           },
-          not: (_field: string, _op: string, _value: unknown) => chain,
+          not: (field: string, op: string, value: unknown) => {
+            state.selectNotCalls.push({ field, op, value })
+            return chain
+          },
           lte: (_field: string, _value: unknown) => chain,
+          maybeSingle: async () => {
+            state.maybeSingleCallCount += 1
+            return {
+              data: table === 'venues' ? state.venueRow : state.configRow,
+              error: null,
+            }
+          },
           order: (_field: string, _opts: unknown) => Promise.resolve({
             data: state.selectReturnQueue
               ? (state.selectReturnQueue[callIndex] ?? [])
@@ -161,6 +199,11 @@ function makeSupabaseMock(state: MockState) {
 
 beforeEach(() => {
   vi.mocked(createAdminClient).mockReset()
+  // Reset the analytics mock too. vi.restoreAllMocks() in afterEach does not
+  // clear call history on a vi.fn() from a module factory, so without this
+  // calls accumulate across tests and any `not.toHaveBeenCalled()` assertion
+  // in this file fails for a reason that has nothing to do with its subject.
+  vi.mocked(captureCommitmentEscalated).mockReset()
 })
 
 afterEach(() => {
@@ -568,10 +611,17 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     // (handle-inbound.ts:754, commitments-due.ts:234) read `type` and `code`
     // OFF THE ROW, so these four columns are what decides whether the push
     // says "comp ... Q4X9" or "recommendation" with nothing.
+    //
+    // TAC-341 ADDS expires_at to this set. TAC-318 deliberately omitted it and
+    // pinned the omission; this ticket is the one that owns the derivation, so
+    // the omission is now the bug. Still toEqual, never toMatchObject — the
+    // reason that mattered for `code` is exactly as true for the horizon.
     expect(state.updatePayload).toEqual({
       type: 'comp',
       code: 'Q4X9',
       source_message_id: MESSAGE_ID,
+      // Two years from the row's OWN created_at (2026-05-28), not from NOW.
+      expires_at: '2028-05-28T12:00:00.000Z',
       updated_at: NOW.toISOString(),
     })
     expect(r.ok).toBe(true)
@@ -606,12 +656,15 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     //                  lifecycle. If the guest already signalled against the
     //                  recommendation, that signal is still about the same
     //                  visit and survives the type change.
+    //
+    // expires_at was on this list under TAC-318 and is NOT any more: TAC-341
+    // owns the derivation and an upgraded row now receives the comp horizon.
+    // See the dedicated test below.
     for (const field of [
       'created_at',
       'status',
       'created_by',
       'description',
-      'expires_at',
       'expected_arrival',
       'arrival_signal',
       'guest_id',
@@ -622,31 +675,57 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     }
   })
 
-  it('does not touch expires_at — TAC-341 owns every derivation', async () => {
+  it('derives the upgrade horizon from created_at, ignoring the emission', async () => {
     const state = newState({ selectReturn: [OPEN_REC] })
     mockWith(state)
 
     await createCommitmentFromPending({
       guestId: GUEST_ID,
       venueId: VENUE_ID,
+      // A non-null emission value, so the assertion proves the derivation
+      // WINS rather than merely that null-in gave null-out.
       pendingCommitment: { ...COMP_ON_SAME_ITEM, expiresAt: '2027-01-01T00:00:00Z' },
       sourceMessageId: MESSAGE_ID,
       now: NOW,
     })
 
-    // Its own test rather than one entry in the loop above, because this is
-    // the one omitted field where leaving it alone is ALSO not obviously
-    // right, and the fixture has to carry a non-null expiresAt to prove the
-    // omission is deliberate rather than an artifact of null-in-null-out.
+    // REVERSES the TAC-318 test of the same name, deliberately. That ticket
+    // pinned the omission precisely so this one could fill it, and its own
+    // comment named the two wrong behaviours: writing the emission's value
+    // (a null horizon that never elapses) and keeping the recommendation's
+    // horizon (an upgraded comp dying after a month).
     //
-    // Both obvious behaviours are wrong once TAC-341 lands: writing the
-    // emission's value overwrites a derived expiry with null and the row
-    // never expires; keeping the recommendation's own horizon gives an
-    // upgraded comp 30 days where a new comp gets two years. TAC-341 owns
-    // every derivation, including this one. Reintroducing the field here
-    // creates a second derivation site in a file that does not own the
-    // horizons.
-    expect(state.updatePayload).not.toHaveProperty('expires_at')
+    // Three distinct dates are in play and only one is correct:
+    //   2027-01-01  the emission's own value          — ignored, server-derived
+    //   2028-05-28  created_at + 2y                   — CORRECT
+    //   2028-05-28T15:30 would be NOW + 2y            — wrong, see below
+    expect(state.updatePayload).toHaveProperty('expires_at', '2028-05-28T12:00:00.000Z')
+    expect(state.updatePayload).not.toHaveProperty(
+      'expires_at',
+      '2027-01-01T00:00:00.000Z',
+    )
+  })
+
+  // Separated from the test above because the two dates differ by hours, not
+  // years, and a fixture where created_at and NOW coincided would let a
+  // now-keyed implementation pass. The promise is as old as it always was;
+  // keying off NOW would extend the horizon every time the guest mentioned it.
+  it('keys the upgrade horizon off the row age, not the moment of the repeat', async () => {
+    const state = newState({ selectReturn: [OPEN_REC] })
+    mockWith(state)
+
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: COMP_ON_SAME_ITEM,
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+
+    const nowPlusTwoYears = new Date(NOW)
+    nowPlusTwoYears.setUTCFullYear(nowPlusTwoYears.getUTCFullYear() + 2)
+    expect(state.updatePayload?.expires_at).not.toBe(nowPlusTwoYears.toISOString())
+    expect(state.updatePayload?.expires_at).toBe('2028-05-28T12:00:00.000Z')
   })
 
   it('has no gating field to carry — gating happens before the row exists', () => {
@@ -1145,5 +1224,378 @@ describe('findScheduledOpenCommitments', () => {
       field: 'arrival_signal',
       value: 'scheduled',
     })
+  })
+})
+
+// ===== TAC-341: server-derived horizons + the lifecycle scan/writers =====
+
+describe('createCommitmentFromPending — TAC-341 horizons', () => {
+  function mockWith(state: MockState) {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+  }
+
+  it('derives a two-year horizon for a comp', async () => {
+    const state = newState()
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: PENDING,
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+    expect(state.insertedPayload).toMatchObject({
+      expires_at: '2028-05-28T15:30:00.000Z',
+      escalated_at: null,
+    })
+  })
+
+  // The emission's own expiresAt has never been populated (the prompt does not
+  // mention the field) and must stay ignored if it ever is: server-derived,
+  // never agent-set. A non-null fixture is what makes this assertion mean
+  // something.
+  it('ignores an agent-supplied expiresAt', async () => {
+    const state = newState()
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: { ...PENDING, expiresAt: '2027-01-01T00:00:00Z' },
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+    expect(state.insertedPayload?.expires_at).toBe('2028-05-28T15:30:00.000Z')
+  })
+
+  // The scope cut at the creation layer. A recommendation is still created,
+  // still deduped, still rendered — it just carries no horizon, so the
+  // lifecycle scan's `expires_at IS NOT NULL` filter can never see it.
+  it('leaves a recommendation with a null horizon', async () => {
+    const state = newState({ insertedReturn: makeRow({ type: 'recommendation' }) })
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'recommendation',
+        description: 'blossom tonic',
+        code: null,
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+    expect(state.insertedPayload).toMatchObject({
+      type: 'recommendation',
+      expires_at: null,
+      escalated_at: null,
+    })
+  })
+
+  // Cost control, and a real one: this is the hot path on every dispatched
+  // commitment. Only a hold needs the venue clock, so a comp must not pay for
+  // two extra round trips.
+  it('does not load the venue clock for a comp', async () => {
+    const state = newState()
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: PENDING,
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+    expect(state.maybeSingleCallCount).toBe(0)
+    expect(state.selectTables).not.toContain('venues')
+    expect(state.selectTables).not.toContain('venue_configs')
+  })
+
+  it('loads the venue clock for a hold and expires it at close', async () => {
+    const state = newState({
+      insertedReturn: makeRow({ type: 'hold', code: null }),
+      venueRow: { timezone: 'America/Los_Angeles' },
+      configRow: { venue_info: { hours: { friday: '7:00 AM – 3:00 PM' } } },
+    })
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'hold',
+        description: 'almond croissant',
+        code: 'H4LD',
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      // Friday 2026-07-10, 11:00 PDT.
+      now: new Date('2026-07-10T18:00:00Z'),
+    })
+    expect(state.selectTables).toContain('venues')
+    expect(state.selectTables).toContain('venue_configs')
+    expect(state.insertedPayload).toMatchObject({
+      expires_at: '2026-07-10T22:00:00.000Z',
+      escalated_at: null,
+    })
+  })
+
+  // The fallback is stamped escalated AT CREATION, and that is the only
+  // moment it can be: a 23:59 guess is indistinguishable later from a venue
+  // that genuinely closes at midnight, so the cron reading this row tomorrow
+  // could not tell.
+  it('stamps escalated_at and alerts when a hold horizon is a fallback', async () => {
+    const state = newState({
+      insertedReturn: makeRow({
+        type: 'hold',
+        code: null,
+        expires_at: '2026-07-11T06:59:00.000Z',
+      }),
+      configRow: { venue_info: { hours: {} } },
+    })
+    mockWith(state)
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'hold',
+        description: 'almond croissant',
+        code: 'H4LD',
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      now: new Date('2026-07-10T18:00:00Z'),
+    })
+    expect(state.insertedPayload).toMatchObject({
+      expires_at: '2026-07-11T06:59:00.000Z',
+      escalated_at: '2026-07-10T18:00:00.000Z',
+    })
+    expect(captureCommitmentEscalated).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'hold_horizon_unknown' }),
+    )
+  })
+
+  it('falls back rather than throwing when the venue clock cannot be read', async () => {
+    const state = newState({
+      insertedReturn: makeRow({ type: 'hold', code: null }),
+      venueRow: null,
+      configRow: null,
+    })
+    mockWith(state)
+    const r = await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'hold',
+        description: 'almond croissant',
+        code: 'H4LD',
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      now: new Date('2026-07-10T18:00:00Z'),
+    })
+    // The message has already been sent to the guest by this point; a missing
+    // venue record must not convert that into a failed materialization.
+    expect(r.ok).toBe(true)
+    // An exact value, not merely non-null: `not.toBeNull()` also passes on
+    // `undefined`, which is what a dropped field looks like. 23:59 UTC on the
+    // creation day, since there is no venue zone to resolve against.
+    expect(state.insertedPayload?.expires_at).toBe('2026-07-10T23:59:00.000Z')
+    expect(state.insertedPayload?.escalated_at).toBe('2026-07-10T18:00:00.000Z')
+  })
+})
+
+describe('createCommitmentFromPending — upgrade to a hold on unreadable hours', () => {
+  // The MAJOR found in code review. shouldUpgrade permits recommendation →
+  // hold, and touchOpenCommitment stamps escalated_at on the fallback — but
+  // resolveToExisting emitted nothing, so the marker was set with no Slack
+  // post and no event. The cron then skips the row forever (escalated_at is
+  // non-null) and reports hadEscalated: true when it expires. Setting an
+  // idempotency marker without the thing it marks having happened is the same
+  // shape as the blocker in the processor.
+  it('stamps escalated_at AND emits when an upgraded hold takes the fallback', async () => {
+    const OPEN_REC = makeRow({ type: 'recommendation', code: null })
+    const state = newState({
+      selectReturn: [OPEN_REC],
+      updateReturn: [makeRow({ type: 'hold', code: 'H4LD' })],
+      configRow: { venue_info: { hours: {} } },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'hold',
+        description: 'oat latte',
+        code: 'H4LD',
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+
+    expect(state.insertCallCount).toBe(0)
+    expect(state.updatePayload).toHaveProperty('escalated_at', NOW.toISOString())
+    expect(captureCommitmentEscalated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'hold_horizon_unknown',
+        type: 'hold',
+        commitmentId: COMMITMENT_ID,
+      }),
+    )
+  })
+
+  it('does not re-stamp or re-emit when the row already escalated', async () => {
+    const ALREADY = makeRow({
+      type: 'recommendation',
+      code: null,
+      escalated_at: '2026-05-01T00:00:00Z',
+    })
+    const state = newState({
+      selectReturn: [ALREADY],
+      updateReturn: [makeRow({ type: 'hold' })],
+      configRow: { venue_info: { hours: {} } },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: {
+        type: 'hold',
+        description: 'oat latte',
+        code: 'H4LD',
+        expiresAt: null,
+      },
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+
+    // The write guard and the emit guard must agree; if they drift, one
+    // commitment produces a second alert years after the first.
+    expect(state.updatePayload).not.toHaveProperty('escalated_at')
+    expect(captureCommitmentEscalated).not.toHaveBeenCalled()
+  })
+})
+
+describe('findOpenObligations', () => {
+  // Non-behavioural on purpose: the mock ignores its filters, so the only way
+  // to prove the scan cannot reach a recommendation — or a pending_ack row —
+  // is to assert the query it builds.
+  it('scans only open obligations carrying a horizon', async () => {
+    const state = newState({ selectReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await findOpenObligations()
+
+    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.selectNotCalls).toContainEqual({
+      field: 'expires_at',
+      op: 'is',
+      value: null,
+    })
+    const typeFilter = state.selectInCalls.find((c) => c.field === 'type')
+    expect(typeFilter).toBeDefined()
+    expect([...(typeFilter?.values ?? [])].sort()).toEqual(['comp', 'discount', 'hold'])
+  })
+
+  // The regression check for the 2026-09-14 scope cut, at the layer that
+  // decides it. An allowlist narrowed to a `neq('recommendation')` exclusion
+  // would pass every behavioural test in this file.
+  it('never admits recommendations', async () => {
+    const state = newState({ selectReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await findOpenObligations()
+    const typeFilter = state.selectInCalls.find((c) => c.field === 'type')
+    expect(typeFilter?.values).not.toContain('recommendation')
+  })
+
+  it('skips an unparseable row rather than failing the whole scan', async () => {
+    const state = newState({
+      selectReturn: [makeRow(), { id: 'broken' }, makeRow({ id: 'also-fine' })],
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await findOpenObligations()
+    expect(r.ok).toBe(true)
+    // Keeps scanning PAST the unreadable row — a `return` here instead of a
+    // `continue` would silently drop every obligation behind it.
+    expect(r.ok && r.data).toHaveLength(2)
+  })
+})
+
+describe('markEscalated', () => {
+  it('CAS-gates on open AND not-yet-escalated', async () => {
+    const state = newState({ updateReturn: [makeRow({ escalated_at: NOW.toISOString() })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
+
+    expect(r.ok && r.data.transitioned).toBe(true)
+    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    // The half that makes escalation fire exactly once under overlapping
+    // ticks. Without it both ticks win their CAS and the guest's operator
+    // gets two alerts for one commitment.
+    expect(state.updateIsCalls).toContainEqual({ field: 'escalated_at', value: null })
+  })
+
+  it('does not change status — an escalated commitment is still owed', async () => {
+    const state = newState()
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
+    expect(state.updatePayload).toEqual({
+      escalated_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    })
+  })
+
+  it('reports a lost CAS as transitioned=false, not as an error', async () => {
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.data.transitioned).toBe(false)
+  })
+})
+
+describe('markExpired', () => {
+  it('moves an open row to expired, CAS-gated on open', async () => {
+    const state = newState({ updateReturn: [makeRow({ status: 'expired' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markExpired({ commitmentId: COMMITMENT_ID, now: NOW })
+
+    expect(r.ok && r.data.transitioned).toBe(true)
+    expect(state.updatePayload).toEqual({
+      status: 'expired',
+      updated_at: NOW.toISOString(),
+    })
+    // status='open' is what makes pending_ack, acknowledged and cancelled
+    // rows untouchable here — not a guard in the processor loop.
+    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'open' })
+  })
+
+  it('leaves a row that moved to pending_ack alone', async () => {
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await markExpired({ commitmentId: COMMITMENT_ID, now: NOW })
+    expect(r.ok && r.data.transitioned).toBe(false)
   })
 })

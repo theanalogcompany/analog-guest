@@ -150,6 +150,7 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
         expires_at: null,
         acknowledged_at: '2026-05-29T10:00:00Z',
         acknowledged_by: OP_ID,
+        escalated_at: null,
         redeemed_at: null,
         source_message_id: null,
         created_at: '2026-05-29T09:55:00Z',

@@ -186,6 +186,12 @@ export const GuestCommitmentRowSchema = z.object({
   arrival_signal: ArrivalSignalSchema.nullable(),
   created_by: CommitmentCreatedBySchema,
   expires_at: z.string().nullable(),
+  // TAC-341. Idempotency marker for escalation: non-null means a human has
+  // already been told about this obligation, so the hourly lifecycle cron
+  // must not tell them again. Nullable rather than defaulted because "never
+  // surfaced" is the honest starting state and NULL says it without a
+  // sentinel date. The row stays status='open' while escalated.
+  escalated_at: z.string().nullable(),
   acknowledged_at: z.string().nullable(),
   acknowledged_by: z.string().nullable(),
   redeemed_at: z.string().nullable(),
