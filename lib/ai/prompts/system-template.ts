@@ -826,6 +826,33 @@
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.50.0 (TAC-394): ## Recent conversation now says which lines the guest
+// never received. The history query returned a pending draft beside sent
+// messages and both rendered identically, so on 2026-09-14 a model
+// regenerating a pending comp ("the next one's on us") read the comp as
+// already offered and replied only to the guest's next question. TAC-264's
+// regen-in-place then replaced the comp with that reply and no operator ever
+// decided on it. TAC-264 assumed the replacement would answer the whole
+// conversation; nothing had ever told the model the earlier draft was unsent.
+//
+// Each unsent line carries a marker saying why (derived in
+// lib/agent/group-responses.ts): NOT SENT while a draft waits for the venue,
+// NOT SENT when the venue decided not to send it, NEVER SENT when a send
+// failed. One note follows the block when any line is marked, and nothing
+// tells the model what to do about an unsent line. This version was first
+// built with such an instruction (the reply takes the pending draft's place,
+// so offer a pending comp again). On the incident turn it produced replies
+// answering two things at once that kept em dashes and sometimes self-rated
+// voice fidelity 0.00, which is refused, and the 2026-09-14 ruling removed it
+// before release. The marker alone does not stop a reply overwriting a pending
+// comp; protecting the obligation is the gate's job (TAC-394 PR 2). No
+// universal rule changed, and a history with nothing unsent renders exactly as
+// v1.49.0 did.
+//
+// Known residue, not fixed here: a regenerated row keeps its created_at, so a
+// draft rewritten and then sent still sorts above the question it answers,
+// and the next turn's history reads the answer before the question.
+//
 // v1.49.0 (TAC-380): two universal-rule edits forced by the intentions
 // redefinition, plus one sentence in the intentions block.
 //
@@ -900,7 +927,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.49.0'
+export const PROMPT_VERSION = 'v1.50.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

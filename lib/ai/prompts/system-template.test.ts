@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.49.0 (TAC-380: R31 carve-out for items already in play, stale R32 clause removed)', () => {
-    expect(PROMPT_VERSION).toBe('v1.49.0')
+  it('is v1.50.0 (TAC-394: unsent history lines marked with why they never arrived)', () => {
+    expect(PROMPT_VERSION).toBe('v1.50.0')
   })
 })
 

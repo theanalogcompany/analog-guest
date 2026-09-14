@@ -145,6 +145,7 @@ const recent = (overrides: Partial<RecentMessage> = {}): RecentMessage => ({
   direction: 'inbound',
   body: 'hi',
   createdAt: NOW,
+  delivery: 'delivered',
   ...overrides,
 })
 
@@ -339,6 +340,81 @@ describe('runtimeToProse — recent conversation block', () => {
       NOW,
     )
     expect(out.indexOf('## Right now')).toBeLessThan(out.indexOf('## Recent conversation'))
+  })
+})
+
+describe('runtimeToProse — unsent history (TAC-394)', () => {
+  const minutesAgo = (n: number) => new Date(NOW.getTime() - n * 60_000)
+  const DRAFT =
+    "Really sorry to hear that. Come back in and the next one's on us. Give me a heads up when you're heading over"
+  const NOTE = 'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
+
+  // The 2026-09-14 sequence, as the regenerating model saw it at 16:31.
+  const incident = (draftDelivery: RecentMessage['delivery']): RecentMessage[] => [
+    recent({ direction: 'inbound', body: 'the cortado i got this morning was cold and bad', createdAt: minutesAgo(5) }),
+    recent({ direction: 'outbound', body: DRAFT, createdAt: minutesAgo(4), delivery: draftDelivery }),
+  ]
+  const render = (messages: RecentMessage[]) =>
+    runtimeToProse(
+      { inboundMessage: 'what time do you open on sundaus', recentMessages: messages },
+      'new_question',
+      NOW,
+    )
+  const historyBlock = (out: string) =>
+    out.slice(out.indexOf('## Recent conversation'), out.indexOf('\n\nThe guest just sent:'))
+
+  it('renders history with nothing unsent exactly as before', () => {
+    const out = render(incident('delivered'))
+    // Exact, not toContain: anything appended to the block must fail this.
+    expect(historyBlock(out)).toBe(
+      '## Recent conversation\n' +
+        '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
+        `[venue, 4 minutes ago] ${DRAFT}`,
+    )
+    expect(out).not.toContain('NOT SENT')
+    expect(out).not.toContain('NEVER SENT')
+    expect(out).not.toContain('never reached the guest')
+  })
+
+  // Literal markers, never read back out of historyDeliveryMarker: a table
+  // built from the function would pass whatever it returns. Exact equality on
+  // the whole block pins the marker and the one note as ALL that is added. The
+  // 2026-09-14 ruling removed an instruction that followed the note (the reply
+  // takes the pending draft's place, so offer a pending comp again), and this
+  // fails if anything is appended there again, however it is worded.
+  it.each([
+    ['awaiting_review', 'NOT SENT: waiting for the venue to approve it'],
+    ['skipped_by_operator', 'NOT SENT: the venue decided not to send it'],
+    ['never_sent', 'NEVER SENT: it failed to send'],
+  ] as const)('marks a %s line "%s" and adds only the note', (delivery, marker) => {
+    expect(historyBlock(render(incident(delivery)))).toBe(
+      '## Recent conversation\n' +
+        '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
+        `[venue, 4 minutes ago, ${marker}] ${DRAFT}\n\n` +
+        NOTE,
+    )
+  })
+
+  // v1.50.0 first exempted pending lines from the cap, because the removed
+  // instruction asked the model to carry a pending offer forward. With nothing
+  // asking that, an exemption has no reason to exist.
+  it.each(['delivered', 'awaiting_review', 'skipped_by_operator', 'never_sent'] as const)(
+    'truncates a %s line at 200 characters',
+    (delivery) => {
+      const long = 'a'.repeat(250)
+      const out = render([recent({ direction: 'outbound', body: long, createdAt: minutesAgo(4), delivery })])
+      expect(out).toContain(`${'a'.repeat(200)}…`)
+      expect(out).not.toContain('a'.repeat(201))
+    },
+  )
+
+  it('states the note once however many lines are unsent', () => {
+    const out = render([
+      recent({ direction: 'outbound', body: 'a failed send', createdAt: minutesAgo(120), delivery: 'never_sent' }),
+      recent({ direction: 'outbound', body: 'an older skipped draft', createdAt: minutesAgo(90), delivery: 'skipped_by_operator' }),
+      ...incident('awaiting_review'),
+    ])
+    expect(out.split('never reached the guest').length - 1).toBe(1)
   })
 })
 
@@ -1471,7 +1547,7 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
         recentVisits: [{ items: ['cappuccino'], visitedAt: new Date('2026-05-01T10:00:00Z') }],
         guestContext: { guest_details: { first_name: 'Sarah' } },
         recentMessages: [
-          { direction: 'inbound', body: 'hi', createdAt: new Date('2026-05-07T10:00:00Z') },
+          { direction: 'inbound', body: 'hi', createdAt: new Date('2026-05-07T10:00:00Z'), delivery: 'delivered' },
         ],
       },
       'reply',
@@ -1648,7 +1724,7 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
           {
             direction: 'inbound' as const,
             body: 'hello',
-            createdAt: new Date('2026-04-29T11:30:00Z'),
+            createdAt: new Date('2026-04-29T11:30:00Z'), delivery: 'delivered',
           },
         ],
       },
@@ -2247,7 +2323,7 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
         inboundMessage: 'what time do you close?',
         guestName: 'Sam',
         recentMessages: [
-          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) },
+          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 60_000), delivery: 'delivered' },
         ],
       },
       'reply',

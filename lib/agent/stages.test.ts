@@ -471,6 +471,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         direction: 'inbound' as const,
         body: 'hi',
         createdAt: new Date('2026-05-08T09:55:00Z'),
+        delivery: 'delivered' as const,
       },
     ]
     await classifyStage(
@@ -497,7 +498,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.49.0',
+        promptVersion: 'v1.50.0',
         crisisSafety: true,
       },
     })
@@ -515,7 +516,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.49.0',
+        promptVersion: 'v1.50.0',
         crisisSafety: false,
       },
     })
@@ -1733,7 +1734,7 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
   it('is false when the guest has other recent messages (not their first inbound)', () => {
     const aiRuntime = buildAiRuntime(
       qrScanCtx({
-        recentMessages: [{ direction: 'inbound', body: 'earlier', createdAt: new Date() }],
+        recentMessages: [{ direction: 'inbound', body: 'earlier', createdAt: new Date(), delivery: 'delivered' }],
       }),
     )
     expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
