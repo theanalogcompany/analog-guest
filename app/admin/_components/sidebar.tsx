@@ -9,6 +9,7 @@ import {
   MessagesSquare,
   SlidersHorizontal,
   Store,
+  Target,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -40,6 +41,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin/voices': AudioLines,
   '/admin/venues': Store,
   '/admin/tunables': SlidersHorizontal,
+  '/admin/intentions': Target,
   '/admin/health': Activity,
 }
 
