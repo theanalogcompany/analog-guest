@@ -237,23 +237,19 @@ function normalizeReviewReason(raw: string | null): string | null {
 }
 
 /**
- * TAC-364: the full trigger set, each normalized exactly as `reviewReason` is,
- * including the `'Needs review'` fallback for an unrecognized value.
- *
- * `null` → `[]`. A null column means the row predates migration 039, or was
- * written by a path that never ran the gate (the generation-failure card, the
- * operator decline) and so has no trigger SET to record — only the single
- * reason it stamps itself. Both render as today, which is what the Contract
- * promises for an old row.
- *
- * Order is preserved from the DB array, which is enumeration order from
- * `applyApprovalPolicyStage` — the order the checks fired, NOT priority order.
- * The client is expected to show the primary (from `reviewReason`) first and
- * these beneath it; re-sorting here would throw away the only record of what
- * fired when.
- */
-/**
  * TAC-364: the raw trigger codes, unmodified.
+ *
+ * Ruling 1 replaced an earlier version of this that mapped every entry through
+ * REVIEW_REASON_LABELS — prose here made the one thing the client has to do
+ * with the field impossible, since secondaries are `reviewTriggers` minus
+ * `reviewReasonCode` and that subtraction needs both sides to be codes.
+ * `toReviewTriggerLabels` below carries the display text.
+ *
+ * A null column means the row predates migration 039, or was written by a path
+ * that never ran the gate (the generation-failure card, the operator decline)
+ * and so has no trigger SET to record — only the single reason it stamps
+ * itself. Both render as today, which is what the Contract promises for an old
+ * row.
  *
  * `?? []` rather than `=== null`: the column is also ABSENT (undefined) when
  * this code runs against a pre-039 RPC, which is a real local-dev state even
