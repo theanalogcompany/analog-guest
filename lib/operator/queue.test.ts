@@ -233,7 +233,7 @@ describe('listPendingQueue', () => {
     // review_state='pending', so neither can reach a card.
     const COPY_TABLE: ReadonlyArray<readonly [string, string]> = [
       // --- Obligation ---
-      ['commitment_type_gated', 'This offers something free — your call.'],
+      ['commitment_type_gated', 'This offers something free. Your call.'],
       ['comp_regex_backstop', "This sounds like it's offering something on the house."],
       [
         'complaint_commitment_floor',
@@ -261,7 +261,7 @@ describe('listPendingQueue', () => {
       ['previous_pending_held', 'Held behind an earlier message to this guest.'],
       [
         'operator_decline_initiated',
-        "You passed on the last one — here's another go.",
+        "You passed on the last one, so here's another go.",
       ],
       // Unrecognized values degrade to the fallback rather than borrowing
       // another trigger's sentence. `review_reason` has no CHECK constraint
@@ -288,6 +288,42 @@ describe('listPendingQueue', () => {
     // Contract, and the table is hand-maintained. Same technique as TAC-348's
     // "universal rule classification completeness" guard, which exists because
     // the operator rail silently showed 14 of 21 rules for the same reason.
+    // TAC-364, ruled 2026-09-14: NO card-facing string contains an em dash.
+    // These are read fast on a phone mid-shift, and an em dash is a pause the
+    // reader has to parse. Asserted over the WHOLE label map, not the two
+    // strings that happened to carry one, so the next trigger added cannot
+    // reintroduce it: any new key reaches this loop automatically through
+    // _REVIEW_REASON_KEYS_FOR_TESTS. Goes through the real projection rather
+    // than reading the map directly, so it checks exactly what the client
+    // receives, on both card-facing fields (the primary label and the
+    // secondary labels) and on the fallback. The code point is written as an
+    // escape so this file's own prose can't satisfy or break the assertion.
+    it('no card-facing label contains an em dash, including the fallback', async () => {
+      const EM_DASH = /\u2014/
+      const codes = [..._REVIEW_REASON_KEYS_FOR_TESTS, 'gibberish_unknown_code']
+      for (const code of codes) {
+        rpcMock.mockResolvedValueOnce({
+          data: [{ ...baseRow, review_reason: code, review_triggers: [code] }],
+          error: null,
+        })
+        const result = await listPendingQueue(['v1'])
+        expect(result.ok).toBe(true)
+        if (!result.ok) continue
+        const draft = result.drafts[0]!
+        expect({ code, label: draft.reviewReason }).not.toEqual(
+          expect.objectContaining({ label: expect.stringMatching(EM_DASH) }),
+        )
+        for (const label of draft.reviewTriggerLabels) {
+          expect({ code, label }).not.toEqual(
+            expect.objectContaining({ label: expect.stringMatching(EM_DASH) }),
+          )
+        }
+      }
+      // Guards the guard: if the key export ever came back empty, the loop
+      // above would pass vacuously on the fallback alone.
+      expect(_REVIEW_REASON_KEYS_FOR_TESTS.length).toBeGreaterThan(0)
+    })
+
     it('covers every key in REVIEW_REASON_LABELS — no copy ships unchecked', () => {
       const covered = new Set(COPY_TABLE.map(([code]) => code))
       const missing = _REVIEW_REASON_KEYS_FOR_TESTS.filter((k) => !covered.has(k))
@@ -350,7 +386,7 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         expect(result.drafts[0]!.reviewReasonCode).toBe('commitment_type_gated')
         expect(result.drafts[0]!.reviewReason).toBe(
-          'This offers something free — your call.',
+          'This offers something free. Your call.',
         )
       }
     })
@@ -425,7 +461,7 @@ describe('listPendingQueue', () => {
         const d = result.drafts[0]!
         expect(d.reviewTriggerLabels).toEqual([
           "This doesn't sound enough like you.",
-          'This offers something free — your call.',
+          'This offers something free. Your call.',
           // Unrecognized code still renders something rather than leaking a
           // raw identifier at an operator.
           'Needs review',
@@ -436,7 +472,7 @@ describe('listPendingQueue', () => {
         // length check passes any permutation.
         expect(d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]])).toEqual([
           ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
-          ['commitment_type_gated', 'This offers something free — your call.'],
+          ['commitment_type_gated', 'This offers something free. Your call.'],
           ['gibberish_unknown_code', 'Needs review'],
         ])
       }

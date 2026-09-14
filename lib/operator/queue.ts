@@ -125,6 +125,12 @@ type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed'
 // TAC-361 defect was NOT a fallthrough: no trigger can fall through this map.
 //
 // These strings are Contract surface — analog-operator renders them verbatim.
+//
+// NO EM DASHES in any value here (ruled 2026-09-14). These are read fast on a
+// phone mid-shift, and an em dash is a pause the reader has to parse; a full
+// stop or a comma is not. Enforced by a test over this map in queue.test.ts,
+// not by review, so a new trigger's copy cannot reintroduce one. Comments in
+// this file are prose and may keep them; only the strings reach the card.
 // The copy table in the TAC-364 description is the source; transcribe from it,
 // never from this map, when asserting on them.
 //
@@ -138,7 +144,7 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-297: structural commitment-type gate, top of PRIMARY_TRIGGER_PRIORITY.
   // Says what is at stake (something free) and whose call it is, rather than
   // naming the gate.
-  commitment_type_gated: 'This offers something free — your call.',
+  commitment_type_gated: 'This offers something free. Your call.',
   // Hedged because it is a regex on prose, not a structured emission: it can
   // be wrong, and the copy should not assert more confidence than the check
   // has. (Its only production hit to date matched the word "refund" inside the
@@ -211,7 +217,7 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-299: the operator swiped left on a heads-up card and /draft-decline
   // persisted this apology. "You passed on the last one" points at their own
   // action, which is the context that makes the draft make sense.
-  operator_decline_initiated: "You passed on the last one — here's another go.",
+  operator_decline_initiated: "You passed on the last one, so here's another go.",
 }
 
 /**
