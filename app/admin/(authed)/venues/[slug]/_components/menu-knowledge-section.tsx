@@ -1,5 +1,5 @@
 import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // Distinct from MenuRosterSection (venue_info.menu.items — the technical,
 // one-row-per-item list). This is what the owner said ABOUT those items —

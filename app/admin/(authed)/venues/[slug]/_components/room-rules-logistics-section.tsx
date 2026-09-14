@@ -1,5 +1,5 @@
 import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 export function RoomRulesLogisticsSection({
   venueId,

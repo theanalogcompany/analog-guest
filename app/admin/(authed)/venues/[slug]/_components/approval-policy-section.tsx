@@ -13,7 +13,7 @@ import {
   type ApprovalDisposition,
   type ApprovalPolicy,
 } from '@/lib/schemas/approval-policy'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // TAC-307: per-venue approval-policy controls. The write side of
 // venue_configs.approval_policy, which until this ticket had a runtime reader

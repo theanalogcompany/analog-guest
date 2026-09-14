@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 // Staff depth lives in chunks, not venue_info (§2: "do not widen
 // venue_info.staff to carry notes"). This section renders the thin roster

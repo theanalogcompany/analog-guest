@@ -15,7 +15,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { KNOWLEDGE_PRIMARY_TAGS, type KnowledgePrimaryTag } from '@/lib/schemas'
 import { StatusDot } from '@/lib/ui'
-import { EmptySectionNote } from './section-shell'
+import { EmptySectionNote } from '@/app/admin/_components/section-shell'
 
 export interface KnowledgeEntryListRow {
   id: string

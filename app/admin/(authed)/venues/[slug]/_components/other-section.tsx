@@ -1,5 +1,5 @@
 import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // The 'other' primary tag's own named section — distinct from the
 // structural catch-all in catch-all-section.tsx, which is for entries no

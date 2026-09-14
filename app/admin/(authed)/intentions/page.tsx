@@ -1,6 +1,5 @@
-import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
@@ -21,26 +20,6 @@ import { RecordedPromptsList } from './_components/recorded-prompts-list'
 // venues/page.tsx.
 
 export const dynamic = 'force-dynamic'
-
-function Section({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle: string
-  children: ReactNode
-}) {
-  return (
-    <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 shadow-none">
-      <CardHeader className="border-b border-stone-light/60 py-4">
-        <CardTitle className="font-fraunces text-lg text-ink">{title}</CardTitle>
-        <p className="text-xs text-ink-faint">{subtitle}</p>
-      </CardHeader>
-      <CardContent className="py-5">{children}</CardContent>
-    </Card>
-  )
-}
 
 export default async function IntentionsPage() {
   const supabase = await createServerClient()
@@ -80,21 +59,21 @@ export default async function IntentionsPage() {
         once per guest, ever.
       </p>
 
-      <Section
+      <SectionShell
         title="Definitions"
         subtitle="Defined in code at lib/agent/intentions/definitions.ts. Global across every venue — adding one is a reviewed pull request, not an edit here."
       >
         <DefinitionsList />
-      </Section>
+      </SectionShell>
 
-      <Section
+      <SectionShell
         title="When an intention reaches the prompt"
         subtitle="Four conditions that live outside the definitions. All four must pass, so a definition listed above may never fire for a given guest."
       >
         <GatingConditions />
-      </Section>
+      </SectionShell>
 
-      <Section
+      <SectionShell
         title="Recorded prompts"
         subtitle={
           hasMore
@@ -103,7 +82,7 @@ export default async function IntentionsPage() {
         }
       >
         <RecordedPromptsList rows={rows} />
-      </Section>
+      </SectionShell>
     </div>
   )
 }

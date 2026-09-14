@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { MenuItem, VenueInfo } from '@/lib/schemas'
 import { HairlineRow } from '@/lib/ui'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 function formatPrice(item: MenuItem): string {
   if (item.price !== undefined) return `$${item.price.toFixed(2)}`
