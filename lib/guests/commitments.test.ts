@@ -571,7 +571,6 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     expect(state.updatePayload).toEqual({
       type: 'comp',
       code: 'Q4X9',
-      expires_at: null,
       source_message_id: MESSAGE_ID,
       updated_at: NOW.toISOString(),
     })
@@ -612,6 +611,7 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
       'status',
       'created_by',
       'description',
+      'expires_at',
       'expected_arrival',
       'arrival_signal',
       'guest_id',
@@ -620,6 +620,33 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     ]) {
       expect(payload).not.toHaveProperty(field)
     }
+  })
+
+  it('does not touch expires_at — TAC-341 owns every derivation', async () => {
+    const state = newState({ selectReturn: [OPEN_REC] })
+    mockWith(state)
+
+    await createCommitmentFromPending({
+      guestId: GUEST_ID,
+      venueId: VENUE_ID,
+      pendingCommitment: { ...COMP_ON_SAME_ITEM, expiresAt: '2027-01-01T00:00:00Z' },
+      sourceMessageId: MESSAGE_ID,
+      now: NOW,
+    })
+
+    // Its own test rather than one entry in the loop above, because this is
+    // the one omitted field where leaving it alone is ALSO not obviously
+    // right, and the fixture has to carry a non-null expiresAt to prove the
+    // omission is deliberate rather than an artifact of null-in-null-out.
+    //
+    // Both obvious behaviours are wrong once TAC-341 lands: writing the
+    // emission's value overwrites a derived expiry with null and the row
+    // never expires; keeping the recommendation's own horizon gives an
+    // upgraded comp 30 days where a new comp gets two years. TAC-341 owns
+    // every derivation, including this one. Reintroducing the field here
+    // creates a second derivation site in a file that does not own the
+    // horizons.
+    expect(state.updatePayload).not.toHaveProperty('expires_at')
   })
 
   it('has no gating field to carry — gating happens before the row exists', () => {

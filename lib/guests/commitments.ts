@@ -161,6 +161,29 @@ const GATED_TYPES: ReadonlySet<CommitmentType> = new Set(['comp', 'hold', 'disco
  * `source_message_id` moves to the upgrading message: it is the message that
  * made the promise the row now represents. `created_at` does not move — see
  * touchOpenCommitment.
+ *
+ * `expires_at` deliberately does NOT move, and this is the one field where
+ * leaving it alone is also not obviously right — so the reasoning is recorded
+ * rather than left to be re-derived (TAC-318 ruling, option B).
+ *
+ * Today the field is inert: the prompt never mentions `expiresAt` (grep
+ * lib/ai/prompts — zero hits), so the model never emits one, `pendingFromEmission`
+ * yields null, and creation writes null too. Nothing reads the column.
+ *
+ * After TAC-341 it stops being inert, and BOTH obvious behaviours are wrong:
+ *   - writing `upgrade.pending.expiresAt` (what this code did until the
+ *     ruling) overwrites TAC-341's derived value with null. A null expiry
+ *     never elapses, so the expiry job can never move the row to 'expired'
+ *     and an upgraded comp stays open forever.
+ *   - leaving the recommendation's own horizon in place means an upgraded
+ *     comp carries 30 days where a new comp gets two years — a venue's
+ *     obligation dying quietly after a month.
+ *
+ * The fix is neither: TAC-341 owns every expiry derivation, including the
+ * upgrade case. Deriving here would put a second derivation site in a file
+ * that does not own the horizons, which is how the two drift. Do not
+ * reintroduce this field on a tidy-up; if the upgrade needs an expiry, it
+ * comes from TAC-341's helper called from TAC-341's own wiring.
  */
 function shouldUpgrade(existing: CommitmentType, incoming: CommitmentType): boolean {
   return existing === 'recommendation' && GATED_TYPES.has(incoming)
@@ -195,7 +218,6 @@ async function touchOpenCommitment(
         ? {
             type: upgrade.pending.type,
             code: upgrade.pending.code,
-            expires_at: upgrade.pending.expiresAt,
             source_message_id: upgrade.sourceMessageId,
           }
         : {}),
