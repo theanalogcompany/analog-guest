@@ -1,6 +1,6 @@
 import type { UnclaimedField } from '../../_lib/unclaimed-fields'
 import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 // Structural complement of every named section above (TAC-343 plan review,
 // "render from the data, not from my list"). Nothing here was placed by

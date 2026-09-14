@@ -3,6 +3,9 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { loadVenueDetail } from '../../_lib/load-venue-detail'
+import { loadIntentionPrompts } from '../../_lib/load-intention-prompts'
+import { loadVenueCommitments } from '../../_lib/load-venue-commitments'
+import { loadVenueOpenIntentions } from '../../_lib/load-venue-intentions'
 import { computeReadiness } from '../_lib/readiness'
 import { groupKnowledgeByTag } from '../_lib/section-grouping'
 import {
@@ -12,7 +15,9 @@ import {
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { ApprovalPolicySection } from './_components/approval-policy-section'
 import { CatchAllSection } from './_components/catch-all-section'
+import { CommitmentsSection } from './_components/commitments-section'
 import { EventsSection } from './_components/events-section'
+import { IntentionsSection } from './_components/intentions-section'
 import { MechanicsSection } from './_components/mechanics-section'
 import { MenuKnowledgeSection } from './_components/menu-knowledge-section'
 import { MenuRosterSection } from './_components/menu-roster-section'
@@ -71,6 +76,19 @@ export default async function VenueDetailPage({ params }: PageProps) {
   }
 
   const now = new Date()
+
+  // TAC-381: operational state for this venue — what it owes and what the
+  // agent is pursuing. Both are venue-scoped reads of the SAME allowlist-
+  // checked venue id resolved above, so neither can widen scope. Both degrade
+  // to empty rather than throwing, so a DB hiccup costs these two sections and
+  // leaves the config sections below intact.
+  const [commitments, openIntentions, raisedIntentions] = await Promise.all([
+    loadVenueCommitments(data.venue.id),
+    loadVenueOpenIntentions(data.venue.id, now),
+    // Reuses TAC-379's fleet-wide loader unchanged; a single-element allowlist
+    // scopes it to this venue and can only ever narrow, never widen.
+    loadIntentionPrompts([data.venue.id]),
+  ])
   const { bySection, unclaimed: unclaimedKnowledge } = groupKnowledgeByTag(
     data.knowledgeEntries,
   )
@@ -126,6 +144,14 @@ export default async function VenueDetailPage({ params }: PageProps) {
       )}
 
       <ReadinessPanel readiness={readiness} />
+
+      <CommitmentsSection commitments={commitments} now={now} />
+      <IntentionsSection
+        openIntentions={openIntentions}
+        raised={raisedIntentions.rows}
+        raisedHasMore={raisedIntentions.hasMore}
+        now={now}
+      />
 
       <ApprovalPolicySection
         venueId={data.venue.id}

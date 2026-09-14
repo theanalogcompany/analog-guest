@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import type { VenueInfo } from '@/lib/schemas'
 import { HairlineRow } from '@/lib/ui'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 function Fact({ label, value }: { label: string; value: string | null }) {
   if (!value) return null

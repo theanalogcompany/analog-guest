@@ -1,10 +1,18 @@
 import type { ReactNode } from 'react'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-// Shared card chrome for every §2 section on the venue page (TAC-343 Stage
-// A). Keeps every section visually consistent without 12 near-identical
-// wrapper divs. `headerAction` (Stage C) is the Edit/Add toggle a writable
-// section renders in the header row, via shadcn Card's own action slot.
+// Shared card chrome for Command Center sections. Originally the venue page's
+// own wrapper (TAC-343 Stage A); promoted here in TAC-381 because the
+// intentions page (TAC-379) had grown an identical local `Section` and the
+// venue commitments/intentions sections would have made a third copy.
+//
+// `headerAction` (TAC-343 Stage C) is the Edit/Add toggle a writable section
+// renders in the header row, via shadcn Card's own action slot. Read-only
+// sections omit it.
+//
+// One deliberate reconciliation at promotion time: the intentions page's copy
+// used `CardContent py-5` where the venue page's used `py-4`. Unified on
+// `py-4`, the value 14 of the 15 call sites already rendered.
 
 export function SectionShell({
   title,

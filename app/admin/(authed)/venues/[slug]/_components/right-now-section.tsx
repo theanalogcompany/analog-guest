@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { KNOWLEDGE_PRIMARY_TAGS, type VenueContextNote } from '@/lib/schemas'
 import { StatusDot } from '@/lib/ui'
 import { partitionCurrentContext } from '../../_lib/expiry-queue'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 function formatBadge(entry: VenueContextNote, override?: string): string {
   if (override) return override

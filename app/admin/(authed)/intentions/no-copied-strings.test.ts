@@ -26,8 +26,22 @@ import { INTENTION_DEFINITIONS } from '@/lib/agent/intentions/definitions'
 // What this still does NOT catch: a paraphrase. Prose that describes a prompt
 // line without quoting it passes here and can go stale. Saying so plainly
 // rather than letting the green tick imply more than it proves.
+//
+// TAC-381: this scans a LIST of roots, not one directory. The venue page grew
+// its own intentions section rendering the same definitions, and a guard
+// rooted at a single directory that misses the second place the string renders
+// is not a guard — the same shape as the entity-escape gap above, one level
+// out. A third surface rendering these strings adds its root here.
 
-const SURFACE_DIR = resolve(__dirname)
+const SURFACE_ROOTS: ReadonlyArray<{ label: string; dir: string }> = [
+  { label: 'intentions', dir: resolve(__dirname) },
+  {
+    label: 'venue-page',
+    dir: resolve(__dirname, '..', 'venues', '[slug]', '_components'),
+  },
+]
+
+const SURFACE_DIR = SURFACE_ROOTS[0].dir
 
 function surfaceFiles(dir: string): string[] {
   const out: string[] = []
@@ -43,7 +57,13 @@ function surfaceFiles(dir: string): string[] {
   return out
 }
 
-const FILES = surfaceFiles(SURFACE_DIR)
+/** Every file across every surface root, tagged with a readable location. */
+const FILES: ReadonlyArray<{ label: string; path: string }> = SURFACE_ROOTS.flatMap((root) =>
+  surfaceFiles(root.dir).map((path) => ({
+    label: `${root.label}/${path.slice(root.dir.length + 1)}`,
+    path,
+  })),
+)
 
 /** Quote entities only. `&amp;` is deliberately absent — decoding it would
  *  create an ordering trap (`&amp;rsquo;` -> `&rsquo;` -> `'`) for no gain,
@@ -75,13 +95,22 @@ function normalizeForCopyCheck(text: string): string {
 }
 
 describe('intentions surface renders definitions from the constant', () => {
-  it('finds the surface files it means to check', () => {
+  it('finds the surface files it means to check, in BOTH roots', () => {
     // Guards the guard: an empty or mis-rooted file list would make every
-    // assertion below vacuously true.
-    const names = FILES.map((f) => f.slice(SURFACE_DIR.length + 1))
-    expect(names).toContain('page.tsx')
-    expect(names).toContain(join('_components', 'definitions-list.tsx'))
-    expect(FILES.length).toBeGreaterThanOrEqual(4)
+    // assertion below vacuously true. Checked per root, because a single
+    // combined count stays green when one root resolves to nothing — which is
+    // exactly the failure that adding the second root exists to prevent.
+    const labels = FILES.map((f) => f.label)
+    expect(labels).toContain('intentions/page.tsx')
+    expect(labels).toContain(`intentions/${join('_components', 'definitions-list.tsx')}`)
+    expect(labels).toContain('venue-page/intentions-section.tsx')
+    for (const root of SURFACE_ROOTS) {
+      expect(
+        labels.filter((l) => l.startsWith(`${root.label}/`)).length,
+        `${root.label} root resolved to no files`,
+      ).toBeGreaterThanOrEqual(1)
+    }
+    expect(FILES.length).toBeGreaterThanOrEqual(5)
   })
 
   it('the definitions list imports INTENTION_DEFINITIONS', () => {
@@ -92,8 +121,8 @@ describe('intentions surface renders definitions from the constant', () => {
 
   it('no definition string is pasted as a literal anywhere in the surface', () => {
     for (const file of FILES) {
-      const src = normalizeForCopyCheck(readFileSync(file, 'utf-8'))
-      const where = file.slice(SURFACE_DIR.length + 1)
+      const src = normalizeForCopyCheck(readFileSync(file.path, 'utf-8'))
+      const where = file.label
       for (const def of INTENTION_DEFINITIONS) {
         expect(src, `${where} copies ${def.key}.promptLine`).not.toContain(
           normalizeForCopyCheck(def.promptLine),

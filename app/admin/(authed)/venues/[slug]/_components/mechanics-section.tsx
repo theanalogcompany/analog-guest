@@ -17,7 +17,7 @@ import {
 import { StatusDot } from '@/lib/ui'
 import type { VenueDetailMechanicRow } from '../../../_lib/load-venue-detail'
 import { findMissingMechanicFields, parseMechanicTriggerType } from '../../_lib/mechanic-fields'
-import { EmptySectionNote, SectionShell } from './section-shell'
+import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
 
 interface UnclaimedForMechanic {
   id: string

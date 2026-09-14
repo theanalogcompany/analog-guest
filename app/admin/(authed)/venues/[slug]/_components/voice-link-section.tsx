@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // Link-out only. This page must never write brand_persona or voice_corpus —
 // /admin/voices/[slug] already owns those with its own API routes and its

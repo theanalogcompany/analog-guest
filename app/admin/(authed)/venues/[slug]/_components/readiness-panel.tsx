@@ -1,6 +1,6 @@
 import type { ReadinessReport } from '../../_lib/readiness'
 import { StatusDot } from '@/lib/ui'
-import { SectionShell } from './section-shell'
+import { SectionShell } from '@/app/admin/_components/section-shell'
 
 function ThresholdRow({
   label,
