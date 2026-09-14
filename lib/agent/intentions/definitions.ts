@@ -51,6 +51,23 @@ export interface IntentionDefinition {
    * description at classification time.
    */
   classifierDescription: string
+  /**
+   * Plain-English statement of how this intention closes, for the read-only
+   * Command Center viewer (TAC-379). `isSatisfied` is a predicate and cannot
+   * be rendered as data, so the viewer needs the intent stated separately.
+   *
+   * Required, and required HERE rather than as a lookup keyed on
+   * IntentionKey somewhere else, for exactly the reason
+   * `classifierDescription` lives on this interface: a new intention with no
+   * label fails `tsc`, instead of silently reaching an admin surface that
+   * then has to invent a description for it. Nobody adds an intention
+   * without stating how it closes.
+   *
+   * Display-only, and structurally incapable of reaching the prompt:
+   * `OpenIntention` (derive.ts) carries `key` and `promptLine` only, so this
+   * field never crosses into `formatOpenIntentions`.
+   */
+  satisfactionLabel: string
   /** How long this intention stays open after guest creation, regardless of prompt state. */
   expiresAfterMs: number
   /**
@@ -86,6 +103,8 @@ export const INTENTION_DEFINITIONS: readonly IntentionDefinition[] = [
     promptLine: "You haven't heard what this guest ordered yet.",
     classifierDescription:
       'asks the guest what they ordered, what they got, or how their drink/food was',
+    satisfactionLabel:
+      'Closes on its own once any transaction exists for this guest, from any source.',
     expiresAfterMs: LEARN_FIRST_ORDER_WINDOW_DAYS * MS_PER_DAY,
     isSatisfied: (facts) => facts.hasQualifyingTransaction,
   },
@@ -94,6 +113,8 @@ export const INTENTION_DEFINITIONS: readonly IntentionDefinition[] = [
     promptLine: "You haven't told them to save your number.",
     classifierDescription:
       'tells the guest to save this number, text anytime, or otherwise invites them to keep in touch',
+    satisfactionLabel:
+      'Never closes on its own. A guest saving a contact is unobservable, so asking once is the only closure.',
     expiresAfterMs: INVITE_CONTACT_SAVE_WINDOW_DAYS * MS_PER_DAY,
     // Never independently observable — we cannot know whether a guest saved
     // a contact. Prompted-once is the only closure; derive.ts's uniform

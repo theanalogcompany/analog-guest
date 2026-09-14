@@ -29,6 +29,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     section: 'System',
     items: [
       { href: '/admin/tunables', label: 'Tunables' },
+      { href: '/admin/intentions', label: 'Intentions' },
       { href: '/admin/health', label: 'Health' },
     ],
   },
