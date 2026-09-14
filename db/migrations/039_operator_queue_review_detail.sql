@@ -23,6 +23,17 @@
 --                        generic label with no way to know which sentence is
 --                        the suspect one. This column is that way.
 --
+--                        THREE-STATE, deliberately: non-empty = flagged these,
+--                        empty = the check ran and found nothing, NULL = the
+--                        check did not run. See the column comment below. The
+--                        empty-vs-NULL split is not incidental — TAC-367 was
+--                        filed because a silently-skipped grounding check was
+--                        invisible everywhere, and conflating the two would
+--                        have rebuilt that blind spot in a new column on its
+--                        first day. `review_triggers` has no equivalent split
+--                        because the gate returns `send` when nothing fires,
+--                        so a queued draft's trigger set is never empty.
+--
 -- `messages.response_review` was the no-migration alternative and was REJECTED
 -- (TAC-364 §"The flagged claim: RPC, not response_review"): that column means
 -- "a human reviewed this", and `getReviewedVia` plus the cc-review and
@@ -113,8 +124,14 @@ comment on column messages.review_triggers is
 
 comment on column messages.ungrounded_claims is
   'TAC-364: verbatim claims flagged by the grounding verifier '
-  '(lib/ai/verify-grounding.ts). NULL or empty means none were flagged, or '
-  'the row predates TAC-364.';
+  '(lib/ai/verify-grounding.ts). THREE-STATE: a non-empty array is what it '
+  'flagged; empty means the check RAN and found nothing; NULL means the check '
+  'DID NOT RUN (followup, demo guest, model self-reported a gap, an unreadable '
+  'truncated verdict) or the row predates TAC-364. The empty-vs-NULL '
+  'distinction is deliberate — TAC-367 was filed because a silently-skipped '
+  'grounding check was invisible everywhere, and this column is where that is '
+  'now answerable. Caveat inherited from TAC-367: a TRANSIENT verifier fault '
+  'fails open and records as empty, not NULL.';
 
 -- No index on either. Both are read only via `list_operator_queue`, which is
 -- already bounded by the migration-018 partial index on

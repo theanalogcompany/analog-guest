@@ -36,7 +36,7 @@ export interface QueueDraft {
   category: string | null
   voiceFidelity: number | null
   reviewReason: string | null
-  // TAC-364. The three fields below are Contract-locked and ALWAYS PRESENT —
+  // TAC-364. The four fields below are Contract-locked and ALWAYS PRESENT —
   // an empty array or empty string where there is nothing, never undefined, so
   // the client never branches on presence.
   //
@@ -47,27 +47,42 @@ export interface QueueDraft {
   // were dead. Colour keys on the code; a copy edit below must not be able to
   // reclassify a card.
   reviewReasonCode: string
-  // The full trigger set, PRIMARY INCLUDED, normalized through the same label
-  // map. `[]` when the row predates migration 039 or was written by a path
-  // that never ran the gate — both render as today.
+  // The full trigger set, PRIMARY INCLUDED, as RAW CODES. `[]` when the row
+  // predates migration 039 or was written by a path that never ran the gate.
   //
-  // Two consequences for the client, both stated because neither is visible
-  // from the type:
-  //   1. The primary is in HERE as well as in `reviewReason`, so a card
-  //      rendering both must drop it from this list or it renders twice.
-  //      Including it is deliberate — this field is "everything that fired",
-  //      and a set that silently omitted one member would be a worse thing to
-  //      reason about than a duplicate.
-  //   2. These are LABELS, not codes. That is the Contract's explicit call
-  //      ("normalized through REVIEW_REASON_LABELS exactly as reviewReason
-  //      is"), and it is narrower than what `reviewReasonCode` exists to
-  //      guarantee: a secondary trigger cannot currently drive an icon, a
-  //      grouping or a filter without hitting the same prose-join wall that
-  //      left queue-tone.ts matching nothing. Fine while secondaries are
-  //      display-only; a `reviewTriggerCodes` sibling is the fix if that
-  //      changes, and it is a Contract amendment, not a local decision.
+  // Codes, not prose, for the same reason `reviewReasonCode` exists: a
+  // secondary trigger that arrives as a sentence cannot drive an icon, a
+  // grouping or a filter without the prose join that left queue-tone.ts
+  // matching nothing on every production card. `reviewTriggerLabels` below
+  // carries the display text.
+  //
+  // THE PRIMARY IS IN HERE TOO, deliberately, and the server does NOT dedupe
+  // it. This field means "everything that fired", and a set that silently
+  // omitted one member because it happened to win the priority sort would be a
+  // worse thing to reason about than a duplicate. The client renders
+  // secondaries as `reviewTriggers` minus `reviewReasonCode` — that subtraction
+  // is well defined precisely because both sides are codes.
   reviewTriggers: string[]
-  // Verbatim claims the grounding verifier flagged. `[]` when none.
+  // Display text for `reviewTriggers`, PARALLEL: same length, same order, so
+  // `reviewTriggerLabels[i]` is the label for `reviewTriggers[i]`. Normalized
+  // through REVIEW_REASON_LABELS with the same 'Needs review' fallback
+  // `reviewReason` uses, so an unrecognized code still renders something
+  // rather than leaking a raw identifier to an operator.
+  //
+  // Two arrays rather than an array of pairs because the client indexes them
+  // independently: the colour/grouping logic reads codes and never needs the
+  // prose, and the card body reads prose and never needs the codes. The
+  // index-alignment invariant is asserted in queue.test.ts.
+  reviewTriggerLabels: string[]
+  // Verbatim claims the grounding verifier flagged.
+  //
+  // `[]` here does NOT mean "no information" — see the migration and the
+  // normalizer below. The COLUMN distinguishes "the check never ran" (NULL)
+  // from "it ran and found nothing" (`[]`), because that is the question
+  // TAC-367 existed because nobody could answer. The WIRE deliberately does
+  // not: both collapse to `[]`, since neither produces a UI element and the
+  // Contract's never-branch-on-presence guarantee is worth more to the client
+  // than a distinction it would never act on. Ask the column, not the card.
   ungroundedClaims: string[]
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
@@ -237,13 +252,33 @@ function normalizeReviewReason(raw: string | null): string | null {
  * these beneath it; re-sorting here would throw away the only record of what
  * fired when.
  */
+/**
+ * TAC-364: the raw trigger codes, unmodified.
+ *
+ * `?? []` rather than `=== null`: the column is also ABSENT (undefined) when
+ * this code runs against a pre-039 RPC, which is a real local-dev state even
+ * though the deploy ordering forbids it in production. Both mean "nothing
+ * recorded" to the client, and one nullish check covers both without
+ * pretending to defend against anything else.
+ *
+ * Order is preserved from the DB array, which is enumeration order from
+ * `applyApprovalPolicyStage` — the order the checks fired, NOT priority order.
+ * Re-sorting here would throw away the only record of what fired when.
+ */
 function normalizeReviewTriggers(raw: string[] | null): string[] {
-  // `?? []` rather than `=== null`: the column is also ABSENT (undefined) when
-  // this code runs against a pre-039 RPC, which is a real local-dev state even
-  // though the deploy ordering forbids it in production. Both mean the same
-  // thing to the client, and one nullish check covers both without pretending
-  // to defend against anything else.
-  return (raw ?? []).map(
+  return raw ?? []
+}
+
+/**
+ * TAC-364: display text for `normalizeReviewTriggers`' output, index-aligned.
+ *
+ * Derived from the SAME array in the SAME order rather than mapped separately
+ * at the call site, so the two cannot come out of step. Callers must pass the
+ * already-normalized codes, not the raw column, or the alignment guarantee is
+ * theirs to keep rather than this function's.
+ */
+function toReviewTriggerLabels(codes: string[]): string[] {
+  return codes.map(
     (t) => (REVIEW_REASON_LABELS as Record<string, string>)[t] ?? REVIEW_REASON_FALLBACK,
   )
 }
@@ -253,6 +288,16 @@ function normalizeReviewTriggers(raw: string[] | null): string[] {
  * quotations from the draft body and are shown to the operator as written —
  * there is no label map to run them through, and rewriting them would defeat
  * the point of quoting.
+ *
+ * This collapse is where the column's NULL-vs-`[]` distinction is DELIBERATELY
+ * discarded. NULL means the grounding check never ran (followup, demo guest,
+ * or the model self-reported a gap so the check was skipped) and `[]` means it
+ * ran and found nothing — a real difference, and the one TAC-367 existed
+ * because nobody could answer. It stays a property of the row rather than the
+ * payload because neither state produces anything on the card: both render no
+ * claims. Surfacing it would cost the Contract's never-branch-on-presence
+ * guarantee to tell the client something it would not act on. The observability
+ * question is asked in SQL against `messages.ungrounded_claims`, not here.
  */
 function normalizeUngroundedClaims(raw: string[] | null): string[] {
   return raw ?? []
@@ -308,6 +353,10 @@ export async function listPendingQueue(
 
   const drafts: QueueDraft[] = (data ?? []).map((row) => {
     const createdAt = new Date(row.created_at).getTime()
+    // Computed once and used twice, so the codes and their labels are
+    // guaranteed to be the same array in the same order rather than two
+    // independent normalizations that happen to agree today.
+    const reviewTriggerCodes = normalizeReviewTriggers(row.review_triggers)
     return {
       messageId: row.draft_id,
       venueId: row.venue_id,
@@ -325,7 +374,8 @@ export async function listPendingQueue(
       // `reviewReason`: the whole defect being fixed is that a label is prose
       // that can be edited, and a colour must not move when copy does.
       reviewReasonCode: row.review_reason ?? '',
-      reviewTriggers: normalizeReviewTriggers(row.review_triggers),
+      reviewTriggers: reviewTriggerCodes,
+      reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes),
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),

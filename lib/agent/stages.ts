@@ -1196,12 +1196,30 @@ export type ApprovalDecision =
       primaryTrigger: string
       // TAC-364: the verbatim claims the grounding verifier flagged, threaded
       // to the persist layer so they land on messages.ungrounded_claims and
-      // reach the operator card. Empty on every turn the backstop didn't
-      // flag — including 'truncated', which reports that the check could not
-      // be READ rather than a finding against the reply, so there is nothing
-      // to show. Always an array, never null: the Contract guarantees the
-      // client never branches on presence.
-      ungroundedClaims: string[]
+      // reach the operator card.
+      //
+      // THREE-STATE, and the null is load-bearing:
+      //   string[] non-empty → the check ran and flagged these
+      //   []                 → the check RAN and found nothing
+      //   null               → the check DID NOT RUN
+      //
+      // That last distinction is the question TAC-367 existed because nobody
+      // could answer: a grounding check that silently didn't run was invisible
+      // everywhere, and the whole point of recording this on the row is to be
+      // able to ask it later in SQL. Collapsing "didn't run" into "found
+      // nothing" would rebuild the blind spot in a new column on day one, and
+      // it is free to avoid while the column is new.
+      //
+      // `truncated` maps to NULL, not `[]`: the check ran but produced no
+      // readable verdict, so we have no claim information — which is what NULL
+      // says. `[]` would assert it found nothing, and the paired
+      // review_reason ('grounding_check_failed' → "I couldn't finish checking
+      // this one") already carries the didn't-complete signal, so the two read
+      // coherently together.
+      //
+      // The WIRE still collapses both to `[]` — see QueueDraft in
+      // lib/operator/queue.ts for why the client doesn't get this distinction.
+      ungroundedClaims: string[] | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
       // (regenerate) instead of INSERTing a new pending row. Captured from
@@ -1600,12 +1618,28 @@ export async function applyApprovalPolicyStage(
     action: 'queue',
     triggers,
     primaryTrigger: pickPrimaryTrigger(triggers),
-    // TAC-364. Read off the ONE state that carries claims. `clean` and
-    // `skipped` have none by construction, and `truncated` deliberately has
-    // none either — it means the verdict could not be read, not that a claim
-    // was found, and rendering an empty claim list next to "I couldn't finish
-    // checking this one" is the honest pairing.
-    ungroundedClaims: grounding.status === 'flagged' ? grounding.claims : [],
+    // TAC-364. All four grounding states map here, and the mapping is the
+    // whole point of the field being nullable — see ApprovalDecision above.
+    //
+    //   flagged   → the claims
+    //   clean     → []    the check ran and found nothing
+    //   skipped   → null  the check did not run (followup, demo guest, or the
+    //                     model self-reported a gap so we trusted it)
+    //   truncated → null  it ran but the verdict was unreadable, so we have no
+    //                     claim information — 'grounding_check_failed' on
+    //                     review_reason is what says it didn't complete
+    //
+    // Known and accepted, inherited from TAC-367 rather than introduced here:
+    // a TRANSIENT fault also returns `clean`, so it records as "ran and found
+    // nothing". That indistinguishability IS the fail-open posture, and the
+    // degraded case is reported by captureGroundingVerifierUnavailable rather
+    // than by this column.
+    ungroundedClaims:
+      grounding.status === 'flagged'
+        ? grounding.claims
+        : grounding.status === 'clean'
+          ? []
+          : null,
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
     pendingUntil,

@@ -117,16 +117,24 @@ export interface PersistQueuedDraftOptions {
    * TAC-364: verbatim claims the grounding verifier flagged, landing on
    * `messages.ungrounded_claims`.
    *
-   * Same WRITE behaviour as `reviewTriggers` — omitted nulls the column on
-   * both paths — but deliberately NOT the same null semantics. A gate-queued
-   * draft almost always writes `[]` here (the verifier runs on most inbound
-   * turns and usually finds nothing), so unlike `review_triggers`, NULL and
-   * `[]` are conflated in practice and this column cannot answer "was the
-   * check ever run?". That question belongs to the PostHog/Langfuse trail —
-   * see TAC-367, which exists because a silently-skipped grounding check was
-   * invisible everywhere.
+   * THREE-STATE, and the null carries meaning rather than absence:
+   *   string[] non-empty → the check ran and flagged these
+   *   []                 → the check RAN and found nothing
+   *   null / omitted     → the check DID NOT RUN
+   *
+   * `null` and omitted are the same write (both NULL the column) because they
+   * mean the same thing: a caller that passes null ran the gate and learned
+   * the check was skipped; a caller that omits it never ran the gate at all.
+   * Neither has claim information.
+   *
+   * The distinction exists because TAC-367 was filed over exactly this blind
+   * spot — a grounding check that silently didn't run was invisible
+   * everywhere — and rebuilding it in a brand-new column would have been a
+   * free mistake to avoid. `select count(*) from messages where
+   * review_state='pending' and ungrounded_claims is null` is now a question
+   * with an answer.
    */
-  ungroundedClaims?: string[]
+  ungroundedClaims?: string[] | null
 }
 
 /**
@@ -748,6 +756,10 @@ async function tryQueueInsert(
           // and it is the same value every pre-039 row carries. The projection
           // in lib/operator/queue.ts maps both to [] for the client.
           review_triggers: options.reviewTriggers ?? null,
+          // `?? null` folds omitted and explicit-null together on purpose:
+          // both mean "no claim information", one because the gate never ran
+          // and one because the check inside it didn't. `[]` is a THIRD value
+          // here and survives as itself — see the option's docstring.
           ungrounded_claims: options.ungroundedClaims ?? null,
           pending_commitment: pendingCommitment,
           // TAC-308: arms the holding-message timer. Undefined stays null —

@@ -369,7 +369,11 @@ describe('listPendingQueue', () => {
       }
     })
 
-    it('normalizes every review_triggers entry through the same label map', async () => {
+    it('surfaces reviewTriggers as RAW CODES, unmodified', async () => {
+      // Codes, not prose (TAC-364 ruling 1). The client subtracts
+      // `reviewReasonCode` from this array to get the secondaries, and that
+      // subtraction is only well defined because both sides are codes — the
+      // first spec shipped prose here and would have made it impossible.
       rpcMock.mockResolvedValue({
         data: [
           {
@@ -392,9 +396,76 @@ describe('listPendingQueue', () => {
         // the checks fired — and it is the only record of that. The primary is
         // in the middle here precisely to show it isn't re-sorted to the front.
         expect(result.drafts[0]!.reviewTriggers).toEqual([
+          'fidelity_below_auto_send_floor',
+          'commitment_type_gated',
+          'gibberish_unknown_code',
+        ])
+      }
+    })
+
+    it('surfaces reviewTriggerLabels index-aligned with the codes', async () => {
+      rpcMock.mockResolvedValue({
+        data: [
+          {
+            ...baseRow,
+            review_reason: 'commitment_type_gated',
+            review_triggers: [
+              'fidelity_below_auto_send_floor',
+              'commitment_type_gated',
+              'gibberish_unknown_code',
+            ],
+            ungrounded_claims: null,
+          },
+        ],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        const d = result.drafts[0]!
+        expect(d.reviewTriggerLabels).toEqual([
           "This doesn't sound enough like you.",
           'This offers something free — your call.',
+          // Unrecognized code still renders something rather than leaking a
+          // raw identifier at an operator.
           'Needs review',
+        ])
+        // The alignment invariant the Contract promises, asserted as PAIRS so
+        // a re-sort of either array fails. A `forEach` comparing
+        // `reviewTriggerLabels[i]` to itself would be a tautology, and a bare
+        // length check passes any permutation.
+        expect(d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]])).toEqual([
+          ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
+          ['commitment_type_gated', 'This offers something free — your call.'],
+          ['gibberish_unknown_code', 'Needs review'],
+        ])
+      }
+    })
+
+    it('keeps the primary IN reviewTriggers — the server never dedupes', async () => {
+      // Ruling 2. This field means "everything that fired"; a set that
+      // silently omitted a member because it won the priority sort would be
+      // worse to reason about than a duplicate. The client renders secondaries
+      // as reviewTriggers minus reviewReasonCode.
+      rpcMock.mockResolvedValue({
+        data: [
+          {
+            ...baseRow,
+            review_reason: 'commitment_type_gated',
+            review_triggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
+            ungrounded_claims: null,
+          },
+        ],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        const d = result.drafts[0]!
+        expect(d.reviewTriggers).toContain(d.reviewReasonCode)
+        // And the subtraction the client is expected to perform works.
+        expect(d.reviewTriggers.filter((t) => t !== d.reviewReasonCode)).toEqual([
+          'fidelity_below_auto_send_floor',
         ])
       }
     })
@@ -415,6 +486,7 @@ describe('listPendingQueue', () => {
       expect(result.ok).toBe(true)
       if (result.ok) {
         expect(result.drafts[0]!.reviewTriggers).toEqual([])
+        expect(result.drafts[0]!.reviewTriggerLabels).toEqual([])
         expect(result.drafts[0]!.reviewReason).toBe('Something felt off about this one.')
       }
     })
@@ -478,7 +550,31 @@ describe('listPendingQueue', () => {
       expect(result.ok).toBe(true)
       if (result.ok) {
         expect(result.drafts[0]!.reviewTriggers).toEqual([])
+        expect(result.drafts[0]!.reviewTriggerLabels).toEqual([])
         expect(result.drafts[0]!.ungroundedClaims).toEqual([])
+      }
+    })
+
+    it('collapses the column NULL-vs-[] split at the wire, deliberately', async () => {
+      // The COLUMN distinguishes "the check never ran" (NULL) from "it ran and
+      // found nothing" ([]) — that is TAC-364 ruling 3 and it is asserted at
+      // the gate and persist layers. The WIRE does not: both are `[]`, because
+      // neither produces a UI element and the Contract's
+      // never-branch-on-presence guarantee is worth more to the client than a
+      // distinction it would never act on. Pinned so the collapse reads as a
+      // decision rather than as the distinction having been lost.
+      const rows = [null, []].map((claims) => ({
+        ...baseRow,
+        review_reason: 'model_flagged',
+        review_triggers: null,
+        ungrounded_claims: claims,
+      }))
+      rpcMock.mockResolvedValue({ data: rows, error: null })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.drafts[0]!.ungroundedClaims).toEqual([])
+        expect(result.drafts[1]!.ungroundedClaims).toEqual([])
       }
     })
   })

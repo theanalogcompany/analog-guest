@@ -1181,6 +1181,51 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     expect(payload).not.toHaveProperty('pending_until')
   })
 
+  // TAC-364 ruling 3: the column is three-state and the write path has to
+  // preserve all three. `[]` is NOT a spelling of null here — it is the
+  // positive record that the grounding check ran and found nothing, and the
+  // whole reason to record it is that TAC-367 was filed over a check that
+  // silently didn't run being invisible everywhere.
+  it('writes [] — not null — when the check ran and found nothing', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      reviewTriggers: ['model_flagged'],
+      ungroundedClaims: [],
+    })
+
+    expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
+    expect(scenario.inserts[0]!.ungrounded_claims).not.toBeNull()
+  })
+
+  it('writes null when the caller says the check did not run', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      reviewTriggers: ['model_flagged'],
+      ungroundedClaims: null,
+    })
+
+    expect(scenario.inserts[0]!.ungrounded_claims).toBeNull()
+  })
+
+  it('keeps [] and null distinguishable end to end at the persist boundary', async () => {
+    // The pair, asserted together — a `?? []` or `|| null` anywhere on this
+    // path collapses them and passes each single-state test above.
+    scenario.insertResponses.push({ data: { id: 'a' }, error: null })
+    scenario.insertResponses.push({ data: { id: 'b' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      ungroundedClaims: [],
+    })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      ungroundedClaims: null,
+    })
+
+    expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
+    expect(scenario.inserts[1]!.ungrounded_claims).toBeNull()
+  })
+
   it('nulls BOTH columns on regen when the caller passes no options', async () => {
     // This is the non-gate regen path — the generation-failure card and the
     // operator decline both land here — and it is the one a reader is most

@@ -3404,7 +3404,14 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.ungroundedClaims).toEqual(claims)
   })
 
-  it('is [] — never undefined — when the backstop found nothing', async () => {
+  // The three-state contract (TAC-364 ruling 3). `[]` and `null` are DIFFERENT
+  // answers here and the difference is the point: TAC-367 was filed because a
+  // grounding check that silently didn't run was invisible everywhere, so
+  // "ran and found nothing" must be distinguishable from "never ran" on the
+  // row. Each of the four grounding states gets its own assertion below,
+  // because a single "is falsy when there's nothing" test would pass against a
+  // version that conflated them — which is the bug being avoided.
+  it('is [] — the check RAN and found nothing — on clean', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
@@ -3413,6 +3420,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.ungroundedClaims).toEqual([])
+    expect(decision.ungroundedClaims).not.toBeNull()
   })
 
   // The one that is easy to get backwards. A truncated check means the verdict
@@ -3420,7 +3428,12 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
   // finding against it. It queues (GROUNDING_CHECK_FAILED, fail-closed), but
   // there is no claim to show, and pairing "I couldn't finish checking this
   // one" with a list of flagged claims would be incoherent.
-  it('is [] on a truncated check, which queues but found nothing', async () => {
+  // The one that is easy to get backwards. A truncated check RAN but produced
+  // no readable verdict, so there is no claim information — which is NULL, not
+  // `[]`. `[]` would assert it found nothing, and the paired review_reason
+  // ("I couldn't finish checking this one") already carries the
+  // didn't-complete signal, so NULL is what reads coherently beside it.
+  it('is null on a truncated check — ran, but no readable verdict', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -3429,17 +3442,40 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
-    expect(decision.ungroundedClaims).toEqual([])
+    expect(decision.ungroundedClaims).toBeNull()
   })
 
-  it('is [] when the stage was skipped entirely', async () => {
+  it('is null when the check never ran at all', async () => {
+    // knowledgeGap=true means the model self-reported, so verifyGroundingStage
+    // skips — the exact "didn't run" case the null exists to record.
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: true }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.ungroundedClaims).toEqual([])
+    expect(decision.ungroundedClaims).toBeNull()
+  })
+
+  it('distinguishes ran-and-found-nothing from never-ran', async () => {
+    // The pair, asserted together. A version that collapsed both to `[]` — or
+    // both to null — passes each of the two tests above in isolation only if
+    // they are read separately; this one fails outright, and it is the whole
+    // ruling in one assertion.
+    const ran = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
+      { status: 'clean' as const },
+    )
+    const neverRan = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+      { status: 'skipped' as const },
+    )
+    if (ran.action !== 'queue' || neverRan.action !== 'queue') throw new Error('both queue')
+    expect(ran.ungroundedClaims).not.toEqual(neverRan.ungroundedClaims)
+    expect(ran.ungroundedClaims).toEqual([])
+    expect(neverRan.ungroundedClaims).toBeNull()
   })
 })
 
