@@ -180,8 +180,8 @@ const GATED_TYPES: ReadonlySet<CommitmentType> = new Set(['comp', 'hold', 'disco
  *     never elapses, so the expiry job can never move the row to 'expired'
  *     and an upgraded comp stays open forever.
  *   - leaving the recommendation's own horizon in place means an upgraded
- *     comp carries 30 days where a new comp gets two years — a venue's
- *     obligation dying quietly after a month.
+ *     comp carries the recommendation's own (shorter) horizon rather than
+ *     the comp horizon — a venue's obligation dying quietly early.
  *
  * The fix is neither: TAC-341 owns every expiry derivation, including the
  * upgrade case. Deriving here would put a second derivation site in a file
@@ -957,12 +957,14 @@ export async function findScheduledOpenCommitments(): Promise<
  *     swept into 'expired' on the strength of a null.
  *
  * UNBOUNDED AND FLEET-WIDE, deliberately at pilot scale but worth knowing:
- * no `.limit()` and no venue scoping. Comps live two years, so the open set
- * grows monotonically for two years before the earliest ones age out. If
- * PostgREST's `max-rows` ever truncates this, the `.order('expires_at')`
- * means the truncation favours the soonest-expiring rows — the right
- * direction, and stated here rather than left as luck. Add paging when the
- * fleet is large enough to need it.
+ * no `.limit()` and no venue scoping. The open set grows until the earliest
+ * rows age out, which at the 60-day comp horizon is two months rather than
+ * the two years this comment originally described — a twelvefold smaller
+ * ceiling, and the reason this is now a note rather than a concern. If
+ * PostgREST's `max-rows` ever truncates it, the `.order('expires_at')` means
+ * the truncation favours the soonest-expiring rows — the right direction,
+ * and stated here rather than left as luck. Add paging when the fleet is
+ * large enough to need it.
  */
 export async function findOpenObligations(): Promise<
   RAGResult<GuestCommitmentRow[]>

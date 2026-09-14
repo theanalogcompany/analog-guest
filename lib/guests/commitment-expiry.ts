@@ -45,14 +45,29 @@ export function isObligationType(type: CommitmentType): boolean {
 // ===== Horizons =====
 
 /**
- * How long a comp or discount stays owed. Two years.
+ * How long a comp or discount stays owed. Sixty days.
  *
- * Set by Jaipal, not measured — but unlike the escalation window below, a
- * long horizon is the SAFE direction: the failure mode of too-long is a row
- * sitting in a list, while too-short is a guest refused at the counter for a
- * drink the venue promised them. Deliberately generous for that reason.
+ * REVISED 2026-09-14, down from two years, and the reasoning inverted rather
+ * than merely tightened — so do not read this as the old constant with a
+ * smaller number. At two years expiry was DECORATIVE: escalation at 7 days
+ * was the entire live mechanism and the horizon existed only so the row had a
+ * terminal state to reach eventually. At 60 days expiry actually fires — a
+ * comp offered in September is gone by mid-November.
+ *
+ * That is a deliberate change to the promise, not a tuning pass. It is
+ * defensible for a café, where an unclaimed free drink two months on is
+ * unlikely to ever be claimed, and it makes the 7-day escalation
+ * proportionate: an eighth of the obligation's life rather than noise against
+ * 730 days.
+ *
+ * The superseded docstring argued that long was the SAFE direction, because
+ * too-short refuses a guest at the counter for a drink the venue promised.
+ * That risk is real and is now accepted rather than dismissed — 60 days is
+ * the window in which the venue considers the promise live.
+ *
+ * Set by Jaipal, still not measured. Same caveat as COMP_ESCALATION_DAYS.
  */
-export const COMP_EXPIRY_YEARS = 2
+export const COMP_EXPIRY_DAYS = 60
 
 /**
  * How long a comp or discount may sit open before a human is told about it.
@@ -278,7 +293,7 @@ export function deriveExpiresAt(input: DeriveExpiryInput): DeriveExpiryResult {
 
   if (type === 'comp' || type === 'discount') {
     const expiresAt = new Date(createdAt)
-    expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + COMP_EXPIRY_YEARS)
+    expiresAt.setUTCDate(expiresAt.getUTCDate() + COMP_EXPIRY_DAYS)
     return { expiresAt, escalateImmediately: false }
   }
 
