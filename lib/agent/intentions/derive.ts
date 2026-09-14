@@ -227,6 +227,13 @@ export interface DeriveOpenIntentionsInput {
    * it?" could follow a re-suggestion in the same exchange.
    */
   openRecommendationTouchedTimes: readonly Date[]
+  /**
+   * True when the open recommendations couldn't be read. got_the_recommendation
+   * is then held for the turn: that read fails closed (ruling 4), where an empty
+   * list would silently lift the hold. Orders need no equivalent: a failed
+   * visit-history read fails the whole context build.
+   */
+  openRecommendationsUnreadable: boolean
   /** occurred_at of this guest's recorded orders at this venue, in any order. */
   recordedOrderTimes: readonly Date[]
   /** null means the rows could not be read, and the derivation fails CLOSED: nothing renders. */
@@ -257,15 +264,20 @@ interface Arming {
   eventAt: Date
 }
 
-/** Returned instead of an arming while an intention's newest event is still mid-conversation. */
-const MID_CONVERSATION = 'mid_conversation'
+/**
+ * Returned instead of an arming when an intention is held for the turn: its
+ * newest event is still mid-conversation (ruling 2), or, for recommendations,
+ * the events couldn't be read, so the hold can't be judged and fails closed
+ * (ruling 4). The turn is skipped, never the intention.
+ */
+const HELD = 'held'
 
 /**
  * The NEWEST event, armed once it has left the conversation it happened in
  * (ruling 2). The anchor is the moment it left.
  *
  * While that newest event is still mid-conversation this returns
- * MID_CONVERSATION and never falls back to an older event. The rendered line
+ * HELD and never falls back to an older event. The rendered line
  * doesn't say which event it is about, and ## Active commitments lists every
  * open recommendation, so arming off an older one would let the model ask about
  * the one it just suggested, in the exchange where it suggested it. Found in
@@ -279,7 +291,7 @@ function newestEventArming(
   conversationWindowMs: number,
   now: number,
   touchedTimes: readonly Date[] = [],
-): Arming | typeof MID_CONVERSATION | null {
+): Arming | typeof HELD | null {
   let newest: number | null = null
   for (const time of times) {
     const at = time.getTime()
@@ -287,8 +299,8 @@ function newestEventArming(
     if (newest === null || at > newest) newest = at
   }
   if (newest === null) return null
-  if (newest + conversationWindowMs > now) return MID_CONVERSATION // still the conversation it happened in
-  if (touchedTimes.some((t) => t.getTime() + conversationWindowMs > now)) return MID_CONVERSATION // re-suggested in this conversation
+  if (newest + conversationWindowMs > now) return HELD // still the conversation it happened in
+  if (touchedTimes.some((t) => t.getTime() + conversationWindowMs > now)) return HELD // re-suggested in this conversation
   return { eventAt: new Date(newest), eligibleAt: new Date(newest + conversationWindowMs) }
 }
 
@@ -318,7 +330,7 @@ function newestEventArming(
 function armingFor(
   def: IntentionDefinition,
   input: DeriveOpenIntentionsInput,
-): Arming | typeof MID_CONVERSATION | null {
+): Arming | typeof HELD | null {
   const now = input.now.getTime()
   switch (def.armsOn.kind) {
     case 'qr_scan_enrollment':
@@ -328,6 +340,10 @@ function armingFor(
     case 'first_contact':
       return { eligibleAt: input.now, eventAt: input.now }
     case 'open_recommendation':
+      // Fail closed (ruling 4): with the recommendations unreadable the hold
+      // can't be judged, so hold rather than let "did you try it?" follow a
+      // suggestion made in this exchange.
+      if (input.openRecommendationsUnreadable) return HELD
       return newestEventArming(
         input.openRecommendationTimes,
         input.conversationWindowMs,
@@ -396,7 +412,9 @@ function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): b
  *
  * WHILE AN EVENT-ARMED INTENTION'S NEWEST EVENT IS MID-CONVERSATION it neither
  * arms nor renders, even off an older event, and even as an already-open row.
- * The turn is skipped, not the intention (newestEventArming).
+ * The turn is skipped, not the intention (newestEventArming). If the open
+ * recommendations couldn't be read, got_the_recommendation is held the same way:
+ * that read fails closed (ruling 4).
  */
 export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOpenIntentionsResult {
   if (input.rows === null) return { open: [], newlyEligible: [], brakeEngaged: false }
@@ -425,9 +443,9 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
   }
 
   const newlyEligible: NewlyEligibleIntention[] = []
-  // Event-armed intentions whose newest event is still mid-conversation. None of
-  // them renders this turn, open row or not; the intentions themselves are kept.
-  const midConversation = new Set<IntentionKey>()
+  // Event-armed intentions held this turn (see HELD). None of them renders,
+  // open row or not; the intentions themselves are kept.
+  const held = new Set<IntentionKey>()
   for (const def of INTENTION_DEFINITIONS) {
     const existing = entries.get(def.key)
     // Sticky unless this intention re-arms: an existing row decides.
@@ -438,8 +456,8 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
     if (existing === undefined && keysWithRows.has(def.key) && rearmsOnNewerEvent(def.armsOn)) continue
 
     const armed = armingFor(def, input)
-    if (armed === MID_CONVERSATION) {
-      midConversation.add(def.key)
+    if (armed === HELD) {
+      held.add(def.key)
       continue
     }
     if (armed === null) continue
@@ -473,7 +491,7 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
     open: brakeEngaged
       ? []
       : deriveIntentionState({ entries, facts: input.facts, now: input.now }).filter(
-          (o) => !midConversation.has(o.key),
+          (o) => !held.has(o.key),
         ),
     newlyEligible,
     brakeEngaged,

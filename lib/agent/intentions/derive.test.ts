@@ -47,6 +47,7 @@ function input(overrides: Partial<DeriveOpenIntentionsInput> = {}): DeriveOpenIn
     facts: NO_FACTS,
     openRecommendationTimes: [],
     openRecommendationTouchedTimes: [],
+    openRecommendationsUnreadable: false,
     recordedOrderTimes: [],
     rows: { prompted: [], eligible: [] },
     inboundTimes: [NOW],
@@ -301,6 +302,51 @@ describe('deriveOpenIntentions — arming', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
+  })
+
+  // Fail closed (ruling 4). With the open recommendations unreadable the hold
+  // can't be judged, and an empty list would silently lift it. Found in review.
+  it('holds got_the_recommendation when the open recommendations could not be read', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        openRecommendationsUnreadable: true,
+        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: hoursAgo(12) }] },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('got_the_recommendation')
+  })
+
+  // Touched times hold; they never arm. Arming off them would arm a months-old
+  // recommendation off the moment it was re-suggested.
+  it('never arms off a touched time', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        openRecommendationTimes: [daysAgo(90)],
+        openRecommendationTouchedTimes: [hoursAgo(60)],
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+  })
+
+  // Nor re-arm. A re-suggestion lands on the same row (TAC-318 dedup), so it is a
+  // repeat of what was already asked, not a newer event.
+  it('never re-arms off a touched time', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        openRecommendationTimes: [daysAgo(90)],
+        openRecommendationTouchedTimes: [hoursAgo(60)],
+        rows: {
+          prompted: [promptedRow('got_the_recommendation', daysAgo(80), { eligibleAt: daysAgo(88) })],
+          eligible: [],
+        },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
   })
 
   // A re-armable row with no anchor could never be stamped closed. Nothing writes

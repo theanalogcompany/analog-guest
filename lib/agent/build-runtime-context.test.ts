@@ -57,9 +57,24 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
     expect(query.slice(0, query.indexOf('.limit('))).toContain(".order('occurred_at', { ascending: false })")
   })
 
-  // The hold reads recommendation updated_at, which a TAC-318 dedup bumps.
+  // The hold reads recommendation updated_at, which a TAC-318 dedup bumps. The
+  // block is pinned whole: without the type filter a comp's updates would hold
+  // the intention, and without the .ok guard it would read a failed result.
   it('hands recommendation updated_at to the derivation for the mid-conversation hold', () => {
-    expect(src).toMatch(/\.map\(\(row\) => new Date\(row\.updated_at\)\)/)
+    const start = src.indexOf('const openRecommendationTouchedTimes =')
+    expect(start).toBeGreaterThan(-1)
+    const block = src.slice(start, src.indexOf('\n\n', start))
+    expect(block).toContain('(activeCommitmentsResult.ok ? activeCommitmentsResult.data : [])')
+    expect(block).toContain(".filter((row) => row.type === 'recommendation')")
+    expect(block).toContain('.map((row) => new Date(row.updated_at))')
     expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationTouchedTimes,\n/)
+  })
+
+  // Fail closed (ruling 4): a failed commitments read holds the intention rather
+  // than silently lifting the hold.
+  it('tells the derivation when the open recommendations could not be read', () => {
+    expect(src).toMatch(
+      /deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationsUnreadable: !activeCommitmentsResult\.ok,\n/,
+    )
   })
 })

@@ -427,7 +427,8 @@ export async function buildRuntimeContext(input: {
     // bumps updated_at and never created_at. Other writes to the row bump it too
     // (arrival capture, pending_ack), which only holds more often: the direction
     // that fails toward not asking. Raw rows, because ActiveCommitment doesn't
-    // carry updated_at.
+    // carry updated_at. A failed read doesn't lift the hold:
+    // openRecommendationsUnreadable holds got_the_recommendation outright.
     const openRecommendationTouchedTimes = (activeCommitmentsResult.ok ? activeCommitmentsResult.data : [])
       .filter((row) => row.type === 'recommendation')
       .map((row) => new Date(row.updated_at))
@@ -474,6 +475,7 @@ export async function buildRuntimeContext(input: {
       }),
       openRecommendationTimes,
       openRecommendationTouchedTimes,
+      openRecommendationsUnreadable: !activeCommitmentsResult.ok,
       recordedOrderTimes,
       rows: intentionRows,
       inboundTimes,
