@@ -2,7 +2,13 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
 import { PROMPT_VERSION } from './prompts/system-template'
-import { formatTimeDelta, personaToProse, venueInfoToProse } from './prompts/serializers'
+import {
+  formatTimeDelta,
+  historyDeliveryMarker,
+  personaToProse,
+  UNSENT_HISTORY_NOTE,
+  venueInfoToProse,
+} from './prompts/serializers'
 import type { AIResult, ClassifyMessageInput, ClassifyMessageResult, RecentMessage } from './types'
 
 // Cap inbound length sent to the classifier. Generation still gets the full body.
@@ -88,14 +94,19 @@ Return your classification with a confidence score (DECIMAL between 0.0 and 1.0,
 
 // Reuses formatTimeDelta from generation so phrasing stays consistent. Header
 // is plain (not `##`-prefixed) since the classifier user prompt isn't markdown.
+//
+// TAC-394: unsent lines carry the same marker the generator's block uses, and
+// the same one-sentence note.
 function formatClassifierRecentConversation(messages: readonly RecentMessage[]): string {
   const now = new Date()
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
-    return `[${speaker}, ${delta}] ${m.body}`
+    const marker = historyDeliveryMarker(m.delivery)
+    return marker === null ? `[${speaker}, ${delta}] ${m.body}` : `[${speaker}, ${delta}, ${marker}] ${m.body}`
   })
-  return `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
+  const block = `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
+  return messages.some((m) => m.delivery !== 'delivered') ? `${block}\n${UNSENT_HISTORY_NOTE}` : block
 }
 
 /**

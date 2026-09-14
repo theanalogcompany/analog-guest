@@ -14,6 +14,7 @@ import type {
   FollowupReason,
   KnowledgeCorpusChunk,
   MessageCategory,
+  MessageDelivery,
   PendingQuestion,
   RecentMessage,
   RuntimeContext,
@@ -489,15 +490,56 @@ function normalizeHistoryBody(body: string): string {
   return `${collapsed.slice(0, MAX_HISTORY_BODY_CHARS)}…`
 }
 
+// TAC-394: the bracket marker for a history line the guest never received, or
+// null for one they did. Shared with the classifier's renderer
+// (lib/ai/classify-message.ts) so the two cannot describe the same line
+// differently. An exhaustive switch, so a new MessageDelivery value fails tsc
+// here rather than rendering as if it were sent.
+//
+// Every marker says WHY the line never arrived, not only that it did not. A
+// draft the venue decided against and a send that failed both went unread, but
+// only the first was a decision, and "never sent" with no reason can nudge the
+// model to raise what an operator rejected (2026-09-14 ruling).
+export function historyDeliveryMarker(delivery: MessageDelivery): string | null {
+  switch (delivery) {
+    case 'delivered':
+      return null
+    case 'awaiting_review':
+      return 'NOT SENT: waiting for the venue to approve it'
+    case 'skipped_by_operator':
+      return 'NOT SENT: the venue decided not to send it'
+    case 'never_sent':
+      return 'NEVER SENT: it failed to send'
+  }
+}
+
+// TAC-394: renders whenever any line carries a marker. Shared with the
+// classifier for the same reason as the marker itself.
+export const UNSENT_HISTORY_NOTE =
+  'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
+
 function formatRecentConversation(messages: readonly RecentMessage[], now: Date): string | null {
   if (messages.length === 0) return null
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const body = normalizeHistoryBody(m.body)
-    return `[${speaker}, ${delta}] ${body}`
+    const marker = historyDeliveryMarker(m.delivery)
+    return marker === null ? `[${speaker}, ${delta}] ${body}` : `[${speaker}, ${delta}, ${marker}] ${body}`
   })
-  return `## Recent conversation\n${lines.join('\n')}`
+  const block = `## Recent conversation\n${lines.join('\n')}`
+  // A history with nothing unsent renders exactly as it did before TAC-394:
+  // the note is appended only when a marker is present.
+  //
+  // Deliberately no instruction about what to do with an unsent line. v1.50.0
+  // was first built with one: the reply takes the pending draft's place, so
+  // offer a pending comp, hold or discount again. On the incident turn it
+  // produced replies answering two things at once that kept em dashes and
+  // sometimes self-rated voice fidelity 0.00, which generateStage refuses. The
+  // 2026-09-14 ruling removed it. Keeping a pending obligation from being
+  // overwritten is the gate's job (TAC-394 PR 2), not the prompt's.
+  if (!messages.some((m) => m.delivery !== 'delivered')) return block
+  return `${block}\n\n${UNSENT_HISTORY_NOTE}`
 }
 
 // TAC-244: human-readable label for a FollowupReason. Internal taxonomy

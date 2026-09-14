@@ -108,9 +108,18 @@ export async function buildRuntimeContext(input: {
   // enforced in the sender (TAC-319: resolveDispatchBubbles never splits past
   // MAX_BUBBLES_PER_RESPONSE sentences), so this many rows can never yield
   // fewer than MAX_HISTORY_MESSAGES groups.
+  //
+  // TAC-394: no row is filtered on delivery. An unsent draft stays in history
+  // and is MARKED unsent instead (see deriveDelivery in group-responses.ts).
+  // Leaving it out would hide a pending comp from the model, which would then
+  // offer the comp a second time. That holds for the first 200 characters: the
+  // line is truncated like any other, and pending_commitment never reaches the
+  // prompt. The two delivery columns are what the mark is derived from;
+  // body <> '' is unchanged, so a blank gap card is still absent here and
+  // reaches the prompt through ## Unanswered question.
   let messagesQuery = supabase
     .from('messages')
-    .select('id, direction, body, created_at, generation_id')
+    .select('id, direction, body, created_at, generation_id, status, review_state')
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
     .neq('body', '')

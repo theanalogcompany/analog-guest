@@ -186,7 +186,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.49.0')
+      expect(r.data.promptVersion).toBe('v1.50.0')
     })
   }
 })
@@ -281,14 +281,60 @@ describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
     await classifyMessage({
       inboundBody: 'do you have oat milk?',
       recentMessages: [
-        { direction: 'inbound', body: 'hi', createdAt: new Date(now - 5 * 60_000) },
-        { direction: 'outbound', body: "hey, what's up", createdAt: new Date(now - 4 * 60_000) },
+        { direction: 'inbound', body: 'hi', createdAt: new Date(now - 5 * 60_000), delivery: 'delivered' },
+        { direction: 'outbound', body: "hey, what's up", createdAt: new Date(now - 4 * 60_000), delivery: 'delivered' },
       ],
     })
     const prompt = await getCapturedUserPrompt()
     expect(prompt).toContain('Recent conversation (most recent at the bottom):')
     expect(prompt).toContain('[guest, 5 minutes ago] hi')
     expect(prompt).toContain("[venue, 4 minutes ago] hey, what's up")
+    // TAC-394: nothing unsent, so no marker and no note.
+    expect(prompt).not.toContain('NOT SENT')
+    expect(prompt).not.toContain('never reached the guest')
+  })
+
+  it('marks lines the guest never received, and says why (TAC-394)', async () => {
+    const now = Date.now()
+    await classifyMessage({
+      inboundBody: 'what time do you open on sundaus',
+      recentMessages: [
+        {
+          direction: 'inbound',
+          body: 'the cortado i got this morning was cold and bad',
+          createdAt: new Date(now - 5 * 60_000),
+          delivery: 'delivered',
+        },
+        {
+          direction: 'outbound',
+          body: "Really sorry to hear that. Come back in and the next one's on us.",
+          createdAt: new Date(now - 4 * 60_000),
+          delivery: 'awaiting_review',
+        },
+        {
+          direction: 'outbound',
+          body: 'skipped one',
+          createdAt: new Date(now - 3 * 60_000),
+          delivery: 'skipped_by_operator',
+        },
+        { direction: 'outbound', body: 'failed one', createdAt: new Date(now - 2 * 60_000), delivery: 'never_sent' },
+      ],
+    })
+    const prompt = await getCapturedUserPrompt()
+    // Exact. Prompt parts are joined with a blank line and this block has none
+    // inside, so header to next blank line is the whole block, and anything
+    // appended after the note fails this however it is worded.
+    const start = prompt.indexOf('Recent conversation (most recent at the bottom):')
+    expect(start).toBeGreaterThan(-1)
+    const end = prompt.indexOf('\n\n', start)
+    expect(prompt.slice(start, end === -1 ? undefined : end)).toBe(
+      'Recent conversation (most recent at the bottom):\n' +
+        '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
+        "[venue, 4 minutes ago, NOT SENT: waiting for the venue to approve it] Really sorry to hear that. Come back in and the next one's on us.\n" +
+        '[venue, 3 minutes ago, NOT SENT: the venue decided not to send it] skipped one\n' +
+        '[venue, 2 minutes ago, NEVER SENT: it failed to send] failed one\n' +
+        'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.',
+    )
   })
 
   it('omits recent conversation block when recentMessages is empty', async () => {

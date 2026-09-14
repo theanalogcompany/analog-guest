@@ -78,3 +78,53 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
     )
   })
 })
+
+// TAC-394: nothing runs buildRuntimeContext for real under test, and a
+// Supabase mock ignores its select() argument, so the history query's columns
+// are pinned at the source. Dropping one would make every row read as its
+// defaults in deriveDelivery with no test failing anywhere else.
+describe('buildRuntimeContext: history delivery (TAC-394)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const query = src.slice(
+    src.indexOf('let messagesQuery = supabase'),
+    src.indexOf('const visitHistoryCutoffIso', src.indexOf('let messagesQuery = supabase')),
+  )
+
+  it('selects the columns deriveDelivery reads', () => {
+    expect(query.length).toBeGreaterThan(0)
+    for (const column of ['status', 'review_state']) {
+      expect(query).toMatch(new RegExp(`\\.select\\('[^']*\\b${column}\\b`))
+    }
+  })
+
+  // Excluding unsent rows was considered and ruled out: a pending comp the
+  // model cannot see is one it offers again (TAC-398).
+  it('does not filter the history query on delivery', () => {
+    expect(query).toContain('historyEndIso')
+    expect(query).not.toMatch(/\.(eq|neq|in|not|is|filter|or|match)\([^)]*\b(status|review_state)\b/)
+  })
+
+  // A filter on the rows before grouping, or chained after it, is the same
+  // exclusion by another route, and the query-side assertion above cannot see
+  // either. So the grouping statement is pinned whole: its argument is the raw
+  // query result, nothing is chained after the call, and the raw rows reach no
+  // other code that could drop some first. A first version matched only the
+  // literal `recentMessages.filter(` and passed both of those mutants.
+  it('groups the raw history rows and returns them without filtering', () => {
+    expect(src).toContain(
+      '  const recentMessages: RecentMessage[] = groupIntoResponses(\n' +
+        '    messagesResult.data ?? [],\n' +
+        '    MAX_HISTORY_MESSAGES,\n' +
+        '  )\n\n',
+    )
+    // The call above, and the rowsFetched count in the trace span.
+    expect([...src.matchAll(/messagesResult\.data\b/g)]).toHaveLength(2)
+    const filters = [...src.matchAll(/recentMessages\.filter\(/g)]
+    expect(filters).toHaveLength(1)
+    // The one allowed filter reads inbound timestamps for the intention brake.
+    expect(src.slice(filters[0]!.index!, filters[0]!.index! + 80)).toContain("m.direction === 'inbound'")
+    const returned = src.slice(src.indexOf('  return {\n    agentRunId: input.agentRunId,'))
+    expect(returned.length).toBeGreaterThan(0)
+    expect(returned).toMatch(/\n\s+recentMessages,\n/)
+  })
+})

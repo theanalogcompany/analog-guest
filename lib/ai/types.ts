@@ -97,10 +97,25 @@ export type KnowledgeCorpusChunk = {
   relevanceScore?: number
 }
 
+// TAC-394: whether the guest actually received a history line. The history
+// query returns unsent drafts beside sent messages, and before this field both
+// rendered identically, so a model regenerating a pending comp draft read the
+// comp as already said. Derived once, in lib/agent/group-responses.ts.
+// The unsent values say why, because the marker does:
+//   delivered            inbound, or outbound that reached the guest
+//   awaiting_review      a pending draft the venue has not decided on yet
+//   skipped_by_operator  a draft the venue decided not to send
+//   never_sent           a failed send, a dispatch that never went out, or an
+//                        outbound status nobody has mapped
+export type MessageDelivery = 'delivered' | 'awaiting_review' | 'skipped_by_operator' | 'never_sent'
+
 export type RecentMessage = {
   direction: 'inbound' | 'outbound'
   body: string
   createdAt: Date
+  // Required, not optional: a missing value defaulting to delivered is the
+  // defect this field exists to remove, so every construction site decides.
+  delivery: MessageDelivery
 }
 
 // One transaction projected for the agent prompt (TAC-234). Replaces the
