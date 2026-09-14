@@ -89,6 +89,52 @@ export interface PersistQueuedDraftOptions {
    * IS what shipped.)
    */
   blankBody?: boolean
+  /**
+   * TAC-364: the FULL approval-trigger set for this draft, primary included.
+   * Lands on `messages.review_triggers` (migration 039) beside the
+   * priority-selected `review_reason`, so a co-firing turn can tell the
+   * operator that a second condition applied instead of silently dropping it.
+   *
+   * Omitted → the column is WRITTEN AS NULL, on both the INSERT and the regen
+   * UPDATE. It is NOT preserve-by-default, and the distinction matters because
+   * `pendingUntil` above IS preserve-by-default and sits two fields away: a
+   * reader who generalises from that one gets this backwards. Omission nulls,
+   * because the trigger set describes THIS draft — a regen that no longer
+   * commits a comp must not keep the previous attempt's trigger, and the two
+   * non-gate callers (the generation-failure card, the operator decline) never
+   * ran `applyApprovalPolicyStage` and so have no trigger SET to record at
+   * all, only the single reason they stamp themselves.
+   *
+   * NULL and `[]` are genuinely different values here, not two spellings of
+   * empty: the gate returns `send` when nothing fired, so a queued draft's set
+   * is never empty, and NULL therefore means "no gate ran for this row" (or
+   * the row predates migration 039) rather than "the gate ran and found
+   * nothing". The projection in lib/operator/queue.ts folds both to `[]` for
+   * the client, which is a display decision, not a claim they're equivalent.
+   */
+  reviewTriggers?: string[]
+  /**
+   * TAC-364: verbatim claims the grounding verifier flagged, landing on
+   * `messages.ungrounded_claims`.
+   *
+   * THREE-STATE, and the null carries meaning rather than absence:
+   *   string[] non-empty → the check ran and flagged these
+   *   []                 → the check RAN and found nothing
+   *   null / omitted     → the check DID NOT RUN
+   *
+   * `null` and omitted are the same write (both NULL the column) because they
+   * mean the same thing: a caller that passes null ran the gate and learned
+   * the check was skipped; a caller that omits it never ran the gate at all.
+   * Neither has claim information.
+   *
+   * The distinction exists because TAC-367 was filed over exactly this blind
+   * spot — a grounding check that silently didn't run was invisible
+   * everywhere — and rebuilding it in a brand-new column would have been a
+   * free mistake to avoid. `select count(*) from messages where
+   * review_state='pending' and ungrounded_claims is null` is now a question
+   * with an answer.
+   */
+  ungroundedClaims?: string[] | null
 }
 
 /**
@@ -704,6 +750,17 @@ async function tryQueueInsert(
           status: 'pending_review',
           review_state: 'pending',
           review_reason: primaryTrigger,
+          // TAC-364: the full set beside the primary. `?? null` rather than
+          // `?? []` — a null column means "nobody recorded a trigger set for
+          // this row", which is honestly different from "the set was empty",
+          // and it is the same value every pre-039 row carries. The projection
+          // in lib/operator/queue.ts maps both to [] for the client.
+          review_triggers: options.reviewTriggers ?? null,
+          // `?? null` folds omitted and explicit-null together on purpose:
+          // both mean "no claim information", one because the gate never ran
+          // and one because the check inside it didn't. `[]` is a THIRD value
+          // here and survives as itself — see the option's docstring.
+          ungrounded_claims: options.ungroundedClaims ?? null,
           pending_commitment: pendingCommitment,
           // TAC-308: arms the holding-message timer. Undefined stays null —
           // only a knowledge-gap draft gets a clock.
@@ -717,8 +774,24 @@ async function tryQueueInsert(
           // it. Given this repo's history with unauthorized comps, a model
           // that could not ground an answer does not get to bind one
           // invisibly.
+          // TAC-364: `ungrounded_claims` is nulled here too — a claim is a
+          // quotation FROM the body, and there is no body on a blank card, so
+          // keeping it would point the operator at text they cannot see.
+          // `review_triggers` deliberately SURVIVES blanking: why the card
+          // exists is still true and still renders, body or no body.
+          //
+          // On the gate path this is belt-and-braces — `blankBody` keys on the
+          // self-reported gap, and verifyGroundingStage only runs when the
+          // model did NOT self-report, so the two can't both be set. It is
+          // load-bearing for the direct callers (the generation-failure card)
+          // and for any future one that doesn't inherit that exclusion.
           ...(options.blankBody === true
-            ? { body: '', voice_fidelity: null, pending_commitment: null }
+            ? {
+                body: '',
+                voice_fidelity: null,
+                pending_commitment: null,
+                ungrounded_claims: null,
+              }
             : {}),
         }),
       )
@@ -805,6 +878,16 @@ async function tryRegenUpdate(
       // See the INSERT path: a blank card must not carry an invisible
       // commitment the operator would unknowingly authorize on send.
       pending_commitment: blank ? null : pendingCommitment,
+      // TAC-364: OVERWRITE-WHOLESALE, like pending_commitment directly above
+      // and UNLIKE pending_until directly below. The distinction is the point,
+      // and the three columns sitting together is why it's written down: both
+      // of these describe THIS draft. A regen that no longer fabricates must
+      // not keep the previous attempt's flagged claim, and a regen that no
+      // longer commits a comp must not keep its trigger. `pending_until`
+      // describes the GUEST'S wait, which the regen didn't reset, so that one
+      // is preserved.
+      review_triggers: options.reviewTriggers ?? null,
+      ungrounded_claims: blank ? null : (options.ungroundedClaims ?? null),
     }
     // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
     // omitted from the payload unless the caller explicitly passed a new

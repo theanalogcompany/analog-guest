@@ -30,6 +30,7 @@ import {
   computeFirstTouchAfterQrScan,
   findPendingDraft,
   generateStage,
+  GENERATION_FAILED_REVIEW_REASON,
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_WINDOW_MS,
   type GroundingBackstopResult,
@@ -180,7 +181,17 @@ async function persistGenerationFailureCard(
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      // TAC-364: its OWN review_reason, not KNOWLEDGE_GAP. TAC-309 reused the
+      // gap value to inherit the timer, the holding message and the priority
+      // wiring for free — all of which still work, because none of them key on
+      // review_reason (the timer scans pending_until; isKnowledgeGapCard and
+      // findPendingQuestion both gained this value in the same change). What
+      // the reuse cost was the operator-facing copy: a crash card read "a
+      // guest asked something I don't have an answer for", which is not what
+      // happened. `review_triggers` is deliberately NOT passed — this path
+      // never ran the gate, so there is no trigger SET to record, only the one
+      // reason it stamps itself.
+      GENERATION_FAILED_REVIEW_REASON,
       existing?.id ?? null,
       { pendingUntil, blankBody: true },
     )
@@ -194,8 +205,8 @@ async function persistGenerationFailureCard(
       agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
-      triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
-      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      triggers: [GENERATION_FAILED_REVIEW_REASON],
+      primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
       voiceFidelity: 0,
       modelRequiresApproval: false,
       modelApprovalReason: '',
@@ -208,7 +219,11 @@ async function persistGenerationFailureCard(
       inboundBody: ctx.currentMessage?.body ?? null,
       generatedBody: '',
     })
-    if (shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)) {
+    // shouldSendDraftFlaggedPush fails OPEN on any value outside PUSH_POLICY's
+    // total map, so `generation_failed` pushes — which is what this card wants
+    // (nobody is coming to look at it otherwise) and is asserted in
+    // push-policy.test.ts rather than left to be inferred from the default.
+    if (shouldSendDraftFlaggedPush(GENERATION_FAILED_REVIEW_REASON)) {
       waitUntil(
         sendDraftFlaggedPush({
           agentRunId,
@@ -216,7 +231,7 @@ async function persistGenerationFailureCard(
           guestId: ctx.guest.id,
           guestFirstName: ctx.guest.firstName,
           draftId: persisted.outboundMessageId,
-          primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+          primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
         }).catch(() => {}),
       )
     }
@@ -620,10 +635,16 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       // TAC-309: two failures in a row, and the guest is waiting. Route to
       // the operator queue instead of returning silence. A crash is
       // functionally "couldn't produce an answer" — the same condition
-      // knowledge_gap already handles, on a surface that already exists.
-      // Reusing review_reason='knowledge_gap' means the timer, the holding
-      // message, and PRIMARY_TRIGGER_PRIORITY all work unchanged; crashes
-      // stay separately visible because the red alert above Slack-relays.
+      // knowledge_gap already handles, on a surface that already exists, so
+      // the card gets that whole mechanism: the timer, the holding message,
+      // the eviction protection.
+      //
+      // TAC-364 splits the LABEL off that mechanism. The card now carries
+      // review_reason='generation_failed' so the operator reads "something
+      // went wrong writing this one" rather than a claim about what the guest
+      // asked. Everything else is unchanged — see persistGenerationFailureCard
+      // and isKnowledgeGapCard for why the split needed both predicates
+      // widened to keep it.
       const card = await persistGenerationFailureCard(ctx, agentRunId)
       if (card.kind === 'carded') {
         trace.update({
@@ -632,8 +653,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         return {
           status: 'queued',
           outboundMessageId: card.outboundMessageId,
-          triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
-          primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+          triggers: [GENERATION_FAILED_REVIEW_REASON],
+          primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
         }
       }
       return { status: 'failed', stage: 'generation', error: gen.error }
@@ -973,7 +994,15 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           // otherwise — see applyApprovalPolicyStage for the full table.
           // TAC-309: blankBody discards the model's attempted answer on a
           // knowledge-gap card so the operator types rather than swipes.
-          { pendingUntil: approval.pendingUntil, blankBody: approval.blankBody },
+          // TAC-364: the full trigger set and the verifier's flagged claims,
+          // so a co-firing turn reaches the operator with more than the one
+          // priority-selected label.
+          {
+            pendingUntil: approval.pendingUntil,
+            blankBody: approval.blankBody,
+            reviewTriggers: approval.triggers,
+            ungroundedClaims: approval.ungroundedClaims,
+          },
         )
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({

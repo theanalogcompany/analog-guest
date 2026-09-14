@@ -30,6 +30,10 @@ interface MockState {
   // Capture every .in() call on guest_states (guest_id + venue_id) so tests
   // can assert both the scoping shape and the deduped guest_id set.
   stateSelectInCalls: Array<{ field: string; values: unknown[] }>
+  // TAC-364: the select() argument on guest_commitments. The chain ignores it,
+  // so a projection test alone cannot tell a fetched column from a fabricated
+  // one — capturing it is the only way to assert the column is actually read.
+  commitmentSelectCols: string
 }
 
 function newState(overrides: Partial<MockState> = {}): MockState {
@@ -39,6 +43,7 @@ function newState(overrides: Partial<MockState> = {}): MockState {
     stateRows: [],
     stateError: null,
     stateSelectInCalls: [],
+    commitmentSelectCols: '',
     ...overrides,
   }
 }
@@ -48,7 +53,10 @@ function makeSupabase(state: MockState) {
     from: (table: string) => {
       if (table === 'guest_commitments') {
         const chain = {
-          select: (_cols: string) => chain,
+          select: (cols: string) => {
+            state.commitmentSelectCols = cols
+            return chain
+          },
           eq: (_field: string, _value: unknown) => chain,
           in: (_field: string, _values: unknown[]) => chain,
           order: (_field: string, _opts: unknown) => chain,
@@ -90,6 +98,7 @@ function makeCommitmentRow(overrides: Record<string, unknown> = {}) {
     expected_arrival: null,
     created_at: '2026-05-29T09:55:00Z',
     source_message_id: MESSAGE_1,
+    venue_id: VENUE_A,
     guest_id: GUEST_1,
     guest: { first_name: 'Sam' },
     ...overrides,
@@ -263,5 +272,66 @@ describe('listHeadsUpQueue', () => {
     const r = await listHeadsUpQueue([VENUE_A, VENUE_B])
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('connection lost')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-364: venueId + guestId on the payload
+// ---------------------------------------------------------------------------
+describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
+  it('projects both onto the Contract payload', async () => {
+    const state = newState({ commitmentRows: [makeCommitmentRow()], stateRows: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await listHeadsUpQueue([VENUE_A])
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.commitments[0].venueId).toBe(VENUE_A)
+      expect(r.commitments[0].guestId).toBe(GUEST_1)
+    }
+  })
+
+  // venueId is not a convenience. The operator app filters every venue-scoped
+  // view through `filterByVenue<T extends { venueId: string }>` (TAC-382),
+  // which is what makes "every view respects the selected venue" true by
+  // construction rather than by vigilance. A heads-up card without this field
+  // cannot pass through that filter, so the client would have to either bypass
+  // it — showing one venue's commitments to an operator looking at another, on
+  // the surface TAC-382 just fixed — or drop the card entirely.
+  it('carries a venueId for every commitment, so none can bypass venue filtering', async () => {
+    const state = newState({
+      commitmentRows: [
+        makeCommitmentRow(),
+        makeCommitmentRow({ id: COMMITMENT_2, venue_id: VENUE_B, guest_id: GUEST_2 }),
+      ],
+      stateRows: [],
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await listHeadsUpQueue([VENUE_A, VENUE_B])
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.commitments.map((c) => c.venueId)).toEqual([VENUE_A, VENUE_B])
+      expect(r.commitments.every((c) => typeof c.venueId === 'string' && c.venueId !== '')).toBe(
+        true,
+      )
+    }
+  })
+
+  it('SELECTs venue_id from guest_commitments', async () => {
+    // The projection can only be right if the column is fetched, and the mock
+    // ignores its select() argument — so the query string is captured and
+    // asserted directly. Same technique as handle-operator-decline's
+    // import-set check: a non-behavioural assertion for something no
+    // behavioural one can reach.
+    const state = newState({ commitmentRows: [makeCommitmentRow()], stateRows: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await listHeadsUpQueue([VENUE_A])
+    expect(state.commitmentSelectCols).toContain('venue_id')
+    expect(state.commitmentSelectCols).toContain('guest_id')
   })
 })

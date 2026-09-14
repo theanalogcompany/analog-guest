@@ -63,7 +63,7 @@ export async function listHeadsUpQueue(
   const { data, error } = await supabase
     .from('guest_commitments')
     .select(
-      'id, type, description, code, expected_arrival, created_at, source_message_id, guest_id, guest:guests!inner(first_name)',
+      'id, venue_id, type, description, code, expected_arrival, created_at, source_message_id, guest_id, guest:guests!inner(first_name)',
     )
     .eq('status', 'pending_ack')
     .in('venue_id', allowedVenueIds)
@@ -127,6 +127,12 @@ export async function listHeadsUpQueue(
     const guest = Array.isArray(guestRaw) ? guestRaw[0] ?? null : guestRaw
     return {
       id: row.id,
+      // TAC-364. guest_id was already SELECTed and simply dropped here;
+      // venue_id is the one new column. Both are needed client-side — see the
+      // note on HeadsUpCommitment for why venueId in particular is a
+      // cross-venue-isolation requirement and not a convenience.
+      venueId: row.venue_id,
+      guestId: row.guest_id,
       type: row.type as CommitmentType,
       guest: { name: guest?.first_name ?? '' },
       description: row.description,

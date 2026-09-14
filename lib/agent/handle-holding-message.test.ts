@@ -249,6 +249,11 @@ describe('handleHoldingMessage (TAC-308)', () => {
         triggers: ['model_flagged'],
         primaryTrigger: 'model_flagged',
         compMatchedPattern: null,
+        // TAC-364: the gate ALWAYS returns this on a queue decision (it is
+        // required on ApprovalDecision), so a fixture omitting it would feed
+        // `undefined` down a path production never produces. null is what a
+        // followup / skipped-check turn actually carries — see ruling 3.
+        ungroundedClaims: null,
         existingPendingDraftId: null,
       })
       .mockResolvedValueOnce({ action: 'send' })

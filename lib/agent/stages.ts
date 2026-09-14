@@ -278,6 +278,33 @@ export const APPROVAL_TRIGGERS = {
 export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
 
 /**
+ * TAC-364: `messages.review_reason` for a card written by
+ * `persistGenerationFailureCard` (handle-inbound.ts) after generation has
+ * crashed twice.
+ *
+ * DELIBERATELY NOT A MEMBER OF `APPROVAL_TRIGGERS`. The gate never fires it —
+ * a crash produces no `GenerateMessageResult`, so `applyApprovalPolicyStage`
+ * cannot run at all and the card is written directly. Putting it in the union
+ * would claim it is a gate outcome, and would force an entry in
+ * `PUSH_POLICY`'s total map for a value the gate can never emit. It lives here
+ * rather than in handle-inbound.ts because `isKnowledgeGapCard` below and
+ * `findPendingQuestion` (pending-question.ts) both compare against it, and
+ * both are imported BY handle-inbound — the other direction is circular.
+ *
+ * TAC-309 shipped these cards stamped `knowledge_gap`, which reuses the
+ * timer, the holding message and the priority wiring unchanged — correct
+ * mechanically, but it makes the operator-facing copy false: "a guest asked
+ * something I don't have an answer for" is not what happened. The crash path
+ * gets its own value so the copy can be true, and joins the two predicates
+ * below so nothing else about its handling changes.
+ *
+ * Mirrors `CRISIS_SAFETY_REVIEW_REASON` (lib/agent/crisis-safety.ts) and
+ * `OPERATOR_DECLINE_PRIMARY_TRIGGER` (lib/agent/handle-operator-decline.ts):
+ * a review_reason owned by the path that stamps it, outside the policy union.
+ */
+export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
+
+/**
  * Priority order for picking the `primaryTrigger` (the value that lands on
  * messages.review_reason and shows up first in the operator queue UI). NOT
  * the order triggers are evaluated in (that's enumeration order, which
@@ -397,6 +424,30 @@ export function knowledgeGapWillQueue(
 }
 
 /**
+ * Every `messages.review_reason` that marks a pending row as a knowledge-gap
+ * card, i.e. one the guest is owed an answer to.
+ *
+ * SHARED with `findPendingQuestion` (lib/agent/pending-question.ts), which has
+ * to express the same predicate as a PostgREST filter so it can run
+ * server-side. That duplication used to be by hand and it DRIFTED: the query
+ * carried one value where the predicate below carried two, so a
+ * `knowledge_gap_backstop` card whose clock had already fired was recognized
+ * here and invisible there — the `## Unanswered question` block silently
+ * vanished for that guest while the card still sat in the operator's queue,
+ * and the comment at the query claimed the two mirrored each other the whole
+ * time. TAC-364 found it while adding a third value.
+ *
+ * Exported as one array so the next value added lands in both places at once
+ * rather than being caught by a reader. Do not inline these back into either
+ * site.
+ */
+export const KNOWLEDGE_GAP_CARD_REVIEW_REASONS = [
+  APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+  APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+  GENERATION_FAILED_REVIEW_REASON,
+] as const
+
+/**
  * TAC-308: is this pending row a knowledge-gap card?
  *
  * Two conditions, OR'd, and the OR is load-bearing:
@@ -421,6 +472,16 @@ export function knowledgeGapWillQueue(
  * the backstop trigger must get identical eviction protection to one the
  * model flagged itself, or a regen of a backstop-caught card would silently
  * lose its clock the moment the label won by a co-firing trigger changed.
+ *
+ * TAC-364 adds `generation_failed` as a third value on that leg, and it is
+ * REQUIRED rather than tidy. The crash card arms `pending_until` like any
+ * other gap card, so it is protected while the clock runs — but the moment
+ * the timer CAS-claims and nulls that column, a crash card without this leg
+ * stops being recognized, and the next turn that queues for any reason
+ * UPDATEs it in place instead of taking the `drop` branch: the guest's
+ * outstanding question is overwritten and the crash is erased. Splitting the
+ * crash path off `knowledge_gap` without adding it here would have introduced
+ * exactly the data-loss bug the second leg exists to prevent.
  */
 export function isKnowledgeGapCard(row: {
   review_reason?: string | null
@@ -435,8 +496,8 @@ export function isKnowledgeGapCard(row: {
   // pre-TAC-308 behavior, not the new one.
   return (
     typeof row.pending_until === 'string' ||
-    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP ||
-    row.review_reason === APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP
+    (typeof row.review_reason === 'string' &&
+      (KNOWLEDGE_GAP_CARD_REVIEW_REASONS as readonly string[]).includes(row.review_reason))
   )
 }
 
@@ -1133,6 +1194,32 @@ export type ApprovalDecision =
       action: 'queue'
       triggers: string[]
       primaryTrigger: string
+      // TAC-364: the verbatim claims the grounding verifier flagged, threaded
+      // to the persist layer so they land on messages.ungrounded_claims and
+      // reach the operator card.
+      //
+      // THREE-STATE, and the null is load-bearing:
+      //   string[] non-empty → the check ran and flagged these
+      //   []                 → the check RAN and found nothing
+      //   null               → the check DID NOT RUN
+      //
+      // That last distinction is the question TAC-367 existed because nobody
+      // could answer: a grounding check that silently didn't run was invisible
+      // everywhere, and the whole point of recording this on the row is to be
+      // able to ask it later in SQL. Collapsing "didn't run" into "found
+      // nothing" would rebuild the blind spot in a new column on day one, and
+      // it is free to avoid while the column is new.
+      //
+      // `truncated` maps to NULL, not `[]`: the check ran but produced no
+      // readable verdict, so we have no claim information — which is what NULL
+      // says. `[]` would assert it found nothing, and the paired
+      // review_reason ('grounding_check_failed' → "I couldn't finish checking
+      // this one") already carries the didn't-complete signal, so the two read
+      // coherently together.
+      //
+      // The WIRE still collapses both to `[]` — see QueueDraft in
+      // lib/operator/queue.ts for why the client doesn't get this distinction.
+      ungroundedClaims: string[] | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
       // (regenerate) instead of INSERTing a new pending row. Captured from
@@ -1531,6 +1618,28 @@ export async function applyApprovalPolicyStage(
     action: 'queue',
     triggers,
     primaryTrigger: pickPrimaryTrigger(triggers),
+    // TAC-364. All four grounding states map here, and the mapping is the
+    // whole point of the field being nullable — see ApprovalDecision above.
+    //
+    //   flagged   → the claims
+    //   clean     → []    the check ran and found nothing
+    //   skipped   → null  the check did not run (followup, demo guest, or the
+    //                     model self-reported a gap so we trusted it)
+    //   truncated → null  it ran but the verdict was unreadable, so we have no
+    //                     claim information — 'grounding_check_failed' on
+    //                     review_reason is what says it didn't complete
+    //
+    // Known and accepted, inherited from TAC-367 rather than introduced here:
+    // a TRANSIENT fault also returns `clean`, so it records as "ran and found
+    // nothing". That indistinguishability IS the fail-open posture, and the
+    // degraded case is reported by captureGroundingVerifierUnavailable rather
+    // than by this column.
+    ungroundedClaims:
+      grounding.status === 'flagged'
+        ? grounding.claims
+        : grounding.status === 'clean'
+          ? []
+          : null,
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: existingPending?.id ?? null,
     pendingUntil,

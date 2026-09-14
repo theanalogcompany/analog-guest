@@ -22,7 +22,7 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingQuestion } from '@/lib/ai'
-import { APPROVAL_TRIGGERS, isKnowledgeGapCard } from './stages'
+import { KNOWLEDGE_GAP_CARD_REVIEW_REASONS, isKnowledgeGapCard } from './stages'
 
 export interface LoadedPendingQuestion {
   /** messages.id of the knowledge-gap card holding the pending slot. */
@@ -50,10 +50,22 @@ export async function findPendingQuestion(
 ): Promise<LoadedPendingQuestion | null> {
   try {
     const supabase = createAdminClient()
-    // Mirrors isKnowledgeGapCard's two conditions in PostgREST form. The
-    // predicate is duplicated here because it has to run server-side as a
-    // filter; the shared function below re-checks the returned row so the two
-    // can't disagree about a row that slipped through.
+    // Mirrors isKnowledgeGapCard's conditions in PostgREST form. The predicate
+    // is duplicated here because it has to run server-side as a filter; the
+    // shared function below re-checks the returned row so the two can't
+    // disagree about a row that slipped through.
+    //
+    // TAC-364: the review_reason legs are now GENERATED from the shared
+    // KNOWLEDGE_GAP_CARD_REVIEW_REASONS rather than hand-listed here. They were
+    // hand-listed, and they drifted: this query carried one value while
+    // isKnowledgeGapCard carried two, so a `knowledge_gap_backstop` card whose
+    // clock had already fired was recognized by the predicate and invisible to
+    // this query — the `## Unanswered question` block silently vanished for
+    // that guest while the card still sat in the operator's queue. Nothing
+    // caught it, because the re-check below only sees rows the filter DID
+    // return; a row the filter never returns is indistinguishable from no row
+    // at all. The filter STRING is asserted in pending-question.test.ts, since
+    // Postgres is the only thing that evaluates it.
     const { data: card, error: cardError } = await supabase
       .from('messages')
       .select('id, reply_to_message_id, pending_until, review_reason')
@@ -62,7 +74,10 @@ export async function findPendingQuestion(
       .eq('direction', 'outbound')
       .eq('review_state', 'pending')
       .or(
-        `pending_until.not.is.null,review_reason.eq.${APPROVAL_TRIGGERS.KNOWLEDGE_GAP}`,
+        [
+          'pending_until.not.is.null',
+          ...KNOWLEDGE_GAP_CARD_REVIEW_REASONS.map((r) => `review_reason.eq.${r}`),
+        ].join(','),
       )
       .limit(1)
       .maybeSingle()

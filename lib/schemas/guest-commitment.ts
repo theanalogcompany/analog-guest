@@ -252,8 +252,21 @@ export function toActiveCommitment(
 // snake_case `source_message_id` column projects to camelCase `sourceMessageId`
 // on the wire per the Contract — column shape and wire shape diverge here,
 // unlike the rest of HeadsUpCommitment which is snake_case end-to-end.
+//
+// TAC-364 added venueId and guestId, both camelCase on the wire like the two
+// TAC-299 fields above. venueId is the urgent one and is NOT cosmetic: TAC-382
+// made the operator app filter every venue-scoped view through
+// `filterByVenue<T extends { venueId: string }>`, which is what makes "every
+// view respects the selected venue" true by construction rather than by
+// vigilance. A heads-up card with no venueId cannot pass through it, so the
+// client would have to either bypass the filter — showing one venue's
+// commitments to an operator looking at another, on the surface TAC-382 just
+// fixed — or drop the card. guestId backs the push-tap venue switch, which
+// resolves a tapped notification's guest to a venue before surfacing its card.
 export interface HeadsUpCommitment {
   id: string
+  venueId: string
+  guestId: string
   type: CommitmentType
   guest: { name: string }
   description: string

@@ -20,7 +20,10 @@ vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
 
-import { APPROVAL_TRIGGERS } from '@/lib/agent/stages'
+import {
+  APPROVAL_TRIGGERS,
+  GENERATION_FAILED_REVIEW_REASON,
+} from '@/lib/agent/stages'
 
 import { _PUSH_POLICY_FOR_TESTS, shouldSendDraftFlaggedPush } from './push-policy'
 
@@ -90,5 +93,26 @@ describe('push-policy — knowledge_gap (TAC-308)', () => {
   it('pushes on a knowledge gap', () => {
     expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)).toBe(true)
     expect(_PUSH_POLICY_FOR_TESTS[APPROVAL_TRIGGERS.KNOWLEDGE_GAP]).toBe('push')
+  })
+})
+
+describe('push-policy — generation_failed (TAC-364)', () => {
+  // `generation_failed` is NOT an ApprovalTrigger — the gate can't fire it,
+  // because a crash never produced the GenerateMessageResult the gate takes —
+  // so PUSH_POLICY's `satisfies Record<ApprovalTrigger, PushDecision>` totality
+  // does not cover it and it reaches the fail-open default.
+  //
+  // That default is the behaviour we want here (a blank crash card is exactly
+  // the card nobody goes looking for), but "it happens to fall through to the
+  // right answer" is not something to leave inferred. CLAUDE.md's own rule:
+  // distrust any gate whose true-positive history you cannot produce on
+  // demand. So it is asserted, and it is asserted BY VALUE rather than via the
+  // map, because the map genuinely has no entry to read.
+  it('pushes the generation-failure card', () => {
+    expect(shouldSendDraftFlaggedPush(GENERATION_FAILED_REVIEW_REASON)).toBe(true)
+  })
+
+  it('is deliberately absent from PUSH_POLICY, not silently mapped', () => {
+    expect(_PUSH_POLICY_FOR_TESTS[GENERATION_FAILED_REVIEW_REASON]).toBeUndefined()
   })
 })

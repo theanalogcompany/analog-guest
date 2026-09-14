@@ -1,0 +1,157 @@
+// TAC-364: the repo's first test for this module.
+//
+// The thing under test is the PostgREST `.or()` filter string, and it is worth
+// being precise about why it needs a test at all and why this is the shape of
+// one.
+//
+// Until TAC-364 the review_reason legs were hand-listed here and hand-listed
+// again in `isKnowledgeGapCard`, and they DRIFTED: this query carried one value
+// where the predicate carried two, so a `knowledge_gap_backstop` card whose
+// clock had already fired was recognized by the predicate and invisible to this
+// query — the `## Unanswered question` block silently vanished for that guest
+// while the card still sat in the operator's queue. The comment at the query
+// claimed the two mirrored each other the whole time.
+//
+// The key-set half of that is now fixed structurally: both sites read one
+// exported `KNOWLEDGE_GAP_CARD_REVIEW_REASONS`. But the fix replaced a literal
+// string with a CONSTRUCTED one, and every mutation inside the construction
+// survives silently: a `.join(' ')`, a dropped `.`, `eq` → `neq` all produce a
+// filter that Postgres either rejects or matches nothing, and the symptom is
+// the exact one this ticket is fixing.
+//
+// So the assertion is on the filter STRING, not on behaviour. A behavioural
+// test cannot reach this — the filter is evaluated by Postgres, and any mock
+// that stands in for Postgres is asserting its own opinion of the query rather
+// than the query. Same technique, and the same reasoning, as
+// `heads-up-queue.test.ts` capturing its `select()` argument and
+// `handle-operator-decline.test.ts` asserting an import set.
+//
+// The fail-open posture is covered too, because it is load-bearing: a DB
+// hiccup here costs one prompt block, and failing the agent run instead would
+// be a far larger outage for something that is a nudge, not a guardrail.
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Importing `./stages` for KNOWLEDGE_GAP_CARD_REVIEW_REASONS pulls the Voyage
+// SDK in transitively, and vitest's ESM resolver trips on its directory
+// import at module load — the documented trap in CLAUDE.md §"Module split for
+// testability". Same stub `lib/tunables/manifest.test.ts` uses for the same
+// reason. Mocking the constant instead would defeat the point: the second test
+// below exists to compare this filter against the REAL shared array.
+vi.mock('voyageai', () => ({
+  VoyageAIClient: class {},
+}))
+
+const orMock = vi.fn()
+const cardMaybeSingle = vi.fn()
+const inboundMaybeSingle = vi.fn()
+
+// Table-aware: this module makes TWO round trips against `messages` — the card
+// lookup (filtered, `.or()`) and then the inbound it replies to (by id). A
+// single undifferentiated chain would answer both with the same row, which is
+// a mock contradicting production rather than standing in for it.
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: () => ({
+    from: () => {
+      const cardChain = {
+        select: () => cardChain,
+        eq: () => cardChain,
+        or: (filter: string) => {
+          orMock(filter)
+          return cardChain
+        },
+        limit: () => cardChain,
+        maybeSingle: () => cardMaybeSingle(),
+      }
+      const inboundChain = {
+        select: () => inboundChain,
+        eq: () => inboundChain,
+        maybeSingle: () => inboundMaybeSingle(),
+      }
+      // The card query is the only one that calls `.or()`; the inbound lookup
+      // is a bare `.eq('id')`. Route on whether `.or()` has been reached yet.
+      return orMock.mock.calls.length === 0 ? cardChain : inboundChain
+    },
+  }),
+}))
+
+import { findPendingQuestion } from './pending-question'
+import { KNOWLEDGE_GAP_CARD_REVIEW_REASONS } from './stages'
+
+const VENUE = '00000000-0000-0000-0000-0000000000aa'
+const GUEST = '00000000-0000-0000-0000-0000000000bb'
+
+beforeEach(() => {
+  orMock.mockReset()
+  cardMaybeSingle.mockReset()
+  inboundMaybeSingle.mockReset()
+  cardMaybeSingle.mockResolvedValue({ data: null, error: null })
+  inboundMaybeSingle.mockResolvedValue({ data: null, error: null })
+})
+
+describe('findPendingQuestion — the card filter (TAC-364)', () => {
+  it('builds one leg per gap-card review_reason, plus the clock leg', async () => {
+    await findPendingQuestion(VENUE, GUEST)
+    expect(orMock).toHaveBeenCalledTimes(1)
+    // Transcribed as a literal rather than rebuilt from the constant: a test
+    // that constructs the expected string the same way the source does would
+    // pass against any construction at all, including a broken one.
+    expect(orMock.mock.calls[0][0]).toBe(
+      'pending_until.not.is.null,' +
+        'review_reason.eq.knowledge_gap,' +
+        'review_reason.eq.knowledge_gap_backstop,' +
+        'review_reason.eq.generation_failed',
+    )
+  })
+
+  it('covers every value isKnowledgeGapCard accepts', async () => {
+    // The drift guard. The literal above is what actually pins the syntax;
+    // this pins the SET, so a value added to the shared array without the
+    // literal being updated fails here with a message naming the missing one.
+    await findPendingQuestion(VENUE, GUEST)
+    const filter = orMock.mock.calls[0][0] as string
+    for (const reason of KNOWLEDGE_GAP_CARD_REVIEW_REASONS) {
+      expect(filter).toContain(`review_reason.eq.${reason}`)
+    }
+    // Exactly one leg per reason, plus the pending_until leg — catches a
+    // duplicated or stray leg that `toContain` alone would wave through.
+    expect(filter.split(',')).toHaveLength(KNOWLEDGE_GAP_CARD_REVIEW_REASONS.length + 1)
+  })
+
+  it('keeps the clock leg first, so a card with a co-fired label still matches', async () => {
+    // `pending_until.not.is.null` is what catches a gap card whose
+    // review_reason was won by a co-firing trigger (a comp commitment on the
+    // same turn). Losing it would make the filter label-only, which is the
+    // narrower of the two conditions isKnowledgeGapCard ORs together.
+    await findPendingQuestion(VENUE, GUEST)
+    expect((orMock.mock.calls[0][0] as string).startsWith('pending_until.not.is.null,')).toBe(
+      true,
+    )
+  })
+})
+
+describe('findPendingQuestion — fail-open (TAC-308)', () => {
+  it('returns null rather than throwing when the card lookup errors', async () => {
+    cardMaybeSingle.mockResolvedValue({ data: null, error: { message: 'boom' } })
+    await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+
+  it('returns null when no card is pending', async () => {
+    await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+
+  it('returns null when the card has no linked inbound', async () => {
+    // A card with nothing in reply_to_message_id has no question to render,
+    // which is different from a DB failure but degrades the same way.
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'card-1',
+        reply_to_message_id: null,
+        pending_until: '2026-09-14T00:00:00Z',
+        review_reason: 'knowledge_gap',
+      },
+      error: null,
+    })
+    await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+})
