@@ -229,9 +229,10 @@ export interface DeriveOpenIntentionsInput {
   openRecommendationTouchedTimes: readonly Date[]
   /**
    * True when the open recommendations couldn't be read. got_the_recommendation
-   * is then held for the turn: that read fails closed (ruling 4), where an empty
-   * list would silently lift the hold. Orders need no equivalent: a failed
-   * visit-history read fails the whole context build.
+   * is then held for the turn: the read fails closed, as the read at
+   * build-runtime-context.ts:203 does, where an empty list would silently lift the
+   * hold. Orders need no equivalent: a failed visit-history read fails the whole
+   * context build.
    */
   openRecommendationsUnreadable: boolean
   /** occurred_at of this guest's recorded orders at this venue, in any order. */
@@ -267,8 +268,9 @@ interface Arming {
 /**
  * Returned instead of an arming when an intention is held for the turn: its
  * newest event is still mid-conversation (ruling 2), or, for recommendations,
- * the events couldn't be read, so the hold can't be judged and fails closed
- * (ruling 4). The turn is skipped, never the intention.
+ * the events couldn't be read, so the hold can't be judged and fails closed, as
+ * the read at build-runtime-context.ts:203 does. The turn is skipped, never the
+ * intention.
  */
 const HELD = 'held'
 
@@ -340,9 +342,9 @@ function armingFor(
     case 'first_contact':
       return { eligibleAt: input.now, eventAt: input.now }
     case 'open_recommendation':
-      // Fail closed (ruling 4): with the recommendations unreadable the hold
-      // can't be judged, so hold rather than let "did you try it?" follow a
-      // suggestion made in this exchange.
+      // Fail closed, as the read at build-runtime-context.ts:203 does: with the
+      // recommendations unreadable the hold can't be judged, so hold rather than
+      // let "did you try it?" follow a suggestion made in this exchange.
       if (input.openRecommendationsUnreadable) return HELD
       return newestEventArming(
         input.openRecommendationTimes,
@@ -414,7 +416,7 @@ function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): b
  * arms nor renders, even off an older event, and even as an already-open row.
  * The turn is skipped, not the intention (newestEventArming). If the open
  * recommendations couldn't be read, got_the_recommendation is held the same way:
- * that read fails closed (ruling 4).
+ * that read fails closed, as the read at build-runtime-context.ts:203 does.
  */
 export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOpenIntentionsResult {
   if (input.rows === null) return { open: [], newlyEligible: [], brakeEngaged: false }

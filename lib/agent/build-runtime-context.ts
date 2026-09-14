@@ -415,8 +415,9 @@ export async function buildRuntimeContext(input: {
 
     // Arms got_the_recommendation; the derivation picks the newest one that is
     // askable now (ruling 1). activeCommitments is the open + pending_ack set,
-    // and it fails open to [] on a load error, which only means nothing arms:
-    // the safe direction.
+    // and it fails open to [] on a load error. For arming that is the safe
+    // direction; for the hold it is not, so the derivation is also told the read
+    // failed (openRecommendationsUnreadable, below).
     const openRecommendationTimes = activeCommitments
       .filter((c) => c.type === 'recommendation')
       .map((c) => new Date(c.created_at))

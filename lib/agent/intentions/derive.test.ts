@@ -304,8 +304,9 @@ describe('deriveOpenIntentions — arming', () => {
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
   })
 
-  // Fail closed (ruling 4). With the open recommendations unreadable the hold
-  // can't be judged, and an empty list would silently lift it. Found in review.
+  // Fail closed, as the read at build-runtime-context.ts:203 does. With the open
+  // recommendations unreadable the hold can't be judged, and an empty list would
+  // silently lift it. Found in review.
   it('holds got_the_recommendation when the open recommendations could not be read', () => {
     const result = deriveOpenIntentions(
       input({

@@ -70,8 +70,8 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
     expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationTouchedTimes,\n/)
   })
 
-  // Fail closed (ruling 4): a failed commitments read holds the intention rather
-  // than silently lifting the hold.
+  // Fail closed, as the read at build-runtime-context.ts:203 does: a failed commitments
+  // read holds the intention rather than silently lifting the hold.
   it('tells the derivation when the open recommendations could not be read', () => {
     expect(src).toMatch(
       /deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationsUnreadable: !activeCommitmentsResult\.ok,\n/,
