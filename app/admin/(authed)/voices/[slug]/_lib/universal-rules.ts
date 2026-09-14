@@ -76,7 +76,8 @@
 // also from a Le Mil's owner-review run. All three are displayed — same
 // class as R17/R18/R21/R23-R31. R32 bans telling the guest to send a
 // message or reach out when they're already texting, with an explicit
-// carve-out for `invite_contact_save` (future contact is legitimate) and a
+// carve-out for inviting future contact (checked against `invite_contact_save`,
+// since retired by TAC-380; future contact is still legitimate) and a
 // boundary note against R5 (alt-channels is a different axis). R33
 // redirects rather than prohibits when retrieved venue knowledge narrates a
 // first-visit order as a multi-step sequence — a straight prohibition would
@@ -237,7 +238,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R31',
     summary:
-      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. Reply in kind and stop. Doesn't restrict a question you ask back, or answering once the guest actually asks or orders something.",
+      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. Reply in kind and stop. Doesn't restrict a question you ask back, answering once the guest actually asks or orders something, or asking how an item went when it's already in their visit history or an open recommendation to them.",
   },
   {
     id: 'R32',

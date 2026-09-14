@@ -598,7 +598,8 @@ function shouldRenderVisitHistory(category: MessageCategory): boolean {
 // same category. Suppressing the whole block (rather than trusting the
 // opt_out category instruction's "don't try to retain them" prose alone) is
 // the point: a guest asking to stop being contacted should never share a
-// prompt with a directive to solicit contact-info-save or an order recap,
+// prompt with goals to pursue (TAC-380: renderableIntentions suppresses this
+// upstream too; this check stays as the render-time second line),
 // including the TAC-329 first-touch opener paragraph nested inside the same
 // block. Only opt_out is excluded here — no other category was found to
 // pose the same risk, but no other category was specifically audited for it
@@ -961,11 +962,17 @@ function formatMechanicEligibility(
 // the same circular "natural door" phrasing already in paragraph one, so
 // this is accepted rather than solved. UAT covers the parking-shaped case
 // explicitly (ticket §9) because it's the one most likely to fail.
+//
+// TAC-380: up to seven lines can render at once now, ordered by
+// IntentionDefinition.priority (derive.ts sorts them). The one added sentence,
+// "take the one listed first", is what makes that order mean something to the
+// model. Without it the ranking ruled on the ticket (event-armed intentions
+// first, because they perish) would be decorative.
 function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
   const paragraph =
-    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.\n\nThat's about the guest's own topic — don't pivot away from what they\nbrought up to chase one of these. It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it. That's not the guest\nopening a door on some other subject — you're the one who asked, and\none of these can fit in the same breath if the moment calls for it.\nTake it on that reply if it fits. It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater, and it doesn't change how you treat anything else."
+    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.\n\nThat's about the guest's own topic — don't pivot away from what they\nbrought up to chase one of these. It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it. That's not the guest\nopening a door on some other subject — you're the one who asked, and\none of these can fit in the same breath if the moment calls for it.\nTake it on that reply if it fits. It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater, and it doesn't change how you treat anything else."
   const opener = firstTouchAfterQrScan
     ? "This is the guest's first message on this number, sent right after they scanned your sign. You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask whether it's their first time — one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
     : ''

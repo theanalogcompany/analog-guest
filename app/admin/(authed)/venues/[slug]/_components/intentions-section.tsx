@@ -11,10 +11,13 @@ import { formatAge } from '../../_lib/commitment-display'
 // TAC-381: what the agent is pursuing with this venue's guests.
 //
 // Two blocks answering two different questions, which is the whole reason both
-// are here. OPEN is derived live and is what the agent would carry into the
-// next conversation. RAISED is guest_intention_prompts — and a row there means
-// the intention was already raised and is closed forever for that guest, i.e.
-// the inverse. Collapsing them into one list would misreport both.
+// are here. OPEN is derived live from recorded eligibility and is what the agent
+// would carry into the next conversation. RAISED is the prompted rows of
+// guest_intention_prompts (TAC-380: that table also holds eligibility rows now,
+// which the loader filters out). A prompted row means the intention was already
+// raised and is closed for that guest, unless a newer recommendation or order
+// re-armed it, when OPEN lists it too. Collapsing them into one list would
+// misreport both.
 //
 // Every definition string is READ from INTENTION_DEFINITIONS via
 // resolveDefinition, never pasted. no-copied-strings.test.ts enforces that at
@@ -113,6 +116,9 @@ function RaisedIntentionsBlock({ rows }: { rows: readonly IntentionPromptRow[] }
               {!resolved.known && (
                 <span className="text-[11px] text-ink-faint italic">no matching definition</span>
               )}
+              {row.promptSource === 'pessimistic' && (
+                <span className="text-[11px] text-ink-faint italic">closed without a verdict</span>
+              )}
             </span>
             <span className="shrink-0 text-xs text-ink-faint tabular-nums">
               {formatPromptedAt(row.promptedAt)}
@@ -147,15 +153,18 @@ export function IntentionsSection({
       subtitle="Goals the agent carries into conversations at this venue. Read-only."
     >
       <p className="mb-3 text-xs text-ink-faint max-w-2xl">
-        Open means derived open right now. It is not a promise the block will appear — several
-        conditions decide that at the moment of a live turn, and none of them are knowable here.
-        The full list is on the Intentions page.
+        Open means recorded eligible, not yet raised, inside its window, and not answered by a fact
+        on record. It is not a promise the block will appear — the brake and several other
+        conditions decide that at the moment of a live turn, and none of them are knowable here. An
+        intention whose gate opened since the guest last texted appears only after their next
+        message. The full list is on the Intentions page.
       </p>
       <OpenIntentionsBlock openIntentions={openIntentions} now={now} />
 
       <div className="mt-6 border-t border-stone-light/60 pt-4">
         <p className="mb-2 text-xs text-ink-faint max-w-2xl">
-          Already raised here · one row per guest per intention, ever.{' '}
+          Already raised here · one row per guest per intention, showing its latest prompt. A
+          recommendation or order intention that a newer event re-armed is listed as open too.{' '}
           {raisedHasMore
             ? `Showing the ${RECORDED_PROMPTS_LIMIT} most recent; older ones exist and are not listed. `
             : ''}

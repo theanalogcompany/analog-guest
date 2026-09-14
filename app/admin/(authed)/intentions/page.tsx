@@ -9,7 +9,7 @@ import { DefinitionsList } from './_components/definitions-list'
 import { GatingConditions } from './_components/gating-conditions'
 import { RecordedPromptsList } from './_components/recorded-prompts-list'
 
-// TAC-379: read-only viewer for first-touch intentions (TAC-324). Nothing here
+// TAC-379: read-only viewer for intentions (TAC-324, redefined by TAC-380). Nothing here
 // creates, edits or retires anything — authoring was cut, because `isSatisfied`
 // is a predicate that cannot be stored as a row and `promptLine` renders
 // verbatim into the slot universal rule R22 names as the sole authority on
@@ -55,8 +55,11 @@ export default async function IntentionsPage() {
         An intention is a conversational goal the agent carries into a conversation it does not
         control. Open ones render into the{' '}
         <code className="text-ink">## What you&rsquo;re hoping to get to</code> block of the user
-        prompt, phrased as a state rather than an instruction, and each one can be raised at most
-        once per guest, ever.
+        prompt, phrased as a state rather than an instruction. Each becomes eligible on its own
+        event, and closes when it is raised, when the fact it asks about is recorded, or when its
+        window runs out. First-contact intentions are raised at most once per guest, ever; the two
+        that ask about a recommendation or an order re-arm when a newer one arrives in a later
+        conversation.
       </p>
 
       <SectionShell
@@ -68,7 +71,7 @@ export default async function IntentionsPage() {
 
       <SectionShell
         title="When an intention reaches the prompt"
-        subtitle="Four conditions that live outside the definitions. All four must pass, so a definition listed above may never fire for a given guest."
+        subtitle="Conditions that live outside the definitions. All of them must pass, so a definition listed above may never fire for a given guest."
       >
         <GatingConditions />
       </SectionShell>

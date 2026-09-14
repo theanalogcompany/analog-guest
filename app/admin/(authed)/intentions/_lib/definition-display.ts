@@ -1,6 +1,8 @@
 import {
   INTENTION_DEFINITIONS,
+  type IntentionArmsOn,
   type IntentionDefinition,
+  type IntentionGate,
 } from '@/lib/agent/intentions/definitions'
 
 // TAC-379: pure display helpers for the read-only intentions viewer. Split out
@@ -52,6 +54,37 @@ export function formatExpiryWindow(expiresAfterMs: number): string {
     return `${hours} ${hours === 1 ? 'hour' : 'hours'}`
   }
   return `${expiresAfterMs} ms`
+}
+
+/**
+ * TAC-380: what makes an intention relevant, in words. An exhaustive switch, so
+ * a new arming kind fails `tsc` here until someone says how to describe it.
+ */
+export function formatArmsOn(armsOn: IntentionArmsOn): string {
+  switch (armsOn.kind) {
+    case 'qr_scan_enrollment':
+      return 'The guest texts in by scanning the sign'
+    case 'first_contact':
+      return 'Any guest, once the gate opens'
+    case 'open_recommendation':
+      return 'The newest open recommendation to the guest, from an earlier conversation. A newer one re-arms it'
+    case 'recorded_order':
+      return "The guest's newest recorded order, from an earlier conversation. A newer one re-arms it"
+  }
+}
+
+/**
+ * TAC-380: the gate, in words. The reply count is the definition's DEFAULT; a
+ * venue can override it in venue_configs.intention_rules, which this page does
+ * not read, so the copy says so rather than presenting the default as the
+ * value in force everywhere.
+ */
+export function formatGate(gate: IntentionGate): string {
+  if (gate.kind === 'none') return 'None'
+  const replies = gate.defaultMinReplies
+  return `Response rate at or above the venue floor, and at least ${replies} ${
+    replies === 1 ? 'reply' : 'replies'
+  } (venue can override)`
 }
 
 /**

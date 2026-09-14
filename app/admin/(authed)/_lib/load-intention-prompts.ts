@@ -34,6 +34,13 @@ export interface IntentionPromptRow {
    * prove that — the viewer says only what is true.
    */
   messageId: string | null
+  /**
+   * TAC-380: 'classified' when the post-send classifier saw the message raise
+   * it; 'pessimistic' when the classifier failed twice and every rendered
+   * intention was closed without a verdict, so it may never have been asked.
+   * Null on rows written before migration 040's backfill.
+   */
+  promptSource: string | null
   guestLabel: string
   venueName: string
 }
@@ -80,8 +87,12 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
   let query = supabase
     .from('guest_intention_prompts')
     .select(
-      'id, intention_key, prompted_at, message_id, guest:guests!inner(first_name, last_name, phone_number), venue:venues!inner(name)',
+      'id, intention_key, prompted_at, message_id, prompt_source, guest:guests!inner(first_name, last_name, phone_number), venue:venues!inner(name)',
     )
+    // TAC-380 trap 5. Since migration 040 this table also holds ELIGIBILITY
+    // rows (prompted_at null), which were never raised. Without this filter
+    // every eligible intention lists here as an already-recorded prompt.
+    .not('prompted_at', 'is', null)
     .order('prompted_at', { ascending: false })
     .limit(RECORDED_PROMPTS_LIMIT + 1)
   if (allowedVenueIds.length > 0) {
@@ -96,14 +107,18 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
 
   const all = data ?? []
   const hasMore = all.length > RECORDED_PROMPTS_LIMIT
-  const rows = all.slice(0, RECORDED_PROMPTS_LIMIT).map((row) => {
+  const rows = all.slice(0, RECORDED_PROMPTS_LIMIT).flatMap((row): IntentionPromptRow[] => {
+    // The SQL filter above guarantees a timestamp. This narrows the type, and
+    // drops rather than mislabels a row if the filter is ever removed.
+    if (row.prompted_at === null) return []
     const guest = firstOrNull(row.guest as JoinedGuestShape | JoinedGuestShape[] | null)
     const venue = firstOrNull(row.venue as JoinedVenueShape | JoinedVenueShape[] | null)
-    return {
+    return [{
       id: row.id,
       intentionKey: row.intention_key,
       promptedAt: row.prompted_at,
       messageId: row.message_id,
+      promptSource: row.prompt_source,
       guestLabel: guest
         ? guestNameWithPhone({
             firstName: guest.first_name,
@@ -112,7 +127,7 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
           })
         : '(unknown guest)',
       venueName: venue?.name ?? '(unknown venue)',
-    }
+    }]
   })
 
   return { rows, hasMore }

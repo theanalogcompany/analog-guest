@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.48.0 (TAC-362: emoji cadence decided per message in code, not by the model)', () => {
-    expect(PROMPT_VERSION).toBe('v1.48.0')
+  it('is v1.49.0 (TAC-380: R31 carve-out for items already in play, stale R32 clause removed)', () => {
+    expect(PROMPT_VERSION).toBe('v1.49.0')
   })
 })
 
@@ -1250,6 +1250,18 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     )
   })
 
+  // TAC-380: got_the_recommendation and did_they_like_it ask how a specific
+  // item went, and can be raised on a reply to a bare "hey", which is a product
+  // name in reply to a greeting. The carve-out is scoped to items already in
+  // play for THIS guest. The limiting sentence carries as much weight as the
+  // permission: a carve-out for any item the venue offers reopens TAC-356.
+  it("carves out asking how an item went only for this guest's history or an open recommendation (TAC-380)", () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Nor does it restrict asking how an item went when that item already appears in this guest's ## Visit history, or is a recommendation to them still listed in ## Active commitments.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('That covers only those items, never anything else the venue offers.')
+  })
+
   // TAC-359 appended R32-R34 after R31, so R31 is no longer the LAST bullet
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
@@ -1290,7 +1302,7 @@ describe('SYSTEM_TEMPLATE — R32: already in the conversation (TAC-359)', () =>
     expect(SYSTEM_TEMPLATE).toContain('If you have a question, ask it directly and expect the answer here.')
   })
 
-  // Checked against lib/agent/intentions/definitions.ts's invite_contact_save,
+  // Checked against invite_contact_save (retired by TAC-380),
   // which legitimately invites a guest to save the number and text again
   // later — a blanket ban would fight it. Not assertable against
   // SYSTEM_TEMPLATE alone since the intention text lives in a different
@@ -1302,6 +1314,14 @@ describe('SYSTEM_TEMPLATE — R32: already in the conversation (TAC-359)', () =>
     expect(SYSTEM_TEMPLATE).toContain(
       'This is different from the alternative-channels rule above, which is about routing the guest elsewhere.',
     )
+  })
+
+  // TAC-380 retired invite_contact_save, which made the claim that the
+  // intentions block "already covers" inviting future contact false. The
+  // carve-out stays; only the claim that something else handles it is gone.
+  it('no longer claims the intentions block covers inviting future contact (TAC-380)', () => {
+    expect(SYSTEM_TEMPLATE).not.toContain('first-touch intentions block already covers it')
+    expect(SYSTEM_TEMPLATE).toContain('That is a distinct, legitimate invitation.')
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {

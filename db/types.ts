@@ -332,29 +332,35 @@ export type Database = {
       guest_intention_prompts: {
         Row: {
           created_at: string
+          eligible_at: string | null
           guest_id: string
           id: string
           intention_key: string
           message_id: string | null
-          prompted_at: string
+          prompt_source: string | null
+          prompted_at: string | null
           venue_id: string
         }
         Insert: {
           created_at?: string
+          eligible_at?: string | null
           guest_id: string
           id?: string
           intention_key: string
           message_id?: string | null
-          prompted_at?: string
+          prompt_source?: string | null
+          prompted_at?: string | null
           venue_id: string
         }
         Update: {
           created_at?: string
+          eligible_at?: string | null
           guest_id?: string
           id?: string
           intention_key?: string
           message_id?: string | null
-          prompted_at?: string
+          prompt_source?: string | null
+          prompted_at?: string | null
           venue_id?: string
         }
         Relationships: [
@@ -1324,6 +1330,7 @@ export type Database = {
           brand_persona: Json
           created_at: string
           followup_rules: Json | null
+          intention_rules: Json | null
           messaging_cadence: Json
           onboarding_status: string
           relationship_strength_formula: Json
@@ -1338,6 +1345,7 @@ export type Database = {
           brand_persona?: Json
           created_at?: string
           followup_rules?: Json | null
+          intention_rules?: Json | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json
@@ -1352,6 +1360,7 @@ export type Database = {
           brand_persona?: Json
           created_at?: string
           followup_rules?: Json | null
+          intention_rules?: Json | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json

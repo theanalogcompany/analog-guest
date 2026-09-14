@@ -1,6 +1,6 @@
 // TAC-327 KEEP: "Do not pivot to suggesting they come anyway" is pursuit-
 // shaped but NOT a duplicate of anything the first-touch intentions block
-// states — no current intention (learn_first_order, invite_contact_save)
+// states — none of the current intentions (lib/agent/intentions/definitions.ts)
 // models generic return-visit nudging. Deleting this would open a real gap,
 // not remove a leak. A future sweep should re-examine this together with
 // follow-up.ts's "Do not push a return visit explicitly" (same restraint,

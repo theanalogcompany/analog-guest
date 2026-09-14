@@ -43,6 +43,7 @@ import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
+import { renderableIntentions } from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import type {
   Classification,
@@ -1954,6 +1955,25 @@ export function operatorInstructionQuery(
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
 }
 
+/**
+ * TAC-380 trap 4: the prompt lines for the intentions this turn renders.
+ *
+ * Reads renderableIntentions, the SAME predicate handle-inbound's recording
+ * gate reads, and the sharing is load-bearing. When the post-send classifier
+ * fails twice, recording closes every intention it was handed, so if the two
+ * sites disagreed about what rendered, a guest could have an intention closed
+ * that they never saw. undefined rather than [] when nothing renders, which
+ * omits the block.
+ */
+function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
+  const rendered = renderableIntentions(
+    ctx.openIntentions,
+    ctx.classification?.category ?? null,
+    ctx.pendingQuestion !== null,
+  )
+  return rendered.length > 0 ? rendered.map((o) => o.promptLine) : undefined
+}
+
 export function buildAiRuntime(
   ctx: RuntimeContext,
   // TAC-362: injectable so tests can pin both branches of the emoji coin
@@ -2110,13 +2130,9 @@ export function buildAiRuntime(
     // `## Active commitments` block between guest context and recent
     // conversation; empty array omits the block.
     activeCommitments: ctx.activeCommitments,
-    // TAC-324: thread open first-touch intentions (already gated to qr_scan
-    // guests, inbound runs only, and current-turn-suppressed by
-    // build-runtime-context.ts) as rendered prompt lines. The serializer
-    // renders the `## What you're hoping to get to` block between mechanics
-    // and follow-up context / visit history when non-empty.
-    openIntentions:
-      ctx.openIntentions.length > 0 ? ctx.openIntentions.map((o) => o.promptLine) : undefined,
+    // TAC-324 / TAC-380: the intentions this turn RENDERS, as prompt lines in
+    // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
+    openIntentions: renderedIntentionLines(ctx),
     firstTouchAfterQrScan,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.

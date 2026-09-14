@@ -165,6 +165,7 @@ function makeCtx() {
     recentVisits: [],
     activeCommitments: [],
     openIntentions: [],
+    intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

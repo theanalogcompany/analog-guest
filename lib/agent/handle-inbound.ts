@@ -7,6 +7,7 @@ import {
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
+  captureIntentionPromptRecordingFailed,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import {
@@ -21,7 +22,8 @@ import { buildRuntimeContext } from './build-runtime-context'
 import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import { extractReportedOrder } from './extract-reported-order'
-import { recordIntentionPrompts } from './intentions/record'
+import { renderableIntentions } from './intentions/derive'
+import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -380,6 +382,14 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           recognitionScore: ctx.recognition.score,
           mechanicCount: ctx.mechanics.length,
           recentMessageCount: ctx.recentMessages.length,
+          // TAC-380: pre-classification. What actually renders is narrowed
+          // later by renderableIntentions.
+          openIntentionKeys: ctx.openIntentions.map((o) => o.key),
+          newlyEligibleIntentionKeys: ctx.intentionDerivation.newlyEligible.map((e) => e.key),
+          rearmedIntentionKeys: ctx.intentionDerivation.newlyEligible
+            .filter((e) => e.rearm)
+            .map((e) => e.key),
+          intentionBrakeEngaged: ctx.intentionDerivation.brakeEngaged,
         },
         content: trace.captureContent
           ? buildRecognitionContent(ctx.recognition)
@@ -490,6 +500,48 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         crisisSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
         return { status: 'failed', stage, error: errMsg }
       }
+    }
+
+    // TAC-380: persist intentions seen eligible for the first time this turn,
+    // and move re-armed ones to their newer event's anchor.
+    // Fire-and-forget like every intentions write; it can't affect the reply. A
+    // failed write costs nothing lasting: the next turn derives the same
+    // intention as newly eligible and writes it again.
+    //
+    // Placed AFTER classification and the crisis-safety return, and skipped on
+    // opt_out, because an eligibility row starts that intention's expiry window.
+    // Opening windows for a guest who just asked to stop being contacted, or on
+    // a crisis turn, records intent to pursue them on exactly the turns nothing
+    // should be pursued. Skipping loses nothing: eligibility re-derives from
+    // live facts on the guest's next inbound. Event-armed intentions keep their
+    // event as the anchor; first-contact ones anchor to whichever later turn
+    // records them. A skipped re-arm leaves the older prompt standing until the
+    // guest's next inbound re-arms it.
+    if (
+      ctx.intentionDerivation.newlyEligible.length > 0 &&
+      ctx.classification.category !== 'opt_out'
+    ) {
+      waitUntil(
+        recordIntentionEligibility({
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          entries: ctx.intentionDerivation.newlyEligible,
+        })
+          .then((outcome) => {
+            if (outcome.kind === 'failed') {
+              console.warn('[agent] intention eligibility write failed (continuing)', {
+                agentRunId,
+                error: outcome.error,
+              })
+            }
+          })
+          .catch((e) => {
+            console.error('[agent] recordIntentionEligibility threw unexpectedly', {
+              agentRunId,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }),
+      )
     }
 
     // TAC-323: fire the self-reported-order extractor. Non-blocking by
@@ -1147,50 +1199,90 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         },
         content: { body: gen.result.body },
       })
-      // TAC-324: record which first-touch intentions this send raised.
-      // Fire-and-forget, mirrors extractReportedOrder's waitUntil posture —
-      // never blocks the reply. Gated on ctx.openIntentions.length > 0 (already
-      // gated to qr_scan guests, inbound runs only, and current-turn-suppressed
-      // by build-runtime-context.ts) so the common case (every other guest)
-      // never calls the classifier. Uses the SENT body, not the drafted one —
-      // this only ever fires on the 'sent' path, never queued/dropped/refused,
-      // because those bodies never reached the guest.
+      // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
+      // forget, mirroring extractReportedOrder's waitUntil posture: it never
+      // blocks the reply. Uses the SENT body, and only runs on this 'sent' path.
       //
-      // TAC-332: ALSO gated on !computeFirstTouchAfterQrScan — the true
-      // opener turn, on which both intentions are freshly open, can never
-      // legitimately raise one: the opener block instructs the model to
-      // greet + ask newness, never order, so running the classifier against
-      // that turn's sent body can only produce a correct negative or a
-      // destructive false positive, never a true positive. Reuses the same
-      // flag that drives R1's carve-out and the opener paragraph itself
-      // (computeFirstTouchAfterQrScan, lib/agent/stages.ts) rather than a
-      // new turn-index check, so "is this the opener turn" can't silently
-      // diverge between what renders the opener and what's allowed to
-      // record against it. This closes the case-3 class of false positive
-      // (learn_first_order recorded against the opener) by construction —
-      // the classifier is never even called on that turn, not merely less
-      // likely to misfire.
+      // KNOWN GAP, TAC-391: a queued draft an operator later
+      // approves or edits DOES reach the guest, via dispatchOperatorOutbound,
+      // and nothing records intentions there. Those sends neither close
+      // intentions nor feed the brake. At Le Mil's that was 13 of 34 sent
+      // replies in the 30 days to 2026-09-14.
+      //
+      // TRAP 4. Recording is handed renderableIntentions(...), the exact set
+      // buildAiRuntime rendered, never ctx.openIntentions. When the classifier
+      // fails twice, recording closes everything it was handed, so a wider set
+      // would close intentions suppressed this turn (opt_out, a pending
+      // question) that the guest never saw.
+      //
+      // TAC-332: never on the true opener turn either. The opener tells the
+      // model to greet and ask whether it's their first time, not to raise an
+      // intention, so the classifier there can only return a correct negative
+      // or a destructive false positive. Reuses computeFirstTouchAfterQrScan,
+      // the flag that renders the opener, so "is this the opener turn" can't
+      // diverge between what renders it and what may record against it.
+      const renderedIntentions = renderableIntentions(
+        ctx.openIntentions,
+        ctx.classification.category,
+        ctx.pendingQuestion !== null,
+      )
       if (
-        ctx.openIntentions.length > 0 &&
+        renderedIntentions.length > 0 &&
         !computeFirstTouchAfterQrScan(ctx, ctx.recognition.computedAt)
       ) {
+        const venueId = ctx.venue.id
+        const guestId = ctx.guest.id
+        const messageId = outboundMessageId
         waitUntil(
           recordIntentionPrompts({
-            venueId: ctx.venue.id,
-            guestId: ctx.guest.id,
-            messageId: outboundMessageId,
+            venueId,
+            guestId,
+            messageId,
             sentBody: gen.result.body,
-            openIntentions: ctx.openIntentions,
+            openIntentions: renderedIntentions,
+            now: new Date(),
           })
-            .then((outcome) => {
+            .then(async (outcome) => {
               if (outcome.kind === 'recorded') {
                 console.log('[agent] inbound intention prompts recorded', {
                   agentRunId,
                   raisedKeys: outcome.raisedKeys,
+                  classifierAttempts: outcome.classifierAttempts,
                 })
-              } else if (outcome.kind === 'failed') {
-                console.warn('[agent] inbound intention prompt recording failed (continuing)', {
+              } else if (outcome.kind === 'closed_pessimistically') {
+                // Ruling 4: nothing re-asks, but these closed without a
+                // verdict. Alerted so a run of them is visible.
+                console.warn('[agent] intention classifier failed twice; rendered intentions closed', {
                   agentRunId,
+                  closedKeys: outcome.closedKeys,
+                  error: outcome.classifierError,
+                })
+                await captureIntentionPromptRecordingFailed({
+                  agentRunId,
+                  venueId,
+                  guestId,
+                  messageId,
+                  outcome: 'closed_pessimistically',
+                  keys: outcome.closedKeys,
+                  error: outcome.classifierError,
+                })
+              } else if (outcome.kind === 'write_failed') {
+                // The one remaining path to a genuine re-ask. Before TAC-380
+                // this was a bare console.warn.
+                console.warn('[agent] intention prompt write failed', {
+                  agentRunId,
+                  keys: outcome.keys,
+                  source: outcome.source,
+                  error: outcome.error,
+                })
+                await captureIntentionPromptRecordingFailed({
+                  agentRunId,
+                  venueId,
+                  guestId,
+                  messageId,
+                  outcome: 'write_failed',
+                  keys: outcome.keys,
+                  source: outcome.source,
                   error: outcome.error,
                 })
               }
