@@ -470,7 +470,16 @@ export async function handleFollowup(input: {
           // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
           // trigger is inbound-only), passed for call-site symmetry so the
           // two orchestrators can't drift.
-          { pendingUntil: approval.pendingUntil },
+          // TAC-364: same symmetry. `ungroundedClaims` is always [] here —
+          // verifyGroundingStage returns early when currentMessage is null, so
+          // no followup has a grounding backstop (that gap is TAC-376) — but
+          // `reviewTriggers` is real and carries the same co-firing
+          // information an inbound draft does.
+          {
+            pendingUntil: approval.pendingUntil,
+            reviewTriggers: approval.triggers,
+            ungroundedClaims: approval.ungroundedClaims,
+          },
         )
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({

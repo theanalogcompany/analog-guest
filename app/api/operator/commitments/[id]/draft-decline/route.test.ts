@@ -34,17 +34,36 @@ vi.mock('@/lib/analytics/posthog', () => ({
 }))
 
 const loadMock = vi.fn<() => Promise<{ data: unknown; error: unknown }>>()
+// TAC-364: the route now reads the persisted decline body back out of
+// `messages` for the response, so the mock has to be TABLE-AWARE. A single
+// undifferentiated chain would hand the commitment row back to a `messages`
+// query — a mock that contradicts production, which is worse than no mock at
+// all (see CLAUDE.md → "A mocked behaviour flag must be asserted to match
+// production"). The two chains also differ in shape: the commitment load is
+// venue-scoped via `.in()`, the body read is a bare PK lookup with no `.in()`.
+const draftBodyMock = vi.fn<() => Promise<{ data: unknown; error: unknown }>>()
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          in: () => ({
-            maybeSingle: () => loadMock(),
+    from: (table: string) => {
+      if (table === 'messages') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => draftBodyMock(),
+            }),
+          }),
+        }
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            in: () => ({
+              maybeSingle: () => loadMock(),
+            }),
           }),
         }),
-      }),
-    }),
+      }
+    },
   }),
 }))
 
@@ -56,6 +75,11 @@ const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const GUEST_ID = '33333333-3333-4333-8333-333333333333'
 const OP_ID = 'op-1'
+// TAC-364: the persisted decline draft's body, returned to the client so
+// /queue/edit renders it on first paint. Deliberately NOT the empty string —
+// the empty string is also the DEGRADED value (a failed read returns it), so
+// a fixture of '' could not tell the happy path apart from a failed read.
+const DECLINE_BODY = "Sorry — we can't get that one to you today."
 
 function makeRequest(): Request {
   return new Request(
@@ -97,6 +121,8 @@ beforeEach(() => {
   capturePostHogMock.mockResolvedValue(undefined)
   loadMock.mockReset()
   loadMock.mockResolvedValue({ data: makeRow(), error: null })
+  draftBodyMock.mockReset()
+  draftBodyMock.mockResolvedValue({ data: { body: DECLINE_BODY }, error: null })
 })
 
 afterEach(() => {
@@ -224,10 +250,46 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
     })
 
-    it("returns 200 {messageId} per Contract on the happy path", async () => {
+    it("returns 200 {messageId, body} per Contract on the happy path", async () => {
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID })
+      // toEqual, not toMatchObject: the Contract's field SET is the claim, and
+      // a partial match would pass with `body` silently missing — which is the
+      // exact shape of the defect this field exists to fix.
+      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
+    })
+
+    it('reads the body off the persisted row, not the generation', async () => {
+      // The persist layer strips bubble delimiters before writing, so the
+      // generated string and the stored string are not guaranteed identical —
+      // and it is the stored one the operator will send. Pinned by giving the
+      // row a body that differs from anything handleOperatorDecline returned.
+      draftBodyMock.mockResolvedValueOnce({
+        data: { body: 'what the row actually holds' },
+        error: null,
+      })
+      const res = await POST(makeRequest(), params())
+      expect(await res.json()).toEqual({
+        messageId: MESSAGE_ID,
+        body: 'what the row actually holds',
+      })
+    })
+
+    it("degrades to body '' when the read fails, rather than failing the request", async () => {
+      // The draft is already persisted and the commitment is about to be
+      // cancelled. A 5xx here would strand the operator: they cannot reach a
+      // draft that exists, and a retry hits 409 on the cancelled commitment.
+      draftBodyMock.mockResolvedValueOnce({ data: null, error: { message: 'boom' } })
+      const res = await POST(makeRequest(), params())
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: '' })
+    })
+
+    it("degrades to body '' when the row has vanished", async () => {
+      draftBodyMock.mockResolvedValueOnce({ data: null, error: null })
+      const res = await POST(makeRequest(), params())
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: '' })
     })
 
     it("invokes handleOperatorDecline AFTER load + before markCancelled", async () => {
@@ -276,7 +338,7 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID })
+      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
       // PostHog event records the race-loss for observability
       expect(capturePostHogMock).toHaveBeenCalledOnce()
       const props = capturePostHogMock.mock.calls[0][0] as {
@@ -293,7 +355,7 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID })
+      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
       const props = capturePostHogMock.mock.calls[0][0] as {
         commitmentCancellationRaceLost: boolean
       }

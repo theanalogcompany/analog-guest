@@ -27,7 +27,11 @@ import {
   capturePushSent,
   capturePushTokenInvalid,
 } from '@/lib/analytics/posthog'
-import { APPROVAL_TRIGGERS, type ApprovalTrigger } from '@/lib/agent/stages'
+import {
+  APPROVAL_TRIGGERS,
+  GENERATION_FAILED_REVIEW_REASON,
+  type ApprovalTrigger,
+} from '@/lib/agent/stages'
 import { sendApnsRequest } from './apns/client'
 import { shouldSendDraftFlaggedPush } from './push-policy'
 
@@ -80,7 +84,21 @@ const CONTEXT_BY_TRIGGER = {
   // are also unlabelled here — pre-existing, deliberately left alone rather
   // than swept into this PR.)
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
-} as const satisfies Partial<Record<ApprovalTrigger, string>>
+  // TAC-364. Not an ApprovalTrigger — the gate can't fire it, a crash never
+  // produced the GenerateMessageResult the gate takes — which is why the
+  // satisfies clause below is widened rather than this key being added to
+  // APPROVAL_TRIGGERS.
+  //
+  // It needs a label for the same reason GROUNDING_CHECK_FAILED does: the card
+  // is BLANK, so an operator who opens it on the strength of an unlabelled
+  // "Reply to Sam" finds nothing to read and no statement of what happened.
+  // Until this ticket the crash card borrowed knowledge_gap's 'needs an
+  // answer', which was at least a hint; splitting the review_reason without
+  // this would have silently made the push less informative than before.
+  [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
+} as const satisfies Partial<
+  Record<ApprovalTrigger | typeof GENERATION_FAILED_REVIEW_REASON, string>
+>
 
 const CONTEXT_LOOKUP: Record<string, string | undefined> = CONTEXT_BY_TRIGGER
 

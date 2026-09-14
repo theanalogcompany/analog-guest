@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { GENERATION_FAILED_REVIEW_REASON } from '@/lib/agent/stages'
+
 // send.ts now imports APPROVAL_TRIGGERS from @/lib/agent/stages (so the label
 // map is keyed on the source of truth rather than re-listed literals), which
 // transitively loads the Voyage SDK — its ESM build trips vitest's
@@ -426,5 +428,24 @@ describe('sendDraftFlaggedPush', () => {
       .map((c) => c[0]?.operatorId)
       .filter((x): x is string => Boolean(x))
     expect(new Set(operatorIds)).toEqual(new Set(['op-1', 'op-2']))
+  })
+})
+
+describe('sendDraftFlaggedPush — generation_failed context (TAC-364)', () => {
+  // The crash card is BLANK. An operator who opens it on the strength of an
+  // unlabelled "Reply to Sam" finds nothing to read and no statement of what
+  // happened — so this card needs its context clause more than most, not less.
+  // Until TAC-364 it borrowed knowledge_gap's 'needs an answer' by borrowing
+  // its review_reason; splitting the reason without adding a label here would
+  // have made the push quietly less informative than before.
+  it("labels the push rather than degrading to a bare 'Reply to <name>'", async () => {
+    const body = buildPushBody('Sam', GENERATION_FAILED_REVIEW_REASON)
+    expect(body).toContain("couldn't write it")
+    expect(body).not.toBe('Reply to Sam')
+  })
+
+  it('stays categorical — no guest text, no draft body', () => {
+    const body = buildPushBody('Sam', GENERATION_FAILED_REVIEW_REASON)
+    expect(body).toBe("Reply to Sam — couldn't write it")
   })
 })

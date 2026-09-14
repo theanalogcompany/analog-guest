@@ -1083,3 +1083,137 @@ describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
     expect(scenario.inserts[0]!.body).toBe('')
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-364: review_triggers + ungrounded_claims at both persist sites
+// ---------------------------------------------------------------------------
+//
+// `review_reason` keeps holding the priority-selected primary; these two carry
+// what it cannot. Before this, a comp commitment that was ALSO below the
+// auto-send fidelity floor reached the operator labelled only "Commitment
+// requires approval" and the second condition was unrecoverable — triggers[]
+// lived in memory and in a PostHog payload, nowhere the card could read.
+describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+  })
+
+  it('writes both columns on the INSERT path', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'commitment_type_gated', null, {
+      reviewTriggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
+      ungroundedClaims: ['We open at 6am on Sundays.'],
+    })
+
+    expect(scenario.inserts[0]).toMatchObject({
+      review_reason: 'commitment_type_gated',
+      review_triggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
+      ungrounded_claims: ['We open at 6am on Sundays.'],
+    })
+  })
+
+  it('writes NULL for both when the caller passes neither', async () => {
+    // The two non-gate callers — the generation-failure card and the operator
+    // decline — never ran applyApprovalPolicyStage, so they have no trigger SET
+    // to record, only the single reason they stamp themselves. NULL says that;
+    // a synthesized one-element array would claim the gate ran and found
+    // exactly one thing.
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'generation_failed', null)
+
+    expect(scenario.inserts[0]).toMatchObject({
+      review_triggers: null,
+      ungrounded_claims: null,
+    })
+  })
+
+  it('nulls ungrounded_claims on a blank card but KEEPS review_triggers', async () => {
+    // A claim is a quotation FROM the body, and a blank card has no body — so
+    // keeping it would point the operator at text they cannot see. Why the card
+    // exists is still true with or without a body, so the triggers stay.
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
+      blankBody: true,
+      reviewTriggers: ['knowledge_gap'],
+      ungroundedClaims: ['should not survive blanking'],
+    })
+
+    expect(scenario.inserts[0]).toMatchObject({
+      body: '',
+      ungrounded_claims: null,
+      review_triggers: ['knowledge_gap'],
+    })
+  })
+
+  it('OVERWRITES both on the regen UPDATE path', async () => {
+    // The distinction that matters, and the reason these three columns sit
+    // together in the payload: `pending_until` below is preserve-by-default
+    // because it describes the GUEST'S wait, which a regen didn't reset. These
+    // two describe THIS draft. A regen that no longer fabricates must not keep
+    // the previous attempt's flagged claim.
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap_backstop' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      'existing-msg-1',
+      { reviewTriggers: ['model_flagged'], ungroundedClaims: [] },
+    )
+
+    const payload = scenario.updates[0].payload
+    expect(payload).toMatchObject({
+      review_reason: 'model_flagged',
+      review_triggers: ['model_flagged'],
+      ungrounded_claims: [],
+    })
+    // Not preserve-by-default — the key is PRESENT in the payload, which is
+    // what makes it an overwrite rather than a no-op. Contrast pending_until,
+    // whose absence from the payload is load-bearing.
+    expect(payload).toHaveProperty('ungrounded_claims')
+    expect(payload).not.toHaveProperty('pending_until')
+  })
+
+  it('nulls BOTH columns on regen when the caller passes no options', async () => {
+    // This is the non-gate regen path — the generation-failure card and the
+    // operator decline both land here — and it is the one a reader is most
+    // likely to get backwards, because `pending_until` in the same payload IS
+    // preserve-by-default and omission there means "leave it alone".
+    //
+    // Omission here means NULL, and both assertions are load-bearing against a
+    // real surviving mutant: rewriting either line as
+    // `...(options.x !== undefined ? { x } : {})` — i.e. making it match
+    // pending_until's shape, which the option's own docstring wrongly claimed
+    // it did until TAC-364's code review — passes the entire rest of the suite.
+    // The consequence would be a crash card inheriting the previous draft's
+    // trigger chips and flagged sentence: an operator reading "Commitment
+    // requires approval" next to "Something went wrong writing this one", for
+    // a draft that no longer exists.
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap_backstop' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'previous_pending_held',
+      'existing-msg-1',
+    )
+
+    const payload = scenario.updates[0].payload
+    expect(payload).toMatchObject({ review_triggers: null, ungrounded_claims: null })
+    // Present-and-null, not absent. An absent key is the preserve-by-default
+    // shape, and that is exactly the mutation above.
+    expect(payload).toHaveProperty('review_triggers')
+    expect(payload).toHaveProperty('ungrounded_claims')
+  })
+})

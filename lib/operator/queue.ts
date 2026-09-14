@@ -36,6 +36,39 @@ export interface QueueDraft {
   category: string | null
   voiceFidelity: number | null
   reviewReason: string | null
+  // TAC-364. The three fields below are Contract-locked and ALWAYS PRESENT —
+  // an empty array or empty string where there is nothing, never undefined, so
+  // the client never branches on presence.
+  //
+  // reviewReasonCode is the RAW trigger code. It exists because shipping only
+  // the prose label is what made analog-operator's queue-tone.ts unreachable:
+  // that module joined on three English strings this server has never emitted,
+  // so every production card fell to the default and two of its three colours
+  // were dead. Colour keys on the code; a copy edit below must not be able to
+  // reclassify a card.
+  reviewReasonCode: string
+  // The full trigger set, PRIMARY INCLUDED, normalized through the same label
+  // map. `[]` when the row predates migration 039 or was written by a path
+  // that never ran the gate — both render as today.
+  //
+  // Two consequences for the client, both stated because neither is visible
+  // from the type:
+  //   1. The primary is in HERE as well as in `reviewReason`, so a card
+  //      rendering both must drop it from this list or it renders twice.
+  //      Including it is deliberate — this field is "everything that fired",
+  //      and a set that silently omitted one member would be a worse thing to
+  //      reason about than a duplicate.
+  //   2. These are LABELS, not codes. That is the Contract's explicit call
+  //      ("normalized through REVIEW_REASON_LABELS exactly as reviewReason
+  //      is"), and it is narrower than what `reviewReasonCode` exists to
+  //      guarantee: a secondary trigger cannot currently drive an icon, a
+  //      grouping or a filter without hitting the same prose-join wall that
+  //      left queue-tone.ts matching nothing. Fine while secondaries are
+  //      display-only; a `reviewTriggerCodes` sibling is the fix if that
+  //      changes, and it is a Contract amendment, not a local decision.
+  reviewTriggers: string[]
+  // Verbatim claims the grounding verifier flagged. `[]` when none.
+  ungroundedClaims: string[]
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
   recentContext: QueueRecentContextEntry[]
@@ -54,75 +87,175 @@ export type ListPendingQueueResult =
 //   operator_decline_initiated — TAC-299: operator swiped left on a
 //     heads-up card; the draft-decline route persisted an apology draft
 //     bypassing the policy gate (the swipe IS the approval).
-type ExtraReviewReason = 'operator_decline_initiated'
+//   generation_failed — TAC-364: generation crashed twice and
+//     persistGenerationFailureCard wrote a blank card directly. Also outside
+//     APPROVAL_TRIGGERS, and for the same structural reason as the decline:
+//     the gate takes a GenerateMessageResult and a crash never produced one.
+//     Until TAC-364 this card was stamped `knowledge_gap`, which made its copy
+//     a lie — see GENERATION_FAILED_REVIEW_REASON in lib/agent/stages.ts.
+type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed'
 
-// Operator-facing labels for `messages.review_reason`. The wire field stays
-// `string | null` — only the value changes from raw classifier code to
-// human-readable text. Typed as Record<ApprovalTrigger | ExtraReviewReason,
-// ...> so adding a new trigger in lib/agent/stages.ts or a new operator-
-// initiated reason without a label here fails tsc.
+// Operator-facing copy for `messages.review_reason`.
+//
+// TAC-364 replaced all of these. They are now ONE PLAIN SENTENCE each, not a
+// rule name and not a category label: what the operator needs to know, written
+// to be understood cold. Five of the thirteen approval triggers have never
+// fired in production, so their copy will be read for the first time on a live
+// card.
+//
+// The wire field stays `string | null` — only the value changes from raw
+// classifier code to human-readable text. Typed as Record<ApprovalTrigger |
+// ExtraReviewReason, ...> so adding a new trigger in lib/agent/stages.ts or a
+// new non-policy reason without copy here fails tsc. That totality is why the
+// TAC-361 defect was NOT a fallthrough: no trigger can fall through this map.
+//
+// These strings are Contract surface — analog-operator renders them verbatim.
+// The copy table in the TAC-364 description is the source; transcribe from it,
+// never from this map, when asserting on them.
+//
+// NOT IN THIS MAP, deliberately: `demo_bypass` and `crisis_safety_reply`. Both
+// land on review_state='auto_sent' and `list_operator_queue` filters
+// review_state='pending', so neither can reach a card. Containment is the
+// queue predicate, not this map — do not add copy for them on the assumption
+// that it would ever be read.
 const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> = {
-  comp_regex_backstop: 'Compensation language detected',
-  // TAC-367: says what the operator actually has to do — read it themselves —
-  // rather than naming the mechanism or implying a finding. Deliberately NOT
-  // folded under knowledge_gap_backstop's "Unverified claim" copy: nothing
-  // was caught here, the check just didn't complete, and telling an operator
-  // a claim was caught when none was is the wrong-reason-copy problem
-  // TAC-364 exists for.
-  grounding_check_failed: 'Fact check did not complete — review manually',
-  model_flagged: 'Model flagged for approval',
-  fidelity_below_auto_send_floor: 'Voice match below auto-send threshold',
-  previous_pending_held: 'Earlier draft still pending',
-  // TAC-297: structural commitment-type gate. Surfaces as the most-severe
-  // signal in PRIMARY_TRIGGER_PRIORITY (lib/agent/stages.ts), so most queued
-  // drafts carrying a comp/hold/discount will land with this label rather
-  // than the comp_regex_backstop fallback.
-  commitment_type_gated: 'Commitment requires approval',
-  // TAC-XXX: venue is in "hold all outbound" mode — every content message is
-  // held for review. Ranked lowest in PRIMARY_TRIGGER_PRIORITY, so this label
-  // shows only when no more-specific trigger co-fired on the draft.
-  hold_all_outbound: 'Venue holds all messages',
-  // v1.23.0: complaint-category floor. Phrased around what the operator has
-  // to decide — the reply promises the guest something on a complaint turn —
-  // rather than naming the mechanism, since the operator's job here is to
-  // judge the promise, not the detector.
-  complaint_commitment_floor: 'Promise made on a complaint',
-  // v1.24.0: category routing. Phrased around what the operator is being
-  // asked to do — decide how generous to be — rather than naming the policy
-  // mechanism, which tells them nothing actionable.
-  category_requires_approval: 'Complaint needs your call',
-  // TAC-299: operator swiped left on a heads-up card → /draft-decline
-  // persisted an apology draft for review.
-  operator_decline_initiated: 'Operator-initiated decline',
-  // TAC-308: the agent couldn't ground the answer, so the draft is its best
-  // guess and the guest has been told nothing. Phrased as the ask, because
-  // this is the one card in the queue where a guest is actively waiting on a
-  // clock — if it isn't answered, a holding message goes out instead.
-  knowledge_gap: 'Waiting on an answer',
-  // TAC-350: independent grounding backstop caught a claim the model didn't
-  // self-report. Distinct label from knowledge_gap so the operator can tell
-  // "the model was honest about not knowing" from "the model stated
-  // something and got overridden" — same clock/blank-body treatment either
-  // way (see isKnowledgeGapCard in lib/agent/stages.ts).
-  knowledge_gap_backstop: 'Reply contained an unverified claim',
-  // TAC-355: deterministic self-talk backstop. Operator-vocabulary label —
-  // the operator card already shows the full draft body, so this just tells
-  // them what to look for before they send it.
-  self_talk_detected: 'Reply needs an edit before sending',
-  // TAC-355: independent mechanic-offer backstop. Deliberately generic
-  // (doesn't name the specific mechanic) — naming it would need the
-  // identified mechanic id persisted on the row, which this ticket
-  // scoped out (see TAC-360). Covers both the confirmed-offer and the
-  // check-failed-fail-closed branches with one label, since there's no
-  // sub-state to distinguish without that extra plumbing.
-  mechanic_offer_backstop: 'Possible mechanic offer — check needed',
+  // --- Obligation: yes/no on money -----------------------------------------
+  // TAC-297: structural commitment-type gate, top of PRIMARY_TRIGGER_PRIORITY.
+  // Says what is at stake (something free) and whose call it is, rather than
+  // naming the gate.
+  commitment_type_gated: 'This offers something free — your call.',
+  // Hedged because it is a regex on prose, not a structured emission: it can
+  // be wrong, and the copy should not assert more confidence than the check
+  // has. (Its only production hit to date matched the word "refund" inside the
+  // model REFUSING a refund.)
+  comp_regex_backstop: "This sounds like it's offering something on the house.",
+  // v1.23.0 complaint floor. Names both halves of what the operator is
+  // judging: a complaint happened, and the reply promises something about it.
+  complaint_commitment_floor: 'Someone complained and this promises to make it right.',
+  // TAC-355. "isn't on" is the venue's own vocabulary for a perk that isn't
+  // running. Deliberately doesn't name the mechanic — that would need the
+  // identified id persisted on the row, which is out of scope here.
+  mechanic_offer_backstop: "This may be offering a perk that isn't on.",
+
+  // --- Something outside the draft needs you --------------------------------
+  // TAC-308. The one card with a clock: if nobody answers inside the window a
+  // holding message goes to the guest instead of an answer. Phrased as the
+  // ask, in the agent's own voice, because the operator is being asked to
+  // supply something only they have.
+  knowledge_gap: "A guest asked something I don't have an answer for.",
+  // TAC-350. The distinction from knowledge_gap above is worth the operator's
+  // attention and is carried by the tense: there the agent knew it was stuck,
+  // here it wrote something and a second check disagreed. That check CAN be
+  // wrong — it was, twice, in the first two minutes after TAC-301 part 1.5
+  // deployed — so the sentence reports a doubt rather than a verdict. The
+  // flagged claim itself now rides on `ungroundedClaims` so the operator can
+  // see which sentence is the suspect one.
+  knowledge_gap_backstop: "I wasn't sure this was true, so I didn't send it.",
+  // TAC-367. Deliberately NOT folded under the backstop copy above: nothing
+  // was caught here, the check just didn't complete. Telling an operator a
+  // claim was caught when none was is the wrong-reason-copy problem TAC-364
+  // exists for.
+  grounding_check_failed: "I couldn't finish checking this one.",
+  // Venue-wide policy, ranked last in PRIMARY_TRIGGER_PRIORITY, so this shows
+  // only when nothing more specific co-fired. "right now" because the flag is
+  // a switch someone threw and can throw back.
+  hold_all_outbound: "You're holding everything here right now.",
+  // TAC-361, the defect this ticket was opened on. The old copy read
+  // 'Complaint needs your call' — an explicit entry written at v1.24.0 when
+  // comp_complaint was the only routed category. TAC-307 generalised the
+  // trigger to any category (and shipped a master "hold everything" switch)
+  // and the copy never followed, so a welcome reply to "Hi Himanshu!" reached
+  // the operator labelled as a complaint. Now it names the only thing that is
+  // actually true on every routed category: they chose this.
+  category_requires_approval: 'You chose to review these yourself.',
+
+  // --- The draft came out wrong --------------------------------------------
+  // The model's own self-flag, which carries a free-text approvalReason we
+  // don't persist — so the copy stays vague on purpose rather than inventing a
+  // specific that isn't on the row.
+  model_flagged: 'Something felt off about this one.',
+  // TAC-355. First person, because that is literally what went wrong: the
+  // reply talked about the agent instead of to the guest. The card renders the
+  // full body, so this tells the operator what to look for.
+  self_talk_detected: 'I was talking about myself instead of to the guest.',
+  // "like you" — the venue's voice is the thing being matched, and the
+  // operator is the one who knows what it sounds like. Never "low fidelity
+  // score", which is our vocabulary, not theirs.
+  fidelity_below_auto_send_floor: "This doesn't sound enough like you.",
+  // TAC-364, new. Generation crashed twice and the card is blank. Until now
+  // this said "a guest asked something I don't have an answer for", which was
+  // false — the guest may have asked something perfectly answerable.
+  generation_failed: 'Something went wrong writing this one.',
+
+  // --- You're mid-thread with this guest ------------------------------------
+  // Ranked 9th, so it only ever wins when nothing else fired: the draft itself
+  // is fine and the copy should not imply otherwise. Verified in production —
+  // on 2026-08-09 a perfectly good "Cortado or the Frosty Gandhi" was held
+  // behind an unreviewed knowledge-gap card.
+  previous_pending_held: 'Held behind an earlier message to this guest.',
+  // TAC-299: the operator swiped left on a heads-up card and /draft-decline
+  // persisted this apology. "You passed on the last one" points at their own
+  // action, which is the context that makes the draft make sense.
+  operator_decline_initiated: "You passed on the last one — here's another go.",
 }
+
+/**
+ * TAC-364: the label map's key set, for tests only.
+ *
+ * `tsc` already forces COPY to exist for every trigger (the map is total over
+ * `ApprovalTrigger | ExtraReviewReason`). What it cannot force is that the new
+ * copy was ever checked against the Contract — a 16th trigger compiles the
+ * moment someone types any string, and `queue.test.ts`'s `it.each` table is
+ * hand-maintained. Exporting the keys lets that test assert its own
+ * completeness, so new copy cannot ship having been read by nobody.
+ *
+ * Not for runtime branching. Same shape as `_PUSH_POLICY_FOR_TESTS`.
+ */
+export const _REVIEW_REASON_KEYS_FOR_TESTS: readonly string[] =
+  Object.keys(REVIEW_REASON_LABELS)
 
 const REVIEW_REASON_FALLBACK = 'Needs review'
 
 function normalizeReviewReason(raw: string | null): string | null {
   if (raw === null) return null
   return (REVIEW_REASON_LABELS as Record<string, string>)[raw] ?? REVIEW_REASON_FALLBACK
+}
+
+/**
+ * TAC-364: the full trigger set, each normalized exactly as `reviewReason` is,
+ * including the `'Needs review'` fallback for an unrecognized value.
+ *
+ * `null` → `[]`. A null column means the row predates migration 039, or was
+ * written by a path that never ran the gate (the generation-failure card, the
+ * operator decline) and so has no trigger SET to record — only the single
+ * reason it stamps itself. Both render as today, which is what the Contract
+ * promises for an old row.
+ *
+ * Order is preserved from the DB array, which is enumeration order from
+ * `applyApprovalPolicyStage` — the order the checks fired, NOT priority order.
+ * The client is expected to show the primary (from `reviewReason`) first and
+ * these beneath it; re-sorting here would throw away the only record of what
+ * fired when.
+ */
+function normalizeReviewTriggers(raw: string[] | null): string[] {
+  // `?? []` rather than `=== null`: the column is also ABSENT (undefined) when
+  // this code runs against a pre-039 RPC, which is a real local-dev state even
+  // though the deploy ordering forbids it in production. Both mean the same
+  // thing to the client, and one nullish check covers both without pretending
+  // to defend against anything else.
+  return (raw ?? []).map(
+    (t) => (REVIEW_REASON_LABELS as Record<string, string>)[t] ?? REVIEW_REASON_FALLBACK,
+  )
+}
+
+/**
+ * TAC-364: `null` → `[]`, nothing else. The claims are the verifier's verbatim
+ * quotations from the draft body and are shown to the operator as written —
+ * there is no label map to run them through, and rewriting them would defeat
+ * the point of quoting.
+ */
+function normalizeUngroundedClaims(raw: string[] | null): string[] {
+  return raw ?? []
 }
 
 function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
@@ -186,6 +319,14 @@ export async function listPendingQueue(
       category: row.category,
       voiceFidelity: row.voice_fidelity,
       reviewReason: normalizeReviewReason(row.review_reason),
+      // TAC-364: the RAW code, un-normalized and never null — this is what the
+      // client keys card colour on, and `''` is the "nothing recorded" value so
+      // it never has to branch on presence. Deliberately NOT derived from
+      // `reviewReason`: the whole defect being fixed is that a label is prose
+      // that can be edited, and a colour must not move when copy does.
+      reviewReasonCode: row.review_reason ?? '',
+      reviewTriggers: normalizeReviewTriggers(row.review_triggers),
+      ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),

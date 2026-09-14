@@ -7,9 +7,11 @@ import {
   deriveFollowupContext,
   findPendingDraft,
   generateStage,
+  GENERATION_FAILED_REVIEW_REASON,
   isCommitmentTypeGated,
   isKnowledgeGapCard,
   isModelFlagged,
+  KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
   KNOWLEDGE_RELEVANCE_FLOOR,
   knowledgeGapWillQueue,
   retrieveCorpusStage,
@@ -3351,5 +3353,143 @@ describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
   it('defaults the rng so production callers need not pass one', () => {
     const directive = buildAiRuntime(ctxWithPolicy('frequent')).emojiDirective
     expect(['allowed', 'none']).toContain(directive)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-364: the gate threads the verifier's claims to the persist layer
+// ---------------------------------------------------------------------------
+//
+// Before this the claims went to PostHog and the Langfuse span and nowhere
+// else — computed, then discarded at exactly the point they would be useful.
+// The gate used them only as a boolean. Now they ride on the decision so
+// `persistOrRegenQueuedDraft` can land them on messages.ungrounded_claims and
+// the operator card can show WHICH sentence is the suspect one.
+describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  // Same shape as the TAC-350 backstop block's fixture: an inbound turn, since
+  // verifyGroundingStage is inbound-only by construction.
+  const inboundCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: 'what are the four SoFi variations?',
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'question',
+        crisisSafety: false,
+      },
+    })
+
+  it('carries the flagged claims through verbatim', async () => {
+    const claims = [
+      'invents four SoFi variation names not in the corpus',
+      'states a wifi password that appears nowhere in venue knowledge',
+    ]
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'flagged' as const, claims },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.ungroundedClaims).toEqual(claims)
+  })
+
+  it('is [] — never undefined — when the backstop found nothing', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
+      { status: 'clean' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.ungroundedClaims).toEqual([])
+  })
+
+  // The one that is easy to get backwards. A truncated check means the verdict
+  // could not be READ — an absence of information about the reply, not a
+  // finding against it. It queues (GROUNDING_CHECK_FAILED, fail-closed), but
+  // there is no claim to show, and pairing "I couldn't finish checking this
+  // one" with a list of flagged claims would be incoherent.
+  it('is [] on a truncated check, which queues but found nothing', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'truncated' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.ungroundedClaims).toEqual([])
+  })
+
+  it('is [] when the stage was skipped entirely', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.ungroundedClaims).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-364: generation_failed is a gap card to the shared predicate
+// ---------------------------------------------------------------------------
+describe('isKnowledgeGapCard — generation_failed (TAC-364)', () => {
+  // The crash card arms pending_until like any gap card, so it is protected
+  // while the clock runs regardless of its label. This leg is what keeps it
+  // protected AFTER the timer CAS-claims and nulls that column — without it,
+  // splitting the crash path off `knowledge_gap` would have silently
+  // reintroduced the data-loss bug the review_reason leg exists to prevent:
+  // the next turn that queued for any reason would UPDATE the card in place
+  // and the guest's outstanding question would be gone.
+  it('recognizes a crash card whose clock has already fired', () => {
+    expect(
+      isKnowledgeGapCard({
+        review_reason: GENERATION_FAILED_REVIEW_REASON,
+        pending_until: null,
+      }),
+    ).toBe(true)
+  })
+
+  it('still refuses an ordinary pending draft', () => {
+    expect(
+      isKnowledgeGapCard({ review_reason: 'commitment_type_gated', pending_until: null }),
+    ).toBe(false)
+  })
+})
+
+describe('KNOWLEDGE_GAP_CARD_REVIEW_REASONS (TAC-364)', () => {
+  // Pinned BY VALUE. The set is shared between isKnowledgeGapCard and the
+  // PostgREST filter in findPendingQuestion, and those two used to be
+  // hand-maintained copies that drifted — the query carried one value where
+  // the predicate carried two, and a backstop card whose clock had fired was
+  // recognized by one and invisible to the other for as long as that lasted.
+  // Sharing the array makes the drift impossible; this test makes a change to
+  // the SET deliberate, since adding a value silently widens what the agent
+  // treats as an unanswered question.
+  it('is exactly the three card-producing reasons', () => {
+    expect([...KNOWLEDGE_GAP_CARD_REVIEW_REASONS]).toEqual([
+      'knowledge_gap',
+      'knowledge_gap_backstop',
+      'generation_failed',
+    ])
+  })
+
+  it('is what isKnowledgeGapCard actually accepts', () => {
+    for (const reason of KNOWLEDGE_GAP_CARD_REVIEW_REASONS) {
+      expect(isKnowledgeGapCard({ review_reason: reason, pending_until: null })).toBe(true)
+    }
   })
 })

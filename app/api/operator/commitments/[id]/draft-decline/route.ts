@@ -4,6 +4,10 @@
 // underlying commitment cancelled. The operator-app routes the returned
 // messageId into the existing edit screen for final review + send.
 //
+// TAC-364: the response also carries the persisted `body`, so that edit screen
+// renders the apology on first paint instead of "That draft is no longer
+// pending". See the read-back comment below for why it comes off the row.
+//
 // TAC-299 (cross-repo sibling TAC-298).
 //
 // Contract conformance (NOT using withOperatorAuth):
@@ -144,6 +148,44 @@ export async function POST(
 
   const messageId = result.outboundMessageId
 
+  // ---- read the persisted body back for the response (TAC-364) ----
+  //
+  // The Contract returns `{ messageId, body }` rather than `{ messageId }`
+  // alone, so the operator app can render /queue/edit on FIRST PAINT.
+  // Without it that screen resolves the draft out of `queue.drafts`, a client
+  // cache that cannot contain a row created server-side milliseconds ago, and
+  // renders "That draft is no longer pending" — not a rare race but the
+  // guaranteed first frame of every decline. TAC-298 worked around it with a
+  // blocking full-queue refetch before navigating, which TAC-304 then filed as
+  // a 5-10s lag; returning the body removes both the wrong first paint and the
+  // extra round trip.
+  //
+  // Read back from the ROW rather than threaded out of the generation. The
+  // persist layer strips stray bubble delimiters via collapseToSingleMessage
+  // before writing, so the generated string and the stored string are not
+  // guaranteed identical — and it is the stored one the operator will send.
+  // Prefilling anything else would show them text that is not on the row.
+  //
+  // Degrades to '' rather than failing the request. The draft is already
+  // persisted and the commitment is about to be cancelled; a 5xx here would
+  // leave the operator unable to reach a draft that exists, and a retry would
+  // hit 409 invalid_state on the already-cancelled commitment. An empty
+  // composer that fills in on the next realtime tick is a far smaller cost,
+  // and still strictly better than the wrong-state screen this replaces.
+  let body = ''
+  const { data: draftRow, error: draftError } = await supabase
+    .from('messages')
+    .select('body')
+    .eq('id', messageId)
+    .maybeSingle()
+  if (draftError) {
+    console.warn(
+      `[/api/operator/commitments/:id/draft-decline] decline body read degraded for message=${messageId}: ${draftError.message}`,
+    )
+  } else {
+    body = draftRow?.body ?? ''
+  }
+
   // ---- transition commitment → cancelled (CAS-gated, race-safe) ----
   // Per Decision 1: this happens AFTER persist succeeds. If markCancelled
   // lost the CAS race (concurrent acknowledge from another operator), the
@@ -189,5 +231,5 @@ export async function POST(
     commitmentCancellationRaceLost: cancellationRaceLost,
   })
 
-  return NextResponse.json({ messageId })
+  return NextResponse.json({ messageId, body })
 }

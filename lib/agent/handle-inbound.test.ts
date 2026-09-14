@@ -72,6 +72,14 @@ vi.mock('./stages', async () => {
   const actual = await vi.importActual<typeof import('./stages')>('./stages')
   return {
     APPROVAL_TRIGGERS: actual.APPROVAL_TRIGGERS,
+    // TAC-364: forwarded REAL, like the constants around it. This factory is
+    // an explicit allow-list, so a constant left out of it arrives `undefined`
+    // at the call site rather than failing loudly — here that would have meant
+    // persisting review_reason=undefined and calling
+    // shouldSendDraftFlaggedPush(undefined), with every assertion in this file
+    // still nominally "about" the crash card. Same trap verify-grounding.test
+    // hit with NoObjectGeneratedError.
+    GENERATION_FAILED_REVIEW_REASON: actual.GENERATION_FAILED_REVIEW_REASON,
     KNOWLEDGE_GAP_WINDOW_MS: actual.KNOWLEDGE_GAP_WINDOW_MS,
     isKnowledgeGapCard: actual.isKnowledgeGapCard,
     // TAC-332: pure and deterministic — forward the real implementation
@@ -186,7 +194,7 @@ vi.mock('./trace-content', () => ({
 }))
 
 import { handleInbound } from './handle-inbound'
-import { APPROVAL_TRIGGERS } from './stages'
+import { APPROVAL_TRIGGERS, GENERATION_FAILED_REVIEW_REASON } from './stages'
 
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
 const GUEST_ID = '11111111-1111-4111-8111-111111111111'
@@ -296,7 +304,10 @@ describe('handleInbound — generation-failure fallback (TAC-309)', () => {
     expect(r).toMatchObject({
       status: 'queued',
       outboundMessageId: 'card-1',
-      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      // TAC-364: the AgentResult carries the crash's own reason too, so a
+      // caller reading the result (and the PostHog draft_queued payload built
+      // from it) can't disagree with the row about why the card exists.
+      primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
     })
     expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledTimes(1)
   })
@@ -334,14 +345,42 @@ describe('handleInbound — generation-failure fallback (TAC-309)', () => {
     expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledTimes(1)
   })
 
-  it('persists the card blank, with a clock, under review_reason=knowledge_gap', async () => {
+  // TAC-364 REVERSES the review_reason half of this test. TAC-309 stamped
+  // these cards `knowledge_gap` to inherit the timer, the holding message and
+  // the eviction protection — all of which still work, because none of them
+  // key on review_reason. What the reuse cost was the operator-facing copy:
+  // the card read "a guest asked something I don't have an answer for" on a
+  // turn where the guest may have asked something perfectly answerable and the
+  // generator simply crashed. Everything else about the card is unchanged, and
+  // the assertions below say so.
+  it('persists the card blank, with a clock, under review_reason=generation_failed', async () => {
     generateStageMock.mockResolvedValue(GEN_FAILED)
     await handleInbound(INBOUND_ID)
     const [, , trigger, existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
-    expect(trigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(trigger).toBe(GENERATION_FAILED_REVIEW_REASON)
+    expect(trigger).not.toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
     expect(existingId).toBeNull()
     expect(opts).toMatchObject({ blankBody: true })
     expect(opts.pendingUntil).toBeInstanceOf(Date)
+    // This path never ran the gate, so there is no trigger SET to record —
+    // only the one reason it stamps itself. Pinned so a future caller doesn't
+    // synthesize a single-element array and make the column claim the gate ran.
+    expect(opts.reviewTriggers).toBeUndefined()
+  })
+
+  // The crash card still IS a gap card to every predicate that decides whether
+  // it survives. This is the half of the split that is easy to get wrong:
+  // without it, the moment the holding timer CAS-claims and nulls
+  // pending_until, the next turn that queues for any reason would UPDATE this
+  // row in place and the guest's outstanding question would be gone.
+  it('is still recognized as a gap card by the real predicate', async () => {
+    const { isKnowledgeGapCard } = await vi.importActual<typeof import('./stages')>('./stages')
+    expect(
+      isKnowledgeGapCard({
+        review_reason: GENERATION_FAILED_REVIEW_REASON,
+        pending_until: null,
+      }),
+    ).toBe(true)
   })
 
   it('pushes so an operator learns the guest is waiting', async () => {
