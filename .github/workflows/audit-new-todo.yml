@@ -95,7 +95,7 @@ jobs:
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
             --max-turns 60
             --allowedTools "Read,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*)"
