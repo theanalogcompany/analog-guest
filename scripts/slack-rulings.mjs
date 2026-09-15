@@ -8,9 +8,11 @@
  * Inbound:  replies in that Slack thread → posted to Linear as human input,
  *           which is what lets the build workflow resume the ticket.
  *
- * The marker comment is EDITED, never re-created, so it never becomes the
- * newest comment on the ticket. If it did, the build workflow would read a
- * [FROM CLAUDE CODE] comment as the last word and refuse to resume.
+ * The marker comment is EDITED, never re-created, so each ticket carries
+ * exactly one. Creating it still makes it the newest comment, after any
+ * ruling already on the ticket. build-ready.yml and work-ticket.md both skip
+ * [SLACK] and [RESUME-CLAIM] comments when deciding who spoke last, so the
+ * marker never buries a ruling.
  *
  * Env: LINEAR_API_KEY, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
  */
@@ -172,8 +174,9 @@ for (const issue of issues) {
 
   const newest = fresh[fresh.length - 1].ts;
 
-  // EDIT the marker, never create a new one — a new bot comment would become
-  // the newest on the ticket and block the resume we just enabled.
+  // EDIT the marker, never create a new one. markerOf reads whichever [SLACK]
+  // comment comes first, so a second marker could leave synced= stale and the
+  // same replies would be copied to Linear again.
   await linear(
     `mutation($id: String!, $body: String!) {
        commentUpdate(id: $id, input: { body: $body }) { success }

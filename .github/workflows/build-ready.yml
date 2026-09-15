@@ -98,7 +98,16 @@ jobs:
 
             | map(
                 (.comments.nodes | sort_by(.createdAt)) as $sorted
-                | ($sorted | last) as $newest
+                # [RESUME-CLAIM] and [SLACK] comments are workflow bookkeeping,
+                # not a turn. Skipping them keeps a Slack marker from burying a
+                # ruling, and keeps the ruling newest across claims so the
+                # attempt count below can reach MAX_ATTEMPTS.
+                | ($sorted
+                   | map(select(
+                       ((.body | test("\\[FROM CLAUDE CODE\\]"))
+                        and (.body | test("\\[(RESUME-CLAIM|SLACK)\\]")))
+                       | not))
+                   | last) as $newest
                 | . + {
                     newestId: ($newest.id // ""),
                     lastIsHuman: (

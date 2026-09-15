@@ -77,10 +77,13 @@ then the marker.
 | `[PLAN]` | A plan awaiting approval | Set Needs Ruling + `Needs Decision`. Approval is a decision like any other |
 | `[FINDING]` | A defect outside this ticket | Describe it. Never file a ticket. Max three per ticket |
 | `[AUDIT]` | Output of `/audit-ticket` | Read-only pass |
+| `[RESUME-CLAIM]` | `build-ready.yml` is about to resume the ticket | Bookkeeping. Neither a session's turn nor human input |
+| `[SLACK]` | `slack-rulings.mjs` posted the ticket to Slack | Bookkeeping. Neither a session's turn nor human input |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
-the newest comment on a ticket is human input, the ticket is unblocked and a
-session may resume it.
+the newest comment on a ticket, skipping `[RESUME-CLAIM]` and `[SLACK]`
+bookkeeping, is human input, the ticket is unblocked and a session may resume
+it.
 
 ## On hitting a question
 
