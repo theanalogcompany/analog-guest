@@ -9,7 +9,7 @@ the bug.
 
 ## Linear statuses
 
-Pipeline: **Backlog → Needs Ruling → Todo → In Progress → In Review → Ready For QA → Done.**
+Pipeline: **Backlog → Todo → Ready → In Progress → In Review → Ready For QA → Done.**
 
 Backlog is Linear's default for a ticket created without an explicit status.
 Every ticket we create sets its status explicitly.
@@ -17,25 +17,35 @@ Every ticket we create sets its status explicitly.
 | Status | Meaning |
 |---|---|
 | Backlog | Uncommitted. Not yet triaged. |
+| Todo | Committed, **not yet audited**. An automation audits it within 15 minutes. Never build from here. |
 | Needs Ruling | Blocked on Jaipal. Carries a `Blocked On` label saying which kind. |
-| Todo | Zero open questions. The only status Claude Code builds from. |
-| In Progress | Set automatically on draft PR open. |
+| Ready | Audited, zero open questions, nobody on it. **The only status Claude Code builds from.** |
+| In Progress | Claude Code has it. Set automatically on draft PR open. |
 | In Review | PR open, not merged. Set automatically. |
-| Ready For QA | Merged. Gate not yet passed. Set automatically on merge. |
-| Done | Gate passed in production. Never set automatically, never set by the agent. |
+| Ready For QA | Merged and deployed. Gate not yet passed. Set automatically on merge. |
+| Done | Gate passed in production. Only Jaipal sets this. |
+
+**Needs Ruling is not a stage.** A ticket falls into it from anywhere the
+moment something needs Jaipal, and returns to where it left when he answers:
+
+- blocked during the audit → returns to **Ready**
+- blocked awaiting plan approval → returns to **In Progress** when approved
+- blocked mid-build → returns to **In Progress**
 
 Rules, in order of how badly they break things if ignored:
 
-1. **Build only from Todo.** A ticket with anything under `## Open questions`
-   is not buildable, whatever its status says. Found one in Todo? Move it to
-   Needs Ruling and say so.
-2. **Never move a ticket to Todo.** The one exception is clearing the last
-   open question immediately after a ruling answered it. Promoting a ticket
-   on your own judgment defeats the process.
+1. **Build only from Ready.** A ticket in Todo has not been audited. A ticket
+   with anything under `## Open questions` is not buildable whatever its
+   status says.
+2. **Never promote a ticket to Ready yourself.** Only an audit that found
+   nothing, or a ruling from Jaipal, moves a ticket there.
 3. **Never mark a ticket Done.** Merging moves it to Ready For QA
-   automatically. Done requires a passed gate, which is a separate act.
+   automatically. Done requires a passed gate, which is Jaipal's act.
 4. **Never run a production migration.** Write the SQL, hand it over. See
    `[NEEDS-ACTION]` below.
+5. **Anything that needs Jaipal moves the ticket to Needs Ruling**, with the
+   right `Blocked On` label, at the moment it needs him. Never wait silently.
+   A plan awaiting approval counts.
 
 ## Labels
 
@@ -64,8 +74,13 @@ then the marker.
 | `[NEEDS-INPUT]` | A question blocks the work | Add it to `## Open questions`, set Needs Ruling + `Needs Decision` |
 | `[HUMAN-REVIEW-REQUIRED]` | The work touches a high-stakes area | Same, and do not plan or branch |
 | `[NEEDS-ACTION]` | Something only Jaipal can run | Set Needs Ruling + `Needs Action`. Format below is mandatory |
+| `[PLAN]` | A plan awaiting approval | Set Needs Ruling + `Needs Decision`. Approval is a decision like any other |
 | `[FINDING]` | A defect outside this ticket | Describe it. Never file a ticket. Max three per ticket |
 | `[AUDIT]` | Output of `/audit-ticket` | Read-only pass |
+
+A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
+the newest comment on a ticket is human input, the ticket is unblocked and a
+session may resume it.
 
 ## On hitting a question
 
