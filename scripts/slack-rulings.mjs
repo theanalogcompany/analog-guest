@@ -4,9 +4,17 @@
  *
  * Outbound: a ticket enters Needs Ruling → one Slack message, its questions
  *           in the body. The Slack timestamp is recorded on the ticket in a
- *           [SLACK] marker comment.
+ *           [SLACK] marker comment. That thread belongs to the ticket for
+ *           life: when what the ticket is blocked on changes, the update goes
+ *           out as a reply in the same thread, never as a new channel message.
  * Inbound:  replies in that Slack thread → posted to Linear as human input,
  *           which is what lets the build workflow resume the ticket.
+ *
+ * The marker's q= field is a hash of what the ticket is blocked on: its
+ * ## Open questions block plus the id of its newest [NEEDS-INPUT],
+ * [HUMAN-REVIEW-REQUIRED], [PLAN] or [NEEDS-ACTION] comment. A thread reply
+ * goes out only when that hash changes, so a ticket sitting unanswered gets
+ * nothing run after run. (TAC-406)
  *
  * The marker comment is EDITED, never re-created, so each ticket carries
  * exactly one. Creating it still makes it the newest comment, after any
@@ -16,6 +24,8 @@
  *
  * Env: LINEAR_API_KEY, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
  */
+
+import { createHash } from 'node:crypto';
 
 const LINEAR = process.env.LINEAR_API_KEY;
 const SLACK = process.env.SLACK_BOT_TOKEN;
@@ -79,13 +89,60 @@ const data = await linear(`
 const issues = data.issues.nodes;
 console.log(`${issues.length} ticket(s) in Needs Ruling`);
 
-// Pull the numbered questions out of the ticket body, if it has a block.
-function questionsOf(description) {
+// The whole ## Open questions block, or null when the ticket has none.
+function openQuestionsBlock(description) {
   if (!description) return null;
   const m = description.match(/##\s*Open questions\s*\n([\s\S]*?)(?=\n##\s|\s*$)/i);
   if (!m) return null;
   const text = m[1].trim();
-  return text.length ? text.slice(0, 2500) : null;
+  return text.length ? text : null;
+}
+
+// Pull the numbered questions out of the ticket body, if it has a block.
+function questionsOf(description) {
+  return openQuestionsBlock(description)?.slice(0, 2500) ?? null;
+}
+
+// process.md: an agent comment opens with the prefix, a blank line, then the
+// marker. Matching the marker in that position, rather than anywhere in the
+// body, keeps a ruling or an audit that merely quotes a marker from counting
+// as a new blocking state.
+const BLOCKING_MARKER =
+  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION)\]/;
+
+function newestBlockingComment(issue) {
+  return (
+    issue.comments.nodes
+      .filter(c => BLOCKING_MARKER.test(c.body))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .at(-1) ?? null
+  );
+}
+
+// Strip what re-saving a ticket can change without changing its words:
+// Linear's backslash escapes, line endings, surrounding whitespace, blank
+// lines.
+function normalize(text) {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\([^\w\s])/g, '$1')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+// What the ticket is blocked on, as 16 hex characters, or 'none' when there
+// is nothing to post. Hashes the whole block rather than the 2,500 characters
+// that get posted, so a change past the cut still counts.
+function blockingHash(issue) {
+  const block = openQuestionsBlock(issue.description);
+  const comment = newestBlockingComment(issue);
+  if (!block && !comment) return 'none';
+  return createHash('sha256')
+    .update(`${block ? normalize(block) : ''}\0${comment?.id ?? ''}`)
+    .digest('hex')
+    .slice(0, 16);
 }
 
 function markerOf(issue) {
@@ -95,46 +152,95 @@ function markerOf(issue) {
 function parseMarker(body) {
   const ts = body.match(/ts=([0-9.]+)/)?.[1];
   const synced = body.match(/synced=([0-9.]+)/)?.[1] ?? '0';
-  return { ts, synced };
+  // Absent on markers written before TAC-406.
+  const q = body.match(/\bq=([0-9a-f]{16}|none)\b/)?.[1];
+  return { ts, synced, q };
 }
 
-function markerBody(ts, synced) {
-  return `**[FROM CLAUDE CODE]**\n\n${MARKER} channel=${CHANNEL} ts=${ts} synced=${synced}`;
+function markerBody(ts, synced, q) {
+  const qField = q ? ` q=${q}` : '';
+  return `**[FROM CLAUDE CODE]**\n\n${MARKER} channel=${CHANNEL} ts=${ts} synced=${synced}${qField}`;
 }
 
-// ── outbound: post tickets that have never been posted ──────────────────────
-
-for (const issue of issues) {
-  if (markerOf(issue)) continue;
-
-  const kind = issue.labels.nodes.some(l => l.name === 'Needs Action')
+function kindOf(issue) {
+  return issue.labels.nodes.some(l => l.name === 'Needs Action')
     ? ':wrench: *You have to run something*'
     : ':thinking_face: *Decision needed*';
+}
 
-  const questions = questionsOf(issue.description);
-
-  const text = [
-    `${kind}  <${issue.url}|${issue.identifier}>  ${issue.title}`,
+function firstPostText(issue) {
+  return [
+    `${kindOf(issue)}  <${issue.url}|${issue.identifier}>  ${issue.title}`,
     '',
-    questions ?? '_Questions are in the ticket — open it._',
+    questionsOf(issue.description) ?? '_Questions are in the ticket — open it._',
     '',
     '_Reply in this thread. `1: A. 2: yes. 3: skip.`_',
   ].join('\n');
+}
 
-  const posted = await slack('chat.postMessage', {
-    channel: CHANNEL,
-    text,
-    unfurl_links: false,
-  });
+function updateText(issue) {
+  const newest = newestBlockingComment(issue);
+  const marker = newest ? BLOCKING_MARKER.exec(newest.body)[1] : null;
+  return [
+    `:arrows_counterclockwise: *Updated*  ${kindOf(issue)}  <${issue.url}|${issue.identifier}>`,
+    ...(marker ? [`Newest in the ticket: \`[${marker}]\``] : []),
+    '',
+    questionsOf(issue.description) ?? '_Details are in the ticket — open it._',
+    '',
+    '_Reply in this thread. `1: A. 2: yes. 3: skip.`_',
+  ].join('\n');
+}
 
+// ── outbound: one channel message per ticket, then replies in its thread ────
+
+for (const issue of issues) {
+  const marker = markerOf(issue);
+  const q = blockingHash(issue);
+
+  if (!marker) {
+    const posted = await slack('chat.postMessage', {
+      channel: CHANNEL,
+      text: firstPostText(issue),
+      unfurl_links: false,
+    });
+
+    await linear(
+      `mutation($id: String!, $body: String!) {
+         commentCreate(input: { issueId: $id, body: $body }) { success }
+       }`,
+      { id: issue.id, body: markerBody(posted.ts, posted.ts, q) }
+    );
+
+    console.log(`posted ${issue.identifier}`);
+    continue;
+  }
+
+  const { ts, synced, q: postedQ } = parseMarker(marker.body);
+  if (!ts || postedQ === q) continue;
+
+  // A marker from before TAC-406 has no q. Its channel message already
+  // carried the questions, so record the current state without posting.
+  if (postedQ !== undefined && q !== 'none') {
+    await slack('chat.postMessage', {
+      channel: CHANNEL,
+      thread_ts: ts,
+      text: updateText(issue),
+      unfurl_links: false,
+    });
+    console.log(`replied in thread for ${issue.identifier}`);
+  } else {
+    console.log(`recorded q for ${issue.identifier}, nothing posted`);
+  }
+
+  const body = markerBody(ts, synced, q);
   await linear(
     `mutation($id: String!, $body: String!) {
-       commentCreate(input: { issueId: $id, body: $body }) { success }
+       commentUpdate(id: $id, input: { body: $body }) { success }
      }`,
-    { id: issue.id, body: markerBody(posted.ts, posted.ts) }
+    { id: marker.id, body }
   );
-
-  console.log(`posted ${issue.identifier}`);
+  // Inbound runs later in this pass and rebuilds the marker from this body.
+  marker.body = body;
 }
 
 // ── inbound: pull thread replies back into Linear ───────────────────────────
@@ -143,7 +249,7 @@ for (const issue of issues) {
   const marker = markerOf(issue);
   if (!marker) continue;
 
-  const { ts, synced } = parseMarker(marker.body);
+  const { ts, synced, q } = parseMarker(marker.body);
   if (!ts) continue;
 
   const thread = await slack(
@@ -181,7 +287,7 @@ for (const issue of issues) {
     `mutation($id: String!, $body: String!) {
        commentUpdate(id: $id, input: { body: $body }) { success }
      }`,
-    { id: marker.id, body: markerBody(ts, newest) }
+    { id: marker.id, body: markerBody(ts, newest, q) }
   );
 
   await slack('reactions.add', {
