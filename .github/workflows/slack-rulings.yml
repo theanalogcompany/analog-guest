@@ -1,0 +1,38 @@
+name: Slack rulings sync
+
+# Two-way sync between Linear "Needs Ruling" and the #rulings Slack channel.
+# Runs in analog-guest only — this is workspace-wide, not per-repo.
+#
+# Every 5 minutes:
+#   - any ticket newly in Needs Ruling gets one Slack message
+#   - any reply in one of those threads becomes a Linear comment, which the
+#     build workflow reads as a ruling and acts on within its own 15 minutes
+#
+# Scheduled workflows run only from the default branch.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: slack-rulings
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Sync
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: node scripts/slack-rulings.mjs

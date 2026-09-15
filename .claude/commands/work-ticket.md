@@ -9,12 +9,13 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
 1. **Re-read ticket state.** `Linear:get_issue` for body + status, `Linear:list_comments` for the full comment thread (createdAt order). In CI there is no Linear MCP — use the GraphQL API with curl and `$LINEAR_API_KEY`.
 
-2. **Compute.** Marker-detection convention: "body contains `[MARKER]`" means `body.includes('[MARKER]')` — substring match, NOT `startsWith`. Bot comments always begin with the `**[FROM CLAUDE CODE]**` prefix, so markers never sit at byte 0. Use `includes` uniformly across `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`.
+2. **Compute.** Marker-detection convention: "body contains `[MARKER]`" means `body.includes('[MARKER]')` — substring match, NOT `startsWith`. Bot comments always begin with the `**[FROM CLAUDE CODE]**` prefix, so markers never sit at byte 0. Use `includes` uniformly across `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`, `[RESUME-CLAIM]`, `[SLACK]`.
 
    **Provenance comes from the prefix, never from the author ID.** Every comment on every ticket is under Jaipal's account, your own included.
 
-   - `botComments` — comments whose body contains `**[FROM CLAUDE CODE]**`
-   - `humanComments` — every other comment. A comment with no recognised prefix is human input.
+   - `bookkeeping` — comments whose body contains `**[FROM CLAUDE CODE]**` and a `[RESUME-CLAIM]` or `[SLACK]` marker. The workflows write these: `build-ready.yml` before it resumes a ticket, `slack-rulings.mjs` when it posts a ticket to Slack. They are neither a session's turn nor human input, and nothing below reads them.
+   - `botComments` — comments whose body contains `**[FROM CLAUDE CODE]**`, excluding `bookkeeping`
+   - `humanComments` — comments whose body does not contain `**[FROM CLAUDE CODE]**`. A comment with no recognised prefix is human input.
    - `lastBotComment` — most recent of `botComments` (null if none). **Used for `parentId` threading and terminal-state detection only.**
    - `lastQuestionComment` — most recent bot comment whose body does NOT contain any of `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]` (null if none). **Used for routing decisions and as the `newReplies` baseline.**
    - `newReplies` — human comments created after `(lastQuestionComment?.createdAt ?? '0')`

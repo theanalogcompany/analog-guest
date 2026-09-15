@@ -1,14 +1,18 @@
 name: Build ready tickets
 
-# Two jobs of one workflow, polled every 15 minutes:
+# Polled every 15 minutes.
 #
-#   START   — a ticket in Ready, no live session on it. Runs /work-ticket,
+#   START   — a ticket in Ready with no live session. Runs /work-ticket,
 #             which audits, plans, posts [PLAN], and moves the ticket to
 #             Needs Ruling for approval. It does not build unattended.
 #
-#   RESUME  — a ticket in Needs Ruling whose newest comment is human input
-#             (no [FROM CLAUDE CODE] prefix). The ruling has landed, so
-#             /work-ticket picks up where it stopped.
+#   RESUME  — a ticket in Needs Ruling whose newest comment is human input.
+#             The ruling has landed, so /work-ticket picks up where it
+#             stopped.
+#
+# A resume is CLAIMED before Claude runs, so a run that dies without posting
+# cannot be retried forever. Two attempts per ruling, then the ticket sits
+# visibly stuck. Bounded stuck beats unbounded spend.
 #
 # Scheduled workflows run only from the default branch.
 
@@ -42,6 +46,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # Typecheck, lint, tests and the pre-commit hook all need these.
+      - name: Install dependencies
+        run: npm ci
+
       - name: Find tickets to work
         id: queue
         env:
@@ -49,11 +62,17 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           ONE_TICKET: ${{ inputs.ticket || github.event.client_payload.ticket }}
           LIMIT: "2"
+          MAX_ATTEMPTS: "2"
+          # A [POLLING-STATE] older than this is a dead local session, not a
+          # live one. Without a window, any ticket ever worked locally can
+          # never be started from CI.
+          LIVE_SESSION_HOURS: "3"
         run: |
           set -euo pipefail
 
           if [ -n "${ONE_TICKET:-}" ]; then
             echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
+            echo "claims=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -61,50 +80,92 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Authorization: $LINEAR_API_KEY" \
             -d @- <<'GQL'
-          {"query":"query { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { in: [\"Ready\", \"Needs Ruling\"] } } }) { nodes { identifier description priority state { name } labels { nodes { name } } comments { nodes { body createdAt } } } } }"}
+          {"query":"query { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { in: [\"Ready\", \"Needs Ruling\"] } } }) { nodes { id identifier description priority state { name } labels { nodes { name } } comments { nodes { id body createdAt } } } } }"}
           GQL
           )
 
-          TICKETS=$(echo "$RESPONSE" | jq -r \
+          SELECTED=$(echo "$RESPONSE" | jq -c \
             --arg repo "$REPO_NAME" \
-            --argjson limit "$LIMIT" '
-            .data.issues.nodes
+            --argjson limit "$LIMIT" \
+            --argjson maxAttempts "$MAX_ATTEMPTS" \
+            --argjson liveHours "$LIVE_SESSION_HOURS" \
+            --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+            ($now | fromdateiso8601) as $nowSec
+            | .data.issues.nodes
 
             # this repo only, per the ticket Repo: line
             | map(select(.description // "" | test("Repo:?\\**\\s*:?\\s*`?" + $repo; "i")))
 
-            # never pick up a ticket blocked on Jaipal doing something himself
-            | map(select(
-                ([.labels.nodes[].name] | index("Needs Action")) | not
-              ))
-
             | map(
-                # newest comment, or null
-                (.comments.nodes | sort_by(.createdAt) | last) as $newest
+                (.comments.nodes | sort_by(.createdAt)) as $sorted
+                # [RESUME-CLAIM] and [SLACK] comments are workflow bookkeeping,
+                # not a turn. Skipping them keeps a Slack marker from burying a
+                # ruling, and keeps the ruling newest across claims so the
+                # attempt count below can reach MAX_ATTEMPTS.
+                | ($sorted
+                   | map(select(
+                       ((.body | test("\\[FROM CLAUDE CODE\\]"))
+                        and (.body | test("\\[(RESUME-CLAIM|SLACK)\\]")))
+                       | not))
+                   | last) as $newest
                 | . + {
+                    newestId: ($newest.id // ""),
                     lastIsHuman: (
                       if $newest == null then false
                       else ($newest.body | test("\\[FROM CLAUDE CODE\\]") | not)
                       end
                     ),
-                    live: ([.comments.nodes[].body]
-                           | map(test("\\[POLLING-STATE\\]")) | any)
+                    # a session is live only if its POLLING-STATE is recent
+                    live: (
+                      [ $sorted[]
+                        | select(.body | test("\\[POLLING-STATE\\]"))
+                        | (.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)
+                      ]
+                      | map(select($nowSec - . < ($liveHours * 3600)))
+                      | length > 0
+                    ),
+                    # how many times CI has already claimed this exact ruling
+                    attempts: (
+                      [ $sorted[]
+                        | select(.body | test("\\[RESUME-CLAIM\\]"))
+                        | select(.body | test("ruling=" + ($newest.id // "none")))
+                      ] | length
+                    )
                   }
               )
 
-            # START: Ready, nothing running on it
-            # RESUME: Needs Ruling, and a human spoke last
             | map(select(
-                (.state.name == "Ready" and (.live | not))
+                (.state.name == "Ready" and (.live | not)
+                  and ([.labels.nodes[].name] | index("Needs Action") | not))
                 or
-                (.state.name == "Needs Ruling" and .lastIsHuman)
+                (.state.name == "Needs Ruling" and .lastIsHuman
+                  and .attempts < $maxAttempts)
               ))
 
             | sort_by(if .priority == 0 then 99 else .priority end)
             | .[:$limit]
-            | map(.identifier)
-            | join(" ")
+            | map({ id, identifier, newestId, state: .state.name })
           ')
+
+          TICKETS=$(echo "$SELECTED" | jq -r 'map(.identifier) | join(" ")')
+
+          # Claim every resume before Claude runs. If the run dies, the claim
+          # is already recorded and the retry count holds.
+          echo "$SELECTED" | jq -c '.[] | select(.state == "Needs Ruling")' | while read -r row; do
+            ID=$(echo "$row" | jq -r .id)
+            RULING=$(echo "$row" | jq -r .newestId)
+            NAME=$(echo "$row" | jq -r .identifier)
+            BODY="**[FROM CLAUDE CODE]**
+
+          [RESUME-CLAIM] ruling=${RULING} run=${GITHUB_RUN_ID}"
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+                  '{query:"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables:{id:$id, body:$body}}')" \
+              > /dev/null
+            echo "claimed $NAME"
+          done
 
           if [ -z "$TICKETS" ]; then
             echo "Nothing to work."
@@ -132,6 +193,8 @@ jobs:
             .claude/commands/work-ticket.md for each ticket — it is the
             specification for this task and it governs.
 
+            Dependencies are already installed. Do not run npm install.
+
             NO LINEAR MCP IN CI. Use the GraphQL API with curl; the key is in
             $LINEAR_API_KEY. Read with `issue(id: "TAC-403")`, comment with
             `commentCreate`, change status and labels with `issueUpdate`.
@@ -144,19 +207,22 @@ jobs:
               - move the ticket to Needs Ruling with the right Blocked On label
               - post the comment work-ticket.md specifies
               - move on to the next ticket, or exit
-            The 15-minute poll that started this run is the resume mechanism.
-            It will pick the ticket back up once Jaipal has replied.
+            The 15-minute poll is the resume mechanism.
 
             A PLAN IS A DECISION. After posting a plan, prefix it [PLAN], set
             the ticket to Needs Ruling with the Needs Decision label, and stop.
             Never build on an unapproved plan.
 
-            RESUMING. If the newest comment on a ticket is human input — no
-            [FROM CLAUDE CODE] prefix — that is Jaipal's ruling. Apply it,
-            clear the answered item from ## Open questions, move the ticket to
-            In Progress if a branch exists or Ready if it does not, and
-            continue from where the earlier session stopped. Read `git status`
-            and `git diff` on the branch to establish what is already done.
+            RESUMING. If the newest human comment postdates your last one,
+            that is Jaipal's ruling. Apply it, clear the answered item from
+            ## Open questions, remove the Blocked On label — Needs Decision or
+            Needs Action, whichever is set — and move the ticket to In Progress
+            if a branch exists or Ready if it does not. Read `git status` and
+            `git diff` on the branch to establish what is already done.
 
-            Never self-commit beyond what work-ticket.md allows, never merge,
-            never mark a ticket Done.
+            ALWAYS POST BEFORE YOU EXIT. Every ticket you touch must end with
+            a comment saying what happened, even if the answer is "nothing —
+            here is why". A silent exit leaves the board claiming this ticket
+            is moving when it is not.
+
+            Never merge, never mark a ticket Done.
