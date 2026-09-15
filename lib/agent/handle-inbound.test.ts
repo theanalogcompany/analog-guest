@@ -34,11 +34,12 @@ const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' }
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
 const verifyMechanicOfferStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
-const findPendingDraftMock = vi.fn()
+const loadPendingRowsBySlotMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn()
 const captureDraftQueuedMock = vi.fn()
+const captureDraftDroppedMock = vi.fn()
 const captureCrisisSafetyReplySentMock = vi.fn()
 const captureIntentionPromptRecordingFailedMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
@@ -103,13 +104,22 @@ vi.mock('./stages', async () => {
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
-    findPendingDraft: (...a: unknown[]) => findPendingDraftMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({
   persistOrRegenQueuedDraft: (...a: unknown[]) => persistOrRegenQueuedDraftMock(...a),
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
+// TAC-394: the crash card reads the guest's pending slots. Only that database
+// read is mocked; decideSlotAction and the identity helpers are forwarded REAL,
+// so a test here cannot pass on a mock's opinion of which slot a card is in.
+vi.mock('./pending-slots', async () => {
+  const actual = await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
+  return {
+    ...actual,
+    loadPendingRowsBySlot: (...a: unknown[]) => loadPendingRowsBySlotMock(...a),
+  }
+})
 vi.mock('./alerts', () => ({
   fireRedAlert: (...a: unknown[]) => fireRedAlertMock(...a),
   capturePostHogEvent: vi.fn(),
@@ -153,7 +163,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
-  captureDraftDropped: vi.fn(),
+  captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
     captureIntentionPromptRecordingFailedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
@@ -291,7 +301,7 @@ beforeEach(() => {
       secondaryTags: [],
     },
   ])
-  findPendingDraftMock.mockResolvedValue(null)
+  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
     action: 'inserted',
@@ -441,11 +451,18 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
   // is about to act on. Writing here would blank the body, null the fidelity
   // and the commitment carrier, and relabel review_reason.
   it('refuses to overwrite a NON-gap pending draft', async () => {
-    findPendingDraftMock.mockResolvedValue({
-      id: 'comp-draft',
-      body: "the next one's on us",
-      pending_until: null,
-      review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+    // TAC-394: a comp promised in prose, with no structured commitment, is a
+    // conversation-slot card: the slot the blank crash card would take.
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: null,
+      conversation: {
+        id: 'comp-draft',
+        body: "the next one's on us",
+        pending_until: null,
+        review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+        pending_commitment: null,
+        created_at: '2026-09-14T16:00:00.000Z',
+      },
     })
     const r = await handleInbound(INBOUND_ID)
     expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
@@ -455,15 +472,121 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
   // An existing gap card IS updatable — but its deadline must survive, or a
   // crash could push out a clock that's already running.
   it('updates an existing gap card in place without re-arming its clock', async () => {
-    findPendingDraftMock.mockResolvedValue({
-      id: 'gap-card',
-      body: '',
-      pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: null,
+      conversation: {
+        id: 'gap-card',
+        body: '',
+        pending_until: new Date(Date.now() + 60_000).toISOString(),
+        review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+        pending_commitment: null,
+        created_at: '2026-09-14T16:00:00.000Z',
+      },
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(existingId).toBe('gap-card')
+    expect(opts.pendingUntil).toBeUndefined()
+  })
+
+  // TAC-394: the crash card is blank and carries no commitment, so it belongs
+  // in the CONVERSATION slot. A comp card in the obligation slot is neither in
+  // its way nor at risk from it. With one slot per guest, this crash left the
+  // guest's question with no card at all.
+  it('writes the card beside a pending comp card in the other slot', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: {
+        id: 'card-a',
+        body: "Really sorry. The next one's on us.",
+        pending_until: null,
+        review_reason: 'commitment_type_gated',
+        pending_commitment: {
+          type: 'comp',
+          description: "the next one's on us",
+          code: '7K2P',
+          expiresAt: null,
+        },
+        created_at: '2026-09-14T16:00:00.000Z',
+      },
+      conversation: null,
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'queued', outboundMessageId: 'card-1' })
+    const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(existingId).toBeNull()
+    expect(opts.callerPolicy).toBe('regen_gap_card_only')
+    // An ordinary comp card is not a gap card, so the crash card still arms its clock.
+    expect(opts.pendingUntil).toBeInstanceOf(Date)
+    expect(captureDraftQueuedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: 'conversation', otherSlotOccupied: true }),
+    )
+  })
+
+  // A failed slot read counts as two empty slots, as findPendingDraft's null did:
+  // the card is written with a clock, and migration 041's index plus persist race
+  // recovery are the backstop.
+  it('writes the card with a clock when the slot read fails', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValue(null)
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'queued', outboundMessageId: 'card-1' })
+    const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(existingId).toBeNull()
+    expect(opts.pendingUntil).toBeInstanceOf(Date)
+    expect(opts.callerPolicy).toBe('regen_gap_card_only')
+    expect(captureDraftQueuedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slot: 'conversation',
+        otherSlotOccupied: false,
+        hasPreviousPending: false,
+      }),
+    )
+  })
+
+  // The pre-check saw an empty conversation slot, then a non-gap draft took it
+  // before the write. Recovery refuses under 'regen_gap_card_only', and a
+  // refused card is a skipped card: nothing queued, nothing pushed.
+  it('treats a refusal during the write as a skipped card', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'slot_occupied',
+      protectedDraftId: 'late-draft',
+      protectedCommitment: null,
+      droppedCommitment: null,
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'failed', stage: 'generation' })
+    expect(captureDraftQueuedMock).not.toHaveBeenCalled()
+    expect(sendDraftFlaggedPushMock).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // TAC-394: the holding-message clock is the guest's, not the slot's. A
+  // knowledge-gap card in the OTHER slot already has one, and the timeout scan
+  // fires per card, so a second clock would send the guest a second holding
+  // message.
+  it('arms no clock while a knowledge-gap card sits in the other slot', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: {
+        id: 'gap-comp',
+        body: "Sorry about that. The next one's on us.",
+        pending_until: new Date(Date.now() + 60_000).toISOString(),
+        review_reason: 'knowledge_gap_backstop',
+        pending_commitment: {
+          type: 'comp',
+          description: "the next one's on us",
+          code: '7K2P',
+          expiresAt: null,
+        },
+        created_at: '2026-09-14T16:00:00.000Z',
+      },
+      conversation: null,
+    })
+    await handleInbound(INBOUND_ID)
+    const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(existingId).toBeNull()
     expect(opts.pendingUntil).toBeUndefined()
   })
 
@@ -472,6 +595,124 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
     persistOrRegenQueuedDraftMock.mockRejectedValue(new Error('db down'))
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'failed', stage: 'generation' })
+  })
+})
+
+describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
+  const KEPT = { type: 'comp', description: 'a free cortado on your next visit', code: '7K2P' }
+  const DROPPED = { type: 'comp', description: 'a free croissant', code: null }
+  const QUEUE_INTO_OBLIGATION = {
+    action: 'queue',
+    triggers: ['commitment_type_gated'],
+    primaryTrigger: 'commitment_type_gated',
+    compMatchedPattern: null,
+    ungroundedClaims: [],
+    existingPendingDraftId: null,
+    blankBody: false,
+    slot: 'obligation',
+    otherSlotOccupied: false,
+  }
+
+  beforeEach(() => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  })
+
+  // The ruling asked for the alert to name both offers and the guest, because
+  // whoever reads it may be reading it mid-incident. toEqual on the payload: an
+  // alert that quietly lost the guest's name or one of the offers is the
+  // defect, and a partial match would pass it.
+  it('reports a gate-time drop with both commitments and the guest, and writes nothing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'drop',
+      reason: 'obligation_slot_taken',
+      triggers: ['commitment_type_gated'],
+      protectedDraftId: 'card-a',
+      protectedCommitment: KEPT,
+      droppedCommitment: DROPPED,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({
+      status: 'dropped',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      triggers: ['commitment_type_gated'],
+    })
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(captureDraftDroppedMock).toHaveBeenCalledTimes(1)
+    expect(captureDraftDroppedMock).toHaveBeenCalledWith({
+      agentRunId: expect.any(String),
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      guestFirstName: 'Sam',
+      guestPhone: '+15555550123',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      protectedCommitment: KEPT,
+      droppedCommitment: DROPPED,
+      triggers: ['commitment_type_gated'],
+      kind: 'inbound',
+      category: 'new_question',
+      droppedBody: 'sure thing',
+    })
+    warn.mockRestore()
+  })
+
+  // The gate saw an empty slot and the write found a card there. Reported
+  // exactly as a gate-time drop, because to the guest and the operator it is one.
+  it('reports a drop found during the write the same way, and never pushes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    applyApprovalPolicyStageMock.mockResolvedValue(QUEUE_INTO_OBLIGATION)
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      protectedCommitment: KEPT,
+      droppedCommitment: DROPPED,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({
+      status: 'dropped',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      triggers: ['commitment_type_gated'],
+    })
+    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(opts.callerPolicy).toBe('regen')
+    expect(captureDraftDroppedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guestFirstName: 'Sam',
+        guestPhone: '+15555550123',
+        reason: 'obligation_slot_taken',
+        protectedDraftId: 'card-a',
+        protectedCommitment: KEPT,
+        droppedCommitment: DROPPED,
+        droppedBody: 'sure thing',
+      }),
+    )
+    expect(captureDraftQueuedMock).not.toHaveBeenCalled()
+    expect(sendDraftFlaggedPushMock).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('records which slot a queued draft took and whether the other slot is held', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      ...QUEUE_INTO_OBLIGATION,
+      otherSlotOccupied: true,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(captureDraftQueuedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: 'obligation', otherSlotOccupied: true }),
+    )
   })
 })
 

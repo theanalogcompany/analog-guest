@@ -7,7 +7,8 @@
 //   409 → {error: 'invalid_state'}   (commitment exists but is not pending_ack)
 //   422 → {error: 'refused'}         (voice fidelity below send floor)
 //   500 → {error: 'internal_error'}  (DB load error OR empty description guard)
-//   502 → {error: 'internal_error'}  (pipeline failed inside handleOperatorDecline)
+//   502 → {error: 'internal_error'}  (pipeline failed inside handleOperatorDecline, or the
+//                                     decline draft was dropped: TAC-394)
 //   200 → {messageId: string}
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -237,6 +238,25 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(502)
       expect(await res.json()).toEqual({ error: 'internal_error' })
+    })
+
+    // TAC-394: a decline draft carrying a different obligation than the guest's
+    // pending obligation card is dropped, and nothing is written. The Contract
+    // literal is unchanged, and the commitment is not cancelled, because there
+    // is no decline draft for the operator to send.
+    it("returns {error: 'internal_error'} and does not cancel when the decline draft was dropped", async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      handleDeclineMock.mockResolvedValueOnce({
+        status: 'dropped',
+        reason: 'obligation_slot_taken',
+        protectedDraftId: 'card-a',
+        triggers: ['operator_decline_initiated'],
+      })
+      const res = await POST(makeRequest(), params())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'internal_error' })
+      expect(markCancelledMock).not.toHaveBeenCalled()
+      warn.mockRestore()
     })
   })
 

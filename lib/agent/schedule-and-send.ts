@@ -7,6 +7,18 @@ import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
 import { type PendingCommitment, pendingFromEmission } from '@/lib/schemas'
 import { fireRedAlert } from './alerts'
+import {
+  type CommitmentIdentity,
+  commitmentIdentityOf,
+  anyKnowledgeGapCard,
+  decideSlotAction,
+  draftCommitmentIdentity,
+  gapFlagsFromTriggers,
+  loadPendingRowsBySlot,
+  type SlotCallerPolicy,
+  type SlotDropReason,
+  type PendingRowsBySlot,
+} from './pending-slots'
 import { resolveDispatchBubbles } from './sentence-split'
 import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
 import { sampleTiming } from './timing'
@@ -17,9 +29,10 @@ type MessageInsert = Database['public']['Tables']['messages']['Insert']
 type MessageUpdate = Database['public']['Tables']['messages']['Update']
 
 // Postgres unique_violation. Surfaces as `error.code === '23505'` on
-// PostgREST responses for INSERTs that violate the migration 020 partial
-// unique index `idx_messages_one_pending_per_guest`. Recovery path
-// re-fetches the existing pending row and routes to UPDATE in place.
+// PostgREST responses for writes that violate migration 041's partial unique
+// indexes (one pending row per venue, guest and slot). TAC-394: INSERT recovery
+// re-reads both slots and decides via decideSlotAction; a violation on the
+// regen UPDATE is reported on its own and writes nothing.
 const PG_UNIQUE_VIOLATION = '23505'
 
 // Bound on the race-recovery loop. INSERT→UPDATE→INSERT ping-pong should
@@ -135,6 +148,49 @@ export interface PersistQueuedDraftOptions {
    * with an answer.
    */
   ungroundedClaims?: string[] | null
+  /**
+   * TAC-394: how this caller treats an occupied slot when a unique violation
+   * on INSERT reveals a card it did not know about. See SlotCallerPolicy in
+   * ./pending-slots. Defaults to 'regen', the approval gate's policy:
+   *   inbound / followup  'regen' (or 'never_regen' for a manual followup)
+   *   operator decline    'regen_always'
+   *   generation failure  'regen_gap_card_only'
+   * Recovery decides with exactly the function the gate used, so a card the
+   * gate never saw is never treated more loosely than one it did.
+   */
+  callerPolicy?: SlotCallerPolicy
+}
+
+/**
+ * TAC-394: what persistOrRegenQueuedDraft did.
+ *
+ * `dropped` means 23505 race recovery found a card in this draft's slot that
+ * it must not overwrite (a different obligation, a protected knowledge-gap
+ * card, or a caller that never regenerates), and wrote NOTHING. The caller
+ * reports it: `reason` and `protectedDraftId` say which card won and why.
+ */
+export type PersistQueuedDraftResult =
+  | {
+      outboundMessageId: string
+      action: 'inserted' | 'updated'
+      priorReviewReason: string | null
+    }
+  | {
+      outboundMessageId: null
+      action: 'dropped'
+      priorReviewReason: null
+      reason: SlotDropReason
+      protectedDraftId: string
+      // For the drop alert, which names both commitments.
+      protectedCommitment: CommitmentIdentity | null
+      droppedCommitment: CommitmentIdentity | null
+    }
+
+/** TAC-308: only an `updateOnly` caller can be told this. */
+export type PersistQueuedDraftSkipped = {
+  outboundMessageId: null
+  action: 'skipped'
+  priorReviewReason: null
 }
 
 /**
@@ -538,9 +594,9 @@ export async function scheduleAndSend(
  * TAC-212 + TAC-264 queue path. Persist the generated draft as a pending
  * review row — no Sendblue dispatch, no timing sleeps. Two modes:
  *
- *   1. INSERT — when there's no existing pending row for (venue, guest).
- *      `existingPendingDraftId === null` AND the migration 020 partial
- *      unique index doesn't fire. Status quo behavior, mirrors the
+ *   1. INSERT — when there's no pending row in this draft's slot.
+ *      `existingPendingDraftId === null` AND the slot's partial unique index
+ *      (migration 041) doesn't fire. Status quo behavior, mirrors the
  *      auto-send INSERT site (same buildOutboundInsert helper) but with
  *      the operator-review column set:
  *        - status='pending_review'  (migration 001 CHECK enum)
@@ -551,7 +607,8 @@ export async function scheduleAndSend(
  *          approve/edit
  *
  *   2. UPDATE in place (regenerate) — when `existingPendingDraftId !== null`,
- *      surfaced by `findPendingDraft` inside applyApprovalPolicyStage. The
+ *      chosen by decideSlotAction inside applyApprovalPolicyStage (always the
+ *      card in THIS draft's slot, TAC-394). The
  *      no-demotion-on-regeneration invariant per TAC-264: a pending draft
  *      can't auto-send out from under an operator. Captured prior
  *      review_reason is returned to the caller so the analytics event can
@@ -567,12 +624,21 @@ export async function scheduleAndSend(
  *        direction, generated_by, response_review
  *      updated_at is auto-bumped by trg_messages_updated_at.
  *
- * Race recovery (TAC-264):
- *   - INSERT path: a concurrent inbound for the same (venue, guest) can win
- *     the unique-index race; the losing INSERT receives `code='23505'`. We
- *     re-fetch the now-existing pending row and recurse into UPDATE.
+ * Race recovery (TAC-264, reworked by TAC-394):
+ *   - INSERT path: a concurrent run for the same (venue, guest) can win the
+ *     unique-index race for this draft's slot; the losing INSERT receives
+ *     `code='23505'`. We re-read BOTH slots and ask decideSlotAction what to
+ *     do with the card now in this draft's slot, exactly as the gate would
+ *     have: regenerate it, retry the INSERT if it vanished, or return
+ *     `action: 'dropped'` when it must not be overwritten. Before TAC-394 this
+ *     path UPDATEd whatever single row an unordered read returned, which is how
+ *     a manual followup could overwrite the card the gate had kept it from.
+ *   - UPDATE path, unique violation: the UPDATE would move the card into a
+ *     slot another card already holds. Unreachable from this code (a regen
+ *     target is always in the draft's own slot), so it gets its own red alert
+ *     and throws, writing nothing.
  *   - UPDATE path: a TOCTOU race vs. dispatchOperatorOutbound can clear the
- *     pending slot between our findPendingDraft + our UPDATE; the conditional
+ *     pending slot between the gate's read and our UPDATE; the conditional
  *     UPDATE gated on `review_state='pending'` returns rowcount=0. We drop
  *     `existingPendingDraftId` and recurse into a fresh INSERT.
  *   - Bounded by RACE_RECOVERY_MAX_ATTEMPTS to avoid pathological spin.
@@ -596,35 +662,40 @@ export async function persistOrRegenQueuedDraft(
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions & { updateOnly: true },
-): Promise<{
-  outboundMessageId: string | null
-  action: 'inserted' | 'updated' | 'skipped'
-  priorReviewReason: string | null
-}>
+): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped>
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options?: PersistQueuedDraftOptions & { updateOnly?: false },
-): Promise<{
-  outboundMessageId: string
-  action: 'inserted' | 'updated'
-  priorReviewReason: string | null
-}>
+): Promise<PersistQueuedDraftResult>
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions = {},
-): Promise<{
-  outboundMessageId: string | null
-  action: 'inserted' | 'updated' | 'skipped'
-  priorReviewReason: string | null
-}> {
+): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped> {
   const supabase = createAdminClient()
   let existingId: string | null = initialExistingPendingDraftId
+  // TAC-394: what race recovery needs to decide a card the gate never saw.
+  const draftCommitment = draftCommitmentIdentity(
+    generation.commitment,
+    options.blankBody === true,
+  )
+  const callerPolicy: SlotCallerPolicy = options.callerPolicy ?? 'regen'
+  // The clock race recovery writes. The gate armed it without seeing any card
+  // recovery later finds, so every write decides it from `seenRows`: the last
+  // successful slot read, less any card since found gone. After a lost card or
+  // a failed read that is an older read, not a fresh one; a card it misses in
+  // the draft's own slot surfaces as another 23505. Both writes call clockFor
+  // directly, so no second copy of this decision has to be kept in step.
+  let seenRows: PendingRowsBySlot | null = null
+  const clockFor = (rows: PendingRowsBySlot | null): PersistQueuedDraftOptions =>
+    rows !== null && options.pendingUntil !== undefined && anyKnowledgeGapCard(rows)
+      ? { ...options, pendingUntil: undefined }
+      : options
 
   for (let attempt = 0; attempt < RACE_RECOVERY_MAX_ATTEMPTS; attempt++) {
     if (existingId !== null) {
@@ -634,7 +705,7 @@ export async function persistOrRegenQueuedDraft(
         generation,
         primaryTrigger,
         existingId,
-        options,
+        clockFor(seenRows),
       )
       if (upd.kind === 'updated') {
         return {
@@ -645,7 +716,7 @@ export async function persistOrRegenQueuedDraft(
       }
       if (upd.kind === 'rowcount_zero') {
         // TOCTOU vs. dispatchOperatorOutbound: row was approved/edited/skipped
-        // between findPendingDraft and our UPDATE.
+        // between the gate's pending read and our UPDATE.
         if (options.updateOnly === true) {
           // Update-only caller (the TAC-308 timeout regen). The row it wanted
           // to freshen is gone, which means an operator already handled it.
@@ -654,9 +725,45 @@ export async function persistOrRegenQueuedDraft(
           return { outboundMessageId: null, action: 'skipped', priorReviewReason: null }
         }
         // The pending slot is now empty — drop the ID and retry as INSERT on
-        // the next loop tick.
+        // the next loop tick. TAC-394: the card is gone, so it no longer
+        // withholds the clock clockFor decides from `seenRows`. This restores
+        // only a clock race recovery withheld. A clock the GATE withheld (its
+        // own read saw a gap card in this slot) is not in `options` to restore,
+        // so the card written in its place has none; that case, and the same
+        // one on the crash card, is recorded under TAC-404.
+        if (seenRows !== null) {
+          seenRows = {
+            obligation: seenRows.obligation?.id === existingId ? null : seenRows.obligation,
+            conversation: seenRows.conversation?.id === existingId ? null : seenRows.conversation,
+          }
+        }
         existingId = null
         continue
+      }
+      if (upd.kind === 'unique_violation') {
+        // TAC-394: the regen UPDATE would move this card into a slot another
+        // card already holds (its carrier changed slot). Unreachable from this
+        // code, which only ever regenerates the card in the draft's own slot,
+        // so it is reported apart from an ordinary write failure, and nothing
+        // is written. Reachable from OLD code during migration 041's deploy
+        // window; see that migration's header.
+        await fireRedAlert({
+          agentRunId: ctx.agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: alertKind(ctx),
+          stage: 'persist',
+          errorMessage: `regen update would move pending card ${existingId} into an occupied pending slot (23505); nothing written`,
+          extra: {
+            primaryTrigger,
+            attemptedPendingDraftId: existingId,
+            regen: true,
+            uniqueViolation: true,
+          },
+        })
+        throw new Error(
+          `persistOrRegenQueuedDraft: regen update hit a unique violation: ${upd.error}`,
+        )
       }
       // upd.kind === 'failed' — alert and throw.
       // attemptedPendingDraftId names the in-loop value (which may differ
@@ -674,25 +781,61 @@ export async function persistOrRegenQueuedDraft(
       throw new Error(`persistOrRegenQueuedDraft: regen update failed: ${upd.error}`)
     }
 
-    const ins = await tryQueueInsert(supabase, ctx, generation, primaryTrigger, options)
+    const ins = await tryQueueInsert(
+      supabase,
+      ctx,
+      generation,
+      primaryTrigger,
+      clockFor(seenRows),
+    )
     if (ins.kind === 'inserted') {
       return { outboundMessageId: ins.id, action: 'inserted', priorReviewReason: null }
     }
     if (ins.kind === 'unique_violation') {
-      // A concurrent inbound for the same (venue, guest) just won the race;
-      // the migration 020 partial unique index caught us. Find the racing
-      // row and route to UPDATE on the next loop tick.
+      // A concurrent run for the same (venue, guest) just won this draft's
+      // slot, and migration 041's index caught us. TAC-394: re-read both slots
+      // and decide the card now in ours exactly as the gate would have.
+      const rows = await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)
+      // The gate armed its clock without seeing this card. When the guest
+      // already holds a knowledge-gap card in either slot, that card's clock is
+      // the guest's: regenerating over it must not push its deadline out or
+      // re-arm one that already fired, and a second card must not start a
+      // second holding message. Same rule as the gate (anyKnowledgeGapCard),
+      // decided by each write from the latest read rather than kept from the
+      // first.
+      if (rows !== null) seenRows = rows
+      const decision =
+        rows === null
+          ? null
+          : decideSlotAction({
+              rows,
+              draftCommitment,
+              ...gapFlagsFromTriggers(options.reviewTriggers),
+              callerPolicy,
+            })
       console.warn(
-        `[agent] persistOrRegenQueuedDraft: 23505 race on attempt=${attempt} venue=${ctx.venue.id} guest=${ctx.guest.id} — recovering via UPDATE`,
+        `[agent] persistOrRegenQueuedDraft: 23505 race on attempt=${attempt} venue=${ctx.venue.id} guest=${ctx.guest.id}: ${decision?.action ?? 'slot read failed'}`,
       )
-      const found = await findOpenPendingRow(supabase, ctx.venue.id, ctx.guest.id)
-      if (found !== null) {
-        existingId = found.id
+      if (decision === null || decision.action === 'insert') {
+        // The read failed, or the racing card vanished between our INSERT and
+        // our read (an operator acted on it). Retry the INSERT; the loop is
+        // bounded.
         continue
       }
-      // The racing pending row vanished between our INSERT and our SELECT
-      // (operator dispatched it immediately). Retry INSERT — pending slot
-      // is open again.
+      if (decision.action === 'drop') {
+        return {
+          outboundMessageId: null,
+          action: 'dropped',
+          priorReviewReason: null,
+          reason: decision.reason,
+          protectedDraftId: decision.protectedDraftId,
+          protectedCommitment: commitmentIdentityOf(
+            rows?.[decision.slot]?.pending_commitment ?? null,
+          ),
+          droppedCommitment: draftCommitment,
+        }
+      }
+      existingId = decision.draftId
       continue
     }
     // ins.kind === 'failed' — alert and throw.
@@ -832,6 +975,7 @@ async function tryRegenUpdate(
 ): Promise<
   | { kind: 'updated'; id: string; priorReviewReason: string | null }
   | { kind: 'rowcount_zero' }
+  | { kind: 'unique_violation'; error: string }
   | { kind: 'failed'; error: string }
 > {
   try {
@@ -910,6 +1054,9 @@ async function tryRegenUpdate(
       .select('id')
       .maybeSingle()
     if (updateError) {
+      if (updateError.code === PG_UNIQUE_VIOLATION) {
+        return { kind: 'unique_violation', error: updateError.message }
+      }
       return { kind: 'failed', error: updateError.message }
     }
     if (!updated) {
@@ -919,35 +1066,4 @@ async function tryRegenUpdate(
   } catch (e) {
     return { kind: 'failed', error: e instanceof Error ? e.message : String(e) }
   }
-}
-
-/**
- * Race-recovery helper: look up the open pending row for a (venue, guest)
- * pair after a 23505 unique-violation on INSERT. Mirrors the read shape
- * inside findPendingDraft in lib/agent/stages.ts but is local to the
- * persist layer so it doesn't reach across module boundaries for the
- * recovery path. Returns null if the row vanished between violation and
- * read (operator dispatched in the gap) — caller retries INSERT.
- */
-async function findOpenPendingRow(
-  supabase: AdminSupabaseClient,
-  venueId: string,
-  guestId: string,
-): Promise<{ id: string } | null> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id')
-    .eq('venue_id', venueId)
-    .eq('guest_id', guestId)
-    .eq('direction', 'outbound')
-    .eq('review_state', 'pending')
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    console.warn(
-      `[agent] findOpenPendingRow lookup degraded for venue=${venueId} guest=${guestId}: ${error.message}`,
-    )
-    return null
-  }
-  return data
 }

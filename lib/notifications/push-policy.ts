@@ -125,9 +125,10 @@ const PUSH_POLICY = {
   // that eventually surfaces it. Push.
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'push',
 
-  // The ONLY skip. A pending draft already exists for this (venue, guest),
-  // and migration 020's partial unique index means persistOrRegenQueuedDraft
-  // UPDATEs that row IN PLACE rather than inserting a new one. The operator
+  // The ONLY skip. A pending draft already exists in this draft's slot, and
+  // persistOrRegenQueuedDraft UPDATEs that row IN PLACE rather than inserting
+  // a new one (TAC-264). Since TAC-394 a card in the OTHER slot never fires
+  // this trigger, so a guest's second card still pushes. The operator
   // was already pushed when the original draft queued, the card is already
   // in their queue, and TAC-298's Realtime subscription refreshes its body
   // live. A second push would notify about a card they are already holding.

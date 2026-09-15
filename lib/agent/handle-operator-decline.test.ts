@@ -68,7 +68,8 @@ describe('handle-operator-decline structural invariants (TAC-299)', () => {
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
 const generateStageMock = vi.fn()
-const findPendingDraftMock = vi.fn()
+const loadPendingRowsBySlotMock = vi.fn()
+const captureDraftDroppedMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const fireRedAlertMock = vi.fn()
 const dispatchArrivalCaptureMock = vi.fn()
@@ -83,8 +84,17 @@ vi.mock('./build-runtime-context', () => ({
 vi.mock('./stages', () => ({
   retrieveCorpusStage: (...args: unknown[]) => retrieveCorpusStageMock(...args),
   generateStage: (...args: unknown[]) => generateStageMock(...args),
-  findPendingDraft: (...args: unknown[]) => findPendingDraftMock(...args),
 }))
+// TAC-394: only the slot read is mocked. decideSlotAction and the identity
+// helpers run REAL, so which card a decline regenerates is decided by the code
+// under test, not by a fixture.
+vi.mock('./pending-slots', async () => {
+  const actual = await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
+  return {
+    ...actual,
+    loadPendingRowsBySlot: (...args: unknown[]) => loadPendingRowsBySlotMock(...args),
+  }
+})
 vi.mock('./schedule-and-send', () => ({
   persistOrRegenQueuedDraft: (...args: unknown[]) =>
     persistOrRegenQueuedDraftMock(...args),
@@ -104,6 +114,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
   AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
   captureAgentLatencyHigh: (...args: unknown[]) =>
     captureAgentLatencyHighMock(...args),
+  captureDraftDropped: (...args: unknown[]) => captureDraftDroppedMock(...args),
   captureDraftQueued: (...args: unknown[]) => captureDraftQueuedMock(...args),
   captureDraftRegenerated: (...args: unknown[]) =>
     captureDraftRegeneratedMock(...args),
@@ -197,14 +208,28 @@ function makeGenerationResult() {
   }
 }
 
+// TAC-394: a pending row as loadPendingRowsBySlot returns it.
+function pendingRow(id: string, body: string, pendingCommitment: unknown = null) {
+  return {
+    id,
+    body,
+    pending_until: null,
+    review_reason: 'model_flagged',
+    pending_commitment: pendingCommitment,
+    created_at: '2026-09-14T16:00:00.000Z',
+  }
+}
+
 beforeEach(() => {
   buildRuntimeContextMock.mockReset()
   buildRuntimeContextMock.mockImplementation(async () => makeCtx())
   retrieveCorpusStageMock.mockReset()
   retrieveCorpusStageMock.mockResolvedValue([])
   generateStageMock.mockReset()
-  findPendingDraftMock.mockReset()
-  findPendingDraftMock.mockResolvedValue(null)
+  loadPendingRowsBySlotMock.mockReset()
+  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+  captureDraftDroppedMock.mockReset()
+  captureDraftDroppedMock.mockResolvedValue(undefined)
   persistOrRegenQueuedDraftMock.mockReset()
   fireRedAlertMock.mockReset()
   fireRedAlertMock.mockResolvedValue(undefined)
@@ -277,7 +302,10 @@ describe('handleOperatorDecline', () => {
   })
 
   it('passes existingPendingDraftId through to persistOrRegenQueuedDraft when found', async () => {
-    findPendingDraftMock.mockResolvedValueOnce({ id: EXISTING_PENDING_ID, body: 'prior draft' })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: null,
+      conversation: pendingRow(EXISTING_PENDING_ID, 'prior draft'),
+    })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -296,15 +324,17 @@ describe('handleOperatorDecline', () => {
     })
 
     expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledOnce()
-    // signature: (ctx, generation, primaryTrigger, existingPendingDraftId)
+    // signature: (ctx, generation, primaryTrigger, existingPendingDraftId, options)
     const persistArgs = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistArgs[2]).toBe('operator_decline_initiated')
     expect(persistArgs[3]).toBe(EXISTING_PENDING_ID)
+    // TAC-394: race recovery decides with the decline's own policy.
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
     expect(result.status).toBe('queued')
   })
 
-  it('passes null existingPendingDraftId when findPendingDraft returns null', async () => {
-    findPendingDraftMock.mockResolvedValueOnce(null)
+  it('passes null existingPendingDraftId when neither slot holds a card', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: null })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -326,7 +356,7 @@ describe('handleOperatorDecline', () => {
   })
 
   it('fires captureDraftQueued on INSERT path', async () => {
-    findPendingDraftMock.mockResolvedValueOnce(null)
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: null })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -349,7 +379,10 @@ describe('handleOperatorDecline', () => {
   })
 
   it('fires captureDraftRegenerated on UPDATE-in-place path', async () => {
-    findPendingDraftMock.mockResolvedValueOnce({ id: EXISTING_PENDING_ID, body: 'prior' })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: null,
+      conversation: pendingRow(EXISTING_PENDING_ID, 'prior'),
+    })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -479,5 +512,172 @@ describe('handleOperatorDecline', () => {
     // retrieveKnowledgeStage mock import (it's not in the orchestrator's
     // import list per the structural test above).
     expect(generateStageMock).toHaveBeenCalledOnce()
+  })
+})
+
+describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
+  const COMP_A = {
+    type: 'comp',
+    description: 'a free cortado on your next visit',
+    code: '7K2P',
+    expiresAt: null,
+  }
+  const INPUT = {
+    venueId: VENUE_ID,
+    guestId: GUEST_ID,
+    commitmentId: COMMITMENT_ID,
+    commitmentDescription: 'olive cake',
+  }
+
+  // TAC-299's rule that a decline supersedes the pending reply now applies to
+  // the reply in its own slot. The comp card beside it is left alone.
+  it('regenerates the conversation card, never the comp card beside it', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: pendingRow('card-a', "the next one's on us", COMP_A),
+      conversation: pendingRow('card-conv', 'we open at 7'),
+    })
+    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: 'card-conv',
+      action: 'updated',
+      priorReviewReason: 'model_flagged',
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    const persistArgs = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistArgs[3]).toBe('card-conv')
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
+    expect(result.status).toBe('queued')
+  })
+
+  it('records the slot it took and that the comp card holds the other one', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: pendingRow('card-a', "the next one's on us", COMP_A),
+      conversation: null,
+    })
+    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline(INPUT)
+
+    expect(persistOrRegenQueuedDraftMock.mock.calls[0][3]).toBeNull()
+    expect(captureDraftQueuedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slot: 'conversation',
+        otherSlotOccupied: true,
+        hasPreviousPending: false,
+      }),
+    )
+  })
+
+  // No path overwrites one obligation with another. A decline draft carrying a
+  // DIFFERENT comp than the pending comp card is dropped before any write, and
+  // the alert names both offers and the guest.
+  it('drops a decline draft carrying a different comp, and writes nothing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: pendingRow('card-a', "the next one's on us", COMP_A),
+      conversation: null,
+    })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: {
+        ...makeGenerationResult(),
+        commitment: { type: 'comp', description: 'a free croissant' },
+      },
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    expect(result).toEqual({
+      status: 'dropped',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      triggers: ['operator_decline_initiated'],
+    })
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    expect(captureDraftQueuedMock).not.toHaveBeenCalled()
+    expect(captureDraftDroppedMock).toHaveBeenCalledWith({
+      agentRunId: expect.any(String),
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      guestFirstName: 'Sam',
+      guestPhone: '+1',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      protectedCommitment: {
+        type: 'comp',
+        description: 'a free cortado on your next visit',
+        code: '7K2P',
+      },
+      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+      triggers: ['operator_decline_initiated'],
+      kind: 'followup',
+      category: 'manual',
+      droppedBody: 'so sorry, we ran out of the olive cake today',
+    })
+    warn.mockRestore()
+  })
+
+  it('reports a drop found during the write the same way', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: {
+        ...makeGenerationResult(),
+        commitment: { type: 'comp', description: 'a free croissant' },
+      },
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      protectedCommitment: {
+        type: 'comp',
+        description: 'a free cortado on your next visit',
+        code: '7K2P',
+      },
+      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    expect(result).toEqual({
+      status: 'dropped',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      triggers: ['operator_decline_initiated'],
+    })
+    expect(captureDraftDroppedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'obligation_slot_taken', protectedDraftId: 'card-a' }),
+    )
+    expect(captureDraftQueuedMock).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // A failed read fails OPEN to the INSERT path. If a card is actually there,
+  // the slot's unique index and race recovery decide again with the same policy.
+  it('inserts when the slot read fails', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce(null)
+    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    const persistArgs = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistArgs[3]).toBeNull()
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
+    expect(result.status).toBe('queued')
   })
 })

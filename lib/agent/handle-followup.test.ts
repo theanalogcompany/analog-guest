@@ -31,6 +31,8 @@ const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
+const captureDraftDroppedMock = vi.fn()
+const captureManualFollowupSlotOccupiedMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 
 vi.mock('./build-runtime-context', () => ({
@@ -97,9 +99,11 @@ vi.mock('@/lib/notifications/send', () => ({
 vi.mock('@/lib/analytics/posthog', () => ({
   AGENT_LATENCY_HIGH_THRESHOLD_MS: 999_999_999,
   captureAgentLatencyHigh: vi.fn(),
-  captureDraftDropped: vi.fn(),
+  captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureDraftQueued: vi.fn(),
   captureDraftRegenerated: vi.fn(),
+  captureManualFollowupSlotOccupied: (...a: unknown[]) =>
+    captureManualFollowupSlotOccupiedMock(...a),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 vi.mock('@/lib/observability', () => ({
@@ -183,6 +187,8 @@ beforeEach(() => {
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
+  captureDraftDroppedMock.mockReset()
+  captureManualFollowupSlotOccupiedMock.mockReset()
 
   buildRuntimeContextMock.mockImplementation(
     async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) =>
@@ -245,6 +251,8 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
     })
     persistOrRegenQueuedDraftMock.mockResolvedValue({
       outboundMessageId: 'queued-1',
@@ -342,6 +350,8 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
     })
     persistOrRegenQueuedDraftMock.mockResolvedValue({
       outboundMessageId: 'queued-2',
@@ -378,5 +388,150 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(mechanicOfferArg).toEqual({ status: 'skipped' })
     expect(result.status).toBe('sent')
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
+  const QUEUE = {
+    action: 'queue',
+    triggers: ['category_requires_approval'],
+    primaryTrigger: 'category_requires_approval',
+    compMatchedPattern: null,
+    ungroundedClaims: null,
+    existingPendingDraftId: null,
+    blankBody: false,
+    slot: 'conversation',
+    otherSlotOccupied: false,
+  }
+
+  beforeEach(() => {
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  // The live bug on main: a manual followup's INSERT hit the unique index and
+  // race recovery regenerated the waiting card anyway. The policy passed here
+  // is what stops it, so both values are pinned.
+  it.each([
+    ['manual', 'never_regen'],
+    ['day_7', 'regen'],
+  ] as const)('a %s followup persists with callerPolicy %s', async (reason, policy) => {
+    applyApprovalPolicyStageMock.mockResolvedValue(QUEUE)
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason, triggeredAt: new Date() },
+    })
+
+    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(opts.callerPolicy).toBe(policy)
+  })
+
+  // Refused, never skipped silently: logged, recorded as its own event, and the
+  // route tells the operator who clicked. No dropped-draft Slack alert, which
+  // would tell the same person twice.
+  it('a manual followup refused at the gate records the refusal and writes nothing', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'drop',
+      reason: 'slot_occupied',
+      triggers: ['category_requires_approval'],
+      protectedDraftId: 'waiting-card',
+      protectedCommitment: null,
+      droppedCommitment: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'manual', triggeredAt: new Date() },
+    })
+
+    expect(result).toEqual({
+      status: 'dropped',
+      reason: 'slot_occupied',
+      protectedDraftId: 'waiting-card',
+      triggers: ['category_requires_approval'],
+    })
+    expect(captureManualFollowupSlotOccupiedMock).toHaveBeenCalledWith({
+      agentRunId: expect.any(String),
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      waitingDraftId: 'waiting-card',
+      triggers: ['category_requires_approval'],
+    })
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('manual followup refused'),
+      expect.anything(),
+    )
+    expect(captureDraftDroppedMock).not.toHaveBeenCalled()
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  it('the same refusal found during the write is reported the same way', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue(QUEUE)
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'slot_occupied',
+      protectedDraftId: 'waiting-card',
+      protectedCommitment: null,
+      droppedCommitment: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'manual', triggeredAt: new Date() },
+    })
+
+    expect(result).toEqual({
+      status: 'dropped',
+      reason: 'slot_occupied',
+      protectedDraftId: 'waiting-card',
+      triggers: ['category_requires_approval'],
+    })
+    expect(captureManualFollowupSlotOccupiedMock).toHaveBeenCalledTimes(1)
+    expect(captureDraftDroppedMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  it('any other drop goes to the dropped-draft alert, naming both commitments', async () => {
+    const kept = { type: 'comp', description: 'a free cortado on your next visit', code: '7K2P' }
+    const dropped = { type: 'comp', description: 'a free croissant', code: null }
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'drop',
+      reason: 'obligation_slot_taken',
+      triggers: ['commitment_type_gated'],
+      protectedDraftId: 'card-a',
+      protectedCommitment: kept,
+      droppedCommitment: dropped,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_7', triggeredAt: new Date() },
+    })
+
+    expect(captureDraftDroppedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guestFirstName: 'Sam',
+        reason: 'obligation_slot_taken',
+        protectedDraftId: 'card-a',
+        protectedCommitment: kept,
+        droppedCommitment: dropped,
+        triggers: ['commitment_type_gated'],
+        kind: 'followup',
+      }),
+    )
+    expect(captureManualFollowupSlotOccupiedMock).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-import { findPendingDraft } from '@/lib/agent/stages'
+import { loadPendingRowsBySlot, type PendingSlot } from '@/lib/agent/pending-slots'
 import { createAdminClient } from '@/lib/db/admin'
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { diffGuardrailState, type GuardrailCounts } from './preflight-pure'
@@ -89,6 +89,8 @@ export async function countGuardrailState(venueId: string): Promise<GuardrailCou
   }
 }
 
+const PENDING_SLOTS: readonly PendingSlot[] = ['obligation', 'conversation']
+
 export interface CleanStateHit {
   state: string
   phone: string
@@ -113,15 +115,32 @@ export async function checkCleanState(
 ): Promise<CleanStateHit[]> {
   const hits: CleanStateHit[] = []
   for (const [state, guestId] of Object.entries(guestIdsByState)) {
-    const pending = await findPendingDraft(venueId, guestId)
-    if (pending) {
+    // TAC-394: a guest can hold one pending card per slot, so report EVERY
+    // pending row rather than whichever one an unordered read returned. A
+    // failed read is reported too: this check exists to abort a run against a
+    // dirty state, and passing it because the read failed is the wrong way to
+    // fail.
+    const pending = await loadPendingRowsBySlot(venueId, guestId)
+    if (pending === null) {
       hits.push({
         state,
         phone: phonesByState[state] ?? 'unknown',
         guestId,
         kind: 'pending_draft',
-        detail: `message id=${pending.id}, review_reason=${pending.review_reason ?? 'null'}`,
+        detail: 'could not read pending drafts; check this guest by hand before running',
       })
+    } else {
+      for (const slot of PENDING_SLOTS) {
+        const row = pending[slot]
+        if (row === null) continue
+        hits.push({
+          state,
+          phone: phonesByState[state] ?? 'unknown',
+          guestId,
+          kind: 'pending_draft',
+          detail: `message id=${row.id}, slot=${slot}, review_reason=${row.review_reason ?? 'null'}`,
+        })
+      }
     }
     const commitments = await findActiveCommitmentsForGuest({ venueId, guestId })
     if (commitments.ok && commitments.data.length > 0) {

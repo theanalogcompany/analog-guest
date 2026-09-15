@@ -14,7 +14,8 @@
 //
 // The Contract specifies fixed-string error bodies — `{"error":"unauthorized"}`
 // at 401, `{"error":"not_found"}` at 404, `{"error":"invalid_state"}` at 409,
-// `{"error":"refused"}` at 422, `{"error":"internal_error"}` at 502/500. The
+// `{"error":"refused"}` at 422, `{"error":"internal_error"}` at 502/500 (502 also
+// covers a decline draft dropped before any write, TAC-394). The
 // shared withOperatorAuth HOF forwards AuthError.message verbatim — fine for
 // the TAC-258 legacy routes that predate cross-repo Contracts but breaks the
 // sibling client's `error === 'unauthorized'` matching. Same posture as
@@ -137,9 +138,12 @@ export async function POST(
     return NextResponse.json({ error: 'refused' }, { status: 422 })
   }
   if (result.status !== 'queued') {
-    // Defensive: handleOperatorDecline only returns failed/refused/queued.
-    // 'sent' / 'skipped_duplicate' would be a structural regression — we
-    // map to 502 with a logline rather than silently 200.
+    // 'dropped' (TAC-394): the decline draft carried a different obligation
+    // than the guest's pending obligation card, so nothing was written. The
+    // commitment is NOT cancelled, because cancellation below runs only after a
+    // queued draft, and the existing internal_error keeps the Contract as it is.
+    // 'sent' / 'skipped_duplicate' would be a structural regression. Either
+    // way: 502 with a logline rather than a silent 200.
     console.warn(
       `[/api/operator/commitments/:id/draft-decline] unexpected pipeline status=${result.status}`,
     )

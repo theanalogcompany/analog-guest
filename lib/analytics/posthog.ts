@@ -621,6 +621,12 @@ export interface DraftQueuedProps {
   compRegexMatchedPattern: string | null
   // True when previous_pending_held was among the triggers.
   hasPreviousPending: boolean
+  // TAC-394: which pending slot the card landed in (migration 041), and
+  // whether the guest's OTHER slot already held a card, i.e. whether this is
+  // the guest's second card. A literal union rather than an import of
+  // PendingSlot, because this module imports nothing from lib/agent.
+  slot: 'obligation' | 'conversation'
+  otherSlotOccupied: boolean
   // 'inbound' | 'followup' — distinguishes which orchestrator queued.
   kind: 'inbound' | 'followup'
   category: string
@@ -641,6 +647,7 @@ function formatDraftQueued(props: DraftQueuedProps): string {
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
     `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+    `slot: \`${props.slot}\`${props.otherSlotOccupied ? ' · second card for this guest' : ''}`,
   ]
   if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
     lines.push(`model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`)
@@ -1145,15 +1152,45 @@ function formatPushTokenInvalid(props: PushTokenInvalidProps): string {
 }
 
 // ---------------------------------------------------------------------------
-// TAC-308: a generated draft was thrown away to protect a knowledge-gap card
+// TAC-308 / TAC-394: a generated draft was discarded to protect a pending card
 // ---------------------------------------------------------------------------
+
+/** A commitment as the drop alert names it. */
+export interface DroppedDraftCommitment {
+  type: string
+  description: string
+  code: string | null
+}
+
+export type DraftDropReason =
+  | 'knowledge_gap_card_protected'
+  | 'obligation_slot_taken'
+  | 'slot_occupied'
 
 export interface DraftDroppedProps {
   agentRunId: string
   venueId: string
   guestId: string
-  /** messages.id of the knowledge-gap card that won the pending slot. */
+  /**
+   * TAC-394: the guest as an operator finds them in the app. The 2026-09-14
+   * ruling asked for the alert to name the guest, not just an id: the one
+   * production instance of two overlapping obligations (2026-08-07) happened
+   * during an incident, and whoever reads this may be reading it mid-incident.
+   */
+  guestFirstName: string | null
+  /**
+   * The full number, for formatting only. It never leaves this module whole:
+   * PostHog and Slack both get the last four digits.
+   */
+  guestPhone: string | null
+  /** Why the draft had nowhere to go. See SlotDropReason in lib/agent/pending-slots.ts. */
+  reason: DraftDropReason
+  /** messages.id of the pending card that kept its slot. */
   protectedDraftId: string
+  /** That card's commitment carrier, or null when it carries none. */
+  protectedCommitment: DroppedDraftCommitment | null
+  /** The discarded draft's commitment, or null when it carried none. */
+  droppedCommitment: DroppedDraftCommitment | null
   /** The triggers that would have queued the discarded draft. */
   triggers: string[]
   kind: 'inbound' | 'followup'
@@ -1162,31 +1199,143 @@ export interface DraftDroppedProps {
 }
 
 /**
- * Fires when the approval gate discards a draft because a knowledge-gap card
- * already holds this guest's one pending slot (migration 020).
+ * Fires when a draft is discarded because a pending card holds its slot:
+ * TAC-308's knowledge-gap card protection, or TAC-394's obligation slot.
  *
  * SLACK-RELAYED, unlike most product analytics, and the reason matters: this
  * is the one path where a guest says something and receives nothing while no
- * operator is told anything new. The sharpest case is a complaint — the
- * clarifying turn auto-sends via the carve-out, then the warm apologetic
- * resolving draft trips category_requires_approval and is dropped here. Two
- * safety systems interlocking into silence is the failure class this repo has
- * been bitten by twice, so it gets an alert rather than a dashboard nobody
- * opens.
+ * operator is told anything new. The sharpest TAC-308 case is a complaint (the
+ * clarifying turn auto-sends, then the resolving draft trips
+ * category_requires_approval and is dropped). The sharpest TAC-394 case is a
+ * second offer while a first is still pending, which is rare and correlated
+ * with things already going wrong, so the alert says exactly which two offers
+ * and which guest.
+ *
+ * `slot_occupied` has copy too, but the followup orchestrator records a
+ * refused manual followup with captureManualFollowupSlotOccupied instead: the
+ * operator who clicked is told directly, so Slack would tell them twice.
  */
 export async function captureDraftDropped(props: DraftDroppedProps): Promise<void> {
-  await capturePostHogEvent('draft_dropped', props.guestId, { ...props })
+  const { guestPhone, ...rest } = props
+  await capturePostHogEvent('draft_dropped', props.guestId, {
+    ...rest,
+    guestPhoneLast4: phoneLast4(guestPhone),
+  })
+  await postToSlack(formatDraftDropped(props))
+}
+
+/** Exported for tests. */
+export function formatDraftDropped(props: DraftDroppedProps): string {
+  const last4 = phoneLast4(props.guestPhone)
+  const guest = `guest: ${props.guestFirstName ?? 'unnamed guest'}${
+    last4 ? `, phone ending ${last4}` : ''
+  } (\`${props.guestId}\`)`
+  const context = [
+    `venue: \`${props.venueId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category ?? 'null'}\``,
+    `would-have-queued: ${props.triggers.map((t) => `\`${t}\``).join(', ')}`,
+    `discarded draft: ${truncate(props.droppedBody, 300)}`,
+  ]
+  switch (props.reason) {
+    case 'obligation_slot_taken':
+      return [
+        `*Draft dropped: this guest already has a different offer waiting* (${props.kind})`,
+        guest,
+        `kept, pending card \`${props.protectedDraftId}\`: ${describeDroppedCommitment(props.protectedCommitment)}`,
+        `dropped, never saved: ${describeDroppedCommitment(props.droppedCommitment)}`,
+        ...context,
+        `_The guest got no reply to their last message. The pending card is untouched. Decide it, then follow up if the guest is owed the second offer too._`,
+      ].join('\n')
+    case 'slot_occupied':
+      return [
+        `*Follow-up refused: a card for this guest is already waiting* (${props.kind})`,
+        guest,
+        `waiting card \`${props.protectedDraftId}\`: ${describeDroppedCommitment(props.protectedCommitment)}`,
+        ...context,
+        `_Nothing was sent or saved. Decide the waiting card, then send the follow-up again._`,
+      ].join('\n')
+    case 'knowledge_gap_card_protected':
+      return [
+        `*Draft dropped to protect a knowledge-gap card* (${props.kind})`,
+        guest,
+        `protected card: \`${props.protectedDraftId}\``,
+        ...context,
+        `_The guest received nothing on this turn. Answering the pending card releases the guest's slot._`,
+      ].join('\n')
+  }
+}
+
+function describeDroppedCommitment(c: DroppedDraftCommitment | null): string {
+  if (c === null) return 'no commitment'
+  return `${c.type} "${truncate(c.description, 120)}" (${c.code ? `code ${c.code}` : 'no code'})`
+}
+
+/** TAC-394: the last four digits of a phone number, for alerts that name a guest. */
+export function phoneLast4(phone: string | null | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '')
+  return digits.length >= 4 ? digits.slice(-4) : null
+}
+
+// ---------------------------------------------------------------------------
+// TAC-394: a manual followup refused to overwrite a pending card
+// ---------------------------------------------------------------------------
+
+export interface ManualFollowupSlotOccupiedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** messages.id of the card holding the slot the followup would have used. */
+  waitingDraftId: string
+  triggers: string[]
+}
+
+/**
+ * Fires when a Command Center Follow Up click would have queued into a slot a
+ * pending card already holds, and was refused instead of regenerating over it.
+ * TAC-307 kept manual followups away from regenerate-in-place; TAC-394 closed
+ * the race path that got round that and made the refusal explicit.
+ *
+ * PostHog only, never silent: the orchestrator also logs it, and the route
+ * tells the operator who clicked in plain words. A Slack alert on top would
+ * tell the same person twice.
+ */
+export async function captureManualFollowupSlotOccupied(
+  props: ManualFollowupSlotOccupiedProps,
+): Promise<void> {
+  await capturePostHogEvent('manual_followup_slot_occupied', props.guestId, { ...props })
+}
+
+// ---------------------------------------------------------------------------
+// TAC-394: a pending slot held more than one row
+// ---------------------------------------------------------------------------
+
+export interface PendingSlotInvariantBrokenProps {
+  venueId: string
+  guestId: string
+  keptObligationId: string | null
+  keptConversationId: string | null
+  /** The rows loadPendingRowsBySlot did not return. */
+  extraIds: string[]
+}
+
+/**
+ * Fires when loadPendingRowsBySlot finds more than one pending row in a slot.
+ * Unreachable while migration 041's indexes are live, which is why it
+ * Slack-relays: it is the one signal that they are gone.
+ */
+export async function capturePendingSlotInvariantBroken(
+  props: PendingSlotInvariantBrokenProps,
+): Promise<void> {
+  await capturePostHogEvent('pending_slot_invariant_broken', props.guestId, { ...props })
   await postToSlack(
     [
-      `*Draft dropped to protect a knowledge-gap card* (${props.kind})`,
+      '*Pending-slot invariant broken: a guest has two pending cards in one slot*',
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,
-      `run: \`${props.agentRunId}\``,
-      `protected card: \`${props.protectedDraftId}\``,
-      `would-have-queued: ${props.triggers.map((t) => `\`${t}\``).join(', ')}`,
-      `category: \`${props.category ?? 'null'}\``,
-      `discarded draft: ${truncate(props.droppedBody, 300)}`,
-      `_The guest received nothing on this turn. Answering the pending card releases the guest's slot._`,
+      `kept: obligation \`${props.keptObligationId ?? 'none'}\`, conversation \`${props.keptConversationId ?? 'none'}\``,
+      `not read: ${props.extraIds.map((id) => `\`${id}\``).join(', ')}`,
+      "_Migration 041's indexes may be missing. Check pg_indexes on messages first._",
     ].join('\n'),
   )
 }

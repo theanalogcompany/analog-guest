@@ -34,6 +34,7 @@ import { randomUUID } from 'node:crypto'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   captureAgentLatencyHigh,
+  captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
@@ -45,9 +46,18 @@ import { startAgentTrace } from '@/lib/observability'
 import { fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
+import {
+  type CommitmentIdentity,
+  commitmentIdentityOf,
+  decideSlotAction,
+  draftCommitmentIdentity,
+  EMPTY_PENDING_ROWS,
+  loadPendingRowsBySlot,
+  otherSlotOccupant,
+  type SlotDropReason,
+} from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
 import {
-  findPendingDraft,
   generateStage,
   retrieveCorpusStage,
 } from './stages'
@@ -89,7 +99,7 @@ export function buildDeclineHint(commitmentDescription: string): string {
  * Server-only. Triggered by POST /api/operator/commitments/:id/draft-decline.
  * Generates an agentRunId then runs the pipeline:
  *   buildRuntimeContext → (synthesize Classification) → retrieveCorpusStage →
- *   generateStage → findPendingDraft → persistOrRegenQueuedDraft.
+ *   generateStage → loadPendingRowsBySlot → decideSlotAction → persistOrRegenQueuedDraft.
  *
  * Skips:
  *   - classification (no inbound to classify; category synthesized to 'manual')
@@ -331,24 +341,102 @@ export async function handleOperatorDecline(input: {
     // Persist as pending. NO approval gate (operator's swipe-left IS the
     // approval). NO scheduleAndSend — persist-only.
     //
-    // findPendingDraft fails OPEN (returns null on error) — that's the
-    // documented posture for that helper. A null return means we route
-    // through persistOrRegenQueuedDraft's INSERT path; if there's actually
-    // a pending row the migration 020 unique violation will catch us and
-    // race-recovery will route to UPDATE. Same belt-and-suspenders chain
-    // the inbound path uses.
+    // TAC-394: the decline regenerates the card in its OWN draft's slot
+    // ('regen_always', keeping TAC-299's rule that the operator's decline
+    // supersedes the pending reply) and never touches the other slot's card.
+    // A decline draft that carries a DIFFERENT obligation than a pending
+    // obligation card is dropped instead: no path overwrites one obligation
+    // with another. The route maps a drop to its existing internal_error, and
+    // the commitment is not cancelled, because cancellation runs only after a
+    // queued draft.
+    //
+    // loadPendingRowsBySlot fails OPEN (null on error), which routes through
+    // persistOrRegenQueuedDraft's INSERT path; if a card is actually there the
+    // slot's unique index catches it and race recovery decides again, with the
+    // same policy.
     const queueSpan = trace.span('queue', {
       primaryTrigger: OPERATOR_DECLINE_PRIMARY_TRIGGER,
       surface: 'operator_decline',
     })
     try {
-      const existingPending = await findPendingDraft(ctx.venue.id, ctx.guest.id)
+      const pendingRows =
+        (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+      const draftCommitment = draftCommitmentIdentity(gen.result.commitment, false)
+      const slotDecision = decideSlotAction({
+        rows: pendingRows,
+        draftCommitment,
+        isGapTurn: false,
+        truncatedOnly: false,
+        callerPolicy: 'regen_always',
+      })
+      const liveCtx = ctx
+      const reportDrop = async (drop: {
+        reason: SlotDropReason
+        protectedDraftId: string
+        protectedCommitment: CommitmentIdentity | null
+        droppedCommitment: CommitmentIdentity | null
+      }): Promise<AgentResult> => {
+        queueSpan.end({
+          output: {
+            persistAction: 'dropped',
+            reason: drop.reason,
+            protectedDraftId: drop.protectedDraftId,
+          },
+        })
+        console.warn('[agent] operator decline draft dropped: a pending card holds its slot', {
+          agentRunId,
+          reason: drop.reason,
+          protectedDraftId: drop.protectedDraftId,
+        })
+        await captureDraftDropped({
+          agentRunId,
+          venueId: liveCtx.venue.id,
+          guestId: liveCtx.guest.id,
+          guestFirstName: liveCtx.guest.firstName,
+          guestPhone: liveCtx.guest.phoneNumber,
+          reason: drop.reason,
+          protectedDraftId: drop.protectedDraftId,
+          protectedCommitment: drop.protectedCommitment,
+          droppedCommitment: drop.droppedCommitment,
+          triggers: [OPERATOR_DECLINE_PRIMARY_TRIGGER],
+          kind: 'followup',
+          category,
+          droppedBody: gen.result.body,
+        })
+        trace.update({
+          output: {
+            status: 'dropped',
+            reason: drop.reason,
+            protectedDraftId: drop.protectedDraftId,
+          },
+        })
+        return {
+          status: 'dropped',
+          reason: drop.reason,
+          protectedDraftId: drop.protectedDraftId,
+          triggers: [OPERATOR_DECLINE_PRIMARY_TRIGGER],
+        }
+      }
+      if (slotDecision.action === 'drop') {
+        return await reportDrop({
+          reason: slotDecision.reason,
+          protectedDraftId: slotDecision.protectedDraftId,
+          protectedCommitment: commitmentIdentityOf(
+            pendingRows[slotDecision.slot]?.pending_commitment ?? null,
+          ),
+          droppedCommitment: draftCommitment,
+        })
+      }
       const persistResult = await persistOrRegenQueuedDraft(
         ctx,
         gen.result,
         OPERATOR_DECLINE_PRIMARY_TRIGGER,
-        existingPending?.id ?? null,
+        slotDecision.action === 'regen' ? slotDecision.draftId : null,
+        { callerPolicy: 'regen_always' },
       )
+      if (persistResult.action === 'dropped') {
+        return await reportDrop(persistResult)
+      }
       const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
       queueSpan.end({
         output: {
@@ -400,7 +488,9 @@ export async function handleOperatorDecline(input: {
           modelRequiresApproval: gen.result.requiresOperatorApproval,
           modelApprovalReason: gen.result.approvalReason,
           compRegexMatchedPattern: null,
-          hasPreviousPending: existingPending !== null,
+          hasPreviousPending: slotDecision.action === 'regen',
+          slot: slotDecision.slot,
+          otherSlotOccupied: otherSlotOccupant(pendingRows, draftCommitment) !== null,
           kind: 'followup',
           category,
           inboundBody: null,

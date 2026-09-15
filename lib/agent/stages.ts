@@ -34,7 +34,6 @@ import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
 // every test that exercises it. Same reasoning as emoji-cadence.ts's
 // deliberate exclusion from the barrel (TAC-362).
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
-import { createAdminClient } from '@/lib/db/admin'
 import { resolveOpenState } from '@/lib/schemas'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
@@ -45,6 +44,20 @@ import { canAutoSendComplaintTurn } from './complaint-routing'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
+import {
+  commitmentIdentityOf,
+  type CommitmentIdentity,
+  anyKnowledgeGapCard,
+  decideSlotAction,
+  draftCommitmentIdentity,
+  EMPTY_PENDING_ROWS,
+  isKnowledgeGapCard,
+  loadPendingRowsBySlot,
+  otherSlotOccupant,
+  type PendingSlot,
+  pendingSlotOf,
+  type SlotDropReason,
+} from './pending-slots'
 import type {
   Classification,
   CorpusMatch,
@@ -424,83 +437,12 @@ export function knowledgeGapWillQueue(
   return knowledgeGap === true && ctx.currentMessage !== null && ctx.guest.isDemo !== true
 }
 
-/**
- * Every `messages.review_reason` that marks a pending row as a knowledge-gap
- * card, i.e. one the guest is owed an answer to.
- *
- * SHARED with `findPendingQuestion` (lib/agent/pending-question.ts), which has
- * to express the same predicate as a PostgREST filter so it can run
- * server-side. That duplication used to be by hand and it DRIFTED: the query
- * carried one value where the predicate below carried two, so a
- * `knowledge_gap_backstop` card whose clock had already fired was recognized
- * here and invisible there — the `## Unanswered question` block silently
- * vanished for that guest while the card still sat in the operator's queue,
- * and the comment at the query claimed the two mirrored each other the whole
- * time. TAC-364 found it while adding a third value.
- *
- * Exported as one array so the next value added lands in both places at once
- * rather than being caught by a reader. Do not inline these back into either
- * site.
- */
-export const KNOWLEDGE_GAP_CARD_REVIEW_REASONS = [
-  APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-  APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-  GENERATION_FAILED_REVIEW_REASON,
-] as const
-
-/**
- * TAC-308: is this pending row a knowledge-gap card?
- *
- * Two conditions, OR'd, and the OR is load-bearing:
- *
- *   pending_until IS NOT NULL — the clock is still running. Catches the card
- *     even when a co-firing trigger (a comp commitment on the same turn) won
- *     `review_reason` and the label doesn't say "knowledge_gap".
- *   review_reason = 'knowledge_gap' — the clock has already fired. The timer
- *     CLEARS pending_until as its CAS claim, so after a holding message goes
- *     out the first condition stops matching. Without this second one the
- *     card would silently lose its eviction protection five minutes after
- *     being created, which is the original data-loss bug on a delay.
- *
- * Residual, accepted: a draft that BOTH gapped and committed a comp gets
- * review_reason='commitment_type_gated', so once its clock fires it is no
- * longer recognized. Rare (the model has to do both in one turn) and it
- * degrades to pre-TAC-308 behavior rather than to something worse. Closing it
- * needs a column, which the ticket ruled out.
- *
- * TAC-350: the review_reason leg checks BOTH `knowledge_gap` (self-reported)
- * and `knowledge_gap_backstop` (independently caught) — a card protected by
- * the backstop trigger must get identical eviction protection to one the
- * model flagged itself, or a regen of a backstop-caught card would silently
- * lose its clock the moment the label won by a co-firing trigger changed.
- *
- * TAC-364 adds `generation_failed` as a third value on that leg, and it is
- * REQUIRED rather than tidy. The crash card arms `pending_until` like any
- * other gap card, so it is protected while the clock runs — but the moment
- * the timer CAS-claims and nulls that column, a crash card without this leg
- * stops being recognized, and the next turn that queues for any reason
- * UPDATEs it in place instead of taking the `drop` branch: the guest's
- * outstanding question is overwritten and the crash is erased. Splitting the
- * crash path off `knowledge_gap` without adding it here would have introduced
- * exactly the data-loss bug the second leg exists to prevent.
- */
-export function isKnowledgeGapCard(row: {
-  review_reason?: string | null
-  pending_until?: string | null
-}): boolean {
-  // Positive identification only. `typeof === 'string'` rather than
-  // `!== null` because an ABSENT field (a caller that didn't select the
-  // column, a hand-built row) is `undefined`, and `undefined !== null` is
-  // true — which would classify every ordinary pending draft as a protected
-  // knowledge-gap card and silently start dropping replies that used to
-  // send. Unknown means "not a gap card": the fail-safe direction is the
-  // pre-TAC-308 behavior, not the new one.
-  return (
-    typeof row.pending_until === 'string' ||
-    (typeof row.review_reason === 'string' &&
-      (KNOWLEDGE_GAP_CARD_REVIEW_REASONS as readonly string[]).includes(row.review_reason))
-  )
-}
+// TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
+// ./pending-slots, so the persist layer can use them without importing this
+// file. Re-exported here so every existing import keeps working. The moved
+// review_reason values are literals there; stages.test.ts pins them against
+// APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON.
+export { isKnowledgeGapCard, KNOWLEDGE_GAP_CARD_REVIEW_REASONS } from './pending-slots'
 
 function pickPrimaryTrigger(triggers: readonly string[]): string {
   // Caller guarantees triggers.length > 0; the fallback to triggers[0]
@@ -1160,11 +1102,11 @@ export async function verifyMechanicOfferStage(
  * Fail-OPEN on the sticky-pending DB read (returns send rather than queue
  * when the lookup throws) — refusing to send because of an observability
  * read failure is worse than the rare race of a draft auto-sending while a
- * sibling pending draft exists. TAC-264 closes this loop structurally via
- * the partial unique index on `messages (venue_id, guest_id) WHERE
- * review_state='pending'` (migration 020) — concurrent INSERTs from rapid
- * inbounds get caught by the index and recovered to UPDATE inside
- * persistOrRegenQueuedDraft.
+ * sibling pending draft exists. TAC-264 closes this loop structurally with a
+ * partial unique index on pending rows; since TAC-394 that is migration 041's
+ * pair, one per (venue_id, guest_id, slot). A colliding INSERT is caught by the
+ * index, and persistOrRegenQueuedDraft re-reads the slots and decides with
+ * decideSlotAction, the same function this gate uses.
  *
  * TAC-264: queue decisions carry `existingPendingDraftId` so the persist
  * layer knows whether to INSERT a fresh pending row or UPDATE the existing
@@ -1223,10 +1165,15 @@ export type ApprovalDecision =
       ungroundedClaims: string[] | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
-      // (regenerate) instead of INSERTing a new pending row. Captured from
-      // findPendingDraft() during trigger 4 evaluation so the persist layer
-      // doesn't need a second round-trip.
+      // (regenerate) instead of INSERTing a new pending row. TAC-394: it is the
+      // card in THIS draft's slot, chosen by decideSlotAction, so the persist
+      // layer never regenerates over the other slot's card.
       existingPendingDraftId: string | null
+      // TAC-394: which of the guest's two pending slots this draft lands in
+      // (migration 041), and whether the OTHER slot already holds a card,
+      // i.e. whether this draft is the guest's second card.
+      slot: PendingSlot
+      otherSlotOccupied: boolean
       // TAC-308: when set, the persist layer stamps messages.pending_until,
       // arming the holding-message timer. `undefined` means "leave the column
       // alone" — omitted on INSERT (so the column stays null), absent from the
@@ -1247,19 +1194,30 @@ export type ApprovalDecision =
       // blanking destroyed correct replies in production.
       blankBody: boolean
     }
-  // TAC-308: the guest already has a knowledge-gap card holding the one
-  // pending slot migration 020 allows, and THIS turn would queue for some
-  // reason other than gapping itself. We can't store a second pending row and
-  // we won't overwrite the card an operator is about to answer, so the new
-  // draft is discarded: not sent, not persisted. The guest is silent on this
-  // turn. That cost is accepted deliberately — the turn needed a human
-  // anyway, and losing the outstanding question is worse than losing a reply
-  // that was never going to reach the guest without review.
+  // A draft that would queue into a slot whose card it must not overwrite is
+  // discarded: not sent, not persisted, and the guest is silent on this turn.
+  // Three reasons, all decided by decideSlotAction (./pending-slots):
+  //
+  //   knowledge_gap_card_protected (TAC-308): a knowledge-gap card holds the
+  //     slot and this turn queues for a reason other than gapping itself.
+  //     Losing the outstanding question is worse than losing a reply that
+  //     needed review anyway.
+  //   obligation_slot_taken (TAC-394): the obligation slot holds a DIFFERENT
+  //     commitment, and the existing card wins. Rare (one production instance
+  //     fleet-wide, on 2026-08-07, during an incident), so the alert names both
+  //     commitments and the guest: whoever reads it may be reading it
+  //     mid-incident.
+  //   slot_occupied (TAC-394): a manual followup would queue into an occupied
+  //     slot. A Follow Up click never overwrites a card; it is refused, loudly.
   | {
       action: 'drop'
-      reason: 'knowledge_gap_card_protected'
+      reason: SlotDropReason
       triggers: string[]
       protectedDraftId: string
+      // The protected card's commitment (null when it carries none), and the
+      // discarded draft's (null when it carried none or its body was blanked).
+      protectedCommitment: CommitmentIdentity | null
+      droppedCommitment: CommitmentIdentity | null
     }
 
 export async function applyApprovalPolicyStage(
@@ -1316,23 +1274,25 @@ export async function applyApprovalPolicyStage(
   // primaryTrigger is priority-selected via PRIMARY_TRIGGER_PRIORITY — so
   // nothing downstream keys on the position.
   //
-  // TAC-307: SKIPPED ENTIRELY for a manual followup (the Command Center
-  // Follow Up button). Removing that path's gate bypass brought it under
-  // approval POLICY, which was the ticket's intent — but the bypass was doing
-  // two unrelated jobs, and pending-detection was the other one. Left in, a
-  // Follow Up click on a guest who already has a pending card would fire
-  // previous_pending_held, route to persistOrRegenQueuedDraft's UPDATE-in-place
-  // branch, and overwrite the draft the operator was about to approve — body,
-  // review_reason and pending_commitment replaced, created_at preserved so the
-  // card looks untouched in the queue. That is data loss on a human's work,
-  // and it is a different axis from "does approval policy apply", so it keeps
-  // its pre-TAC-307 behaviour: a pending card and an operator-sent manual
-  // outbound can legitimately coexist on the same guest (migration 020's
-  // partial index permits it — a manual send writes review_state='auto_sent').
+  // TAC-394: one ordered read covering BOTH of the guest's pending slots
+  // (migration 041). Which card this draft competes with is decided below, once
+  // the trigger set says whether the body is blanked and so which slot the
+  // draft lands in. A failed read fails OPEN, as findPendingDraft did, and
+  // migration 041's indexes are the backstop.
+  //
+  // TAC-307 made manual followups (the Command Center Follow Up button) run
+  // approval POLICY and deliberately kept them away from regenerate-in-place: a
+  // Follow Up click must never overwrite a draft an operator is about to
+  // approve. Before TAC-394 that was done by skipping this read entirely, which
+  // left a hole: a manual followup that queued INSERTed blind, hit the unique
+  // index, and race recovery UPDATEd the card anyway. Now the read runs for
+  // manual followups too, previous_pending_held never fires for them, and one
+  // that would queue into an occupied slot is refused below ('slot_occupied').
+  // One that sends still coexists with the card, as before: a send writes
+  // review_state='auto_sent', outside both indexes.
   const isManualFollowup = ctx.followupTrigger?.reason === 'manual'
-  const existingPending = isManualFollowup
-    ? null
-    : await findPendingDraft(ctx.venue.id, ctx.guest.id)
+  const pendingRows =
+    (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
 
   // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
   // discount}. Fires regardless of requiresOperatorApproval self-flag.
@@ -1494,14 +1454,23 @@ export async function applyApprovalPolicyStage(
   // whole intended consequence, and it needs none of the above.
   const isGapTurn = knowledgeGapFired || backstopFired
 
-  // ---- Pending-row resolution (TAC-308) ----
+  // ---- Pending-row resolution (TAC-308, TAC-394) ----
   //
   // Trigger 4's lookup ran in enumeration order above; its PUSH happens here,
   // because whether it fires depends on what every other trigger decided.
   //
-  // A knowledge-gap card is a pending row with a live `pending_until`: an
-  // operator is on the hook for an answer and a clock is running. Three cases,
-  // and they are genuinely different:
+  // TAC-394: everything below concerns the card in THIS draft's slot. The slot
+  // is decided by the carrier the draft will persist: a comp, hold or discount
+  // lands in the obligation slot, anything else (including a blanked body,
+  // whose carrier TAC-309 nulls) in the conversation slot. The card in the
+  // OTHER slot never holds this draft back, never fires previous_pending_held,
+  // and is never regenerated over. That is the fix for the 2026-09-14
+  // incident, where an hours question queued behind a pending comp card and
+  // regenerated over it.
+  //
+  // Within the slot, a knowledge-gap card is a pending row with a live
+  // `pending_until`: an operator is on the hook for an answer and a clock is
+  // running. Three cases, and they are genuinely different:
   //
   //   1. This turn is independently sendable (no trigger fired at all).
   //      Send it. TAC-264's no-demotion invariant would otherwise queue it and
@@ -1510,9 +1479,8 @@ export async function applyApprovalPolicyStage(
   //      REGENERATED VERSION OF THE SAME DRAFT going out from under an
   //      operator; a reply to a different question is not that. Narrowed to
   //      knowledge-gap cards only, so the invariant stays absolute everywhere
-  //      it was designed to apply. Migration 020 permits the coexistence —
-  //      the send writes review_state='auto_sent', which is outside the
-  //      partial unique index.
+  //      it was designed to apply. The send writes review_state='auto_sent',
+  //      which is outside both of migration 041's indexes.
   //   2. This turn also gaps. UPDATE the card in place (the standard
   //      regen path) and PRESERVE its original pending_until, so a guest
   //      asking a second unanswerable question can't push the clock out.
@@ -1520,12 +1488,14 @@ export async function applyApprovalPolicyStage(
   //      is dropped below.
   //
   // Every other pending row keeps the pre-TAC-308 behavior exactly.
-  const existingIsKnowledgeGapCard =
-    existingPending !== null && isKnowledgeGapCard(existingPending)
-  const protectedCardCarveOut =
-    existingIsKnowledgeGapCard && triggers.length === 0
+  const blankBody = knowledgeGapFired
+  const draftCommitment = draftCommitmentIdentity(generation.commitment, blankBody)
+  const slot: PendingSlot = pendingSlotOf(draftCommitment)
+  const slotOccupant = pendingRows[slot]
+  const existingIsKnowledgeGapCard = slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
+  const protectedCardCarveOut = existingIsKnowledgeGapCard && triggers.length === 0
 
-  if (existingPending !== null && !protectedCardCarveOut) {
+  if (slotOccupant !== null && !protectedCardCarveOut && !isManualFollowup) {
     triggers.push(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   }
 
@@ -1562,33 +1532,51 @@ export async function applyApprovalPolicyStage(
     return { action: 'send' }
   }
 
+  // TAC-394: where this queued draft goes, decided by the same pure function
+  // that 23505 race recovery calls in schedule-and-send.ts, so a card the gate
+  // never saw gets exactly the treatment a card it did see gets. The full order
+  // is at decideSlotAction. The drops that can come back:
+  //
   // TAC-308 case 3: a knowledge-gap card holds the slot and this turn queues
   // for some reason OTHER than gapping itself. Regen-in-place would overwrite
-  // the question an operator is about to answer, and migration 020 forbids a
-  // second pending row, so the draft is discarded rather than stored.
-  // TAC-350: `!isGapTurn` (not `!knowledgeGapFired`) — a turn the backstop
-  // caught is just as much "gapping itself" as a self-reported one, and must
-  // NOT be dropped as if it were an unrelated reason to queue.
+  // the question an operator is about to answer, and the slot's index forbids a
+  // second pending row, so the draft is discarded rather than stored. TAC-350: a
+  // turn the backstop caught is just as much "gapping itself" as a
+  // self-reported one, which is why this keys on isGapTurn.
   //
   // TAC-367: a TRUNCATED grounding check is exempt too, and this is the one
-  // place `isGapTurn` alone gives the wrong answer. Excluding `truncated`
-  // from `isGapTurn` is right FORWARD (don't arm a clock, don't make this
-  // card protected for later turns) and wrong BACKWARD: without this clause
-  // the trigger pushed above makes `triggers.length > 0`, which cancels the
-  // protected-card carve-out and lands the turn here, DROPPING it. That is
-  // strictly worse than what shipped before this ticket — the same turn
-  // previously fired no trigger at all and SENT. A draft nobody could read
-  // the verdict for should be handed to an operator, never destroyed: queuing
-  // regenerates in place over the card and preserves its original
-  // `pending_until` (the UPDATE payload omits the column), so the guest's
-  // original question keeps its clock and this reply stays approvable.
+  // place `isGapTurn` alone gives the wrong answer. Excluding `truncated` from
+  // `isGapTurn` is right FORWARD (don't arm a clock, don't make this card
+  // protected for later turns) and wrong BACKWARD: without the exemption the
+  // trigger pushed above makes `triggers.length > 0`, which cancels the
+  // protected-card carve-out and would DROP a turn that, before TAC-367, fired
+  // no trigger at all and SENT. A draft nobody could read the verdict for is
+  // handed to an operator, never destroyed: queuing regenerates in place over
+  // the card and preserves its original `pending_until` (the UPDATE payload
+  // omits the column), so the guest's question keeps its clock.
+  //
+  // TAC-394: the obligation slot holds a DIFFERENT commitment (a comp for
+  // another item, or another gated type). The existing card wins and this
+  // draft is dropped with an alert naming both commitments. And a manual
+  // followup that would queue into any occupied slot is refused.
   const truncatedOnly = grounding.status === 'truncated'
-  if (existingPending !== null && existingIsKnowledgeGapCard && !isGapTurn && !truncatedOnly) {
+  const slotDecision = decideSlotAction({
+    rows: pendingRows,
+    draftCommitment,
+    isGapTurn,
+    truncatedOnly,
+    callerPolicy: isManualFollowup ? 'never_regen' : 'regen',
+  })
+  if (slotDecision.action === 'drop') {
     return {
       action: 'drop',
-      reason: 'knowledge_gap_card_protected',
+      reason: slotDecision.reason,
       triggers,
-      protectedDraftId: existingPending.id,
+      protectedDraftId: slotDecision.protectedDraftId,
+      protectedCommitment: commitmentIdentityOf(
+        pendingRows[slotDecision.slot]?.pending_commitment ?? null,
+      ),
+      droppedCommitment: draftCommitment,
     }
   }
 
@@ -1606,12 +1594,17 @@ export async function applyApprovalPolicyStage(
   //     card as of this write, so it needs a clock; that overwrite is the
   //     pre-existing TAC-264 clobber, out of scope here)
   //   - any non-gap queue                   → undefined, column untouched
+  //   - gap turn beside a gap card in the OTHER slot → undefined (TAC-394).
+  //     The clock is the guest's, not the slot's: the timeout scan fires per
+  //     card, so a second clock would send the guest a second holding message.
+  //     A self-reported gap card and a backstop-flagged comp are the realistic
+  //     pair. anyKnowledgeGapCard covers the same-slot cases above as well.
   //
   // TAC-350: keyed on isGapTurn, not knowledgeGapFired alone — a fresh
   // backstop catch arms the clock exactly like a fresh self-reported gap;
   // both are "the guest asked something and got no grounded answer."
   const pendingUntil =
-    isGapTurn && !existingIsKnowledgeGapCard
+    isGapTurn && !anyKnowledgeGapCard(pendingRows)
       ? new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
       : undefined
 
@@ -1642,7 +1635,9 @@ export async function applyApprovalPolicyStage(
           ? []
           : null,
     compMatchedPattern: comp.matched ? comp.pattern : null,
-    existingPendingDraftId: existingPending?.id ?? null,
+    existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
+    slot,
+    otherSlotOccupied: otherSlotOccupant(pendingRows, draftCommitment) !== null,
     pendingUntil,
     // TAC-301 part 1.5 REVERSES TAC-350 here, deliberately: blank on a
     // self-reported gap, KEEP the body on a backstop catch.
@@ -1685,65 +1680,7 @@ export async function applyApprovalPolicyStage(
     // card now holds a viable answer: nothing has been SENT, so from the
     // guest's side they are still waiting, and the holding message ("still on
     // it") stays accurate about their experience rather than about the card.
-    blankBody: knowledgeGapFired,
-  }
-}
-
-/**
- * Read-side lookup for an existing pending draft for the (venue, guest)
- * pair. Hits the migration 018 partial index
- * `idx_messages_review_state_pending (venue_id, created_at) WHERE review_state='pending'`
- * — single cheap lookup. Returns the row's id + body when found (body is
- * captured for forensic logging and future no-op detection; not load-bearing
- * at the route level), or null on miss / DB error.
- *
- * Fails OPEN: any throw is caught + logged + returns null so the approval
- * gate proceeds to send rather than refusing on a DB read failure. The
- * sticky-pending signal is the lowest-stakes of the four triggers; the
- * regex backstop and model self-flag don't depend on it. The partial
- * unique index from migration 020 is the structural backstop against
- * concurrent rapid-inbound races that slip past this read.
- *
- * Exported for the test suite. TAC-264 renamed from hasPendingDraft (which
- * returned a boolean) to surface the row identity for the persist layer.
- * TAC-308 adds `pending_until` + `review_reason` so the gate can tell a
- * knowledge-gap card (protected from eviction) from an ordinary pending
- * draft — see isKnowledgeGapCard for why it takes both.
- */
-export async function findPendingDraft(
-  venueId: string,
-  guestId: string,
-): Promise<{
-  id: string
-  body: string
-  pending_until: string | null
-  review_reason: string | null
-} | null> {
-  try {
-    const supabase = createAdminClient()
-    const { data, error } = await supabase
-      .from('messages')
-      .select('id, body, pending_until, review_reason')
-      .eq('venue_id', venueId)
-      .eq('guest_id', guestId)
-      .eq('direction', 'outbound')
-      .eq('review_state', 'pending')
-      .limit(1)
-      .maybeSingle()
-    if (error) {
-      console.warn(
-        `[agent] findPendingDraft lookup degraded for venue=${venueId} guest=${guestId}: ${error.message}`,
-      )
-      return null
-    }
-    return data
-  } catch (e) {
-    console.warn(
-      `[agent] findPendingDraft threw for venue=${venueId} guest=${guestId}: ${
-        e instanceof Error ? e.message : String(e)
-      }`,
-    )
-    return null
+    blankBody,
   }
 }
 

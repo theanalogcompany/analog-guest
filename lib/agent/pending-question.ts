@@ -79,6 +79,19 @@ export async function findPendingQuestion(
           ...KNOWLEDGE_GAP_CARD_REVIEW_REASONS.map((r) => `review_reason.eq.${r}`),
         ].join(','),
       )
+      // TAC-394: an explicit order, because there can now be two. A guest holds
+      // up to two pending cards (migration 041), and either slot can hold a
+      // knowledge-gap card: a blank self-reported card in the conversation
+      // slot, a backstop-caught comp in the obligation slot. Without ORDER BY
+      // Postgres may return either, so `## Unanswered question` could swap
+      // between two questions from one turn to the next. The OLDEST card is the
+      // question the guest has waited on longest.
+      //
+      // Known limit, recorded rather than fixed: with a gap card in each slot
+      // only the oldest question renders. Rendering both needs a prompt change,
+      // and a prompt change needs a pre-registered measurement run, which a
+      // case that may never occur at one venue does not justify.
+      .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle()
 
