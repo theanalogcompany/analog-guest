@@ -20,9 +20,39 @@
 // embedding write), but the body != '' filter mirrors the rest of the app:
 // empty-body messages are reactions / status pings / placeholders and don't
 // belong in a rendered thread.
+//
+// TAC-395: the thread holds only messages that REACHED the guest. The query
+// adds REACHED_GUEST_FILTER, the PostgREST form of
+//
+//   direction = 'inbound'
+//   or (review_state is distinct from 'pending'
+//       and status in (DELIVERED_OUTBOUND_STATUSES))
+//
+// which is the set `deriveDelivery` (lib/agent/group-responses.ts) calls
+// `delivered`. Before it, a pending draft came back as an ordinary message, so
+// the edit screen showed it both in the compose box and as a sent-looking
+// bubble, and skipped drafts and replies that never sent read as sent too.
+//
+// Three things about the filter are deliberate:
+//   - It lives in the query, so Postgres applies it before LIMIT 200. A JS
+//     post-filter would return fewer than 200 rows when more qualify.
+//   - It filters the thread rows only, never the messageId lookup: the edit
+//     screen opens the thread with the pending draft's own id.
+//   - `or(review_state.is.null,review_state.neq.pending)` is IS DISTINCT FROM.
+//     A bare `neq` would drop outbound rows whose review_state is NULL.
+//
+// The same condition is written in migrations 043 and 044, and
+// reached-guest-condition.test.ts keeps all three in step. The Realtime channel
+// is not filtered by any of this; the operator app applies the same rule to
+// live rows (TAC-411).
 
+import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
 import { THREAD_MESSAGE_LIMIT, type ThreadMessage } from '@/lib/schemas'
+
+const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
+  ...DELIVERED_OUTBOUND_STATUSES,
+].join(',')}),or(review_state.is.null,review_state.neq.pending))`
 
 export interface LoadGuestThreadInput {
   messageId: string
@@ -48,11 +78,12 @@ export interface LoadGuestThreadFailure {
 export type LoadGuestThreadResult = LoadGuestThreadSuccess | LoadGuestThreadFailure
 
 /**
- * Fetches up to THREAD_MESSAGE_LIMIT non-empty-body messages for a resolved
- * (venueId, guestId) pair, oldest→newest. Shared by loadGuestThread (keyed
- * off a messageId, resolves venue/guest first) and loadGuestThreadByGuestId
- * (lib/operator/guest-thread.ts, keyed directly off guestId) so both thread
- * endpoints run the identical query instead of drifting independently.
+ * Fetches up to THREAD_MESSAGE_LIMIT non-empty-body messages that reached the
+ * guest, for a resolved (venueId, guestId) pair, oldest→newest. Shared by
+ * loadGuestThread (keyed off a messageId, resolves venue/guest first) and
+ * loadGuestThreadByGuestId (lib/operator/guest-thread.ts, keyed directly off
+ * guestId) so both thread endpoints run the identical query instead of
+ * drifting independently.
  */
 export async function fetchThreadMessagesForGuest(
   supabase: ReturnType<typeof createAdminClient>,
@@ -65,6 +96,7 @@ export async function fetchThreadMessagesForGuest(
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
     .neq('body', '')
+    .or(REACHED_GUEST_FILTER)
     .order('created_at', { ascending: false })
     .limit(THREAD_MESSAGE_LIMIT)
 
@@ -102,6 +134,8 @@ export async function loadGuestThread(
   const supabase = createAdminClient()
 
   // ---- 1. resolve (venue_id, guest_id) for the supplied messageId ----
+  // Unfiltered on purpose (TAC-395): the edit screen opens the thread with a
+  // pending draft's own id, which the thread query below then leaves out.
   const { data: row, error: lookupErr } = await supabase
     .from('messages')
     .select('venue_id, guest_id')

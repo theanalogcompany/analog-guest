@@ -12,6 +12,13 @@ const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const VENUE_B = '00000000-0000-0000-0000-00000000000b'
 const GUEST_X = '00000000-0000-0000-0000-000000000001'
 
+// TAC-395: transcribed from TAC-395's Contract ("Which messages count",
+// condition 2) into PostgREST syntax. A literal, never built from
+// DELIVERED_OUTBOUND_STATUSES: an expectation built from the constant would
+// pass whatever the constant says (CLAUDE.md, Cross-repo contracts).
+const CONTRACT_REACHED_GUEST_FILTER =
+  'direction.eq.inbound,and(status.in.(sending,sent,delivered),or(review_state.is.null,review_state.neq.pending))'
+
 // The helper makes two sequential .from('messages') calls. We dispatch the
 // second-call mock from a queue, so each test can stage exactly the responses
 // it needs without coupling test order to mock-call order.
@@ -23,10 +30,12 @@ let nextMaybeSingleResponse: { data: unknown; error: { message: string } | null 
 
 const limitMock = vi.fn(() => Promise.resolve(nextSelectResponses.shift()))
 const orderMock = vi.fn(() => ({ limit: limitMock }))
-const neqMock = vi.fn(() => ({ order: orderMock }))
+const orMock = vi.fn(() => ({ order: orderMock }))
+const neqMock = vi.fn(() => ({ or: orMock }))
 const eqGuestMock = vi.fn(() => ({ neq: neqMock }))
 const eqVenueMock = vi.fn(() => ({ eq: eqGuestMock }))
 const maybeSingleMock = vi.fn(() => Promise.resolve(nextMaybeSingleResponse))
+// The lookup chain has no `.or`: a filter added to the lookup throws here.
 const eqIdMock = vi.fn(() => ({ maybeSingle: maybeSingleMock }))
 
 // `select()` is called twice with different downstream chains. Distinguish by
@@ -52,6 +61,7 @@ beforeEach(() => {
   eqVenueMock.mockClear()
   eqGuestMock.mockClear()
   neqMock.mockClear()
+  orMock.mockClear()
   orderMock.mockClear()
   limitMock.mockClear()
 })
@@ -119,10 +129,11 @@ describe('loadGuestThread', () => {
       expect(result.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
     }
     // Verify the SQL shape: equal-eq on (venue_id, guest_id), neq body '',
-    // order DESC, limit 200.
+    // the reached-guest filter, order DESC, limit 200.
     expect(eqVenueMock).toHaveBeenCalledWith('venue_id', VENUE_A)
     expect(eqGuestMock).toHaveBeenCalledWith('guest_id', GUEST_X)
     expect(neqMock).toHaveBeenCalledWith('body', '')
+    expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
     expect(orderMock).toHaveBeenCalledWith('created_at', { ascending: false })
     expect(limitMock).toHaveBeenCalledWith(200)
   })
@@ -229,5 +240,72 @@ describe('loadGuestThread', () => {
     if (result.ok) {
       expect(result.messages).toEqual([])
     }
+  })
+})
+
+describe('loadGuestThread: only messages that reached the guest (TAC-395)', () => {
+  it('filters the thread query with the Contract condition, exactly once', async () => {
+    nextMaybeSingleResponse = {
+      data: { venue_id: VENUE_A, guest_id: GUEST_X },
+      error: null,
+    }
+    nextSelectResponses = [{ data: [], error: null }]
+    await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    expect(orMock).toHaveBeenCalledTimes(1)
+    expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
+  })
+
+  // The edit screen opens the thread with the pending draft's own id. Its
+  // lookup must resolve even though the thread query then leaves that row out.
+  it("resolves a pending draft's own id: the lookup carries no filter", async () => {
+    nextMaybeSingleResponse = {
+      data: { venue_id: VENUE_A, guest_id: GUEST_X },
+      error: null,
+    }
+    nextSelectResponses = [
+      {
+        data: [
+          { id: 'm1', direction: 'inbound', body: 'what time do you open on sundaus', created_at: '2026-09-14T16:31:23Z' },
+        ],
+        error: null,
+      },
+    ]
+    const result = await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    expect(result).toEqual({
+      ok: true,
+      messages: [
+        { id: 'm1', direction: 'inbound', body: 'what time do you open on sundaus', createdAt: '2026-09-14T16:31:23Z' },
+      ],
+    })
+    expect(selectMock).toHaveBeenCalledWith('venue_id, guest_id')
+    expect(eqIdMock).toHaveBeenCalledWith('id', VALID_UUID)
+    // One filter call in total, and it belongs to the thread query.
+    expect(orMock).toHaveBeenCalledTimes(1)
+  })
+
+  // The filter runs in SQL, before LIMIT 200. A JS post-filter would return
+  // fewer than 200 rows when more qualify, so JS must keep every row the query
+  // returns, and must not fetch the columns such a filter would need.
+  it('filters in the query only: every returned row is kept and no delivery columns are fetched', async () => {
+    nextMaybeSingleResponse = {
+      data: { venue_id: VENUE_A, guest_id: GUEST_X },
+      error: null,
+    }
+    nextSelectResponses = [
+      {
+        data: [
+          { id: 'm3', direction: 'outbound', body: 'draft', created_at: '2026-09-14T16:31:50Z', status: 'pending_review', review_state: 'pending' },
+          { id: 'm2', direction: 'outbound', body: 'skipped', created_at: '2026-09-14T16:26:34Z', status: 'pending_review', review_state: 'skipped' },
+          { id: 'm1', direction: 'inbound', body: 'hi', created_at: '2026-09-14T16:26:03Z', status: 'received', review_state: null },
+        ],
+        error: null,
+      },
+    ]
+    const result = await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
+    }
+    expect(selectMock).toHaveBeenCalledWith('id, body, direction, created_at')
   })
 })
