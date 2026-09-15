@@ -9,6 +9,21 @@ This is an audit. Do not plan, do not branch, do not write code, do not edit
 the ticket's description except for the `## Open questions` block as directed
 below.
 
+# Check the repo
+
+Find the ticket's **Repo:** line. If it names a repo other than the one you
+are running in, stop and say which repo to run in. Do not audit across a repo
+boundary.
+
+If the ticket names no repo, say so and stop. That is a defect in the ticket,
+not something to guess past.
+
+A ticket is audited once, by one session, regardless of how many repos it
+touches. If it spans repos, audit from the one its **Repo:** line names and
+state in the report what could not be verified from there.
+
+# The audit
+
 Read CLAUDE.md and `.claude/process.md` first.
 
 Then read the ticket and every comment on it. Identify comments by their
@@ -39,6 +54,11 @@ that proves it.
 **3. QUESTIONS** — numbered, one decision each, options stated. Do not
 recommend. Do not answer your own question. Do not rank them.
 
+**Cap at seven.** If the ticket raises more than seven distinct decisions,
+that is itself the finding: the ticket is too large to rule on and should be
+split. Say so, list the seven that block the most, and name the rest in one
+line each.
+
 **4. FINDINGS** — defects you hit that are not in any ticket. Describe them.
 Do not file tickets. Maximum three; list any remainder as one-liners under a
 "not detailed" heading.
@@ -48,18 +68,26 @@ Do not file tickets. Maximum three; list any remainder as one-liners under a
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.
 
-# After posting
+# After posting — the ticket always moves
 
-If section 3 is non-empty: copy those questions into the ticket body's
-`## Open questions` block, set the ticket to **Needs Ruling**, and add the
-`Needs Decision` label. A ticket whose audit found open questions must not
-sit in Todo — Claude Code would pick it up as buildable.
+An audited ticket never stays in Todo. Todo means unaudited, and leaving it
+there means nothing picks the ticket up and the board lies about why.
 
-If section 3 is empty and the ticket is in Needs Ruling only because of
-questions this audit has now resolved against the code, say so in the
-comment but do not move it. Only a ruling from Jaipal moves a ticket to Todo.
+**Questions found** → copy them into the ticket body's `## Open questions`
+block, set the ticket to **Needs Ruling**, add the `Needs Decision` label.
 
-If the ticket's `## Gate` section names no QA route, propose one — `QA: Script`
+**No questions** → set the ticket to **Ready**. It is verified and buildable,
+and the build automation pulls from Ready.
+
+If the ticket body already has an `## Open questions` block, merge rather than
+append. A question already asked in a different form is not a new question;
+say which existing item it duplicates.
+
+If the ticket was already in Needs Ruling and this audit resolved its
+questions against the code, say so in the comment but do **not** move it.
+Only a ruling from Jaipal clears a question he was asked.
+
+If the ticket's `## Gate` section names no QA route, set one — `QA: Script`
 if the gate is provable by a test or query, `QA: Device` if it needs Jaipal on
 a real device or at the venue — and say what would make a device gate
 script-provable.
