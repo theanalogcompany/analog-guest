@@ -5,7 +5,6 @@ import {
   buildAiRuntime,
   classifyStage,
   deriveFollowupContext,
-  findPendingDraft,
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   isCommitmentTypeGated,
@@ -26,6 +25,7 @@ import type { GenerateMessageResult } from '@/lib/ai'
 // source under test imports it the same way for the same reason.
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
 import { BrandPersonaSchema } from '@/lib/schemas'
+import { gapFlagsFromTriggers } from './pending-slots'
 
 // Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
 // captureCorpusRetrievalBelowThreshold is fire-and-forget observability —
@@ -52,33 +52,38 @@ const captureMechanicOfferBackstopCaughtMock = vi.fn()
 // when a demo guest's bypass overrides a would-have-queued decision. Mocked
 // so the demo-bypass tests can assert the payload without a PostHog call.
 const captureDemoBypassMock = vi.fn()
-// TAC-212 + TAC-264: findPendingDraft inside applyApprovalPolicyStage calls
-// createAdminClient → supabase.from(...).select(...).limit(1).maybeSingle().
-// We mock createAdminClient to return a chainable stub whose terminal
-// maybeSingle() resolves with whatever the test sets via the per-test
-// `pendingDraftMaybeSingleMock`. TAC-264 widened the select to `id, body`
-// so tests assert against {id, body} shapes; the mock's return value is
-// passed through to the stage decision's existingPendingDraftId field.
+// TAC-394: the gate reads BOTH of a guest's pending slots through
+// loadPendingRowsBySlot (lib/agent/pending-slots.ts), whose query is
+// .select().eq() x4 .order().limit(), awaited as an array. The per-test
+// `pendingDraftMaybeSingleMock` keeps its pre-TAC-394 shape so existing fixtures
+// read unchanged: `{ data: row }` is a guest with that one pending row,
+// `{ data: [rowA, rowB] }` is a guest with two (listed in the order the read
+// returns them), and a rejection is a read that throws. A row with no
+// `pending_commitment` is a conversation-slot card, which is what every
+// fixture written before TAC-394 describes.
 const pendingDraftMaybeSingleMock = vi.fn()
 vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({
-            eq: () => ({
-              eq: () => ({
-                limit: () => ({
-                  maybeSingle: (...args: unknown[]) =>
-                    pendingDraftMaybeSingleMock(...args),
-                }),
-              }),
-            }),
-          }),
-        }),
-      }),
-    }),
-  }),
+  createAdminClient: () => {
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      order: () => chain,
+      limit: async () => {
+        const res = (await pendingDraftMaybeSingleMock()) as {
+          data: unknown
+          error: unknown
+        }
+        const data =
+          res.data === null || res.data === undefined
+            ? []
+            : Array.isArray(res.data)
+              ? res.data
+              : [res.data]
+        return { data, error: res.error ?? null }
+      },
+    }
+    return { from: () => chain }
+  },
 }))
 
 vi.mock('@/lib/rag', () => ({
@@ -910,7 +915,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.existingPendingDraftId).toBe('existing-pending-id')
   })
 
-  it('fails OPEN when findPendingDraft errors — sends rather than refusing', async () => {
+  it('fails OPEN when the pending-slot read errors — sends rather than refusing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
       data: null,
@@ -926,7 +931,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(warnSpy).toHaveBeenCalled()
   })
 
-  it('fails OPEN when findPendingDraft throws — sends rather than refusing', async () => {
+  it('fails OPEN when the pending-slot read throws — sends rather than refusing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('admin client init failed'))
     const decision = await applyApprovalPolicyStage(
@@ -1235,53 +1240,8 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// findPendingDraft (TAC-264 — renamed from hasPendingDraft, returns {id, body} | null)
-// ---------------------------------------------------------------------------
-
-describe('findPendingDraft (TAC-264)', () => {
-  beforeEach(() => {
-    pendingDraftMaybeSingleMock.mockReset()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('returns {id, body} when a pending row exists', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
-      data: { id: 'pending-1', body: 'draft body' },
-      error: null,
-    })
-    const out = await findPendingDraft('venue-1', 'guest-1')
-    expect(out).toEqual({ id: 'pending-1', body: 'draft body' })
-  })
-
-  it('returns null when no pending row exists', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValueOnce({ data: null, error: null })
-    const out = await findPendingDraft('venue-1', 'guest-1')
-    expect(out).toBeNull()
-  })
-
-  it('returns null (fail-open) when the DB read errors', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
-      data: null,
-      error: { message: 'connection reset' },
-    })
-    const out = await findPendingDraft('venue-1', 'guest-1')
-    expect(out).toBeNull()
-    expect(warnSpy).toHaveBeenCalled()
-  })
-
-  it('returns null (fail-open) when the DB read throws', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('client init failed'))
-    const out = await findPendingDraft('venue-1', 'guest-1')
-    expect(out).toBeNull()
-    expect(warnSpy).toHaveBeenCalled()
-  })
-})
+// findPendingDraft's own tests moved to pending-slots.test.ts, with its
+// replacement, loadPendingRowsBySlot (TAC-394).
 
 // TAC-244: deriveFollowupContext is the single mapping point between the
 // agent's FollowupTrigger + visit data and the AI runtime's FollowupContext
@@ -2858,7 +2818,27 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
 
   // CASE 2 — the card wins, the new draft is discarded. The guest is silent
   // on this turn, which is the accepted cost of not losing the question.
+  // TAC-394: this used to queue for its "other reason" by carrying a COMP
+  // commitment. A comp now lands in the obligation slot, beside the gap card
+  // rather than over it (see the next test), so the drop is exercised with a
+  // reason that stays in the gap card's own slot.
   it('drops a draft that would queue for some other reason', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+    )
+    expect(decision.action).toBe('drop')
+    if (decision.action !== 'drop') return
+    expect(decision.reason).toBe('knowledge_gap_card_protected')
+    expect(decision.protectedDraftId).toBe('gap-card-1')
+  })
+
+  // TAC-394 REVERSED this outcome. Before migration 041 a comp competed with
+  // the gap card for the guest's one pending slot and was dropped. It now
+  // becomes a second card, in the obligation slot, and the gap card is not
+  // touched.
+  it('queues a comp beside a gap card as a second card instead of dropping it', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
@@ -2867,10 +2847,12 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         commitment: { type: 'comp', description: 'oat latte' },
       }),
     )
-    expect(decision.action).toBe('drop')
-    if (decision.action !== 'drop') return
-    expect(decision.reason).toBe('knowledge_gap_card_protected')
-    expect(decision.protectedDraftId).toBe('gap-card-1')
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('obligation')
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.otherSlotOccupied).toBe(true)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   })
 
   // CASE 3 — a second unanswerable question updates the card in place and
@@ -3233,7 +3215,7 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
   })
 })
 
-describe('manual followups keep pending-detection bypassed (TAC-307)', () => {
+describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () => {
   // Removing the manual gate bypass brought that path under approval POLICY,
   // which was the point. The bypass was doing a second, unrelated job though —
   // keeping the Follow Up button away from pending-draft detection — and
@@ -3277,10 +3259,47 @@ describe('manual followups keep pending-detection bypassed (TAC-307)', () => {
       }),
       makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
     )
-    // findPendingDraft is unmocked here and resolves null in this fixture, so
-    // the assertion that matters is that the lookup was not short-circuited by
-    // the manual check — a send with no triggers is the correct outcome.
+    // The pending-slot read resolves no rows in this fixture, so the assertion
+    // that matters is that the lookup was not short-circuited by the manual
+    // check. A send with no triggers is the correct outcome.
     expect(decision.action).toBe('send')
+  })
+
+  const waitingCard = {
+    id: 'waiting-card',
+    body: 'earlier draft an operator is about to approve',
+    pending_until: null,
+    review_reason: 'model_flagged',
+    pending_commitment: null,
+    created_at: '2026-09-14T16:26:34.000Z',
+  }
+
+  // TAC-394. The live bug on main: a manual followup that queued skipped the
+  // read, INSERTed, hit the unique index, and race recovery overwrote the card.
+  // The gate now reads the slot and refuses, explicitly.
+  it('REFUSES a manual followup that would queue into an occupied slot', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: waitingCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      manualCtx({ default: 'operator_approval', perCategory: {} }),
+      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+    )
+    expect(decision).toEqual({
+      action: 'drop',
+      reason: 'slot_occupied',
+      triggers: ['category_requires_approval'],
+      protectedDraftId: 'waiting-card',
+      protectedCommitment: null,
+      droppedCommitment: null,
+    })
+  })
+
+  it('still SENDS a manual followup beside a pending card when nothing holds it', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: waitingCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      manualCtx(),
+      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+    )
+    expect(decision).toEqual({ action: 'send' })
   })
 })
 
@@ -3561,5 +3580,339 @@ describe('KNOWLEDGE_GAP_CARD_REVIEW_REASONS (TAC-364)', () => {
     for (const reason of KNOWLEDGE_GAP_CARD_REVIEW_REASONS) {
       expect(isKnowledgeGapCard({ review_reason: reason, pending_until: null })).toBe(true)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-394: two pending slots per guest (migration 041)
+// ---------------------------------------------------------------------------
+//
+// Every fixture sets `pending_commitment`, because the carrier is what decides a
+// card's slot. Rows come back in the order listed, and several tests put the
+// WRONG slot's card first: before TAC-394 the gate took whichever row an
+// unordered `.limit(1)` read returned, so a card listed first is the card it
+// would have regenerated over.
+describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
+  const compA = {
+    type: 'comp',
+    description: 'a free cortado on your next visit',
+    code: '7K2P',
+    expiresAt: null,
+  }
+  const compCard = {
+    id: 'card-a',
+    body: "Really sorry to hear that. Come back in and the next one's on us.",
+    pending_until: null,
+    review_reason: APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    pending_commitment: compA,
+    created_at: '2026-09-14T16:26:34.000Z',
+  }
+  const conversationCard = {
+    id: 'card-conv',
+    body: '7am on Sundays',
+    pending_until: null,
+    review_reason: 'category_requires_approval',
+    pending_commitment: null,
+    created_at: '2026-09-14T16:31:23.000Z',
+  }
+  const conversationGapCard = {
+    ...conversationCard,
+    id: 'gap-conv',
+    body: '',
+    pending_until: new Date(Date.now() + 60_000).toISOString(),
+    review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+  }
+  const HELD = { default: 'operator_approval', perCategory: {} }
+
+  function inbound(category: string, policy?: unknown): RuntimeContext {
+    return makeCtx({
+      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      currentMessage: {
+        id: 'inbound-2',
+        body: 'what time do you open on sundaus',
+        providerMessageId: 'p2',
+        receivedAt: new Date(),
+      },
+      classification: {
+        category,
+        classifierConfidence: 0.9,
+        reasoning: 'test',
+        crisisSafety: false,
+      } as RuntimeContext['classification'],
+    })
+  }
+
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  // THE RULING'S TEST, at the gate. "Preserves the obligation" means the same
+  // commitment, not the same type: a comp for a different item is a different
+  // obligation, and the pending card wins.
+  it('comp A pending, replacement carries comp B: the existing card wins', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'a free croissant', code: 'Q4X9' },
+      }),
+    )
+    expect(decision).toEqual({
+      action: 'drop',
+      reason: 'obligation_slot_taken',
+      triggers: expect.arrayContaining([APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]),
+      protectedDraftId: 'card-a',
+      protectedCommitment: {
+        type: 'comp',
+        description: 'a free cortado on your next visit',
+        code: '7K2P',
+      },
+      droppedCommitment: { type: 'comp', description: 'a free croissant', code: 'Q4X9' },
+    })
+  })
+
+  it('the same comp, differing only in case and whitespace, regenerates the comp card in place', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [conversationCard, compCard],
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: '  A Free Cortado on your next visit ' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('obligation')
+    expect(decision.existingPendingDraftId).toBe('card-a')
+    expect(decision.otherSlotOccupied).toBe(true)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  })
+
+  // Accepted consequence (ruled 2026-09-14): rewording beyond case and
+  // whitespace is a different commitment. Pinned so it stays deliberate.
+  it('the same comp in different words is dropped, and the existing card stays', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({ commitment: { type: 'comp', description: 'your next cortado is free' } }),
+    )
+    expect(decision.action).toBe('drop')
+    if (decision.action !== 'drop') return
+    expect(decision.reason).toBe('obligation_slot_taken')
+    expect(decision.protectedDraftId).toBe('card-a')
+  })
+
+  it('a hold for the same item is a different obligation', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({
+        commitment: { type: 'hold', description: 'a free cortado on your next visit' },
+      }),
+    )
+    expect(decision.action).toBe('drop')
+    if (decision.action !== 'drop') return
+    expect(decision.reason).toBe('obligation_slot_taken')
+  })
+
+  // The 2026-09-14 incident, fixed. Nothing holds the hours answer, so it sends.
+  it('an untriggered reply to the next question SENDS beside a pending comp card', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question'),
+      makeGenerationResult({ body: '7am on Sundays' }),
+    )
+    expect(decision).toEqual({ action: 'send' })
+  })
+
+  it('a held reply to the next question becomes a second card, never a regen of the comp card', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question', HELD),
+      makeGenerationResult({ body: '7am on Sundays' }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.otherSlotOccupied).toBe(true)
+    // previous_pending_held fires only for a card in the draft's OWN slot.
+    expect(decision.triggers).toEqual(['category_requires_approval'])
+  })
+
+  it('with both cards pending and the comp card listed first, a held reply regenerates the conversation card', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard, conversationCard],
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question', HELD),
+      makeGenerationResult({ body: 'we open at 7 on sundays' }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    expect(decision.existingPendingDraftId).toBe('card-conv')
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+  })
+
+  // "Can give up its obligation" means the body is blanked (signed off
+  // 2026-09-14). TAC-309 nulls the carrier with the body, so the draft is a
+  // conversation card and never competes with the comp.
+  it('a blanked comp B draft gives up its obligation and lands in the conversation slot', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question'),
+      makeGenerationResult({
+        knowledgeGap: true,
+        commitment: { type: 'comp', description: 'a free croissant' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    expect(decision.blankBody).toBe(true)
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.otherSlotOccupied).toBe(true)
+  })
+
+  it('TAC-308 still applies inside the obligation slot: a comp gap card is not regenerated by a non-gap turn', async () => {
+    const compGapCard = {
+      ...compCard,
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compGapCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'a free cortado on your next visit' },
+      }),
+      { status: 'clean' as const },
+    )
+    expect(decision.action).toBe('drop')
+    if (decision.action !== 'drop') return
+    expect(decision.reason).toBe('knowledge_gap_card_protected')
+    expect(decision.protectedDraftId).toBe('card-a')
+  })
+
+  it('a knowledge-gap card in the conversation slot still lets an answerable reply send, with a comp card listed first', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard, conversationGapCard],
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question'),
+      makeGenerationResult({ body: 'we open at 7' }),
+    )
+    expect(decision).toEqual({ action: 'send' })
+  })
+
+  // The holding-message clock is the guest's, not the slot's. The timeout scan
+  // fires once per card, so a gap turn that armed a clock beside a gap card in
+  // the OTHER slot would send the guest a second holding message.
+  it('a gap turn in the obligation slot arms no clock beside a gap card in the conversation slot', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [conversationGapCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('comp_complaint'),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'a free cortado on your next visit' },
+      }),
+      { status: 'flagged' as const, claims: ['invents a fact'] },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('obligation')
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.pendingUntil).toBeUndefined()
+  })
+
+  it('a gap turn in the conversation slot arms no clock beside a gap card in the obligation slot', async () => {
+    const compGapCard = {
+      ...compCard,
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compGapCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question'),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.pendingUntil).toBeUndefined()
+  })
+
+  // The control: an ordinary comp card is not a gap card, so it arms nothing.
+  it('a gap turn beside an ordinary comp card still arms its clock', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    const decision = await applyApprovalPolicyStage(
+      inbound('new_question'),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+  })
+
+  // The holding message treats anything but `send` as a failure and falls back
+  // to an ungated line. A comp card in the other slot must not cost it its send.
+  it('the holding-message path (manual trigger, no inbound) sends beside a comp card', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard, conversationGapCard],
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({
+        venue: { id: 'venue-1' } as RuntimeContext['venue'],
+        followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+        currentMessage: null,
+      }),
+      makeGenerationResult({ body: 'Still looking into that for you.' }),
+    )
+    expect(decision).toEqual({ action: 'send' })
+  })
+})
+
+// TAC-394: pending-slots.ts cannot import APPROVAL_TRIGGERS (it would pull this
+// file's SDK dependencies into the persist layer), so it spells the trigger and
+// review_reason codes it keys on as literals. These pin those literals to the
+// constants they stand for.
+describe('pending-slot literals track the gate constants (TAC-394)', () => {
+  it('KNOWLEDGE_GAP_CARD_REVIEW_REASONS is the gate constants, in order', () => {
+    expect([...KNOWLEDGE_GAP_CARD_REVIEW_REASONS]).toEqual([
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+      GENERATION_FAILED_REVIEW_REASON,
+    ])
+  })
+
+  it("gapFlagsFromTriggers reads the gate's own trigger codes", () => {
+    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP])).toEqual({
+      isGapTurn: true,
+      truncatedOnly: false,
+    })
+    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP])).toEqual({
+      isGapTurn: true,
+      truncatedOnly: false,
+    })
+    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED])).toEqual({
+      isGapTurn: false,
+      truncatedOnly: true,
+    })
+    expect(
+      gapFlagsFromTriggers([
+        APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+        APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+      ]),
+    ).toEqual({ isGapTurn: false, truncatedOnly: false })
+    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, truncatedOnly: false })
   })
 })

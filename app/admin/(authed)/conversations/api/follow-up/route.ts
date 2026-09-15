@@ -36,6 +36,19 @@ import { createServerClient } from '@/lib/db/server'
 
 const MAX_HINT_LENGTH = 500
 
+// TAC-394: what the operator sees when the pipeline refused to overwrite a card.
+// Total over the drop reasons, so a new one fails tsc here until it has words.
+const DROPPED_DETAIL: Record<
+  Extract<Awaited<ReturnType<typeof handleFollowup>>, { status: 'dropped' }>['reason'],
+  string
+> = {
+  slot_occupied:
+    'A card for this guest is already waiting. Approve, edit or skip it, then send the follow-up.',
+  obligation_slot_taken:
+    'This guest already has a card waiting with a different offer. Decide that card first.',
+  knowledge_gap_card_protected: "A pending question is holding this guest's review slot.",
+}
+
 const BodySchema = z.object({
   venueId: z.string().uuid(),
   guestId: z.string().uuid(),
@@ -191,15 +204,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
   // TAC-308 widened AgentResult with 'dropped'. Reachable from here as of
-  // TAC-307 (manual followups run the approval gate now), so a knowledge-gap
-  // card can protect itself against an operator-initiated followup. Named
-  // explicitly so this tail can't silently relabel it — or any future member
-  // — as a duplicate.
+  // TAC-307 (manual followups run the approval gate now). Named explicitly so
+  // this tail can't silently relabel it, or any future member, as a duplicate.
+  //
+  // TAC-394: a manual followup never overwrites a pending card. When it would
+  // queue into a slot a card already holds it is refused, and the operator who
+  // clicked is told why in plain words rather than left to guess.
   if (result.status === 'dropped') {
     return NextResponse.json(
       {
         error: 'dropped',
-        detail: "a pending question is holding this guest's review slot",
+        reason: result.reason,
+        detail: DROPPED_DETAIL[result.reason],
       },
       { status: 409 },
     )

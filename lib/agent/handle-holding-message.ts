@@ -19,7 +19,7 @@
 //
 //   2. It runs the real gates and treats "queue" as a FAILURE. The gate has
 //      nowhere to put a queued draft — the knowledge-gap card is already
-//      holding this guest's one pending slot (migration 020) — so a holding
+//      holding one of this guest's pending slots (migration 041) — so a holding
 //      message that trips any trigger is regenerated once and then replaced
 //      with a plain line. Silence is the worse outcome (TAC-308 decision #7).
 //

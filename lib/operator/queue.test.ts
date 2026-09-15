@@ -614,4 +614,83 @@ describe('listPendingQueue', () => {
       }
     })
   })
+  // TAC-394. Contract (TAC-394 description, `## Contract`): "QueueDraft gains
+  // otherPendingDraftsForGuest: number. The count of OTHER pending drafts for
+  // the same guest at the same venue. Always present, 0 when there are none,
+  // never undefined."
+  describe('otherPendingDraftsForGuest (TAC-394)', () => {
+    const baseRow = {
+      draft_id: 'd1',
+      venue_id: 'v1',
+      venue_slug: 'x',
+      guest_id: '18694d6a-6a80-470e-b334-acea7be1ed95',
+      guest_display_name: null,
+      guest_phone: '+15555550007',
+      guest_opted_out_at: null,
+      draft_body: 'hi',
+      category: null,
+      voice_fidelity: null,
+      review_reason: null,
+      review_triggers: null,
+      ungrounded_claims: null,
+      recognition_state: null,
+      created_at: '2026-09-14T16:26:34.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+    }
+
+    // Transcribed from the Contract's example: one guest, a comp card and a
+    // conversation card, each reporting 1.
+    it('carries the count on both of a guest\'s cards', async () => {
+      rpcMock.mockResolvedValue({
+        data: [
+          {
+            ...baseRow,
+            draft_id: '11111111-1111-4111-8111-111111111111',
+            review_reason: 'commitment_type_gated',
+            other_pending_for_guest: 1,
+          },
+          {
+            ...baseRow,
+            draft_id: '22222222-2222-4222-8222-222222222222',
+            review_reason: 'category_requires_approval',
+            other_pending_for_guest: 1,
+          },
+        ],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.drafts.map((d) => [d.messageId, d.otherPendingDraftsForGuest])).toEqual([
+        ['11111111-1111-4111-8111-111111111111', 1],
+        ['22222222-2222-4222-8222-222222222222', 1],
+      ])
+    })
+
+    it('is 0 when the guest has no other card', async () => {
+      rpcMock.mockResolvedValue({ data: [{ ...baseRow, other_pending_for_guest: 0 }], error: null })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok && result.drafts[0]!.otherPendingDraftsForGuest).toBe(0)
+    })
+
+    // Always present, never undefined, even against a function that predates
+    // migration 042 and omits the column.
+    it('is 0, never undefined, when the RPC omits the column', async () => {
+      rpcMock.mockResolvedValue({ data: [{ ...baseRow }], error: null })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.drafts[0]).toHaveProperty('otherPendingDraftsForGuest', 0)
+    })
+
+    it('is 0 when the column is null', async () => {
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, other_pending_for_guest: null }],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok && result.drafts[0]!.otherPendingDraftsForGuest).toBe(0)
+    })
+  })
 })

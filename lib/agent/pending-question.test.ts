@@ -43,6 +43,8 @@ vi.mock('voyageai', () => ({
 }))
 
 const orMock = vi.fn()
+// TAC-394: every order()/limit() call on the card query, in call order.
+const cardChainCalls: unknown[][] = []
 const cardMaybeSingle = vi.fn()
 const inboundMaybeSingle = vi.fn()
 
@@ -60,7 +62,14 @@ vi.mock('@/lib/db/admin', () => ({
           orMock(filter)
           return cardChain
         },
-        limit: () => cardChain,
+        order: (column: string, opts: unknown) => {
+          cardChainCalls.push(['order', column, opts])
+          return cardChain
+        },
+        limit: (n: number) => {
+          cardChainCalls.push(['limit', n])
+          return cardChain
+        },
         maybeSingle: () => cardMaybeSingle(),
       }
       const inboundChain = {
@@ -83,6 +92,7 @@ const GUEST = '00000000-0000-0000-0000-0000000000bb'
 
 beforeEach(() => {
   orMock.mockReset()
+  cardChainCalls.length = 0
   cardMaybeSingle.mockReset()
   inboundMaybeSingle.mockReset()
   cardMaybeSingle.mockResolvedValue({ data: null, error: null })
@@ -153,5 +163,20 @@ describe('findPendingQuestion — fail-open (TAC-308)', () => {
       error: null,
     })
     await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+})
+
+describe('findPendingQuestion — two knowledge-gap cards (TAC-394)', () => {
+  // A guest can hold a gap card in each slot (migration 041). Without ORDER BY
+  // Postgres may return either, so the rendered question could change from one
+  // turn to the next. The behavioural half (oldest card wins against a
+  // newest-first table) is in two-pending-slots.test.ts, which runs this query
+  // against an in-memory table.
+  it('orders by created_at ascending, BEFORE limiting to one row', async () => {
+    await findPendingQuestion(VENUE, GUEST)
+    expect(cardChainCalls).toEqual([
+      ['order', 'created_at', { ascending: true }],
+      ['limit', 1],
+    ])
   })
 })

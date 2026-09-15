@@ -44,6 +44,8 @@ import { Textarea } from '@/components/ui/textarea'
 //   200 → { success: true, queued: true, messageId, primaryTrigger }
 //         TAC-307: the approval gate held this draft for review instead of
 //         sending it. Still a success — the draft exists and is in the queue.
+//   409 → { error: 'dropped', reason, detail }          — a card for this guest already
+//         holds the slot; detail says which card to decide first (TAC-394)
 //   422 → { error: 'refused', detail, attemptScores }   — voice fidelity floor
 //   429 → { error: 'rate limited', detail }             — 1/5min rate limit
 //   403 → { error: 'guest opted out' | 'venue not allowed' }

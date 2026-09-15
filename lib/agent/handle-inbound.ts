@@ -21,6 +21,12 @@ import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
+import {
+  anyKnowledgeGapCard,
+  decideSlotAction,
+  EMPTY_PENDING_ROWS,
+  loadPendingRowsBySlot,
+} from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
@@ -30,10 +36,8 @@ import {
   APPROVAL_TRIGGERS,
   classifyStage,
   computeFirstTouchAfterQrScan,
-  findPendingDraft,
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
-  isKnowledgeGapCard,
   KNOWLEDGE_GAP_WINDOW_MS,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
@@ -151,32 +155,43 @@ async function persistGenerationFailureCard(
       return { kind: 'skipped' }
     }
 
-    const existing = await findPendingDraft(ctx.venue.id, ctx.guest.id)
-    const alreadyGapCard = existing !== null && isKnowledgeGapCard(existing)
-
-    // Never overwrite a pending draft that ISN'T a gap card. Writing here
-    // would UPDATE it in place with body '', voice_fidelity null,
-    // review_reason 'knowledge_gap' AND a nulled pending_commitment — so an
-    // operator holding a comp draft would lose the text, the label, and the
-    // commitment carrier because a LATER, unrelated turn happened to crash.
-    // The gate has a whole `drop` branch to avoid exactly that; this path
-    // must respect the same rule rather than route around it.
+    // TAC-394: the crash card is blank, so it carries no commitment and lands
+    // in the CONVERSATION slot; a comp card in the obligation slot is neither in
+    // this write's way nor at risk from it. decideSlotAction decides the slot
+    // with 'regen_gap_card_only', the same function and policy persist race
+    // recovery applies below. A failed read reads as two empty slots, as
+    // findPendingDraft's null did; the slot's unique index and that recovery
+    // are the backstop.
     //
-    // The guest already has a card in the queue, so nothing is silent — the
-    // operator is on the hook either way, and the red alert above records the
-    // crash. Adding a second signal isn't worth erasing the first.
-    if (existing !== null && !alreadyGapCard) {
+    // The policy never overwrites a pending draft that ISN'T a gap card.
+    // Writing over one would UPDATE it in place with body '', voice_fidelity
+    // null, a new review_reason AND a nulled pending_commitment, so an operator
+    // holding a draft would lose the text, the label and the commitment carrier
+    // because a LATER, unrelated turn happened to crash. The guest already has a
+    // card in the queue, so nothing is silent: the operator is on the hook
+    // either way, and the red alert above records the crash.
+    const pendingRows =
+      (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+    const slotDecision = decideSlotAction({
+      rows: pendingRows,
+      draftCommitment: null,
+      isGapTurn: true,
+      truncatedOnly: false,
+      callerPolicy: 'regen_gap_card_only',
+    })
+    if (slotDecision.action === 'drop') {
       console.warn(
         '[agent] generation-failure card skipped — a non-gap pending draft holds the slot',
-        { agentRunId, guestId: ctx.guest.id, protectedDraftId: existing.id },
+        { agentRunId, guestId: ctx.guest.id, protectedDraftId: slotDecision.protectedDraftId },
       )
       return { kind: 'skipped' }
     }
+    const existingId = slotDecision.action === 'regen' ? slotDecision.draftId : null
 
-    // Same clock rule the gate applies: only arm a new deadline when the row
-    // isn't already a knowledge-gap card, so a crash can't push out a
-    // deadline that's already running.
-    const pendingUntil = alreadyGapCard
+    // Same clock rule the gate applies: arm a new deadline only when no
+    // knowledge-gap card sits in EITHER slot, so a crash can't push out a
+    // deadline that's already running or start a second holding message.
+    const pendingUntil = anyKnowledgeGapCard(pendingRows)
       ? undefined
       : new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
 
@@ -194,9 +209,18 @@ async function persistGenerationFailureCard(
       // never ran the gate, so there is no trigger SET to record, only the one
       // reason it stamps itself.
       GENERATION_FAILED_REVIEW_REASON,
-      existing?.id ?? null,
-      { pendingUntil, blankBody: true },
+      existingId,
+      // TAC-394: the same decision as above, applied again if a unique
+      // violation reveals a card this read didn't see.
+      { pendingUntil, blankBody: true, callerPolicy: 'regen_gap_card_only' },
     )
+    if (persisted.action === 'dropped') {
+      console.warn(
+        '[agent] generation-failure card skipped: a non-gap pending draft took the slot during the write',
+        { agentRunId, guestId: ctx.guest.id, protectedDraftId: persisted.protectedDraftId },
+      )
+      return { kind: 'skipped' }
+    }
 
     console.warn('[agent] generation failed twice — carded for operator', {
       agentRunId,
@@ -213,7 +237,9 @@ async function persistGenerationFailureCard(
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
-      hasPreviousPending: existing !== null,
+      hasPreviousPending: slotDecision.action === 'regen',
+      slot: 'conversation',
+      otherSlotOccupied: pendingRows.obligation !== null,
       kind: 'inbound',
       // Classification always succeeded to reach the generate stage; the
       // fallback satisfies the non-null contract without inventing a category.
@@ -988,15 +1014,19 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       modelRequiresApproval: gen.result.requiresOperatorApproval,
     })
 
-    // TAC-308: a knowledge-gap card holds this guest's one pending slot and
-    // this turn would have queued for a different reason. We don't overwrite
-    // the question an operator is about to answer, and migration 020 forbids
-    // a second pending row, so the draft is discarded. The guest hears
-    // nothing on this turn — accepted deliberately (the turn needed a human
-    // anyway, and losing the outstanding question is the worse outcome).
+    // A pending card holds this draft's slot and must not be overwritten
+    // (decideSlotAction in ./pending-slots), so the draft is discarded. The
+    // guest hears nothing on this turn. Two ways to get here on the inbound path:
+    //   knowledge_gap_card_protected (TAC-308): a knowledge-gap card holds the
+    //     slot and this turn queues for another reason. Losing the outstanding
+    //     question is the worse outcome.
+    //   obligation_slot_taken (TAC-394): the obligation slot holds a DIFFERENT
+    //     commitment. The existing card wins, and the alert names both offers
+    //     and the guest.
     if (approval.action === 'drop') {
-      console.warn('[agent] inbound dropped to protect knowledge-gap card', {
+      console.warn('[agent] inbound draft dropped: a pending card holds its slot', {
         agentRunId,
+        reason: approval.reason,
         protectedDraftId: approval.protectedDraftId,
         triggers: approval.triggers,
       })
@@ -1004,7 +1034,12 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         agentRunId,
         venueId: ctx.venue.id,
         guestId: ctx.guest.id,
+        guestFirstName: ctx.guest.firstName,
+        guestPhone: ctx.guest.phoneNumber,
+        reason: approval.reason,
         protectedDraftId: approval.protectedDraftId,
+        protectedCommitment: approval.protectedCommitment,
+        droppedCommitment: approval.droppedCommitment,
         triggers: approval.triggers,
         kind: 'inbound',
         category: ctx.classification.category,
@@ -1049,13 +1084,63 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           // TAC-364: the full trigger set and the verifier's flagged claims,
           // so a co-firing turn reaches the operator with more than the one
           // priority-selected label.
+          // TAC-394: callerPolicy 'regen' is the gate's own policy, stated so
+          // a 23505 recovery decides a card the gate never saw the same way.
           {
             pendingUntil: approval.pendingUntil,
             blankBody: approval.blankBody,
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
+            callerPolicy: 'regen',
           },
         )
+        if (persistResult.action === 'dropped') {
+          // TAC-394: race recovery found a card in this draft's slot that the
+          // gate never saw and that must not be overwritten. Reported exactly
+          // as a gate-time drop, because to the guest and the operator it is one.
+          queueSpan.end({
+            output: {
+              persistAction: 'dropped',
+              reason: persistResult.reason,
+              protectedDraftId: persistResult.protectedDraftId,
+            },
+          })
+          console.warn('[agent] inbound draft dropped in race recovery: a pending card took its slot', {
+            agentRunId,
+            reason: persistResult.reason,
+            protectedDraftId: persistResult.protectedDraftId,
+          })
+          await captureDraftDropped({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            guestFirstName: ctx.guest.firstName,
+            guestPhone: ctx.guest.phoneNumber,
+            reason: persistResult.reason,
+            protectedDraftId: persistResult.protectedDraftId,
+            protectedCommitment: persistResult.protectedCommitment,
+            droppedCommitment: persistResult.droppedCommitment,
+            triggers: approval.triggers,
+            kind: 'inbound',
+            category: ctx.classification.category,
+            // TAC-309: never republish a discarded guess.
+            droppedBody: approval.blankBody ? '' : gen.result.body,
+          })
+          trace.update({
+            output: {
+              status: 'dropped',
+              reason: persistResult.reason,
+              protectedDraftId: persistResult.protectedDraftId,
+              triggers: approval.triggers,
+            },
+          })
+          return {
+            status: 'dropped',
+            reason: persistResult.reason,
+            protectedDraftId: persistResult.protectedDraftId,
+            triggers: approval.triggers,
+          }
+        }
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({
           output: {
@@ -1121,6 +1206,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             hasPreviousPending: approval.triggers.includes(
               APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
             ),
+            slot: approval.slot,
+            otherSlotOccupied: approval.otherSlotOccupied,
             kind: 'inbound',
             category: ctx.classification.category,
             inboundBody: ctx.currentMessage?.body ?? null,

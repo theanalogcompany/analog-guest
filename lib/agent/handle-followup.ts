@@ -6,6 +6,7 @@ import {
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
+  captureManualFollowupSlotOccupied,
 } from '@/lib/analytics/posthog'
 import {
   isEmptyContextUpdate,
@@ -16,6 +17,7 @@ import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifica
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
+import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -39,6 +41,73 @@ import type {
   FollowupTrigger,
   RuntimeContext,
 } from './types'
+
+/**
+ * TAC-394: report a followup draft that had nowhere to go.
+ *
+ * A refused MANUAL followup ('slot_occupied': a Follow Up click that would have
+ * queued into a slot a pending card already holds) is logged and recorded as
+ * its own event, never skipped silently; the Command Center route tells the
+ * operator who clicked. Every other drop goes to captureDraftDropped, which
+ * Slack-relays and names both commitments and the guest.
+ */
+async function reportFollowupDrop(args: {
+  ctx: RuntimeContext
+  agentRunId: string
+  triggerReason: FollowupTrigger['reason']
+  category: string
+  drop: {
+    reason: SlotDropReason
+    protectedDraftId: string
+    protectedCommitment: CommitmentIdentity | null
+    droppedCommitment: CommitmentIdentity | null
+  }
+  triggers: string[]
+  droppedBody: string
+  viaRaceRecovery: boolean
+}): Promise<void> {
+  const { ctx, agentRunId, drop } = args
+  if (drop.reason === 'slot_occupied') {
+    console.warn('[agent] manual followup refused: a card for this guest is already waiting', {
+      agentRunId,
+      triggerReason: args.triggerReason,
+      waitingDraftId: drop.protectedDraftId,
+      triggers: args.triggers,
+      viaRaceRecovery: args.viaRaceRecovery,
+    })
+    await captureManualFollowupSlotOccupied({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      waitingDraftId: drop.protectedDraftId,
+      triggers: args.triggers,
+    })
+    return
+  }
+  console.warn('[agent] followup draft dropped: a pending card holds its slot', {
+    agentRunId,
+    triggerReason: args.triggerReason,
+    reason: drop.reason,
+    protectedDraftId: drop.protectedDraftId,
+    triggers: args.triggers,
+    viaRaceRecovery: args.viaRaceRecovery,
+  })
+  await captureDraftDropped({
+    agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    guestFirstName: ctx.guest.firstName,
+    guestPhone: ctx.guest.phoneNumber,
+    reason: drop.reason,
+    protectedDraftId: drop.protectedDraftId,
+    protectedCommitment: drop.protectedCommitment,
+    droppedCommitment: drop.droppedCommitment,
+    triggers: args.triggers,
+    kind: 'followup',
+    category: args.category,
+    droppedBody: args.droppedBody,
+  })
+}
 
 function triggerToCategory(reason: FollowupTrigger['reason']): Classification['category'] {
   switch (reason) {
@@ -479,12 +548,49 @@ export async function handleFollowup(input: {
           // is therefore NULL, and that is a true statement about the feature
           // rather than a gap in the data. `reviewTriggers` IS real here and
           // carries the same co-firing information an inbound draft does.
+          //
+          // TAC-394: a manual followup never regenerates over a card, even one
+          // a 23505 reveals that the gate never saw ('never_regen').
           {
             pendingUntil: approval.pendingUntil,
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
+            callerPolicy: input.trigger.reason === 'manual' ? 'never_regen' : 'regen',
           },
         )
+        if (persistResult.action === 'dropped') {
+          queueSpan.end({
+            output: {
+              persistAction: 'dropped',
+              reason: persistResult.reason,
+              protectedDraftId: persistResult.protectedDraftId,
+            },
+          })
+          await reportFollowupDrop({
+            ctx,
+            agentRunId,
+            triggerReason: input.trigger.reason,
+            category,
+            drop: persistResult,
+            triggers: approval.triggers,
+            droppedBody: gen.result.body,
+            viaRaceRecovery: true,
+          })
+          trace.update({
+            output: {
+              status: 'dropped',
+              reason: persistResult.reason,
+              protectedDraftId: persistResult.protectedDraftId,
+              triggers: approval.triggers,
+            },
+          })
+          return {
+            status: 'dropped',
+            reason: persistResult.reason,
+            protectedDraftId: persistResult.protectedDraftId,
+            triggers: approval.triggers,
+          }
+        }
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({
           output: {
@@ -542,6 +648,8 @@ export async function handleFollowup(input: {
             hasPreviousPending: approval.triggers.includes(
               APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
             ),
+            slot: approval.slot,
+            otherSlotOccupied: approval.otherSlotOccupied,
             kind: 'followup',
             category,
             inboundBody: null,
@@ -593,30 +701,26 @@ export async function handleFollowup(input: {
         return { status: 'failed', stage: 'persist', error: errMsg }
       }
     }
-    // TAC-308: this guest has a knowledge-gap card awaiting an operator
-    // answer. A cron-triggered followup that would otherwise queue must not
-    // take the pending slot — regen-in-place would overwrite the question.
-    // Drop it; the next tick re-evaluates once the card clears.
-    //
-    // Reachable on this path only via a NON-gap trigger, since the
-    // KNOWLEDGE_GAP trigger is inbound-only. Since TAC-307 manual followups
-    // reach here too — they no longer bypass the gate.
+    // A pending card holds this draft's slot and must not be overwritten
+    // (decideSlotAction in ./pending-slots), so the draft is discarded.
+    //   knowledge_gap_card_protected (TAC-308): a knowledge-gap card awaits an
+    //     operator answer. Reachable here only via a non-gap trigger, since the
+    //     KNOWLEDGE_GAP trigger is inbound-only. The engine releases its claim,
+    //     and the next tick re-evaluates once the card clears.
+    //   obligation_slot_taken (TAC-394): the obligation slot holds a DIFFERENT
+    //     commitment. The existing card wins.
+    //   slot_occupied (TAC-394): a manual followup would have queued into an
+    //     occupied slot. Refused, never regenerated over the card.
     if (approval.action === 'drop') {
-      console.warn('[agent] followup dropped to protect knowledge-gap card', {
+      await reportFollowupDrop({
+        ctx,
         agentRunId,
         triggerReason: input.trigger.reason,
-        protectedDraftId: approval.protectedDraftId,
-        triggers: approval.triggers,
-      })
-      await captureDraftDropped({
-        agentRunId,
-        venueId: ctx.venue.id,
-        guestId: ctx.guest.id,
-        protectedDraftId: approval.protectedDraftId,
-        triggers: approval.triggers,
-        kind: 'followup',
         category,
+        drop: approval,
+        triggers: approval.triggers,
         droppedBody: gen.result.body,
+        viaRaceRecovery: false,
       })
       trace.update({
         output: {

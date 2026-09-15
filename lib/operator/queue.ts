@@ -84,6 +84,12 @@ export interface QueueDraft {
   // Contract's never-branch-on-presence guarantee is worth more to the client
   // than a distinction it would never act on. Ask the column, not the card.
   ungroundedClaims: string[]
+  // TAC-394, Contract-locked (TAC-394's description, `## Contract`): how many
+  // OTHER pending drafts this guest has at this venue. Always present, 0 when
+  // none, never undefined. With migration 041 a guest holds at most one
+  // obligation card and one conversation card, so the server produces 0 or 1;
+  // the client must not rely on that bound.
+  otherPendingDraftsForGuest: number
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
   recentContext: QueueRecentContextEntry[]
@@ -305,6 +311,17 @@ function normalizeUngroundedClaims(raw: string[] | null): string[] {
   return raw ?? []
 }
 
+/**
+ * TAC-394: the RPC's `other_pending_for_guest` count, as the Contract's
+ * always-present number. `count(*)` is never NULL, but the column is ABSENT when
+ * this code runs against a pre-042 function (a local-dev state the deploy
+ * ordering forbids in production), and the Contract promises a number, so
+ * anything that is not a positive finite number reads as 0.
+ */
+function normalizeOtherPendingCount(raw: number | null | undefined): number {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0
+}
+
 function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
   if (raw === null) return []
   if (!Array.isArray(raw)) return []
@@ -379,6 +396,7 @@ export async function listPendingQueue(
       reviewTriggers: reviewTriggerCodes,
       reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes),
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
+      otherPendingDraftsForGuest: normalizeOtherPendingCount(row.other_pending_for_guest),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),

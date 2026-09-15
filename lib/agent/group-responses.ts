@@ -117,8 +117,8 @@ export function deriveDelivery(
  * response only disagree when a status callback marks one failed after
  * another arrived, and the guest has then read part of it. Calling the whole
  * response NEVER SENT would invite the model to repeat what they read. A
- * pending draft is always a single row (migration 020), so this never blurs
- * a pending draft into a sent one.
+ * pending draft is always a single row (the queue path persists one row per
+ * draft), so this never blurs a pending draft into a sent one.
  */
 export function groupIntoResponses(
   rowsNewestFirst: readonly HistoryRow[],

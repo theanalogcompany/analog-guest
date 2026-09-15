@@ -240,9 +240,10 @@ describe('handleHoldingMessage (TAC-308)', () => {
     expect(r).toMatchObject({ status: 'sent', usedFallback: false })
   })
 
-  // A queue verdict is a FAILURE here, not a route: the knowledge-gap card
-  // already holds this guest's one pending slot (migration 020), so there is
-  // nowhere to put a queued holding message.
+  // A queue verdict is a FAILURE here, not a route: the guest is already
+  // waiting on the knowledge-gap card, which holds one of their pending slots
+  // (migration 041), and a queued holding message would only add a second card
+  // for the same question.
   it('treats a queue verdict as a failed attempt and retries', async () => {
     applyApprovalPolicyStageMock
       .mockResolvedValueOnce({

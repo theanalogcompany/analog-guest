@@ -1687,6 +1687,7 @@ export type Database = {
           guest_opted_out_at: string
           guest_phone: string
           langfuse_trace_id: string
+          other_pending_for_guest: number
           recent_context: Json
           recognition_state: string
           review_reason: string

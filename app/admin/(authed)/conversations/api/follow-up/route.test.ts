@@ -440,6 +440,46 @@ describe('POST /admin/conversations/api/follow-up', () => {
   // to the operator as 409 "duplicate: pipeline reported skipped_duplicate" —
   // a draft successfully queued for review, reported as a failure, on every
   // approval trigger there is.
+  // TAC-394: a draft with nowhere to go comes back as 409 with the reason and
+  // the plain-words detail the operator who clicked is shown. Transcribed, not
+  // read back out of DROPPED_DETAIL: a test built from the map could only
+  // confirm the map equals itself.
+  it.each([
+    [
+      'slot_occupied',
+      'A card for this guest is already waiting. Approve, edit or skip it, then send the follow-up.',
+    ],
+    [
+      'obligation_slot_taken',
+      'This guest already has a card waiting with a different offer. Decide that card first.',
+    ],
+    ['knowledge_gap_card_protected', "A pending question is holding this guest's review slot."],
+  ] as const)('returns 409 with the reason and detail when the pipeline dropped the draft (%s)', async (reason, detail) => {
+    vi.mocked(createServerClient).mockResolvedValue(
+      makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
+    )
+    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      isAnalogAdmin: true,
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock({
+        guestRow: { id: GUEST_ID, opted_out_at: null },
+      }) as never,
+    )
+    vi.mocked(handleFollowup).mockResolvedValue({
+      status: 'dropped',
+      reason,
+      protectedDraftId: 'waiting-card',
+      triggers: ['category_requires_approval'],
+    })
+
+    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'dropped', reason, detail })
+  })
+
   it('returns 200 with queued:true when the approval gate holds the draft', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
       makeSessionMock({ user: { id: 'auth-user-1' } }) as never,

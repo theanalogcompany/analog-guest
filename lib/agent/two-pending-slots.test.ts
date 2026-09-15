@@ -1,0 +1,687 @@
+// TAC-394, option F, end to end against an in-memory `messages` table.
+//
+// The real approval gate, the real persist layer and the real
+// findPendingQuestion, run against lib/agent/testing/pending-rows-fake.ts
+// instead of per-query mocks. The fake returns rows in INSERTION order unless a
+// read orders them, enforces migration 020 or migration 041, and answers a
+// violation with 23505. So these tests exercise what the ticket is about:
+//
+//   - AC4: two inbounds in quick succession, the first producing a gated comp
+//     draft, do not lose the comp draft.
+//   - Race recovery reaches a card the gate never saw, and decides it the same
+//     way the gate would have.
+//   - A read that forgot its slot is handed the wrong card: the tests insert
+//     the other slot's card first. A read that forgot its ORDER within one slot
+//     is caught by pending-slots.test.ts and by the findPendingQuestion test.
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { GenerateMessageResult } from '@/lib/ai'
+import { createPendingRowsFake, type PendingIndexMode } from './testing/pending-rows-fake'
+import type { RuntimeContext } from './types'
+
+const mockAdmin: { client: unknown } = { client: null }
+const fireRedAlertMock = vi.fn()
+
+vi.mock('voyageai', () => ({ VoyageAIClient: class {} }))
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: () => mockAdmin.client,
+}))
+vi.mock('./alerts', () => ({
+  fireRedAlert: (...args: unknown[]) => fireRedAlertMock(...args),
+  capturePostHogEvent: vi.fn(),
+}))
+vi.mock('@/lib/rag', () => ({
+  retrieveContext: vi.fn(),
+  retrieveKnowledgeContext: vi.fn(),
+}))
+vi.mock('@/lib/ai', () => ({
+  classifyMessage: vi.fn(),
+  generateMessage: vi.fn(),
+  verifyGrounding: vi.fn(),
+  verifyMechanicOffer: vi.fn(),
+}))
+vi.mock('@/lib/messaging', () => ({
+  markAsRead: vi.fn(),
+  sendMessage: vi.fn(),
+  sendTypingIndicator: vi.fn(),
+}))
+vi.mock('@/lib/analytics/posthog', () => ({
+  captureClassificationLowConfidence: vi.fn(),
+  captureCommitmentDedupCheckFailed: vi.fn(),
+  captureCommitmentDeduped: vi.fn(),
+  captureCommitmentEscalated: vi.fn(),
+  captureCorpusRetrievalBelowThreshold: vi.fn(),
+  captureDashViolationPersisted: vi.fn(),
+  captureDemoBypassedApprovalGate: vi.fn(),
+  captureEmojiDirectiveViolated: vi.fn(),
+  captureGroundingVerifierUnavailable: vi.fn(),
+  captureMechanicOfferBackstopCaught: vi.fn(),
+  capturePostHogEvent: vi.fn(),
+  captureRegenerationTriggered: vi.fn(),
+  captureUngroundedClaimCaught: vi.fn(),
+  captureVoiceFidelityLow: vi.fn(),
+  CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
+  CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
+  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
+  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
+}))
+
+import { findPendingQuestion } from './pending-question'
+import type { SlotCallerPolicy } from './pending-slots'
+import { persistOrRegenQueuedDraft } from './schedule-and-send'
+import { applyApprovalPolicyStage } from './stages'
+
+const VENUE = '00000000-0000-4000-8000-0000000000aa'
+const GUEST = '18694d6a-6a80-470e-b334-acea7be1ed95'
+
+const compA = {
+  type: 'comp',
+  description: 'a free cortado on your next visit',
+  code: '7K2P',
+  expiresAt: null,
+}
+
+function useFake(mode: PendingIndexMode) {
+  const fake = createPendingRowsFake(mode)
+  mockAdmin.client = fake.client
+  return fake
+}
+
+function ctxFor(opts: { category: string; held?: boolean; manual?: boolean }): RuntimeContext {
+  return {
+    agentRunId: 'run-1',
+    venue: {
+      id: VENUE,
+      holdAllOutbound: false,
+      approvalPolicy: opts.held
+        ? { default: 'operator_approval', perCategory: {} }
+        : { default: 'auto_send', perCategory: {} },
+    },
+    guest: { id: GUEST, firstName: 'Sam', phoneNumber: '+15555550853', isDemo: false },
+    currentMessage: opts.manual
+      ? null
+      : {
+          id: 'inbound-1',
+          body: 'what time do you open on sundaus',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+        },
+    followupTrigger: opts.manual ? { reason: 'manual', triggeredAt: new Date() } : null,
+    classification: {
+      category: opts.category,
+      classifierConfidence: 0.9,
+      reasoning: 'test',
+      crisisSafety: false,
+    },
+    pendingQuestion: null,
+    recentMessages: [],
+    recentVisits: [],
+    activeCommitments: [],
+    openIntentions: [],
+    mechanics: [],
+    corpus: null,
+    knowledgeCorpus: null,
+    trace: { id: '' },
+  } as unknown as RuntimeContext
+}
+
+function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageResult {
+  return {
+    body: 'a reply',
+    voiceFidelity: 0.85,
+    reasoning: 'r',
+    requiresOperatorApproval: false,
+    approvalReason: '',
+    complaintIntent: 'none',
+    knowledgeGap: false,
+    contextUpdate: {},
+    commitment: {},
+    arrivalCapture: {},
+    attempts: 1,
+    attemptScores: [0.85],
+    attemptHistory: [],
+    systemPrompt: '',
+    userPrompt: '',
+    promptVersion: 'v1.50.0',
+    dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
+    ...over,
+  }
+}
+
+/** One agent turn: the real gate, then the real persist layer when it queues. */
+async function runTurn(
+  ctx: RuntimeContext,
+  gen: GenerateMessageResult,
+  callerPolicy: SlotCallerPolicy = 'regen',
+) {
+  const decision = await applyApprovalPolicyStage(ctx, gen, { status: 'clean' })
+  if (decision.action !== 'queue') return { decision, persisted: null }
+  const persisted = await persistOrRegenQueuedDraft(
+    ctx,
+    gen,
+    decision.primaryTrigger,
+    decision.existingPendingDraftId,
+    {
+      pendingUntil: decision.pendingUntil,
+      blankBody: decision.blankBody,
+      reviewTriggers: decision.triggers,
+      ungroundedClaims: decision.ungroundedClaims,
+      callerPolicy,
+    },
+  )
+  return { decision, persisted }
+}
+
+const COMP_REPLY = "Really sorry to hear that. Come back in and the next one's on us."
+const COMP_TURN = generation({
+  body: COMP_REPLY,
+  commitment: { type: 'comp', description: "the next one's on us" },
+})
+
+beforeEach(() => {
+  fireRedAlertMock.mockReset()
+  fireRedAlertMock.mockResolvedValue(undefined)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('AC4: two inbounds in quick succession, the first producing a gated comp draft (TAC-394)', () => {
+  it('041: the comp card survives a held reply to the next question, which becomes a second card', async () => {
+    const fake = useFake('041')
+
+    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    expect(turn1.persisted).toMatchObject({ action: 'inserted' })
+    const compCardId = turn1.persisted!.outboundMessageId as string
+    const compCard = fake.snapshot(compCardId)
+    expect(compCard?.pending_commitment).toMatchObject({ type: 'comp' })
+
+    const turn2 = await runTurn(
+      ctxFor({ category: 'new_question', held: true }),
+      generation({ body: '7am on Sundays' }),
+    )
+
+    expect(turn2.decision).toMatchObject({
+      action: 'queue',
+      slot: 'conversation',
+      existingPendingDraftId: null,
+      otherSlotOccupied: true,
+    })
+    expect(turn2.persisted).toMatchObject({ action: 'inserted' })
+    expect(fake.snapshot(compCardId)).toEqual(compCard)
+    expect(fake.rows.filter((r) => r.review_state === 'pending').map((r) => r.body)).toEqual([
+      COMP_REPLY,
+      '7am on Sundays',
+    ])
+  })
+
+  it('041: the comp card survives an unheld reply to the next question, which sends', async () => {
+    const fake = useFake('041')
+
+    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    const compCardId = turn1.persisted!.outboundMessageId as string
+    const compCard = fake.snapshot(compCardId)
+
+    const turn2 = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: '7am on Sundays' }),
+    )
+
+    expect(turn2.decision).toEqual({ action: 'send' })
+    expect(fake.snapshot(compCardId)).toEqual(compCard)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+  })
+
+  // Why migration 041 is applied BEFORE merge. New code against migration 020
+  // cannot fit a second card: its INSERT hits 020's index, the slot re-read
+  // finds the conversation slot empty, and after the bounded retries the turn
+  // fails with a red alert. It fails loudly, and it still never overwrites the
+  // comp card. That is the deploy-window answer for "merged before the index
+  // swap", stated as a test.
+  it('020 (new code, index swap not applied): a second card fails loudly and never overwrites the comp card', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('020')
+
+    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    const compCardId = turn1.persisted!.outboundMessageId as string
+    const compCard = fake.snapshot(compCardId)
+
+    await expect(
+      runTurn(ctxFor({ category: 'new_question', held: true }), generation({ body: '7am on Sundays' })),
+    ).rejects.toThrow(/exceeded 3 race-recovery attempts/)
+
+    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'persist' }))
+    expect(fake.snapshot(compCardId)).toEqual(compCard)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+  })
+})
+
+describe('race recovery decides a card the gate never saw (TAC-394)', () => {
+  function seedCompCard(fake: ReturnType<typeof createPendingRowsFake>) {
+    return fake.seed({
+      id: 'card-a',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      status: 'pending_review',
+      review_reason: 'commitment_type_gated',
+      body: COMP_REPLY,
+      pending_commitment: compA,
+      created_at: '2026-09-14T16:26:34.999Z',
+    })
+  }
+
+  // The ruling's case again, reached through the race path: the gate's read
+  // missed card A (a failed read or a concurrent run), so persistence is handed
+  // existingPendingDraftId=null and the INSERT collides.
+  it('comp A pending, a comp B INSERT collides: dropped, card A byte-identical', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedCompCard(fake)
+    const cardA = fake.snapshot('card-a')
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: 'a free croissant next time', commitment: { type: 'comp', description: 'a free croissant' } }),
+      'commitment_type_gated',
+      null,
+      { reviewTriggers: ['commitment_type_gated'], callerPolicy: 'regen' },
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      protectedCommitment: {
+        type: 'comp',
+        description: 'a free cortado on your next visit',
+        code: '7K2P',
+      },
+      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+    })
+    expect(fake.snapshot('card-a')).toEqual(cardA)
+    expect(fake.rows).toHaveLength(1)
+  })
+
+  // Wrong slot first: the comp card was inserted before the conversation card,
+  // so an unordered single-row read would have handed recovery the comp card.
+  it('a colliding conversation INSERT regenerates the conversation card, never the comp card inserted first', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedCompCard(fake)
+    fake.seed({
+      id: 'card-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'category_requires_approval',
+      body: 'we open at 7',
+      created_at: '2026-09-14T16:31:23.000Z',
+    })
+    const cardA = fake.snapshot('card-a')
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question', held: true }),
+      generation({ body: '7am on Sundays' }),
+      'category_requires_approval',
+      null,
+      { reviewTriggers: ['category_requires_approval'], callerPolicy: 'regen' },
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: 'card-conv',
+      action: 'updated',
+      priorReviewReason: 'category_requires_approval',
+    })
+    expect(fake.snapshot('card-a')).toEqual(cardA)
+    expect(fake.snapshot('card-conv')?.body).toBe('7am on Sundays')
+  })
+
+  // The gate armed a clock without seeing this gap card. Regenerating it must
+  // keep the card's deadline: pushing it out would let a chatty guest delay the
+  // holding message, and re-arming a fired one would send it twice.
+  it('regenerating a knowledge-gap card found by recovery keeps its original clock', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    fake.seed({
+      id: 'gap-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      body: '',
+    })
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'a second guess', knowledgeGap: true }),
+      'knowledge_gap',
+      null,
+      {
+        pendingUntil: new Date('2026-09-14T17:00:00.000Z'),
+        blankBody: true,
+        reviewTriggers: ['knowledge_gap'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+  })
+
+  // The retry reads BOTH slots: a gap card in the other slot holds the guest's
+  // clock, so the card recovery regenerates must not start a second one.
+  it('a card recovery regenerates arms no clock while a gap card sits in the other slot', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    fake.seed({
+      id: 'gap-comp',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap_backstop',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      pending_commitment: compA,
+      body: "Sorry about that. The next one's on us.",
+    })
+    fake.seed({
+      id: 'conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'category_requires_approval',
+      pending_until: null,
+      body: '7am on Sundays',
+    })
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'a second guess', knowledgeGap: true }),
+      'knowledge_gap',
+      null,
+      {
+        pendingUntil: new Date('2026-09-14T17:00:00.000Z'),
+        blankBody: true,
+        reviewTriggers: ['knowledge_gap'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'conv' })
+    expect(fake.snapshot('conv')?.pending_until).toBeNull()
+    expect(fake.snapshot('gap-comp')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+  })
+
+  // A re-read withheld the clock because of a gap card, then an operator acted
+  // on that card before the regenerate landed. The card is gone, and so is the
+  // reason: the card written in its place carries the clock the gate armed.
+  it('when the gap card recovery found is handled mid-write, the card written in its place keeps the clock', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    fake.seed({
+      id: 'gap-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      body: '',
+    })
+    const real = fake.client
+    mockAdmin.client = {
+      from(table: string) {
+        const t = real.from(table)
+        return {
+          ...t,
+          update: (payload: Record<string, unknown>) => {
+            // An operator approves the card between recovery's read and its write.
+            const card = fake.rows.find((r) => r.id === 'gap-conv')
+            if (card) card.review_state = 'approved'
+            return t.update(payload)
+          },
+        }
+      },
+    }
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'a second guess', knowledgeGap: true }),
+      'knowledge_gap',
+      null,
+      {
+        pendingUntil: new Date('2026-09-14T17:00:00.000Z'),
+        blankBody: true,
+        reviewTriggers: ['knowledge_gap'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result.action).toBe('inserted')
+    const written = fake.rows.find((r) => r.id === result.outboundMessageId)
+    expect(written?.review_state).toBe('pending')
+    expect(written?.pending_until).toBe('2026-09-14T17:00:00.000Z')
+  })
+
+  // The mirror case. Only the lost card leaves: a gap card still in the OTHER
+  // slot keeps holding the guest's clock, so the card written in place of the
+  // lost one must not start a second.
+  it('when the card recovery regenerates is handled mid-write, a gap card in the other slot still withholds the clock', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const alertsBefore = fireRedAlertMock.mock.calls.length
+    const fake = useFake('041')
+    fake.seed({
+      id: 'gap-comp',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap_backstop',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      pending_commitment: compA,
+      body: "Sorry about that. The next one's on us.",
+    })
+    fake.seed({
+      id: 'conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'category_requires_approval',
+      pending_until: null,
+      body: '7am on Sundays',
+    })
+    const real = fake.client
+    mockAdmin.client = {
+      from(table: string) {
+        const t = real.from(table)
+        return {
+          ...t,
+          update: (payload: Record<string, unknown>) => {
+            // An operator approves the card between recovery's read and its write.
+            const card = fake.rows.find((r) => r.id === 'conv')
+            if (card) card.review_state = 'approved'
+            return t.update(payload)
+          },
+        }
+      },
+    }
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'a second guess', knowledgeGap: true }),
+      'knowledge_gap',
+      null,
+      {
+        pendingUntil: new Date('2026-09-14T17:00:00.000Z'),
+        blankBody: true,
+        reviewTriggers: ['knowledge_gap'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result.action).toBe('inserted')
+    const written = fake.rows.find((r) => r.id === result.outboundMessageId)
+    expect(written?.review_state).toBe('pending')
+    expect(written?.pending_until).toBeNull()
+    expect(fake.snapshot('gap-comp')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(
+      fake.rows
+        .filter((r) => r.review_state === 'pending')
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(['gap-comp', String(result.outboundMessageId)].sort())
+    expect(fireRedAlertMock.mock.calls.length).toBe(alertsBefore)
+  })
+
+  it('a manual followup that collides with an occupied slot is refused, and nothing is written', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    fake.seed({
+      id: 'waiting-card',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'model_flagged',
+      body: 'an earlier draft an operator is about to approve',
+    })
+    const waiting = fake.snapshot('waiting-card')
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'manual', held: true, manual: true }),
+      generation({ body: 'checking in' }),
+      'category_requires_approval',
+      null,
+      { reviewTriggers: ['category_requires_approval'], callerPolicy: 'never_regen' },
+    )
+
+    expect(result).toMatchObject({
+      action: 'dropped',
+      reason: 'slot_occupied',
+      protectedDraftId: 'waiting-card',
+    })
+    expect(fake.snapshot('waiting-card')).toEqual(waiting)
+    expect(fake.rows).toHaveLength(1)
+  })
+
+  it('the generation-failure card never overwrites an ordinary conversation card, even through recovery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    fake.seed({
+      id: 'card-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'model_flagged',
+      body: 'a real draft',
+    })
+    const conv = fake.snapshot('card-conv')
+
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: '(generation failed)' }),
+      'generation_failed',
+      null,
+      { blankBody: true, callerPolicy: 'regen_gap_card_only' },
+    )
+
+    expect(result).toMatchObject({ action: 'dropped', reason: 'slot_occupied' })
+    expect(fake.snapshot('card-conv')).toEqual(conv)
+  })
+})
+
+describe('the gate reads the right slot whichever card was inserted first (TAC-394)', () => {
+  it('a same-commitment comp regenerates the comp card when the conversation card was inserted first', async () => {
+    const fake = useFake('041')
+    fake.seed({
+      id: 'card-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'category_requires_approval',
+      body: 'we open at 7',
+    })
+    fake.seed({
+      id: 'card-a',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'commitment_type_gated',
+      body: COMP_REPLY,
+      pending_commitment: compA,
+    })
+
+    const turn = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({
+        body: 'So sorry. Your next cortado is on us.',
+        commitment: { type: 'comp', description: 'A free cortado on your next visit' },
+      }),
+    )
+
+    expect(turn.decision).toMatchObject({
+      action: 'queue',
+      slot: 'obligation',
+      existingPendingDraftId: 'card-a',
+    })
+    expect(turn.persisted).toMatchObject({ action: 'updated', outboundMessageId: 'card-a' })
+    expect(fake.snapshot('card-conv')?.body).toBe('we open at 7')
+  })
+})
+
+describe('findPendingQuestion with a knowledge-gap card in each slot (TAC-394)', () => {
+  // Both slots can hold a gap card: a blank self-reported card in the
+  // conversation slot, a backstop-caught comp in the obligation slot. The NEWER
+  // card is inserted first, so a read without ORDER BY returns the wrong one.
+  it("returns the OLDEST card's question, whatever order the cards were inserted in", async () => {
+    const fake = useFake('041')
+    fake.seed({
+      id: 'in-parking',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      direction: 'inbound',
+      body: 'is there parking nearby?',
+      provider_message_id: 'p-parking',
+      created_at: '2026-09-14T16:00:00.000Z',
+    })
+    fake.seed({
+      id: 'in-oat',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      direction: 'inbound',
+      body: 'do you do oat milk?',
+      provider_message_id: 'p-oat',
+      created_at: '2026-09-14T16:15:00.000Z',
+    })
+    fake.seed({
+      id: 'gap-comp',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap_backstop',
+      pending_until: '2026-09-14T16:25:00.000Z',
+      pending_commitment: compA,
+      reply_to_message_id: 'in-oat',
+      created_at: '2026-09-14T16:20:00.000Z',
+    })
+    fake.seed({
+      id: 'gap-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap',
+      pending_until: null,
+      reply_to_message_id: 'in-parking',
+      created_at: '2026-09-14T16:10:00.000Z',
+    })
+
+    const loaded = await findPendingQuestion(VENUE, GUEST)
+
+    expect(loaded?.draftId).toBe('gap-conv')
+    expect(loaded?.question.question).toBe('is there parking nearby?')
+  })
+})

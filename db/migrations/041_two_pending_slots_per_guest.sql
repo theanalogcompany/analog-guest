@@ -1,0 +1,186 @@
+-- ============================================================================
+-- migration 041: two pending slots per (venue, guest)
+-- ============================================================================
+-- TAC-394, option F.
+--
+-- Replaces migration 020's single partial unique index with two, so a guest can
+-- hold at most TWO pending drafts at once:
+--
+--   obligation slot   — the draft's structured commitment carrier
+--                       (messages.pending_commitment) is a comp, hold or
+--                       discount.
+--   conversation slot — everything else: no carrier, a recommendation, or a
+--                       blank knowledge-gap card (TAC-309 nulls the carrier
+--                       when it blanks the body).
+--
+-- WHY. On 2026-09-14 a pending comp draft ("the next one's on us") was
+-- overwritten in place by the reply to the guest's next question ("7am on
+-- Sundays"). Migration 020 allowed one pending row per guest, and
+-- persistOrRegenQueuedDraft (TAC-264) regenerates that row in place, so any
+-- later draft that queued for any reason replaced the comp. The operator never
+-- saw it. With two slots, an unrelated reply lands in the conversation slot
+-- (or sends, when nothing else holds it) and the comp card is untouched.
+--
+-- WHAT THE SLOT IS DECIDED BY. The structured carrier's `type` string, and
+-- nothing else. Prose that promises something without a carrier still sits in
+-- the conversation slot (TAC-401). The same condition lives in TypeScript as
+-- pendingSlotOf in lib/agent/pending-slots.ts, derived from OBLIGATION_TYPES in
+-- lib/guests/commitment-expiry.ts. The two MOVE TOGETHER: pending-slots.test.ts
+-- reads this file and fails if the type lists differ.
+--
+-- HIGH-STAKES: touches `messages`. No column, no backfill, no constraint
+-- change; indexes don't surface in db/types.ts.
+--
+-- ----------------------------------------------------------------------------
+-- DEPLOY: apply in Studio BEFORE merging the PR, outside venue hours
+-- ----------------------------------------------------------------------------
+-- The new code must never run against migration 020. If it did, a second
+-- card would hit 020's index, race recovery would find the target slot empty
+-- and retry, and the turn would end in a red alert with no reply to the guest.
+-- It would never overwrite a card, but it would fail every second card. So the
+-- index swap lands first, and the merge follows immediately.
+--
+-- Schedule the window OUTSIDE Le Mil's hours, 7am to 3pm America/Los_Angeles
+-- (after close or before open). Almost no inbound traffic means almost nothing
+-- for old code to race during the window.
+--
+-- Preconditions:
+--   - the PR is approved and CI is green
+--   - nobody else merges to main during the window (a fresh conflict is the
+--     likeliest reason the merge would stall)
+--   - someone is watching Slack red alerts
+--
+-- Order:
+--   1. Run the three read-only checks below.
+--   2. Apply this file, then migration 042.
+--   3. Merge within ~2 minutes.
+--   4. When BOTH production deploys are ready (analog-guest, and analog-admin,
+--      which serves the Command Center Follow Up button), run the detection
+--      query below.
+--
+-- How long old code runs against the new index pair: the merge (target under
+-- 2 minutes), the deploy (1m12s to 2m51s measured on analog-guest on
+-- 2026-09-14), and invocations already in flight (bounded by Vercel's 300s
+-- default; no route sets maxDuration). About 10 minutes at worst.
+--
+-- What old code does in that window. It knows nothing about slots, so a second
+-- pending row appears only when it INSERTs while a card sits in the OTHER slot
+-- (a failed or racing pending read, or a manual followup). Once a guest has two
+-- rows, old code's unordered `.limit(1)` read picks one at random:
+--   - a row in the draft's own slot is regenerated over (today's bug, no worse);
+--   - a row in the other slot makes the UPDATE move it into an occupied slot,
+--     which raises a unique violation: red alert, failed turn, no reply that
+--     turn. This is the one new failure the window adds.
+-- Approve / edit / skip / undo, the timeout claim and badge counts are keyed by
+-- id or count rows, and are unaffected.
+--
+-- ----------------------------------------------------------------------------
+-- BEFORE APPLYING: three read-only checks
+-- ----------------------------------------------------------------------------
+--
+--   -- 1. The index this replaces is live and is exactly migration 020's.
+--   --    Expect ONE row: idx_messages_one_pending_per_guest,
+--   --    ... WHERE (review_state = 'pending'::text). If a second
+--   --    idx_messages_one_pending_* already exists, stop.
+--   select indexname, indexdef
+--   from pg_indexes
+--   where tablename = 'messages' and indexname like 'idx_messages_one_pending%';
+--
+--   -- 2. How many pending rows exist. The build below takes a write lock on
+--   --    messages while it runs; at pilot size that is well under a second.
+--   select count(*) from messages where review_state = 'pending';
+--
+--   -- 3. Which slot each pending row will land in. Every existing row fits,
+--   --    because 020 allowed one pending row per guest and each row matches
+--   --    exactly one of the two conditions.
+--   select coalesce(pending_commitment->>'type', '') in ('comp', 'hold', 'discount')
+--            as obligation_slot,
+--          count(*)
+--   from messages
+--   where review_state = 'pending'
+--   group by 1;
+--
+-- ----------------------------------------------------------------------------
+-- AFTER THE DEPLOY IS READY: the two-card detection query
+-- ----------------------------------------------------------------------------
+--
+--   select venue_id, guest_id, array_agg(id order by created_at) as pending_ids
+--   from messages
+--   where review_state = 'pending'
+--   group by venue_id, guest_id
+--   having count(*) > 1;
+--
+-- Any row it returns is a guest holding two cards. That is legitimate under
+-- this migration (one per slot), so read each pair in the operator app rather
+-- than treating it as an error. It matters for the rollback rule below.
+--
+-- ----------------------------------------------------------------------------
+-- ROLLBACK: only when BOTH conditions hold
+-- ----------------------------------------------------------------------------
+--
+--   (a) the new code is NOT live 30 minutes after this migration was applied,
+--       AND
+--   (b) the detection query above returns NO rows.
+--
+-- If the query returns rows, do not roll back: FIX FORWARD, however long it has
+-- been. Recreating 020 needs every guest collapsed to one pending card first,
+-- which means an operator clearing cards by hand, and landing the merge needs
+-- none of that. (If someone tries anyway, the rollback transaction fails
+-- harmlessly: 020's index hits the duplicate, the transaction aborts, and this
+-- migration's two indexes stay in place.) Rows are never deleted by SQL.
+--
+-- Time alone is the wrong trigger for a rollback. Time AND a clean query is
+-- the right one.
+--
+--   begin;
+--   create unique index idx_messages_one_pending_per_guest
+--     on messages (venue_id, guest_id)
+--     where review_state = 'pending';
+--   drop index idx_messages_one_pending_obligation_per_guest;
+--   drop index idx_messages_one_pending_conversation_per_guest;
+--   commit;
+--
+-- Migration 042 can stay if 041 is rolled back: old code ignores its new
+-- column, and excluding pending rows from recent_context is harmless to it.
+--
+-- If the merge lands but the new deploy is later reverted (promoting the
+-- previous deployment), that is the window state again with no end point.
+-- Apply the same rule.
+--
+-- ----------------------------------------------------------------------------
+-- Why these choices
+-- ----------------------------------------------------------------------------
+-- CREATE BEFORE DROP, in one transaction, so the table is never without a
+-- uniqueness constraint on pending rows. Both new indexes can be built while
+-- 020 still exists: 020 is strictly stronger, so any data that satisfies it
+-- satisfies both.
+--
+-- NOT CONCURRENTLY. `create index concurrently` cannot run inside a
+-- transaction, and the one-transaction swap matters more than a lock that
+-- lasts milliseconds on a pilot-sized table.
+--
+-- `coalesce(..., '')` so a NULL carrier (no commitment) evaluates `not in` to
+-- TRUE rather than NULL. Without it a draft with no carrier would match
+-- NEITHER index and escape uniqueness entirely. `->>` and `coalesce` are both
+-- immutable, which a partial index predicate requires.
+-- ============================================================================
+
+begin;
+
+create unique index idx_messages_one_pending_obligation_per_guest
+  on messages (venue_id, guest_id)
+  where review_state = 'pending'
+    and coalesce(pending_commitment->>'type', '') in ('comp', 'hold', 'discount');
+
+create unique index idx_messages_one_pending_conversation_per_guest
+  on messages (venue_id, guest_id)
+  where review_state = 'pending'
+    and coalesce(pending_commitment->>'type', '') not in ('comp', 'hold', 'discount');
+
+drop index idx_messages_one_pending_per_guest;
+
+commit;
+
+-- ============================================================================
+-- end of migration
+-- ============================================================================

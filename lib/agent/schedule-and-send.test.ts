@@ -26,7 +26,7 @@ import type { GenerateMessageResult } from '@/lib/ai'
 //   - .from('messages').insert(payload).select('id').single() → {data, error}
 //   - .from('messages').select('review_reason').eq('id', _).eq('review_state', _).maybeSingle()
 //   - .from('messages').update(payload).eq('id', _).eq('review_state', _).select('id').maybeSingle()
-//   - .from('messages').select('id').eq().eq().eq().eq().limit(1).maybeSingle()
+//   - .from('messages').select(PENDING_SLOT_ROW_COLUMNS).eq() x4 .order().limit() (TAC-394)
 //
 // The mock dispatches by inspecting the first call after .from('messages')
 // to disambiguate INSERT vs SELECT (review_reason) vs UPDATE vs SELECT (id).
@@ -36,9 +36,11 @@ interface ScenarioRecorder {
   updates: Array<{ payload: Record<string, unknown>; id: string; reviewState: string }>
   // Stack-of-responses each builder pops from.
   insertResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
-  updateResponses: Array<{ data: { id: string } | null; error: { message: string } | null }>
+  updateResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
   priorReasonResponses: Array<{ data: { review_reason: string | null } | null; error: { message: string } | null }>
-  findPendingResponses: Array<{ data: { id: string } | null; error: { message: string } | null }>
+  // TAC-394: loadPendingRowsBySlot rows. `data` is one row, an array of rows,
+  // or null for none.
+  findPendingResponses: Array<{ data: unknown; error: { message: string } | null }>
 }
 
 let scenario: ScenarioRecorder
@@ -72,8 +74,8 @@ vi.mock('@/lib/db/admin', () => ({
         //     → prior-reason capture before UPDATE
         //   - .select('id').eq('id', _).eq('review_state', _).select('id').maybeSingle()
         //     (chained AFTER an update() — handled in update() below)
-        //   - .select('id').eq().eq().eq().eq().limit(1).maybeSingle()
-        //     → findOpenPendingRow after 23505
+        //   - .select(PENDING_SLOT_ROW_COLUMNS).eq() x4 .order().limit()
+        //     → loadPendingRowsBySlot after 23505 (TAC-394)
         if (cols === 'review_reason') {
           return makePriorReasonBuilder()
         }
@@ -123,26 +125,24 @@ function makePriorReasonBuilder() {
 }
 
 function makeFindPendingBuilder() {
-  // Four .eq() calls then .limit(1).maybeSingle()
-  return {
-    eq: () => ({
-      eq: () => ({
-        eq: () => ({
-          eq: () => ({
-            limit: () => ({
-              maybeSingle: () => {
-                const resp = scenario.findPendingResponses.shift() ?? {
-                  data: null,
-                  error: null,
-                }
-                return Promise.resolve(resp)
-              },
-            }),
-          }),
-        }),
-      }),
-    }),
+  // TAC-394: loadPendingRowsBySlot's chain, .eq() x4 .order().limit(), awaited
+  // as an array. A queued `{ data: row }` is a guest with that one pending row;
+  // a row with no pending_commitment is a conversation-slot card.
+  const chain = {
+    eq: () => chain,
+    order: () => chain,
+    limit: async () => {
+      const resp = scenario.findPendingResponses.shift() ?? { data: null, error: null }
+      const data =
+        resp.data === null || resp.data === undefined
+          ? []
+          : Array.isArray(resp.data)
+            ? resp.data
+            : [resp.data]
+      return { data, error: resp.error }
+    },
   }
+  return chain
 }
 
 // Red-alert is fire-and-forget. The persist layer awaits it; the test
@@ -312,7 +312,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       data: null,
       error: { code: '23505', message: 'duplicate key' },
     })
-    // findOpenPendingRow surfaces the racing row.
+    // The slot re-read surfaces the racing row.
     scenario.findPendingResponses.push({ data: { id: 'racing-msg-1' }, error: null })
     // Prior-reason capture for the regen UPDATE on the racing row.
     scenario.priorReasonResponses.push({
@@ -419,7 +419,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       data: null,
       error: { code: '23505', message: 'duplicate key' },
     })
-    // findOpenPendingRow surfaces the racing row.
+    // The slot re-read surfaces the racing row.
     scenario.findPendingResponses.push({ data: { id: 'racing-msg-1' }, error: null })
     // Attempt 2: prior-reason SELECT returns null (racing row was acted on
     // between our INSERT-race and our UPDATE — TOCTOU vs. dispatch).
@@ -447,7 +447,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
 
   // ---- Failure path: sustained ping-pong exceeds race-recovery cap ----
   it('alerts and throws when race-recovery exceeds the bounded retry limit', async () => {
-    // Every INSERT hits 23505; every findOpenPendingRow returns null
+    // Every INSERT hits 23505; every slot re-read finds nothing
     // (operator immediately dispatches). The loop ticks 3x then bails.
     for (let i = 0; i < 3; i++) {
       scenario.insertResponses.push({
@@ -1261,5 +1261,117 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     // shape, and that is exactly the mutation above.
     expect(payload).toHaveProperty('review_triggers')
     expect(payload).toHaveProperty('ungrounded_claims')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-394: race recovery on two pending slots
+// ---------------------------------------------------------------------------
+//
+// The fake-table versions of these (a comp A card against a comp B INSERT, a
+// conversation INSERT beside a comp card) are in two-pending-slots.test.ts. These
+// pin the persist layer's own branches with this file's scripted responses.
+describe('persistOrRegenQueuedDraft — two pending slots (TAC-394)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // The live bug on main: a manual followup's INSERT hit the unique index and
+  // recovery UPDATEd the card anyway. 'never_regen' refuses instead.
+  it('refuses instead of regenerating when a manual followup races into an occupied slot', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    scenario.insertResponses.push({
+      data: null,
+      error: { code: '23505', message: 'duplicate key' },
+    })
+    scenario.findPendingResponses.push({
+      data: {
+        id: 'waiting-card',
+        body: 'earlier draft',
+        pending_until: null,
+        review_reason: 'model_flagged',
+        pending_commitment: null,
+        created_at: '2026-09-14T16:26:34.000Z',
+      },
+      error: null,
+    })
+
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'category_requires_approval',
+      null,
+      { callerPolicy: 'never_regen' },
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: null,
+      action: 'dropped',
+      priorReviewReason: null,
+      reason: 'slot_occupied',
+      protectedDraftId: 'waiting-card',
+      protectedCommitment: null,
+      droppedCommitment: null,
+    })
+    expect(scenario.inserts).toHaveLength(1)
+    expect(scenario.updates).toHaveLength(0)
+    expect(fireRedAlertMock).not.toHaveBeenCalled()
+  })
+
+  it('retries the INSERT when the slot re-read after a 23505 fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    scenario.insertResponses.push(
+      { data: null, error: { code: '23505', message: 'duplicate key' } },
+      { data: { id: 'new-msg-1' }, error: null },
+    )
+    scenario.findPendingResponses.push({ data: null, error: { message: 'connection reset' } })
+
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: 'new-msg-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+    expect(scenario.inserts).toHaveLength(2)
+    expect(scenario.updates).toHaveLength(0)
+  })
+
+  // Unreachable from the new code, which only regenerates the card in the
+  // draft's own slot, and reachable from OLD code in migration 041's deploy
+  // window. It must not be mistaken for an ordinary write failure.
+  it('reports a unique violation on the regen UPDATE as its own red alert and writes nothing', async () => {
+    scenario.priorReasonResponses.push({ data: { review_reason: 'model_flagged' }, error: null })
+    scenario.updateResponses.push({
+      data: null,
+      error: { code: '23505', message: 'duplicate key' },
+    })
+
+    await expect(
+      persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', 'card-conv'),
+    ).rejects.toThrow(/unique violation/)
+
+    expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'persist',
+        errorMessage: expect.stringContaining('occupied pending slot'),
+        extra: expect.objectContaining({
+          uniqueViolation: true,
+          attemptedPendingDraftId: 'card-conv',
+        }),
+      }),
+    )
+    expect(scenario.inserts).toHaveLength(0)
   })
 })
