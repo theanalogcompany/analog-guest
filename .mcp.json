@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "linear-bot": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    }
+  }
+}
