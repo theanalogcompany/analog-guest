@@ -1,0 +1,140 @@
+name: Audit new Todo tickets
+
+# Polls every 15 minutes. A ticket is audited once: the query skips anything
+# that already carries an [AUDIT] or [AUDIT-CLAIM] comment, so re-running is
+# safe and a ticket returning to Todo after a ruling is not re-audited.
+#
+# Scheduled workflows run only from the default branch. This does nothing
+# until it is merged to main.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  repository_dispatch:
+    types: [ticket-ready]
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: "Audit one specific ticket (e.g. TAC-395). Blank = whatever is newly in Todo."
+        required: false
+        type: string
+      force:
+        description: "Re-audit even if already audited"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ticket-audits-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Find tickets needing an audit
+        id: queue
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          ONE_TICKET: ${{ inputs.ticket || github.event.client_payload.ticket }}
+          FORCE: ${{ inputs.force }}
+          LIMIT: "3"
+        run: |
+          set -euo pipefail
+
+          if [ -n "${ONE_TICKET:-}" ] && [ "${FORCE:-false}" = "true" ]; then
+            echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RESPONSE=$(curl -sS https://api.linear.app/graphql \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $LINEAR_API_KEY" \
+            -d @- <<'GQL'
+          {"query":"query { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { eq: \"Todo\" } } }) { nodes { identifier description priority comments { nodes { body } } } } }"}
+          GQL
+          )
+
+          # Keep: this repo's tickets, never audited, (optionally) the named one.
+          TICKETS=$(echo "$RESPONSE" | jq -r \
+            --arg repo "$REPO_NAME" \
+            --arg only "${ONE_TICKET:-}" \
+            --argjson limit "$LIMIT" '
+            .data.issues.nodes
+            | map(select(.description // "" | test("Repo:?\\**\\s*:?\\s*`?" + $repo; "i")))
+            | map(select(
+                ([.comments.nodes[].body] | map(test("\\[AUDIT(-CLAIM)?\\]")) | any) | not
+              ))
+            | (if $only == "" then . else map(select(.identifier == $only)) end)
+            | sort_by(if .priority == 0 then 99 else .priority end)
+            | .[:$limit]
+            | map(.identifier)
+            | join(" ")
+          ')
+
+          if [ -z "$TICKETS" ]; then
+            echo "Nothing to audit."
+          else
+            echo "Auditing: $TICKETS"
+          fi
+          echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"
+
+      - name: Audit
+        if: steps.queue.outputs.tickets != ''
+        uses: anthropics/claude-code-action@v1
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 60
+            --allowedTools "Read,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*)"
+          prompt: |
+            You are auditing Linear tickets for the repo ${{ github.event.repository.name }}.
+
+            Tickets to audit, in order: ${{ steps.queue.outputs.tickets }}
+
+            Read CLAUDE.md and .claude/process.md first. Then follow
+            .claude/commands/audit-ticket.md for each ticket — it is the
+            specification for this task and it governs.
+
+            ONE DIFFERENCE FROM THE LOCAL COMMAND: there is no Linear MCP in
+            CI. Use the GraphQL API with curl. The key is in $LINEAR_API_KEY.
+
+            Read an issue:
+              curl -sS https://api.linear.app/graphql \
+                -H "Content-Type: application/json" \
+                -H "Authorization: $LINEAR_API_KEY" \
+                -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { name } } comments { nodes { id body createdAt } } } }"}'
+
+            Post a comment:
+              curl -sS https://api.linear.app/graphql \
+                -H "Content-Type: application/json" \
+                -H "Authorization: $LINEAR_API_KEY" \
+                -d '{"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"..."}}'
+
+            Update status and labels: use issueUpdate with stateId and labelIds.
+            Resolve those ids by querying workflowStates and issueLabels for
+            team key TAC. Never invent an id.
+
+            Your audit comment MUST contain the literal string [AUDIT]. That
+            marker is what stops this workflow auditing the same ticket again
+            on its next run. If you cannot complete an audit, still post a
+            comment saying why, with [AUDIT] in it, so the ticket is not
+            silently retried every fifteen minutes.
+
+            Audit each ticket completely before starting the next. Never write
+            code, never open a branch, never commit. The audit is read-only
+            except for the Linear writes the command file specifies.
+
+            If a ticket's Repo: line does not name this repo, skip it and say so.
