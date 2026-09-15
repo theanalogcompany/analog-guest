@@ -6,6 +6,12 @@ const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const VENUE_B = '00000000-0000-0000-0000-00000000000b'
 const GUEST_X = '00000000-0000-0000-0000-000000000001'
 
+// TAC-395: transcribed from TAC-395's Contract ("Which messages count",
+// condition 2) into PostgREST syntax. A literal, never built from
+// DELIVERED_OUTBOUND_STATUSES.
+const CONTRACT_REACHED_GUEST_FILTER =
+  'direction.eq.inbound,and(status.in.(sending,sent,delivered),or(review_state.is.null,review_state.neq.pending))'
+
 let nextGuestLookup: { data: unknown; error: { message: string } | null } = {
   data: null,
   error: null,
@@ -17,7 +23,8 @@ let nextThreadRows: { data: unknown; error: { message: string } | null } = {
 
 const limitMock = vi.fn(() => Promise.resolve(nextThreadRows))
 const orderMock = vi.fn(() => ({ limit: limitMock }))
-const neqMock = vi.fn(() => ({ order: orderMock }))
+const orMock = vi.fn(() => ({ order: orderMock }))
+const neqMock = vi.fn(() => ({ or: orMock }))
 const eqGuestMock = vi.fn(() => ({ neq: neqMock }))
 const eqVenueMock = vi.fn(() => ({ eq: eqGuestMock }))
 const maybeSingleMock = vi.fn(() => Promise.resolve(nextGuestLookup))
@@ -43,6 +50,7 @@ beforeEach(() => {
   eqVenueMock.mockClear()
   eqGuestMock.mockClear()
   neqMock.mockClear()
+  orMock.mockClear()
   orderMock.mockClear()
   limitMock.mockClear()
 })
@@ -107,6 +115,16 @@ describe('loadGuestThreadByGuestId', () => {
       ],
     })
     expect(eqGuestMock).toHaveBeenCalledWith('guest_id', GUEST_X)
+  })
+
+  // TAC-395: the guestId endpoint shares fetchThreadMessagesForGuest, so it
+  // carries the same filter. The conversations-tab spec binds it to an
+  // identical response contract.
+  it('filters the thread query with the Contract condition, exactly once (TAC-395)', async () => {
+    nextGuestLookup = { data: { venue_id: VENUE_A }, error: null }
+    await loadGuestThreadByGuestId({ guestId: GUEST_X, allowedVenueIds: [VENUE_A] })
+    expect(orMock).toHaveBeenCalledTimes(1)
+    expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
   })
 
   it('returns db_error when the guest lookup errors', async () => {

@@ -50,6 +50,10 @@ export interface HistoryRow {
  * reply rate. For the prompt, marking it NEVER SENT would tell the model the
  * guest never saw something they did, and invite it to say it again. Those
  * are different costs, so the two sets differ on purpose.
+ *
+ * TAC-395: lib/operator/thread.ts and migrations 043 and 044 filter on this
+ * same set, in SQL. Changing it needs a migration recreating both functions,
+ * and lib/operator/reached-guest-condition.test.ts fails until that lands.
  */
 export const DELIVERED_OUTBOUND_STATUSES: ReadonlySet<string> = new Set([
   'sending',
