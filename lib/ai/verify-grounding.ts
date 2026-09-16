@@ -25,7 +25,30 @@ import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './ty
 // the version moves because the generation ENVELOPE changed and the two
 // populations must be separable in analytics — at 500 an unknown fraction of
 // v1.2.0 verdicts were never produced at all.
-export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.3.0'
+// v1.4.0 (TAC-409): two bullets added to "Do not flag:".
+//   1. Abridgement. A reply that omits detail the source contains, while
+//      contradicting nothing in it, is grounded. The bullet names its own
+//      DIRECTION against point 3 deliberately: point 3's three worked examples
+//      are all a reply asserting MORE than the source, and this is the reverse
+//      case. The two never conflicted logically, and the model conflated them
+//      anyway — twice, three days apart, drawing a different line each time
+//      (`a1345d56` was flagged only for "in tonic" though it named the cold
+//      foam; `c7a01385` was flagged for both). Stating "omission is fine" with
+//      nothing distinguishing it from point 3 would have produced a third
+//      arbitrary line rather than a rule.
+//   2. Identity. Who the assistant is — the name it speaks under, and that it
+//      works here — is configured, not asserted. Deliberately NOT "the role it
+//      claims": nothing configures a role. `speakerFramingProse`'s
+//      named_person branch renders only "staff at the venue", and
+//      `venue_info.staff` is `z.array(z.string())` of free-form lines, so a
+//      reply claiming a specific job title is an ordinary unsupported claim
+//      and stays checked. Scoped to identity ONLY so it cannot be read
+//      against the assistant's-own-text rule below, which must survive intact.
+// Both were false positives on real drafts at Le Mil's: the verifier held
+// correct replies against source material it already had. The name it objected
+// to was in `venue_info.staff` (which it receives) and, on `1b221692`, in the
+// guest's own inbound.
+export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.4.0'
 
 /**
  * TAC-367. Was 500, which this verifier had quietly outgrown: measured
@@ -69,6 +92,8 @@ Flag a claim as ungrounded when ALL of:
 Do not flag:
 - A reply that already admits uncertainty ("not sure," "no idea," "let me check").
 - A reply that draws only on what the source material actually states, even if phrased differently.
+- A reply that says LESS than the source does. Leaving out detail the source contains is not an unsupported claim: if every fact the reply states is supported, the reply is grounded no matter how much it omits. Note the direction, because it is the opposite of point 3 above — point 3 is about a reply asserting MORE than the source states, which you check; a shorter, partial, or selective description asserts less, and is fine so long as it contradicts nothing the source states. A reply naming three of a drink's five ingredients has stated nothing unsupported.
+- Who the assistant is. The name the assistant speaks under, and that it works at this venue, are configured, not claimed — never flag a reply for saying who is speaking, including when the guest asked. This exempts identity only, never the facts inside it: a specific job title, shift, or responsibility the assistant claims for itself is checked exactly like any other claim, as is anything else it says about itself or the venue.
 - General conversation with no specific venue fact in it.
 - A reply that draws on the runtime context for this turn, when that section is present. It states what the assistant legitimately knew about this guest and this moment: the current date and time, whether the venue is open right now, what this guest can be offered, what has already been promised to them, what they have ordered before, what is known about them, and what was said earlier in the conversation. A claim supported there is grounded, exactly as much as one supported by the venue facts. Two specifics, because they are the ones most often got wrong:
   - The status line in the runtime context is the authority on whether the venue is open AT THIS MOMENT and when it next opens. A reply that says the venue is closed right now, or that names the next opening day and time from that line, is grounded. Do not flag it for lacking support elsewhere; the weekly hours table is not the source for a claim about right now, that line is.
