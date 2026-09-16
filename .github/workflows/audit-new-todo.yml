@@ -21,6 +21,11 @@ name: Audit new Todo tickets
 # run log. Off by default: this repo is public, so the log is too, and a
 # transcript of a real ticket carries guest message text.
 #
+# The Claude step does not run from a branch whose copy of this file differs
+# from main's: claude-code-action skips itself and exits green. So a change to
+# this file can only be tested after it merges, on a fixture ticket. Run
+# 35149594063 is the example, caught by the check below.
+#
 # Scheduled workflows run only from the default branch. This does nothing
 # until it is merged to main.
 
