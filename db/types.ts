@@ -803,7 +803,7 @@ export type Database = {
           reviewed_at?: string | null
           reviewed_by_operator_id?: string | null
           sent_at?: string | null
-          status?: string
+          status: string
           ungrounded_claims?: string[] | null
           updated_at?: string
           venue_id: string
