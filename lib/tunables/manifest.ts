@@ -34,12 +34,6 @@ import {
   SEND_FIDELITY_FLOOR,
   STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
-import {
-  MARK_AS_READ_GAP_MAX_MS,
-  MARK_AS_READ_GAP_MIN_MS,
-  TOTAL_DELAY_MAX_MS,
-  TOTAL_DELAY_MIN_MS,
-} from '@/lib/agent/timing'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
 import { MAX_ATTEMPTS, MAX_OUTPUT_TOKENS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
 import { VERIFY_GROUNDING_MAX_OUTPUT_TOKENS } from '@/lib/ai/verify-grounding'
@@ -235,42 +229,6 @@ export const TUNABLES = [
     source: 'lib/ai/classify-message.ts',
     description: 'Inbound length cap sent to the classifier; longer messages are truncated with a `[...truncated]` suffix. Generation still receives the full body.',
     relatedTickets: ['TAC-240'],
-  },
-
-  // ---------------------------------------------------------------------------
-  // timing (4)
-  // ---------------------------------------------------------------------------
-  {
-    name: 'mark_as_read_gap_max_ms',
-    value: MARK_AS_READ_GAP_MAX_MS,
-    type: 'number',
-    category: 'timing',
-    source: 'lib/agent/timing.ts',
-    description: 'Maximum delay before the agent marks an inbound message as read.',
-  },
-  {
-    name: 'mark_as_read_gap_min_ms',
-    value: MARK_AS_READ_GAP_MIN_MS,
-    type: 'number',
-    category: 'timing',
-    source: 'lib/agent/timing.ts',
-    description: 'Minimum delay before the agent marks an inbound message as read.',
-  },
-  {
-    name: 'total_delay_max_ms',
-    value: TOTAL_DELAY_MAX_MS,
-    type: 'number',
-    category: 'timing',
-    source: 'lib/agent/timing.ts',
-    description: 'Maximum total human-feel delay from inbound to send.',
-  },
-  {
-    name: 'total_delay_min_ms',
-    value: TOTAL_DELAY_MIN_MS,
-    type: 'number',
-    category: 'timing',
-    source: 'lib/agent/timing.ts',
-    description: 'Minimum total human-feel delay from inbound to send.',
   },
 
   // ---------------------------------------------------------------------------

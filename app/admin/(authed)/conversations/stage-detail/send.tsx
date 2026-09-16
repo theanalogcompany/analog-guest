@@ -15,8 +15,8 @@ import {
 // send drill-down. Top-level: outbound message ID, provider message ID
 // (Sendblue's), body length. CAPTURED CONTENT shows the body text Sonnet
 // actually produced. INPUT carries any structured input the wrapper
-// captured — usually empty for send since the human-feel timing happens
-// after generate.
+// captured — usually empty for send, which does dispatch rather than
+// generation.
 
 export function SendDetail({ stage }: { stage: TraceStage }) {
   const output = readRecord(stage.observation.output)

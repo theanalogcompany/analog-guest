@@ -218,7 +218,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
     })
   })
 
-  it('skips the human-feel delay — the message is already late by construction', async () => {
+  it('skips the read receipt and typing beats — the message is already late by construction', async () => {
     await handleHoldingMessage({
       venueId: 'venue-1',
       guestId: 'guest-1',

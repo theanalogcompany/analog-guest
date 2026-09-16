@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
 import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
-import { BUBBLE_DELIMITER } from './split-message'
+import { BUBBLE_DELIMITER, INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 
@@ -152,18 +152,14 @@ vi.mock('./alerts', () => ({
   fireRedAlert: (...args: unknown[]) => fireRedAlertMock(...args),
 }))
 
-// Schedule sample + messaging are referenced at module load by
-// schedule-and-send.ts; stub them so the import doesn't pull in the real
-// SDK init paths.
-vi.mock('./timing', () => ({
-  sampleTiming: () => ({
-    totalDelayMs: 0,
-    markAsReadGapMs: 0,
-    preTypingPauseMs: 0,
-    typingDurationMs: 0,
-  }),
-}))
-
+// Messaging is referenced at module load by schedule-and-send.ts; stub it so
+// the import doesn't pull in the real SDK init paths.
+//
+// There is deliberately NO './timing' mock here (TAC-421 deleted that module).
+// The old one pinned every sampled sleep to 0, which meant an assertion that
+// "no delay occurs before the first send" passed against code that still
+// slept. The no-sleep guarantee is now asserted with fake timers instead —
+// see the TAC-421 describe block at the bottom of this file.
 vi.mock('@/lib/messaging', () => ({
   markAsRead: vi.fn(),
   sendMessage: vi.fn(),
@@ -1519,4 +1515,117 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
 
     expect(scenario.updates[0].payload.rendered_intentions).toBeNull()
   })
+})
+// ---------------------------------------------------------------------------
+// TAC-421 — no pre-send pause
+// ---------------------------------------------------------------------------
+//
+// scheduleAndSend used to sample a "human-feel" timing plan and sleep through
+// it before marking as read. That sleep ran after generation, the backstops
+// and the approval gate, so it was ~6.5s of dead time on a pipeline that
+// already took 14-17s (TAC-420). It is gone; the read receipt and the opening
+// typing beat are not.
+//
+// Both tests here install fake timers and carry an explicit 2s per-test
+// timeout. That combination IS the assertion: a reintroduced sleep leaves its
+// setTimeout unfired, the promise never settles, and the test fails on its own
+// timeout instead of hanging the suite. Verified by actually re-adding
+// `await sleep(6500)` and watching each one fail -- an assertion this file
+// could not make before, because the deleted './timing' mock pinned every
+// sampled sleep to 0 and would have let a sleeping implementation pass.
+describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(createCommitmentFromPending)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it(
+    'marks as read, shows typing, then sends — with no timer awaited in between',
+    async () => {
+      queueSends('provider-1')
+      queueInserts('msg-1')
+
+      // skipHumanFeelDelay deliberately NOT set: this is the ordinary
+      // auto-send path, the one that used to sleep. The clock is never
+      // advanced below.
+      await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+        rng: () => 0.99,
+      })
+
+      const read = vi.mocked(markAsRead).mock.invocationCallOrder[0]!
+      const typing = vi.mocked(sendTypingIndicator).mock.invocationCallOrder[0]!
+      const sent = vi.mocked(sendMessage).mock.invocationCallOrder[0]!
+
+      expect(read).toBeLessThan(typing)
+      expect(typing).toBeLessThan(sent)
+      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    },
+    2000,
+  )
+
+  it(
+    'still holds the second bubble behind INTER_BUBBLE_GAP_MS',
+    async () => {
+      queueSends('p1', 'p2')
+      queueInserts('m1', 'm2')
+
+      const dispatch = scheduleAndSend(
+        makeCtx(),
+        generationWithBody('First one here. Second one here.'),
+        { rng: () => 0 },
+      )
+
+      // Flush microtasks WITHOUT moving the clock. The first bubble clears;
+      // the second must still be waiting on its gap. Advancing first and then
+      // asserting two sends would pass with the gap removed, which is the
+      // version of this test worth avoiding.
+      await vi.advanceTimersByTimeAsync(0)
+      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(INTER_BUBBLE_GAP_MS)
+      await dispatch
+
+      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(2)
+    },
+    2000,
+  )
+
+  // The engine-followup shape. This is the SECOND of the two paths that used
+  // to sleep, and the one where the wait bought least: `buildRuntimeContext`
+  // sets currentMessage null for a followup, so the ~6.5s pause was not even
+  // followed by a read receipt. Nothing else in this file passes a null
+  // currentMessage, so without this case deleting the `if (ctx.currentMessage)`
+  // guard in schedule-and-send.ts is a TypeError on every engine followup in
+  // production that survives the entire suite — the orchestrator tests mock
+  // ./schedule-and-send, so they cannot reach it either.
+  it(
+    'sends a followup with no read receipt when there is no inbound to mark',
+    async () => {
+      queueSends('provider-1')
+      queueInserts('msg-1')
+
+      await scheduleAndSend(
+        makeCtx({ currentMessage: null }),
+        generationWithBody('Open until 4'),
+        { rng: () => 0.99 },
+      )
+
+      expect(vi.mocked(markAsRead)).not.toHaveBeenCalled()
+      expect(vi.mocked(sendTypingIndicator)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    },
+    2000,
+  )
 })

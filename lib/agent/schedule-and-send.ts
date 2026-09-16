@@ -23,7 +23,6 @@ import {
 } from './pending-slots'
 import { resolveDispatchBubbles } from './sentence-split'
 import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
-import { sampleTiming } from './timing'
 import type { RuntimeContext } from './types'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
@@ -283,9 +282,8 @@ async function persistOutbound(
  * the outbound row(s) to the messages table.
  *
  * Server-only. Uses the admin DB client. Sequence:
- *   split into bubbles → sample timing → sleep markAsReadGap →
- *   markAsRead (inbound only) → sleep preTypingPause → typing indicator →
- *   sleep typingDuration → [ send → persist ] → for each later bubble:
+ *   split into bubbles → markAsRead (inbound only) → typing indicator →
+ *   [ send → persist ] → for each later bubble:
  *   typing indicator → sleep INTER_BUBBLE_GAP_MS → send → persist.
  *
  * TAC-313 shape, TAC-319 decision-maker: one generation may dispatch as up to
@@ -299,10 +297,18 @@ async function persistOutbound(
  * not by the model — TAC-319 removed the model's R12 splitting rule after two
  * prompt-side rounds failed to make it fire.
  *
- * The opening sequence is untouched — `sampleTiming` supplies exactly the
- * numbers it always did, and no timing constant is read or changed here
- * (TAC-313 §6). Only the per-bubble gap is new, and it is a fixed constant
- * declared in ./split-message rather than derived from the opening delay.
+ * THERE IS NO PRE-SEND PAUSE (TAC-421). The opening sequence used to sample a
+ * "human-feel" timing plan and sleep through it before marking as read; that
+ * sleep ran AFTER generation, the backstops and the approval gate, so it was
+ * ~6.5s of dead time bolted onto a pipeline that already took 14–17s — 27% of
+ * the measured first-bubble p50 (TAC-420). It bought nothing on either path it
+ * fired on: on a followup `ctx.currentMessage` is null, so the wait was not
+ * even followed by a read receipt. markAsRead and the typing indicator still
+ * fire, in the same order, with nothing between them and the send.
+ *
+ * The only sleep left in this function is the per-bubble gap, a fixed constant
+ * declared in ./split-message and deliberately never derived from the opening
+ * sequence (TAC-313 §6) — which is why it survived TAC-421 untouched.
  *
  * Failure handling. The boundary is "have we committed anything to the guest
  * yet," expressed as `persistedIds.length`, deliberately NOT as a bubble
@@ -329,11 +335,20 @@ async function persistOutbound(
  * No retries within a dispatch. The thrown error is mapped to AgentResult by
  * the caller (handle-inbound / handle-followup).
  *
- * `options.skipHumanFeelDelay`: when true, all sleeps + the typing indicator
- * are bypassed. Send + persist still happen. Used by the Command Center
- * Follow Up button — operator clicked "send" expecting a fast result, and
- * a manual outbound is by definition not a "natural" reply where typing-
- * indicator theatre belongs. TAC-284 also passes this for demo guests.
+ * `options.skipHumanFeelDelay`: when true, markAsRead, BOTH typing indicators
+ * and the inter-bubble gap are bypassed. Send + persist still happen. Used by
+ * the Command Center Follow Up button — operator clicked "send" expecting a
+ * fast result, and a manual outbound is by definition not a "natural" reply
+ * where typing-indicator theatre belongs. TAC-284 also passes this for demo
+ * guests; handle-inbound passes it for a crisis-safety reply and
+ * handle-holding-message for both of its sends.
+ *
+ * The flag KEPT ITS FULL REACH through TAC-421 (ruled, not inherited): that
+ * ticket removed the pre-send sleeps only, so this still gates the two things
+ * it always gated besides them — the read receipt plus opening typing beat,
+ * and the per-bubble typing beat plus INTER_BUBBLE_GAP_MS. Narrowing it to the
+ * inter-bubble gap would start firing read receipts on crisis and holding
+ * sends, which is a guest-visible change nobody asked for.
  *
  * `options.reviewReason`: when set, written to `messages.review_reason` on
  * the auto-sent row. The auto-send path normally leaves `review_reason`
@@ -392,10 +407,6 @@ export async function scheduleAndSend(
   const generationId = randomUUID()
 
   if (!skipDelay) {
-    const plan = sampleTiming()
-
-    await sleep(plan.markAsReadGapMs)
-
     if (ctx.currentMessage) {
       const r = await markAsRead({
         venueId: ctx.venue.id,
@@ -415,8 +426,6 @@ export async function scheduleAndSend(
       }
     }
 
-    await sleep(plan.preTypingPauseMs)
-
     {
       const r = await sendTypingIndicator({
         venueId: ctx.venue.id,
@@ -434,8 +443,6 @@ export async function scheduleAndSend(
         })
       }
     }
-
-    await sleep(plan.typingDurationMs)
   }
 
   const supabase = createAdminClient()

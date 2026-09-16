@@ -18,6 +18,5 @@ export type {
   InboundMessage,
   RecognitionSnapshot,
   RuntimeContext,
-  TimingPlan,
   VenueContext,
 } from './types'

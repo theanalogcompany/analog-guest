@@ -37,8 +37,9 @@ describe('TUNABLES manifest', () => {
     // verify_grounding_max_output_tokens. The name of this test said 46 while
     // it asserted 49 — fixed here rather than left as a fourth instance of
     // the "test name is not evidence of what the test checks" pattern.
-    // TAC-380 added six intention entries.
-    expect(TUNABLES.length).toBe(56)
+    // TAC-380 added six intention entries. TAC-421 removed the four
+    // lib/agent/timing.ts entries with the module itself.
+    expect(TUNABLES.length).toBe(52)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -58,7 +59,10 @@ describe('TUNABLES manifest', () => {
     expect(counts).toEqual({
       agent_runtime: 23,
       classification: 3,
-      timing: 11,
+      // TAC-421 took this from 11 to 7: the four lib/agent/timing.ts
+      // constants went with the deleted module. The remaining seven are
+      // followup + knowledge-gap windows, which are unrelated.
+      timing: 7,
       recognition: 8,
       // TAC-350 added knowledge_relevance_floor.
       retrieval: 11,

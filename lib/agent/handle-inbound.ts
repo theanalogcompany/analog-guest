@@ -1304,8 +1304,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       }
     }
 
-    // Send + persist. TAC-284: demo guests skip the human-feel delay and,
-    // when applyApprovalPolicyStage short-circuited the gate, the send is
+    // Send + persist. TAC-284: demo guests skip the read receipt and typing
+    // indicators (TAC-421 removed the pre-send sleep this also used to skip)
+    // and, when applyApprovalPolicyStage short-circuited the gate, the send is
     // stamped review_reason='demo_bypass' (approval.reason is undefined on a
     // normal untriggered send).
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
