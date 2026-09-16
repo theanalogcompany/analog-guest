@@ -30,6 +30,16 @@ name: Build ready tickets
 # dry_run (manual dispatch only) prints what the run would start, resume and
 # flag, and writes nothing to Linear.
 #
+# After the session, a shell step checks that it posted on every ticket it
+# worked. A session that cannot write to Linear cannot report its own
+# failure, so the check is the workflow's, not the session's. A ticket left
+# without a comment gets [SILENT-RUN] and the run fails. Permission denials
+# are counted in the log on every run.
+#
+# full_output (manual dispatch only) prints the session transcript into the
+# run log. Off by default: this repo is public, so the log is too, and a
+# transcript of a real ticket carries guest message text.
+#
 # Scheduled workflows run only from the default branch.
 
 on:
@@ -45,6 +55,11 @@ on:
         type: string
       dry_run:
         description: "Print what would be started, resumed and flagged. Writes nothing."
+        required: false
+        default: false
+        type: boolean
+      full_output:
+        description: "Print the session transcript in the run log. This repo is public: use it only on a fixture ticket."
         required: false
         default: false
         type: boolean
@@ -91,6 +106,9 @@ jobs:
           LIVE_SESSION_HOURS: "3"
         run: |
           set -euo pipefail
+
+          # The check after Work counts only comments newer than this.
+          echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
           if [ -n "${ONE_TICKET:-}" ]; then
             echo "defects=[]" >> "$GITHUB_OUTPUT"
@@ -304,12 +322,14 @@ jobs:
           done
 
       - name: Work
+        id: work
         if: steps.queue.outputs.tickets != ''
         uses: anthropics/claude-code-action@v1
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 120
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npm:*),Bash(npx:*),Bash(git:*),Bash(gh pr:*),Bash(curl:*),Bash(jq:*),Bash(rg:*)"
@@ -324,15 +344,47 @@ jobs:
 
             Dependencies are already installed. Do not run npm install.
 
-            NO LINEAR MCP IN CI. Use the GraphQL API with curl; the key is in
-            $LINEAR_API_KEY. Read with `issue(id: "TAC-403")` and fetch
-            comments with `comments(first: 250)`. Comment with
-            `commentCreate` (always flat: never pass parentId), change status
-            with `issueUpdate` and `stateId`, and add or remove a label with
-            `issueAddLabel` / `issueRemoveLabel`. Do not set labels through
-            issueUpdate's `labelIds`: it replaces every label on the ticket.
-            Resolve state and label ids by querying workflowStates and
-            issueLabels. Never invent an id.
+            LINEAR, FROM CI. There is no Linear MCP here. Use the GraphQL API
+            with curl; the key is in $LINEAR_API_KEY.
+
+            YOUR BASH IS RESTRICTED, AND A DENIED COMMAND FAILS SILENTLY.
+            These are denied however you arrange them: command substitution
+            ($(...) or backticks), variable assignment (NAME=...), output
+            redirection (>), and heredocs (<<). This workflow's own shell
+            steps use those forms; you cannot. Use exactly these two forms.
+
+            1. A read, with the request inline in single quotes:
+
+                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { id name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
+
+               Piping the response to jq is allowed: append | jq '...'.
+
+            2. Every write, and any request too long to inline: use the Write
+               tool to write the whole JSON request body to
+               ${{ runner.temp }}/linear-request.json, replacing the file each
+               time, then send the file:
+
+                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d @${{ runner.temp }}/linear-request.json
+
+               The file is JSON, so escape newlines as \n and double quotes
+               as \". A comment, for example:
+
+                 {"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"**[FROM CLAUDE CODE]**\n\n[PLAN] ..."}}
+
+            Read every response. Only "success": true means the write
+            happened; anything else is a failed write, not a finished step.
+
+            Post comments flat: never pass parentId. Change status with
+            issueUpdate and stateId. Add or remove a label with
+            issueAddLabel / issueRemoveLabel (id, labelId); never set labels
+            through issueUpdate's labelIds, which replaces every label on the
+            ticket. Resolve state and label ids by querying workflowStates
+            and issueLabels. Never invent an id.
+
+            After you finish, this workflow checks that you posted a comment
+            on every ticket you were given, and counts your permission
+            denials. A ticket you worked without a comment gets a
+            [SILENT-RUN] notice and the run fails.
 
             NO SCHEDULEWAKEUP IN CI. There is no harness to re-fire this
             session. Wherever work-ticket.md says to write [POLLING-STATE]
@@ -368,3 +420,118 @@ jobs:
 
             Never self-commit beyond what work-ticket.md allows, never merge,
             never mark a ticket Done.
+
+      - name: Check the session posted on every ticket it worked
+        if: ${{ !cancelled() && steps.queue.outputs.tickets != '' }}
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          TICKETS: ${{ steps.queue.outputs.tickets }}
+          STARTED: ${{ steps.queue.outputs.started }}
+          WORK_OUTCOME: ${{ steps.work.outcome }}
+          EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          # What the session did, from the action's own record of it
+          # ($RUNNER_TEMP/claude-execution-output.json, written even when the
+          # session fails). This log is public, so only counts are printed;
+          # denied commands go to Linear, which is not.
+          if [ -f "$EXECUTION_FILE" ]; then
+            SESSION=$(jq -c --arg key "$LINEAR_API_KEY" '
+              ([.[] | select(.type == "result")] | last) as $r
+              | {
+                  ended: ($r.subtype // "without a result"),
+                  turns: ($r.num_turns // 0),
+                  denials: (($r.permission_denials // []) | length),
+                  denied: [ ($r.permission_denials // [])[:10][]
+                    | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
+                    | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
+                    | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
+                    | .[0:200] ]
+                }' "$EXECUTION_FILE")
+          else
+            SESSION='{"ended":"without a session record","turns":0,"denials":0,"denied":[]}'
+          fi
+          ENDED=$(echo "$SESSION" | jq -r .ended)
+          TURNS=$(echo "$SESSION" | jq -r .turns)
+          DENIALS=$(echo "$SESSION" | jq -r .denials)
+          DENIED=$(echo "$SESSION" | jq -r '.denied | if length == 0 then "(none)" else map("- " + .) | join("\n") end')
+          echo "Session ended $ENDED after $TURNS turns, with $DENIALS permission denials."
+          if [ "$DENIALS" -gt 0 ]; then
+            echo "::warning title=Permission denials::The session hit $DENIALS permission denials."
+          fi
+
+          SILENT=""
+          for TICKET in $TICKETS; do
+            ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
+              '{query: "query($t: String!) { issue(id: $t) { id labels { nodes { name } } comments(first: 250) { nodes { body createdAt } } } }", variables: {t: $t}}')")
+            ID=$(echo "$ISSUE" | jq -er '.data.issue.id')
+
+            # A comment the session posted during this run: prefixed, newer
+            # than the run's start, and not workflow bookkeeping or a notice.
+            POSTED=$(echo "$ISSUE" | jq --arg started "$STARTED" '
+              ($started | fromdateiso8601) as $since
+              | [.data.issue.comments.nodes[]
+                  | select((.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= $since)
+                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*"))
+                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:RESUME-CLAIM|SLACK|SILENT-RUN)\\]") | not)]
+              | length')
+
+            if [ "$POSTED" -gt 0 ]; then
+              echo "$TICKET: the session posted $POSTED comment(s)."
+              continue
+            fi
+
+            SILENT="$SILENT $TICKET"
+            echo "::error title=Silent run::$TICKET: the session worked this ticket and posted nothing. Posting [SILENT-RUN]."
+
+            FENCE='```'
+            BODY="**[FROM CLAUDE CODE]**
+
+          [SILENT-RUN] ${TICKET}
+
+          The build workflow worked this ticket and its session posted nothing, so nothing here says what it did. This notice comes from the workflow, not the session: a session that cannot write to Linear cannot report its own failure.
+
+          - Run: ${RUN_URL}
+          - Work step: ${WORK_OUTCOME}. The session ended ${ENDED} after ${TURNS} turns.
+          - Permission denials: ${DENIALS}
+
+          Denied, first 10:
+
+          ${FENCE}text
+          ${DENIED}
+          ${FENCE}
+
+          Read the run before replying. A reply here resumes the ticket on the next scheduled run, and until the cause is fixed the same failure repeats."
+
+            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+
+            if echo "$ISSUE" | jq -e '[.data.issue.labels.nodes[].name] | any(. == "Needs Decision" or . == "Needs Action")' > /dev/null; then
+              continue
+            fi
+            LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+              | jq -r '.data.issueLabels.nodes[0].id // empty')
+            if [ -z "$LABEL_ID" ]; then
+              echo "::error::No Needs Decision label found in Linear."
+              exit 1
+            fi
+            gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+              '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+              | jq -e '.data.issueAddLabel.success' > /dev/null
+          done
+
+          # A silent run is a failed run. Green would say the opposite.
+          if [ -n "$SILENT" ]; then
+            echo "::error title=Silent run::No comment from the session on:$SILENT"
+            exit 1
+          fi

@@ -14,6 +14,13 @@ name: Audit new Todo tickets
 # ticket being retried on every run; the label stops it sitting in Todo
 # where nobody looks.
 #
+# The surface step also counts the session's permission denials in the log
+# on every run, and names the denied commands in its [AUDIT] notice.
+#
+# full_output (manual dispatch only) prints the session transcript into the
+# run log. Off by default: this repo is public, so the log is too, and a
+# transcript of a real ticket carries guest message text.
+#
 # Scheduled workflows run only from the default branch. This does nothing
 # until it is merged to main.
 
@@ -30,6 +37,11 @@ on:
         type: string
       force:
         description: "Re-audit even if already audited"
+        required: false
+        default: false
+        type: boolean
+      full_output:
+        description: "Print the session transcript in the run log. This repo is public: use it only on a fixture ticket."
         required: false
         default: false
         type: boolean
@@ -198,6 +210,7 @@ jobs:
           done
 
       - name: Audit
+        id: audit
         if: steps.queue.outputs.tickets != ''
         timeout-minutes: 50
         uses: anthropics/claude-code-action@v1
@@ -205,9 +218,10 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 150
-            --allowedTools "Read,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*)"
+            --allowedTools "Read,Write,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*)"
           prompt: |
             You are auditing a Linear ticket for the repo ${{ github.event.repository.name }}.
 
@@ -217,26 +231,44 @@ jobs:
             .claude/commands/audit-ticket.md — it is the specification for
             this task and it governs.
 
-            ONE DIFFERENCE FROM THE LOCAL COMMAND: there is no Linear MCP in
-            CI. Use the GraphQL API with curl. The key is in $LINEAR_API_KEY.
+            LINEAR, FROM CI. There is no Linear MCP here. Use the GraphQL API
+            with curl; the key is in $LINEAR_API_KEY.
 
-            Read an issue:
-              curl -sS https://api.linear.app/graphql \
-                -H "Content-Type: application/json" \
-                -H "Authorization: $LINEAR_API_KEY" \
-                -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
+            YOUR BASH IS RESTRICTED, AND A DENIED COMMAND FAILS SILENTLY.
+            These are denied however you arrange them: command substitution
+            ($(...) or backticks), variable assignment (NAME=...), output
+            redirection (>), and heredocs (<<). This workflow's own shell
+            steps use those forms; you cannot. Use exactly these two forms.
 
-            Post a comment. Always flat: never pass parentId.
-              curl -sS https://api.linear.app/graphql \
-                -H "Content-Type: application/json" \
-                -H "Authorization: $LINEAR_API_KEY" \
-                -d '{"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"..."}}'
+            1. A read, with the request inline in single quotes:
 
-            Update status with issueUpdate and stateId. Add or remove a label
-            with issueAddLabel / issueRemoveLabel (id, labelId). Do not set
-            labels through issueUpdate's labelIds: it replaces every label on
-            the ticket. Resolve state and label ids by querying
-            workflowStates and issueLabels. Never invent an id.
+                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { id name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
+
+               Piping the response to jq is allowed: append | jq '...'.
+
+            2. Every write, and any request too long to inline: use the Write
+               tool to write the whole JSON request body to
+               ${{ runner.temp }}/linear-request.json, replacing the file each
+               time, then send the file:
+
+                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d @${{ runner.temp }}/linear-request.json
+
+               The file is JSON, so escape newlines as \n and double quotes
+               as \". A comment, for example:
+
+                 {"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"**[FROM CLAUDE CODE]**\n\n[PLAN] ..."}}
+
+            Read every response. Only "success": true means the write
+            happened; anything else is a failed write, not a finished step.
+
+            Post comments flat: never pass parentId. Change status with
+            issueUpdate and stateId. Add or remove a label with
+            issueAddLabel / issueRemoveLabel (id, labelId); never set labels
+            through issueUpdate's labelIds, which replaces every label on the
+            ticket. Resolve state and label ids by querying workflowStates
+            and issueLabels. Never invent an id.
+
+            The Write tool is for that request file only. Write nothing else.
 
             Your audit comment MUST contain the literal string [AUDIT]. That
             marker is what stops this workflow auditing the same ticket again
@@ -256,6 +288,7 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           TICKET: ${{ steps.queue.outputs.tickets }}
           STARTED: ${{ steps.queue.outputs.started }}
+          EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPOSITORY: ${{ github.repository }}
         run: |
@@ -267,6 +300,35 @@ jobs:
               -H "Authorization: $LINEAR_API_KEY" \
               -d "$1"
           }
+
+          # What the session did, from the action's own record of it
+          # ($RUNNER_TEMP/claude-execution-output.json, written even when the
+          # session fails). This log is public, so only counts are printed;
+          # denied commands go to Linear, which is not.
+          if [ -f "$EXECUTION_FILE" ]; then
+            SESSION=$(jq -c --arg key "$LINEAR_API_KEY" '
+              ([.[] | select(.type == "result")] | last) as $r
+              | {
+                  ended: ($r.subtype // "without a result"),
+                  turns: ($r.num_turns // 0),
+                  denials: (($r.permission_denials // []) | length),
+                  denied: [ ($r.permission_denials // [])[:10][]
+                    | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
+                    | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
+                    | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
+                    | .[0:200] ]
+                }' "$EXECUTION_FILE")
+          else
+            SESSION='{"ended":"without a session record","turns":0,"denials":0,"denied":[]}'
+          fi
+          ENDED=$(echo "$SESSION" | jq -r .ended)
+          TURNS=$(echo "$SESSION" | jq -r .turns)
+          DENIALS=$(echo "$SESSION" | jq -r .denials)
+          DENIED=$(echo "$SESSION" | jq -r '.denied | if length == 0 then "(none)" else map("- " + .) | join("\n") end')
+          echo "Session ended $ENDED after $TURNS turns, with $DENIALS permission denials."
+          if [ "$DENIALS" -gt 0 ]; then
+            echo "::warning title=Permission denials::The session hit $DENIALS permission denials."
+          fi
 
           ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
             '{query: "query($t: String!) { issue(id: $t) { id state { name } labels { nodes { name } } comments(first: 250) { nodes { body createdAt } } } }", variables: {t: $t}}')")
@@ -296,6 +358,12 @@ jobs:
           BODY="**[FROM CLAUDE CODE]**
 
           ${HEAD}
+
+          The session ended ${ENDED} after ${TURNS} turns, with ${DENIALS} permission denials. Denied, first 10:
+
+          ${FENCE}text
+          ${DENIED}
+          ${FENCE}
 
           This comment stops every scheduled run retrying the ticket, and Needs Decision puts it in front of you. Replying here will not re-run the audit. Look at the run first: if it ran out of turns, the ticket may be too large to audit in one pass and need splitting. To audit it again:
 

@@ -20,8 +20,8 @@
  *
  * The marker's q= field is a hash of what the ticket is blocked on: its
  * ## Open questions block plus the id of its newest [NEEDS-INPUT],
- * [HUMAN-REVIEW-REQUIRED], [PLAN], [NEEDS-ACTION], [AUDIT-SKIPPED] or
- * [BUILD-SKIPPED] comment. A thread reply
+ * [HUMAN-REVIEW-REQUIRED], [PLAN], [NEEDS-ACTION], [AUDIT-SKIPPED],
+ * [BUILD-SKIPPED] or [SILENT-RUN] comment. A thread reply
  * goes out only when that hash changes, so a ticket sitting unanswered gets
  * nothing run after run. (TAC-406)
  *
@@ -119,7 +119,7 @@ function questionsOf(description) {
 // body, keeps a ruling or an audit that merely quotes a marker from counting
 // as a new blocking state.
 const BLOCKING_MARKER =
-  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION|AUDIT-SKIPPED|BUILD-SKIPPED)\]/;
+  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION|AUDIT-SKIPPED|BUILD-SKIPPED|SILENT-RUN)\]/;
 
 function newestBlockingComment(issue) {
   return (
@@ -191,6 +191,9 @@ function replyLine(issue) {
   const marker = newest ? BLOCKING_MARKER.exec(newest.body)[1] : null;
   if (marker === 'BUILD-SKIPPED') {
     return '_Replying here will not unblock it: the ticket needs splitting into one ticket per repo. Open the ticket._';
+  }
+  if (marker === 'SILENT-RUN') {
+    return '_The last build run on this ticket posted nothing. Read the run linked in the ticket before replying: a reply here re-runs it, and until the cause is fixed the same failure repeats._';
   }
   if (marker === 'AUDIT-SKIPPED') {
     return '_Replying here will not unblock it: the ticket needs its Repo: line or repo labels fixed. Open the ticket._';
