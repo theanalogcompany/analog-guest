@@ -64,25 +64,10 @@ that proves it.
 **2. WRONG** — claims that do not hold, with what is actually true.
 
 **3. QUESTIONS** — numbered, one decision each, each written in the format
-under "Asking Jaipal a question" in `.claude/process.md`. Every question leads
-with a concrete case, in plain language:
-
-```
-A guest texts "omw can you have my usual ready?" at 6pm.
-The venue closed at 5.
-
-Today: the agent replies "Got it, see you soon" and it
-auto-sends. The guest walks to a locked door.
-
-The question: should a reply that confirms an arrival while
-the venue is closed always go to Jaipal's queue first?
-  A — yes, always
-  B — only when it also promises something
-```
-
-Three lines of situation, one line of what breaks, then the question with
-options. No identifiers, no file paths, no function names, no schema columns.
-Do not recommend. Do not answer your own question. Do not rank them.
+under "Asking Jaipal a question" in `.claude/process.md`: a concrete case in
+plain language first, then the question with options. No identifiers, no file
+paths, no function names, no schema columns. Do not recommend. Do not answer
+your own question. Do not rank them.
 
 **A question that cannot be written that way is not a decision for Jaipal —
 it is an implementation detail.** Decide it yourself, and list it at the end
