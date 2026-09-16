@@ -350,17 +350,20 @@ jobs:
             Dependencies are already installed. Do not run npm install.
 
             LINEAR, FROM CI. There is no Linear MCP here. Use the GraphQL API
-            with curl; the key is in $LINEAR_API_KEY.
+            with curl; the key is in the LINEAR_API_KEY environment variable.
 
             YOUR BASH IS RESTRICTED, AND A DENIED COMMAND FAILS SILENTLY.
-            These are denied however you arrange them: command substitution
-            ($(...) or backticks), variable assignment (NAME=...), output
-            redirection (>), and heredocs (<<). This workflow's own shell
-            steps use those forms; you cannot. Use exactly these two forms.
+            These are denied however you arrange them: expanding an
+            environment variable ($LINEAR_API_KEY or ${LINEAR_API_KEY}),
+            command substitution ($(...) or backticks), variable assignment
+            (NAME=...), output redirection (>), and heredocs (<<). This
+            workflow's own shell steps use those forms; you cannot. Pass the
+            key with curl's own --variable and --expand-header, exactly as
+            below. Use exactly these two forms.
 
             1. A read, with the request inline in single quotes:
 
-                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { id name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
+                 curl -sS https://api.linear.app/graphql --variable %LINEAR_API_KEY --expand-header "Authorization: {{LINEAR_API_KEY}}" -H "Content-Type: application/json" -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { id name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
 
                Piping the response to jq is allowed: append | jq '...'.
 
@@ -369,7 +372,7 @@ jobs:
                ${{ runner.temp }}/linear-request.json, replacing the file each
                time, then send the file:
 
-                 curl -sS https://api.linear.app/graphql -H "Content-Type: application/json" -H "Authorization: $LINEAR_API_KEY" -d @${{ runner.temp }}/linear-request.json
+                 curl -sS https://api.linear.app/graphql --variable %LINEAR_API_KEY --expand-header "Authorization: {{LINEAR_API_KEY}}" -H "Content-Type: application/json" -d @${{ runner.temp }}/linear-request.json
 
                The file is JSON, so escape newlines as \n and double quotes
                as \". A comment, for example:

@@ -154,7 +154,7 @@ earlier comment where that reading misses it.
 | `[BUILD-SKIPPED]` | The ticket carries two repo labels, or its Repo: line and labels disagree | Add `Needs Decision`. Never start the build |
 | `[SLACK]` | The Slack sync posted the ticket; edited in place as it syncs | Bookkeeping, not a turn |
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
-| `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. Read the run before replying: a reply resumes the ticket |
+| `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
