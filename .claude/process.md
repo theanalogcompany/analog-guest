@@ -154,6 +154,7 @@ earlier comment where that reading misses it.
 | `[BUILD-SKIPPED]` | The ticket carries two repo labels, or its Repo: line and labels disagree | Add `Needs Decision`. Never start the build |
 | `[SLACK]` | The Slack sync posted the ticket; edited in place as it syncs | Bookkeeping, not a turn |
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
+| `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. Read the run before replying: a reply resumes the ticket |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
@@ -228,6 +229,15 @@ answered. More generally, **a session never exits a ticket carrying a
 there leaves the ticket looking exactly like one still waiting for him. The
 only silent exit is when the newest comment is already the agent's, which
 already says why the ticket is waiting.
+
+**The workflow checks too, because the rule cannot report its own failure.** A
+session is loud only by writing to Linear, so a session that cannot write
+cannot say so. After every build session a shell step, not the session,
+looks for a comment from the session on each ticket it worked. A ticket with
+none gets `[SILENT-RUN]`, naming the permission denials, and the run fails.
+The denial count is printed in the run log on every build and audit run.
+This check exists because TAC-401's first resume ran green, hit 30
+permission denials, and wrote nothing.
 
 **Nothing tests this.** It is instructions to the build session, not code.
 The workflow fixtures cover which tickets get picked up, not whether a

@@ -7,9 +7,9 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
 # State detection (run first on every invocation)
 
-1. **Re-read ticket state.** `Linear:get_issue` for body + status, `Linear:list_comments` for the full comment thread (createdAt order). In CI there is no Linear MCP — use the GraphQL API with curl and `$LINEAR_API_KEY`.
+1. **Re-read ticket state.** `Linear:get_issue` for body + status, `Linear:list_comments` for the full comment thread (createdAt order). In CI there is no Linear MCP — use the GraphQL API with curl and `$LINEAR_API_KEY`, in exactly the two forms the workflow prompt gives. CI Bash denies command substitution, variable assignment, output redirection and heredocs, and a denied command fails silently.
 
-2. **Compute.** Marker-detection convention: "contains `[MARKER]`" means the comment's marker is `[MARKER]`, and a comment's marker is the first `[...]` marker after its `**[FROM CLAUDE CODE]**` prefix (the prefix, a blank line, then the marker). It is NOT a substring match anywhere in the body: an `[AUDIT]` or a `[PLAN]` that quotes `[NEEDS-INPUT]` keeps its own meaning. The same holds for every marker: `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`, `[AUDIT]`, `[AUDIT-SKIPPED]`, `[BUILD-SKIPPED]`, `[FINDING]`, `[RESUME-CLAIM]`, `[SLACK]`.
+2. **Compute.** Marker-detection convention: "contains `[MARKER]`" means the comment's marker is `[MARKER]`, and a comment's marker is the first `[...]` marker after its `**[FROM CLAUDE CODE]**` prefix (the prefix, a blank line, then the marker). It is NOT a substring match anywhere in the body: an `[AUDIT]` or a `[PLAN]` that quotes `[NEEDS-INPUT]` keeps its own meaning. The same holds for every marker: `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`, `[AUDIT]`, `[AUDIT-SKIPPED]`, `[BUILD-SKIPPED]`, `[FINDING]`, `[RESUME-CLAIM]`, `[SLACK]`, `[SILENT-RUN]`.
 
    **Provenance comes from the prefix, never from the author ID.** Every comment on every ticket is under Jaipal's account, your own included.
 
