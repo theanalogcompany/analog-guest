@@ -1375,3 +1375,148 @@ describe('persistOrRegenQueuedDraft — two pending slots (TAC-394)', () => {
     expect(scenario.inserts).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-385 PR 1: rendered_intentions at both persist sites
+// ---------------------------------------------------------------------------
+//
+// The carrier that lets dispatchOperatorOutbound record the ask when an
+// operator approves or edits a card. Before this, those sends recorded nothing
+// — 13 of 34 sent replies at Le Mil's in the 30 days to 2026-09-14.
+//
+// The column follows review_triggers' policy, NOT pending_until's: it describes
+// THIS draft, so a regen overwrites it wholesale.
+describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
+  const ANCHOR = new Date('2026-09-14T10:00:00.000Z')
+
+  beforeEach(() => {
+    scenario = freshScenario()
+  })
+
+  it('writes the rendered set on the INSERT path', async () => {
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      renderedIntentions: [
+        { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+      ],
+    })
+
+    // promptLine is deliberately NOT carried: recording reads only
+    // classifierDescription, off the definition, so storing the line would be a
+    // second copy of a constant that can go stale against it.
+    expect(scenario.inserts[0]!.rendered_intentions).toEqual([
+      { key: 'understand_order', eligibleAt: '2026-09-14T10:00:00.000Z' },
+    ])
+  })
+
+  it('writes NULL when the caller passes nothing', async () => {
+    // Followup, decline and crash-card drafts. build-runtime-context derives
+    // intentions only when there is a current message, so those paths carry
+    // openIntentions: [] by construction and have nothing to record.
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'generation_failed', null)
+
+    expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
+  })
+
+  it('nulls the column on a blank knowledge-gap card', async () => {
+    // Ruled 2026-09-15. The dispatched text on a blank card is entirely
+    // operator-authored, so the model's rendered set is not a claim about it,
+    // and a classifier double-failure would close intentions the model never
+    // attempted to raise — TAC-332's failure through a new door.
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
+      blankBody: true,
+      renderedIntentions: [
+        { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+      ],
+    })
+
+    expect(scenario.inserts[0]!.body).toBe('')
+    expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
+  })
+
+  it('OVERWRITES on the regen UPDATE path, and is not preserve-by-default', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      'existing-msg-1',
+      {
+        renderedIntentions: [
+          { key: 'learn_name', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+        ],
+      },
+    )
+
+    const payload = scenario.updates[0].payload
+    expect(payload.rendered_intentions).toEqual([
+      { key: 'learn_name', eligibleAt: '2026-09-14T10:00:00.000Z' },
+    ])
+    // The key being PRESENT is what makes it an overwrite. A regen that renders
+    // a different set must not leave the previous attempt's behind, because a
+    // classifier double-failure closes everything it is offered.
+    expect(payload).toHaveProperty('rendered_intentions')
+    expect(payload).not.toHaveProperty('pending_until')
+  })
+
+  // The UPDATE half of the blankBody rule, and it is REACHABLE, which is why it
+  // needs its own test rather than riding on the INSERT one: a gap turn
+  // regenerating a NON-gap card in the same slot (turn 1 queues model_flagged,
+  // turn 2 self-reports a knowledge gap) has pendingQuestion === null, so
+  // renderableIntentions returns a NON-EMPTY set, and blankBody is true. Without
+  // the `blank ||` guard that blank card carries the model's rendered set, and an
+  // operator approving text they typed themselves gets the model's intentions
+  // recorded against their words. Found by code review as a surviving mutant.
+  it('nulls the column on a regen that BLANKS a previously non-gap card', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'model_flagged' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'existing-msg-1',
+      {
+        blankBody: true,
+        renderedIntentions: [
+          { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+        ],
+      },
+    )
+
+    const payload = scenario.updates[0].payload
+    expect(payload.body).toBe('')
+    expect(payload.rendered_intentions).toBeNull()
+  })
+
+  it('nulls the column on a regen that renders nothing', async () => {
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'model_flagged' },
+      error: null,
+    })
+    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      'existing-msg-1',
+      {},
+    )
+
+    expect(scenario.updates[0].payload.rendered_intentions).toBeNull()
+  })
+})

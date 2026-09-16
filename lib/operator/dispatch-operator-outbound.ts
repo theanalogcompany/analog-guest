@@ -26,10 +26,19 @@
 // chain pattern); skip route doesn't use this helper at all (no Sendblue
 // dispatch); approve route stamps neither.
 
+import { waitUntil } from '@vercel/functions'
+
+import { captureIntentionPromptRecordingFailed } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
 import { PendingCommitmentSchema } from '@/lib/schemas'
+// TAC-385 PR 1: imported BY PATH, not through a barrel. record.ts pulls
+// classifyIntentionPrompts from @/lib/ai, and CLAUDE.md documents twice
+// (emoji-cadence, VERIFY_GROUNDING_TRUNCATED_ERROR_CODE) what a barrel mock
+// does to something a test needs for real.
+import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
+import { recordIntentionPrompts } from '@/lib/agent/intentions/record'
 
 export type DispatchAction = 'approve' | 'edit'
 
@@ -121,7 +130,7 @@ export async function dispatchOperatorOutbound(
   const { data: row, error: readErr } = await supabase
     .from('messages')
     .select(
-      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment',
+      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment, rendered_intentions',
     )
     .eq('id', input.messageId)
     .maybeSingle()
@@ -327,6 +336,114 @@ export async function dispatchOperatorOutbound(
         )
       }
     }
+  }
+
+  // ---- 8. TAC-385 PR 1: record the ask ----
+  //
+  // An intention is ASKED when the message carrying it reaches the guest —
+  // auto-sent, operator-approved and operator-edited-then-sent alike (ruled
+  // 2026-09-15). handle-inbound records the auto-sent path; this is the other
+  // two, which recorded nothing: 13 of 34 sent replies at Le Mil's in the 30
+  // days to 2026-09-14, and TAC-380 made it seven intentions per guest.
+  //
+  // `sendBody` is THE DISPATCHED TEXT, never `row.body`. That is the whole
+  // mechanism behind "read the ask from what was sent, not what was drafted":
+  // the classifier judges the words that actually went out, so a question the
+  // operator edited OUT is simply not returned and not recorded. No diffing.
+  // Known limit, accepted: a question the operator writes IN that the model
+  // never rendered cannot be returned either, because the key set is a
+  // per-call enum over the offered set. It stays open and may be asked again.
+  //
+  // PR 1 changes nothing about WHEN an intention closes — raising still closes,
+  // exactly as before. It changes which sends count as raising.
+  //
+  // waitUntil, not awaited, unlike step 7: this is a Haiku call on the
+  // operator's approve tap. The message has already gone out, so a recording
+  // failure must never turn a successful dispatch into a 502.
+  //
+  // Wrapped, even though every branch of the parser is written to drop rather
+  // than throw: this runs AFTER the guest has the message, and it is the only
+  // synchronous work left before the return. Anything that threw here would
+  // reject dispatchOperatorOutbound and 500 the operator's approve on a send
+  // that already succeeded.
+  let renderedIntentions: ReturnType<typeof parseRenderedIntentionsForRecording> = []
+  try {
+    renderedIntentions = parseRenderedIntentionsForRecording(row.rendered_intentions)
+  } catch (e) {
+    console.error('[operator] rendered_intentions parse threw; recording nothing', {
+      messageId: row.id,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+  if (renderedIntentions.length > 0) {
+    const venueId = row.venue_id
+    const guestId = row.guest_id
+    const messageId = row.id
+    const via = input.action === 'edit' ? ('operator_edit' as const) : ('operator_approve' as const)
+    waitUntil(
+      recordIntentionPrompts({
+        venueId,
+        guestId,
+        messageId,
+        sentBody: sendBody,
+        openIntentions: renderedIntentions,
+        now: new Date(),
+      })
+        .then(async (outcome) => {
+          if (outcome.kind === 'recorded') {
+            console.log('[operator] dispatch intention prompts recorded', {
+              messageId,
+              action: input.action,
+              raisedKeys: outcome.raisedKeys,
+              classifierAttempts: outcome.classifierAttempts,
+            })
+          } else if (outcome.kind === 'closed_pessimistically') {
+            // TAC-380 ruling 4: nothing re-asks, but these closed without a
+            // verdict. On the edit path the offered set came from the model's
+            // draft, which the operator may have rewritten — so a pessimistic
+            // closure here can be wrong in a way the auto-send path is not.
+            console.warn(
+              '[operator] intention classifier failed twice; rendered intentions closed',
+              { messageId, action: input.action, closedKeys: outcome.closedKeys, error: outcome.classifierError },
+            )
+            await captureIntentionPromptRecordingFailed({
+              agentRunId: null,
+              via,
+              venueId,
+              guestId,
+              messageId,
+              outcome: 'closed_pessimistically',
+              keys: outcome.closedKeys,
+              error: outcome.classifierError,
+            })
+          } else if (outcome.kind === 'write_failed') {
+            console.warn('[operator] intention prompt write failed', {
+              messageId,
+              action: input.action,
+              keys: outcome.keys,
+              source: outcome.source,
+              error: outcome.error,
+            })
+            await captureIntentionPromptRecordingFailed({
+              agentRunId: null,
+              via,
+              venueId,
+              guestId,
+              messageId,
+              outcome: 'write_failed',
+              keys: outcome.keys,
+              source: outcome.source,
+              error: outcome.error,
+            })
+          }
+        })
+        .catch((e) => {
+          console.error('[operator] recordIntentionPrompts threw unexpectedly', {
+            messageId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }),
+    )
   }
 
   return {

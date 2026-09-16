@@ -475,7 +475,21 @@ function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableP
 // Before TAC-380 both were a bare console.warn, invisible in PostHog and Slack,
 // and this ticket takes the number of intentions they apply to from two to seven.
 export interface IntentionPromptRecordingFailedProps {
-  agentRunId: string
+  /**
+   * TAC-385 PR 1: NULLABLE, because the operator dispatch path has no agent
+   * run — the draft's run ended when it was queued, possibly hours earlier.
+   * Faking one would put a meaningless id in the Slack line; `via` below is
+   * what tells you where to look instead.
+   */
+  agentRunId: string | null
+  /**
+   * Which send path this closure happened on. REQUIRED rather than optional,
+   * so a third send path has to decide rather than silently inherit
+   * 'auto_send'. It matters for triage: on the dispatch paths the offered set
+   * came from the model's draft, which the operator may have rewritten, so a
+   * pessimistic closure there can be wrong in a way it cannot be on auto-send.
+   */
+  via: 'auto_send' | 'operator_approve' | 'operator_edit'
   venueId: string
   guestId: string
   messageId: string
@@ -503,7 +517,8 @@ function formatIntentionPromptRecordingFailed(props: IntentionPromptRecordingFai
     headline,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
+    `via: ${props.via}`,
+    ...(props.agentRunId === null ? [] : [`run: \`${props.agentRunId}\``]),
     `message: \`${props.messageId}\``,
     `keys: ${props.keys.join(', ')}${props.source ? ` (${props.source})` : ''}`,
     `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,

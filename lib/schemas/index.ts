@@ -39,6 +39,12 @@ export {
 } from './venue-hours'
 export { parseVisitPrecision, type VisitTimePrecision } from './visit-precision'
 export {
+  parseRenderedIntentions,
+  type RenderedIntention,
+  RenderedIntentionSchema,
+  RenderedIntentionsSchema,
+} from './rendered-intentions'
+export {
   type ActiveCommitment,
   type ArrivalCaptureEmission,
   ArrivalCaptureEmissionSchema,

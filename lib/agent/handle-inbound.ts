@@ -1062,6 +1062,42 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       }
     }
 
+    // TAC-380 TRAP 4 / TAC-385 PR 1. ONE call, feeding BOTH branches below.
+    //
+    // This is the exact set buildAiRuntime rendered — never ctx.openIntentions.
+    // When the classifier fails twice, recording closes everything it was
+    // handed, so a wider set would close intentions suppressed this turn
+    // (opt_out, a pending question) that the guest never saw.
+    //
+    // Hoisted above the queue/send fork by TAC-385 so that what a QUEUED draft
+    // stores on messages.rendered_intentions and what an AUTO-SEND records are
+    // the same value by construction rather than by two call sites agreeing.
+    //
+    // NAMING, because the variable reads as more than it is: this is the
+    // RECORDABLE set, which is `renderableIntentions(...)` MINUS the opener
+    // turn. buildAiRuntime still RENDERS intentions on an opener turn — only
+    // recording is suppressed there. Consequence, unchanged from TAC-332 on the
+    // auto-send path and now inherited by dispatch: an opener draft that
+    // genuinely raises an intention and is then approved records nothing, and
+    // the intention is asked again. That fails in the annoying-not-invisible
+    // direction, which is the direction TAC-385 §4 chose.
+    //
+    // TAC-332: never on the true opener turn either. The opener tells the model
+    // to greet and ask whether it's their first time, not to raise an
+    // intention, so the classifier there can only return a correct negative or
+    // a destructive false positive. Reuses computeFirstTouchAfterQrScan, the
+    // flag that renders the opener, so "is this the opener turn" can't diverge
+    // between what renders it and what may record against it — and applying it
+    // HERE means a queued opener draft stores nothing, so the dispatch path
+    // inherits the guard without re-deriving it.
+    const renderedIntentions = computeFirstTouchAfterQrScan(ctx, ctx.recognition.computedAt)
+      ? []
+      : renderableIntentions(
+          ctx.openIntentions,
+          ctx.classification.category,
+          ctx.pendingQuestion !== null,
+        )
+
     if (approval.action === 'queue') {
       const queueSpan = trace.span('queue', {
         primaryTrigger: approval.primaryTrigger,
@@ -1092,6 +1128,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: 'regen',
+            // TAC-385 PR 1: carry the rendered set onto the card so
+            // dispatchOperatorOutbound can record the ask if an operator
+            // approves or edits it. Nulled by the persist layer under
+            // blankBody.
+            renderedIntentions,
           },
         )
         if (persistResult.action === 'dropped') {
@@ -1288,35 +1329,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       })
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
-      // blocks the reply. Uses the SENT body, and only runs on this 'sent' path.
+      // blocks the reply. Uses the SENT body.
       //
-      // KNOWN GAP, TAC-391: a queued draft an operator later
-      // approves or edits DOES reach the guest, via dispatchOperatorOutbound,
-      // and nothing records intentions there. Those sends neither close
-      // intentions nor feed the brake. At Le Mil's that was 13 of 34 sent
-      // replies in the 30 days to 2026-09-14.
+      // TAC-385 PR 1: `renderedIntentions` is computed ONCE above the
+      // queue/send fork and used by both, so an auto-send records exactly the
+      // set a queued draft would have stored. The operator-approved and
+      // operator-edited paths record the same way now, from
+      // dispatchOperatorOutbound — that was TAC-391's gap, 13 of 34 sent
+      // replies at Le Mil's in the 30 days to 2026-09-14.
       //
-      // TRAP 4. Recording is handed renderableIntentions(...), the exact set
-      // buildAiRuntime rendered, never ctx.openIntentions. When the classifier
-      // fails twice, recording closes everything it was handed, so a wider set
-      // would close intentions suppressed this turn (opt_out, a pending
-      // question) that the guest never saw.
-      //
-      // TAC-332: never on the true opener turn either. The opener tells the
-      // model to greet and ask whether it's their first time, not to raise an
-      // intention, so the classifier there can only return a correct negative
-      // or a destructive false positive. Reuses computeFirstTouchAfterQrScan,
-      // the flag that renders the opener, so "is this the opener turn" can't
-      // diverge between what renders it and what may record against it.
-      const renderedIntentions = renderableIntentions(
-        ctx.openIntentions,
-        ctx.classification.category,
-        ctx.pendingQuestion !== null,
-      )
-      if (
-        renderedIntentions.length > 0 &&
-        !computeFirstTouchAfterQrScan(ctx, ctx.recognition.computedAt)
-      ) {
+      // See the hoisted declaration for trap 4 and the TAC-332 opener guard.
+      if (renderedIntentions.length > 0) {
         const venueId = ctx.venue.id
         const guestId = ctx.guest.id
         const messageId = outboundMessageId
@@ -1346,6 +1369,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
                 })
                 await captureIntentionPromptRecordingFailed({
                   agentRunId,
+                  via: 'auto_send',
                   venueId,
                   guestId,
                   messageId,
@@ -1364,6 +1388,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
                 })
                 await captureIntentionPromptRecordingFailed({
                   agentRunId,
+                  via: 'auto_send',
                   venueId,
                   guestId,
                   messageId,

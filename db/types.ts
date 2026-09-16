@@ -757,6 +757,7 @@ export type Database = {
           prompt_version: string | null
           provider_message_id: string | null
           reaction_type: string | null
+          rendered_intentions: Json | null
           reply_to_message_id: string | null
           response_review: Json | null
           review_reason: string | null
@@ -793,6 +794,7 @@ export type Database = {
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
+          rendered_intentions?: Json | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
@@ -829,6 +831,7 @@ export type Database = {
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
+          rendered_intentions?: Json | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null

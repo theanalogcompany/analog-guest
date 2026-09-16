@@ -1,0 +1,73 @@
+-- 045_messages_rendered_intentions.sql
+-- TAC-385 PR 1: record the ask on every send path.
+--
+-- An intention is ASKED when the message carrying it reaches the guest —
+-- auto-sent, operator-approved and operator-edited-then-sent alike (ruled
+-- 2026-09-15). Auto-sends already record, from handle-inbound.ts. A draft an
+-- operator approves or edits is dispatched by
+-- lib/operator/dispatch-operator-outbound.ts, which records nothing: at Le Mil's
+-- that was 13 of 34 sent replies in the 30 days to 2026-09-14, and TAC-380 made
+-- it seven intentions per guest rather than two.
+--
+-- This column is the carrier that lets the dispatch path record. It holds the
+-- intentions RENDERED into the prompt that produced this draft, one entry each,
+-- as {"key": <intention_key>, "eligibleAt": <iso timestamp>}. Shaped like
+-- messages.pending_commitment (migration 027): a jsonb intent carrier on the
+-- draft row, read back when the draft is dispatched — camelCase inside the
+-- payload, matching that carrier's own `expiresAt`, even though the columns
+-- these mirror are snake_case. Parsed by lib/schemas/rendered-intentions.ts.
+--
+-- WHY eligible_at IS STORED RATHER THAN LOOKED UP AT DISPATCH.
+-- This is the part that is not obvious and is the easiest thing here to
+-- "simplify" away later.
+--
+-- Recording calls closeIntentions (lib/agent/intentions/record.ts), which uses
+-- the anchor twice. It ensures an eligibility row exists carrying it, because
+-- the eligibility write is fire-and-forget and may not have landed yet. And for
+-- the two event-armed intentions — got_the_recommendation, did_they_like_it —
+-- the stamp is guarded on `eligible_at <= anchor` AND `prompted_at IS NULL OR
+-- prompted_at < anchor`, so the prompt records WHICH ARMING it closed.
+--
+-- Those two re-arm on a strictly newer recommendation or order, which moves
+-- eligible_at forward. A draft can sit in the operator queue for hours. If the
+-- recorder read the guest's CURRENT anchor at dispatch instead of this stored
+-- one, a re-arm in that gap would make it stamp a prompt from the OLD arming
+-- onto the NEW one — closing an intention about an event the message never
+-- mentioned, which is precisely what those guards exist to prevent. The anchor
+-- must be the one that RENDERED.
+--
+-- Re-deriving the whole set at dispatch fails for the same family of reasons:
+-- renderableIntentions needs that turn's classification and pending question,
+-- applyCurrentTurnSuppression needs that turn's inbound body, and in the
+-- meantime an intention may have expired, been satisfied, re-armed, or had the
+-- brake engage. Recording against a re-derived set is TAC-380 trap 4.
+--
+-- NULL means "no intentions rendered into this draft, or this row predates the
+-- migration". Both are the same instruction to the recorder: record nothing.
+-- A blank knowledge-gap card (TAC-309) is written NULL deliberately — its
+-- dispatched text is entirely operator-authored, so the model's rendered set is
+-- not a claim about it, and a classifier double-failure would otherwise close
+-- intentions the model never attempted to raise (ruled 2026-09-15).
+--
+-- `[]` IS A THIRD VALUE, and unlike review_triggers / ungrounded_claims in the
+-- same payload it carries NO extra meaning: handle-inbound always passes a set,
+-- so an inbound card on a suppressed turn (opt_out, a pending question) or the
+-- opener turn stores `[]`. NULL is what pre-migration rows, blank cards and the
+-- non-inbound callers carry. Both read as "record nothing" — do not build a
+-- three-state reader here by analogy with its neighbours.
+--
+-- NO BACKFILL: every existing row is already dispatched, or will be dispatched
+-- by code that reads NULL as "record nothing".
+-- NO INDEX: the only read is by primary key, inside dispatchOperatorOutbound.
+--
+-- SCOPE NOTE for whoever reads this next: PR 1 does NOT change when an
+-- intention closes. Raising still closes, exactly as before. This column only
+-- widens WHICH SENDS COUNT AS RAISING. The asked/closed split is TAC-385 PR 2.
+--
+-- ORDERING: additive, but deployed code SELECTs the column, so apply in Studio
+-- BEFORE merging the PR.
+--
+-- HIGH-STAKES: touches `messages`. db/types.ts is hand-patched in the same
+-- commit until `npm run db:types` runs post-apply.
+
+alter table messages add column rendered_intentions jsonb;

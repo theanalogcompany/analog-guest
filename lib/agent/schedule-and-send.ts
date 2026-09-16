@@ -7,6 +7,8 @@ import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
 import { type PendingCommitment, pendingFromEmission } from '@/lib/schemas'
 import { fireRedAlert } from './alerts'
+import type { OpenIntention } from './intentions/derive'
+import { buildRenderedIntentionsPayload } from './intentions/rendered'
 import {
   type CommitmentIdentity,
   commitmentIdentityOf,
@@ -159,6 +161,31 @@ export interface PersistQueuedDraftOptions {
    * gate never saw is never treated more loosely than one it did.
    */
   callerPolicy?: SlotCallerPolicy
+  /**
+   * TAC-385 PR 1: the intentions RENDERED into the prompt that produced this
+   * draft, landing on `messages.rendered_intentions` (migration 045).
+   *
+   * It is what lets dispatchOperatorOutbound record the ask when an operator
+   * approves or edits the card, which today records nothing — 13 of 34 sent
+   * replies at Le Mil's in the 30 days to 2026-09-14.
+   *
+   * OVERWRITE-WHOLESALE, null-by-omission, exactly like `pending_commitment`
+   * and `reviewTriggers` above and UNLIKE `pendingUntil`. A regenerated draft
+   * came from a NEW prompt with a NEW rendered set; keeping the old one would
+   * offer the classifier intentions this draft never raised, and a classifier
+   * double-failure closes everything it is offered (TAC-380 ruling 4).
+   *
+   * NULLED under `blankBody`, alongside `ungrounded_claims` (ruled
+   * 2026-09-15). A blank knowledge-gap card's dispatched text is entirely
+   * operator-authored, so the model's rendered set is not a claim about it,
+   * and recording against it would attribute an operator's words to the agent.
+   *
+   * Only the inbound path ever sets this: build-runtime-context derives
+   * intentions only when there is a current message, so followup, decline and
+   * crash-card drafts carry `openIntentions: []` by construction and write
+   * NULL here.
+   */
+  renderedIntentions?: readonly OpenIntention[]
 }
 
 /**
@@ -904,6 +931,12 @@ async function tryQueueInsert(
           // and one because the check inside it didn't. `[]` is a THIRD value
           // here and survives as itself — see the option's docstring.
           ungrounded_claims: options.ungroundedClaims ?? null,
+          // TAC-385 PR 1: the rendered set, so the operator dispatch path can
+          // record the ask. Omitted -> null, which reads as "record nothing".
+          rendered_intentions:
+            options.renderedIntentions === undefined
+              ? null
+              : buildRenderedIntentionsPayload(options.renderedIntentions),
           pending_commitment: pendingCommitment,
           // TAC-308: arms the holding-message timer. Undefined stays null —
           // only a knowledge-gap draft gets a clock.
@@ -928,12 +961,19 @@ async function tryQueueInsert(
           // model did NOT self-report, so the two can't both be set. It is
           // load-bearing for the direct callers (the generation-failure card)
           // and for any future one that doesn't inherit that exclusion.
+          // TAC-385 PR 1: `rendered_intentions` is nulled here too (ruled
+          // 2026-09-15). The dispatched text on a blank card is entirely the
+          // operator's, so recording the model's rendered set against it would
+          // attribute their words to the agent — and a classifier
+          // double-failure would then close intentions the model never
+          // attempted to raise, which is TAC-332's failure through a new door.
           ...(options.blankBody === true
             ? {
                 body: '',
                 voice_fidelity: null,
                 pending_commitment: null,
                 ungrounded_claims: null,
+                rendered_intentions: null,
               }
             : {}),
         }),
@@ -1032,6 +1072,13 @@ async function tryRegenUpdate(
       // is preserved.
       review_triggers: options.reviewTriggers ?? null,
       ungrounded_claims: blank ? null : (options.ungroundedClaims ?? null),
+      // TAC-385 PR 1: overwrite-wholesale on regen, with the same reasoning as
+      // the two columns above — this draft's rendered set, not the previous
+      // attempt's. Nulled when blank, per the INSERT path.
+      rendered_intentions:
+        blank || options.renderedIntentions === undefined
+          ? null
+          : buildRenderedIntentionsPayload(options.renderedIntentions),
     }
     // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
     // omitted from the payload unless the caller explicitly passed a new
