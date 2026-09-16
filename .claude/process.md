@@ -178,6 +178,9 @@ Every question leads with a concrete case in plain language: three lines of
 situation, one line of what breaks, then the question with options. No
 identifiers, no file paths, no function names, no schema columns.
 
+The shape and these rules are the same in every repo. The example is not:
+each repo's copy uses a case from its own domain.
+
 ```
 A guest texts "omw can you have my usual ready?" at 6pm.
 The venue closed at 5.
@@ -241,6 +244,10 @@ why not.
 **A ticket marked `[HUMAN-REVIEW-REQUIRED]` never gets a plan from `/work-ticket`, in CI or run by hand, by design.** Phase 0 checks the ticket against the high-stakes list in `work-ticket.md` step 4 on every run, after it applies answers and before any plan. So each time Jaipal answers, the session moves the answered questions out of `## Open questions`, posts `[HUMAN-REVIEW-REQUIRED]` again, and exits. No reply moves the ticket past that point, however many times he answers.
 
 That is the intended behaviour, not a stuck ticket: high-stakes work never starts unattended. **The only route forward is a session Jaipal drives himself without `/work-ticket`**, where he approves the plan and watches the build. Running `/work-ticket` by hand does not get past it; the same check stops a local run the same way.
+
+**There is no go-ahead that lets `/work-ticket` continue past the check** (ruled 2026-09-16). Jaipal answering, or approving, or saying "plan it" on such a ticket does not change what the command does.
+
+**What that costs: most of Gate Two is outside the automation entirely.** Most of Gate Two touches the agent runtime, and every one of those tickets is planned and built in a session Jaipal drives himself. The automation still audits them and still records his answers, but it never plans or builds them.
 
 ## On hitting a question
 
