@@ -11,16 +11,28 @@ below.
 
 # Check the repo
 
-Find the ticket's **Repo:** line. If it names a repo other than the one you
-are running in, stop and say which repo to run in. Do not audit across a repo
-boundary.
+Work out which repo works this ticket, by the rule under "Which repo works a
+ticket" in `.claude/process.md`:
 
-If the ticket names no repo, say so and stop. That is a defect in the ticket,
-not something to guess past.
+- If its **Repo:** line names at least one repo the ticket is labelled for,
+  the first such repo.
+- If it has no Repo: line and one repo label, that repo.
+
+If that is a repo other than the one you are running in, stop and say which
+repo to run in. Do not audit across a repo boundary.
+
+If the ticket has two repo labels and no Repo: line, a Repo: line naming no
+repo it is labelled for, or no repo label at all, say so and stop. That is a
+defect in the ticket, not something to guess past.
 
 A ticket is audited once, by one session, regardless of how many repos it
-touches. If it spans repos, audit from the one its **Repo:** line names and
-state in the report what could not be verified from there.
+touches. Audit it from the repo chosen above, and state in the report what
+could not be verified from there.
+
+A ticket carrying two repo labels can be audited but never built: cross-repo
+work is two tickets, one per repo, linked. Audit it anyway, and say under
+WRONG that it needs splitting before anything can build it. Saying so now is
+cheaper than the build refusing it later.
 
 # The audit
 
@@ -36,7 +48,7 @@ over migrations, `pg_get_functiondef` over migration files, the running query
 over the query you would expect. A claim you cannot verify is not confirmed —
 say so rather than assuming the ticket is right.
 
-Post one comment in this shape:
+Post one comment, flat at the top level, never as a reply, in this shape:
 
 ```
 **[FROM CLAUDE CODE]**
@@ -51,8 +63,31 @@ that proves it.
 
 **2. WRONG** — claims that do not hold, with what is actually true.
 
-**3. QUESTIONS** — numbered, one decision each, options stated. Do not
-recommend. Do not answer your own question. Do not rank them.
+**3. QUESTIONS** — numbered, one decision each, each written in the format
+under "Asking Jaipal a question" in `.claude/process.md`. Every question leads
+with a concrete case, in plain language:
+
+```
+A guest texts "omw can you have my usual ready?" at 6pm.
+The venue closed at 5.
+
+Today: the agent replies "Got it, see you soon" and it
+auto-sends. The guest walks to a locked door.
+
+The question: should a reply that confirms an arrival while
+the venue is closed always go to Jaipal's queue first?
+  A — yes, always
+  B — only when it also promises something
+```
+
+Three lines of situation, one line of what breaks, then the question with
+options. No identifiers, no file paths, no function names, no schema columns.
+Do not recommend. Do not answer your own question. Do not rank them.
+
+**A question that cannot be written that way is not a decision for Jaipal —
+it is an implementation detail.** Decide it yourself, and list it at the end
+of this section under **Decided without asking**, one line each with the
+reason, so he can overrule it.
 
 **Cap at seven.** If the ticket raises more than seven distinct decisions,
 that is itself the finding: the ticket is too large to rule on and should be
@@ -68,24 +103,34 @@ Do not file tickets. Maximum three; list any remainder as one-liners under a
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.
 
-# After posting — the ticket always moves
+# After posting — the ticket always leaves Todo
 
-An audited ticket never stays in Todo. Todo means unaudited, and leaving it
-there means nothing picks the ticket up and the board lies about why.
+An audited ticket never stays in Todo. Todo means not yet looked at, and
+leaving it there means nothing picks the ticket up and the board lies about
+why.
 
-**Questions found** → copy them into the ticket body's `## Open questions`
-block, set the ticket to **Needs Ruling**, add the `Needs Decision` label.
+**Questions found** → set the ticket to **Ready**, add the `Needs Decision`
+label, and copy the questions into the ticket body's `## Open questions`
+block. Ready says it has been audited; the label says it is waiting on Jaipal,
+and nothing builds it while the label is on.
 
-**No questions** → set the ticket to **Ready**. It is verified and buildable,
-and the build automation pulls from Ready.
+**No questions** → set the ticket to **Ready**, with no `Blocked On` label. It
+is verified and buildable, and the build automation pulls from Ready.
+
+Never change the status for any other reason.
 
 If the ticket body already has an `## Open questions` block, merge rather than
 append. A question already asked in a different form is not a new question;
 say which existing item it duplicates.
 
-If the ticket was already in Needs Ruling and this audit resolved its
-questions against the code, say so in the comment but do **not** move it.
-Only a ruling from Jaipal clears a question he was asked.
+If `## Open questions` already held questions Jaipal was asked before this
+audit, and this audit resolved them against the code, say so in the comment
+but leave them, and the `Needs Decision` label, in place. Only a ruling from
+Jaipal clears a question he was asked.
+
+A `Needs Decision` label that a failed audit run or an `[AUDIT-SKIPPED]`
+comment put on the ticket is not a question he was asked. This audit's own
+outcome replaces it.
 
 If the ticket's `## Gate` section names no QA route, set one — `QA: Script`
 if the gate is provable by a test or query, `QA: Device` if it needs Jaipal on

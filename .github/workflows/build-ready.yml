@@ -1,18 +1,34 @@
 name: Build ready tickets
 
-# Polled every 15 minutes.
+# Two jobs of one workflow, scheduled every 15 minutes, which GitHub runs
+# hours apart (TAC-428):
 #
-#   START   — a ticket in Ready with no live session. Runs /work-ticket,
-#             which audits, plans, posts [PLAN], and moves the ticket to
-#             Needs Ruling for approval. It does not build unattended.
+#   START   — a Ready ticket with no Blocked On label and no live session.
+#             Runs /work-ticket, which plans, posts [PLAN], and adds Needs
+#             Decision for approval. It does not build unattended.
 #
-#   RESUME  — a ticket in Needs Ruling whose newest comment is human input.
-#             The ruling has landed, so /work-ticket picks up where it
-#             stopped.
+#   RESUME  — a Ready or In Progress ticket carrying Needs Decision or Needs
+#             Action, whose newest comment is human input. The ruling has
+#             landed, so /work-ticket picks up where it stopped.
+#
+# "Newest comment" skips [SLACK] and [RESUME-CLAIM] bookkeeping, so a Slack
+# marker or an earlier claim never buries a ruling.
+#
+# Blocked on Jaipal is a label, not a status: nothing here moves a ticket
+# between statuses.
 #
 # A resume is CLAIMED before Claude runs, so a run that dies without posting
 # cannot be retried forever. Two attempts per ruling, then the ticket sits
 # visibly stuck. Bounded stuck beats unbounded spend.
+#
+# Which tickets are this repo's: the label narrows, the Repo: line decides
+# (.claude/process.md, "Which repo works a ticket"). One ticket, one repo:
+# a ticket with two repo labels is never built. The repo that would have
+# built it posts [BUILD-SKIPPED] saying it needs splitting, adds Needs
+# Decision, and moves on.
+#
+# dry_run (manual dispatch only) prints what the run would start, resume and
+# flag, and writes nothing to Linear.
 #
 # Scheduled workflows run only from the default branch.
 
@@ -27,6 +43,11 @@ on:
         description: "Work one specific ticket (e.g. TAC-403). Blank = whatever is Ready or newly ruled."
         required: false
         type: string
+      dry_run:
+        description: "Print what would be started, resumed and flagged. Writes nothing."
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ticket-builds-${{ github.repository }}
@@ -51,7 +72,7 @@ jobs:
           node-version: "22"
           cache: npm
 
-      # Typecheck, lint, tests and the pre-commit hook all need these.
+      # work-ticket.md's typecheck, lint and test gates all need these.
       - name: Install dependencies
         run: npm ci
 
@@ -61,6 +82,7 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           REPO_NAME: ${{ github.event.repository.name }}
           ONE_TICKET: ${{ inputs.ticket || github.event.client_payload.ticket }}
+          DRY_RUN: ${{ inputs.dry_run }}
           LIMIT: "2"
           MAX_ATTEMPTS: "2"
           # A [POLLING-STATE] older than this is a dead local session, not a
@@ -71,54 +93,86 @@ jobs:
           set -euo pipefail
 
           if [ -n "${ONE_TICKET:-}" ]; then
-            echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
-            echo "claims=" >> "$GITHUB_OUTPUT"
+            echo "defects=[]" >> "$GITHUB_OUTPUT"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "Dry run: would work $ONE_TICKET. Nothing worked."
+              echo "tickets=" >> "$GITHUB_OUTPUT"
+            else
+              # work-ticket.md's own gate refuses a ticket this repo can't build.
+              echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
           RESPONSE=$(curl -sS https://api.linear.app/graphql \
             -H "Content-Type: application/json" \
             -H "Authorization: $LINEAR_API_KEY" \
-            -d @- <<'GQL'
-          {"query":"query { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { in: [\"Ready\", \"Needs Ruling\"] } } }) { nodes { id identifier description priority state { name } labels { nodes { name } } comments { nodes { id body createdAt } } } } }"}
-          GQL
-          )
+            -d "$(jq -nc --arg repo "$REPO_NAME" '{
+              query: "query($repo: String!) { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { in: [\"Ready\", \"In Progress\"] } }, labels: { some: { name: { eq: $repo } } } }) { nodes { id identifier description priority state { name } labels { nodes { name } } comments(first: 250) { nodes { id body createdAt } } } } }",
+              variables: { repo: $repo }
+            }')")
+
+          if ! echo "$RESPONSE" | jq -e '.data.issues.nodes' > /dev/null; then
+            echo "::error::Linear query failed: $RESPONSE"
+            exit 1
+          fi
+
+          RULES='
+            # The repo rule from .claude/process.md. Kept identical in
+            # audit-new-todo.yml.
+            def repo_labels: [.labels.nodes[].name | select(startswith("analog-"))];
+            def repo_line_names:
+              [(.description // "") | capture("(?:^|\\n)[ \\t>*_]*Repos?[*_]*[ \\t]*:(?<line>[^\\n]*)"; "i") | .line]
+              | if length == 0 then []
+                else [.[0] | gsub("<[^>]*>"; "") | gsub("https?://[^\\s)>]*"; "") | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
+                end;
+            def owner:
+              repo_labels as $labels
+              | repo_line_names as $named
+              | ([$named[] | select(. as $n | $labels | any(. == $n))] | first) as $pick
+              | if $pick != null then $pick
+                elif ($named | length) > 0 then "defect:unlabelled"
+                elif ($labels | length) == 1 then $labels[0]
+                elif ($labels | length) == 0 then "none"
+                else "defect:no-repo-line"
+                end;
+            def has_label($name): [.labels.nodes[].name] | any(. == $name);
+            # Provenance is the prefix; a comment marker is the first marker
+            # after it (.claude/process.md). $m may be an alternation.
+            def is_bot: test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*");
+            def marker_is($m): test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:" + $m + ")\\]");
+            def build_skipped: [.comments.nodes[].body] | map(marker_is("BUILD-SKIPPED")) | any;
+          '
 
           SELECTED=$(echo "$RESPONSE" | jq -c \
             --arg repo "$REPO_NAME" \
             --argjson limit "$LIMIT" \
             --argjson maxAttempts "$MAX_ATTEMPTS" \
             --argjson liveHours "$LIVE_SESSION_HOURS" \
-            --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+            --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RULES"'
             ($now | fromdateiso8601) as $nowSec
             | .data.issues.nodes
 
-            # this repo only, per the ticket Repo: line
-            | map(select(.description // "" | test("Repo:?\\**\\s*:?\\s*`?" + $repo; "i")))
+            # this repo only, and only a ticket with one repo label
+            | map(select(owner == $repo and (repo_labels | length) == 1))
 
             | map(
-                (.comments.nodes | sort_by(.createdAt)) as $sorted
-                # [RESUME-CLAIM] and [SLACK] comments are workflow bookkeeping,
-                # not a turn. Skipping them keeps a Slack marker from burying a
-                # ruling, and keeps the ruling newest across claims so the
-                # attempt count below can reach MAX_ATTEMPTS.
-                | ($sorted
-                   | map(select(
-                       ((.body | test("\\[FROM CLAUDE CODE\\]"))
-                        and (.body | test("\\[(RESUME-CLAIM|SLACK)\\]")))
-                       | not))
-                   | last) as $newest
+                [.labels.nodes[].name] as $labels
+                | (.comments.nodes | sort_by(.createdAt)) as $sorted
+                # the newest comment that is a turn: bookkeeping skipped
+                | ($sorted | map(select(.body | marker_is("RESUME-CLAIM|SLACK") | not)) | last) as $newest
                 | . + {
+                    blocked: ($labels | any(. == "Needs Decision" or . == "Needs Action")),
                     newestId: ($newest.id // ""),
                     lastIsHuman: (
                       if $newest == null then false
-                      else ($newest.body | test("\\[FROM CLAUDE CODE\\]") | not)
+                      else ($newest.body | is_bot | not)
                       end
                     ),
                     # a session is live only if its POLLING-STATE is recent
                     live: (
                       [ $sorted[]
-                        | select(.body | test("\\[POLLING-STATE\\]"))
+                        | select(.body | marker_is("POLLING-STATE"))
                         | (.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)
                       ]
                       | map(select($nowSec - . < ($liveHours * 3600)))
@@ -127,31 +181,57 @@ jobs:
                     # how many times CI has already claimed this exact ruling
                     attempts: (
                       [ $sorted[]
-                        | select(.body | test("\\[RESUME-CLAIM\\]"))
+                        | select(.body | marker_is("RESUME-CLAIM"))
                         | select(.body | test("ruling=" + ($newest.id // "none")))
                       ] | length
                     )
                   }
               )
 
-            | map(select(
-                (.state.name == "Ready" and (.live | not)
-                  and ([.labels.nodes[].name] | index("Needs Action") | not))
-                or
-                (.state.name == "Needs Ruling" and .lastIsHuman
-                  and .attempts < $maxAttempts)
-              ))
+            # START: Ready, unblocked, nothing running on it.
+            # RESUME: blocked on Jaipal, a human spoke last, attempts left.
+            | map(
+                if .state.name == "Ready" and (.blocked | not) and (.live | not)
+                then . + { mode: "start" }
+                elif .blocked and .lastIsHuman and .attempts < $maxAttempts
+                then . + { mode: "resume" }
+                else empty
+                end
+              )
 
             | sort_by(if .priority == 0 then 99 else .priority end)
             | .[:$limit]
-            | map({ id, identifier, newestId, state: .state.name })
+            | map({ id, identifier, newestId, mode, state: .state.name })
+          ')
+
+          # Tickets this repo would have built but can't: two repo labels, or
+          # a Repo: line naming no labelled repo. Noticed once; noticed again
+          # only if Needs Decision was removed without fixing the ticket.
+          DEFECTS=$(echo "$RESPONSE" | jq -c \
+            --arg repo "$REPO_NAME" "$RULES"'
+            .data.issues.nodes
+            | map(select(
+                ((owner == $repo and (repo_labels | length) >= 2)
+                  or (owner | startswith("defect:")))
+                and ((build_skipped and has_label("Needs Decision")) | not)
+              ))
+            | map({ id, identifier, hasNeedsDecision: has_label("Needs Decision"), labels: (repo_labels | sort), named: repo_line_names })
           ')
 
           TICKETS=$(echo "$SELECTED" | jq -r 'map(.identifier) | join(" ")')
+          echo "$SELECTED" | jq -r '.[] | "\(.mode): \(.identifier) (\(.state))"'
+          echo "$DEFECTS" | jq -r '.[] | "flag: \(.identifier)"'
+
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "Dry run: no claims or flags written, nothing worked."
+            echo "tickets=" >> "$GITHUB_OUTPUT"
+            echo "defects=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Claim every resume before Claude runs. If the run dies, the claim
-          # is already recorded and the retry count holds.
-          echo "$SELECTED" | jq -c '.[] | select(.state == "Needs Ruling")' | while read -r row; do
+          # is already recorded and the attempt count holds.
+          echo "$SELECTED" | jq -c '.[] | select(.mode == "resume")' | while read -r row; do
             ID=$(echo "$row" | jq -r .id)
             RULING=$(echo "$row" | jq -r .newestId)
             NAME=$(echo "$row" | jq -r .identifier)
@@ -162,8 +242,8 @@ jobs:
               -H "Content-Type: application/json" \
               -H "Authorization: $LINEAR_API_KEY" \
               -d "$(jq -nc --arg id "$ID" --arg body "$BODY" \
-                  '{query:"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables:{id:$id, body:$body}}')" \
-              > /dev/null
+                  '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
             echo "claimed $NAME"
           done
 
@@ -173,6 +253,55 @@ jobs:
             echo "Working: $TICKETS"
           fi
           echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"
+          echo "defects=$DEFECTS" >> "$GITHUB_OUTPUT"
+
+      - name: Flag tickets that can't be built
+        if: steps.queue.outputs.defects != '' && steps.queue.outputs.defects != '[]'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DEFECTS: ${{ steps.queue.outputs.defects }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+            | jq -r '.data.issueLabels.nodes[0].id // empty')
+          if [ -z "$LABEL_ID" ]; then
+            echo "::error::No Needs Decision label found in Linear."
+            exit 1
+          fi
+
+          echo "$DEFECTS" | jq -c '.[]' | while read -r row; do
+            ID=$(echo "$row" | jq -r .id)
+            NAME=$(echo "$row" | jq -r .identifier)
+            # The two-label wording is .claude/process.md's, word for word.
+            TEXT=$(echo "$row" | jq -r '
+              if (.labels | length) >= 2
+              then "This ticket can'"'"'t be built. It carries the \(.labels | join(" and ")) labels, and cross-repo work is two tickets, one per repo, linked. Built as one ticket, only one repo would build it and the other half would never be built.\n\nSplit it: one ticket per repo, each with its own repo label and Repo: line, linked to each other. Replying here will not unblock it: the ticket needs splitting."
+              else "This ticket can'"'"'t be built. Its Repo: line names \(.named | join(" and ")), and the ticket carries no label for \(if (.named | length) == 1 then "it" else "any of them" end).\n\nFix the Repo: line or the repo label so they agree. Replying here will not unblock it."
+              end')
+            BODY="**[FROM CLAUDE CODE]**
+
+          [BUILD-SKIPPED] ${NAME}
+
+          ${TEXT}"
+
+            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            if [ "$(echo "$row" | jq -r .hasNeedsDecision)" != "true" ]; then
+              gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+                '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+                | jq -e '.data.issueAddLabel.success' > /dev/null
+            fi
+            echo "flagged $NAME"
+          done
 
       - name: Work
         if: steps.queue.outputs.tickets != ''
@@ -196,33 +325,46 @@ jobs:
             Dependencies are already installed. Do not run npm install.
 
             NO LINEAR MCP IN CI. Use the GraphQL API with curl; the key is in
-            $LINEAR_API_KEY. Read with `issue(id: "TAC-403")`, comment with
-            `commentCreate`, change status and labels with `issueUpdate`.
+            $LINEAR_API_KEY. Read with `issue(id: "TAC-403")` and fetch
+            comments with `comments(first: 250)`. Comment with
+            `commentCreate` (always flat: never pass parentId), change status
+            with `issueUpdate` and `stateId`, and add or remove a label with
+            `issueAddLabel` / `issueRemoveLabel`. Do not set labels through
+            issueUpdate's `labelIds`: it replaces every label on the ticket.
             Resolve state and label ids by querying workflowStates and
-            issueLabels for team key TAC. Never invent an id.
+            issueLabels. Never invent an id.
 
             NO SCHEDULEWAKEUP IN CI. There is no harness to re-fire this
             session. Wherever work-ticket.md says to write [POLLING-STATE]
             and ScheduleWakeup, instead:
-              - move the ticket to Needs Ruling with the right Blocked On label
+              - add the right Blocked On label (Needs Decision or Needs
+                Action) and leave the status alone
               - post the comment work-ticket.md specifies
               - move on to the next ticket, or exit
-            The 15-minute poll is the resume mechanism.
+            This workflow resumes the ticket on its next scheduled run after
+            Jaipal replies. That can be hours.
 
-            A PLAN IS A DECISION. After posting a plan, prefix it [PLAN], set
-            the ticket to Needs Ruling with the Needs Decision label, and stop.
-            Never build on an unapproved plan.
+            A PLAN IS A DECISION. After posting a plan, prefix it [PLAN], add
+            the Needs Decision label, leave the status alone, and stop. Never
+            build on an unapproved plan.
 
-            RESUMING. If the newest human comment postdates your last one,
-            that is Jaipal's ruling. Apply it, clear the answered item from
-            ## Open questions, remove the Blocked On label — Needs Decision or
-            Needs Action, whichever is set — and move the ticket to In Progress
-            if a branch exists or Ready if it does not. Read `git status` and
+            RESUMING. If the newest comment on a ticket, skipping [SLACK] and
+            [RESUME-CLAIM] bookkeeping, is human input, that is Jaipal's
+            ruling, often a Slack reply. Apply it to ## Open questions BEFORE
+            checking whether any question is still open (work-ticket.md Phase
+            0 step 2b, then 2c). Checking first finds his own question still
+            there and ignores his answer. Then continue from where the earlier
+            session stopped. Do not change the status. Read `git status` and
             `git diff` on the branch to establish what is already done.
 
-            ALWAYS POST BEFORE YOU EXIT. Every ticket you touch must end with
-            a comment saying what happened, even if the answer is "nothing —
-            here is why". A silent exit leaves the board claiming this ticket
-            is moving when it is not.
+            ALWAYS POST BEFORE YOU EXIT. Every ticket you touch ends with a
+            comment saying what happened, even if the answer is "nothing, and
+            here is why". A [RESUME-CLAIM] this workflow posted is not that
+            comment. If you cannot match Jaipal's answer to the open
+            questions, post [NEEDS-INPUT] saying which questions are still
+            open and why his reply didn't settle them (work-ticket.md Phase 0
+            step 2c). A quiet exit leaves the ticket looking exactly like one
+            still waiting for him.
 
-            Never merge, never mark a ticket Done.
+            Never self-commit beyond what work-ticket.md allows, never merge,
+            never mark a ticket Done.

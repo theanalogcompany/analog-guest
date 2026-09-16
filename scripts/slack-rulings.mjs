@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 /**
- * slack-rulings.mjs — two-way sync between Linear "Needs Ruling" and Slack.
+ * slack-rulings.mjs — two-way sync between tickets blocked on Jaipal and Slack.
  *
- * Outbound: a ticket enters Needs Ruling → one Slack message, its questions
- *           in the body. The Slack timestamp is recorded on the ticket in a
- *           [SLACK] marker comment. That thread belongs to the ticket for
- *           life: when what the ticket is blocked on changes, the update goes
- *           out as a reply in the same thread, never as a new channel message.
+ * Blocked on Jaipal is a label, not a status: any open ticket carrying
+ * Needs Decision or Needs Action, whatever its status. "Open" means not Done,
+ * Canceled or Duplicate. Duplicate is its own status type in this workspace,
+ * not a canceled one, so the filter lists it explicitly.
+ *
+ * Outbound: a ticket gains a Blocked On label → one Slack message, its
+ *           questions in the body. The Slack timestamp is recorded on the
+ *           ticket in a [SLACK] marker comment. That thread belongs to the
+ *           ticket for life: when what the ticket is blocked on changes, the
+ *           update goes out as a reply in the same thread, never as a new
+ *           channel message.
  * Inbound:  replies in that Slack thread → posted to Linear as human input,
- *           which is what lets the build workflow resume the ticket.
+ *           which is what lets the build workflow resume the ticket. It
+ *           resumes only Ready and In Progress tickets, so for any other
+ *           status the message says plainly that replying won't unblock it.
  *
  * The marker's q= field is a hash of what the ticket is blocked on: its
  * ## Open questions block plus the id of its newest [NEEDS-INPUT],
- * [HUMAN-REVIEW-REQUIRED], [PLAN] or [NEEDS-ACTION] comment. A thread reply
+ * [HUMAN-REVIEW-REQUIRED], [PLAN], [NEEDS-ACTION], [AUDIT-SKIPPED] or
+ * [BUILD-SKIPPED] comment. A thread reply
  * goes out only when that hash changes, so a ticket sitting unanswered gets
  * nothing run after run. (TAC-406)
  *
@@ -75,19 +84,21 @@ const data = await linear(`
   query {
     issues(first: 100, filter: {
       team: { key: { eq: "TAC" } },
-      state: { name: { eq: "Needs Ruling" } }
+      labels: { some: { name: { in: ["Needs Decision", "Needs Action"] } } },
+      state: { type: { nin: ["completed", "canceled", "duplicate"] } }
     }) {
       nodes {
         id identifier title url description
+        state { name }
         labels { nodes { name } }
-        comments { nodes { id body createdAt } }
+        comments(first: 250) { nodes { id body createdAt } }
       }
     }
   }
 `);
 
 const issues = data.issues.nodes;
-console.log(`${issues.length} ticket(s) in Needs Ruling`);
+console.log(`${issues.length} ticket(s) blocked on Jaipal`);
 
 // The whole ## Open questions block, or null when the ticket has none.
 function openQuestionsBlock(description) {
@@ -108,7 +119,7 @@ function questionsOf(description) {
 // body, keeps a ruling or an audit that merely quotes a marker from counting
 // as a new blocking state.
 const BLOCKING_MARKER =
-  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION)\]/;
+  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION|AUDIT-SKIPPED|BUILD-SKIPPED)\]/;
 
 function newestBlockingComment(issue) {
   return (
@@ -168,13 +179,35 @@ function kindOf(issue) {
     : ':thinking_face: *Decision needed*';
 }
 
+// build-ready.yml resumes only these statuses. A reply on a ticket anywhere
+// else lands as a comment and starts nothing, which is worse than no invite
+// to reply at all: it reads as answered.
+const RESUMABLE_STATES = new Set(['Ready', 'In Progress']);
+
+function replyLine(issue) {
+  // A skip notice needs an edit to the ticket, whatever its status: the
+  // automations read the Repo: line and labels, never a reply.
+  const newest = newestBlockingComment(issue);
+  const marker = newest ? BLOCKING_MARKER.exec(newest.body)[1] : null;
+  if (marker === 'BUILD-SKIPPED') {
+    return '_Replying here will not unblock it: the ticket needs splitting into one ticket per repo. Open the ticket._';
+  }
+  if (marker === 'AUDIT-SKIPPED') {
+    return '_Replying here will not unblock it: the ticket needs its Repo: line or repo labels fixed. Open the ticket._';
+  }
+  if (RESUMABLE_STATES.has(issue.state.name)) {
+    return '_Reply in this thread. `1: A. 2: yes. 3: skip.`_';
+  }
+  return `_This ticket is in ${issue.state.name}, and nothing acts on a reply while it is there. Replying here will not unblock it. Open the ticket to see what it needs._`;
+}
+
 function firstPostText(issue) {
   return [
     `${kindOf(issue)}  <${issue.url}|${issue.identifier}>  ${issue.title}`,
     '',
     questionsOf(issue.description) ?? '_Questions are in the ticket — open it._',
     '',
-    '_Reply in this thread. `1: A. 2: yes. 3: skip.`_',
+    replyLine(issue),
   ].join('\n');
 }
 
@@ -187,7 +220,7 @@ function updateText(issue) {
     '',
     questionsOf(issue.description) ?? '_Details are in the ticket — open it._',
     '',
-    '_Reply in this thread. `1: A. 2: yes. 3: skip.`_',
+    replyLine(issue),
   ].join('\n');
 }
 

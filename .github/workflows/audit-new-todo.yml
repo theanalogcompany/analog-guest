@@ -1,8 +1,18 @@
 name: Audit new Todo tickets
 
-# Polls every 15 minutes. A ticket is audited once: the query skips anything
-# that already carries an [AUDIT] or [AUDIT-CLAIM] comment, so re-running is
-# safe and a ticket returning to Todo after a ruling is not re-audited.
+# Scheduled every 15 minutes, which GitHub runs hours apart (TAC-428).
+# Audits one ticket per run. A ticket is audited
+# once: the query skips anything that already carries an [AUDIT] or
+# [AUDIT-CLAIM] comment, so re-running is safe.
+#
+# Which tickets are this repo's: the label narrows, the Repo: line decides
+# (.claude/process.md, "Which repo works a ticket"). A ticket no repo can
+# claim gets [AUDIT-SKIPPED] and Needs Decision instead of a guess.
+#
+# A run that leaves its ticket in Todo, for any reason, makes sure the ticket
+# has an [AUDIT] comment and adds Needs Decision. The comment stops the
+# ticket being retried on every run; the label stops it sitting in Todo
+# where nobody looks.
 #
 # Scheduled workflows run only from the default branch. This does nothing
 # until it is merged to main.
@@ -31,7 +41,7 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
@@ -41,45 +51,94 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Find tickets needing an audit
+      - name: Find a ticket needing an audit
         id: queue
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           REPO_NAME: ${{ github.event.repository.name }}
           ONE_TICKET: ${{ inputs.ticket || github.event.client_payload.ticket }}
           FORCE: ${{ inputs.force }}
-          LIMIT: "3"
+          LIMIT: "1"
         run: |
           set -euo pipefail
 
+          echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
           if [ -n "${ONE_TICKET:-}" ] && [ "${FORCE:-false}" = "true" ]; then
             echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
+            echo "defects=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           RESPONSE=$(curl -sS https://api.linear.app/graphql \
             -H "Content-Type: application/json" \
             -H "Authorization: $LINEAR_API_KEY" \
-            -d @- <<'GQL'
-          {"query":"query { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { eq: \"Todo\" } } }) { nodes { identifier description priority comments { nodes { body } } } } }"}
-          GQL
-          )
+            -d "$(jq -nc --arg repo "$REPO_NAME" '{
+              query: "query($repo: String!) { issues(first: 100, filter: { team: { key: { eq: \"TAC\" } }, state: { name: { eq: \"Todo\" } }, labels: { some: { name: { eq: $repo } } } }) { nodes { id identifier description priority labels { nodes { name } } comments(first: 250) { nodes { body } } } } }",
+              variables: { repo: $repo }
+            }')")
 
-          # Keep: this repo's tickets, never audited, (optionally) the named one.
+          if ! echo "$RESPONSE" | jq -e '.data.issues.nodes' > /dev/null; then
+            echo "::error::Linear query failed: $RESPONSE"
+            exit 1
+          fi
+
+          # The repo rule from .claude/process.md. Kept identical in
+          # build-ready.yml.
+          RULES='
+            def repo_labels: [.labels.nodes[].name | select(startswith("analog-"))];
+            # Every analog-* name on the Repo: line, in order. [] with no line.
+            def repo_line_names:
+              [(.description // "") | capture("(?:^|\\n)[ \\t>*_]*Repos?[*_]*[ \\t]*:(?<line>[^\\n]*)"; "i") | .line]
+              | if length == 0 then []
+                else [.[0] | gsub("<[^>]*>"; "") | gsub("https?://[^\\s)>]*"; "") | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
+                end;
+            def owner:
+              repo_labels as $labels
+              | repo_line_names as $named
+              | ([$named[] | select(. as $n | $labels | any(. == $n))] | first) as $pick
+              | if $pick != null then $pick
+                elif ($named | length) > 0 then "defect:unlabelled"
+                elif ($labels | length) == 1 then $labels[0]
+                elif ($labels | length) == 0 then "none"
+                else "defect:no-repo-line"
+                end;
+            def audited: [.comments.nodes[].body] | map(test("\\[AUDIT(-CLAIM)?\\]")) | any;
+            def only($t): if $t == "" then . else map(select(.identifier == $t)) end;
+            def has_label($name): [.labels.nodes[].name] | any(. == $name);
+            # The first marker after the prefix, per .claude/process.md.
+            def audit_skipped: [.comments.nodes[].body]
+              | map(test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[AUDIT-SKIPPED\\]")) | any;
+          '
+
+          # This repo's tickets, never audited, (optionally) the named one.
           TICKETS=$(echo "$RESPONSE" | jq -r \
             --arg repo "$REPO_NAME" \
             --arg only "${ONE_TICKET:-}" \
-            --argjson limit "$LIMIT" '
+            --argjson limit "$LIMIT" "$RULES"'
             .data.issues.nodes
-            | map(select(.description // "" | test("Repo:?\\**\\s*:?\\s*`?" + $repo; "i")))
-            | map(select(
-                ([.comments.nodes[].body] | map(test("\\[AUDIT(-CLAIM)?\\]")) | any) | not
-              ))
-            | (if $only == "" then . else map(select(.identifier == $only)) end)
+            | map(select(owner == $repo and (audited | not)))
+            | only($only)
             | sort_by(if .priority == 0 then 99 else .priority end)
             | .[:$limit]
             | map(.identifier)
             | join(" ")
+          ')
+
+          # Tickets no repo can claim, not yet flagged. Flagged means an
+          # [AUDIT-SKIPPED] comment AND Needs Decision: the label alone doesn't
+          # count, because a ticket can be written with open questions and no
+          # Repo: line. Removing the label without fixing the ticket re-flags it.
+          DEFECTS=$(echo "$RESPONSE" | jq -c \
+            --arg only "${ONE_TICKET:-}" "$RULES"'
+            .data.issues.nodes
+            | map(select(
+                (owner | startswith("defect:"))
+                and (audited | not)
+                and ((audit_skipped and has_label("Needs Decision")) | not)
+              ))
+            | only($only)
+            | map({ id, identifier, kind: owner, hasNeedsDecision: has_label("Needs Decision"), labels: (repo_labels | sort), named: repo_line_names })
           ')
 
           if [ -z "$TICKETS" ]; then
@@ -88,25 +147,75 @@ jobs:
             echo "Auditing: $TICKETS"
           fi
           echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"
+          echo "defects=$DEFECTS" >> "$GITHUB_OUTPUT"
+
+      - name: Flag tickets no repo can claim
+        if: steps.queue.outputs.defects != '' && steps.queue.outputs.defects != '[]'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          DEFECTS: ${{ steps.queue.outputs.defects }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+            | jq -r '.data.issueLabels.nodes[0].id // empty')
+          if [ -z "$LABEL_ID" ]; then
+            echo "::error::No Needs Decision label found in Linear."
+            exit 1
+          fi
+
+          echo "$DEFECTS" | jq -c '.[]' | while read -r row; do
+            ID=$(echo "$row" | jq -r .id)
+            NAME=$(echo "$row" | jq -r .identifier)
+            # "Replying here will not unblock it." is Jaipal's wording.
+            TEXT=$(echo "$row" | jq -r '
+              if .kind == "defect:no-repo-line"
+              then "This ticket can'"'"'t be audited. It carries the \(.labels | join(" and ")) labels and has no Repo: line, so nothing says which repo the work starts in.\n\nAdd a Repo: line to the ticket. Replying here will not unblock it."
+              else "This ticket can'"'"'t be audited. Its Repo: line names \(.named | join(" and ")), and the ticket carries no label for \(if (.named | length) == 1 then "it" else "any of them" end).\n\nFix the Repo: line or the repo label so they agree. Replying here will not unblock it."
+              end')
+            BODY="**[FROM CLAUDE CODE]**
+
+          [AUDIT-SKIPPED] ${NAME}
+
+          ${TEXT}"
+
+            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            if [ "$(echo "$row" | jq -r .hasNeedsDecision)" != "true" ]; then
+              gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+                '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+                | jq -e '.data.issueAddLabel.success' > /dev/null
+            fi
+            echo "flagged $NAME"
+          done
 
       - name: Audit
         if: steps.queue.outputs.tickets != ''
+        timeout-minutes: 50
         uses: anthropics/claude-code-action@v1
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --max-turns 60
+            --max-turns 150
             --allowedTools "Read,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*)"
           prompt: |
-            You are auditing Linear tickets for the repo ${{ github.event.repository.name }}.
+            You are auditing a Linear ticket for the repo ${{ github.event.repository.name }}.
 
-            Tickets to audit, in order: ${{ steps.queue.outputs.tickets }}
+            Ticket to audit: ${{ steps.queue.outputs.tickets }}
 
             Read CLAUDE.md and .claude/process.md first. Then follow
-            .claude/commands/audit-ticket.md for each ticket — it is the
-            specification for this task and it governs.
+            .claude/commands/audit-ticket.md — it is the specification for
+            this task and it governs.
 
             ONE DIFFERENCE FROM THE LOCAL COMMAND: there is no Linear MCP in
             CI. Use the GraphQL API with curl. The key is in $LINEAR_API_KEY.
@@ -115,26 +224,101 @@ jobs:
               curl -sS https://api.linear.app/graphql \
                 -H "Content-Type: application/json" \
                 -H "Authorization: $LINEAR_API_KEY" \
-                -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { name } } comments { nodes { id body createdAt } } } }"}'
+                -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
 
-            Post a comment:
+            Post a comment. Always flat: never pass parentId.
               curl -sS https://api.linear.app/graphql \
                 -H "Content-Type: application/json" \
                 -H "Authorization: $LINEAR_API_KEY" \
                 -d '{"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"..."}}'
 
-            Update status and labels: use issueUpdate with stateId and labelIds.
-            Resolve those ids by querying workflowStates and issueLabels for
-            team key TAC. Never invent an id.
+            Update status with issueUpdate and stateId. Add or remove a label
+            with issueAddLabel / issueRemoveLabel (id, labelId). Do not set
+            labels through issueUpdate's labelIds: it replaces every label on
+            the ticket. Resolve state and label ids by querying
+            workflowStates and issueLabels. Never invent an id.
 
             Your audit comment MUST contain the literal string [AUDIT]. That
             marker is what stops this workflow auditing the same ticket again
             on its next run. If you cannot complete an audit, still post a
-            comment saying why, with [AUDIT] in it, so the ticket is not
-            silently retried every fifteen minutes.
+            comment saying why, with [AUDIT] in it.
 
-            Audit each ticket completely before starting the next. Never write
-            code, never open a branch, never commit. The audit is read-only
-            except for the Linear writes the command file specifies.
+            The workflow has already checked, by the rule in .claude/process.md,
+            that this repo works the ticket. A manually forced run skips that
+            check, so audit-ticket.md's own repo check still applies.
 
-            If a ticket's Repo: line does not name this repo, skip it and say so.
+            Never write code, never open a branch, never commit. The audit is
+            read-only except for the Linear writes the command file specifies.
+
+      - name: Surface an audit that left its ticket in Todo
+        if: ${{ !cancelled() && steps.queue.outputs.tickets != '' }}
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          TICKET: ${{ steps.queue.outputs.tickets }}
+          STARTED: ${{ steps.queue.outputs.started }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
+            '{query: "query($t: String!) { issue(id: $t) { id state { name } labels { nodes { name } } comments(first: 250) { nodes { body createdAt } } } }", variables: {t: $t}}')")
+          ID=$(echo "$ISSUE" | jq -er '.data.issue.id')
+          STATE=$(echo "$ISSUE" | jq -r '.data.issue.state.name')
+
+          # A completed audit always moves the ticket out of Todo.
+          if [ "$STATE" != "Todo" ]; then
+            echo "$TICKET is in $STATE. The audit finished."
+            exit 0
+          fi
+
+          POSTED=$(echo "$ISSUE" | jq --arg started "$STARTED" '
+            ($started | fromdateiso8601) as $since
+            | [.data.issue.comments.nodes[]
+                | select(.body | test("\\[AUDIT\\]"))
+                | select((.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= $since)]
+            | length')
+
+          if [ "$POSTED" -gt 0 ]; then
+            HEAD="[AUDIT] ${TICKET} is still in Todo after its audit run, so it has not been audited. The audit comment above says why. Run: ${RUN_URL}"
+          else
+            HEAD="[AUDIT] ${TICKET} did not finish, and the run posted no audit, so this ticket has not been audited. Run: ${RUN_URL}"
+          fi
+
+          FENCE='```'
+          BODY="**[FROM CLAUDE CODE]**
+
+          ${HEAD}
+
+          This comment stops every scheduled run retrying the ticket, and Needs Decision puts it in front of you. Replying here will not re-run the audit. Look at the run first: if it ran out of turns, the ticket may be too large to audit in one pass and need splitting. To audit it again:
+
+          ${FENCE}
+          gh workflow run audit-new-todo.yml --repo ${REPOSITORY} -f ticket=${TICKET} -f force=true
+          ${FENCE}"
+
+          gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+            '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+            | jq -e '.data.commentCreate.success' > /dev/null
+
+          if echo "$ISSUE" | jq -e '[.data.issue.labels.nodes[].name] | any(. == "Needs Decision")' > /dev/null; then
+            echo "$TICKET already carries Needs Decision."
+            exit 0
+          fi
+
+          LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+            | jq -r '.data.issueLabels.nodes[0].id // empty')
+          if [ -z "$LABEL_ID" ]; then
+            echo "::error::No Needs Decision label found in Linear."
+            exit 1
+          fi
+          gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+            '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+            | jq -e '.data.issueAddLabel.success' > /dev/null
+          echo "Surfaced $TICKET with Needs Decision."
