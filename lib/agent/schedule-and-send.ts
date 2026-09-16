@@ -237,7 +237,7 @@ export type PersistQueuedDraftSkipped = {
 function buildOutboundInsert(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  overrides: Partial<MessageInsert>,
+  overrides: Partial<MessageInsert> & Required<Pick<MessageInsert, 'status'>>,
 ): MessageInsert {
   return {
     venue_id: ctx.venue.id,

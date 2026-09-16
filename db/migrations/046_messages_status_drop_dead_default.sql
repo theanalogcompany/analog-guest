@@ -1,0 +1,273 @@
+-- 046_messages_status_drop_dead_default.sql
+-- TAC-416: drop the unreachable default on messages.status.
+--
+-- ============================================================================
+-- THE DEFECT
+-- ============================================================================
+--
+-- messages.status has been `not null default 'pending'` since migration 001,
+-- and its own check constraint has never permitted 'pending':
+--
+--   messages_status_check CHECK (status = ANY (ARRAY[
+--     'received','draft','pending_review','approved',
+--     'sending','sent','delivered','failed','rejected'
+--   ]))
+--
+-- Both halves are in the SAME statement in 001, on adjacent lines (318-328).
+-- So the default can never apply: an insert that relies on it produces
+-- 'pending', which the check immediately rejects. The default has been dead
+-- since the table was created on 2026-04-25.
+--
+-- WHERE IT CAME FROM. Not a typo. `default 'pending'` is the house convention
+-- for a status column in 001 — venues.status (line 35) and
+-- venue_configs.onboarding_status (line 147) both use it, and both list
+-- 'pending' among their permitted values, so both are correct.
+-- pos_tap_events.status (migration 030) does the same. messages copied the
+-- house default and then wrote a message-lifecycle value list that starts at
+-- 'received'/'draft' and never included the generic opening state.
+--
+-- ============================================================================
+-- WHY THIS IS WORTH A MIGRATION WHEN NOTHING IS BROKEN
+-- ============================================================================
+--
+-- Nothing is broken. Every insert sets status explicitly, necessarily: one
+-- that did not would already fail. Verified, not assumed — all FOUR production
+-- insert sites set it:
+--
+--   app/api/webhooks/sendblue/route.ts:202      'received'
+--   lib/messaging/expressions.ts:49             'sent'
+--   lib/agent/schedule-and-send.ts              via buildOutboundInsert, whose
+--                                               two callers pass 'sent' (:522)
+--                                               and 'pending_review' (:919)
+--   scripts/onboarding/run-test-scenarios.ts:215  'sent' / 'received'
+--
+-- and no source file writes or reads messages.status = 'pending'. Every
+-- 'pending' literal elsewhere in the codebase is either a different column —
+-- pos_tap_events.status, venues.status, review_state / previous_review_state,
+-- each of whose constraints does permit it — or not a database value at all
+-- (a React state discriminant in the Voices commit modal, a venue fixture in
+-- load-venue-context.test.ts).
+--
+-- An earlier draft of this paragraph said "the three insert sites" and named
+-- three. The count was wrong, and an enumeration offered as PROOF, inside a
+-- header whose whole thesis is that a false statement in an artefact is the
+-- entire cost, is the one place a miscount is least affordable.
+--
+-- The cost is that the schema asserts something false, and people believe it.
+-- A schema is the thing you check AGAINST when you doubt a claim, so a dead
+-- default is a worse instance of that failure class than most. During TAC-411
+-- it was cited as the justification for making status optional in a Zod
+-- schema, and that reasoning was written into a code comment and a CLAUDE.md
+-- entry before review caught it. Three test payloads modelled
+-- status: 'pending' — a state no row can hold — and the worst of them claimed
+-- to model a real production row whose actual shape is
+-- status: 'pending_review' with review_state: 'approved'.
+--
+-- ============================================================================
+-- WHY DROP RATHER THAN CORRECT
+-- ============================================================================
+--
+-- There is no correct single value to replace it with. Inbound rows are
+-- 'received'; drafts are 'draft' or 'pending_review'. Nothing sensible covers
+-- both, and picking either would silently make the wrong one the fallback for
+-- the other path.
+--
+-- The third option — WIDENING the check to admit 'pending' — is worse than
+-- either, and is the one someone will propose. It would legalise a state no
+-- reader handles: deriveDelivery's truth table (lib/agent/group-responses.ts)
+-- and DELIVERED_OUTBOUND_STATUSES (lib/operator/) both partition the nine
+-- existing values, so a tenth arrives unclassified and falls to whichever
+-- branch happens to be last. Making the schema agree with a dead default, by
+-- teaching the rest of the system a state that means nothing, is the opposite
+-- of the repair.
+--
+-- After this, an insert that omits status fails on the NOT NULL constraint
+-- rather than on the check constraint. Both fail. The new failure names the
+-- actual problem.
+--
+-- ============================================================================
+-- SCOPE
+-- ============================================================================
+--
+-- NO BACKFILL, and none is possible to need. The durable claim is that ZERO
+-- rows hold 'pending', and it needs no measurement — the check constraint has
+-- forbidden that value since the table was created, so no row can ever have
+-- carried it.
+--
+-- A snapshot, for shape only: at 2026-09-16T00:45Z the table held 707 rows
+-- across exactly four statuses — received, delivered, sent, pending_review.
+-- Deliberately NOT written here as a fixed total to assert against: this is a
+-- live table at a live venue and it gained six rows in the ten minutes between
+-- two readings while this migration was being written. A verification query
+-- that pins an exact row count would be stale before it was ever run, which is
+-- the same false-specification failure this migration exists to remove.
+--
+-- `alter column ... drop default` is catalogue-only. It rewrites no rows,
+-- takes no row lock beyond the brief ACCESS EXCLUSIVE on the table's catalogue
+-- entry, and is instant at any table size.
+--
+-- NO CONSTRAINT CHANGE. messages_status_check keeps its name and all nine
+-- values. This migration touches the column default and nothing else.
+--
+-- That is load-bearing for two tests, not merely tidy: group-responses.test.ts
+-- and reached-guest-condition.test.ts both parse the status vocabulary out of
+-- migration 001 BY NAME, on the stated premise that no later migration touches
+-- messages_status_check. Still true after this one. A future migration that
+-- does change the constraint has to update those two tests as well.
+--
+-- NO RUNTIME BEHAVIOUR CHANGE. Nothing reads the default, so no code path
+-- changes when it goes.
+--
+-- BUT db/types.ts IS AFFECTED, and this is the one consequence that is not
+-- obvious. A first draft of this header asserted the opposite ("generated
+-- types carry nullability and type, not defaults"), which is false — the
+-- header for a migration about a schema that asserted something false had
+-- itself asserted something false.
+--
+-- Supabase marks a column OPTIONAL in the generated `Insert` type when it has
+-- a default. messages.status is `status?: string` in
+-- Database['public']['Tables']['messages']['Insert'] TODAY precisely because
+-- of this dead default. Dropping it makes that field REQUIRED the next time
+-- `npm run db:types` runs.
+--
+-- MEASURED, not predicted: hand-patching db/types.ts to `status: string` and
+-- running `npx tsc --noEmit` produces EXACTLY ONE error in the whole repo —
+--
+--   lib/agent/schedule-and-send.ts(242,3): error TS2322
+--
+-- the return of buildOutboundInsert, whose base object omits `status` and
+-- relies on `...overrides` — typed `Partial<MessageInsert>`, so every field is
+-- optional — to supply it. Both call paths do supply it at runtime (auto-send
+-- 'sent', queue 'pending_review'), so this is a type-level gap only and
+-- nothing is broken today.
+--
+-- THE REPAIR IS IN THIS PR, and it is the one deviation from TAC-416's
+-- "migration only" scope. It is here rather than deferred because step 3 of
+-- CLAUDE.md's own migration workflow is "Operator runs `npm run db:types`" —
+-- so the DOCUMENTED next action after applying this migration is precisely the
+-- one that reddens CI. Deferring would arm a landmine and hand over the
+-- standard procedure for tripping it, in a file the follow-up PR never
+-- mentions.
+--
+--   -  overrides: Partial<MessageInsert>,
+--   +  overrides: Partial<MessageInsert> & Required<Pick<MessageInsert, 'status'>>,
+--
+-- `Required<Pick<...>>` rather than a bare `Pick<...>`: `Pick` PRESERVES
+-- optionality, so while status is still optional a bare Pick is inert and a
+-- caller could drop status with nothing complaining. Verified by mutation in
+-- both schema states — deleting `status: 'sent'` from the auto-send caller
+-- fails with TS2345 at schedule-and-send.ts(522,44) against today's types AND
+-- against the regenerated ones. The tightened signature itself compiles clean
+-- in both, so it is safe whenever this lands relative to the Studio apply.
+--
+-- db/types.ts:806 is hand-patched to `status: string` in this same commit,
+-- which is CLAUDE.md's documented convention for a migration the code must
+-- typecheck against immediately; the next `npm run db:types` reproduces the
+-- patch as canonical output.
+--
+-- Zero runtime change: both callers already pass status, so this only makes
+-- the compiler enforce what the schema now enforces.
+--
+-- ORDERING: neither additive nor backwards-incompatible in the sense §Ordering
+-- addresses — no deployed read path references a column default, so no
+-- downtime window exists in either direction. Apply before or after merge.
+--
+-- HIGH-STAKES: touches `messages`.
+--
+-- ============================================================================
+-- MIGRATION
+-- ============================================================================
+
+alter table messages alter column status drop default;
+
+-- ============================================================================
+-- VERIFICATION — run after applying. Expect one row, exactly as annotated.
+-- ============================================================================
+--
+--   select
+--     (select column_default
+--        from information_schema.columns
+--       where table_schema = 'public'
+--         and table_name = 'messages'
+--         and column_name = 'status')            as status_default,   -- NULL
+--     (select is_nullable
+--        from information_schema.columns
+--       where table_schema = 'public'
+--         and table_name = 'messages'
+--         and column_name = 'status')            as status_nullable,  -- NO
+--     (select pg_get_constraintdef(oid)
+--        from pg_constraint
+--       where conname = 'messages_status_check') as status_check,
+--     (select count(*) from messages
+--       where status = 'pending')                as dead_value_rows; -- 0
+--
+-- status_default must be NULL (the default is gone).
+-- status_nullable must stay 'NO' (NOT NULL is untouched).
+-- dead_value_rows must be 0, before and after — the constraint has always
+--   guaranteed it. It is here as the honest invariant in place of a total row
+--   count, which on this table changes minute to minute.
+-- status_check must still read:
+--   CHECK ((status = ANY (ARRAY['received'::text, 'draft'::text,
+--     'pending_review'::text, 'approved'::text, 'sending'::text, 'sent'::text,
+--     'delivered'::text, 'failed'::text, 'rejected'::text])))
+--
+-- ============================================================================
+-- ROLLBACK
+-- ============================================================================
+--
+-- Restoring the default restores a DEAD default — one no insert can use,
+-- because the check constraint still forbids 'pending'. This exists only to
+-- undo this migration cleanly, never as a fix for anything. If an insert is
+-- failing after this migration, the insert is missing an explicit status and
+-- the correct repair is in the calling code, not here.
+--
+--   alter table messages alter column status set default 'pending'::text;
+--
+-- ============================================================================
+-- SCHEMA-WIDE SWEEP (TAC-416, 2026-09-15) — messages.status was the only one
+-- ============================================================================
+--
+-- The ticket asked whether any other column has a default its own check
+-- constraint forbids. Every defaulted column in the public schema was
+-- evaluated against every single-column check constraint on it, by executing
+-- the constraint predicate over the default value rather than by matching
+-- text. Ten such pairs exist. Exactly one is false:
+--
+--   messages.status          'pending'    messages_status_check          FALSE
+--   guest_commitments.created_by 'agent'  ..._created_by_check           true
+--   guest_commitments.status 'open'       ..._status_check               true
+--   guests.status            'new'        guests_status_check            true
+--   mechanics.min_state      'new'        mechanics_min_state_check      true
+--   mechanics.redemption_policy 'one_time' ..._redemption_policy_check   true
+--   operator_venues.permission_level 'editor' ..._permission_level_check true
+--   pos_tap_events.status    'pending'    pos_tap_events_status_check    true
+--   venue_configs.onboarding_status 'pending' ..._onboarding_status_check true
+--   venues.status            'pending'    venues_status_check            true
+--
+-- Note the three other columns defaulting to 'pending' whose constraints all
+-- permit it. That is the evidence for the house-convention account above.
+--
+-- Multi-column check constraints were swept separately, since a per-column
+-- evaluation cannot reach them. Four exist, and NONE has every referenced
+-- column defaulted, so none can be violated by defaults alone:
+--
+--   mechanics_redemption_window_consistency  1 of 2 defaulted  -> true
+--   messages_has_content                     2 of 3 defaulted  -> NULL
+--   messages_reaction_consistency            0 of 2 defaulted  -> true
+--   operators_must_have_auth                 0 of 2 defaulted  -> false
+--
+-- operators_must_have_auth evaluating false on a defaults-only row is NOT this
+-- defect class: neither column has a default, so there is no dead default to
+-- drop. It is the constraint correctly requiring the caller to supply at least
+-- one auth method.
+--
+-- messages_has_content evaluating NULL reproduces the trap CLAUDE.md already
+-- documents under TAC-309: array_length('{}', 1) is NULL, not 0, so the whole
+-- OR expression is NULL for a blank draft, and a CHECK passes on NULL —
+-- violated only by FALSE. That is deliberate and load-bearing (it is what
+-- makes blank knowledge-gap cards legal without a migration). Confirmed here
+-- against the live schema, unchanged by this migration.
+--
+-- ============================================================================
+-- end of migration
+-- ============================================================================
