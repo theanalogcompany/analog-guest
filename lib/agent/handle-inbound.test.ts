@@ -1041,7 +1041,7 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
     expect(applyApprovalPolicyStageMock).not.toHaveBeenCalled()
   })
 
-  it('dispatches the exact fixed body via scheduleAndSend, skipping the human-feel delay and stamping review_reason', async () => {
+  it('dispatches the exact fixed body via scheduleAndSend, skipping the read receipt and typing beats and stamping review_reason', async () => {
     classifyStageMock.mockResolvedValueOnce({
       category: 'unknown',
       classifierConfidence: 0.5,

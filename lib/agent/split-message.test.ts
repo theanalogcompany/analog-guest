@@ -83,8 +83,8 @@ describe('constants', () => {
   })
 
   it('uses a short fixed inter-bubble gap', () => {
-    // Specified directly rather than derived from sampleTiming — TAC-313 §6
-    // puts all timing tuning out of scope.
+    // Specified directly rather than derived from the opening send sequence,
+    // which is why TAC-421 could delete that sequence without touching this.
     expect(INTER_BUBBLE_GAP_MS).toBe(1_500)
   })
 })

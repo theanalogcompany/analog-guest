@@ -37,8 +37,10 @@ export function PipelineCard({ stages, langfuseUrl }: PipelineCardProps) {
   }))
   const totalMs = rows.reduce((acc, r) => acc + (r.durationMs ?? 0), 0)
   // Dominator = the row with the longest duration. Multiple stages tied at
-  // the max would all highlight; in practice `send` dominates by an order
-  // of magnitude due to human-feel sleep.
+  // the max would all highlight. Computed per trace, never assumed: `send`
+  // dominated by an order of magnitude on traces recorded before TAC-421,
+  // which is the ~6.5s pre-send sleep that ticket removed, so traces from
+  // either side of that deploy have different dominators.
   const maxMs = rows.reduce((acc, r) => Math.max(acc, r.durationMs ?? 0), 0)
 
   return (

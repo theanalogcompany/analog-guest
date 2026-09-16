@@ -162,11 +162,15 @@ export async function handleFollowup(input: {
   guestId: string
   trigger: FollowupTrigger
   /**
-   * When true, scheduleAndSend skips all human-feel sleeps + the typing
-   * indicator. Used by the Command Center Follow Up button — operator
-   * clicked "send" expecting fast response, and a manual outbound isn't
-   * the kind of "natural" reply where typing theatre belongs. Defaults
-   * to false (cron-triggered followups keep the existing cadence).
+   * When true, scheduleAndSend skips the read receipt, both typing
+   * indicators and the inter-bubble gap. Used by the Command Center Follow
+   * Up button — operator clicked "send" expecting fast response, and a
+   * manual outbound isn't the kind of "natural" reply where typing theatre
+   * belongs. Defaults to false.
+   *
+   * TAC-421 removed the pre-send sleeps this used to skip, so the flag no
+   * longer buys latency on any path — a cron followup is as fast either
+   * way. What it still decides is whether the typing beats fire at all.
    */
   skipHumanFeelDelay?: boolean
 }): Promise<AgentResult> {
@@ -740,9 +744,10 @@ export async function handleFollowup(input: {
     }
     const demoBypassReviewReason: 'demo_bypass' | undefined = approval.reason
 
-    // Send + persist. TAC-284: demo guests skip the human-feel delay (in
-    // addition to the existing Follow Up button skip) and carry the
-    // demo_bypass review_reason when the gate short-circuited above.
+    // Send + persist. TAC-284: demo guests skip the read receipt and typing
+    // indicators (in addition to the existing Follow Up button skip) and carry
+    // the demo_bypass review_reason when the gate short-circuited above.
+    // TAC-421 removed the pre-send sleep, so neither skip saves time now.
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const { outboundMessageId, providerMessageId, generationId, bubbleCount } =

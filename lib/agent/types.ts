@@ -76,7 +76,9 @@ export interface GuestContext {
   createdVia: string
   // TAC-284: per-guest demo flag. When true, the agent runtime bypasses the
   // TAC-212 approval policy gate (applyApprovalPolicyStage short-circuits to
-  // send) and skips the human-feel delay. Populated from guests.is_demo by
+  // send) and skips the read receipt and typing indicators. (Pre-TAC-421 it
+  // also skipped a ~6.5s pre-send sleep; no path sleeps before the first
+  // bubble any more, so the flag buys no latency.) Populated from guests.is_demo by
   // build-runtime-context.ts; the column is NOT NULL DEFAULT false so this
   // is always a real boolean for a normally-built context.
   isDemo: boolean
@@ -262,10 +264,3 @@ export type AgentResult =
       triggers: string[]
     }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }
-
-export interface TimingPlan {
-  totalDelayMs: number
-  markAsReadGapMs: number
-  preTypingPauseMs: number
-  typingDurationMs: number
-}

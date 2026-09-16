@@ -31,8 +31,12 @@ import { createServerClient } from '@/lib/db/server'
 //
 // On approval, invokes handleFollowup synchronously with
 // skipHumanFeelDelay=true so the operator gets a real result (sent /
-// refused / failed) within ~5s instead of waiting through the typing-
-// indicator theatre. Returns 200 with the outbound message id on success.
+// refused / failed) without the typing-indicator theatre. Returns 200 with
+// the outbound message id on success.
+//
+// TAC-421 removed the pre-send sleeps, so this no longer saves the operator
+// any wall-clock time; it suppresses the read receipt and typing beats,
+// which is what a manual outbound wants regardless.
 
 const MAX_HINT_LENGTH = 500
 
@@ -155,8 +159,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // ---- invoke pipeline ----
-  // skipHumanFeelDelay=true so the operator gets a fast result instead of
-  // waiting through the typing-indicator theatre. Hint travels as
+  // skipHumanFeelDelay=true to suppress the typing-indicator theatre on an
+  // outbound the operator explicitly asked for. Hint travels as
   // FollowupTrigger.metadata; stages.ts buildAiRuntime renders it cleanly
   // for manual triggers.
   const result = await handleFollowup({

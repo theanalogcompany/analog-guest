@@ -272,9 +272,10 @@ export async function handleHoldingMessage(input: {
       const sendSpan = trace.span('send', { attempt, bodyLength: generated.body.length })
       try {
         const { outboundMessageId } = await scheduleAndSend(ctx, generated, {
-          // The guest has already waited out the whole window. Adding
-          // typing-indicator theatre to a message that is late by
-          // construction makes it later for no gain.
+          // The guest has already waited out the whole window. Typing
+          // theatre on a message that is late by construction is the wrong
+          // register, and since TAC-421 the only time it would add is the
+          // inter-bubble gap on a split.
           skipHumanFeelDelay: true,
         })
         sendSpan.end({ output: { outboundMessageId, attempt } })

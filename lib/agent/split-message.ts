@@ -38,10 +38,12 @@ export const MAX_BUBBLES_PER_RESPONSE = 3
 /**
  * Pause between bubbles, with the typing indicator showing across it.
  *
- * A fixed constant, deliberately NOT derived from `sampleTiming` — per TAC-313
- * §6 the timing module is out of scope and none of its constants are read or
- * changed here. A follow-up bubble lands faster than a first reply does,
- * because the writer is already mid-thought rather than deciding to answer.
+ * A fixed constant, deliberately NOT derived from the opening send sequence —
+ * per TAC-313 §6 the timing module was out of scope and none of its constants
+ * were read here. That independence is why this survived TAC-421, which
+ * deleted that module and the pre-send pause with it. A follow-up bubble lands
+ * faster than a first reply does, because the writer is already mid-thought
+ * rather than deciding to answer.
  */
 export const INTER_BUBBLE_GAP_MS = 1_500
 
