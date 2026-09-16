@@ -1,12 +1,14 @@
 name: Slack rulings sync
 
-# Two-way sync between Linear "Needs Ruling" and the #rulings Slack channel.
+# Two-way sync between tickets blocked on Jaipal (any open ticket carrying
+# Needs Decision or Needs Action) and the #rulings Slack channel.
 # Runs in analog-guest only — this is workspace-wide, not per-repo.
 #
-# Every 5 minutes:
-#   - any ticket newly in Needs Ruling gets one Slack message
+# On each scheduled run (GitHub runs it hours apart, not every 5 minutes;
+# TAC-428):
+#   - any ticket newly carrying a Blocked On label gets one Slack message
 #   - any reply in one of those threads becomes a Linear comment, which the
-#     build workflow reads as a ruling and acts on within its own 15 minutes
+#     build workflow reads as a ruling on its own next run
 #
 # Scheduled workflows run only from the default branch.
 
