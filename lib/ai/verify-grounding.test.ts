@@ -2,6 +2,7 @@ import { NoObjectGeneratedError } from 'ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   VERIFY_GROUNDING_MAX_OUTPUT_TOKENS,
+  VERIFY_GROUNDING_PROMPT_VERSION,
   VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
   verifyGrounding,
 } from './verify-grounding'
@@ -445,5 +446,87 @@ describe('runtime context in the source material', () => {
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('[venue, ...]')
     expect(system).toContain('Observations:')
+  })
+})
+
+// TAC-409. These assert PROMPT CONTENT, which is all this file can assert —
+// generateObject is mocked, so nothing here observes whether the model obeys
+// the rules. That was established by a separate replay against 39 promise
+// bodies plus the eight live flagged drafts; the numbers are on the ticket.
+// The three content assertions below are evidence the sentences are present and
+// scoped; the other two pin placement and version. Evidence of nothing else.
+describe('TAC-409: abridgement and identity are not ungrounded', () => {
+  async function systemPromptFor(): Promise<string> {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+    })
+    await verifyGrounding({
+      inboundBody: 'what should i get',
+      replyBody: 'the Pink Panther, cascara and hibiscus over ice',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+    })
+    return (generateObjectMock.mock.calls[0][0] as { system: string }).system
+  }
+
+  it('tells the verifier a reply that says LESS than the source is grounded', async () => {
+    const system = await systemPromptFor()
+    expect(system).toContain('A reply that says LESS than the source does')
+    expect(system).toContain('is not an unsupported claim')
+  })
+
+  // The load-bearing half. Point 3's three worked examples are all a reply
+  // asserting MORE than the source states; abridgement is the reverse, and the
+  // model conflated the two twice in production, drawing a different line each
+  // time. A bullet that only says "omission is fine" would pass the test above
+  // and leave that conflation live, so the direction clause is asserted
+  // separately rather than folded into it.
+  it('names the direction distinction against point 3, not just the exemption', async () => {
+    const system = await systemPromptFor()
+    expect(system).toContain(
+      'it is the opposite of point 3 above — point 3 is about a reply asserting MORE than the source states, which you check; a shorter, partial, or selective description asserts less, and is fine so long as it contradicts nothing the source states',
+    )
+    // Point 3 itself must survive intact — the exemption narrows nothing about
+    // a reply that claims more than the source has.
+    expect(system).toContain('A source that mentions the general topic without stating the specific detail')
+  })
+
+  it('exempts the assistant\'s identity, scoped to identity alone', async () => {
+    const system = await systemPromptFor()
+    expect(system).toContain('Who the assistant is')
+    expect(system).toContain('configured, not claimed')
+    expect(system).toContain(
+      'never flag a reply for saying who is speaking, including when the guest asked. This exempts identity only, never the facts inside it: a specific job title, shift, or responsibility the assistant claims for itself is checked exactly like any other claim',
+    )
+    // The collision this scoping exists to prevent: an unscoped identity
+    // exemption could be read as licensing anything the assistant asserts
+    // about itself. That rule must still be in the prompt, verbatim.
+    expect(system).toContain('ANYTHING THE ASSISTANT ITSELF WROTE is not evidence that it was correct')
+  })
+
+  it('places both bullets inside the "Do not flag:" list', async () => {
+    const system = await systemPromptFor()
+    const listStart = system.indexOf('Do not flag:')
+    // The paragraph that closes the list and switches to scoping guidance.
+    const listEnd = system.indexOf('The runtime context section, the venue facts')
+    expect(listStart).toBeGreaterThan(-1)
+    expect(listEnd).toBeGreaterThan(listStart)
+    for (const bullet of ['A reply that says LESS than the source does', 'Who the assistant is']) {
+      const at = system.indexOf(bullet)
+      expect(at).toBeGreaterThan(listStart)
+      expect(at).toBeLessThan(listEnd)
+    }
+  })
+
+  // Deliberately NOT "so the two populations are separable in analytics" — they
+  // are not. `VerifyGroundingResult.promptVersion` is returned and consumed by
+  // nothing: verifyGroundingStage drops it, neither capture event carries it,
+  // and no column stores it. (`messages.prompt_version` comes from the
+  // GENERATION result.) That premise is inherited from the v1.3.0 comment and is
+  // wrong there too; threading it into captureUngroundedClaimCaught would make
+  // it true and is out of this ticket's ruled scope. What the pin actually buys
+  // is that a rule change cannot ship without moving the version.
+  it('pins the prompt version, so a rule change cannot ship silently', () => {
+    expect(VERIFY_GROUNDING_PROMPT_VERSION).toBe('v1.4.0')
   })
 })
