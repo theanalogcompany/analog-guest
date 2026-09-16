@@ -11,7 +11,7 @@ name: Build ready tickets
 #             Action, whose newest comment is human input. The ruling has
 #             landed, so /work-ticket picks up where it stopped.
 #
-# "Newest comment" skips [SLACK] and [RESUME-CLAIM] bookkeeping, so a Slack
+# "Newest comment" skips [SLACK], [RESUME-CLAIM] and [DENIALS] bookkeeping, so a Slack
 # marker or an earlier claim never buries a ruling.
 #
 # Blocked on Jaipal is a label, not a status: nothing here moves a ticket
@@ -183,7 +183,7 @@ jobs:
                 [.labels.nodes[].name] as $labels
                 | (.comments.nodes | sort_by(.createdAt)) as $sorted
                 # the newest comment that is a turn: bookkeeping skipped
-                | ($sorted | map(select(.body | marker_is("RESUME-CLAIM|SLACK") | not)) | last) as $newest
+                | ($sorted | map(select(.body | marker_is("RESUME-CLAIM|SLACK|DENIALS") | not)) | last) as $newest
                 | . + {
                     blocked: ($labels | any(. == "Needs Decision" or . == "Needs Action")),
                     newestId: ($newest.id // ""),
@@ -408,8 +408,8 @@ jobs:
             the Needs Decision label, leave the status alone, and stop. Never
             build on an unapproved plan.
 
-            RESUMING. If the newest comment on a ticket, skipping [SLACK] and
-            [RESUME-CLAIM] bookkeeping, is human input, that is Jaipal's
+            RESUMING. If the newest comment on a ticket, skipping [SLACK],
+            [RESUME-CLAIM] and [DENIALS] bookkeeping, is human input, that is Jaipal's
             ruling, often a Slack reply. Apply it to ## Open questions BEFORE
             checking whether any question is still open (work-ticket.md Phase
             0 step 2b, then 2c). Checking first finds his own question still
@@ -459,7 +459,7 @@ jobs:
                   ended: ($r.subtype // "without a result"),
                   turns: ($r.num_turns // 0),
                   denials: (($r.permission_denials // []) | length),
-                  denied: [ ($r.permission_denials // [])[:10][]
+                  denied: [ ($r.permission_denials // [])[:20][]
                     | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
                     | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
                     | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
@@ -477,6 +477,31 @@ jobs:
             echo "::warning title=Permission denials::The session hit $DENIALS permission denials."
           fi
 
+          # A run that succeeds with denials looks identical to one without,
+          # so the denials go on the ticket as bookkeeping every time: a
+          # denial on a finished run usually means a prompt teaches a form the
+          # allowlist refuses. The automation ignores [DENIALS].
+          FENCE='```'
+          post_denials() {
+            BODY="**[FROM CLAUDE CODE]**
+
+          [DENIALS] $2 run=${GITHUB_RUN_ID} count=${DENIALS}
+
+          This run's session did its work on this ticket but hit ${DENIALS} permission denials on the way. A denial on a run that otherwise succeeded usually means a prompt teaches a command the allowlist refuses. Bookkeeping: the automation ignores this comment.
+
+          Denied, first 20, key redacted:
+
+          ${FENCE}text
+          ${DENIED}
+          ${FENCE}
+
+          Run: ${RUN_URL}"
+            gql "$(jq -nc --arg id "$1" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            echo "$2: posted [DENIALS] for $DENIALS denial(s)."
+          }
+
           SILENT=""
           for TICKET in $TICKETS; do
             ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
@@ -490,18 +515,20 @@ jobs:
               | [.data.issue.comments.nodes[]
                   | select((.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= $since)
                   | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*"))
-                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:RESUME-CLAIM|SLACK|SILENT-RUN)\\]") | not)]
+                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:RESUME-CLAIM|SLACK|DENIALS|SILENT-RUN)\\]") | not)]
               | length')
 
             if [ "$POSTED" -gt 0 ]; then
               echo "$TICKET: the session posted $POSTED comment(s)."
+              if [ "$DENIALS" -gt 0 ]; then
+                post_denials "$ID" "$TICKET"
+              fi
               continue
             fi
 
             SILENT="$SILENT $TICKET"
             echo "::error title=Silent run::$TICKET: the session worked this ticket and posted nothing. Posting [SILENT-RUN]."
 
-            FENCE='```'
             BODY="**[FROM CLAUDE CODE]**
 
           [SILENT-RUN] ${TICKET}
@@ -512,7 +539,7 @@ jobs:
           - Work step: ${WORK_OUTCOME}. The session ended ${ENDED} after ${TURNS} turns.
           - Permission denials: ${DENIALS}
 
-          Denied, first 10:
+          Denied, first 20, key redacted:
 
           ${FENCE}text
           ${DENIED}
