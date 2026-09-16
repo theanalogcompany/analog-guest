@@ -896,6 +896,10 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
     await vi.waitFor(() =>
       expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
         agentRunId: expect.any(String),
+        // TAC-385 PR 1: required, and asserted rather than loosened — it is
+        // what tells the three send paths apart in Slack, and the dispatch
+        // paths are where a pessimistic closure is most likely to be wrong.
+        via: 'auto_send',
         venueId: VENUE_ID,
         guestId: GUEST_ID,
         messageId: 'sent-1',
@@ -919,6 +923,10 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
     await vi.waitFor(() =>
       expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
         agentRunId: expect.any(String),
+        // TAC-385 PR 1: required, and asserted rather than loosened — it is
+        // what tells the three send paths apart in Slack, and the dispatch
+        // paths are where a pessimistic closure is most likely to be wrong.
+        via: 'auto_send',
         venueId: VENUE_ID,
         guestId: GUEST_ID,
         messageId: 'sent-1',
@@ -1311,5 +1319,130 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
     const [, , , mechanicOfferBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(mechanicOfferBackstopArg).toEqual({ status: 'check_failed' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-385 PR 1: the rendered set reaches the QUEUED card too
+// ---------------------------------------------------------------------------
+//
+// Before this, only the auto-send path recorded intentions. A queued card an
+// operator later approved or edited reached the guest and recorded nothing —
+// 13 of 34 sent replies at Le Mil's in the 30 days to 2026-09-14.
+//
+// The fix is a single renderableIntentions(...) call hoisted above the
+// queue/send fork, so what a card STORES and what an auto-send RECORDS are the
+// same value by construction. The first test below proves that equivalence
+// BEHAVIOURALLY rather than by counting call sites in the source: it runs the
+// same context down both branches and compares the two.
+describe('handleInbound — rendered intentions on the queue path (TAC-385)', () => {
+  const UNDERSTAND = {
+    key: 'understand_order' as const,
+    promptLine: "You haven't heard what this guest ordered yet.",
+    eligibleAt: new Date('2026-09-13T12:00:00.000Z'),
+  }
+  const LEARN_NAME = {
+    key: 'learn_name' as const,
+    promptLine: "You don't know this guest's name yet.",
+    eligibleAt: new Date('2026-09-10T12:00:00.000Z'),
+  }
+
+  function setUpSend() {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-1',
+      providerMessageId: 'p',
+    })
+  }
+
+  function setUpQueue() {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['model_flagged'],
+      primaryTrigger: 'model_flagged',
+      existingPendingDraftId: null,
+    })
+  }
+
+  // THE EQUIVALENCE. Two runs over one context: the queued card's stored set
+  // must equal the auto-send's recorded set. A second, independently-derived
+  // renderableIntentions call in either branch fails this the moment the two
+  // disagree, which is the failure a call-site count is only a proxy for.
+  it('stores on a queued card exactly what an auto-send would record', async () => {
+    const openIntentions = [UNDERSTAND, LEARN_NAME]
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions }))
+
+    setUpQueue()
+    await handleInbound(INBOUND_ID)
+    const [, , , , queueOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+
+    setUpSend()
+    await handleInbound(INBOUND_ID)
+    const recorded = recordIntentionPromptsMock.mock.calls[0][0].openIntentions
+
+    expect(queueOpts.renderedIntentions).toEqual(recorded)
+    expect(queueOpts.renderedIntentions).toEqual(openIntentions)
+  })
+
+  it('passes the rendered set to the queue persist', async () => {
+    setUpQueue()
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'queued' })
+    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(opts.renderedIntentions).toEqual([UNDERSTAND])
+  })
+
+  // renderableIntentions suppresses on opt_out (TAC-328). A suppressed turn
+  // must store nothing, or an operator approving that card would record an
+  // intention against a reply to someone asking to stop being contacted.
+  it('stores an empty set when the turn suppresses intentions', async () => {
+    setUpQueue()
+    // The orchestrator overwrites ctx.classification from classifyStage, so
+    // the category has to come from the STAGE, not the context fixture.
+    classifyStageMock.mockResolvedValue({
+      category: 'opt_out',
+      classifierConfidence: 0.99,
+      reasoning: 'stop',
+      crisisSafety: false,
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(opts.renderedIntentions).toEqual([])
+  })
+
+  // TAC-332's opener guard now applies at WRITE time. A queued opener draft
+  // stores nothing, so the dispatch path inherits the guard without having to
+  // re-derive "was this the opener" from a runtime context it does not hold.
+  it('stores nothing on the true opener turn of a qr_scan guest', async () => {
+    setUpQueue()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        openIntentions: [UNDERSTAND],
+        guest: {
+          id: GUEST_ID,
+          phoneNumber: '+15555550123',
+          firstName: null,
+          createdAt: new Date(),
+          createdVia: 'qr_scan',
+          isDemo: false,
+          context: {},
+          lastVisitAt: null,
+        },
+        recentMessages: [],
+      }),
+    )
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(opts.renderedIntentions).toEqual([])
   })
 })
