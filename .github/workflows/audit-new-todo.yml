@@ -320,7 +320,7 @@ jobs:
                   ended: ($r.subtype // "without a result"),
                   turns: ($r.num_turns // 0),
                   denials: (($r.permission_denials // []) | length),
-                  denied: [ ($r.permission_denials // [])[:10][]
+                  denied: [ ($r.permission_denials // [])[:20][]
                     | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
                     | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
                     | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
@@ -338,6 +338,31 @@ jobs:
             echo "::warning title=Permission denials::The session hit $DENIALS permission denials."
           fi
 
+          # A run that succeeds with denials looks identical to one without,
+          # so the denials go on the ticket as bookkeeping every time: a
+          # denial on a finished run usually means a prompt teaches a form the
+          # allowlist refuses. The automation ignores [DENIALS].
+          FENCE='```'
+          post_denials() {
+            BODY="**[FROM CLAUDE CODE]**
+
+          [DENIALS] $2 run=${GITHUB_RUN_ID} count=${DENIALS}
+
+          This run's session did its work on this ticket but hit ${DENIALS} permission denials on the way. A denial on a run that otherwise succeeded usually means a prompt teaches a command the allowlist refuses. Bookkeeping: the automation ignores this comment.
+
+          Denied, first 20, key redacted:
+
+          ${FENCE}text
+          ${DENIED}
+          ${FENCE}
+
+          Run: ${RUN_URL}"
+            gql "$(jq -nc --arg id "$1" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            echo "$2: posted [DENIALS] for $DENIALS denial(s)."
+          }
+
           ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
             '{query: "query($t: String!) { issue(id: $t) { id state { name } labels { nodes { name } } comments(first: 250) { nodes { body createdAt } } } }", variables: {t: $t}}')")
           ID=$(echo "$ISSUE" | jq -er '.data.issue.id')
@@ -346,6 +371,9 @@ jobs:
           # A completed audit always moves the ticket out of Todo.
           if [ "$STATE" != "Todo" ]; then
             echo "$TICKET is in $STATE. The audit finished."
+            if [ "$DENIALS" -gt 0 ]; then
+              post_denials "$ID" "$TICKET"
+            fi
             exit 0
           fi
 
@@ -367,7 +395,7 @@ jobs:
 
           ${HEAD}
 
-          The session ended ${ENDED} after ${TURNS} turns, with ${DENIALS} permission denials. Denied, first 10:
+          The session ended ${ENDED} after ${TURNS} turns, with ${DENIALS} permission denials. Denied, first 20, key redacted:
 
           ${FENCE}text
           ${DENIED}

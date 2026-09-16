@@ -154,12 +154,13 @@ earlier comment where that reading misses it.
 | `[BUILD-SKIPPED]` | The ticket carries two repo labels, or its Repo: line and labels disagree | Add `Needs Decision`. Never start the build |
 | `[SLACK]` | The Slack sync posted the ticket; edited in place as it syncs | Bookkeeping, not a turn |
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
+| `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
-session may resume it. **Bookkeeping comments (`[SLACK]`, `[RESUME-CLAIM]`)
-never count as the newest comment.** They record what a workflow did, and
+session may resume it. **Bookkeeping comments (`[SLACK]`, `[RESUME-CLAIM]`,
+`[DENIALS]`) never count as the newest comment.** They record what a workflow did, and
 counting them would bury the reply they were posted around. The build
 automation resumes only Ready and In Progress tickets; a reply on a ticket in
 any other status is recorded but starts nothing.
@@ -235,7 +236,10 @@ session is loud only by writing to Linear, so a session that cannot write
 cannot say so. After every build session a shell step, not the session,
 looks for a comment from the session on each ticket it worked. A ticket with
 none gets `[SILENT-RUN]`, naming the permission denials, and the run fails.
-The denial count is printed in the run log on every build and audit run.
+The denial count is printed in the run log on every build and audit run,
+and any run with denials also posts the denied commands on the ticket as
+`[DENIALS]` bookkeeping, because a run that succeeds with denials otherwise
+looks identical to one without.
 This check exists because TAC-401's first resume ran green, hit 30
 permission denials, and wrote nothing.
 
