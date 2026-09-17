@@ -350,7 +350,7 @@ jobs:
                     | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
                     | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
                     | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
-                    | .[0:200] ]
+                    | .[0:2000] ]
                 }' "$EXECUTION_FILE")
           else
             SESSION='{"ended":"without a session record","turns":0,"denials":0,"denied":[]}'
