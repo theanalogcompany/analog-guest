@@ -48,6 +48,12 @@ name: Build ready tickets
 # own: a PR opened with the job token triggers no other workflows, so build's
 # PRs would get no CI and no preview build.
 #
+# Known unknown: which permissions that token carries inside this repo. The
+# exchange sends no permissions request and its response states only the
+# expiry, so nothing here shows, for example, whether the session can push a
+# change to a file under .github/workflows, which needs the workflows
+# permission. Not chased further.
+#
 # The Claude step does not run from a branch whose copy of this file differs
 # from main's: claude-code-action skips itself and exits green. So a change to
 # this file can only be tested after it merges, on a fixture ticket. Run
