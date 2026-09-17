@@ -68,6 +68,11 @@ on:
         required: false
         default: false
         type: boolean
+      check_token_scope:
+        description: "One-off: mint the Claude App token the way claude-code-action does and list the repos it reaches. Use with dry_run."
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ticket-builds-${{ github.repository }}
@@ -86,6 +91,47 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      # One-off, to be removed once its result is recorded. claude-code-action
+      # trades this job's OIDC token for a Claude GitHub App token and hands it
+      # to the session. Anthropic's docs say that token reaches only the repo
+      # the workflow runs in, but the App is installed on every org repo and
+      # the scoping happens on Anthropic's side. This step does the same
+      # exchange, lists the repositories the token can reach, and revokes it.
+      # The token is masked and never printed. It must run from main: the
+      # exchange refuses a workflow file that differs from the default branch.
+      - name: Check which repos the Claude App token reaches
+        if: inputs.check_token_scope == true
+        run: |
+          set -euo pipefail
+          OIDC=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r '.value // empty')
+          if [ -z "$OIDC" ]; then
+            echo "::error::No OIDC token."
+            exit 1
+          fi
+          echo "::add-mask::$OIDC"
+          RESPONSE=$(curl -sS -X POST -H "Authorization: Bearer $OIDC" \
+            https://api.anthropic.com/api/github/github-app-token-exchange)
+          TOKEN=$(echo "$RESPONSE" | jq -r '.token // .app_token // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "::error::The exchange returned no token: $(echo "$RESPONSE" | jq -c 'del(.token, .app_token)')"
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          revoke() {
+            curl -sS -o /dev/null -w "Token revoked: HTTP %{http_code}\n" -X DELETE \
+              -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/installation/token
+          }
+          trap revoke EXIT
+          echo "Exchange response, token removed:"
+          echo "$RESPONSE" | jq 'del(.token, .app_token)'
+          echo "Repositories the token can reach:"
+          curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/installation/repositories?per_page=100" \
+            | jq '{total_count, repositories: [.repositories[]?.full_name]}'
 
       - uses: actions/setup-node@v4
         with:
