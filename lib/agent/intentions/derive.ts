@@ -211,13 +211,31 @@ export function resolveInboundHistoryFrom(input: {
 
 export interface DeriveOpenIntentionsInput {
   now: Date
-  guest: { createdVia: string; createdAt: Date }
+  // TAC-436 removed `guest` from this input. Arming read createdVia/createdAt
+  // directly to decide understand_order; ruling 3 moved that resolution to the
+  // caller as `visitConfirmedAt`, leaving nothing here that reads the guest.
+  // Removed rather than left dead, so a future qr_scan branch has to be added
+  // back deliberately instead of finding the field already in scope.
   /** recognition.signals.responseRate, normalized 0-100. */
   responseRate: number
   /** Lifetime inbound message count at this venue (RawSignals.repliedMessageCount). */
   repliedMessageCount: number
   rules: IntentionRules
   facts: IntentionSatisfactionFacts
+  /**
+   * TAC-436 ruling 3: the EARLIEST confirmed visit on record, or null when no
+   * visit is confirmed. Arms understand_order.
+   *
+   * Earliest, not latest, because the window runs from the anchor: a guest who
+   * has been in several times should not have the ask renewed by each visit —
+   * understand_order is about the first order we never heard, and TAC-380's
+   * re-arming is deliberately off for it (rearmsOnNewerEvent).
+   *
+   * Resolved by build-runtime-context from QR enrollment and acknowledged
+   * arrivals. See IntentionArmsOn.visit_confirmed for why last_visit_at is not
+   * one of them.
+   */
+  visitConfirmedAt: Date | null
   /** created_at of every open recommendation to this guest, in any order. */
   openRecommendationTimes: readonly Date[]
   /**
@@ -309,8 +327,8 @@ function newestEventArming(
 /**
  * How this intention arms right now, or null when nothing arms it.
  *
- * - qr_scan_enrollment: the enrollment. understand_order is ungated and belongs
- *   to the first exchange.
+ * - visit_confirmed: the earliest confirmed visit (TAC-436 ruling 3).
+ *   understand_order is ungated and belongs to the first exchange after one.
  * - first_contact: this turn, the first turn its gate is seen open.
  * - open_recommendation / recorded_order (event-armed): the NEWEST event (ruling
  *   1), anchored at the moment it became part of a DIFFERENT conversation, i.e.
@@ -335,10 +353,10 @@ function armingFor(
 ): Arming | typeof HELD | null {
   const now = input.now.getTime()
   switch (def.armsOn.kind) {
-    case 'qr_scan_enrollment':
-      return input.guest.createdVia === 'qr_scan'
-        ? { eligibleAt: input.guest.createdAt, eventAt: input.guest.createdAt }
-        : null
+    case 'visit_confirmed':
+      return input.visitConfirmedAt === null
+        ? null
+        : { eligibleAt: input.visitConfirmedAt, eventAt: input.visitConfirmedAt }
     case 'first_contact':
       return { eligibleAt: input.now, eventAt: input.now }
     case 'open_recommendation':
@@ -378,13 +396,53 @@ function lastPromptWentUnanswered(
   return !wasAnswered(promptedAt, input.inboundTimes, input.conversationWindowMs)
 }
 
+/**
+ * TAC-436: whether this is the guest's FIRST-EVER inbound at this venue.
+ *
+ * Read off `repliedMessageCount`, the lifetime inbound count the gate already
+ * compares against, rather than a separately-plumbed flag that could drift from
+ * it. The webhook INSERTs the inbound before handing off to the agent
+ * (app/api/webhooks/sendblue/route.ts), so on a first-ever message the count is
+ * 1; `<= 1` also covers a count of 0 rather than depending on that ordering.
+ *
+ * Deliberately NOT `recentMessages.length === 0`, which is a 14-day window and
+ * is also true for a guest returning after a long gap.
+ *
+ * Safe because deriveOpenIntentions only ever runs on an inbound turn:
+ * build-runtime-context guards the whole derivation on `input.currentMessage`
+ * and sets `openIntentions: []` otherwise.
+ */
+export function isFirstEverInboundTurn(repliedMessageCount: number): boolean {
+  return repliedMessageCount <= 1
+}
+
+/**
+ * The right to ask. An exhaustive switch, so a fourth gate kind fails `tsc`
+ * until someone decides what it requires.
+ *
+ * `replies_only` (TAC-436 ruling 2) drops the response-rate floor, which is
+ * unreachable in a guest's first turns by construction — see IntentionGate.
+ * Its first-message count is stated per intention and is NOT venue-overridable:
+ * `min_replies` tunes the ongoing stagger, not the opening exchange.
+ */
 function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): boolean {
-  if (def.gate.kind === 'none') return true
-  const minReplies = input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
-  return (
-    input.responseRate >= input.rules.response_rate_floor &&
-    input.repliedMessageCount >= minReplies
-  )
+  switch (def.gate.kind) {
+    case 'none':
+      return true
+    case 'replies_only': {
+      const minReplies = isFirstEverInboundTurn(input.repliedMessageCount)
+        ? def.gate.firstMessageMinReplies
+        : (input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies)
+      return input.repliedMessageCount >= minReplies
+    }
+    case 'conversational': {
+      const minReplies = input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
+      return (
+        input.responseRate >= input.rules.response_rate_floor &&
+        input.repliedMessageCount >= minReplies
+      )
+    }
+  }
 }
 
 /**

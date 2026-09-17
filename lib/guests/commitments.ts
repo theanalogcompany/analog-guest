@@ -894,6 +894,60 @@ export async function findActiveCommitmentsForGuest(opts: {
 }
 
 /**
+ * TAC-436 ruling 3: the EARLIEST time someone at the venue confirmed this guest
+ * arrived, or null when nobody ever has.
+ *
+ * `acknowledged_at` is written by markAcknowledged off the operator's
+ * swipe-right on a heads-up card, and it is the one arrival signal that creates
+ * no transaction row — which is what makes it usable for arming
+ * understand_order, an intention any transaction closes.
+ *
+ * Earliest, not latest: the intention's window runs from its anchor, and
+ * understand_order does not re-arm (rearmsOnNewerEvent), so a later visit must
+ * not renew an ask about the first order nobody heard.
+ *
+ * Reads the column directly rather than through GuestCommitmentRowSchema: the
+ * one field needed is a timestamp, and a row with, say, an unrecognized `type`
+ * would otherwise drop a genuine arrival on the floor.
+ *
+ * Not covered by a dedicated index. `idx_guest_commitments_active_for_guest` is
+ * partial on open + pending_ack and so does not serve this; at pilot volume the
+ * (venue_id, guest_id) scan is cheap, and adding an index for one read on the
+ * agent path is a migration this ticket does not need.
+ */
+export async function findEarliestAcknowledgedArrival(opts: {
+  venueId: string
+  guestId: string
+}): Promise<RAGResult<Date | null>> {
+  const { venueId, guestId } = opts
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .select('acknowledged_at')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .eq('status', 'acknowledged')
+      .not('acknowledged_at', 'is', null)
+      .order('acknowledged_at', { ascending: true })
+      .limit(1)
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_read_failed' }
+    }
+    const raw = data?.[0]?.acknowledged_at
+    if (typeof raw !== 'string') return { ok: true, data: null }
+    const parsed = new Date(raw)
+    // An unparseable timestamp is "no confirmed visit", never Invalid Date: the
+    // derivation would carry NaN into an expiry comparison and silently never
+    // expire.
+    return { ok: true, data: Number.isFinite(parsed.getTime()) ? parsed : null }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_read_threw' }
+  }
+}
+
+/**
  * Find open commitments with arrival_signal='scheduled' and expected_arrival
  * populated. The morning-of model (TAC-297 follow-up): time-of-day filtering
  * lives in the processor, not the query — the processor knows each venue's

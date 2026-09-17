@@ -40,11 +40,18 @@ const NO_FACTS = { hasQualifyingTransaction: false, hasFirstName: false, hasHome
 function input(overrides: Partial<DeriveOpenIntentionsInput> = {}): DeriveOpenIntentionsInput {
   return {
     now: NOW,
-    guest: { createdVia: 'inbound_message', createdAt: daysAgo(30) },
     responseRate: 0,
-    repliedMessageCount: 0,
+    // TAC-436: 2, not 0. Since ruling 2, a count of 0 or 1 IS a guest's
+    // first-ever turn, which opens learn_name through its firstMessageMinReplies
+    // waiver. This base fixture means "every gate closed", so it has to sit off
+    // that turn. Tests about the waiver set the count to 1 explicitly.
+    repliedMessageCount: 2,
     rules: INTENTION_RULES_DEFAULT,
     facts: NO_FACTS,
+    // TAC-436: no confirmed visit by default, so understand_order stays closed
+    // unless a test supplies one. Tests that used to set a qr_scan guest for
+    // this now set visitConfirmedAt directly.
+    visitConfirmedAt: null,
     openRecommendationTimes: [],
     openRecommendationTouchedTimes: [],
     openRecommendationsUnreadable: false,
@@ -117,7 +124,6 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
   it('reads a legacy learn_first_order prompt as a closed understand_order', () => {
     const result = deriveOpenIntentions(
       input({
-        guest: { createdVia: 'qr_scan', createdAt: hoursAgo(3) },
         rows: { prompted: [promptedRow('learn_first_order', hoursAgo(2))], eligible: [] },
       }),
     )
@@ -139,28 +145,44 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
 })
 
 describe('deriveOpenIntentions — arming', () => {
-  // Ruling 4: a scan confirms a visit, which is what lets understand_order ask
-  // about an order without breaking R1. No scan, no arm.
-  it('arms understand_order on a qr_scan enrollment, ungated, anchored to enrollment', () => {
-    const createdAt = hoursAgo(1)
-    const result = deriveOpenIntentions(input({ guest: { createdVia: 'qr_scan', createdAt } }))
+  // TAC-436 ruling 3 REVERSED the scope here. This used to arm on a qr_scan
+  // enrollment and nothing else; it now arms on a confirmed visit from any
+  // source, and resolving WHICH sources confirm one moved to the caller. The
+  // derivation sees one date, so these are about the date.
+  it('arms understand_order on a confirmed visit, ungated, anchored to that visit', () => {
+    const visitConfirmedAt = hoursAgo(1)
+    const result = deriveOpenIntentions(input({ visitConfirmedAt }))
     expect(keysOf(result.open)).toEqual(['understand_order'])
-    expect(result.newlyEligible).toEqual([{ key: 'understand_order', eligibleAt: createdAt, rearm: false }])
+    expect(result.newlyEligible).toEqual([
+      { key: 'understand_order', eligibleAt: visitConfirmedAt, rearm: false },
+    ])
   })
 
-  it('never arms understand_order for a guest who texted in without scanning (R1)', () => {
-    const result = deriveOpenIntentions(
-      input({ ...engaged(11), guest: { createdVia: 'inbound_message', createdAt: hoursAgo(1) } }),
-    )
+  // R1 still holds: no confirmed visit, no ask about an order. Before ruling 3
+  // this was "no scan"; the guarantee is the same and its scope is wider.
+  it('never arms understand_order with no confirmed visit, however engaged the guest', () => {
+    const result = deriveOpenIntentions(input({ ...engaged(11), visitConfirmedAt: null }))
     expect(keysOf(result.open)).not.toContain('understand_order')
   })
 
-  it('expires understand_order its window after enrollment', () => {
+  it('expires understand_order its window after the confirmed visit', () => {
     const result = deriveOpenIntentions(
-      input({ guest: { createdVia: 'qr_scan', createdAt: daysAgo(UNDERSTAND_ORDER_WINDOW_DAYS + 1) } }),
+      input({ visitConfirmedAt: daysAgo(UNDERSTAND_ORDER_WINDOW_DAYS + 1) }),
     )
-    expect(result.open).toEqual([])
-    expect(result.newlyEligible).toEqual([])
+    expect(keysOf(result.open)).not.toContain('understand_order')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
+  })
+
+  // The ruling's own closure, unchanged: hearing the order closes the ask,
+  // whatever confirmed the visit.
+  it('never arms understand_order once any transaction exists', () => {
+    const result = deriveOpenIntentions(
+      input({
+        visitConfirmedAt: hoursAgo(1),
+        facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('understand_order')
   })
 
   // Ruling 2: anchored to the moment the recommendation became part of a
@@ -499,7 +521,7 @@ describe('deriveOpenIntentions — re-arming', () => {
     const result = deriveOpenIntentions(
       input({
         responseRate: 0,
-        repliedMessageCount: 0,
+        repliedMessageCount: 2, // off the first-ever turn; see input()
         openRecommendationTimes: [hoursAgo(50)],
         rows: { prompted: [promptedRecommendation()], eligible: [] },
         inboundTimes: ANSWERED,
@@ -599,10 +621,85 @@ describe('deriveOpenIntentions — re-arming', () => {
 })
 
 describe('deriveOpenIntentions — conversational gate', () => {
-  it('opens nothing gated while responseRate is below the floor, however many replies', () => {
+  // TAC-436 ruling 2 REVERSED this. It used to assert that nothing opened below
+  // the floor whatever the reply count; that is exactly the deadlock the ticket
+  // is about, because the floor reads 0 until three outbound responses exist and
+  // the four first-contact intentions became eligible only after the one licence
+  // to raise them had expired.
+  //
+  // The floor still binds the two CONVERSATIONAL intentions. They arm off events
+  // this fixture has none of, so the assertion below is about the first-contact
+  // four; the conversational pair get their own case underneath, with their
+  // events present, or it would pass for the wrong reason.
+  it('opens the first-contact intentions below the floor, on the reply count alone', () => {
     const result = deriveOpenIntentions(input({ responseRate: 49, repliedMessageCount: 50 }))
+    expect(keysOf(result.open)).toEqual([
+      'learn_name',
+      'are_they_local',
+      'their_rhythm',
+      'why_theyre_here',
+    ])
+  })
+
+  it('still holds a conversational-gated intention below the floor, with its event armed', () => {
+    const result = deriveOpenIntentions(
+      input({
+        responseRate: 49,
+        repliedMessageCount: 50,
+        openRecommendationTimes: [hoursAgo(50)],
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+  })
+
+  it('opens that same conversational intention once the rate clears the floor', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(50), openRecommendationTimes: [hoursAgo(50)] }),
+    )
+    expect(keysOf(result.open)).toContain('got_the_recommendation')
+  })
+
+  // TAC-436 audit question 1. The waiver is learn_name's alone, and it applies
+  // on the guest's first-ever inbound only.
+  it('opens learn_name on a guest first-ever message, with nothing else', () => {
+    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 1 }))
+    expect(keysOf(result.open)).toEqual(['learn_name'])
+  })
+
+  it('opens learn_name on a first-ever message beside understand_order, in priority order', () => {
+    const result = deriveOpenIntentions(
+      input({ responseRate: 0, repliedMessageCount: 1, visitConfirmedAt: hoursAgo(1) }),
+    )
+    expect(keysOf(result.open)).toEqual(['understand_order', 'learn_name'])
+  })
+
+  // THE NEGATIVE THAT SCOPES THE RULING. Second turn, still below every count:
+  // learn_name closes again until the ordinary stagger opens it. Without this,
+  // a blanket zero on replies_only passes every other test in this file.
+  it('closes learn_name again on the SECOND message, before its ordinary count', () => {
+    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 2 }))
     expect(result.open).toEqual([])
-    expect(result.newlyEligible).toEqual([])
+  })
+
+  it('does not waive the count for the other three on a first-ever message', () => {
+    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 1 }))
+    expect(keysOf(result.open)).not.toContain('are_they_local')
+    expect(keysOf(result.open)).not.toContain('their_rhythm')
+    expect(keysOf(result.open)).not.toContain('why_theyre_here')
+  })
+
+  // A venue tunes the ONGOING stagger. The opening exchange is a per-intention
+  // statement, not a venue knob, so an override must not reach it.
+  it('ignores a per-venue min_replies override on a first-ever message', () => {
+    const result = deriveOpenIntentions(
+      input({
+        responseRate: 0,
+        repliedMessageCount: 1,
+        rules: { ...INTENTION_RULES_DEFAULT, min_replies: { learn_name: 9 } },
+      }),
+    )
+    expect(keysOf(result.open)).toEqual(['learn_name'])
   })
 
   // Correction B from the 2026-09-14 plan: tiers stagger on the monotone reply
@@ -656,7 +753,6 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
   it('keeps a first-contact intention open for its window from ELIGIBILITY, not guest creation', () => {
     const result = deriveOpenIntentions(
       input({
-        guest: { createdVia: 'inbound_message', createdAt: daysAgo(60) },
         rows: {
           prompted: [],
           eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(FIRST_CONTACT_WINDOW_DAYS - 1) }],
@@ -684,7 +780,7 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
     const result = deriveOpenIntentions(
       input({
         responseRate: 0,
-        repliedMessageCount: 0,
+        repliedMessageCount: 2, // off the first-ever turn; see input()
         rows: { prompted: [], eligible: [{ intentionKey: 'are_they_local', eligibleAt: daysAgo(2) }] },
       }),
     )
@@ -721,7 +817,6 @@ describe('deriveOpenIntentions — satisfaction proxies', () => {
   it('closes understand_order once any transaction exists', () => {
     const result = deriveOpenIntentions(
       input({
-        guest: { createdVia: 'qr_scan', createdAt: hoursAgo(1) },
         facts: { ...NO_FACTS, hasQualifyingTransaction: true },
       }),
     )
@@ -734,7 +829,6 @@ describe('deriveOpenIntentions — priority', () => {
     const result = deriveOpenIntentions(
       input({
         ...engaged(11),
-        guest: { createdVia: 'qr_scan', createdAt: hoursAgo(1) },
         openRecommendationTimes: [hoursAgo(50)],
         recordedOrderTimes: [hoursAgo(50)],
         facts: { ...NO_FACTS, hasQualifyingTransaction: true },

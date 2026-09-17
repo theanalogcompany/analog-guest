@@ -62,8 +62,8 @@ export function formatExpiryWindow(expiresAfterMs: number): string {
  */
 export function formatArmsOn(armsOn: IntentionArmsOn): string {
   switch (armsOn.kind) {
-    case 'qr_scan_enrollment':
-      return 'The guest texts in by scanning the sign'
+    case 'visit_confirmed':
+      return 'A visit is confirmed: the guest scans the sign, or someone at the counter acknowledges their arrival'
     case 'first_contact':
       return 'Any guest, once the gate opens'
     case 'open_recommendation':

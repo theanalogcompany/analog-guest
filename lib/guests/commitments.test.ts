@@ -22,6 +22,7 @@ import {
   commitmentDedupKey,
   createCommitmentFromPending,
   findActiveCommitmentsForGuest,
+  findEarliestAcknowledgedArrival,
   findOpenObligations,
   findScheduledOpenCommitments,
   markAcknowledged,
@@ -86,6 +87,8 @@ interface MockState {
   // the mock ignores them — so they are captured and asserted directly. Same
   // technique handle-operator-decline.test.ts uses for its import-set check.
   selectNotCalls: Array<{ field: string; op: string; value: unknown }>
+  selectOrderCalls: Array<{ field: string; opts: unknown }>
+  selectLimitCalls: number[]
   selectTables: string[]
   updateIsCalls: Array<{ field: string; value: unknown }>
   /** venues.timezone lookup for the hold horizon. */
@@ -113,6 +116,8 @@ function newState(overrides: Partial<MockState> = {}): MockState {
     selectEqCalls: [],
     selectInCalls: [],
     selectNotCalls: [],
+    selectOrderCalls: [],
+    selectLimitCalls: [],
     selectTables: [],
     updateIsCalls: [],
     venueRow: { timezone: 'America/Los_Angeles' },
@@ -184,12 +189,27 @@ function makeSupabaseMock(state: MockState) {
               error: null,
             }
           },
-          order: (_field: string, _opts: unknown) => Promise.resolve({
-            data: state.selectReturnQueue
-              ? (state.selectReturnQueue[callIndex] ?? [])
-              : state.selectReturn,
-            error: state.selectError,
-          }),
+          // Awaitable AND chainable: most callers await order() directly,
+          // findEarliestAcknowledgedArrival chains .limit(1) onto it.
+          order: (field: string, opts: unknown) => {
+            state.selectOrderCalls.push({ field, opts })
+            const result = {
+              data: state.selectReturnQueue
+                ? (state.selectReturnQueue[callIndex] ?? [])
+                : state.selectReturn,
+              error: state.selectError,
+            }
+            return {
+              limit: (n: number) => {
+                state.selectLimitCalls.push(n)
+                return Promise.resolve(result)
+              },
+              then: (
+                resolve: (v: typeof result) => unknown,
+                reject?: (e: unknown) => unknown,
+              ) => Promise.resolve(result).then(resolve, reject),
+            }
+          },
         }
         return chain
       },
@@ -1138,6 +1158,98 @@ describe('markCancelled (TAC-299)', () => {
     })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.errorCode).toBe('db_write_failed')
+  })
+})
+
+// TAC-436 ruling 3. The arrival half of "a visit is confirmed". This is the one
+// arrival signal that creates no transaction row, which is what makes it usable
+// for arming an intention that any transaction closes.
+describe('findEarliestAcknowledgedArrival', () => {
+  function mockWith(state: MockState) {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+  }
+
+  it('returns the acknowledged_at of the earliest acknowledged commitment', async () => {
+    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    mockWith(state)
+
+    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data).toEqual(new Date('2026-09-10T14:00:00.000Z'))
+  })
+
+  // NON-BEHAVIOURAL, and the only thing that proves the query is scoped. The
+  // mock hands back selectReturn whatever is asked for, so without these a
+  // build that dropped the status filter, the venue scoping or the ordering
+  // would pass every assertion above while reading another venue's rows or the
+  // LATEST arrival instead of the earliest.
+  it('scopes to this venue, this guest, and acknowledged rows with a timestamp', async () => {
+    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    mockWith(state)
+
+    await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    expect(state.selectEqCalls).toContainEqual({ field: 'venue_id', value: VENUE_ID })
+    expect(state.selectEqCalls).toContainEqual({ field: 'guest_id', value: GUEST_ID })
+    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'acknowledged' })
+    expect(state.selectNotCalls).toContainEqual({
+      field: 'acknowledged_at',
+      op: 'is',
+      value: null,
+    })
+  })
+
+  // EARLIEST, not latest. understand_order does not re-arm, and its window runs
+  // from the anchor, so a later visit must not renew an ask about the first
+  // order nobody heard. A mutant flipping ascending to false fails here.
+  it('asks for the EARLIEST arrival, not the latest', async () => {
+    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    mockWith(state)
+
+    await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    expect(state.selectOrderCalls).toContainEqual({
+      field: 'acknowledged_at',
+      opts: { ascending: true },
+    })
+    expect(state.selectLimitCalls).toEqual([1])
+  })
+
+  it('returns null when the guest has no acknowledged arrival', async () => {
+    const state = newState({ selectReturn: [] })
+    mockWith(state)
+
+    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data).toBeNull()
+  })
+
+  // Never Invalid Date. The derivation carries this straight into an expiry
+  // comparison, and NaN there silently never expires.
+  it('returns null rather than an Invalid Date for an unparseable timestamp', async () => {
+    const state = newState({ selectReturn: [{ acknowledged_at: 'not a date' }] })
+    mockWith(state)
+
+    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data).toBeNull()
+  })
+
+  it('returns db_read_failed on a supabase error rather than null', async () => {
+    const state = newState({ selectError: { message: 'connection lost' }, selectReturn: null })
+    mockWith(state)
+
+    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+
+    // Distinguishable from "no arrival": the caller holds the arrival-armed
+    // half of the turn rather than reading a hiccup as "never visited".
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errorCode).toBe('db_read_failed')
   })
 })
 

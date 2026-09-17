@@ -104,7 +104,7 @@ describe('INTENTION_DEFINITIONS — shape', () => {
 describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', () => {
   it('arms understand_order on a qr_scan enrollment and leaves it ungated', () => {
     const def = INTENTION_DEFINITION_BY_KEY.understand_order
-    expect(def.armsOn).toEqual({ kind: 'qr_scan_enrollment' })
+    expect(def.armsOn).toEqual({ kind: 'visit_confirmed' })
     expect(def.gate).toEqual({ kind: 'none' })
   })
 
@@ -131,12 +131,56 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
     }
   })
 
-  it('gates every other intention on the conversational signal with the ruled reply counts', () => {
+  // TAC-436 ruling 2 split this in two. The reply counts are unchanged; what
+  // changed is WHICH intentions also wait on the response-rate floor. A literal
+  // table, not derived from armsOn, so that a definition switched between the
+  // two gate kinds fails here rather than passing against a rule that now
+  // describes it.
+  it('gates each intention on the ruled kind, with the ruled reply counts', () => {
+    const RULED_GATE_KIND = {
+      got_the_recommendation: 'conversational',
+      did_they_like_it: 'conversational',
+      learn_name: 'replies_only',
+      are_they_local: 'replies_only',
+      their_rhythm: 'replies_only',
+      why_theyre_here: 'replies_only',
+    } satisfies Record<Exclude<IntentionKey, 'understand_order'>, string>
+
     for (const [key, minReplies] of Object.entries(RULED_MIN_REPLIES)) {
-      expect(INTENTION_DEFINITION_BY_KEY[key as IntentionKey].gate, key).toEqual({
-        kind: 'conversational',
-        defaultMinReplies: minReplies,
-      })
+      const gate = INTENTION_DEFINITION_BY_KEY[key as IntentionKey].gate
+      expect(gate.kind, key).toBe(RULED_GATE_KIND[key as keyof typeof RULED_GATE_KIND])
+      expect(gate, key).toMatchObject({ defaultMinReplies: minReplies })
+    }
+  })
+
+  // TAC-436 audit question 1, ruled 2026-09-17: "explicit per intention, not a
+  // blanket zero for replies_only". learn_name alone is free in the opening
+  // exchange; the other three repeat their ongoing count, which waives nothing.
+  //
+  // A LITERAL table. Deriving the expectation from the definitions would pass
+  // against any value at all, which is the whole failure this pins.
+  it('waives the reply count on a first-ever message for learn_name ONLY', () => {
+    const RULED_FIRST_MESSAGE = {
+      learn_name: 0,
+      are_they_local: 5,
+      their_rhythm: 8,
+      why_theyre_here: 11,
+    } as const
+
+    for (const [key, expected] of Object.entries(RULED_FIRST_MESSAGE)) {
+      const gate = INTENTION_DEFINITION_BY_KEY[key as IntentionKey].gate
+      expect(gate.kind, key).toBe('replies_only')
+      expect(gate, key).toMatchObject({ firstMessageMinReplies: expected })
+    }
+  })
+
+  // The three non-learn_name waivers must stay INERT: a first-message count
+  // below the ongoing one would silently widen the ruling.
+  it('never lets a first-message count sit below the ongoing one, except learn_name', () => {
+    for (const def of INTENTION_DEFINITIONS) {
+      if (def.gate.kind !== 'replies_only') continue
+      if (def.key === 'learn_name') continue
+      expect(def.gate.firstMessageMinReplies, def.key).toBe(def.gate.defaultMinReplies)
     }
   })
 
@@ -148,7 +192,7 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
       const expectedDays =
         def.armsOn.kind === 'first_contact'
           ? FIRST_CONTACT_WINDOW_DAYS
-          : def.armsOn.kind === 'qr_scan_enrollment'
+          : def.armsOn.kind === 'visit_confirmed'
             ? UNDERSTAND_ORDER_WINDOW_DAYS
             : EVENT_ARMED_WINDOW_DAYS
       expect(def.expiresAfterMs, def.key).toBe(expectedDays * MS_PER_DAY)

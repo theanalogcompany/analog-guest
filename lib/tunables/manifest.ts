@@ -490,7 +490,7 @@ export const TUNABLES = [
     category: 'agent_runtime',
     source: 'lib/schemas/intention-rules.ts',
     description:
-      'Minimum normalized responseRate (0-100) before any conversational intention can become eligible. One floor for all of them; the per-intention reply count does the staggering.',
+      'Minimum normalized responseRate (0-100) before a conversational-gated intention can become eligible. TAC-436: this no longer applies to the four first-contact intentions, which are replies_only and are gated on the reply count alone. One floor for the rest; the per-intention reply count does the staggering.',
     relatedTickets: ['TAC-380'],
   },
   {
@@ -514,7 +514,7 @@ export const TUNABLES = [
     category: 'agent_runtime',
     source: 'lib/agent/intentions/definitions.ts',
     description:
-      'Lifetime inbound messages a guest must have sent before each conversational intention can become eligible. Overridable per venue via intention_rules.min_replies.',
+      'Lifetime inbound messages a guest must have sent before each gated intention can become eligible. Overridable per venue via intention_rules.min_replies, which tunes the ongoing stagger only: what a replies_only intention requires on a guest first-ever message is stated on its own definition and is not venue-overridable.',
     relatedTickets: ['TAC-380'],
   },
   {

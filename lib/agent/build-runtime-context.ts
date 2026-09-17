@@ -16,7 +16,10 @@ import {
   toParsedGuestContext,
   VenueInfoSchema,
 } from '@/lib/schemas'
-import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
+import {
+  findActiveCommitmentsForGuest,
+  findEarliestAcknowledgedArrival,
+} from '@/lib/guests/commitments'
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
@@ -422,6 +425,40 @@ export async function buildRuntimeContext(input: {
     // parse-projection, since we heard it even if raw_data is unparseable.
     const hasQualifyingTransaction = (visitHistoryResult.data?.length ?? 0) > 0
 
+    // TAC-436 ruling 3: arms understand_order off the EARLIEST confirmed visit,
+    // from either source, rather than off QR enrollment alone.
+    //
+    // Two sources, and the earliest of them wins because the intention's window
+    // runs from its anchor and understand_order never re-arms: a later visit
+    // must not renew an ask about the first order nobody heard.
+    //
+    // NOT guests.last_visit_at, which looks like the natural source and is inert
+    // here: every writer of it runs downstream of a transaction row, and a
+    // transaction satisfies this intention. A guest merely saying they came in
+    // is recorded nowhere today; that third source is TAC-386's (ruled
+    // 2026-09-17, audit question 2).
+    //
+    // Fails CLOSED on a read error, like the recommendation hold beside it: an
+    // unreadable arrival is not a confirmed visit, and the QR half still stands
+    // on its own, so a hiccup costs at most the arrival-armed half of one turn.
+    const acknowledgedArrivalResult = await findEarliestAcknowledgedArrival({
+      venueId: input.venueId,
+      guestId: input.guestId,
+    })
+    if (!acknowledgedArrivalResult.ok) {
+      console.warn(
+        `[agent] buildRuntimeContext: acknowledged-arrival load failed for guest ${input.guestId}: ${acknowledgedArrivalResult.error}. understand_order arms on QR enrollment alone this turn.`,
+      )
+    }
+    const confirmedVisitTimes = [
+      guest.createdVia === 'qr_scan' ? guest.createdAt : null,
+      acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null,
+    ].filter((d): d is Date => d !== null && Number.isFinite(d.getTime()))
+    const visitConfirmedAt =
+      confirmedVisitTimes.length === 0
+        ? null
+        : new Date(Math.min(...confirmedVisitTimes.map((d) => d.getTime())))
+
     // Arms got_the_recommendation; the derivation picks the newest one that is
     // askable now (ruling 1). activeCommitments is the open + pending_ack set,
     // and it fails open to [] on a load error. For arming that is the safe
@@ -474,7 +511,6 @@ export async function buildRuntimeContext(input: {
 
     const derived = deriveOpenIntentions({
       now: computedAt,
-      guest: { createdVia: guest.createdVia, createdAt: guest.createdAt },
       responseRate: recognition.signals.responseRate,
       repliedMessageCount: recognitionResult.data.repliedMessageCount,
       rules: parseIntentionRules(config.intention_rules),
@@ -483,6 +519,7 @@ export async function buildRuntimeContext(input: {
         firstName: guest.firstName,
         homeBase: parsedGuestContext.guest_details?.home_base,
       }),
+      visitConfirmedAt,
       openRecommendationTimes,
       openRecommendationTouchedTimes,
       openRecommendationsUnreadable: !activeCommitmentsResult.ok,

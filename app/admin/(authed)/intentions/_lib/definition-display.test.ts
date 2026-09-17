@@ -75,7 +75,7 @@ describe('formatPromptedAt', () => {
 describe('formatArmsOn (TAC-380)', () => {
   it('describes every arming kind distinctly', () => {
     const rendered = [
-      formatArmsOn({ kind: 'qr_scan_enrollment' }),
+      formatArmsOn({ kind: 'visit_confirmed' }),
       formatArmsOn({ kind: 'first_contact' }),
       formatArmsOn({ kind: 'open_recommendation' }),
       formatArmsOn({ kind: 'recorded_order' }),
