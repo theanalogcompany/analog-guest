@@ -594,6 +594,16 @@ export function applyCurrentTurnSuppression(
  *
  * - `opt_out` (TAC-328): a guest asking to stop being contacted never shares a
  *   prompt with a goal to pursue.
+ * - `comp_complaint` (TAC-436): an apology turn never carries an intention
+ *   question. **This entry MUST stay in step with shouldRenderOpenIntentions in
+ *   lib/ai/prompts/serializers.ts**, which is the render-side half of the same
+ *   suppression. Adding a category there and not here does not leak a question
+ *   into the reply — the block genuinely does not render — it does something
+ *   quieter and worse: the post-send classifier is still offered intentions the
+ *   prompt never showed, so a false positive closes one the guest never saw,
+ *   and a double classifier failure closes ALL of them pessimistically. Caught
+ *   by TAC-436's own gate run, on a comp_complaint turn reporting four
+ *   intentions offered against a reply generated without the block.
  * - A pending knowledge-gap question (ruling 6): the venue owes the guest an
  *   answer before it asks anything new. This burns a turn, not the intention —
  *   a suppressed intention is never recorded, so it stays open.
@@ -606,6 +616,6 @@ export function renderableIntentions(
   category: MessageCategory | null,
   hasPendingQuestion: boolean,
 ): OpenIntention[] {
-  if (category === 'opt_out' || hasPendingQuestion) return []
+  if (category === 'opt_out' || category === 'comp_complaint' || hasPendingQuestion) return []
   return [...open]
 }

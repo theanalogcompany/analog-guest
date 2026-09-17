@@ -17,6 +17,8 @@ import {
   runtimeToProse,
   venueInfoToProse,
 } from './serializers'
+import { renderableIntentions } from '../../agent/intentions/derive'
+import { MESSAGE_CATEGORIES } from '../types'
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -2492,5 +2494,47 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
     const none = runtimeToProse({ emojiDirective: 'none' }, 'reply', NOW)
     const allowed = runtimeToProse({ emojiDirective: 'allowed' }, 'reply', NOW)
     expect(none).not.toEqual(allowed)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-436: the two halves of intention suppression must agree
+// ---------------------------------------------------------------------------
+//
+// shouldRenderOpenIntentions (here) decides whether the block reaches the
+// PROMPT. renderableIntentions (lib/agent/intentions/derive) decides what the
+// post-send classifier is OFFERED, and handle-inbound reads it for both the
+// carrier and the recording.
+//
+// A category suppressed in one and not the other does NOT leak a question into
+// the reply -- the block genuinely does not render. It fails more quietly: the
+// classifier is handed intentions the prompt never showed, so a false positive
+// closes one the guest never saw, and a double classifier failure closes ALL of
+// them pessimistically. TAC-436 shipped exactly that divergence for
+// comp_complaint and its own gate run caught it, on a turn reporting four
+// intentions offered against a reply generated without the block.
+//
+// Iterates EVERY category rather than naming the two, so the next suppression
+// added to either side has to be added to both.
+describe('intention suppression: render side and record side agree (TAC-436)', () => {
+  const openIntentions = ["You don't know this guest's name yet."]
+  const asOpen = [
+    { key: 'learn_name' as const, promptLine: openIntentions[0], eligibleAt: NOW },
+  ]
+
+  it.each(MESSAGE_CATEGORIES)('agrees for %s', (category) => {
+    const rendersBlock = runtimeToProse({ mechanics: [], openIntentions }, category, NOW).includes(
+      "## What you're hoping to get to",
+    )
+    const offersToRecorder = renderableIntentions(asOpen, category, false).length > 0
+    expect(offersToRecorder, `${category}: render=${rendersBlock} record=${offersToRecorder}`).toBe(
+      rendersBlock,
+    )
+  })
+
+  // The pending-question case is renderableIntentions' alone (the serializer
+  // never sees it), so it is asserted separately rather than folded above.
+  it('offers nothing to the recorder while a knowledge-gap question is pending', () => {
+    expect(renderableIntentions(asOpen, 'reply', true)).toEqual([])
   })
 })
