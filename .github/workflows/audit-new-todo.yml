@@ -285,7 +285,7 @@ jobs:
             runs, gh run list and gh run view are available, read-only. For
             example:
 
-                 gh run list --repo theanalogcompany/analog-guest --workflow=commitments-due-cron.yml --event schedule --limit 100 --json createdAt,conclusion | jq length
+                 gh run list --repo ${{ github.repository }} --workflow=build-ready.yml --event schedule --limit 100 --json createdAt,conclusion | jq length
 
             Nothing else under gh is: gh run rerun, gh run cancel, gh workflow
             run and gh auth are denied, and so is anything that starts work.
