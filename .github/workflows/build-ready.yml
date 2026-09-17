@@ -23,9 +23,10 @@ name: Build ready tickets
 #
 # Which tickets are this repo's: the label narrows, the Repo: line decides
 # (.claude/process.md, "Which repo works a ticket"). One ticket, one repo:
-# a ticket with two repo labels is never built. The repo that would have
-# built it posts [BUILD-SKIPPED] saying it needs splitting, adds Needs
-# Decision, and moves on.
+# a ticket with two repo labels is never built, and neither is one whose
+# Repo: line names more than one repo. The repo that would have built it
+# posts [BUILD-SKIPPED] saying it needs splitting, adds Needs Decision, and
+# moves on.
 #
 # dry_run (manual dispatch only) prints what the run would start, resume and
 # flag, and writes nothing to Linear.
@@ -167,7 +168,11 @@ jobs:
               repo_labels as $labels
               | repo_line_names as $named
               | ([$named[] | select(. as $n | $labels | any(. == $n))] | first) as $pick
-              | if $pick != null then $pick
+              # A line naming more than one repo is a defect whatever the
+              # labels say: the repo it is NOT labelled for never sees the
+              # ticket at all, so a silent pick here is a silent half-build.
+              | if ($named | length) > 1 then "defect:multi-repo-line"
+                elif $pick != null then $pick
                 elif ($named | length) > 0 then "defect:unlabelled"
                 elif ($labels | length) == 1 then $labels[0]
                 elif ($labels | length) == 0 then "none"
@@ -319,7 +324,9 @@ jobs:
             NAME=$(echo "$row" | jq -r .identifier)
             # The two-label wording is .claude/process.md's, word for word.
             TEXT=$(echo "$row" | jq -r '
-              if (.labels | length) >= 2
+              if (.named | length) > 1
+              then "This ticket can'"'"'t be built. Its Repo: line names \(.named | join(" and ")), and cross-repo work is two tickets, one per repo, linked. A line naming more than one repo is a defect whatever the labels say: the repo it is not labelled for never sees this ticket, so nothing there picks it up and nothing there says why.\n\nSplit it: one ticket per repo, each with its own repo label and a Repo: line naming only that repo, linked to each other. Replying here will not unblock it: the ticket needs splitting."
+              elif (.labels | length) >= 2
               then "This ticket can'"'"'t be built. It carries the \(.labels | join(" and ")) labels, and cross-repo work is two tickets, one per repo, linked. Built as one ticket, only one repo would build it and the other half would never be built.\n\nSplit it: one ticket per repo, each with its own repo label and Repo: line, linked to each other. Replying here will not unblock it: the ticket needs splitting."
               else "This ticket can'"'"'t be built. Its Repo: line names \(.named | join(" and ")), and the ticket carries no label for \(if (.named | length) == 1 then "it" else "any of them" end).\n\nFix the Repo: line or the repo label so they agree. Replying here will not unblock it."
               end')

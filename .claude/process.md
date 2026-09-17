@@ -93,9 +93,15 @@ the audit. It just fails later and more expensively.
 The labels say where the work lands. The **Repo:** line says where it starts.
 The audit and the build both narrow by label and decide by the Repo: line:
 
-- **A Repo: line naming at least one labelled repo:** the first repo it names
-  that the ticket is labelled for works it. Naming an extra, unlabelled repo
-  is not a defect.
+- **A Repo: line naming exactly one repo, and the ticket is labelled for
+  it:** that repo works it.
+- **A Repo: line naming more than one repo** is a ticket-writing defect,
+  whatever the labels say. Cross-repo work is two tickets, one per repo,
+  linked. The repo the ticket is labelled for posts `[BUILD-SKIPPED]` (or
+  `[AUDIT-SKIPPED]`), adds `Needs Decision`, and does not guess. Naming a
+  second repo used not to be a defect, and that is what let TAC-439 sit
+  labelled `analog-guest` with a line naming both: guest picked it up
+  silently and operator never saw it at all.
 - **No Repo: line, one repo label:** that repo works it.
 - **No Repo: line, two repo labels** is a ticket-writing defect. The audit
   automation posts `[AUDIT-SKIPPED]` saying so, adds `Needs Decision`, and

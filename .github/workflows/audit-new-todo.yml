@@ -122,7 +122,11 @@ jobs:
               repo_labels as $labels
               | repo_line_names as $named
               | ([$named[] | select(. as $n | $labels | any(. == $n))] | first) as $pick
-              | if $pick != null then $pick
+              # A line naming more than one repo is a defect whatever the
+              # labels say: the repo it is NOT labelled for never sees the
+              # ticket at all, so a silent pick here is a silent half-build.
+              | if ($named | length) > 1 then "defect:multi-repo-line"
+                elif $pick != null then $pick
                 elif ($named | length) > 0 then "defect:unlabelled"
                 elif ($labels | length) == 1 then $labels[0]
                 elif ($labels | length) == 0 then "none"
@@ -201,7 +205,9 @@ jobs:
             NAME=$(echo "$row" | jq -r .identifier)
             # "Replying here will not unblock it." is Jaipal's wording.
             TEXT=$(echo "$row" | jq -r '
-              if .kind == "defect:no-repo-line"
+              if .kind == "defect:multi-repo-line"
+              then "This ticket can'"'"'t be audited. Its Repo: line names \(.named | join(" and ")), and cross-repo work is two tickets, one per repo, linked. A line naming more than one repo is a defect whatever the labels say: the repo it is not labelled for never sees this ticket at all.\n\nSplit it: one ticket per repo, each with its own repo label and a Repo: line naming only that repo, linked to each other. Replying here will not unblock it: the ticket needs splitting."
+              elif .kind == "defect:no-repo-line"
               then "This ticket can'"'"'t be audited. It carries the \(.labels | join(" and ")) labels and has no Repo: line, so nothing says which repo the work starts in.\n\nAdd a Repo: line to the ticket. Replying here will not unblock it."
               else "This ticket can'"'"'t be audited. Its Repo: line names \(.named | join(" and ")), and the ticket carries no label for \(if (.named | length) == 1 then "it" else "any of them" end).\n\nFix the Repo: line or the repo label so they agree. Replying here will not unblock it."
               end')
