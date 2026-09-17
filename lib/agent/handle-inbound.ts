@@ -7,6 +7,7 @@ import {
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
+  captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
@@ -1315,6 +1316,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         await scheduleAndSend(ctx, gen.result, {
           skipHumanFeelDelay: ctx.guest.isDemo === true,
           reviewReason: approval.reason,
+          // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
+          // and this branch records against, so what a card carries and what
+          // an auto-send carries cannot drift. Audit only on this path — the
+          // recording below is what actually closes the intentions.
+          renderedIntentions,
         })
       sendSpan.end({
         output: {
@@ -1359,6 +1365,23 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
                   agentRunId,
                   raisedKeys: outcome.raisedKeys,
                   classifierAttempts: outcome.classifierAttempts,
+                })
+                // TAC-436 ruling 5: a successful raise was a console.log and
+                // nothing else, so "zero intentions have ever been raised" was
+                // invisible for the whole life of the feature. `offeredKeys` is
+                // the rendered set, not ctx.openIntentions — the same value the
+                // classifier was given, so the event cannot claim a door was
+                // open that this turn suppressed.
+                await captureIntentionPromptRaised({
+                  agentRunId,
+                  via: 'auto_send',
+                  venueId,
+                  guestId,
+                  messageId,
+                  raisedKeys: outcome.raisedKeys,
+                  offeredKeys: renderedIntentions.map((o) => o.key),
+                  classifierAttempts: outcome.classifierAttempts,
+                  sentBody: gen.result.body,
                 })
               } else if (outcome.kind === 'closed_pessimistically') {
                 // Ruling 4: nothing re-asks, but these closed without a

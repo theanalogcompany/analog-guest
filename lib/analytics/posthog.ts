@@ -465,6 +465,74 @@ function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableP
   ].join('\n')
 }
 
+// TAC-436 ruling 5: the post-send recorder RAISED an intention. Until this,
+// a successful raise was a bare console.log on both send paths, so the only
+// intention signals that reached PostHog or Slack were the two failures below
+// — and since TAC-380 shipped, zero intentions had been raised, which was
+// itself invisible. This event is what makes the first production raise
+// observable, and it is the signal TAC-385 PR 2 keys its rollout on.
+//
+// Slack-relayed at pilot volume DELIBERATELY, unlike most success events: the
+// question this exists to answer is "has an intention ever been raised", and
+// at zero-to-a-handful a day the relay IS the answer. Revisit the relay (not
+// the event) if raising becomes routine.
+//
+// Shape mirrors IntentionPromptRecordingFailedProps below field for field
+// where they overlap, so the two are diffable in PostHog.
+export interface IntentionPromptRaisedProps {
+  /** Null on the dispatch paths: that draft's agent run ended when it queued. */
+  agentRunId: string | null
+  /**
+   * Which send path raised it. REQUIRED, not defaulted, for the same reason
+   * the failure event's is: a fourth send path has to decide rather than
+   * silently inherit 'auto_send'.
+   */
+  via: 'auto_send' | 'operator_approve' | 'operator_edit'
+  venueId: string
+  guestId: string
+  messageId: string
+  /** What the classifier said this message actually raised. Never empty. */
+  raisedKeys: string[]
+  /**
+   * Everything that was rendered and offered to the classifier. Carried so a
+   * 1-of-4 raise is legible without a second query: raisedKeys alone cannot
+   * distinguish "one door was open and she took it" from "four were open and
+   * she took one".
+   */
+  offeredKeys: string[]
+  classifierAttempts: number
+  /**
+   * The body as SENT. Truncated in Slack, full in PostHog. Without it the
+   * first production raise is a key name with nothing to judge, which is the
+   * whole point of the event; the two existing agent-quality Slack events
+   * (ungrounded claim, mechanic offer) carry message text on the same basis.
+   */
+  sentBody: string
+}
+
+export async function captureIntentionPromptRaised(
+  props: IntentionPromptRaisedProps,
+): Promise<void> {
+  await capturePostHogEvent('intention_prompt_raised', props.guestId, { ...props })
+  await postToSlack(formatIntentionPromptRaised(props))
+}
+
+function formatIntentionPromptRaised(props: IntentionPromptRaisedProps): string {
+  // The offered set minus what was raised, so the line reads as "she took this
+  // one, these were also open" rather than repeating the raised key.
+  const alsoOffered = props.offeredKeys.filter((k) => !props.raisedKeys.includes(k))
+  return [
+    '*Intention raised* — the agent asked, and it is recorded',
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `via: ${props.via}`,
+    ...(props.agentRunId === null ? [] : [`run: \`${props.agentRunId}\``]),
+    `message: \`${props.messageId}\``,
+    `raised: ${props.raisedKeys.join(', ')}${alsoOffered.length > 0 ? ` (also open: ${alsoOffered.join(', ')})` : ''}`,
+    `sent: "${truncate(props.sentBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ].join('\n')
+}
+
 // TAC-380: the post-send intention recorder could not record normally. Both
 // outcomes Slack-relay, because both change what a guest will be asked:
 //   - closed_pessimistically: the classifier failed on every attempt, so every

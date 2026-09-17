@@ -42,6 +42,7 @@ const captureDraftQueuedMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
 const captureCrisisSafetyReplySentMock = vi.fn()
 const captureIntentionPromptRecordingFailedMock = vi.fn()
+const captureIntentionPromptRaisedMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
@@ -166,6 +167,10 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
     captureIntentionPromptRecordingFailedMock(...a),
+  // TAC-436: this factory is an ALLOW-LIST. Omitted here, the new export
+  // arrives `undefined` and throws inside the waitUntil .then(), which nothing
+  // in this file would surface.
+  captureIntentionPromptRaised: (...a: unknown[]) => captureIntentionPromptRaisedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
   captureCorpusRetrievalBelowThreshold: vi.fn(),
@@ -311,6 +316,7 @@ beforeEach(() => {
   recordIntentionPromptsMock.mockResolvedValue({ kind: 'no_open_intentions' })
   recordIntentionEligibilityMock.mockResolvedValue({ kind: 'nothing_to_record' })
   captureIntentionPromptRecordingFailedMock.mockResolvedValue(undefined)
+  captureIntentionPromptRaisedMock.mockResolvedValue(undefined)
 })
 
 describe('handleInbound — generation-failure fallback (TAC-309)', () => {
@@ -733,7 +739,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.50.0',
+    promptVersion: 'v1.51.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -936,6 +942,46 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
         error: 'db down',
       }),
     )
+  })
+
+  // TAC-436 ruling 5. The auto-send half of the raise event. `offeredKeys` is
+  // the RENDERED set, which on this path is also the recordable set, so the
+  // event can never claim a door was open that this turn suppressed.
+  it('fires the raise event on a successful recording, naming the auto-send path', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 1,
+    })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND, LEARN_NAME] }))
+    await handleInbound(INBOUND_ID)
+    await vi.waitFor(() => expect(captureIntentionPromptRaisedMock).toHaveBeenCalled())
+
+    expect(captureIntentionPromptRaisedMock.mock.calls[0][0]).toMatchObject({
+      via: 'auto_send',
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      messageId: 'sent-1',
+      raisedKeys: ['learn_name'],
+      offeredKeys: [UNDERSTAND.key, LEARN_NAME.key],
+      classifierAttempts: 1,
+      sentBody: successResult().body,
+    })
+    expect(captureIntentionPromptRaisedMock.mock.calls[0][0].agentRunId).toEqual(expect.any(String))
+  })
+
+  // THE NEGATIVE THAT MATTERS. Most sends raise nothing; firing there would
+  // make the event useless on the one question it exists to answer.
+  it('does NOT fire the raise event when the send raised nothing', async () => {
+    setUpSentPath()
+    recordIntentionPromptsMock.mockResolvedValue({ kind: 'nothing_raised' })
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    await handleInbound(INBOUND_ID)
+    await vi.waitFor(() => expect(recordIntentionPromptsMock).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(captureIntentionPromptRaisedMock).not.toHaveBeenCalled()
   })
 
   it('does not alert on a normal recording', async () => {
