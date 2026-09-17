@@ -300,9 +300,9 @@ jobs:
             what gh run view shows; do not run the command to see. Shell loops
             (for, while) are denied: run one command at a time.
 
-            If a command is refused, list it under 6. BLOCKED in your [AUDIT]
-            comment, as audit-ticket.md describes. The comment reports
-            findings and their evidence, never how you worked.
+            Your [AUDIT] comment reports findings and their evidence, never
+            how you worked. A refused command is not a finding: do not
+            mention it. This workflow records refusals in [DENIALS].
 
             Your audit comment MUST contain the literal string [AUDIT]. That
             marker is what stops this workflow auditing the same ticket again

@@ -64,7 +64,7 @@ Post one comment, flat at the top level, never as a reply, in this shape:
 [AUDIT] TAC-XXX
 ```
 
-followed by exactly these sections, the sixth only when it applies:
+followed by exactly these sections:
 
 **1. CONFIRMED** — claims in the ticket that hold, each with the `file:line`
 that proves it.
@@ -93,18 +93,15 @@ Do not file tickets. Maximum three; list any remainder as one-liners under a
 
 **5. UNBLOCKED** — what could be built with zero further input from Jaipal.
 
-**6. BLOCKED** — every command or tool call that was refused, with the
-refused command and the claim it was meant to check. Include this section
-only when something was refused. A refused call goes here even though the
-workflow also lists it in `[DENIALS]`.
-
 **The comment does not describe how the audit was done.** It holds the
-findings, the evidence for each, what could not be verified, and section 6
-when something was refused. No list of the tools or commands used, no "I
-checked X by doing Y", nothing about what you did or did not do. Evidence is
-the source, stated as what it shows: a `file:line`, a query result, the
-fields a run records. An audit that narrates its own process is writing from
-memory, and on TAC-431 two runs in a row got that narration wrong.
+findings, the evidence for each, and what could not be verified. No list of
+the tools or commands used, no "I checked X by doing Y", nothing about what
+you did or did not do. Evidence is the source, stated as what it shows: a
+`file:line`, a query result, the fields a run records. An audit that
+narrates its own process is writing from memory, and on TAC-431 two runs in
+a row got that narration wrong. A refused command is something that happened
+to the session, not a finding about the ticket: the comment does not mention
+it. In CI the workflow records refusals in `[DENIALS]`.
 
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.
