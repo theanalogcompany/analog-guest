@@ -151,7 +151,7 @@ earlier comment where that reading misses it.
 | Marker | When | Then |
 |---|---|---|
 | `[NEEDS-INPUT]` | A question blocks the work | Add it to `## Open questions`, add `Needs Decision`. Status unchanged |
-| `[HUMAN-REVIEW-REQUIRED]` | The work touches a high-stakes area | Same, and do not plan or branch |
+| `[HUMAN-REVIEW-REQUIRED]` | A hard-stop plan has been approved | Remove `Needs Decision`. The build is a session Jaipal drives. Posted once, after the plan, never instead of it |
 | `[NEEDS-ACTION]` | Something only Jaipal can run | Add `Needs Action`. Status unchanged. Format below is mandatory |
 | `[PLAN]` | A plan awaiting approval | Add `Needs Decision`. Approval is a decision like any other |
 | `[FINDING]` | A defect outside this ticket | Describe it. Never file a ticket. Max three per ticket |
@@ -259,15 +259,42 @@ Phase 0 of `work-ticket.md`, name one ticket, answer it, and check within a
 few hours that its questions left the block or a `[NEEDS-INPUT]` explains
 why not.
 
-## High-stakes tickets never get a plan from /work-ticket
+## High-stakes work: a plan gate, and a narrower hard stop
 
-**A ticket marked `[HUMAN-REVIEW-REQUIRED]` never gets a plan from `/work-ticket`, in CI or run by hand, by design.** Phase 0 checks the ticket against the high-stakes list in `work-ticket.md` step 4 on every run, after it applies answers and before any plan. So each time Jaipal answers, the session moves the answered questions out of `## Open questions`, posts `[HUMAN-REVIEW-REQUIRED]` again, and exits. No reply moves the ticket past that point, however many times he answers.
+A high-stakes ticket gets a plan. It does not get an unattended build.
 
-That is the intended behaviour, not a stuck ticket: high-stakes work never starts unattended. **The only route forward is a session Jaipal drives himself without `/work-ticket`**, where he approves the plan and watches the build. Running `/work-ticket` by hand does not get past it; the same check stops a local run the same way.
+Phase 0 of `work-ticket.md` sorts every ticket into one of three tiers on
+every run, after it applies answers and before any plan.
 
-**There is no go-ahead that lets `/work-ticket` continue past the check** (ruled 2026-09-16). Jaipal answering, or approving, or saying "plan it" on such a ticket does not change what the command does.
+**Hard stop.** The narrow list in `work-ticket.md` step 4: auth, Stripe, the
+Sendblue webhook handlers, and migrations on `messages`,
+`engagement_events` or `voice_corpus`. The session audits, plans, posts
+`[PLAN]` with `Needs Decision`, and exits. On approval it does **not**
+build: it posts `[HUMAN-REVIEW-REQUIRED]` saying the plan is approved and
+the build is a session Jaipal drives, removes `Needs Decision`, and exits.
 
-**What that costs: most of Gate Two is outside the automation entirely.** Most of Gate Two touches the agent runtime, and every one of those tickets is planned and built in a session Jaipal drives himself. The automation still audits them and still records his answers, but it never plans or builds them.
+**Plan gate.** Everything else the repo calls high-stakes — here, the agent
+runtime contract. The session audits, plans, posts `[PLAN]` with
+`Needs Decision`, and exits. A human reply resumes it on the next scheduled
+run, exactly as every other plan does. It then builds, commits, pushes, and
+opens a draft PR, and stops. Jaipal reviews and merges.
+
+**Ordinary.** Unchanged, and now the same flow as the plan gate.
+
+**Guest-facing copy is its own gate.** A plan that changes wording a guest
+can read shows the new wording verbatim and waits for approval of that
+wording specifically. Approving a plan's shape is not approving its copy.
+
+`[HUMAN-REVIEW-REQUIRED]` means one thing: this ticket's build is a session
+Jaipal drives. It is posted once, after a hard-stop plan is approved, never
+instead of a plan, and it is terminal for the automation — a reply after it
+starts nothing.
+
+**Superseded, the 2026-09-16 ruling.** It said no go-ahead lets
+`/work-ticket` past the high-stakes check, and it described the shape the
+check then had correctly: the check fired before any plan, so each answer
+produced another stop and the human never got anything to approve. The check
+now fires after the plan, so the ruling no longer holds.
 
 ## On hitting a question
 

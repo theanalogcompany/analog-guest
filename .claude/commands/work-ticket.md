@@ -29,7 +29,7 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
 | Condition | Action |
 |---|---|
-| `lastBotComment` contains `[HUMAN-REVIEW-REQUIRED]` and no human reply postdates it | Exit. No wakeup. |
+| `lastBotComment` contains `[HUMAN-REVIEW-REQUIRED]` | Exit. No wakeup, whatever postdates it. The plan is approved and the build is Jaipal's own session. |
 | `lastBotComment` contains `[NEEDS-ACTION]` and no human reply postdates it | Exit. Blocked on Jaipal executing something. |
 | `lastBotComment` contains `[POLLING-TIMEOUT]` and no human reply postdates it | Exit. No wakeup. |
 | `lastBotComment` contains `[POLLING-CLOSED]` | Exit. No wakeup. Operator-driven wind-down. |
@@ -59,7 +59,7 @@ When intent is ambiguous between Proceed/Modify and Wind-down, default to Procee
 When the classification is **Proceed**, route by `lastQuestionComment`. Phase 0 step 2 has already applied the reply to `## Open questions`, and a ticket with a question still open never gets this far.
 
 - **`[AUDIT]`** → the audit's questions are answered. Run Phase 1 → Phase 2 as on a fresh run, integrating the rulings.
-- **`[PLAN]`** → approval received. Remove `Needs Decision`. Advance to Phase 3.
+- **`[PLAN]`** → approval received. Remove `Needs Decision`. If the plan was marked hard-stop, post `[HUMAN-REVIEW-REQUIRED]` saying the plan is approved and the build is a session Jaipal drives, and exit without branching. Otherwise advance to Phase 3.
 - **`[NEEDS-INPUT]` AND `branchExists === false`** → Phase 2 question answered. Re-run Phase 1 audit integrating the answer, and re-post the plan per Phase 2.
 - **`[NEEDS-INPUT]` AND `branchExists === true`** → Phase 3 question answered. Read `git status` and `git diff` on the branch to establish what is done and what is left, then continue.
 - **`[NEEDS-ACTION]`** → Jaipal says it ran. Verify it against the live system as step 17 requires, remove `Needs Action`, and continue where the build stopped.
@@ -89,7 +89,9 @@ Leave the status alone throughout. `Needs Decision` comes off in Phase 0 when no
 
    A ticket that fails the gate gets no plan and no branch. Exit, after the polling bookkeeping of the branch-table row that sent you here, if that row has any.
 3. Re-read the relevant sections of CLAUDE.md — Workflow rules, Code conventions, Common gotchas. Cite which sections you consulted on the FIRST invocation.
-4. Check the "Notes for Claude Code" block. If high-stakes (auth, Stripe, Sendblue webhooks, agent runtime contract, or migrations on `messages` / `engagement_events` / `voice_corpus`), STOP. Post `[HUMAN-REVIEW-REQUIRED]` summarizing what you would be touching and the risks. Add `Needs Decision` and leave the status alone. Exit.
+4. Check the "Notes for Claude Code" block and classify the ticket. Neither tier stops here, and neither branches here: nothing is branched or built before a plan is approved, which was already true of every ticket.
+   - **Hard stop** — auth (`lib/auth/`, `verifyAnalogAdminAccess`, RLS policies), Stripe, Sendblue webhook handlers, or a migration on `messages` / `engagement_events` / `voice_corpus`. Continue to Phase 1 and Phase 2, and open the plan with one line saying it is hard-stop and will not be built from CI.
+   - **Plan gate** — anything else this repo calls high-stakes, including the agent runtime contract. Continue to Phase 1 and Phase 2 normally, naming in the plan which high-stakes surface it touches.
 
 # Phase 1 — Audit (read-only) — fresh start, answered `[AUDIT]` questions, or post-`[NEEDS-INPUT]` Phase 2 resumption
 5. Use the Explore subagent to map the affected surface area. Read at least one existing file the new code will sit next to (per the audit-first rule). Read migrations touching relevant tables. Read existing tests for modules being modified.
@@ -147,10 +149,14 @@ Everything else is Jaipal's. In particular: anything in the agent's voice a gues
 24. Invoke the `code-reviewer` subagent on the diff. Address BLOCKER and MAJOR findings; explain skips on MINOR.
 
 # Phase 5 — Ship
-25. Commit. Subject: `TAC-XXX: <imperative lowercase subject>`. Body explains why if non-obvious.
-26. `gh pr create`. Title matches commit subject. Body: changes + test count delta + plan deviations + the CLAUDE.md note + anything you would push back on.
-27. Post a Linear comment with the PR link. Apply the QA route label (`QA: Script` or `QA: Device`) if not already set. **Do not set the status by hand** — opening the PR moves the ticket to In Progress automatically, and merging moves it to Ready For QA automatically.
-28. Exit without adding a `Blocked On` label. The open PR is the signal that the merge is Jaipal's to run; a label would make `Blocked On` mean two kinds of waiting. He runs `gh pr merge --squash --delete-branch` after reviewing the PR on GitHub, and the merge automation moves the ticket to Ready For QA.
+
+A **hard-stop** ticket never reaches this phase: it exits at the `[PLAN]` resumption row above. Every other ticket ships the same way, whether it is plan-gate or ordinary.
+
+25. Commit to the ticket branch. Subject: `TAC-XXX: <imperative lowercase subject>`. Body explains why if non-obvious. **Never commit to `main`.**
+26. `git push -u origin jaipal/TAC-XXX-<short-description>`. **Never push to `main`, never `--force`.**
+27. `gh pr create --draft`. The title matches the commit subject, so it carries the ticket id. Body: changes + test count delta + plan deviations + the CLAUDE.md note + anything you would push back on. **Draft, always**: the PR is for Jaipal to read, not a request to merge. He marks it ready, or merges it, himself.
+28. Post a Linear comment with the PR link. Apply the QA route label (`QA: Script` or `QA: Device`) if not already set. **Do not set the status by hand** — opening the PR moves the ticket to In Progress automatically, and merging moves it to Ready For QA automatically.
+29. Exit without adding a `Blocked On` label. The open PR is the signal that the merge is Jaipal's to run; a label would make `Blocked On` mean two kinds of waiting. He runs `gh pr merge --squash --delete-branch` after reviewing the PR on GitHub, and the merge automation moves the ticket to Ready For QA.
 
 **Cross-repo UAT gate.** If the Phase 1 cross-repo audit flagged a sibling ticket, the PR description MUST explicitly call out: *"Cross-repo UAT REQUIRED before Done — unit tests passing on both sides does not prove the contract is consistent."* Without manual end-to-end UAT confirming the cross-repo behavior, the ticket stays in Ready For QA. The 2026-05-27 TAC-207 incident (server tests green, client tests green, integration broken on first push 9 hours after deploy) is the documented case.
 
@@ -211,7 +217,7 @@ Status untouched. The agent never sets a ticket to Done; the permission hook den
 - **Provenance is the prefix, never the author ID.** Every comment shares one author. A comment with no `**[FROM CLAUDE CODE]**` prefix is human input.
 - **Post every comment flat.** Never set `parentId`. Jaipal reads a ticket top to bottom, and a threaded reply hides inside an earlier comment.
 - ScheduleWakeup is the only polling primitive where a harness exists — no `Bash sleep`, no until-loops chaining short sleeps. In CI, don't poll at all.
-- No auto-merge. The merge gate stays manual.
+- No auto-merge. The merge gate stays manual. **Never commit or push to `main`**, and every PR opens as a draft: the PR is for Jaipal to read, not a request to merge.
 - **Build only from Ready or In Progress, and only a ticket with one repo label.** Todo means committed but not yet audited. Two repo labels means the ticket needs splitting: cross-repo work is two tickets, one per repo, linked.
 - **Apply Jaipal's answers before checking for open questions.** Phase 0 step 2b runs before 2c, every time.
 - **Never exit silently on a ticket carrying a `Blocked On` label when the newest comment, skipping `[SLACK]`, `[RESUME-CLAIM]` and `[DENIALS]` bookkeeping, is human input.** Post a comment saying what happened to his input first. An answer you cannot match gets `[NEEDS-INPUT]` saying so, never a quiet exit.
@@ -219,7 +225,7 @@ Status untouched. The agent never sets a ticket to Done; the permission hook den
 - **Anything that needs Jaipal gets the right `Blocked On` label immediately**, and the status stays where it is. Never wait silently on a ticket that still looks available. A plan awaiting approval counts. A PR awaiting merge does not.
 - **Never run a production migration.** Write the SQL and hand it over via `[NEEDS-ACTION]`.
 - No loyalty-program language anywhere — points, rewards, tier, earn, badges, progress bars are forbidden. Guests are recognized, not enrolled.
-- High-stakes uncertainty → `[HUMAN-REVIEW-REQUIRED]`, never `[NEEDS-INPUT]`.
+- A question on a high-stakes ticket is still `[NEEDS-INPUT]`. `[HUMAN-REVIEW-REQUIRED]` is not a question marker: it is posted once, after a hard-stop plan is approved, to say the build is Jaipal's session.
 - Wind-down is operator-driven. The agent never decides to wind down on its own.
 - The agent never marks a ticket Done. In Progress (on PR open) and Ready For QA (on merge) are set by Linear's PR automations, not by you.
 - CLAUDE.md hygiene is mandatory in every Build phase. Skipping = drift, drift = future pain.
