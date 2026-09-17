@@ -351,7 +351,8 @@ jobs:
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 120
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npm:*),Bash(npx:*),Bash(git:*),Bash(gh pr:*),Bash(curl:*),Bash(jq:*),Bash(rg:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git checkout jaipal/:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(python3:*),Bash(node:*)"
+            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
             You are working Linear tickets for the repo ${{ github.event.repository.name }}.
 
@@ -370,7 +371,9 @@ jobs:
             These are denied however you arrange them: expanding an
             environment variable ($LINEAR_API_KEY or ${LINEAR_API_KEY}),
             command substitution ($(...) or backticks), variable assignment
-            (NAME=...), output redirection (>), and heredocs (<<). This
+            (NAME=...), output redirection in every form, including >, >> and
+            2>&1 — a command cannot capture its own stderr — and heredocs
+            (<<). This
             workflow's own shell steps use those forms; you cannot. Pass the
             key with curl's own --variable and --expand-header, exactly as
             below. Use exactly these two forms.
@@ -395,6 +398,11 @@ jobs:
 
             Read every response. Only "success": true means the write
             happened; anything else is a failed write, not a finished step.
+
+            READ FILES WITH THE READ TOOL AND SEARCH WITH GREP OR rg, never
+            with a shell pipeline. cat, grep, cut and env are not available,
+            and every denied pipeline on record was a shell text tool feeding
+            jq.
 
             Post comments flat: never pass parentId. Change status with
             issueUpdate and stateId. Add or remove a label with

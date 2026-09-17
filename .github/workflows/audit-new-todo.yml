@@ -236,7 +236,8 @@ jobs:
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 150
-            --allowedTools "Read,Write,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*),Bash(gh run list:*),Bash(gh run view:*)"
+            --allowedTools "Read,Write,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(python3:*),Bash(node:*)"
+            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
             You are auditing a Linear ticket for the repo ${{ github.event.repository.name }}.
 
@@ -253,7 +254,9 @@ jobs:
             These are denied however you arrange them: expanding an
             environment variable ($LINEAR_API_KEY or ${LINEAR_API_KEY}),
             command substitution ($(...) or backticks), variable assignment
-            (NAME=...), output redirection (>), and heredocs (<<). This
+            (NAME=...), output redirection in every form, including >, >> and
+            2>&1 — a command cannot capture its own stderr — and heredocs
+            (<<). This
             workflow's own shell steps use those forms; you cannot. Pass the
             key with curl's own --variable and --expand-header, exactly as
             below. Use exactly these two forms.
@@ -278,6 +281,11 @@ jobs:
 
             Read every response. Only "success": true means the write
             happened; anything else is a failed write, not a finished step.
+
+            READ FILES WITH THE READ TOOL AND SEARCH WITH GREP OR rg, never
+            with a shell pipeline. cat, grep, cut and env are not available,
+            and every denied pipeline on record was a shell text tool feeding
+            jq.
 
             Post comments flat: never pass parentId. Change status with
             issueUpdate and stateId. Add or remove a label with
