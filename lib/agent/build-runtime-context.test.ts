@@ -128,3 +128,48 @@ describe('buildRuntimeContext: history delivery (TAC-394)', () => {
     expect(returned).toMatch(/\n\s+recentMessages,\n/)
   })
 })
+
+// TAC-436 ruling 3: how "a visit is confirmed" is resolved. Source-level for the
+// same reason as the block above — nothing runs buildRuntimeContext for real —
+// and the last assertion is the audit's own finding pinned as a guard.
+describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const blockStart = src.indexOf('const confirmedVisitTimes = [')
+  const block = src.slice(blockStart, src.indexOf(']', blockStart))
+
+  it('resolves it from QR enrollment and the earliest acknowledged arrival', () => {
+    expect(src).toContain('findEarliestAcknowledgedArrival({')
+    expect(block).toContain("guest.createdVia === 'qr_scan' ? guest.createdAt : null")
+    expect(block).toContain('acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null')
+  })
+
+  it('takes the EARLIEST of the confirmed visits', () => {
+    // Math.max would renew the ask on every later visit, for an intention that
+    // deliberately never re-arms.
+    expect(src).toMatch(/new Date\(Math\.min\(\.\.\.confirmedVisitTimes\.map\(/)
+  })
+
+  it('hands it to the derivation', () => {
+    expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+visitConfirmedAt,\n/)
+  })
+
+  // THE FINDING, AS A GUARD. guests.last_visit_at reads like the obvious source
+  // for "a visit is confirmed" and is inert: all three of its writers run
+  // downstream of a transaction row, and a transaction SATISFIES
+  // understand_order, so arming on it would close the intention in the same
+  // breath it opened it. Anyone widening this resolution reaches for it first.
+  //
+  // BOTH SPELLINGS. The column is last_visit_at and the loaded field is
+  // lastVisitAt; a guard written against one only is the source-level trap
+  // CLAUDE.md logs, and a mutant using the camelCase field walked straight past
+  // the first version of this test.
+  it('does NOT resolve a confirmed visit from last_visit_at', () => {
+    const lastVisit = /last_?[Vv]isit/
+    expect(block).not.toMatch(lastVisit)
+    const call = src.slice(
+      src.indexOf('findEarliestAcknowledgedArrival({'),
+      src.indexOf('const confirmedVisitTimes'),
+    )
+    expect(call).not.toMatch(lastVisit)
+  })
+})

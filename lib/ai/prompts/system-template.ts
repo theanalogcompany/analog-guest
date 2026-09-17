@@ -826,6 +826,26 @@
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.51.0 (TAC-436): the ## What you're hoping to get to restraint paragraph is
+// rewritten. Since TAC-380 shipped, zero intentions had ever been raised: they
+// rendered, and the model declined, because the block's only concretely-worked
+// permission was "your own last message asked them something about themselves
+// and this reply answers it" — which presupposes an ask it never licensed. The
+// deadlock was one sentence, "If the guest asks about something else, answer
+// that and let these wait", firing on nine of sixteen traced turns. That
+// sentence is gone (ruling 1b: a reply may answer and then ask one small
+// thing), and four ordinary openings are named positively in its place (ruling
+// 1c) rather than the old negation-only "a natural door". Every other restraint
+// survives verbatim or reworded, and one is new: an apology, bad news or an
+// upset guest is never an opening. comp_complaint also joins opt_out in
+// shouldRenderOpenIntentions, which is the structural half of that last line.
+//
+// Not in the prompt but shipped alongside: the four first-contact intentions
+// now gate on the reply count alone (the response-rate floor reads 0 until
+// three outbound responses exist, so it was unreachable in a guest's first
+// turns), learn_name is free on a first-ever message, and understand_order arms
+// on any confirmed visit rather than a QR scan alone.
+//
 // v1.50.0 (TAC-394): ## Recent conversation now says which lines the guest
 // never received. The history query returned a pending draft beside sent
 // messages and both rendered identically, so on 2026-09-14 a model
@@ -927,7 +947,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.50.0'
+export const PROMPT_VERSION = 'v1.51.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

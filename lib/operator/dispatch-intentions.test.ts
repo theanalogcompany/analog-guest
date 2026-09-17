@@ -23,6 +23,7 @@ const recordIntentionPromptsMock = vi.fn()
 const rowMaybeSingleMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const captureRecordingFailedMock = vi.fn()
+const captureRaisedMock = vi.fn()
 /**
  * Every `select()` argument, in call order.
  *
@@ -86,6 +87,10 @@ vi.mock('@/lib/messaging/send', () => ({
 vi.mock('@/lib/guests/commitments', () => ({ createCommitmentFromPending: vi.fn() }))
 vi.mock('@/lib/analytics/posthog', () => ({
   captureIntentionPromptRecordingFailed: (...a: unknown[]) => captureRecordingFailedMock(...a),
+  // TAC-436: this factory is an ALLOW-LIST. An export omitted here arrives
+  // `undefined` at the call site and throws inside the waitUntil .then(),
+  // where nothing in this file would surface it.
+  captureIntentionPromptRaised: (...a: unknown[]) => captureRaisedMock(...a),
 }))
 
 // record.ts pulls classifyIntentionPrompts from @/lib/ai. Mocked so the SDK
@@ -143,6 +148,7 @@ beforeEach(() => {
   scheduled.length = 0
   selectArgs.length = 0
   captureRecordingFailedMock.mockResolvedValue(undefined)
+  captureRaisedMock.mockResolvedValue(undefined)
   recordIntentionPromptsMock.mockResolvedValue({
     kind: 'recorded',
     raisedKeys: ['understand_order'],
@@ -358,6 +364,119 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
       outcome: 'write_failed',
       source: 'classified',
     })
+  })
+
+  // TAC-436 ruling 5. Until this, a successful raise was a console.log, so the
+  // fact that nothing had been raised since TAC-380 shipped was invisible.
+  it('fires the raise event on a successful recording, naming the approve path', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row())
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    await settle()
+
+    expect(captureRaisedMock).toHaveBeenCalledTimes(1)
+    expect(captureRaisedMock.mock.calls[0][0]).toEqual({
+      // Null, not a fabricated id: this draft's agent run ended when it queued.
+      agentRunId: null,
+      via: 'operator_approve',
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      messageId: MESSAGE_ID,
+      raisedKeys: ['understand_order'],
+      offeredKeys: ['understand_order'],
+      classifierAttempts: 1,
+      sentBody: DRAFTED,
+    })
+  })
+
+  // The edit path is the one that can separate the dispatched text from the
+  // stored draft, so the event's body is pinned there too — same reasoning as
+  // this file's header.
+  it('carries the EDITED body and the edit path into the raise event', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row())
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'edit',
+      editedBody: EDITED,
+    })
+    await settle()
+
+    expect(captureRaisedMock.mock.calls[0][0]).toMatchObject({
+      via: 'operator_edit',
+      sentBody: EDITED,
+    })
+  })
+
+  // offeredKeys is the set the classifier was SHOWN, not the set it returned.
+  // Without it a 1-of-3 raise is indistinguishable from a 1-of-1.
+  it('carries every offered key, not just the raised one', async () => {
+    rowMaybeSingleMock.mockResolvedValue(
+      row({
+        rendered_intentions: [
+          { key: 'understand_order', eligibleAt: ANCHOR },
+          { key: 'learn_name', eligibleAt: ANCHOR },
+        ],
+      }),
+    )
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 1,
+    })
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    await settle()
+
+    expect(captureRaisedMock.mock.calls[0][0]).toMatchObject({
+      raisedKeys: ['learn_name'],
+      offeredKeys: ['understand_order', 'learn_name'],
+    })
+  })
+
+  // THE NEGATIVE THAT MATTERS. The event means "the agent asked". A send that
+  // raised nothing is the common case, and firing there would make the signal
+  // worthless on the exact question it exists to answer.
+  it('does NOT fire the raise event when the send raised nothing', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row())
+    recordIntentionPromptsMock.mockResolvedValue({ kind: 'nothing_raised' })
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    await settle()
+
+    expect(captureRaisedMock).not.toHaveBeenCalled()
+  })
+
+  it('does NOT fire the raise event when the classifier failed and everything closed', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row())
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'closed_pessimistically',
+      closedKeys: ['understand_order'],
+      classifierError: 'overloaded',
+    })
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    await settle()
+
+    expect(captureRaisedMock).not.toHaveBeenCalled()
+    expect(captureRecordingFailedMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not alert on an ordinary successful recording', async () => {

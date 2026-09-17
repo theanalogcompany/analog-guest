@@ -369,6 +369,26 @@ export async function scheduleAndSend(
     skipHumanFeelDelay?: boolean
     reviewReason?: string
     rng?: () => number
+    /**
+     * TAC-436 ruling 4: the intentions RENDERED into the prompt behind this
+     * send, landing on `messages.rendered_intentions` (migration 045) exactly
+     * as the queue path already writes it.
+     *
+     * AUDIT, NOT MECHANISM. This path records the ask inline the moment the
+     * send succeeds, so nothing downstream reads this column here — unlike the
+     * queue path, where it is the carrier that bridges the operator's tap. It
+     * exists so a query can prove what rendered on an auto-sent turn, which is
+     * precisely what TAC-385's raising-half audit could not do: every
+     * auto-sent row carried NULL, and the claim about those turns had to be
+     * inference rather than observation.
+     *
+     * Written to the FIRST row of the turn only. A split response is one
+     * prompt and one rendered set, and the first row is the one the recorder
+     * stores as `message_id`, so the column and the prompt row agree.
+     *
+     * Omitted -> NULL, the value every pre-TAC-436 auto-sent row carries.
+     */
+    renderedIntentions?: readonly OpenIntention[]
   } = {},
 ): Promise<{
   outboundMessageId: string
@@ -534,6 +554,14 @@ export async function scheduleAndSend(
         review_reason: options.reviewReason ?? null,
         sent_at: new Date().toISOString(),
         provider_message_id: providerMessageId,
+        // TAC-436 ruling 4. First row of the turn only — see the option's
+        // docstring. Later bubbles keep NULL rather than repeating a set that
+        // describes the whole response, so a count of non-null rows is a count
+        // of responses, not of bubbles.
+        rendered_intentions:
+          index === 0 && options.renderedIntentions !== undefined
+            ? buildRenderedIntentionsPayload(options.renderedIntentions)
+            : null,
       }),
     )
 

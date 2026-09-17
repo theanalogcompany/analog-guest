@@ -28,7 +28,10 @@
 
 import { waitUntil } from '@vercel/functions'
 
-import { captureIntentionPromptRecordingFailed } from '@/lib/analytics/posthog'
+import {
+  captureIntentionPromptRaised,
+  captureIntentionPromptRecordingFailed,
+} from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
@@ -396,6 +399,21 @@ export async function dispatchOperatorOutbound(
               action: input.action,
               raisedKeys: outcome.raisedKeys,
               classifierAttempts: outcome.classifierAttempts,
+            })
+            // TAC-436 ruling 5: same event the auto-send path fires, with `via`
+            // carrying which tap it was. `agentRunId` is null here because this
+            // draft's run ended when it queued, possibly hours ago — the same
+            // reason the failure event below passes null.
+            await captureIntentionPromptRaised({
+              agentRunId: null,
+              via,
+              venueId,
+              guestId,
+              messageId,
+              raisedKeys: outcome.raisedKeys,
+              offeredKeys: renderedIntentions.map((o) => o.key),
+              classifierAttempts: outcome.classifierAttempts,
+              sentBody: sendBody,
             })
           } else if (outcome.kind === 'closed_pessimistically') {
             // TAC-380 ruling 4: nothing re-asks, but these closed without a

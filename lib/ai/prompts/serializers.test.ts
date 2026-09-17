@@ -17,6 +17,8 @@ import {
   runtimeToProse,
   venueInfoToProse,
 } from './serializers'
+import { renderableIntentions } from '../../agent/intentions/derive'
+import { MESSAGE_CATEGORIES } from '../types'
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -572,7 +574,7 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       NOW,
     )
     expect(out).toContain(
-      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+      "These are things you'd like to get to, not a checklist to work through.\nIf more than one would fit, take the one listed first, and only that one.",
     )
   })
 
@@ -584,7 +586,7 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       'reply',
       NOW,
     )
-    expect(out).toContain('If more than\none of these would fit, take the one listed first.')
+    expect(out).toContain('If more than one would fit, take the one listed first, and only that one.')
     expect(out.indexOf('alpha intention line')).toBeLessThan(out.indexOf('beta intention line'))
   })
 
@@ -599,10 +601,12 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
 
     it('distinguishes a reply to Sana\'s own question from the guest\'s own topic', () => {
       const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-      expect(out).toContain("That's about the guest's own topic")
+      // TAC-436 condensed this to a bullet. The condition is unchanged: what
+      // Sana asked about, not merely that she asked.
       expect(out).toContain(
-        "It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it.",
+        '- Your own last message asked them something about themselves and this\n  reply answers it.',
       )
+      expect(out).toContain("You asked, so following it up isn't a pivot.")
     })
 
     // Plan-review caught that "your last message was a question" is too
@@ -620,14 +624,18 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
 
     it('asserts the exception is consumed on the very next reply regardless of content', () => {
       const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-      expect(out).toContain(
-        "It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater",
-      )
+      expect(out).toContain('covers this one reply only, whatever they say back.')
+      // And it never becomes something to return to.
+      expect(out).toContain('never\nraise one twice.')
     })
 
-    it('asserts the exception does not change how any other topic is treated', () => {
+    // TAC-436 carries this as the general rule rather than an aside on the
+    // exception: whatever the guest raised is still the reply's job, and the
+    // ask rides on the end of it or not at all.
+    it('asserts an ask never changes what the reply is about', () => {
       const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-      expect(out).toContain("it doesn't change how you treat anything else")
+      expect(out).toContain('Asking never changes what the reply is about. Whatever they raised is')
+      expect(out).toContain('still the job, and the question goes at the end, in one short line, or\nnot at all.')
     })
 
     // Plan-review: "license" is spec vocabulary describing the mechanism,
@@ -757,7 +765,7 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       NOW,
     )
     expect(out).toContain(
-      "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.",
+      "These are things you'd like to get to, not a checklist to work through.\nIf more than one would fit, take the one listed first, and only that one.",
     )
   })
 })
@@ -771,6 +779,119 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
 // opener (the more directive of the two payloads) must be fully suppressed,
 // not just the header — a stray intention line surviving under a missing
 // header would still be a compliance exposure.
+// TAC-436 ruling 1. The block used to license the ask only in a situation that
+// could not arise: its one worked permission required Sana to have already
+// asked something about the guest, and nothing licensed that first ask. Since
+// TAC-380 shipped, zero intentions had ever been raised.
+describe("runtimeToProse — ## What you're hoping to get to openings (TAC-436)", () => {
+  const openIntentions = ["You don't know this guest's name yet."]
+  const render = (category: Parameters<typeof runtimeToProse>[1] = 'reply') =>
+    runtimeToProse({ mechanics: [], openIntentions }, category, NOW)
+
+  // THE CANARY. This exact sentence fired on nine of the sixteen traced turns
+  // and is the deadlock. A future edit restoring it for brevity or symmetry
+  // reverts the whole ticket, silently, with every other test here still green.
+  it('no longer tells the model to let these wait whenever the guest asked something', () => {
+    const out = render()
+    expect(out).not.toContain('asks about something else, answer that and let these wait')
+    expect(out).not.toContain('Only raise one if the conversation opens a natural door')
+  })
+
+  // Ruling 1c: named positively, not defined by negation.
+  it('names each of the four openings', () => {
+    const out = render()
+    expect(out).toContain('A natural opening is ordinary and small. Any of these is one:')
+    expect(out).toContain("- You've answered what they asked and the reply feels finished.")
+    expect(out).toContain("- They've said something about themselves, however small,")
+    expect(out).toContain("- There's nothing they need from you in the message.")
+    expect(out).toContain('- Your own last message asked them something about themselves')
+  })
+
+  // Ruling 1b: answer, then ask one small thing. The worked example is the part
+  // the model actually generalizes from, so it is pinned whole.
+  it('shows answering and then asking in one reply', () => {
+    expect(render()).toContain(
+      '  short question on the end is fine: "we\'re open till 3 on Sundays.\n  you nearby?"',
+    )
+  })
+
+  // The example must not model an emoji: this block renders immediately before
+  // the per-message emoji call, and a 'none' directive would then contradict a
+  // worked example three lines above it.
+  it('carries no emoji in the worked example', () => {
+    const out = render()
+    const start = out.indexOf('A natural opening is ordinary')
+    const end = out.indexOf('Not an opening:')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(out.slice(start, end)).not.toMatch(/\p{Extended_Pictographic}/u)
+  })
+
+  // R3 bans em dashes in output and the regen loop pays for each one that
+  // survives, so the block must not model them either. The replaced text had two.
+  it('carries no em dash', () => {
+    const out = render()
+    const start = out.indexOf("These are things you'd like to get to")
+    const end = out.indexOf('If nothing fits, let it wait.')
+    expect(start).toBeGreaterThan(-1)
+    expect(out.slice(start, end)).not.toContain('\u2014')
+  })
+
+  // NEW restraint, and the prose half of the comp_complaint gate below.
+  it('rules out an apology or bad-news turn as an opening', () => {
+    expect(render()).toContain(
+      "Not an opening: a message carrying an apology, bad news, or something\nthey're unhappy about. Leave those alone entirely.",
+    )
+  })
+
+  // Every restraint that survived. A rewrite that drops one of these is not the
+  // ruling; it is a wider licence than was approved.
+  it('keeps the surviving restraints', () => {
+    const out = render()
+    expect(out).toContain('not a checklist to work through')
+    expect(out).toContain('take the one listed first, and only that one')
+    expect(out).toContain('Never steer the conversation toward one of these')
+    expect(out).toContain('never\nraise one twice')
+    expect(out).toContain('If nothing fits, let it wait. There will be other conversations.')
+  })
+})
+
+// TAC-436: the STRUCTURAL half of ruling 1's apology carve-out. The block
+// renders LAST in the user prompt and COMP_COMPLAINT_INSTRUCTIONS lives in the
+// SYSTEM prompt, so on proximity the block wins — the same failure class
+// TAC-314/329/330/338 each paid for. The prose line is a second line of
+// defence; this is the one that cannot be talked past.
+describe("runtimeToProse — ## What you're hoping to get to comp_complaint suppression (TAC-436)", () => {
+  const openIntentions = [
+    "You don't know this guest's name yet.",
+    "You don't know whether this guest lives or works nearby.",
+  ]
+
+  it('omits the block entirely for comp_complaint', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'comp_complaint', NOW)
+    expect(out).not.toContain("What you're hoping to get to")
+    expect(out).not.toContain("You don't know this guest's name yet.")
+    expect(out).not.toContain("You don't know whether this guest lives or works nearby.")
+  })
+
+  // The sharper case, mirroring the opt_out pair: a fresh scan whose first
+  // message is the complaint would otherwise carry the more directive opener.
+  it('omits it for comp_complaint even when firstTouchAfterQrScan is true', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'comp_complaint',
+      NOW,
+    )
+    expect(out).not.toContain("What you're hoping to get to")
+    expect(out).not.toContain('scanned your sign')
+  })
+
+  it('still renders the block for an ordinary reply with the same inputs', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    expect(out).toContain("## What you're hoping to get to")
+  })
+})
+
 describe("runtimeToProse — ## What you're hoping to get to opt_out suppression (TAC-328)", () => {
   const openIntentions = [
     "You haven't heard what this guest ordered yet.",
@@ -2373,5 +2494,47 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
     const none = runtimeToProse({ emojiDirective: 'none' }, 'reply', NOW)
     const allowed = runtimeToProse({ emojiDirective: 'allowed' }, 'reply', NOW)
     expect(none).not.toEqual(allowed)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-436: the two halves of intention suppression must agree
+// ---------------------------------------------------------------------------
+//
+// shouldRenderOpenIntentions (here) decides whether the block reaches the
+// PROMPT. renderableIntentions (lib/agent/intentions/derive) decides what the
+// post-send classifier is OFFERED, and handle-inbound reads it for both the
+// carrier and the recording.
+//
+// A category suppressed in one and not the other does NOT leak a question into
+// the reply -- the block genuinely does not render. It fails more quietly: the
+// classifier is handed intentions the prompt never showed, so a false positive
+// closes one the guest never saw, and a double classifier failure closes ALL of
+// them pessimistically. TAC-436 shipped exactly that divergence for
+// comp_complaint and its own gate run caught it, on a turn reporting four
+// intentions offered against a reply generated without the block.
+//
+// Iterates EVERY category rather than naming the two, so the next suppression
+// added to either side has to be added to both.
+describe('intention suppression: render side and record side agree (TAC-436)', () => {
+  const openIntentions = ["You don't know this guest's name yet."]
+  const asOpen = [
+    { key: 'learn_name' as const, promptLine: openIntentions[0], eligibleAt: NOW },
+  ]
+
+  it.each(MESSAGE_CATEGORIES)('agrees for %s', (category) => {
+    const rendersBlock = runtimeToProse({ mechanics: [], openIntentions }, category, NOW).includes(
+      "## What you're hoping to get to",
+    )
+    const offersToRecorder = renderableIntentions(asOpen, category, false).length > 0
+    expect(offersToRecorder, `${category}: render=${rendersBlock} record=${offersToRecorder}`).toBe(
+      rendersBlock,
+    )
+  })
+
+  // The pending-question case is renderableIntentions' alone (the serializer
+  // never sees it), so it is asserted separately rather than folded above.
+  it('offers nothing to the recorder while a knowledge-gap question is pending', () => {
+    expect(renderableIntentions(asOpen, 'reply', true)).toEqual([])
   })
 })

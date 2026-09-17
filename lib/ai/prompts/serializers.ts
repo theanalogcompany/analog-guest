@@ -643,12 +643,22 @@ function shouldRenderVisitHistory(category: MessageCategory): boolean {
 // prompt with goals to pursue (TAC-380: renderableIntentions suppresses this
 // upstream too; this check stays as the render-time second line),
 // including the TAC-329 first-touch opener paragraph nested inside the same
-// block. Only opt_out is excluded here — no other category was found to
-// pose the same risk, but no other category was specifically audited for it
-// either; this isn't a claim that opt_out is the only one that should ever
-// suppress this block.
+// block.
+//
+// TAC-436 added comp_complaint, and it is the structural half of ruling 1. That
+// ruling licenses answering the guest and then asking one small thing, and
+// without this gate the licence would reach a complaint turn: "sorry the cortado
+// was cold, what should we do, also do you live nearby?". The block renders LAST
+// in the user prompt where COMP_COMPLAINT_INSTRUCTIONS lives in the SYSTEM
+// prompt, so on proximity the block wins — the TAC-314/329/330/338 failure
+// class. The paragraph says the same thing in prose as a second line; this is
+// the one that cannot be talked past. Same pair shouldRenderEmojiDirective
+// already excludes, for the same reason on a different axis.
+//
+// Still not a claim that these two are the only categories that should ever
+// suppress this block. No other category has been audited for it.
 function shouldRenderOpenIntentions(category: MessageCategory): boolean {
-  return category !== 'opt_out'
+  return category !== 'opt_out' && category !== 'comp_complaint'
 }
 
 // Voices regen-loop block. The operator's free-text critique of the
@@ -1013,8 +1023,44 @@ function formatMechanicEligibility(
 function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
-  const paragraph =
-    "These are things you'd like to get to, not a checklist to work through.\nOnly raise one if the conversation opens a natural door. If more than\none of these would fit, take the one listed first. If the guest\nasks about something else, answer that and let these wait. There will\nbe other conversations. Never steer back to them.\n\nThat's about the guest's own topic — don't pivot away from what they\nbrought up to chase one of these. It's different when your own last\nmessage asked them something about themselves, like whether they're\nnew or a regular, and this reply answers it. That's not the guest\nopening a door on some other subject — you're the one who asked, and\none of these can fit in the same breath if the moment calls for it.\nTake it on that reply if it fits. It only covers that one reply: once they've\nreplied, whatever they say, it's done, not something to come back to\nlater, and it doesn't change how you treat anything else."
+  // TAC-436 ruling 1, approved 2026-09-17. See the block comment above for what
+  // changed and why: one restraint removed, the openings named positively.
+  //
+  // Deliberately no em dash anywhere, where the replaced text had two. R3 bans
+  // them in output and the regen loop pays for every one that survives, so the
+  // prompt should not model them.
+  //
+  // Deliberately no emoji in the worked example either, though the ruling's own
+  // example carried one: this block renders immediately before the per-message
+  // emoji call, and an example with an emoji would argue with a 'none'
+  // directive on roughly a quarter of turns at a frequent venue.
+  const paragraph = [
+    "These are things you'd like to get to, not a checklist to work through.",
+    'If more than one would fit, take the one listed first, and only that one.',
+    '',
+    'A natural opening is ordinary and small. Any of these is one:',
+    '',
+    "- You've answered what they asked and the reply feels finished. One",
+    '  short question on the end is fine: "we\'re open till 3 on Sundays.',
+    '  you nearby?"',
+    "- They've said something about themselves, however small, and asking",
+    '  the obvious next thing is what anyone would do.',
+    "- There's nothing they need from you in the message. They're chatting,",
+    '  and a question is a fair way to keep it going.',
+    '- Your own last message asked them something about themselves and this',
+    "  reply answers it. You asked, so following it up isn't a pivot. That",
+    '  covers this one reply only, whatever they say back.',
+    '',
+    'Not an opening: a message carrying an apology, bad news, or something',
+    "they're unhappy about. Leave those alone entirely.",
+    '',
+    'Asking never changes what the reply is about. Whatever they raised is',
+    'still the job, and the question goes at the end, in one short line, or',
+    'not at all. Never steer the conversation toward one of these, and never',
+    'raise one twice.',
+    '',
+    'If nothing fits, let it wait. There will be other conversations.',
+  ].join('\n')
   const opener = firstTouchAfterQrScan
     ? "This is the guest's first message on this number, sent right after they scanned your sign. You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask whether it's their first time — one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
     : ''

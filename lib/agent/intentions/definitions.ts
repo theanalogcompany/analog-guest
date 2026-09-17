@@ -41,7 +41,7 @@ export type IntentionKey =
  *
  * It also fixes the anchor expiry runs from (`eligible_at`, TAC-380 ruling 5).
  * For `first_contact` that is the turn the gate was first seen open, and for
- * `qr_scan_enrollment` the enrollment. For the two event-armed kinds it is the
+ * `visit_confirmed` the earliest confirmed visit. For the two event-armed kinds it is the
  * moment the event became part of a DIFFERENT conversation — once it is older
  * than `followup_rules.recent_conversation_hours` (ruling 2) — so each perishes
  * a fixed time after that, however late the gate opened. A strictly newer event
@@ -49,12 +49,29 @@ export type IntentionKey =
  */
 export type IntentionArmsOn =
   /**
-   * `created_via = 'qr_scan'`. Scanning the sign at pickup confirms a visit,
-   * which is what lets understand_order ask what someone ordered without
-   * breaking R1 (never reference an action the guest's history doesn't
-   * confirm). A guest who texted in without scanning is never asked.
+   * A CONFIRMED VISIT (TAC-436 ruling 3), anchored to the earliest one on
+   * record. A visit is what lets understand_order ask what someone ordered
+   * without breaking R1 (never reference an action the guest's history doesn't
+   * confirm) — scanning the sign is one way to confirm it, and used to be the
+   * only one this armed on.
+   *
+   * Two sources today, resolved by the caller (build-runtime-context):
+   *   - `created_via = 'qr_scan'`, anchored to enrollment. The sign is at
+   *     pickup, so the scan itself is the visit.
+   *   - a commitment acknowledged at the counter, anchored to
+   *     `acknowledged_at`. Someone at the venue confirmed the guest showed up.
+   *
+   * DELIBERATELY NOT `guests.last_visit_at`, which reads like the obvious
+   * source and is inert here: all three of its writers run downstream of a
+   * transaction row that already exists, and a transaction SATISFIES this
+   * intention, so arming on it would close the intention in the same breath it
+   * opened it.
+   *
+   * A guest simply saying they came in, naming nothing they ordered, is
+   * recorded nowhere today. That third source is TAC-386's to supply, and it
+   * lands here without touching derive.ts (ruled 2026-09-17, audit question 2).
    */
-  | { kind: 'qr_scan_enrollment' }
+  | { kind: 'visit_confirmed' }
   /** Every guest. */
   | { kind: 'first_contact' }
   /**
@@ -83,7 +100,7 @@ export type IntentionArmsOn =
  */
 export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
   switch (armsOn.kind) {
-    case 'qr_scan_enrollment':
+    case 'visit_confirmed':
     case 'first_contact':
       return false
     case 'open_recommendation':
@@ -93,11 +110,15 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
 }
 
 /**
- * The right to ask (TAC-380 §3). `conversational` requires BOTH the venue's
- * floor on `recognition.signals.responseRate` AND a minimum lifetime reply
- * count. The reply count is what staggers intentions. The ratio cannot:
- * normalizeResponseRate reads 0 until three responses have been sent, then
- * jumps straight to ~100 for a guest who replies to everything.
+ * The right to ask (TAC-380 §3). Three kinds, and `gateOpen` switches on them
+ * exhaustively so a fourth fails `tsc` until someone decides what it requires.
+ *
+ * `conversational` requires BOTH the venue's floor on
+ * `recognition.signals.responseRate` AND a minimum lifetime reply count.
+ * `replies_only` (TAC-436) requires the count alone. The count is what staggers
+ * intentions; the ratio cannot, because normalizeResponseRate reads 0 until
+ * three responses have been sent, then jumps straight to ~100 for a guest who
+ * replies to everything.
  *
  * `defaultMinReplies` is a PLACEHOLDER. A venue overrides it per key through
  * `venue_configs.intention_rules.min_replies`.
@@ -105,6 +126,40 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
 export type IntentionGate =
   | { kind: 'none' }
   | { kind: 'conversational'; defaultMinReplies: number }
+  /**
+   * TAC-436 ruling 2: the reply count WITHOUT the response-rate floor.
+   *
+   * The floor is unreachable early by construction. normalizeResponseRate
+   * returns 0 until three outbound responses exist, and the floor defaults to
+   * 50, so every conversational-gated intention is closed on a guest's first
+   * turns no matter how they behave. The four first-contact intentions became
+   * eligible strictly after the only licence to raise them had expired.
+   *
+   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn`. Arming and gating are
+   * orthogonal here on purpose: a future first-contact intention that should
+   * wait for a proven responder writes `conversational` and gets it. Nothing in
+   * this file branches on `armsOn.kind` to decide a gate.
+   */
+  | {
+      kind: 'replies_only'
+      defaultMinReplies: number
+      /**
+       * The count required on a guest's FIRST-EVER message, stated separately
+       * from the ongoing one (TAC-436 audit question 1, ruled 2026-09-17:
+       * "explicit per intention, not a blanket zero").
+       *
+       * 0 means the intention is free to be raised in the opening exchange.
+       * Only `learn_name` carries 0: a name is the one thing it is natural to
+       * ask for on a first hello. The others repeat their ongoing count here,
+       * which is the same as not waiving anything, and they say so explicitly
+       * so that a new replies_only intention has to choose rather than inherit.
+       *
+       * NOT venue-overridable, unlike defaultMinReplies. `min_replies` is the
+       * ongoing stagger a venue tunes; this is a per-intention statement about
+       * the opening exchange.
+       */
+      firstMessageMinReplies: number
+    }
 
 export interface IntentionSatisfactionFacts {
   /**
@@ -199,7 +254,7 @@ const DEFINITIONS = {
   understand_order: {
     key: 'understand_order',
     priority: 10,
-    armsOn: { kind: 'qr_scan_enrollment' },
+    armsOn: { kind: 'visit_confirmed' },
     gate: { kind: 'none' },
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
@@ -243,7 +298,7 @@ const DEFINITIONS = {
     key: 'learn_name',
     priority: 40,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'conversational', defaultMinReplies: 3 },
+    gate: { kind: 'replies_only', defaultMinReplies: 3, firstMessageMinReplies: 0 },
     promptLine: "You don't know this guest's name yet.",
     classifierDescription: "asks the guest's name or what to call them",
     satisfactionLabel: 'Closes once raised, or once a first name is on record for this guest.',
@@ -255,7 +310,7 @@ const DEFINITIONS = {
     key: 'are_they_local',
     priority: 50,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'conversational', defaultMinReplies: 5 },
+    gate: { kind: 'replies_only', defaultMinReplies: 5, firstMessageMinReplies: 5 },
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
@@ -267,7 +322,7 @@ const DEFINITIONS = {
     key: 'their_rhythm',
     priority: 60,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'conversational', defaultMinReplies: 8 },
+    gate: { kind: 'replies_only', defaultMinReplies: 8, firstMessageMinReplies: 8 },
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -286,7 +341,7 @@ const DEFINITIONS = {
     key: 'why_theyre_here',
     priority: 70,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'conversational', defaultMinReplies: 11 },
+    gate: { kind: 'replies_only', defaultMinReplies: 11, firstMessageMinReplies: 11 },
     promptLine: "You don't know what brings this guest in.",
     classifierDescription: 'asks what brings the guest in, or what they come in for',
     satisfactionLabel: 'Closes once raised. The reason itself is not observed until TAC-385.',

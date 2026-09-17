@@ -1533,6 +1533,101 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
 // `await sleep(6500)` and watching each one fail -- an assertion this file
 // could not make before, because the deleted './timing' mock pinned every
 // sampled sleep to 0 and would have let a sleeping implementation pass.
+// ---------------------------------------------------------------------------
+// TAC-436 ruling 4: rendered_intentions on the AUTO-SEND path
+// ---------------------------------------------------------------------------
+//
+// Until this, the column was written only by persistOrRegenQueuedDraft, so
+// every auto-sent row carried NULL and TAC-385's raising-half audit had to
+// infer what rendered on those turns rather than read it. Nothing downstream
+// consumes it here — the auto-send path records inline — so this is audit, and
+// the assertions are about what lands in the row.
+describe('scheduleAndSend — rendered_intentions (TAC-436)', () => {
+  const ANCHOR = new Date('2026-09-14T10:00:00.000Z')
+  const RENDERED = [
+    { key: 'understand_order' as const, promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+  ]
+
+  beforeEach(() => {
+    scenario = freshScenario()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('writes the rendered set on an auto-sent row', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      ...NO_DELAY,
+      renderedIntentions: RENDERED,
+    })
+
+    // Same wire shape the queue path writes: key + anchor, never promptLine.
+    expect(scenario.inserts[0]!.rendered_intentions).toEqual([
+      { key: 'understand_order', eligibleAt: '2026-09-14T10:00:00.000Z' },
+    ])
+  })
+
+  it('writes NULL when the caller passes nothing', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), NO_DELAY)
+
+    expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
+  })
+
+  // THE ONE THAT MATTERS ON A SPLIT. One prompt, one rendered set, so the
+  // column belongs to the response and not to each bubble of it. Without the
+  // index guard a two-bubble turn writes it twice and a count of non-null rows
+  // counts bubbles instead of responses.
+  it('writes it on the FIRST row only when the response splits', async () => {
+    queueSends('provider-1', 'provider-2')
+    queueInserts('msg-1', 'msg-2')
+
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('Open until 4. Come by whenever.'),
+      { skipHumanFeelDelay: true, rng: () => 0, renderedIntentions: RENDERED },
+    )
+
+    expect(scenario.inserts).toHaveLength(2)
+    expect(scenario.inserts[0]!.rendered_intentions).toEqual([
+      { key: 'understand_order', eligibleAt: '2026-09-14T10:00:00.000Z' },
+    ])
+    expect(scenario.inserts[1]!.rendered_intentions).toBeNull()
+  })
+
+  // EQUIVALENCE. handle-inbound hoists one value above the queue/send fork, so
+  // a card and an auto-send describe the same prompt. This pins the two
+  // PAYLOADS equal for one rendered set, so a divergence in either writer's
+  // serialization fails here rather than in production six weeks later.
+  it('writes the same payload the queue path writes for the same rendered set', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      ...NO_DELAY,
+      renderedIntentions: RENDERED,
+    })
+    const autoSent = scenario.inserts[0]!.rendered_intentions
+
+    scenario = freshScenario()
+    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
+    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
+      renderedIntentions: RENDERED,
+    })
+    const queued = scenario.inserts[0]!.rendered_intentions
+
+    expect(autoSent).toEqual(queued)
+  })
+})
+
 describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
   beforeEach(() => {
     scenario = freshScenario()
