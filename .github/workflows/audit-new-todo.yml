@@ -294,10 +294,15 @@ jobs:
 
                  gh run list --repo ${{ github.repository }} --workflow=build-ready.yml --event schedule --limit 100 --json createdAt,conclusion | jq length
 
-            Nothing else under gh is: gh run rerun, gh run cancel, gh workflow
-            run and gh auth are denied, and so is anything that starts work.
-            Shell loops (for, while) are denied too: run one command at a
-            time.
+            Use them to read, never to act. An audit never changes the state
+            of what it is auditing (audit-ticket.md): no cancels, no reruns,
+            no dispatches. If the ticket says a command fails, check that from
+            what gh run view shows; do not run the command to see. Shell loops
+            (for, while) are denied: run one command at a time.
+
+            If a command is refused, list it under 6. BLOCKED in your [AUDIT]
+            comment, as audit-ticket.md describes. Never write that you did
+            not attempt something.
 
             Your audit comment MUST contain the literal string [AUDIT]. That
             marker is what stops this workflow auditing the same ticket again

@@ -9,6 +9,14 @@ This is an audit. Do not plan, do not branch, do not write code, do not edit
 the ticket's description except for the `## Open questions` block as directed
 below.
 
+**An audit never changes the state of what it is auditing.** No cancels, no
+reruns, no dispatches, no writes of any kind except the Linear writes this
+file lists: the `[AUDIT]` comment, and the status, label and `## Open
+questions` changes under "After posting". If the ticket describes something
+broken, describing it is the whole job. That holds when the claim is about
+what a command does: verify it from what can be read, and if nothing
+readable settles it, say so. Never run the command to see what happens.
+
 # Check the repo
 
 Work out which repo works this ticket, by the rule under "Which repo works a
@@ -56,7 +64,7 @@ Post one comment, flat at the top level, never as a reply, in this shape:
 [AUDIT] TAC-XXX
 ```
 
-followed by exactly these sections:
+followed by exactly these sections, the sixth only when it applies:
 
 **1. CONFIRMED** — claims in the ticket that hold, each with the `file:line`
 that proves it.
@@ -84,6 +92,18 @@ Do not file tickets. Maximum three; list any remainder as one-liners under a
 "not detailed" heading.
 
 **5. UNBLOCKED** — what could be built with zero further input from Jaipal.
+
+**6. BLOCKED** — every command or tool call that was refused during this
+audit, with the command and what you were trying to find out. Include this
+section only when something was refused. A refused attempt goes here even
+though the workflow also lists it in `[DENIALS]`.
+
+**The comment never asserts a negative about your own actions.** Never write
+"I did not attempt X", "this audit only read state", or anything of that
+shape, anywhere in the comment, including "Decided without asking". Report
+what you did and what was blocked, and nothing else. A claim that you did
+not do something cannot be checked from the comment, and the denial record
+has already shown one to be false.
 
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.
