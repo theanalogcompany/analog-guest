@@ -10,9 +10,9 @@ the ticket's description except for the `## Open questions` block as directed
 below.
 
 **An audit never changes the state of what it is auditing.** No cancels, no
-reruns, no dispatches, no writes of any kind except the Linear writes this
-file lists: the `[AUDIT]` comment, and the status, label and `## Open
-questions` changes under "After posting". If the ticket describes something
+reruns, no dispatches, and no writes to the repo or to GitHub. Its writes
+are the Linear ones this file lists: the `[AUDIT]` comment, and the status,
+label and `## Open questions` changes under "After posting". If the ticket describes something
 broken, describing it is the whole job. That holds when the claim is about
 what a command does: verify it from what can be read, and if nothing
 readable settles it, say so. Never run the command to see what happens.
@@ -93,19 +93,18 @@ Do not file tickets. Maximum three; list any remainder as one-liners under a
 
 **5. UNBLOCKED** — what could be built with zero further input from Jaipal.
 
-**6. BLOCKED** — every command or tool call that was refused during this
-audit, with the command and what you were trying to find out. Include this
-section only when something was refused. A refused attempt goes here even
-though the workflow also lists it in `[DENIALS]`.
+**6. BLOCKED** — every command or tool call that was refused, with the
+refused command and the claim it was meant to check. Include this section
+only when something was refused. A refused call goes here even though the
+workflow also lists it in `[DENIALS]`.
 
-**The comment never asserts a negative about your own actions.** Never write
-"I did not attempt X", "this audit only read state", "used only gh run
-view", or anything of that shape, anywhere in the comment, including
-"Decided without asking". A claim that you did only certain things is a
-claim that you did nothing else, and it is the same negative. Report what
-you did and what was blocked, and nothing else. A claim that you did not do
-something cannot be checked from the comment, and the denial record has
-already shown one to be false.
+**The comment does not describe how the audit was done.** It holds the
+findings, the evidence for each, what could not be verified, and section 6
+when something was refused. No list of the tools or commands used, no "I
+checked X by doing Y", nothing about what you did or did not do. Evidence is
+the source, stated as what it shows: a `file:line`, a query result, the
+fields a run records. An audit that narrates its own process is writing from
+memory, and on TAC-431 two runs in a row got that narration wrong.
 
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.

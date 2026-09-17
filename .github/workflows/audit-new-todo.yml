@@ -301,8 +301,8 @@ jobs:
             (for, while) are denied: run one command at a time.
 
             If a command is refused, list it under 6. BLOCKED in your [AUDIT]
-            comment, as audit-ticket.md describes. Never write that you did
-            not attempt something.
+            comment, as audit-ticket.md describes. The comment reports
+            findings and their evidence, never how you worked.
 
             Your audit comment MUST contain the literal string [AUDIT]. That
             marker is what stops this workflow auditing the same ticket again
