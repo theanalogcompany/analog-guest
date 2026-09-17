@@ -99,11 +99,13 @@ section only when something was refused. A refused attempt goes here even
 though the workflow also lists it in `[DENIALS]`.
 
 **The comment never asserts a negative about your own actions.** Never write
-"I did not attempt X", "this audit only read state", or anything of that
-shape, anywhere in the comment, including "Decided without asking". Report
-what you did and what was blocked, and nothing else. A claim that you did
-not do something cannot be checked from the comment, and the denial record
-has already shown one to be false.
+"I did not attempt X", "this audit only read state", "used only gh run
+view", or anything of that shape, anywhere in the comment, including
+"Decided without asking". A claim that you did only certain things is a
+claim that you did nothing else, and it is the same negative. Report what
+you did and what was blocked, and nothing else. A claim that you did not do
+something cannot be checked from the comment, and the denial record has
+already shown one to be false.
 
 If a question blocks verifying a later claim, say so and stop verifying that
 branch. Do not assume an answer in order to keep going.
