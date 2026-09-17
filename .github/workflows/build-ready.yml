@@ -23,9 +23,10 @@ name: Build ready tickets
 #
 # Which tickets are this repo's: the label narrows, the Repo: line decides
 # (.claude/process.md, "Which repo works a ticket"). One ticket, one repo:
-# a ticket with two repo labels is never built. The repo that would have
-# built it posts [BUILD-SKIPPED] saying it needs splitting, adds Needs
-# Decision, and moves on.
+# a ticket with two repo labels is never built, and neither is one whose
+# Repo: line names more than one repo. The repo that would have built it
+# posts [BUILD-SKIPPED] saying it needs splitting, adds Needs Decision, and
+# moves on.
 #
 # dry_run (manual dispatch only) prints what the run would start, resume and
 # flag, and writes nothing to Linear.
@@ -167,7 +168,11 @@ jobs:
               repo_labels as $labels
               | repo_line_names as $named
               | ([$named[] | select(. as $n | $labels | any(. == $n))] | first) as $pick
-              | if $pick != null then $pick
+              # A line naming more than one repo is a defect whatever the
+              # labels say: the repo it is NOT labelled for never sees the
+              # ticket at all, so a silent pick here is a silent half-build.
+              | if ($named | length) > 1 then "defect:multi-repo-line"
+                elif $pick != null then $pick
                 elif ($named | length) > 0 then "defect:unlabelled"
                 elif ($labels | length) == 1 then $labels[0]
                 elif ($labels | length) == 0 then "none"
@@ -319,7 +324,9 @@ jobs:
             NAME=$(echo "$row" | jq -r .identifier)
             # The two-label wording is .claude/process.md's, word for word.
             TEXT=$(echo "$row" | jq -r '
-              if (.labels | length) >= 2
+              if (.named | length) > 1
+              then "This ticket can'"'"'t be built. Its Repo: line names \(.named | join(" and ")), and cross-repo work is two tickets, one per repo, linked. A line naming more than one repo is a defect whatever the labels say: the repo it is not labelled for never sees this ticket, so nothing there picks it up and nothing there says why.\n\nSplit it: one ticket per repo, each with its own repo label and a Repo: line naming only that repo, linked to each other. Replying here will not unblock it: the ticket needs splitting."
+              elif (.labels | length) >= 2
               then "This ticket can'"'"'t be built. It carries the \(.labels | join(" and ")) labels, and cross-repo work is two tickets, one per repo, linked. Built as one ticket, only one repo would build it and the other half would never be built.\n\nSplit it: one ticket per repo, each with its own repo label and Repo: line, linked to each other. Replying here will not unblock it: the ticket needs splitting."
               else "This ticket can'"'"'t be built. Its Repo: line names \(.named | join(" and ")), and the ticket carries no label for \(if (.named | length) == 1 then "it" else "any of them" end).\n\nFix the Repo: line or the repo label so they agree. Replying here will not unblock it."
               end')
@@ -351,7 +358,8 @@ jobs:
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 120
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npm:*),Bash(npx:*),Bash(git:*),Bash(gh pr:*),Bash(curl:*),Bash(jq:*),Bash(rg:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git checkout jaipal/:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(python3:*),Bash(node:*)"
+            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
             You are working Linear tickets for the repo ${{ github.event.repository.name }}.
 
@@ -370,7 +378,9 @@ jobs:
             These are denied however you arrange them: expanding an
             environment variable ($LINEAR_API_KEY or ${LINEAR_API_KEY}),
             command substitution ($(...) or backticks), variable assignment
-            (NAME=...), output redirection (>), and heredocs (<<). This
+            (NAME=...), output redirection in every form, including >, >> and
+            2>&1 — a command cannot capture its own stderr — and heredocs
+            (<<). This
             workflow's own shell steps use those forms; you cannot. Pass the
             key with curl's own --variable and --expand-header, exactly as
             below. Use exactly these two forms.
@@ -395,6 +405,11 @@ jobs:
 
             Read every response. Only "success": true means the write
             happened; anything else is a failed write, not a finished step.
+
+            READ FILES WITH THE READ TOOL AND SEARCH WITH GREP OR rg, never
+            with a shell pipeline. cat, grep, cut and env are not available,
+            and every denied pipeline on record was a shell text tool feeding
+            jq.
 
             Post comments flat: never pass parentId. Change status with
             issueUpdate and stateId. Add or remove a label with
@@ -477,7 +492,7 @@ jobs:
                     | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
                     | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
                     | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
-                    | .[0:200] ]
+                    | .[0:2000] ]
                 }' "$EXECUTION_FILE")
           else
             SESSION='{"ended":"without a session record","turns":0,"denials":0,"denied":[]}'
