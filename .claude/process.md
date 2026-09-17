@@ -90,6 +90,30 @@ would never be built, and merging that one PR would still move the whole
 ticket to Ready For QA. It is the same defect as a missing Repo: line is for
 the audit. It just fails later and more expensively.
 
+**Two kinds of sibling pair, and they need different rules.**
+
+- **Contract pair.** A server endpoint and its client (TAC-207 ↔ TAC-288).
+  Order is absolute: the server ships, deploys, and is curl-verified against
+  the `## Contract` before the client half starts. CLAUDE.md's "Cross-repo
+  contracts" covers it.
+- **Mirror pair.** The same text lands in both repos with no runtime
+  dependency (TAC-396 ↔ TAC-437, TAC-441 ↔ TAC-442). Order is irrelevant,
+  and the Contract rules actively misfit it: there is no endpoint, no curl,
+  nothing to ship first. Its gate is that the shared blocks are identical
+  and every per-repo block is listed explicitly with what differs and why —
+  **never whole-file identity**, because several blocks are required to
+  differ. The worked question example in this file is one; the high-stakes
+  list in `work-ticket.md` step 4 is another.
+
+**How the second half learns the first has landed: the sibling ticket's own
+status.** Linear's GitHub automation moves it to In Progress on PR open and
+Ready For QA on merge, so "has the other half shipped" is answerable without
+any cross-repo access — which is just as well, because there is none. A run
+is bound to its own repo: the GitHub App token it holds reaches exactly one
+repo, and nothing sends a `repository_dispatch` to the other. The branch
+name and any curl verification belong in the Phase 5 comment, because
+nothing else carries them across.
+
 The labels say where the work lands. The **Repo:** line says where it starts.
 The audit and the build both narrow by label and decide by the Repo: line:
 

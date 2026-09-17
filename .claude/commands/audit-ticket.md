@@ -38,9 +38,19 @@ touches. Audit it from the repo chosen above, and state in the report what
 could not be verified from there.
 
 A ticket carrying two repo labels can be audited but never built: cross-repo
-work is two tickets, one per repo, linked. Audit it anyway, and say under
-WRONG that it needs splitting before anything can build it. Saying so now is
-cheaper than the build refusing it later.
+work is two tickets, one per repo, linked. The same is true of a ticket whose
+Repo: line names more than one repo, whatever its labels say. Audit it anyway,
+and say under WRONG that it needs splitting before anything can build it.
+Saying so now is cheaper than the build refusing it later.
+
+When a ticket has a sibling in the other repo, say which kind of pair it is,
+because they are audited differently. A **contract pair** is a server
+endpoint and its client: check the `## Contract` exists, and say plainly
+that the server half ships and is curl-verified first. A **mirror pair** is
+the same text landing in both repos with no runtime dependency: there is no
+Contract to check and no order to enforce, so check instead that the ticket
+says which blocks must be identical and which are per-repo. See "Which repo
+works a ticket" in `.claude/process.md`.
 
 # The audit
 
