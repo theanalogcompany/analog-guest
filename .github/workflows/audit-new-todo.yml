@@ -21,10 +21,17 @@ name: Audit new Todo tickets
 # run log. Off by default: this repo is public, so the log is too, and a
 # transcript of a real ticket carries guest message text.
 #
-# The Claude step does not run from a branch whose copy of this file differs
-# from main's: claude-code-action skips itself and exits green. So a change to
-# this file can only be tested after it merges, on a fixture ticket. Run
-# 35149594063 is the example, caught by the check below.
+# The session's GitHub token is this job's own token, passed as github_token,
+# so the permissions block below is what it can do: read the repo and read
+# workflow runs, nothing else. Without github_token, claude-code-action swaps
+# an OIDC token for the Claude GitHub App's token, which can write, and sets
+# it as GH_TOKEN and GITHUB_TOKEN inside the session. That is also why there
+# is no id-token: write: nothing here should be able to mint that token.
+#
+# Passing github_token also means the Claude step runs from a branch. The
+# skip on a branch whose copy of this file differs from main's (run
+# 35149594063) happens in the app-token exchange, which this workflow no
+# longer does. build-ready.yml still exchanges, so it still skips.
 #
 # Scheduled workflows run only from the default branch. This does nothing
 # until it is merged to main.
@@ -61,7 +68,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      id-token: write
       # gh run list / gh run view, read-only, for claims about workflow runs.
       actions: read
 
@@ -223,9 +229,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The job token, scoped by permissions above. See the header.
+          github_token: ${{ github.token }}
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 150
