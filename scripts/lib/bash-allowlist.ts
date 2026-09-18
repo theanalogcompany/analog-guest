@@ -33,11 +33,15 @@ export function permits(allowed: readonly string[], disallowed: readonly string[
 // each part of a compound command (&&, ||, ;, |) on its own and refuses the
 // line if any part is refused. The build prompt names forms CI denies
 // however they are arranged: expanding a variable, command substitution,
-// redirection and heredocs; this refuses a $, a backtick, < or > outside
-// single quotes, and a lone & (a background job), which it does not model. `cd` has no rule: Claude Code admits a single cd to a directory
-// inside the checkout on its own, and refuses a second in one command (run
+// redirection and heredocs. This refuses a $, a backtick, < or > outside
+// single quotes, and a lone & (a background job), which it does not model.
+// `cd` has no rule: Claude Code admits a single cd to a directory inside the
+// checkout on its own, and refuses a second in one command (run
 // 35323004309), so a cd is admitted when it is the only one and its path is
-// relative with no `..`, or under `root`.
+// relative with no `..`, or under `root`. But a cd and a git command in one
+// line is refused whatever the rules say ("cd before a git command needs
+// approval"): Claude Code 2.1.273, run headless under this allowlist,
+// refused it with a relative path and with an absolute one (TAC-471).
 export function permitsCommandLine(
   allowed: readonly string[],
   disallowed: readonly string[],
@@ -84,6 +88,7 @@ export function permitsCommandLine(
   if (commands.some((c) => c === '')) return false
   const cds = commands.filter((c) => c === 'cd' || c.startsWith('cd '))
   if (cds.length > 1) return false
+  if (cds.length === 1 && commands.some((c) => c === 'git' || c.startsWith('git '))) return false
   return commands.every((c) => {
     if (!c.startsWith('cd ')) return permits(allowed, disallowed, c)
     const path = c.slice(3).trim()

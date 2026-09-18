@@ -498,11 +498,13 @@ jobs:
           # everything after it, and a deny rule catches a flag only where it
           # names it. What that leaves open is listed in CLAUDE.md, "A
           # Bash(x:*) rule matches x followed by a space", and pinned in
-          # scripts/lib/bash-allowlist.test.ts (TAC-471).
+          # scripts/lib/bash-allowlist.test.ts (TAC-471). Git in a resume's
+          # side folder runs as git -C with its absolute path, fixed so a rule
+          # can name it: Claude Code refuses cd and git in one command.
           claude_args: |
             --max-turns ${{ env.MAX_TURNS }}
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(npx eslint:*),Bash(npm run build:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git switch:*),Bash(git worktree add:*),Bash(git worktree remove:*),Bash(git worktree list:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(gh api repos/theanalogcompany/analog-guest/activity:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(node scripts/linear.mjs:*)"
-            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*),Bash(git checkout .),Bash(git checkout --:*),Bash(git switch --discard-changes:*),Bash(git switch -f:*),Bash(git switch --force:*),Bash(git switch -C:*),Bash(git switch --force-create:*),Bash(git worktree add -B:*),Bash(git worktree remove -f:*),Bash(git worktree remove --force:*),Bash(git push --force:*),Bash(git push -f:*),Bash(git push --force-with-lease:*),Bash(git push --mirror:*),Bash(git push --prune:*),Bash(git push -d:*),Bash(git push --delete:*),Bash(gh pr merge:*),Bash(gh pr checkout:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(npx eslint:*),Bash(npm run build:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git switch:*),Bash(git worktree add:*),Bash(git worktree remove:*),Bash(git worktree list:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume status:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume log:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume diff:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume show:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume add:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume commit:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume pull --ff-only:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(gh api repos/theanalogcompany/analog-guest/activity:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(node scripts/linear.mjs:*)"
+            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*),Bash(git checkout .),Bash(git checkout --:*),Bash(git switch --discard-changes:*),Bash(git switch -f:*),Bash(git switch --force:*),Bash(git switch -C:*),Bash(git switch --force-create:*),Bash(git worktree add -B:*),Bash(git worktree remove -f:*),Bash(git worktree remove --force:*),Bash(git push --force:*),Bash(git push -f:*),Bash(git push --force-with-lease:*),Bash(git push --mirror:*),Bash(git push --prune:*),Bash(git push -d:*),Bash(git push --delete:*),Bash(gh pr merge:*),Bash(gh pr checkout:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push --force:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push -f:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push --force-with-lease:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push --mirror:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push --prune:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push -d:*),Bash(git -C ${{ github.workspace }}/.worktrees/resume push --delete:*)"
           prompt: |
             You are working a Linear ticket for the repo ${{ github.event.repository.name }}.
 
@@ -605,8 +607,9 @@ jobs:
             there and ignores his answer. Then continue from where the earlier
             session stopped. Do not change the status. If the ticket's branch
             is on GitHub, do not check it out: read what is already done from
-            GitHub's copy, and continue it in a worktree (work-ticket.md
-            Phase 3 step 14).
+            GitHub's copy, and continue it in the side folder
+            ${{ github.workspace }}/.worktrees/resume, by that absolute path
+            and never with cd (work-ticket.md Phase 3 step 14).
 
             ALWAYS POST BEFORE YOU EXIT. Every ticket you touch ends with a
             comment saying what happened, even if the answer is "nothing, and

@@ -6,6 +6,16 @@ tools: Bash, Read, mcp__playwright__*
 
 You are the QA runner for analog-guest. Your job is to verify the implementation works, not just compiles.
 
+# When the handoff names a side folder
+
+A resumed build works in a side folder (`work-ticket.md` step 14), and the handoff gives its absolute path. Run every step below against that path, written out in full, never with `cd`:
+- `git -C <side folder> diff main...HEAD --name-only` for the touched files
+- `npx tsc --noEmit -p <side folder>` for the typecheck
+- `npx eslint <side folder>` for lint
+- `npx vitest run --root <side folder>` for the tests
+
+Browser and API checks start a dev server from the checkout you are in, which serves `main`'s code, not the side folder's: report them as not run, and say why.
+
 # Phase 1 — Categorize the change
 1. `git diff main...HEAD --name-only` to see touched files.
 2. Categorize:
