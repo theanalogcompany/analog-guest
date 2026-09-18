@@ -33,15 +33,23 @@ function firstItem(name: FixtureName): { entryId: string; item: Item } {
   return { entryId: entry.id, item }
 }
 
-/** The part of a mid that decodes to `:<account id>:<thread id>:<item id>`. */
+/**
+ * A mid's body, decoded to `['', account id, thread id, item id]`. After a
+ * fixed 34-character header, the rest is base64 whose `==` padding Meta writes
+ * as `ZDZD`. Anything else fails loudly rather than decoding short.
+ */
 function decodeMid(mid: string): string[] {
-  return Buffer.from(mid.slice(34, 158), 'base64').toString('ascii').split(':')
+  if (!mid.endsWith('ZDZD')) throw new Error(`unexpected mid padding: ${mid.slice(-8)}`)
+  return Buffer.from(`${mid.slice(34, -4)}==`, 'base64').toString('ascii').split(':')
 }
 
 describe('recorded Instagram payloads: what Meta sends', () => {
   // Staff replying by hand in the Instagram app produce an echo, so a handler
   // will see the venue's own outbound messages on the `messages` field.
-  // Direction is marked explicitly, not left to be inferred.
+  // Direction is marked explicitly, not left to be inferred. `is_echo` marks
+  // the venue's side, not a person: replies the agent sends through the API
+  // most likely arrive as echoes too (not yet captured), so it cannot tell
+  // staff from the agent.
   it('marks a reply typed in the Instagram app as is_echo, with sender and recipient reversed', () => {
     const { entryId, item } = firstItem('echo')
     const message = item.message as Record<string, unknown>
@@ -69,14 +77,17 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     expect(read.mid).toBe(echo.mid)
   })
 
-  // Identifier formats as captured. The account id is 17 digits and a guest's
-  // IGSID was 16 in every capture, so a validator must not assume one length.
-  it('uses digit-string ids: 17 for the account, 16 for the guest', () => {
+  // Identifier formats. The account id is 17 digits. Both guest IGSIDs seen
+  // on 2026-09-17 (this one, and the postback's, not committed) were 16, so an
+  // account id and a guest id are not the same length and a validator for one
+  // must not be reused for the other. Two samples do not show that every
+  // IGSID is 16 digits, so the guest id is pinned to digits only.
+  it('uses digit-string ids, 17 digits for the account', () => {
     for (const name of FIXTURE_NAMES) {
       const { entryId, item } = firstItem(name)
       expect(entryId).toMatch(/^\d{17}$/)
       const guest = item.sender.id === entryId ? item.recipient.id : item.sender.id
-      expect(guest).toMatch(/^\d{16}$/)
+      expect(guest).toMatch(/^\d+$/)
     }
   })
 
@@ -93,6 +104,8 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     expect(echoAccount).toBe(echo.entryId)
     expect(msgThread).toMatch(/^\d{39}$/)
     expect(echoThread).toBe(msgThread)
+    expect(msgItem).toMatch(/^\d{35}$/)
+    expect(echoItem).toMatch(/^\d{35}$/)
     expect(echoItem).not.toBe(msgItem)
   })
 })
