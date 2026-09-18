@@ -1,7 +1,6 @@
-// Non-PII shape summary of an Instagram webhook payload. This is what the
-// route logs when INSTAGRAM_LOG_RAW_INBOUND is OFF, which is the default and
-// therefore the steady state — so this file, not the flag-gated raw capture,
-// is what actually has to hold "no secrets, no guest content in log output".
+// Non-PII shape summary of an Instagram webhook payload. Since TAC-458 removed
+// the raw-body capture, this is the ONLY thing the route logs about a payload,
+// so this file is what holds "no secrets, no guest content in log output".
 //
 // Deliberately excluded, and each for its own reason:
 //   - message text / attachments / reactions — guest content, the PII
@@ -10,11 +9,12 @@
 // What survives is shape: which kinds of event arrived, and when. That is the
 // question the stub exists to answer before handling logic is written.
 //
-// The caps are not decoration. TAC-445 does not enforce the signature, so this
-// endpoint is publicly reachable and anyone can POST arbitrary JSON to it.
-// `types` is derived from attacker-controllable object KEYS, so without a
-// bound a stranger can write whatever they like into our logs at whatever
-// length they like.
+// The caps were written when the endpoint did not enforce its signature
+// (TAC-445) and anyone could POST arbitrary JSON to it. Since TAC-458 only a
+// signed delivery reaches this summary, so they are defence in depth rather
+// than the only bound: `types` is still derived from object KEYS, and a leaked
+// app secret would put this back in a stranger's hands. They cost nothing on
+// real traffic, so they stay.
 
 /** Per-item keys that route the event rather than name it. */
 const ROUTING_KEYS: ReadonlySet<string> = new Set(['sender', 'recipient', 'timestamp'])

@@ -1,8 +1,15 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { checkInstagramSignature, verifyMetaChallengeToken } from './verify-webhook'
+import { verifyInstagramSignature, verifyMetaChallengeToken } from './verify-webhook'
+
+// The real timingSafeEqual, wrapped so a test can see that it is what decides
+// the comparison. Nothing else about node:crypto changes.
+vi.mock('node:crypto', async () => {
+  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto')
+  return { ...actual, timingSafeEqual: vi.fn(actual.timingSafeEqual) }
+})
 
 const SECRET = 'test-app-secret'
 const BODY = '{"object":"instagram","entry":[{"id":"17841400000000000","time":1,"messaging":[]}]}'
@@ -15,81 +22,128 @@ function headersWith(signature: string): Headers {
   return new Headers({ 'x-hub-signature-256': signature })
 }
 
-describe('checkInstagramSignature', () => {
+afterEach(() => {
+  vi.mocked(timingSafeEqual).mockClear()
+})
+
+describe('verifyInstagramSignature', () => {
   it('accepts a correctly signed delivery', () => {
-    const digest = sign(BODY, SECRET)
-    const result = checkInstagramSignature(BODY, headersWith(`sha256=${digest}`), SECRET)
-    expect(result.matched).toBe(true)
-    expect(result.received).toBe(digest)
-    expect(result.computed).toBe(digest)
+    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}`), SECRET)
+    expect(result).toEqual({ ok: true })
   })
 
-  it('rejects a tampered body', () => {
-    const digest = sign(BODY, SECRET)
-    const result = checkInstagramSignature(`${BODY} `, headersWith(`sha256=${digest}`), SECRET)
-    expect(result.matched).toBe(false)
+  it('rejects a tampered body as a mismatch', () => {
+    const result = verifyInstagramSignature(`${BODY} `, headersWith(`sha256=${sign(BODY, SECRET)}`), SECRET)
+    expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
-  it('rejects the wrong app secret', () => {
-    const digest = sign(BODY, SECRET)
-    const result = checkInstagramSignature(BODY, headersWith(`sha256=${digest}`), 'other-secret')
-    expect(result.matched).toBe(false)
+  it('rejects the wrong app secret as a mismatch', () => {
+    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}`), 'other-secret')
+    expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
-  it('rejects a missing header without throwing', () => {
-    const result = checkInstagramSignature(BODY, new Headers(), SECRET)
-    expect(result.matched).toBe(false)
-    expect(result.received).toBeNull()
+  it('rejects a missing header', () => {
+    expect(verifyInstagramSignature(BODY, new Headers(), SECRET)).toEqual({
+      ok: false,
+      reason: 'missing_header',
+    })
   })
 
   // The natural mistake is sending the bare hex digest. Meta does not, but an
-  // unauthenticated endpoint sees whatever anyone sends it.
-  it('rejects a header with no sha256= prefix', () => {
-    const digest = sign(BODY, SECRET)
-    const result = checkInstagramSignature(BODY, headersWith(digest), SECRET)
-    expect(result.matched).toBe(false)
-    expect(result.received).toBeNull()
+  // endpoint anyone can reach sees whatever anyone sends it.
+  it('rejects a header with no sha256= prefix as malformed', () => {
+    const result = verifyInstagramSignature(BODY, headersWith(sign(BODY, SECRET)), SECRET)
+    expect(result).toEqual({ ok: false, reason: 'malformed_header' })
   })
 
-  it('rejects a sha256= prefix with an empty digest', () => {
-    const result = checkInstagramSignature(BODY, headersWith('sha256='), SECRET)
-    expect(result.matched).toBe(false)
-    expect(result.received).toBeNull()
+  it('rejects a sha256= prefix with an empty digest as malformed', () => {
+    expect(verifyInstagramSignature(BODY, headersWith('sha256='), SECRET)).toEqual({
+      ok: false,
+      reason: 'malformed_header',
+    })
   })
 
   // timingSafeEqual throws on a length mismatch, so the length guard is what
-  // keeps this a report rather than an exception.
+  // keeps these a refusal rather than an exception.
   it('rejects a short digest without throwing', () => {
-    const result = checkInstagramSignature(BODY, headersWith('sha256=abc'), SECRET)
-    expect(result.matched).toBe(false)
-    expect(result.received).toBe('abc')
+    expect(verifyInstagramSignature(BODY, headersWith('sha256=abc'), SECRET)).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    })
   })
 
-  // Nothing authenticates this endpoint while the signature is unenforced, and
-  // the header is bounded only by the platform's header limit, so an 8KB
-  // signature is one request away from an 8KB log line.
-  it('bounds an absurdly long received digest', () => {
-    const result = checkInstagramSignature(BODY, headersWith(`sha256=${'a'.repeat(8000)}`), SECRET)
-    expect(result.matched).toBe(false)
-    expect(result.received).toHaveLength(result.computed.length)
+  it('rejects an absurdly long digest without throwing', () => {
+    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${'a'.repeat(8000)}`), SECRET)
+    expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
-  // The security-relevant half of that bound. If the truncation were applied
-  // BEFORE the comparison rather than only to the logged value, this forgery
-  // would be cut down to exactly the right digest and match.
-  it('never matches a digest that is only correct once truncated', () => {
+  // A correct digest with trailing bytes must not match. Nothing here trims or
+  // truncates, and this is the test that keeps it that way: any "tidy" that
+  // cut the received value to digest length would turn this into a forgery
+  // that passes.
+  it('never matches a correct digest with bytes appended', () => {
+    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}extra`), SECRET)
+    expect(result).toEqual({ ok: false, reason: 'mismatch' })
+  })
+
+  // THE trap this helper guards. HMAC accepts an empty key, and a signature
+  // keyed with one is computable by anyone. So a forger who signs with '' must
+  // never pass against an empty or unset secret, whatever the caller does.
+  // The route refuses an unset secret before calling this; this test is what
+  // holds the guard for every caller, including that one if its check is ever
+  // removed.
+  it('never verifies against an empty or unset secret, even a body signed with an empty key', () => {
+    const forged = headersWith(`sha256=${sign(BODY, '')}`)
+    expect(verifyInstagramSignature(BODY, forged, '')).toEqual({ ok: false, reason: 'secret_unset' })
+    expect(verifyInstagramSignature(BODY, forged, undefined)).toEqual({
+      ok: false,
+      reason: 'secret_unset',
+    })
+  })
+
+  // A timing-safe comparison can't be observed from its result, only from what
+  // makes the decision. A plain `===` or Buffer.equals would pass every other
+  // test in this file.
+  it('decides a well-formed signature with timingSafeEqual', () => {
     const digest = sign(BODY, SECRET)
-    const result = checkInstagramSignature(BODY, headersWith(`sha256=${digest}extra`), SECRET)
-    expect(result.matched).toBe(false)
+
+    verifyInstagramSignature(BODY, headersWith(`sha256=${digest}`), SECRET)
+    expect(timingSafeEqual).toHaveBeenCalledTimes(1)
+    const [received, computed] = vi.mocked(timingSafeEqual).mock.calls[0] ?? []
+    expect(Buffer.from(received as Uint8Array).toString()).toBe(digest)
+    expect(Buffer.from(computed as Uint8Array).toString()).toBe(digest)
+
+    vi.mocked(timingSafeEqual).mockClear()
+    const forgery = 'f'.repeat(digest.length)
+    expect(verifyInstagramSignature(BODY, headersWith(`sha256=${forgery}`), SECRET)).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    })
+    expect(timingSafeEqual).toHaveBeenCalledTimes(1)
   })
 
-  // The route logs `computed` on the failure path too. If this returned an
-  // empty string on a miss, the scaffold would be unable to answer the one
-  // question it exists for: what digest did WE expect?
-  it('returns the computed digest even when the check fails', () => {
-    const expected = sign(BODY, SECRET)
-    expect(checkInstagramSignature(BODY, new Headers(), SECRET).computed).toBe(expected)
-    expect(checkInstagramSignature(BODY, headersWith('sha256=abc'), SECRET).computed).toBe(expected)
+  // Once the route trusts the signature, our digest of a stranger's body is a
+  // valid signature for that body. The result carries a reason and nothing
+  // else, so no caller can log it by accident. Checked on every outcome,
+  // because a digest handed back only on a miss is exactly the oracle.
+  it('never returns a digest, on any outcome', () => {
+    const digest = sign(BODY, SECRET)
+    const forgedBody = `${BODY} `
+    const digestOfForgedBody = sign(forgedBody, SECRET)
+
+    const outcomes = [
+      verifyInstagramSignature(BODY, headersWith(`sha256=${digest}`), SECRET),
+      verifyInstagramSignature(forgedBody, headersWith(`sha256=${digest}`), SECRET),
+      verifyInstagramSignature(forgedBody, new Headers(), SECRET),
+      verifyInstagramSignature(forgedBody, headersWith('sha256=abc'), SECRET),
+    ]
+
+    for (const outcome of outcomes) {
+      expect(Object.keys(outcome).sort()).toEqual('reason' in outcome ? ['ok', 'reason'] : ['ok'])
+      const serialized = JSON.stringify(outcome)
+      expect(serialized).not.toContain(digest)
+      expect(serialized).not.toContain(digestOfForgedBody)
+    }
   })
 })
 

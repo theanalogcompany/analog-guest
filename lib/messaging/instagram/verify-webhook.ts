@@ -8,76 +8,79 @@
 // `sb-signing-secret` header and the helper constant-time-compares it. Wrong
 // scheme entirely for Meta, and it throws when its env var is unset.
 //
-// TAC-445 SCAFFOLDS the signature check and does NOT enforce it: the route
-// logs whether the digest matched and returns 200 either way. Enforcement
-// lands with the real handler, once matches are confirmed on live traffic.
-// checkInstagramSignature is named "check" rather than "verify" for exactly
-// that reason — it returns a report, not a gate.
+// TAC-445 scaffolded the signature check as a report the route only logged.
+// TAC-458 made it a gate: the route refuses anything that does not verify.
+// Two things changed with that, and both are why the result below carries a
+// reason and nothing else.
+//
+// 1. The computed digest is never returned. Our digest of a body IS a valid
+//    signature for that body for as long as the secret is unchanged, so a log
+//    line carrying it lets anyone who can read the logs replay that body as a
+//    signed delivery. TAC-445 logged it on every delivery while nothing was
+//    enforced, which only looked harmless: enforcing made every one of those
+//    lines valid at once, and they stay valid until the secret is rotated.
+//    Returning only a reason makes it impossible to log one by accident.
+//
+// 2. An empty secret is refused here, not only in the route. HMAC accepts an
+//    empty key, and a signature keyed with one is computable by anyone, so a
+//    caller that passed '' would otherwise verify a forgery. Same trap as the
+//    '' === '' comparison verifyMetaChallengeToken guards below.
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
 const SIGNATURE_HEADER = 'x-hub-signature-256'
 const SIGNATURE_PREFIX = 'sha256='
 
-export type InstagramSignatureCheck = {
-  /**
-   * Hex digest computed from the raw body and the app secret. Safe to log:
-   * an HMAC digest does not reveal the key. Always present — the route logs
-   * it on a miss too, which is the point of the scaffold.
-   */
-  computed: string
-  /**
-   * The digest Meta sent, with the `sha256=` prefix stripped and truncated to
-   * the length of a real digest. Null when the header is absent or not in
-   * `sha256=<hex>` form. Truncated because this value is attacker-controlled
-   * and gets logged: the header is otherwise bounded only by the platform's
-   * header limit.
-   */
-  received: string | null
-  /** True only when a well-formed header was present AND matched. */
-  matched: boolean
-}
+/**
+ * Why a delivery was refused. Safe to log: none of these carries anything from
+ * the request or the secret.
+ *
+ * - `secret_unset` — no app secret to verify with. Misconfiguration, not
+ *   forgery: every genuine delivery fails this way until the secret is set.
+ * - `missing_header` — no `x-hub-signature-256` header at all.
+ * - `malformed_header` — present but not `sha256=<digest>`.
+ * - `mismatch` — `sha256=` followed by anything but the right digest,
+ *   including one of the wrong length or not hex. What a forgery, a tampered
+ *   body or a rotated secret all look like.
+ */
+export type InstagramSignatureRejection =
+  | 'secret_unset'
+  | 'missing_header'
+  | 'malformed_header'
+  | 'mismatch'
+
+export type InstagramSignatureResult =
+  | { ok: true }
+  | { ok: false; reason: InstagramSignatureRejection }
 
 /**
- * Compute and compare the `x-hub-signature-256` digest for an Instagram
- * webhook delivery. Never throws.
+ * Verify the `x-hub-signature-256` header on an Instagram webhook delivery.
+ * Never throws.
  *
  * Meta signs the EXACT bytes of the request body, so `rawBody` must be the
  * unparsed text — re-serialized JSON will not match, which is why the route
  * reads the body with `.text()` before parsing.
  */
-export function checkInstagramSignature(
+export function verifyInstagramSignature(
   rawBody: string,
   headers: Headers,
-  appSecret: string,
-): InstagramSignatureCheck {
-  const computed = createHmac('sha256', appSecret).update(rawBody).digest('hex')
+  appSecret: string | undefined,
+): InstagramSignatureResult {
+  if (!appSecret) return { ok: false, reason: 'secret_unset' }
 
   const header = headers.get(SIGNATURE_HEADER)
-  if (header === null || !header.startsWith(SIGNATURE_PREFIX)) {
-    return { computed, received: null, matched: false }
+  if (header === null) return { ok: false, reason: 'missing_header' }
+  if (!header.startsWith(SIGNATURE_PREFIX) || header.length === SIGNATURE_PREFIX.length) {
+    return { ok: false, reason: 'malformed_header' }
   }
 
-  const received = header.slice(SIGNATURE_PREFIX.length)
-  if (received.length === 0) {
-    return { computed, received: null, matched: false }
-  }
-
-  const a = Buffer.from(received)
-  const b = Buffer.from(computed)
-
-  // Bound ONLY what we hand back for logging. The comparison above is built
-  // from the full value, so truncation can never turn a long forgery into a
-  // match by cutting it down to the right size — there is a test for exactly
-  // that, because doing this in the other order would be a real hole. Nothing
-  // diagnostic is lost either: a hex digest is a fixed, public length, so
-  // anything past it is padding a stranger chose.
-  const loggable = received.slice(0, computed.length)
+  const received = Buffer.from(header.slice(SIGNATURE_PREFIX.length))
+  const computed = Buffer.from(createHmac('sha256', appSecret).update(rawBody).digest('hex'))
 
   // Length check guards timingSafeEqual (it throws on length mismatch) and is
   // not a meaningful timing leak — the digest length is fixed/public.
-  if (a.length !== b.length) return { computed, received: loggable, matched: false }
-  return { computed, received: loggable, matched: timingSafeEqual(a, b) }
+  if (received.length !== computed.length) return { ok: false, reason: 'mismatch' }
+  return timingSafeEqual(received, computed) ? { ok: true } : { ok: false, reason: 'mismatch' }
 }
 
 /**
