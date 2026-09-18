@@ -453,6 +453,7 @@ export type Database = {
           first_name: string | null
           home_postal_code: string | null
           id: string
+          instagram_scoped_id: string | null
           is_demo: boolean
           is_test_synthetic: boolean
           last_inbound_at: string | null
@@ -462,7 +463,7 @@ export type Database = {
           last_visit_at: string | null
           last_visit_precision: string | null
           opted_out_at: string | null
-          phone_number: string
+          phone_number: string | null
           status: string
           updated_at: string
           venue_id: string
@@ -477,6 +478,7 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          instagram_scoped_id?: string | null
           is_demo?: boolean
           is_test_synthetic?: boolean
           last_inbound_at?: string | null
@@ -486,7 +488,7 @@ export type Database = {
           last_visit_at?: string | null
           last_visit_precision?: string | null
           opted_out_at?: string | null
-          phone_number: string
+          phone_number?: string | null
           status?: string
           updated_at?: string
           venue_id: string
@@ -501,6 +503,7 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          instagram_scoped_id?: string | null
           is_demo?: boolean
           is_test_synthetic?: boolean
           last_inbound_at?: string | null
@@ -510,7 +513,7 @@ export type Database = {
           last_visit_at?: string | null
           last_visit_precision?: string | null
           opted_out_at?: string | null
-          phone_number?: string
+          phone_number?: string | null
           status?: string
           updated_at?: string
           venue_id?: string
@@ -738,6 +741,7 @@ export type Database = {
         Row: {
           body: string
           category: string | null
+          channel: string
           created_at: string
           delivered_at: string | null
           direction: string
@@ -757,6 +761,8 @@ export type Database = {
           prompt_version: string | null
           provider_message_id: string | null
           reaction_type: string | null
+          referral_ref: string | null
+          referral_source: string | null
           rendered_intentions: Json | null
           reply_to_message_id: string | null
           response_review: Json | null
@@ -775,6 +781,7 @@ export type Database = {
         Insert: {
           body?: string
           category?: string | null
+          channel?: string
           created_at?: string
           delivered_at?: string | null
           direction: string
@@ -794,6 +801,8 @@ export type Database = {
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
+          referral_ref?: string | null
+          referral_source?: string | null
           rendered_intentions?: Json | null
           reply_to_message_id?: string | null
           response_review?: Json | null
@@ -812,6 +821,7 @@ export type Database = {
         Update: {
           body?: string
           category?: string | null
+          channel?: string
           created_at?: string
           delivered_at?: string | null
           direction?: string
@@ -831,6 +841,8 @@ export type Database = {
           prompt_version?: string | null
           provider_message_id?: string | null
           reaction_type?: string | null
+          referral_ref?: string | null
+          referral_source?: string | null
           rendered_intentions?: Json | null
           reply_to_message_id?: string | null
           response_review?: Json | null
@@ -1388,6 +1400,7 @@ export type Database = {
           created_at: string
           hold_all_outbound: boolean
           id: string
+          instagram_account_id: string | null
           is_test: boolean
           messaging_phone_number: string | null
           name: string
@@ -1400,6 +1413,7 @@ export type Database = {
           created_at?: string
           hold_all_outbound?: boolean
           id?: string
+          instagram_account_id?: string | null
           is_test?: boolean
           messaging_phone_number?: string | null
           name: string
@@ -1412,6 +1426,7 @@ export type Database = {
           created_at?: string
           hold_all_outbound?: boolean
           id?: string
+          instagram_account_id?: string | null
           is_test?: boolean
           messaging_phone_number?: string | null
           name?: string

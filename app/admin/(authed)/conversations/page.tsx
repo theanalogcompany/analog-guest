@@ -6,6 +6,7 @@ import { createServerClient } from '@/lib/db/server'
 import { type ApiTraceWithFullDetails, fetchTrace } from '@/lib/observability'
 import { type GuestState } from '@/lib/recognition'
 import { BrandPersonaSchema, VenueInfoSchema, filterActiveContext } from '@/lib/schemas'
+import { guestNameWithPhone } from '../_lib/guest-name'
 import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
@@ -543,12 +544,15 @@ async function loadRecentActivity({
     const venue = Array.isArray(m.venues) ? m.venues[0] : m.venues
     const guest = Array.isArray(m.guests) ? m.guests[0] : m.guests
     if (!venue || !guest) continue
-    const name = [guest.first_name, guest.last_name].filter(Boolean).join(' ').trim()
     rows.push({
       venueId: m.venue_id,
       venueName: venue.name,
       guestId: m.guest_id,
-      guestLabel: name ? `${name} · ${guest.phone_number}` : guest.phone_number,
+      guestLabel: guestNameWithPhone({
+        firstName: guest.first_name,
+        lastName: guest.last_name,
+        phoneNumber: guest.phone_number,
+      }),
       lastActivityAt: new Date(m.created_at),
     })
     if (rows.length >= RECENT_ACTIVITY_LIMIT) break

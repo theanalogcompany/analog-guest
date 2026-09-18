@@ -70,7 +70,12 @@ export interface VenueContext {
 
 export interface GuestContext {
   id: string
-  phoneNumber: string
+  // TAC-467: null for a guest who reached the venue on Instagram
+  // (guests.instagram_scoped_id instead). Every send path hands this to the
+  // phone-number provider, whose guard refuses null with
+  // `recipient_has_no_phone_number`, so such a guest fails closed rather than
+  // being sent anything. Replying on Instagram is the outbound ticket's job.
+  phoneNumber: string | null
   firstName: string | null
   createdAt: Date
   createdVia: string

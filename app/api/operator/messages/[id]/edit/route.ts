@@ -102,6 +102,10 @@ export const POST = withOperatorAuth<{ id: string }>(
             { error: 'venue misconfigured', detail: result.error },
             { status: 400 },
           )
+        // TAC-467: the guest has no phone number. Refused before the review_state
+        // flip, so the card stays queued. Same body as sendblue_failed on
+        // purpose: the operator app already handles it, so the Contract holds.
+        case 'no_phone_number':
         case 'sendblue_failed':
           return NextResponse.json(
             { error: 'dispatch failed', detail: result.error },

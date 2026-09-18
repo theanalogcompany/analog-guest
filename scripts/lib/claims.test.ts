@@ -368,6 +368,36 @@ describe('pickUnclaimed', () => {
   })
 })
 
+describe('status never decides a claim (TAC-466)', () => {
+  // TAC-466 writes ticket status from the same "Find tickets to work" step
+  // this claim check runs in, from a ticket's derived status. Neither claimOf
+  // nor pickUnclaimed reads `.state` today — it rides along only to label a
+  // skip in the log. This pins that as a property, so a future edit that
+  // starts branching on it (treating a Ready For QA ticket as unclaimable,
+  // say) fails here rather than shipping a second, less precise claim signal.
+  const NOW = t('2026-09-18T03:30:00Z')
+
+  it('claimOf gives the same answer whatever .state says', () => {
+    const claimed = resume396()
+    const unclaimed = { ...resume396([]), newestAt: '' }
+    for (const state of ['Ready', 'In Progress', 'Ready For QA', 'Done', 'nonsense']) {
+      expect(claimOf({ ...claimed, state }, ctx(INCIDENT_NOW, TAC_396_REFS))).toEqual(claimOf(claimed, ctx(INCIDENT_NOW, TAC_396_REFS)))
+      expect(claimOf({ ...unclaimed, state }, ctx(NOW))).toEqual(claimOf(unclaimed, ctx(NOW)))
+    }
+  })
+
+  it('pickUnclaimed gives the same answer whatever .state says', () => {
+    const a = start('TAC-448', [LOCAL_CLAIM('2026-09-18T03:22:00Z')])
+    const b = start('TAC-438')
+    for (const state of ['Ready', 'In Progress', 'Ready For QA']) {
+      const varied = pickUnclaimed([{ ...a, state }, { ...b, state }], ctx(NOW), 2)
+      const base = pickUnclaimed([a, b], ctx(NOW), 2)
+      expect(varied.picked.map((c) => c.identifier)).toEqual(base.picked.map((c) => c.identifier))
+      expect(varied.skipped.map((s) => ({ ...s, state: undefined }))).toEqual(base.skipped.map((s) => ({ ...s, state: undefined })))
+    }
+  })
+})
+
 describe('run', () => {
   const NOW = t('2026-09-18T03:30:00Z')
   const MAIN = `main\t${t('2026-09-18T02:53:02Z') / 1000}\t<noreply@github.com>\n`

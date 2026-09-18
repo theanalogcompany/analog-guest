@@ -29,8 +29,21 @@ name: Build ready tickets
 # "Newest comment" skips [SLACK], [CLAIM], [RESUME-CLAIM], [DENIALS] and
 # [OVER-LIMIT] bookkeeping, so a Slack marker or a claim never buries a ruling.
 #
-# Blocked on Jaipal is a label, not a status: nothing here moves a ticket
-# between statuses.
+# Blocked on Jaipal is a label, not a status, and the claim check above never
+# reads status. Status is a separate, derived signal this step also writes,
+# every run (TAC-466): a branch `jaipal/tac-xxx-...` on GitHub moves a ticket
+# to In Progress, a merged PR moves it to Ready For QA. Forward-only, never
+# invented outside those two targets, and run over every Ready/In Progress
+# candidate this repo owns, not just what the claim check selected this run
+# — a derived status is a projection of public state, never a claim, so it
+# cannot function as a second one and reconciling a ticket another session
+# has is safe. scripts/reconcile-status.mjs decides; a write it cannot make
+# (an unreadable branch list, an unreadable merged-PR list, a failed Linear
+# write) just leaves that ticket's status stale until the next run — there
+# is no two-sessions hazard here to fail closed against, unlike the claim
+# check. Nothing in this repo's GitHub-Linear integration attaches an
+# analog-guest PR to its ticket (confirmed 2026-09-18), so without this the
+# status never moved on its own.
 #
 # Every ticket is CLAIMED before Claude runs: a resume with [RESUME-CLAIM],
 # so a run that dies without posting cannot be retried forever (two attempts
@@ -230,7 +243,15 @@ jobs:
             def repo_line_names:
               [(.description // "") | capture("(?:^|\\n)[ \\t>*_]*Repos?[*_]*[ \\t]*:(?<line>[^\\n]*)"; "i") | .line]
               | if length == 0 then []
-                else [.[0] | gsub("<[^>]*>"; "") | gsub("https?://[^\\s)>]*"; "") | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
+                else [.[0]
+                      | gsub("<[^>]*>"; "")
+                      | gsub("https?://[^\\s)>]*"; "")
+                      # The assignment is the head of the line, up to the first
+                      # sentence-ending period. Prose after that point — naming
+                      # a second repo only to explain why it is not the owner
+                      # (TAC-443) — must not count.
+                      | capture("^(?<head>[^.]*)").head
+                      | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
                 end;
             def owner:
               repo_labels as $labels
@@ -359,6 +380,30 @@ jobs:
             echo "claimed $NAME"
           done
 
+          # Reconcile status from GitHub, every run (TAC-466). Runs over
+          # every owner-matched candidate from $RESPONSE, not $SELECTED: a
+          # derived status is a projection of public state, never a claim,
+          # so reconciling a ticket another session has is safe (see the
+          # header). Every command below is individually handled so this
+          # block can never abort the step: a failure here must not skip
+          # tickets=$TICKETS below, which the Work and Check steps depend on.
+          STATUS_ROWS=$(echo "$RESPONSE" | jq -c \
+            --arg repo "$REPO_NAME" "$RULES"'
+            .data.issues.nodes
+            | map(select(owner == $repo and (repo_labels | length) == 1))
+            | map({ id, identifier, state: .state.name })
+          ' || echo '[]')
+          STATUS_WRITES=$(echo "$STATUS_ROWS" | node scripts/reconcile-status.mjs || echo '[]')
+          echo "$STATUS_WRITES" | jq -c '.[]' | while read -r row; do
+            IDENTIFIER=$(echo "$row" | jq -r .identifier)
+            TO=$(echo "$row" | jq -r .to)
+            if node scripts/linear.mjs state "$IDENTIFIER" "$TO"; then
+              echo "status: $IDENTIFIER -> $TO"
+            else
+              echo "::warning title=Status reconcile::Could not move $IDENTIFIER to $TO."
+            fi
+          done
+
           if [ -z "$TICKETS" ]; then
             echo "Nothing to work."
           else
@@ -450,7 +495,7 @@ jobs:
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns ${{ env.MAX_TURNS }}
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git checkout jaipal/:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(python3:*),Bash(node:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git checkout jaipal/:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(node scripts/linear.mjs:*)"
             --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
             You are working a Linear ticket for the repo ${{ github.event.repository.name }}.

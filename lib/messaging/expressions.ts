@@ -99,6 +99,10 @@ export async function sendTypingIndicator(
 ): Promise<MessagingResult> {
   const { venueId, to } = input
 
+  // TAC-467: see sendMessage.
+  if (to === null) {
+    return { ok: false, error: 'recipient_has_no_phone_number' }
+  }
   if (!E164_RE.test(to)) {
     return { ok: false, error: 'invalid_recipient_phone_number' }
   }
@@ -127,6 +131,10 @@ export async function markAsRead(
 ): Promise<MessagingResult> {
   const { venueId, to, messageHandle } = input
 
+  // TAC-467: see sendMessage.
+  if (to === null) {
+    return { ok: false, error: 'recipient_has_no_phone_number' }
+  }
   if (!E164_RE.test(to)) {
     return { ok: false, error: 'invalid_recipient_phone_number' }
   }

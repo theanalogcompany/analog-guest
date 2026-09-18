@@ -11,8 +11,8 @@
 //   - Filter to non-test venues (venues.is_test = false).
 //   - Only fire when at least one prior inbound exists (lastInboundAt IS NOT
 //     NULL); initial-state silence is not actionable.
-//   - Threshold: 24 hours since the most recent inbound across non-test
-//     venues. Below threshold, return 200 with no event. Above threshold,
+//   - Threshold: 24 hours since the most recent TEXT inbound (channel =
+//     'text', i.e. Sendblue) across non-test venues. Below threshold, return 200 with no event. Above threshold,
 //     emit `webhook_silence` and still return 200 (the event itself is the
 //     signal — Vercel cron doesn't retry).
 
@@ -61,6 +61,10 @@ export async function GET(request: Request): Promise<Response> {
     .from('messages')
     .select('created_at')
     .eq('direction', 'inbound')
+    // Sendblue's webhook only (TAC-468). Instagram inbound rows land in the
+    // same table, and counting them would let one Instagram DM a day hide a
+    // complete Sendblue outage. Instagram has no silence check of its own yet.
+    .eq('channel', 'text')
     .in('venue_id', venueIds)
     .order('created_at', { ascending: false })
     .limit(1)

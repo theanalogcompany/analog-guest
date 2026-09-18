@@ -5,6 +5,7 @@ import { createBrowserClient } from '@/lib/db/browser'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import type { GuestState } from '@/lib/recognition'
 import type { BrandPersona, VenueInfo } from '@/lib/schemas'
+import { guestDisplayName } from '../_lib/guest-name'
 import { ConversationThread } from './_components/conversation-thread'
 import { GuestContext } from './_components/guest-context'
 import { InboundDetail } from './_components/inbound-detail'
@@ -51,7 +52,8 @@ export interface InitialData {
     id: string
     firstName: string | null
     lastName: string | null
-    phoneNumber: string
+    // TAC-467: null for an Instagram guest.
+    phoneNumber: string | null
     distanceMiles: number | null
     createdVia: string
   }
@@ -232,10 +234,7 @@ export function ConversationsClient({
   }, [messages])
 
   const onSelectMessage = useCallback((id: string) => setSelectedId(id), [])
-  const guestName = useMemo(() => {
-    const n = [initialData.guest.firstName, initialData.guest.lastName].filter(Boolean).join(' ')
-    return n || initialData.guest.phoneNumber
-  }, [initialData.guest])
+  const guestName = useMemo(() => guestDisplayName(initialData.guest), [initialData.guest])
 
   // Layout: ConversationsClient occupies the post-Filters slot of
   // FullShell's flex-col, and stacks vertically into:
@@ -325,7 +324,7 @@ interface SidePanelProps {
   traceCache: Record<string, ApiTraceWithFullDetails | null>
   traceLoading: boolean
   guestName: string
-  guestPhone: string
+  guestPhone: string | null
   venueTimezone: string
   triggeredByMap: Map<string, string>
   operatorMap: Record<string, string>
