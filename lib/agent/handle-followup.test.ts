@@ -29,6 +29,7 @@ const retrieveKnowledgeStageMock = vi.fn<(...a: unknown[]) => Promise<unknown[]>
 ])
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
+const verifyGroundingStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
@@ -74,6 +75,7 @@ vi.mock('./stages', async () => {
     shouldRetrieveKnowledge: () => true,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+    verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
   }
 })
@@ -184,6 +186,7 @@ beforeEach(() => {
   retrieveKnowledgeStageMock.mockReset()
   generateStageMock.mockReset()
   applyApprovalPolicyStageMock.mockReset()
+  verifyGroundingStageMock.mockReset()
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
@@ -196,6 +199,10 @@ beforeEach(() => {
   )
   retrieveCorpusStageMock.mockResolvedValue([])
   generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  // TAC-376: default to 'skipped', matching production's most common case
+  // (a followup with no gap-shaped finding). Tests that need a real verdict
+  // override with mockResolvedValueOnce.
+  verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
   scheduleAndSendMock.mockResolvedValue({
     outboundMessageId: 'sent-1',
     providerMessageId: 'p1',
@@ -269,23 +276,154 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
     const [, , groundingArg, mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    // followup never has a grounding backstop (inbound-only) — always null here.
-    expect(groundingArg).toBeNull()
+    // TAC-376: followups now run verifyGroundingStage — the default fixture
+    // resolves 'skipped' (this test's own finding is on the mechanic-offer
+    // side), so the gate receives the real skipped result, not null.
+    expect(groundingArg).toEqual({ status: 'skipped' })
     expect(mechanicOfferArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
 
     // TAC-364: the followup path threads the gate's trigger set and claims to
-    // the persist layer exactly as inbound does. `ungroundedClaims` is NULL
-    // here rather than `[]`, and the distinction is the ruling: NULL records
-    // that the grounding check DID NOT RUN, which on a followup is true by
-    // construction (verifyGroundingStage is inbound-only — that gap is
-    // TAC-376). `[]` would claim it ran and found nothing, which would make
-    // every followup row in the column a quiet lie about a check that never
-    // happened.
+    // the persist layer exactly as inbound does.
     const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistOpts.reviewTriggers).toEqual(['mechanic_offer_backstop'])
     expect(persistOpts.ungroundedClaims).toBeNull()
     expect(result.status).toBe('queued')
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-376: the actual new wiring this ticket adds. A followup whose
+  // grounding backstop flags something must thread that finding into the
+  // gate exactly as an inbound catch would, and the flagged claims must
+  // reach the persist layer's ungroundedClaims — not silently stay null the
+  // way every followup row was forced to before this ticket.
+  it('threads a "flagged" grounding result into applyApprovalPolicyStage and the persisted ungroundedClaims', async () => {
+    verifyGroundingStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      claims: ['thanks the guest for a referral with no referral on record'],
+    })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['knowledge_gap_backstop'],
+      primaryTrigger: 'knowledge_gap_backstop',
+      compMatchedPattern: null,
+      ungroundedClaims: ['thanks the guest for a referral with no referral on record'],
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-flagged-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'perk_unlock', triggeredAt: new Date() },
+    })
+
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
+    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({
+      status: 'flagged',
+      claims: ['thanks the guest for a referral with no referral on record'],
+    })
+    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistOpts.reviewTriggers).toEqual(['knowledge_gap_backstop'])
+    expect(persistOpts.ungroundedClaims).toEqual([
+      'thanks the guest for a referral with no referral on record',
+    ])
+    expect(result.status).toBe('queued')
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  // AC2 ("the fail-open/closed posture is explicit and tested in both
+  // directions") exercised at the orchestrator boundary — a degraded call
+  // must never queue on its own, a truncated one always must.
+  it('a degraded grounding call does not queue on its own (fail-open reaches send)', async () => {
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'clean' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_1', triggeredAt: new Date() },
+    })
+
+    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({ status: 'clean' })
+    expect(result.status).toBe('sent')
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a truncated grounding call queues (fail-closed)', async () => {
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'truncated' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['grounding_check_failed'],
+      primaryTrigger: 'grounding_check_failed',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-truncated-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'cold_lapsed', triggeredAt: new Date() },
+    })
+
+    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({ status: 'truncated' })
+    expect(result.status).toBe('queued')
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  // A hypothetical future throw inside verifyGroundingStage must not silently
+  // discard verifyMechanicOfferStage's finding — the whole reason this file
+  // uses Promise.allSettled rather than Promise.all, mirroring handle-inbound.
+  it('degrades to skipped, not a rejection, when verifyGroundingStage throws (allSettled)', async () => {
+    verifyGroundingStageMock.mockRejectedValueOnce(new Error('boom'))
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'flagged', mechanicId: 'mech-2' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['mechanic_offer_backstop'],
+      primaryTrigger: 'mechanic_offer_backstop',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-reject-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_3', triggeredAt: new Date() },
+    })
+
+    const [, , groundingArg, mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({ status: 'skipped' })
+    expect(mechanicOfferArg).toEqual({ status: 'flagged', mechanicId: 'mech-2' })
   })
 
   // TAC-367 PR 3 (option B). The original defect was retrieving against
