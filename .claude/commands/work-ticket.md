@@ -13,9 +13,9 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
    **Provenance comes from the prefix, never from the author ID.** Every comment on every ticket is under Jaipal's account, your own included.
 
-   - `botComments` — comments whose body contains `**[FROM CLAUDE CODE]**`
+   - `botComments` — comments whose body opens with `**[FROM CLAUDE CODE]**`: unescape `\[` to `[` and `\]` to `]`, then match with `startsWith`, never a substring match. A comment that quotes the prefix further down, such as session output pasted back into Linear, is not a bot comment (TAC-396).
    - `bookkeeping` — bot comments whose marker is `[SLACK]` (written by the Slack sync), `[RESUME-CLAIM]` (written by the build workflow before it resumes a ticket) or `[DENIALS]` (written by the build or audit workflow after a session that hit permission denials). They record what a workflow did; they are not a turn. **Every definition below skips them.** Without that, a claim posted a moment before this session started would look like the newest word on the ticket and bury Jaipal's reply.
-   - `humanComments` — every other comment. A comment with no recognised prefix is human input.
+   - `humanComments` — every other comment. A comment with no recognised prefix is human input. A plain `**[FROM CLAUDE CHAT]**` comment is human input too, but it is context: it never advances a gate (Phase 0 step 2b, "Reply classification").
    - `lastBotComment` — most recent of `botComments`, skipping bookkeeping (null if none). **Used for terminal-state detection only.**
    - `newestComment` — most recent comment of any kind, skipping bookkeeping. "The newest comment" anywhere in this file means this one.
    - `lastQuestionComment` — most recent bot comment that asks Jaipal something and waits for his reply (null if none): its marker is `[NEEDS-INPUT]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]` or `[NEEDS-ACTION]`, or it is an `[AUDIT]` whose QUESTIONS section asks at least one numbered question ("Decided without asking" lines are not questions). Nothing else counts. A clean `[AUDIT]`, `[AUDIT-SKIPPED]`, `[BUILD-SKIPPED]`, `[FINDING]`, the polling markers and PR-link comments ask nothing, so a cleanly audited ticket is a fresh run, never a question awaiting a reply. **Used for routing decisions and as the `newReplies` baseline.**
@@ -44,7 +44,7 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
 # Reply classification (3-way)
 
-Take the most recent human reply and classify it:
+Take the most recent of `newReplies` that can advance a gate, and classify it. A reply can advance a gate only when it is unprefixed or opens `**[FROM CLAUDE CHAT — RULING` (Phase 0 step 2b). **A plain `**[FROM CLAUDE CHAT]**` comment is context: it never approves a plan, never answers a question, never says a `[NEEDS-ACTION]` ran and never winds a ticket down, whatever it says**, and it is skipped here (TAC-396). If every new reply is a plain `[FROM CLAUDE CHAT]` comment, nothing has advanced: post `[POLLING-ACK]`, saying in place of its template line that the newest comment was read as context, not a ruling, and what is still waiting for one. Then exit, as for a holding pattern below.
 
 1. **Proceed** — approves the plan or answers the question with a clear go signal ("build", "approved, proceed", or a direct answer that unblocks). Route per "Phase resumption".
 2. **Modify** — carries revisions or new constraints ("looks good but change X"). Integrate, re-post the plan prefixed `[PLAN]`, leave `Needs Decision` on, exit.
@@ -215,7 +215,7 @@ Then update `[POLLING-STATE]` (iteration 1) and ScheduleWakeup(60s).
 Status untouched. The agent never sets a ticket to Done; the permission hook denies that and that's intentional.
 
 # Hard rules (non-negotiable)
-- Plan gate (Phase 2 → 3) requires explicit substantive approval. Do not advance on silence or on a non-substantive reply. The substantive-answer judgment IS the gate.
+- Plan gate (Phase 2 → 3) requires explicit substantive approval. Do not advance on silence, on a non-substantive reply, or on a plain `**[FROM CLAUDE CHAT]**` comment, which is context whatever it says. The substantive-answer judgment IS the gate.
 - **Provenance is the prefix, never the author ID.** Every comment shares one author. A comment with no `**[FROM CLAUDE CODE]**` prefix is human input.
 - **Post every comment flat.** Never set `parentId`. Jaipal reads a ticket top to bottom, and a threaded reply hides inside an earlier comment.
 - ScheduleWakeup is the only polling primitive where a harness exists — no `Bash sleep`, no until-loops chaining short sleeps. In CI, don't poll at all.
