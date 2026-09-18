@@ -251,6 +251,51 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
   })
 })
 
+describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)', () => {
+  // "$STATUS_CANDIDATES" would collide as a `between()` anchor: it contains
+  // "CANDIDATES=$(" as a substring, the same anchor TAC-448's own tests use,
+  // so the workflow names this STATUS_ROWS instead. This test pins that the
+  // avoidance holds, since a future rename back would silently break both
+  // this describe block and the TAC-448 one above it.
+  const RECONCILE = between(QUEUE, 'STATUS_ROWS=$(', 'echo "tickets=$TICKETS"')
+
+  it('runs after the claim check and after the dry-run exit, never before', () => {
+    const at = QUEUE.indexOf('STATUS_ROWS=$(')
+    expect(at).toBeGreaterThan(QUEUE.indexOf('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)'))
+    expect(at).toBeGreaterThan(QUEUE.indexOf('if [ "${DRY_RUN:-false}" = "true" ]; then\n  echo "Dry run: no claims'))
+  })
+
+  it('runs before tickets= reaches GITHUB_OUTPUT, so a failure here cannot skip it', () => {
+    expect(QUEUE.indexOf('STATUS_ROWS=$(')).toBeLessThan(QUEUE.indexOf('echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"'))
+  })
+
+  it('reconciles every owner-matched candidate, not just what the claim check selected this run', () => {
+    expect(RECONCILE).not.toContain('$SELECTED')
+    expect(RECONCILE).toContain('select(owner == $repo and (repo_labels | length) == 1)')
+  })
+
+  it('hands the candidates to the reconcile script and writes only what it returns, never a literal status', () => {
+    expect(RECONCILE).toContain('node scripts/reconcile-status.mjs')
+    expect(RECONCILE).toContain('node scripts/linear.mjs state "$IDENTIFIER" "$TO"')
+    // Every status name this block could write comes from $TO; it never
+    // spells one out, which is what stops a third value creeping in here
+    // without also going through deriveTargetStatus's own guard.
+    expect(RECONCILE).not.toMatch(/"(Ready|In Progress|Ready For QA|Done|Todo|Backlog)"/)
+  })
+
+  it('degrades to a warning rather than failing the step on a bad write', () => {
+    expect(RECONCILE).toContain("|| echo '[]'")
+    expect(RECONCILE).toContain('if node scripts/linear.mjs state "$IDENTIFIER" "$TO"; then')
+    expect(RECONCILE).toContain('::warning title=Status reconcile::')
+  })
+
+  it('the header documents it as a projection, never a claim', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-466')
+    expect(header).toContain('cannot function as a second')
+  })
+})
+
 describe('build-ready.yml pushes with the App token (TAC-463)', () => {
   // Until TAC-463 every build push went out as github-actions[bot]: the
   // checkout's persisted header outranked the App token in the remote URL,
