@@ -652,21 +652,53 @@ jobs:
 
           # What the session did, from the action's own record of it
           # ($RUNNER_TEMP/claude-execution-output.json, written even when the
-          # session fails). This log is public, so only counts are printed;
-          # denied commands go to Linear, which is not.
+          # session fails). This log is public, so only counts and secret
+          # names are printed; denied commands go to Linear, which is not.
+          #
+          # Denied commands are redacted against every secret this step holds
+          # (TAC-442), with no list to keep. The names come from this
+          # workflow's own file at the commit the run came from, not the
+          # working tree, which a build session leaves on another branch:
+          # every NAME: line whose value opens with a secrets or github.token
+          # expression, kept if NAME is set here. That also matches with:
+          # inputs, which never are. A secret nested in a longer value can't
+          # be redacted on its own, so each must be the whole value of its
+          # entry (scripts/lib/denials-redaction.test.ts). With nothing to
+          # redact against, the commands are withheld, never posted as they
+          # are.
           if [ -f "$EXECUTION_FILE" ]; then
-            SESSION=$(jq -c --arg key "$LINEAR_API_KEY" '
-              ([.[] | select(.type == "result")] | last) as $r
+            WORKFLOW_FILE=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY"/}
+            SECRET_NAMES=$(git show "$GITHUB_WORKFLOW_SHA:${WORKFLOW_FILE%%@*}" | jq -Rnc '
+              [inputs | capture("^\\s+(?<name>[A-Za-z_][A-Za-z0-9_]*):\\s*[\"\\x27]?\\$\\{\\{\\s*(?:secrets\\.|github\\.token\\b)") | .name]
+              | unique') || SECRET_NAMES='[]'
+            SESSION=$(jq -c --argjson names "$SECRET_NAMES" '
+              # By value: trimmed, so a secret saved with a trailing newline
+              # still matches as typed; never empty, since split("") would
+              # break up every line; also JSON-escaped, the form a tool
+              # input with no command or file path is printed in; longest
+              # first, so a secret holding another is redacted whole. All of
+              # it before whitespace is collapsed, or a multi-line secret no
+              # longer matches, and before the cut, or only what survived the
+              # cut is redacted.
+              [$names[] | select(($ENV[.] // "") | test("\\S"))] as $held
+              | ([$held[] | $ENV[.] | gsub("^\\s+|\\s+$"; "") | ., (tojson | .[1:-1])] | unique | sort_by(-length)) as $secrets
+              | ([.[] | select(.type == "result")] | last) as $r
               | {
                   ended: ($r.subtype // "without a result"),
                   turns: ($r.num_turns // 0),
                   denials: (($r.permission_denials // []) | length),
-                  denied: [ ($r.permission_denials // [])[:20][]
-                    | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
-                    | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
-                    | (if ($key | length) > 0 then (split($key) | join("***")) else . end)
-                    | .[0:2000] ]
+                  redacting: $held,
+                  denied: (
+                    [ ($r.permission_denials // [])[:20][]
+                      | "\(.tool_name): \(.tool_input.command // .tool_input.file_path // (.tool_input | tostring))"
+                      | reduce $secrets[] as $s (.; split($s) | join("***"))
+                      | gsub("\\s+"; " ") | gsub("`"; "\u02cb")
+                      | .[0:2000] ]
+                    | if ($held | length) == 0 and length > 0
+                      then ["(withheld: this step found no secret to redact against)"]
+                      else . end)
                 }' "$EXECUTION_FILE")
+            echo "Secrets redacted from denied commands: $(echo "$SESSION" | jq -r '.redacting | if length == 0 then "none found, so none are posted" else join(", ") end')."
           else
             SESSION='{"ended":"without a session record","turns":0,"denials":0,"denied":[]}'
           fi
@@ -725,7 +757,7 @@ jobs:
 
           This run's session did its work on this ticket but hit ${DENIALS} permission denials on the way. A denial on a run that otherwise succeeded usually means a prompt teaches a command the allowlist refuses. Bookkeeping: the automation ignores this comment.
 
-          Denied, first 20, key redacted:
+          Denied, first 20, secrets redacted:
 
           ${FENCE}text
           ${DENIED}
@@ -801,7 +833,7 @@ jobs:
           - Work step: ${WORK_OUTCOME}. The session ended ${ENDED} after ${TURNS} turns, against a limit of ${MAX_TURNS}.
           - Permission denials: ${DENIALS}
 
-          Denied, first 20, key redacted:
+          Denied, first 20, secrets redacted:
 
           ${FENCE}text
           ${DENIED}
