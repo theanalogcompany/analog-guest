@@ -45,9 +45,10 @@ describe('summarizeInstagramPayload', () => {
     expect(events[0]?.types).not.toContain('timestamp')
   })
 
-  // This is the assertion that holds AC #6 once INSTAGRAM_LOG_RAW_INBOUND is
-  // off, which is the default and so the steady state. It fails if any value
-  // reaches the summary, however it gets there.
+  // This is the assertion that keeps guest content out of the logs: since
+  // TAC-458 removed the raw-body capture, the summary is the only thing the
+  // route logs about a payload. It fails if any value reaches the summary,
+  // however it gets there.
   it('leaks no guest content and no identifiers into the serialized summary', () => {
     const serialized = JSON.stringify(summarizeInstagramPayload(MESSAGES_PAYLOAD))
     expect(serialized).not.toContain(MESSAGE_TEXT)
@@ -107,8 +108,8 @@ describe('summarizeInstagramPayload', () => {
     expect(summary.events[0]?.time).toBeNull()
   })
 
-  // Nothing authenticates this endpoint while the signature is unenforced, so
-  // the caps bound what a stranger can write into our logs.
+  // Defence in depth since TAC-458 enforced the signature: the caps bound what
+  // a payload can write into our logs, should anyone but Meta ever sign one.
   it('drops an absurdly long type key', () => {
     const summary = summarizeInstagramPayload({
       object: 'instagram',

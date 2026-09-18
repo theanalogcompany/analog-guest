@@ -3,26 +3,31 @@
 // config is saved, then POST for every Instagram event delivery. We never call
 // ourselves.
 //
-// TAC-445 is transport plumbing ONLY: no persistence, no agent invocation, no
-// IGSID-to-guest identity, no outbound path. It exists to unblock the Meta
-// dashboard save (which rejects a callback URL nothing answers) and to let us
-// observe real payload shapes before writing handling logic on assumptions.
+// Still transport plumbing only (TAC-445): no persistence, no agent
+// invocation, no IGSID-to-guest identity, no outbound path. POST verifies the
+// delivery, logs its shape, and acknowledges.
 //
 // THREE deliberate divergences from the Sendblue and Square webhook routes,
 // each of which would otherwise read as an inconsistency:
 //
-// 1. The signature is computed and logged but NOT enforced. A mismatch still
-//    returns 200. Enforcement lands with the real handler once we've confirmed
-//    the digest matches on live traffic. The consequence to keep in mind while
-//    this ships: the endpoint is effectively unauthenticated, so anything it
-//    logs is something a stranger can write.
+// 1. A delivery that fails signature verification gets 403, where Sendblue
+//    and Square answer 401. The ticket (TAC-458) specified 403, it matches this
+//    route's GET refusal, and Meta treats any non-2xx the same way. The refusal
+//    is decided before anything from the body is logged, and it logs a reason,
+//    never a digest: see lib/messaging/instagram/verify-webhook.ts for why the
+//    computed digest must not reach a log line now that it is trusted.
 //
-// 2. POST returns 200 on EVERY path, including a parse failure and including
-//    an unhandled throw. Sendblue and Square reserve 5xx for unhandled throws
-//    so the provider retries transient infra failures; that trade doesn't
-//    apply here, because a stub that persists nothing has no transient
-//    failure worth retrying, while Meta disables the subscription after
-//    repeated non-2xx. Retrying buys nothing and costs the integration.
+// 2. Once a delivery has verified, POST returns 200 on EVERY path, including a
+//    parse failure and an unhandled throw. So does a throw while reading the
+//    body, before verification, which logs nothing from the body. Sendblue and
+//    Square reserve 5xx for unhandled throws so the provider retries transient
+//    infra failures; that trade doesn't apply here, because a handler that
+//    persists nothing has no transient failure worth retrying, while Meta
+//    disables the subscription after repeated non-2xx. A signature refusal is
+//    the one non-2xx this route sends, and it is meant for forgeries: if
+//    GENUINE deliveries start getting it, Meta will eventually disable the
+//    subscription, so treat that as a revert signal, not something to debug
+//    in place.
 //
 // 3. Nothing in the GET handler logs `request.url`. The other two routes log
 //    it freely because their secrets travel in headers; here `hub.verify_token`
@@ -35,9 +40,15 @@
 // vi.mock hand these tests a stubbed verifier when they need the real one.
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
-  checkInstagramSignature,
+  verifyInstagramSignature,
   verifyMetaChallengeToken,
 } from '@/lib/messaging/instagram/verify-webhook'
+
+// The user-agent is logged on a refusal so a rejected Meta delivery (the revert
+// signal in divergence 2) can be told apart from a stranger's probe. It is
+// caller-controlled, so it is capped like everything else this route logs from
+// a request it has not yet trusted.
+const MAX_USER_AGENT_LOGGED = 128
 
 // The verification handshake MUST see each request. A cached GET would replay
 // a stale challenge and Meta would reject the callback URL — the exact failure
@@ -104,50 +115,44 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 /**
- * Instagram event delivery. Logs and acknowledges; handles nothing.
+ * Instagram event delivery. Verifies, logs its shape, and acknowledges;
+ * handles nothing.
  *
- * Always 200. See divergence 2 in the file header for why, including on a
- * parse failure and an unhandled throw.
+ * 403 with an empty body when the signature does not verify, including when
+ * INSTAGRAM_APP_SECRET is unset. 200 on every other path: see divergence 2 in
+ * the file header for why, including on a parse failure and an unhandled
+ * throw.
  */
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Misconfiguration is refused before the body is read, and logged at
+    // error level under its own event, because it is the one refusal that
+    // means GENUINE deliveries are failing: every one of them is refused
+    // until the secret is set. The verifier refuses an empty secret too;
+    // this check is here to say so loudly, not only to say no.
+    const appSecret = process.env.INSTAGRAM_APP_SECRET
+    if (!appSecret) {
+      console.error('instagram webhook: INSTAGRAM_APP_SECRET not set; refusing every delivery', {
+        event: 'instagram_signature_misconfigured',
+      })
+      return new Response(null, { status: 403 })
+    }
+
     // Text, not .json(): the HMAC is over the exact bytes received, and
     // re-serialized JSON will not match.
     const rawBody = await request.text()
 
-    // Signature scaffold. Computed and logged, never enforced (divergence 1).
-    // The digest is not a secret — that is what an HMAC is for — but the app
-    // secret that keys it never appears here.
-    const appSecret = process.env.INSTAGRAM_APP_SECRET
-    if (!appSecret) {
-      console.error('instagram webhook: INSTAGRAM_APP_SECRET not set; signature not computed', {
-        event: 'instagram_signature_unavailable',
+    // Nothing derived from the body is logged above this line, and a refusal
+    // logs a reason, never a digest. The user-agent is the one request value
+    // here, capped, so a refused Meta delivery can be told from a probe.
+    const signature = verifyInstagramSignature(rawBody, request.headers, appSecret)
+    if (!signature.ok) {
+      console.warn('instagram webhook: signature rejected', {
+        event: 'instagram_signature_rejected',
+        reason: signature.reason,
+        userAgent: request.headers.get('user-agent')?.slice(0, MAX_USER_AGENT_LOGGED) ?? null,
       })
-    } else {
-      const signature = checkInstagramSignature(rawBody, request.headers, appSecret)
-      console.log('instagram webhook: signature check', {
-        event: 'instagram_signature_check',
-        matched: signature.matched,
-        computed: signature.computed,
-        received: signature.received,
-        enforced: false,
-      })
-    }
-
-    // Flag-gated raw-body capture, mirroring SENDBLUE_LOG_RAW_INBOUND.
-    // LEAKS PII (guest DM content, IGSIDs); default OFF. Only set it during a
-    // deliberate, time-bounded capture window and unset it immediately after.
-    // See .env.local.example for the discipline note.
-    //
-    // The RAW STRING, deliberately, not a re-serialized parse: it is the only
-    // form that captures unknown keys with full fidelity, which is the whole
-    // reason this stub exists. It also fires BEFORE the parse, so a malformed
-    // payload is captured too — those are the interesting ones.
-    if (process.env.INSTAGRAM_LOG_RAW_INBOUND === 'true') {
-      console.log('instagram webhook: raw inbound (PII)', {
-        event: 'instagram_raw_inbound',
-        raw: rawBody,
-      })
+      return new Response(null, { status: 403 })
     }
 
     let parsed: unknown
@@ -157,9 +162,8 @@ export async function POST(request: Request): Promise<Response> {
       // V8's SyntaxError message ECHOES the first bytes of the body when the
       // opening token is unexpected ("Unexpected token 'o', \"oat milk a\"..."),
       // so logging it would break the no-guest-content guarantee on exactly
-      // the path that claims to hold it. The body is still recoverable when
-      // it matters: turn INSTAGRAM_LOG_RAW_INBOUND on, which captures
-      // malformed payloads too, by design.
+      // the path that claims to hold it. The body is not recoverable from the
+      // logs: TAC-458 removed the raw-body capture, deliberately.
       console.warn('instagram webhook: invalid JSON; acknowledging anyway', {
         event: 'instagram_invalid_json',
         bodyLength: rawBody.length,
@@ -168,7 +172,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // Shape only. summarize-payload.ts is what holds "no guest content in
-    // logs" when the raw-capture flag is off, which is the steady state.
+    // logs": it is the only thing this route logs about a payload.
     console.log('instagram webhook: event received', {
       event: 'instagram_event',
       ...summarizeInstagramPayload(parsed),
