@@ -21,6 +21,8 @@ interface GuestContextProps {
     lastName: string | null
     // TAC-467: null for an Instagram guest.
     phoneNumber: string | null
+    // TAC-479: shown in the phone line for a guest with no phone, once fetched.
+    instagramUsername: string | null
     distanceMiles: number | null
     createdVia: string
   }
@@ -53,7 +55,7 @@ export function GuestContext({
   venueTimezone,
 }: GuestContextProps) {
   const fullName = [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
-  const formattedPhone = formatGuestPhone(guest.phoneNumber)
+  const formattedPhone = formatGuestPhone(guest.phoneNumber, guest.instagramUsername)
   const sinceLabel = sinceAt ? formatInTimeZone(sinceAt, venueTimezone, 'MMM d') : null
 
   const lastVisitLabel = lastVisitAt

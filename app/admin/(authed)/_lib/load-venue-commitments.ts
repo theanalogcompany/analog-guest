@@ -109,6 +109,8 @@ interface JoinedGuestShape {
   last_name: string | null
   // TAC-467: null for an Instagram guest.
   phone_number: string | null
+  // TAC-479: the guest's Instagram handle, null until fetched.
+  instagram_username: string | null
 }
 
 /** PostgREST returns a to-one embed as an object, but has returned arrays; normalize both. */
@@ -117,7 +119,7 @@ function firstOrNull<T>(raw: T | T[] | null): T | null {
 }
 
 const SELECT =
-  'id, type, status, description, code, created_at, expires_at, escalated_at, expected_arrival, arrival_signal, guest_id, venue_id, created_by, updated_at, acknowledged_at, acknowledged_by, redeemed_at, source_message_id, guest:guests!inner(first_name, last_name, phone_number)'
+  'id, type, status, description, code, created_at, expires_at, escalated_at, expected_arrival, arrival_signal, guest_id, venue_id, created_by, updated_at, acknowledged_at, acknowledged_by, redeemed_at, source_message_id, guest:guests!inner(first_name, last_name, phone_number, instagram_username)'
 
 /**
  * Project a raw row, parsed through the canonical schema, into the display
@@ -149,6 +151,7 @@ function projectRow(raw: unknown): VenueCommitmentRow | null {
           firstName: guest.first_name,
           lastName: guest.last_name,
           phoneNumber: guest.phone_number,
+          instagramUsername: guest.instagram_username,
         })
       : '(unknown guest)',
     createdAt: parsed.data.created_at,
