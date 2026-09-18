@@ -10,6 +10,7 @@ import {
   fetchTokenAccountId,
   GRAPH_CODE_TOKEN_REJECTED,
   INSTAGRAM_GRAPH_BASE_URL,
+  INSTAGRAM_GRAPH_TIMEOUT_MS,
   isTokenRejected,
 } from './fetch-profile'
 
@@ -168,6 +169,12 @@ describe('fetchInstagramProfile', () => {
     expect(result).toEqual({ ok: false, failure: { reason: 'network', errorName: 'TypeError', causeCode: 'ECONNRESET' } })
     expect(JSON.stringify(result)).not.toContain(IGSID_16)
   })
+})
+
+// Pinned so raising it is a decision: the refresh runs under waitUntil, and a
+// longer timeout keeps the function alive longer on every slow Graph call.
+it('gives up on a Graph call after five seconds', () => {
+  expect(INSTAGRAM_GRAPH_TIMEOUT_MS).toBe(5_000)
 })
 
 describe('fetchTokenAccountId', () => {

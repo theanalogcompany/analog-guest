@@ -7,8 +7,10 @@
 //
 // When a refresh is due (isProfileRefreshDue):
 //   - never fetched, or the last SUCCESSFUL fetch is over 24 hours old, and
-//   - no attempt in the last hour, so a fetch that keeps failing is retried at
-//     most hourly while the guest is active.
+//   - no attempt in the last hour, so a profile fetch that keeps failing is
+//     retried at most hourly while the guest is active. That throttle starts at
+//     the claim (step 4): a failure before it, in the token or account check,
+//     is tried again on the guest's next message.
 // Only the guest's own action triggers one. There is no sweep of quiet guests:
 // Meta grants profile access when the guest acts and doesn't say for how long,
 // and nobody reads a quiet guest's handle until they come back, which
@@ -58,12 +60,12 @@ import {
   fetchInstagramProfile,
   fetchTokenAccountId,
   isTokenRejected,
+  type FetchLike,
   type GraphFailure,
 } from './fetch-profile'
 import type { InstagramEventOutcome } from './handle-events'
 
 type AdminSupabaseClient = SupabaseClient<Database>
-type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
 const HOUR_MS = 60 * 60 * 1000
 
@@ -333,6 +335,11 @@ export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefresh
         error: outcome.error,
       })
       return
+    default: {
+      // A new outcome must decide how it is logged; this fails tsc until it does.
+      const unhandled: never = outcome
+      return unhandled
+    }
   }
 }
 

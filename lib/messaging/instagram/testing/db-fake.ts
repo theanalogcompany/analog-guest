@@ -30,7 +30,8 @@ import type { Database } from '@/db/types'
 
 export type FakeTable = 'venues' | 'guests' | 'messages'
 export type FakeRow = { id: string; [column: string]: unknown }
-export type FakeError = { code?: string; message: string }
+/** `details` is PostgREST's, which holds the failing row's values: what a store failure must never log. */
+export type FakeError = { code?: string; message: string; details?: string }
 
 export type FakeCall =
   | { op: 'select'; table: FakeTable; columns: string; filters: Array<[string, unknown]> }

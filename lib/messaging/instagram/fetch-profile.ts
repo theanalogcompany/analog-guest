@@ -60,7 +60,7 @@ export type GraphFailure =
 
 export type GraphResult<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure }
 
-type FetchLike = (input: string, init: RequestInit) => Promise<Response>
+export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
 /** True when Meta refused the token itself: expired, revoked or invalid. */
 export function isTokenRejected(failure: GraphFailure): boolean {

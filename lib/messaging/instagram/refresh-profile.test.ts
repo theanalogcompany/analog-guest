@@ -334,7 +334,12 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
     const fetchImpl: RefreshDeps['fetch'] = async (url, init) => {
       const response = await g.fetchImpl(url)
       if (!url.startsWith(`${INSTAGRAM_GRAPH_BASE_URL}/me?`)) {
-        db.failNext('guests', 'update', { code: '23514', message: 'violates check constraint' })
+        db.failNext('guests', 'update', {
+          code: '23514',
+          message: 'violates check constraint',
+          // What PostgREST puts here: the failing row, handle and name included.
+          details: 'Failing row contains (guest-1, venue-1, maya.oakland, Maya, 2026-09-18 12:00:00+00).',
+        })
       }
       void init
       return response
@@ -344,7 +349,7 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
     expect(outcome).toEqual({ status: 'store_failed', stage: 'write', error: 'violates check constraint', code: '23514' })
     expect(db.tables.guests[0]).toMatchObject({ instagram_username: null, instagram_profile_attempted_at: NOW })
     expect(logLevel.warn).toEqual(['instagram_profile_store_failed'])
-    expect(loggedText()).not.toContain('maya.oakland')
+    for (const value of ['Failing row', 'maya.oakland', 'Maya']) expect(loggedText()).not.toContain(value)
   })
 
   it('resolves, never rejects, when something unexpected throws', async () => {
@@ -378,9 +383,10 @@ describe('refreshInstagramProfile: the claim', () => {
 })
 
 // The three configuration failures, each under its own event at error level,
-// so none is mistaken for another or for a guest's privacy settings. None of
-// them claims, so each is logged again on the guest's next message until it is
-// fixed.
+// so none is mistaken for another or for a guest's privacy settings. Each is
+// found before the claim, so it is logged again on the guest's next message
+// until it is fixed. The exception is a 190 on the profile call itself (the
+// last test here), which comes after the claim and waits the hour.
 describe('refreshInstagramProfile: configuration failures are told apart', () => {
   it.each<[string, { token?: string }]>([
     ['unset', {}],
