@@ -52,7 +52,9 @@ Rules, in order of how badly they break things if ignored:
    so Ready alone does not mean unblocked. **Ready never means approved.** An
    audit sets Ready without asking Jaipal anything, and a ticket can reach In
    Progress the same way: TAC-403 did, with a `[PLAN]` nobody had answered.
-   An unanswered plan blocks the build whatever the status says.
+   An unanswered plan blocks the build whatever the status says. Nor is a
+   ticket another session has yours to build, whatever its status (see
+   "Claims").
 2. **Never promote a ticket to Ready yourself.** Only the audit moves a ticket
    there, whatever it finds.
 3. **Never mark a ticket Done.** Merging moves it to Ready For QA
@@ -168,6 +170,13 @@ then the marker. **A comment's marker is the first `[MARKER]` after the
 prefix**, not a marker quoted anywhere in the body: an audit or a plan that
 quotes `[NEEDS-INPUT]` is still an audit or a plan.
 
+**Before checking whether a comment opens with the CC prefix, unescape `\[`
+to `[` and `\]` to `]`, then match with `startsWith`.** Linear can return
+brackets escaped, and a comment opening with a CC prefix in any bracket form
+is CC's own, never human input and never a ruling (TAC-396).
+`scripts/lib/comment-provenance.mjs` implements this rule and the ruling
+rule below, with tests. Extend it rather than writing the check again.
+
 **Post every comment flat, at the top level. Never set `parentId`.** Jaipal
 reads a ticket top to bottom, and a threaded reply puts an answer inside an
 earlier comment where that reading misses it.
@@ -183,6 +192,7 @@ earlier comment where that reading misses it.
 | `[AUDIT-SKIPPED]` | The audit automation can't tell which repo works the ticket | Add `Needs Decision`. Deliberately not `[AUDIT]`, so the ticket is audited once fixed |
 | `[BUILD-SKIPPED]` | The ticket carries two repo labels, or its Repo: line and labels disagree | Add `Needs Decision`. Never start the build |
 | `[SLACK]` | The Slack sync posted the ticket; edited in place as it syncs | Bookkeeping, not a turn |
+| `[CLAIM]` | A session is about to work the ticket: the build workflow before it starts one or works one named in a dispatch, naming its run, or a local session before anything else it writes, naming none. A local session edits its own to `released` when it hands the ticket back | Bookkeeping, not a turn. The build workflow skips a ticket a local session has claimed, and a local session leaves alone a ticket whose build run is still going. See "Claims" |
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
 | `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
@@ -190,19 +200,88 @@ earlier comment where that reading misses it.
 | `[OVER-LIMIT]` | The build session finished its work but used more turns than its limit, so claude-code-action failed the run afterwards | Bookkeeping, not a turn. Posted by the workflow, saying what was pushed. The run stays failed (ruled on TAC-447). Bookkeeping because it lands after the session's own last comment, often a PR link, and must not hide it |
 | `[CANCELLED]` | A fixture ticket has served its purpose | Posted just before cancelling the fixture, naming the ticket it was a fixture for. See "Testing a workflow change" |
 
-A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
+A comment that does **not** open with `**[FROM CLAUDE CODE]**` is human
+input, including one that quotes the prefix further down. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
-session may resume it. **Bookkeeping comments (`[SLACK]`, `[RESUME-CLAIM]`,
-`[DENIALS]`, `[OVER-LIMIT]`) never count as the newest comment.** They record what a workflow did, and
+session may resume it. **Bookkeeping comments (`[SLACK]`, `[CLAIM]`,
+`[RESUME-CLAIM]`, `[DENIALS]`, `[OVER-LIMIT]`) never count as the newest comment.** They record what a workflow did, and
 counting them would bury the reply they were posted around. The build
 automation resumes only Ready and In Progress tickets; a reply on a ticket in
 any other status is recorded but starts nothing.
+
+**A reply advances a gate only when it is unprefixed or opens
+`**[FROM CLAUDE CHAT — RULING`.** A plain `**[FROM CLAUDE CHAT]**` comment
+is context and is never matched against `## Open questions`, whatever it
+says (TAC-396). Nor does it approve a plan, say a `[NEEDS-ACTION]` ran, or
+wind a ticket down. The build workflow's resume check is coarser: it reads only
+the CC prefix, without unescaping, so it can start a session on a plain
+`[FROM CLAUDE CHAT]` comment or on an escaped CC prefix. The session it
+starts applies both rules.
 
 **Only a comment that asks something waits for a reply**: one whose marker
 is `[NEEDS-INPUT]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]` or `[NEEDS-ACTION]`,
 or an `[AUDIT]` that asked at least one question. A clean `[AUDIT]` asks
 nothing. A ticket that has only been cleanly audited is a fresh start for the
 build, not a question still waiting for a reply.
+
+## Claims
+
+Two sessions must never work one ticket. On 2026-09-17 the build workflow
+resumed TAC-396 while a local session was building it (run 35299836324,
+attempt 1), and only a human reading the run log stopped it. The status
+did not help: the ticket was In Progress, and the resume path never read
+the status.
+
+**The status is not a claim.** In Progress is set only once a branch
+exists (TAC-448, ruling 2), so a ticket can be taken long before its
+status says so. The build workflow still starts only Ready tickets, but it
+decides whether another session has one from what that session left behind:
+
+- **A local session's `[CLAIM]`**, edited in the last 3 hours
+  (`LIVE_SESSION_HOURS`), unless it says `released`. A local session posts
+  its claim before anything else it writes, and edits it to `released` when
+  it hands the ticket back to wait for Jaipal (`work-ticket.md`, "Claiming
+  the ticket"). A claim that is not released holds whatever Jaipal rules in
+  the meantime: his ruling reaches Linear when the Slack sync posts it, which
+  can be long after a local session heard the answer another way.
+- **A `[POLLING-STATE]`** edited in the last 3 hours.
+- **A commit on the ticket's branch on GitHub** in the last 3 hours, by
+  anyone but the build session itself. Only a branch named
+  `jaipal/tac-xxx-...` counts.
+- **An open PR from the ticket's branch.** For a start only: the build is
+  finished and waiting for Jaipal to merge it. A ticket reopened while its
+  old PR is still open is not started until that PR is merged or closed.
+
+When resuming on a ruling, a `[POLLING-STATE]` or a commit counts only if it
+is no older than the ruling. A polling chain that stopped, or a branch last
+pushed before he answered, has not acted on the answer, so it is the next
+session's to act on. The one exception is a `[POLLING-STATE]` edited in the
+last 10 minutes: that session polls at least every 5 minutes and will read
+the ruling itself.
+
+A skipped ticket is named in the run log with the reason. The check is
+`scripts/claims.mjs`; if it cannot read the branches it takes nothing and
+fails the run rather than choose blind. A skip can be harmless: a commit
+made in GitHub's web editor ("Update branch") counts as a session's, and
+holds the ticket for 3 hours like any other.
+
+The other direction: the build workflow posts `[CLAIM]` (on a start, and
+for a ticket named in a dispatch) or `[RESUME-CLAIM]` (on a resume) naming
+its run, before its session starts, and a local session leaves the ticket
+alone while that run is still going. Two build runs never overlap: the
+workflow's concurrency group runs one at a time.
+
+**What nothing protects.** A session that has neither posted to the ticket
+nor pushed to its branch is invisible, so a local session is unprotected
+until its `[CLAIM]` lands, and one that never posts a claim is unprotected
+until it first pushes to a `jaipal/tac-xxx-...` branch. A session whose
+claim is released or more than 3 hours old is unprotected on a resume unless
+it has pushed since the ruling. A build dispatched with a named ticket skips
+the selection, and with it this check. A local session and a build run that
+read the thread in the same few seconds can both proceed; the local session
+reads again after posting its claim, which narrows that window without
+closing it. Two local sessions are kept apart only by each reading the
+other's claim before it starts.
 
 ## Asking Jaipal a question
 
