@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BOOKKEEPING_MARKERS,
+  auditHasQuestions,
   commentMarker,
+  isBookkeepingComment,
   isBotComment,
   isContextChatComment,
   isRulingComment,
@@ -132,5 +135,147 @@ describe('a CC HUMAN-REVIEW-REQUIRED comment is never a ruling', () => {
     expect(isBotComment(HRR_ESCAPED)).toBe(true)
     expect(isRulingComment(HRR_ESCAPED)).toBe(false)
     expect(commentMarker(HRR_ESCAPED)).toBe('HUMAN-REVIEW-REQUIRED')
+  })
+})
+
+describe('isBookkeepingComment', () => {
+  it('recognises every marker in BOOKKEEPING_MARKERS', () => {
+    for (const marker of BOOKKEEPING_MARKERS) {
+      expect(isBookkeepingComment(`**[FROM CLAUDE CODE]**\n\n[${marker}] TAC-1`)).toBe(true)
+    }
+  })
+
+  it('does not recognise a marker outside the list', () => {
+    expect(isBookkeepingComment(PLAN_COMMENT)).toBe(false)
+    expect(isBookkeepingComment(HRR_NO_REPLY)).toBe(false)
+  })
+
+  it('does not recognise a non-CC comment, whatever it contains', () => {
+    expect(isBookkeepingComment('[CLAIM] TAC-1 mentioned mid-body, no prefix')).toBe(false)
+    expect(isBookkeepingComment(CHAT_RULING)).toBe(false)
+  })
+})
+
+describe('auditHasQuestions', () => {
+  // TAC-273's real [AUDIT] comment, fetched 2026-09-18: its own QUESTIONS
+  // section says "None." and lists two calls under "Decided without
+  // asking" — real evidence that a decided-without-asking bullet must never
+  // read as a question, whatever number precedes similar lines elsewhere in
+  // the same comment.
+  const TAC_273_CLEAN_AUDIT = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-273
+
+**1. CONFIRMED**
+
+- Outage A's exact repro is still live in the code.
+
+**2. WRONG**
+
+- The "Technical approach" file list is stale.
+
+**3. QUESTIONS**
+
+None. The ticket's own "User-facing behavior" and "Out of scope" sections already settle the questions that would otherwise need asking (analog admins always see everything in Command Center, unconditionally on their own \`operator_venues\` rows; the operator dashboard's separate scoping is out of scope here).
+
+**Decided without asking:**
+
+- Fixing \`verifyAnalogAdminAccess\`'s own \`allowedVenueIds\` (the root of the 2026-09-13 recurrence), not just the six page-level call sites, is in scope for this ticket.
+- Removing the vestigial \`operator_venues.permission_level = 'analog_admin'\` value is out of scope here.
+
+**4. FINDINGS**
+
+- The auth module's own test suite locks in the exact scope-drift bug as its "happy path."
+
+**5. UNBLOCKED**
+
+- Building \`getAdminScopedVenueIds(operatorId)\` needs no further input.`
+
+  // TAC-386's real [AUDIT] comment, fetched 2026-09-18: headed with "##"
+  // rather than bold asterisks, and its QUESTIONS section carries twelve
+  // real numbered questions (trimmed to the first two here).
+  const TAC_386_AUDIT_WITH_QUESTIONS = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-386
+
+## 1. CONFIRMED
+
+- \`crisisSafety\` is a boolean on the single \`classifyMessage\` call.
+
+## 2. WRONG
+
+- "\`classifyMessage\` already runs on every inbound." It doesn't run on a photo sent without text.
+
+## 3. QUESTIONS
+
+1. **What counts as implying a visit?** Le Mil's has 11 real inbounds from guests other than Jaipal.
+   - (a) A stated plan to come, alone or with a logistics question.
+   - (b) A logistics question whose only purpose is a visit.
+2. **Is the delay fixed or taken from venue hours?**
+   - (a) A fixed number of hours after the question.
+   - (b) Worked out from venue hours.
+
+## 4. FINDINGS
+
+- A real guest's question at Le Mil's produced no row at all.
+
+## 5. UNBLOCKED
+
+- Measure the classifier's output headroom.`
+
+  it('reads a real clean audit as asking nothing, bold-heading form', () => {
+    expect(auditHasQuestions(TAC_273_CLEAN_AUDIT)).toBe(false)
+  })
+
+  it('reads a real audit with numbered questions as still asking, "## N. NAME" heading form', () => {
+    expect(auditHasQuestions(TAC_386_AUDIT_WITH_QUESTIONS)).toBe(true)
+  })
+
+  it('does not read a "Decided without asking" bullet as a question', () => {
+    const decidedOnly = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-1
+
+**3. QUESTIONS**
+
+None.
+
+**Decided without asking:**
+
+- Some decision, numbered like a question would be: 1. not actually a question, just prose.
+
+**4. FINDINGS**
+
+None.`
+    expect(auditHasQuestions(decidedOnly)).toBe(false)
+  })
+
+  it('defaults to true — still asking — when it cannot find a QUESTIONS heading at all', () => {
+    const noHeading = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-1
+
+Some unstructured audit text with no recognisable section headings.`
+    expect(auditHasQuestions(noHeading)).toBe(true)
+  })
+
+  it('is heading-tolerant: matches "### 3. Questions" mixed case', () => {
+    const mixedCase = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-1
+
+### 3. QUESTIONS
+
+1. A real numbered question.
+
+### 4. FINDINGS
+
+None.`
+    expect(auditHasQuestions(mixedCase)).toBe(true)
+  })
+
+  it('unescapes brackets before parsing, matching the rest of the module', () => {
+    const escaped = TAC_273_CLEAN_AUDIT.replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+    expect(auditHasQuestions(escaped)).toBe(false)
   })
 })
