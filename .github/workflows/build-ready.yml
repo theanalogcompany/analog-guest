@@ -45,6 +45,24 @@ name: Build ready tickets
 # analog-guest PR to its ticket (confirmed 2026-09-18), so without this the
 # status never moved on its own.
 #
+# A Ready, unblocked candidate is also checked against its own comment
+# thread before it is ever called "start" (TAC-453): when a human clears
+# Needs Decision or Needs Action without answering the question that put it
+# there, starting the ticket only repeats the same stop, spending this run's
+# one ticket (TAC-447) to rediscover what was already known. scripts/
+# pending-question.mjs decides from the newest turn skipping bookkeeping and
+# a plain, non-ruling [FROM CLAUDE CHAT] comment — neither can advance a
+# gate. A ticket it flags is left out of "start" and gets [LABEL-DRIFT]
+# restoring the label, so the drift is visible rather than a silent
+# non-selection. This is deliberately narrower than, and does not replace,
+# reconciling whether a label is TRUE in general (TAC-446, not yet built):
+# that check would run after CANDIDATES/SELECTED are already computed, so it
+# cannot un-select a ticket this run already chose, and it would write
+# silently, which does not say what happened the way [LABEL-DRIFT] does.
+# Once TAC-446 lands its own reconciliation keeps the label honest between
+# runs; this check keeps a drifted ticket from being started on the very run
+# that would otherwise waste on it.
+#
 # Every ticket is CLAIMED before Claude runs: a resume with [RESUME-CLAIM],
 # so a run that dies without posting cannot be retried forever (two attempts
 # per ruling, then the ticket sits visibly stuck; bounded stuck beats
@@ -207,6 +225,7 @@ jobs:
 
           if [ -n "${ONE_TICKET:-}" ]; then
             echo "defects=[]" >> "$GITHUB_OUTPUT"
+            echo "pending=[]" >> "$GITHUB_OUTPUT"
             if [ "${DRY_RUN:-false}" = "true" ]; then
               echo "Dry run: would work $ONE_TICKET. Nothing worked."
               echo "tickets=" >> "$GITHUB_OUTPUT"
@@ -275,11 +294,30 @@ jobs:
             def build_skipped: [.comments.nodes[].body] | map(marker_is("BUILD-SKIPPED")) | any;
           '
 
+          # Whether a Ready, unblocked candidate's newest comment still asks
+          # a question nothing has answered (TAC-453): its Needs Decision or
+          # Needs Action label was cleared without a reply. This is exactly
+          # the population the mode computation below would otherwise call
+          # "start" — checked here, before that decision, so a drifted
+          # ticket is never selected: starting it again would only repeat
+          # the same stop the label was for. scripts/pending-question.mjs
+          # reads only the comment thread already fetched in $RESPONSE.
+          PENDING=$(echo "$RESPONSE" | jq -c \
+            --arg repo "$REPO_NAME" "$RULES"'
+            .data.issues.nodes
+            | map(select(owner == $repo and (repo_labels | length) == 1))
+            | map(select(.state.name == "Ready"
+                and ((has_label("Needs Decision") or has_label("Needs Action")) | not)))
+            | map({ id, identifier, comments: .comments.nodes })
+          ' || echo '[]')
+          PENDING=$(echo "$PENDING" | node scripts/pending-question.mjs || echo '[]')
+
           # Every candidate, in priority order. The limit is applied after
           # the claim check below, so a claimed ticket never uses it up.
           CANDIDATES=$(echo "$RESPONSE" | jq -c \
             --arg repo "$REPO_NAME" \
-            --argjson maxAttempts "$MAX_ATTEMPTS" "$RULES"'
+            --argjson maxAttempts "$MAX_ATTEMPTS" \
+            --argjson pendingIds "$(echo "$PENDING" | jq -c 'map(.identifier)')" "$RULES"'
             .data.issues.nodes
 
             # this repo only, and only a ticket with one repo label
@@ -311,11 +349,13 @@ jobs:
                   }
               )
 
-            # START: Ready, unblocked.
+            # START: Ready, unblocked, and not still waiting on an answer
+            # the label does not show (TAC-453; see $pendingIds above).
             # RESUME: blocked on Jaipal, a human spoke last, attempts left.
             # Whether another session has it is for the claim check, below.
             | map(
                 if .state.name == "Ready" and (.blocked | not)
+                    and ((.identifier as $i | $pendingIds | any(. == $i)) | not)
                 then . + { mode: "start" }
                 elif .blocked and .lastIsHuman and .attempts < $maxAttempts
                 then . + { mode: "resume" }
@@ -349,11 +389,13 @@ jobs:
           TICKETS=$(echo "$SELECTED" | jq -r 'map(.identifier) | join(" ")')
           echo "$SELECTED" | jq -r '.[] | "\(.mode): \(.identifier) (\(.state))"'
           echo "$DEFECTS" | jq -r '.[] | "flag: \(.identifier)"'
+          echo "$PENDING" | jq -r '.[] | "restore: \(.identifier) (\(.label))"'
 
           if [ "${DRY_RUN:-false}" = "true" ]; then
             echo "Dry run: no claims or flags written, nothing worked."
             echo "tickets=" >> "$GITHUB_OUTPUT"
             echo "defects=[]" >> "$GITHUB_OUTPUT"
+            echo "pending=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -411,6 +453,7 @@ jobs:
           fi
           echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"
           echo "defects=$DEFECTS" >> "$GITHUB_OUTPUT"
+          echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
 
       - name: Flag tickets that can't be built
         if: steps.queue.outputs.defects != '' && steps.queue.outputs.defects != '[]'
@@ -460,6 +503,63 @@ jobs:
                 | jq -e '.data.issueAddLabel.success' > /dev/null
             fi
             echo "flagged $NAME"
+          done
+
+      # TAC-453. A ticket that reached here had neither Needs Decision nor
+      # Needs Action, and $pendingIds in the queue step's own jq already
+      # kept it out of "start" for this reason: its own thread still asks a
+      # question nothing answered. Restoring the label here says so, rather
+      # than letting the next run silently repeat this run's non-selection
+      # with no visible cause.
+      - name: Flag tickets whose blocking label was cleared without an answer
+        if: steps.queue.outputs.pending != '' && steps.queue.outputs.pending != '[]'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          PENDING: ${{ steps.queue.outputs.pending }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          label_id() {
+            gql "$(jq -nc --arg name "$1" '{query: "query($name: String!) { issueLabels(filter: { name: { eq: $name } }) { nodes { id } } }", variables: {name: $name}}')" \
+              | jq -r '.data.issueLabels.nodes[0].id // empty'
+          }
+
+          NEEDS_DECISION_ID=$(label_id "Needs Decision")
+          NEEDS_ACTION_ID=$(label_id "Needs Action")
+          if [ -z "$NEEDS_DECISION_ID" ] || [ -z "$NEEDS_ACTION_ID" ]; then
+            echo "::error::No Needs Decision or Needs Action label found in Linear."
+            exit 1
+          fi
+
+          echo "$PENDING" | jq -c '.[]' | while read -r row; do
+            ID=$(echo "$row" | jq -r .id)
+            NAME=$(echo "$row" | jq -r .identifier)
+            LABEL=$(echo "$row" | jq -r .label)
+            if [ "$LABEL" = "Needs Action" ]; then
+              LABEL_ID="$NEEDS_ACTION_ID"
+            else
+              LABEL_ID="$NEEDS_DECISION_ID"
+            fi
+            BODY="**[FROM CLAUDE CODE]**
+
+          [LABEL-DRIFT] ${NAME}
+
+          Its most recent comment still asks a question nothing has answered, and its ${LABEL} label was gone. Restoring it rather than spending a build run rediscovering the same thing."
+
+            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+              '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+              | jq -e '.data.issueAddLabel.success' > /dev/null
+            echo "restored $NAME ($LABEL)"
           done
 
       # The check after the session reports through scripts/run-report.mjs.
