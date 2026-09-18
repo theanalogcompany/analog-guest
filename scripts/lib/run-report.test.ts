@@ -105,6 +105,17 @@ describe('readGitState', () => {
     'log --format=%h %s refs/remotes/origin/main..refs/heads/main': '',
     'rev-parse --abbrev-ref HEAD': 'jaipal/tac-447-one-ticket-per-run\n',
     'status --porcelain': ' M lib/a.ts\n?? lib/b.ts\n',
+    'worktree list --porcelain': [
+      'worktree /runner/checkout',
+      'HEAD 1111111111111111111111111111111111111111',
+      'branch refs/heads/main',
+      '',
+      'worktree /runner/checkout/.worktrees/resume',
+      'HEAD 2222222222222222222222222222222222222222',
+      'branch refs/heads/jaipal/tac-447-one-ticket-per-run',
+      '',
+    ].join('\n'),
+    '-C /runner/checkout/.worktrees/resume status --porcelain': ' M lib/c.ts\n',
   }
 
   it('sorts what is on GitHub from what died with the runner', () => {
@@ -122,8 +133,40 @@ describe('readGitState', () => {
         },
       ],
       uncommitted: [' M lib/a.ts', '?? lib/b.ts'],
+      sideFolders: [
+        { path: '/runner/checkout/.worktrees/resume', branch: 'jaipal/tac-447-one-ticket-per-run', uncommitted: [' M lib/c.ts'] },
+      ],
       onLocalMain: [],
     })
+  })
+
+  // TAC-471: a resume edits its branch in a side folder, which the
+  // checkout's own status cannot see, so each one is read with git -C.
+  it('reads a side folder git could not read as unknown, not as none', () => {
+    const rest = Object.fromEntries(Object.entries(answers).filter(([args]) => !args.startsWith('-C ')))
+    expect(readGitState(fakeGit(rest), 'TAC-447').sideFolders).toEqual([
+      { path: '/runner/checkout/.worktrees/resume', branch: 'jaipal/tac-447-one-ticket-per-run', uncommitted: null },
+    ])
+  })
+
+  it('names no branch for a side folder on a detached head', () => {
+    const state = readGitState(
+      fakeGit({
+        ...answers,
+        'worktree list --porcelain': 'worktree /runner/checkout\nbranch refs/heads/main\n\nworktree /runner/checkout/.worktrees/baseline\ndetached\n',
+        '-C /runner/checkout/.worktrees/baseline status --porcelain': '',
+      }),
+      'TAC-447',
+    )
+    expect(state.sideFolders).toEqual([{ path: '/runner/checkout/.worktrees/baseline', branch: null, uncommitted: [] }])
+  })
+
+  it('lists no side folder when the checkout is the only worktree', () => {
+    const state = readGitState(
+      fakeGit({ ...answers, 'worktree list --porcelain': 'worktree /runner/checkout\nbranch refs/heads/main\n' }),
+      'TAC-447',
+    )
+    expect(state.sideFolders).toEqual([])
   })
 
   it('matches the ticket id whole and without regard to case', () => {
@@ -172,6 +215,7 @@ describe('readGitState', () => {
       { name: 'jaipal/tac-447-x', local: true, remote: true, onGitHub: null, notPushed: null },
     ])
     expect(state.uncommitted).toBeNull()
+    expect(state.sideFolders).toBeNull()
   })
 
   it('says so when git cannot be read at all', () => {
@@ -216,6 +260,8 @@ describe('readGitState against a real repository', () => {
     execFileSync('git', ['clone', origin, work], { env, stdio: 'ignore' })
     sh(work, 'checkout', '-b', 'main')
     writeFileSync(join(work, 'a.txt'), 'a')
+    // As in this repo, so the checkout's own status cannot see a side folder.
+    writeFileSync(join(work, '.gitignore'), '.worktrees/\n')
     sh(work, 'add', '.')
     sh(work, 'commit', '-m', 'base')
     sh(work, 'push', 'origin', 'main')
@@ -228,6 +274,8 @@ describe('readGitState against a real repository', () => {
     sh(work, 'add', '.')
     sh(work, 'commit', '-m', 'TAC-447: not pushed')
     writeFileSync(join(work, 'd.txt'), 'd')
+    sh(work, 'worktree', 'add', '--detach', '.worktrees/resume')
+    writeFileSync(join(work, '.worktrees', 'resume', 'e.txt'), 'e')
   })
 
   afterAll(() => {
@@ -245,6 +293,16 @@ describe('readGitState against a real repository', () => {
     expect(b.notPushed.map(subject)).toEqual(['TAC-447: not pushed'])
     expect(state.uncommitted).toEqual(['?? d.txt'])
     expect(state.onLocalMain).toEqual([])
+  })
+
+  it('reads uncommitted work in a side folder, which the checkout\'s own status cannot see', () => {
+    const state = readGitState(git(work), 'TAC-447')
+    expect(state.uncommitted).not.toContain('?? e.txt')
+    expect(state.sideFolders).toHaveLength(1)
+    const [folder] = state.sideFolders ?? []
+    expect(folder.path.endsWith('/work/.worktrees/resume')).toBe(true)
+    expect(folder.branch).toBeNull()
+    expect(folder.uncommitted).toEqual(['?? e.txt'])
   })
 })
 
@@ -271,6 +329,24 @@ describe('renderGitReport', () => {
     const report = renderGitReport(state)
     expect(report).toContain('\u02cbthird\u02cb')
     expect(report).not.toContain('`third`')
+  })
+
+  it('lists each side folder\'s uncommitted work, with its branch', () => {
+    const report = renderGitReport({
+      ...state,
+      sideFolders: [{ path: '/runner/checkout/.worktrees/resume', branch: 'jaipal/tac-447-x', uncommitted: ['?? lib/e.ts'] }],
+    })
+    expect(report).toContain('Changed in the side folder /runner/checkout/.worktrees/resume but never committed, and lost (on jaipal/tac-447-x):\n\n```text\n?? lib/e.ts\n```')
+  })
+
+  it('says side folders are unknown when git could not list them', () => {
+    expect(renderGitReport({ ...state, sideFolders: null })).toContain(
+      'Changed in a side folder but never committed, and lost:\n\n```text\n(unknown: git could not read it)\n```',
+    )
+  })
+
+  it('adds nothing when there is no side folder', () => {
+    expect(renderGitReport({ ...state, sideFolders: [] })).not.toContain('side folder')
   })
 
   it('says nothing reached GitHub when there is no branch', () => {
