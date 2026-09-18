@@ -250,7 +250,7 @@ jobs:
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns 150
-            --allowedTools "Read,Write,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(python3:*),Bash(node:*)"
+            --allowedTools "Read,Write,Grep,Glob,Bash(curl:*),Bash(jq:*),Bash(git log:*),Bash(git show:*),Bash(rg:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(node scripts/linear.mjs:*)"
             --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
             You are auditing a Linear ticket for the repo ${{ github.event.repository.name }}.

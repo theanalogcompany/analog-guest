@@ -10,8 +10,9 @@
  * checkout, whatever the allowlist says, so every one of those attempts was
  * refused and the session fell back to escaping by hand. This takes the text
  * as a plain markdown file and does the encoding itself. `node` is not
- * path-checked and `Bash(node:*)` is already on both workflows' allowlists,
- * so no allowlist change was needed.
+ * path-checked, and both workflows' allowlists carry
+ * `Bash(node scripts/linear.mjs:*)`, this helper and no other node command
+ * (TAC-449).
  *
  * No I/O at module load, and none outside `run`'s injected dependencies, so
  * the tests drive it with a fake fetch and a fake key.
