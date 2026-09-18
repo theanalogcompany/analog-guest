@@ -502,7 +502,7 @@ jobs:
           claude_args: |
             --max-turns ${{ env.MAX_TURNS }}
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(npx eslint:*),Bash(npm run build:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git switch:*),Bash(git worktree add:*),Bash(git worktree remove:*),Bash(git worktree list:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(gh api repos/theanalogcompany/analog-guest/activity:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(node scripts/linear.mjs:*)"
-            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*),Bash(git checkout .),Bash(git checkout --:*),Bash(git switch --discard-changes:*),Bash(git switch -f:*),Bash(git switch --force:*),Bash(git switch -C:*),Bash(git switch --force-create:*),Bash(git worktree add -B:*),Bash(git worktree remove -f:*),Bash(git worktree remove --force:*),Bash(git push --force:*),Bash(git push -f:*),Bash(git push --force-with-lease:*)"
+            --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*),Bash(git checkout .),Bash(git checkout --:*),Bash(git switch --discard-changes:*),Bash(git switch -f:*),Bash(git switch --force:*),Bash(git switch -C:*),Bash(git switch --force-create:*),Bash(git worktree add -B:*),Bash(git worktree remove -f:*),Bash(git worktree remove --force:*),Bash(git push --force:*),Bash(git push -f:*),Bash(git push --force-with-lease:*),Bash(git push --mirror:*),Bash(git push --prune:*),Bash(git push -d:*),Bash(git push --delete:*),Bash(gh pr merge:*),Bash(gh pr checkout:*)"
           prompt: |
             You are working a Linear ticket for the repo ${{ github.event.repository.name }}.
 
@@ -619,8 +619,9 @@ jobs:
             still waiting for him.
 
             Leave any scratch file you write in this checkout where it is:
-            rm is refused, and nothing uncommitted outlives the runner. Stage
-            files by name, so a scratch file is never committed.
+            rm is refused, and nothing uncommitted outlives the runner. Name
+            it .txt or .md, so typecheck, lint and the tests never read it,
+            and stage files by name, so it is never committed.
 
             Commit and push only to the ticket's own branch, never to main.
             Never merge, and never mark a ticket Done.
