@@ -20,8 +20,8 @@ Every ticket we create sets its status explicitly.
 | Backlog | Uncommitted. Not yet triaged. |
 | Todo | Committed, **not yet audited**. The audit automation picks it up on its next scheduled run. Never build from here. |
 | Ready | Audited, buildable. **The only status a build starts from.** |
-| In Progress | Claude Code has it. Set automatically on PR open. |
-| Ready For QA | Merged and deployed. Gate not yet passed. Set automatically on merge. |
+| In Progress | Claude Code has it. The build workflow derives this from a branch existing on GitHub and writes it, every run (TAC-466). Not Linear's own automation — see "Which repo works a ticket" below. |
+| Ready For QA | Merged and deployed. Gate not yet passed. The build workflow derives this from a merged PR and writes it, every run (TAC-466). |
 | Done | Gate passed in production. Only Jaipal sets this. |
 | Canceled | Not being done. |
 | Duplicate | Covered by another ticket. |
@@ -108,13 +108,23 @@ the audit. It just fails later and more expensively.
   list in `work-ticket.md` step 4 is another.
 
 **How the second half learns the first has landed: the sibling ticket's own
-status.** Linear's GitHub automation moves it to In Progress on PR open and
-Ready For QA on merge, so "has the other half shipped" is answerable without
-any cross-repo access — which is just as well, because there is none. A run
-is bound to its own repo: the GitHub App token it holds reaches exactly one
-repo, and nothing sends a `repository_dispatch` to the other. The branch
-name and any curl verification belong in the Phase 5 comment, because
-nothing else carries them across.
+status.** For analog-guest, this is not Linear's own GitHub automation — its
+integration does not attach an analog-guest PR to its ticket at all
+(confirmed 2026-09-18: PR #215 merged for TAC-467 after the "Public
+repositories" integration setting was fixed, and TAC-467 still shows no PR
+attachment). The build workflow derives and writes the status itself,
+every run (TAC-466, `scripts/reconcile-status.mjs`): a branch on GitHub
+moves a ticket to In Progress, a merged PR moves it to Ready For QA.
+"Has the other half shipped" is still answerable without any cross-repo
+access — which is just as well, because there is none. A run is bound to
+its own repo: the GitHub App token it holds reaches exactly one repo, and
+nothing sends a `repository_dispatch` to the other. Whether
+analog-operator's status moves the same way — by its own GitHub automation
+or by something else — was not re-investigated here: only PR attachment was
+confirmed there, a different fact from whether status moves, so treat it as
+that repo's own open question until checked. The branch name and any curl
+verification belong in the Phase 5 comment, because nothing else carries
+them across.
 
 The labels say where the work lands. The **Repo:** line says where it starts.
 The audit and the build both narrow by label and decide by the Repo: line:
