@@ -477,12 +477,12 @@ describe('POST /api/webhooks/instagram', () => {
 // Real deliveries captured from Meta on 2026-09-17, identifiers replaced (see
 // lib/messaging/instagram/fixtures/README.md). The synthetic payloads above
 // test the rules; these test that a body shaped exactly as Meta sends it,
-// including an echo and a read receipt, verifies, is acknowledged, and puts
+// including an echo, a read receipt and a postback carrying a referral, verifies, is acknowledged, and puts
 // none of its identifiers or text in the logs.
 describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
   const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
 
-  it.each(['message', 'echo', 'read'])('verifies and acknowledges the recorded %s delivery', async (name) => {
+  it.each(['message', 'echo', 'read', 'postback-referral'])('verifies and acknowledges the recorded %s delivery', async (name) => {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
     const body = readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
 

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { summarizeInstagramPayload } from './summarize-payload'
 
-const FIXTURE_NAMES = ['message', 'echo', 'read'] as const
+const FIXTURE_NAMES = ['message', 'echo', 'read', 'postback-referral'] as const
 type FixtureName = (typeof FIXTURE_NAMES)[number]
 
 function raw(name: FixtureName): string {
@@ -78,10 +78,11 @@ describe('recorded Instagram payloads: what Meta sends', () => {
   })
 
   // Identifier formats. The account id is 17 digits. Both guest IGSIDs seen
-  // on 2026-09-17 (this one, and the postback's, not committed) were 16, so an
-  // account id and a guest id are not the same length and a validator for one
-  // must not be reused for the other. Two samples do not show that every
-  // IGSID is 16 digits, so the guest id is pinned to digits only.
+  // on 2026-09-17 (the one in these fixtures, and one from an earlier capture
+  // that aged out of the logs) were 16, so an account id and a guest id are
+  // not the same length and a validator for one must not be reused for the
+  // other. Two samples do not show that every IGSID is 16 digits, so the
+  // guest id is pinned to digits only.
   it('uses digit-string ids, 17 digits for the account', () => {
     for (const name of FIXTURE_NAMES) {
       const { entryId, item } = firstItem(name)
@@ -89,6 +90,38 @@ describe('recorded Instagram payloads: what Meta sends', () => {
       const guest = item.sender.id === entryId ? item.recipient.id : item.sender.id
       expect(guest).toMatch(/^\d+$/)
     }
+  })
+
+  // Tapping an icebreaker after opening an ig.me link arrives as a postback,
+  // with the link's referral inside it and the ref carried through verbatim.
+  // The mid is INSIDE `postback`, as it is inside `message` on a message: a
+  // hand transcription of this payload put it beside `postback`, which the
+  // logged body contradicted.
+  it('delivers an icebreaker tap after an ig.me link as a postback carrying the referral and its mid', () => {
+    const { entryId, item } = firstItem('postback-referral')
+    expect(item.sender.id).not.toBe(entryId)
+    expect(item).not.toHaveProperty('message')
+    expect(item).not.toHaveProperty('mid')
+    const postback = item.postback as Record<string, unknown>
+    expect(postback.title).toBe('What are your hours?')
+    expect(postback.payload).toBe('ICEBREAKER_HOURS')
+    expect(postback.referral).toEqual({ ref: 'TESTVENUE', source: 'SHORTLINK', type: 'OPEN_THREAD' })
+    expect(postback.mid).toEqual(expect.stringMatching(/ZDZD$/))
+  })
+
+  // This postback was captured after the guest deleted the thread and opened
+  // it again through the ig.me link. The referral fired as it does on a new
+  // thread, but the thread id inside its mid is the one the earlier messages
+  // carry. Deleting a thread does not start a new conversation id, so a
+  // handler can't use a new thread id to spot a returning guest re-entering
+  // through a link; the referral is the signal.
+  it('keeps the thread id across a deleted and reopened thread', () => {
+    const postback = firstItem('postback-referral').item.postback as { mid: string }
+    const message = firstItem('message').item.message as { mid: string }
+    const [, , postbackThread, postbackItem] = decodeMid(postback.mid)
+    const [, , messageThread, messageItem] = decodeMid(message.mid)
+    expect(postbackThread).toBe(messageThread)
+    expect(postbackItem).not.toBe(messageItem)
   })
 
   // A mid is not an opaque random token: it encodes the account id, a thread
@@ -119,6 +152,7 @@ describe('summarizeInstagramPayload on recorded payloads', () => {
     ['message', ['message']],
     ['echo', ['message']],
     ['read', ['read']],
+    ['postback-referral', ['postback']],
   ] as const)('reports the %s delivery as %j', (name, types) => {
     const summary = summarizeInstagramPayload(JSON.parse(raw(name)))
     expect(summary.object).toBe('instagram')
