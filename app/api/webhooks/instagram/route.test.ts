@@ -5,7 +5,46 @@ import { formatWithOptions } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { createInstagramDbFake, type FakeRow } from '@/lib/messaging/instagram/testing/db-fake'
+
 import { GET, POST } from './route'
+
+// The route saves through the admin client and would hand a guest message to
+// the agent. Both are replaced: the store with the same in-memory fake the
+// handler's own tests use, the agent and waitUntil with spies, so a test can
+// assert the agent is NEVER reached while the TAC-469 gate is shut.
+const mocks = vi.hoisted(() => ({
+  createAdminClient: vi.fn(),
+  handleInbound: vi.fn(),
+  waitUntil: vi.fn(),
+}))
+vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
+vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
+vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
+
+// The real gate, except that a test can open it. That is the one thing
+// TAC-469 changes, so the route's own hand-off gets tested as it will run
+// then, while every other test runs with the gate as it ships. Two details
+// keep this mock from hiding a bypass: an `enabled` the ROUTE passes is
+// honoured, so a route that forced the gate open fails the shut-gate tests;
+// and with no test opening it, the real constant decides, so flipping that
+// constant fails them too.
+const gate = vi.hoisted(() => ({ open: false }))
+vi.mock('@/lib/messaging/instagram/agent-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/agent-gate')>()
+  return {
+    ...actual,
+    agentMessageIdFor: (outcome: Parameters<typeof actual.agentMessageIdFor>[0], enabled?: boolean) =>
+      actual.agentMessageIdFor(outcome, enabled ?? (gate.open || actual.INSTAGRAM_AGENT_REPLIES_ENABLED)),
+  }
+})
+
+let db = createInstagramDbFake()
+
+function useDb(seed: Parameters<typeof createInstagramDbFake>[0] = {}): void {
+  db = createInstagramDbFake(seed)
+  mocks.createAdminClient.mockReturnValue(db.client)
+}
 
 const ROUTE_URL = 'https://webhooks.theanalog.company/api/webhooks/instagram'
 const TOKEN = 'the-shared-verify-token'
@@ -100,6 +139,11 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(capture)
   vi.spyOn(console, 'error').mockImplementation(capture)
   delete process.env.INSTAGRAM_LOG_RAW_INBOUND
+  mocks.createAdminClient.mockReset()
+  mocks.handleInbound.mockReset()
+  mocks.waitUntil.mockReset()
+  gate.open = false
+  useDb()
 })
 
 afterEach(() => {
@@ -237,6 +281,8 @@ describe('POST /api/webhooks/instagram', () => {
     expect(findEntry('instagram_signature_rejected')).toMatchObject({ reason: 'mismatch' })
     expect(findEntry('instagram_event')).toBeUndefined()
     expect(findEntry('instagram_invalid_json')).toBeUndefined()
+    // Handles nothing includes saving nothing: the store is never opened.
+    expect(mocks.createAdminClient).not.toHaveBeenCalled()
     const text = loggedText()
     expect(text).not.toContain(MESSAGE_TEXT)
     expect(text).not.toContain(SENDER_IGSID)
@@ -414,6 +460,8 @@ describe('POST /api/webhooks/instagram', () => {
       event: 'instagram_invalid_json',
       bodyLength: '{not json'.length,
     })
+    // TAC-468 AC8: still 200, and nothing is saved from a body that can't be read.
+    expect(mocks.createAdminClient).not.toHaveBeenCalled()
   })
 
   it('never logs the app secret', async () => {
@@ -480,11 +528,21 @@ describe('POST /api/webhooks/instagram', () => {
 // including an echo, a read receipt and a postback carrying a referral,
 // verifies, is acknowledged, and puts none of its identifiers, text, ref,
 // title or payload in the logs.
-describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
-  const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
+const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
+// The replacement IDs in the fixtures (fixtures/README.md).
+const FIXTURE_ACCOUNT_ID = '17841400000000001'
+const FIXTURE_GUEST_IGSID = '1000000000000001'
+const FIXTURE_VENUE: FakeRow = { id: 'venue-1', instagram_account_id: FIXTURE_ACCOUNT_ID }
+const FIXTURE_GUEST: FakeRow = { id: 'guest-1', venue_id: 'venue-1', instagram_scoped_id: FIXTURE_GUEST_IGSID }
 
+describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
+
+  // Venue mapped and guest known, so each delivery goes all the way through
+  // its save path and logs its outcome line: the lines the leak check must
+  // cover as well as the shape line.
   it.each(['message', 'echo', 'read', 'postback-referral'])('verifies and acknowledges the recorded %s delivery', async (name) => {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
     const body = readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
 
     const res = await POST(postRequest(body, signed(body)))
@@ -495,5 +553,139 @@ describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
     expect(values.length).toBeGreaterThan(0)
     const text = loggedText()
     for (const value of values) expect(text).not.toContain(value)
+  })
+})
+
+// TAC-468. The handler's own tests cover what each kind writes; these cover
+// the route around it: a signed recorded delivery reaches the store, the agent
+// is never handed anything while the TAC-469 gate is shut, and every path
+// still answers 200.
+describe('POST /api/webhooks/instagram saving events', () => {
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function recorded(name: string): string {
+    return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  }
+
+  // The gate. Lifting it (TAC-469) makes both of these hand the new row to
+  // the agent, and this test has to change with it.
+  it.each(['message', 'postback-referral'])(
+    'saves the recorded %s as an Instagram row and does not run the agent',
+    async (name) => {
+      useDb({ venues: [FIXTURE_VENUE] })
+      const res = await post(recorded(name))
+
+      expect(res.status).toBe(200)
+      expect(db.inserts('messages')).toMatchObject([{ channel: 'instagram', direction: 'inbound' }])
+      expect(findEntry('instagram_event_persisted')).toMatchObject({ guestCreated: true })
+      expect(mocks.handleInbound).not.toHaveBeenCalled()
+      expect(mocks.waitUntil).not.toHaveBeenCalled()
+    },
+  )
+
+  it('logs an unhandled field and acknowledges it', async () => {
+    const body = JSON.stringify({
+      object: 'instagram',
+      entry: [{ id: FIXTURE_ACCOUNT_ID, time: 1, changes: [{ field: 'comments', value: { text: 'nice spot' } }] }],
+    })
+    const res = await post(body)
+
+    expect(res.status).toBe(200)
+    expect(findEntry('instagram_event_unhandled')).toEqual({
+      event: 'instagram_event_unhandled',
+      reason: 'changes_field',
+      fields: ['comments'],
+    })
+    expect(loggedText()).not.toContain('nice spot')
+  })
+
+  it('acknowledges a delivery whose save fails', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    db.failNext('messages', 'insert', { code: '08006', message: 'connection failure' })
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    expect(findEntry('instagram_event_persist_failed')).toMatchObject({ stage: 'message_insert', code: '08006' })
+  })
+
+  it('acknowledges when the store cannot be opened', async () => {
+    mocks.createAdminClient.mockImplementation(() => {
+      throw new Error('Missing env var: SUPABASE_SECRET_KEY')
+    })
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    expect(findEntry('instagram_unexpected_error')).toBeDefined()
+  })
+
+  it('skips, logs and acknowledges a delivery for an account no venue is mapped to', async () => {
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    expect(findEntry('instagram_event_skipped')).toEqual({
+      event: 'instagram_event_skipped',
+      kind: 'message',
+      reason: 'venue_not_found',
+    })
+    expect(db.inserts('messages')).toEqual([])
+  })
+})
+
+// With the gate open, as TAC-469 will run it. Without these, deleting the
+// route's hand-off line passes every other test in this file, since they can
+// only assert that the agent is NOT called.
+describe('POST /api/webhooks/instagram with the agent gate open', () => {
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function recorded(name: string): string {
+    return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  }
+
+  it.each(['message', 'postback-referral'])(
+    'hands the newly saved %s row to the agent in the background',
+    async (name) => {
+      gate.open = true
+      useDb({ venues: [FIXTURE_VENUE] })
+      const agentRun = Promise.resolve()
+      mocks.handleInbound.mockReturnValue(agentRun)
+
+      const res = await post(recorded(name))
+
+      expect(res.status).toBe(200)
+      const [saved] = db.tables.messages
+      expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+      expect(mocks.handleInbound).toHaveBeenCalledWith(saved?.id)
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+      expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
+    },
+  )
+
+  it.each(['echo', 'read'])('never hands the recorded %s to the agent', async (name) => {
+    gate.open = true
+    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: name === 'read' ? [echoRow] : [] })
+
+    await post(recorded(name))
+
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
+    expect(mocks.waitUntil).not.toHaveBeenCalled()
+  })
+
+  it('never hands a redelivered message to the agent a second time', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE] })
+    const body = recorded('message')
+
+    await post(body)
+    await post(body)
+
+    expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+    expect(findEntry('instagram_event_duplicate')).toBeDefined()
   })
 })
