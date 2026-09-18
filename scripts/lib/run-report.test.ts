@@ -187,10 +187,12 @@ describe('readGitState against a real repository', () => {
   let work: string
   // A git hook (this test runs in the pre-commit hook) exports GIT_DIR and
   // GIT_INDEX_FILE, which would point every call here at the outer repo, and
-  // a global config can change hash length or run hooks. Neither may reach
-  // the temporary repository.
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
-  for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX', 'GIT_COMMON_DIR']) delete env[key]
+  // `git -c` or a global config can change hash length or run hooks. None of
+  // it may reach the temporary repository, so every GIT_ variable goes.
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key]
+  env.GIT_CONFIG_GLOBAL = '/dev/null'
+  env.GIT_CONFIG_NOSYSTEM = '1'
   const git = (cwd: string) => (args: string[]) => {
     try {
       return execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })

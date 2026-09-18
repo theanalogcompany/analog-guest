@@ -187,8 +187,8 @@ earlier comment where that reading misses it.
 | `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
 | `[TURN-LIMIT]` | The CLI stopped the build session at its turn limit, before it finished | Posted by the workflow, in place of `[SILENT-RUN]` and `[DENIALS]`. Names what reached GitHub and what died with the runner. Adds `Needs Decision` like `[SILENT-RUN]`, the run fails, and it is **not bookkeeping** for the same reason. A reply resumes the build from the ticket's branch on GitHub |
-| `[CANCELLED]` | A fixture ticket has served its purpose | Posted just before cancelling the fixture, naming the ticket it was a fixture for. See "Testing a workflow change" |
 | `[OVER-LIMIT]` | The build session finished its work but used more turns than its limit, so claude-code-action failed the run afterwards | Bookkeeping, not a turn. Posted by the workflow, saying what was pushed. The run stays failed (ruled on TAC-447). Bookkeeping because it lands after the session's own last comment, often a PR link, and must not hide it |
+| `[CANCELLED]` | A fixture ticket has served its purpose | Posted just before cancelling the fixture, naming the ticket it was a fixture for. See "Testing a workflow change" |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
@@ -292,7 +292,8 @@ the limit is that ticket's alone, and the session pushes each planned commit
 as it makes it. A session the CLI stops at the limit gets `[TURN-LIMIT]`, and
 one that finishes over it gets `[OVER-LIMIT]`. Both say what reached GitHub,
 read from the runner's git after the session, by a copy of the reporter taken
-before the session so the session cannot change it.
+before the session, so a branch that predates or edits the reporter cannot
+affect the notice.
 
 ## Testing a workflow change
 
