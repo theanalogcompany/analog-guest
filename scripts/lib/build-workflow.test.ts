@@ -151,6 +151,46 @@ describe('bookkeeping markers agree across the workflow', () => {
   })
 })
 
+describe('work-ticket.md', () => {
+  const doc = read('.claude/commands/work-ticket.md')
+  const line = (start: string) => {
+    const found = doc.split('\n').find((l) => l.trimStart().startsWith(start))
+    if (!found) throw new Error(`no line starting "${start}"`)
+    return found
+  }
+
+  it('skips the same bookkeeping markers as the workflow, in both places it lists them', () => {
+    expect(markersIn(line('- `bookkeeping` —'))).toEqual(BOOKKEEPING)
+    const rule = line('- **Never exit silently on a ticket carrying')
+    expect(markersIn(rule.slice(0, rule.indexOf('bookkeeping, is human input')))).toEqual(BOOKKEEPING)
+  })
+
+  it('knows both turn-limit markers', () => {
+    const known = markersIn(line('2. **Compute.**'))
+    expect(known).toContain('TURN-LIMIT')
+    expect(known).toContain('OVER-LIMIT')
+  })
+
+  it('finds a branch an earlier run pushed', () => {
+    const exists = line('- `branchExists` —')
+    expect(exists).toContain("`git branch --list -a '*jaipal/tac-xxx-*'`")
+    // The old glob used the uppercase id, which no branch name carries.
+    expect(doc).not.toContain('jaipal/TAC-XXX')
+  })
+
+  it('continues that branch instead of starting over', () => {
+    expect(line('14.')).toMatch(/^14\. \*\*Continue the ticket's branch if it exists\*\*/)
+  })
+
+  it('pushes each planned commit as it is made, never to main', () => {
+    const step = line('15.')
+    expect(step).toContain('**Push each commit as soon as it is made**')
+    expect(step).toContain('Never to `main`, never `--force`.')
+    expect(step).toContain('Do not open the PR here')
+    expect(line('8.')).toContain('the commits the build will make in order')
+  })
+})
+
 describe('the Slack sync', () => {
   const slack = read('scripts/slack-rulings.mjs')
   const set = slack.match(/const BLOCKING_MARKERS = new Set\(\[([\s\S]*?)\]\)/)
