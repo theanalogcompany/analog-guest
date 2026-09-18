@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.51.0 (TAC-436: the intentions restraint block names its openings)', () => {
-    expect(PROMPT_VERSION).toBe('v1.51.0')
+  it('is v1.52.0 (TAC-423: the first-touch opener asks what they got)', () => {
+    expect(PROMPT_VERSION).toBe('v1.52.0')
   })
 })
 

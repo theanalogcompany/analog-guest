@@ -826,6 +826,30 @@
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.52.0 (TAC-423): the ## What you're hoping to get to first-touch opener's
+// fallback question changes from "ask whether it's their first time" to "ask
+// what they got". Since TAC-380/436 the opener already renders alongside
+// understand_order's own line ("You haven't heard what this guest ordered
+// yet.") on a qr_scan guest's true first message — two independently-authored
+// instructions in the same block, with nothing reconciling them. Live at Le
+// Mil's: the model followed the nearer, more specific scripted question,
+// asked whether it was the guest's first time, then volunteered a
+// recommendation — to a guest standing at the drink pickup counter already
+// holding the drink they ordered.
+//
+// The QR sign's placement is assumed to be the pickup counter (ruled
+// 2026-09-18; not made configurable — no second venue yet, so a
+// configuration field would have exactly one possible value). That is why
+// "what did you get" is the right question and not an arbitrary swap: the
+// guest scanning this code has already decided and acted, so a recommendation
+// or a first-time question are both the wrong genre of question, and asking
+// what they got is the one capture opportunity a venue with no POS otherwise
+// has (TAC-325's premise). The opener's "thank them for coming in" half is
+// unchanged; only the fallback question moves, so the block now agrees with
+// understand_order instead of racing it. A guest who answers is captured
+// through TAC-323's original one-scan enrollment path (gates 2 and 3 both
+// hold on a guest's first or second message), not TAC-325's ongoing path.
+//
 // v1.51.0 (TAC-436): the ## What you're hoping to get to restraint paragraph is
 // rewritten. Since TAC-380 shipped, zero intentions had ever been raised: they
 // rendered, and the model declined, because the block's only concretely-worked
@@ -947,7 +971,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.51.0'
+export const PROMPT_VERSION = 'v1.52.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
