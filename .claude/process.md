@@ -26,6 +26,10 @@ Every ticket we create sets its status explicitly.
 | Canceled | Not being done. |
 | Duplicate | Covered by another ticket. |
 
+A status the build workflow writes shows in Linear's history as Jaipal's,
+the same attribution gap as comments (TAC-396). Reading the board cannot
+tell an automated move from one he made by hand.
+
 **"The next scheduled run" can be hours.** GitHub runs our scheduled
 workflows 2–5 hours apart whatever their cron says, and has since 2026-08-27
 (TAC-428). Nothing in this process promises a time. Say "picked up on the
