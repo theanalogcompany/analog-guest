@@ -85,7 +85,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   // Always need the venue's guest list at this point for the dropdown.
   const { data: guestsRaw } = await supabase
     .from('guests')
-    .select('id, first_name, last_name, phone_number, last_interaction_at')
+    .select('id, first_name, last_name, phone_number, instagram_username, last_interaction_at')
     .eq('venue_id', venueId)
     .order('last_interaction_at', { ascending: false, nullsFirst: false })
     .limit(RECENT_GUESTS_LIMIT)
@@ -94,6 +94,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     firstName: g.first_name,
     lastName: g.last_name,
     phoneNumber: g.phone_number,
+    instagramUsername: g.instagram_username,
   }))
 
   if (!guestId) {
@@ -194,7 +195,7 @@ async function loadConversationData({
 }: LoadConversationArgs): Promise<InitialData | null> {
   const { data: guestRow, error: guestErr } = await supabase
     .from('guests')
-    .select('id, first_name, last_name, phone_number, distance_to_venue_miles, created_via, last_visit_at')
+    .select('id, first_name, last_name, phone_number, instagram_username, distance_to_venue_miles, created_via, last_visit_at')
     .eq('id', guestId)
     .eq('venue_id', venueRow.id)
     .maybeSingle()
@@ -476,6 +477,7 @@ async function loadConversationData({
       firstName: guestRow.first_name,
       lastName: guestRow.last_name,
       phoneNumber: guestRow.phone_number,
+      instagramUsername: guestRow.instagram_username,
       distanceMiles: guestRow.distance_to_venue_miles,
       createdVia: guestRow.created_via,
     },
@@ -518,7 +520,7 @@ async function loadRecentActivity({
   // and dedupe in memory by (venue_id, guest_id). Cheap given the cap.
   let q = supabase
     .from('messages')
-    .select('venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number)')
+    .select('venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number, instagram_username)')
     .neq('body', '')
     .order('created_at', { ascending: false })
     .limit(200)
@@ -552,6 +554,7 @@ async function loadRecentActivity({
         firstName: guest.first_name,
         lastName: guest.last_name,
         phoneNumber: guest.phone_number,
+        instagramUsername: guest.instagram_username,
       }),
       lastActivityAt: new Date(m.created_at),
     })

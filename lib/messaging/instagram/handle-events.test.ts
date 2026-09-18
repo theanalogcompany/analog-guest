@@ -8,8 +8,8 @@
 // (messages.channel defaults to 'text' until TAC-472), and a partial match
 // would pass it.
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -82,6 +82,7 @@ describe('a guest message', () => {
         body: 'MSGTEXT',
         media_urls: [],
         provider_message_id: midOf('message', 'message'),
+        provider_sent_at: '2026-09-18T04:00:54.588Z',
         referral_ref: null,
         referral_source: null,
       },
@@ -95,6 +96,7 @@ describe('a guest message', () => {
         messageId: db.tables.messages[0]?.id,
         guestCreated: true,
         hasReferral: false,
+        hasProviderSentAt: true,
       },
     ])
   })
@@ -148,6 +150,8 @@ describe('a guest message', () => {
         body: 'hi',
         media_urls: [],
         provider_message_id: 'm-ref',
+        // Synthetic payload, timestamp 1: not a millisecond epoch, so no time.
+        provider_sent_at: null,
         referral_ref: 'QR1',
         referral_source: 'SHORTLINK',
       },
@@ -185,6 +189,7 @@ describe('an icebreaker postback', () => {
         body: 'What are your hours?',
         media_urls: [],
         provider_message_id: midOf('postback-referral', 'postback'),
+        provider_sent_at: '2026-09-18T04:24:24.295Z',
         referral_ref: 'TESTVENUE',
         referral_source: 'SHORTLINK',
       },
@@ -234,6 +239,7 @@ describe('an echo', () => {
         body: 'ECHO',
         media_urls: [],
         provider_message_id: midOf('echo', 'message'),
+        provider_sent_at: '2026-09-18T04:02:26.605Z',
         sent_at: NOW,
       },
     ])
@@ -451,8 +457,8 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
@@ -475,5 +481,52 @@ describe('logInstagramOutcome', () => {
     logInstagramOutcome(outcome)
     expect(lines).toHaveLength(1)
     expect(lines[0]?.[1]).toEqual(expected)
+  })
+})
+
+// TAC-479: Instagram's own time on each saved row (migration 049). The rows the
+// recorded deliveries produce are pinned whole above; these cover a missing
+// time and who may write the column at all.
+describe('provider_sent_at', () => {
+  it('saves NULL, and says so in the outcome, when the item has no millisecond timestamp', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1789704055296,
+          messaging: [{ sender: { id: GUEST_IGSID }, recipient: { id: ACCOUNT_ID }, message: { mid: 'm-no-time', text: 'hi' } }],
+        },
+      ],
+    }
+    const outcomes = await processInstagramDelivery(payload, db.client)
+
+    expect(db.inserts('messages')).toMatchObject([{ provider_message_id: 'm-no-time', provider_sent_at: null }])
+    expect(outcomes).toMatchObject([{ status: 'persisted', hasProviderSentAt: false }])
+  })
+
+  // The column has no default, so a writer that doesn't name it gets NULL. That
+  // is what keeps it NULL on every Sendblue row, and it holds only while this
+  // handler is the one place that writes it. The check is by mention, so a
+  // reader (TAC-469's window gate) is also added here, deliberately, along
+  // with any second writer.
+  it('is named by this handler and nothing else in the app', () => {
+    const root = join(__dirname, '..', '..', '..')
+    const writers: string[] = []
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(path)
+          continue
+        }
+        if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue
+        if (readFileSync(path, 'utf8').includes('provider_sent_at')) writers.push(relative(root, path))
+      }
+    }
+    for (const dir of ['app', 'lib', 'scripts']) walk(join(root, dir))
+
+    expect(writers.sort()).toEqual([join('lib', 'messaging', 'instagram', 'handle-events.ts')])
   })
 })
