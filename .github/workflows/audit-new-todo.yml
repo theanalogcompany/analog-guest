@@ -288,7 +288,8 @@ jobs:
             2. Every write, with the helper. For a comment or a description,
                first use the Write tool to write the text as plain markdown,
                with nothing escaped, to a new file under ${{ runner.temp }}.
-               Give every write its own file name; never reuse one. Then:
+               The temp folder already exists, do not create it. Give every
+               write its own file name; never reuse one. Then:
 
                  node scripts/linear.mjs comment TAC-395 ${{ runner.temp }}/tac-395-plan.md
                  node scripts/linear.mjs describe TAC-395 ${{ runner.temp }}/tac-395-description.md

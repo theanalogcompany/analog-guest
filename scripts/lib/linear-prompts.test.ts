@@ -63,6 +63,8 @@ describe('the Linear block of the workflow prompts', () => {
     expect(block).toContain('refuses any path outside this checkout, whatever the\n            allowlist says')
     expect(block).toContain('${{ runner.temp }} is outside it')
     expect(block).toContain('Open those files with\n            the Read tool')
+    // Without it, a session tried mkdir on the temp folder, which is refused (run 35293187884).
+    expect(block).toContain('The temp folder already exists, do not create it.')
   })
 
   it.each(WORKFLOWS)('%s keeps the inline curl read, which passes the key without expanding it', (path) => {
