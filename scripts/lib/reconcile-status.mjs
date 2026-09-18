@@ -35,8 +35,6 @@
 
 import { isTicketBranch, parseRefs, REF_FORMAT } from './claims.mjs';
 
-export { REF_FORMAT };
-
 export const EXIT = { OK: 0, USAGE: 2 };
 
 // Forward order only. 'Ready' is never a *target* here — only the Todo to

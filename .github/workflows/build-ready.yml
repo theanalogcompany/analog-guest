@@ -392,7 +392,7 @@ jobs:
             .data.issues.nodes
             | map(select(owner == $repo and (repo_labels | length) == 1))
             | map({ id, identifier, state: .state.name })
-          ')
+          ' || echo '[]')
           STATUS_WRITES=$(echo "$STATUS_ROWS" | node scripts/reconcile-status.mjs || echo '[]')
           echo "$STATUS_WRITES" | jq -c '.[]' | while read -r row; do
             IDENTIFIER=$(echo "$row" | jq -r .identifier)

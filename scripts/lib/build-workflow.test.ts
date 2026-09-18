@@ -283,8 +283,12 @@ describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)',
     expect(RECONCILE).not.toMatch(/"(Ready|In Progress|Ready For QA|Done|Todo|Backlog)"/)
   })
 
-  it('degrades to a warning rather than failing the step on a bad write', () => {
-    expect(RECONCILE).toContain("|| echo '[]'")
+  it('never aborts the step: both reads that can fail have a fallback, and the write is if/else', () => {
+    // Two, not one: the candidate jq AND the reconcile-script call each need
+    // their own `|| echo '[]'` under `set -euo pipefail` — a fallback on
+    // only one leaves the other free to abort the step and skip
+    // tickets=$TICKETS below it, which is exactly the MAJOR this pins.
+    expect(RECONCILE.match(/\|\| echo '\[\]'/g)).toHaveLength(2)
     expect(RECONCILE).toContain('if node scripts/linear.mjs state "$IDENTIFIER" "$TO"; then')
     expect(RECONCILE).toContain('::warning title=Status reconcile::')
   })
