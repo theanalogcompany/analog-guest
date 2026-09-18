@@ -40,6 +40,7 @@ import {
   applyApprovalPolicyStage,
   generateStage,
   retrieveCorpusStage,
+  verifyGroundingStage,
 } from './stages'
 import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
@@ -328,7 +329,36 @@ async function tryGenerateHolding(
     return null
   }
 
-  const approval = await applyApprovalPolicyStage(ctx, gen.result)
+  // TAC-376: independent grounding backstop, run before the gate. Was
+  // inbound-only (verifyGroundingStage returned 'skipped' unconditionally
+  // when ctx.currentMessage was null, which it always is on this path) — per
+  // the 2026-09-17 ruling it now runs here too, same verifier, same
+  // triggers, same failure posture as inbound. No Promise.allSettled needed:
+  // unlike the two orchestrators, this path has never run
+  // verifyMechanicOfferStage — a holding message doesn't offer mechanics —
+  // so grounding is the only backstop call, and there is nothing else to
+  // race against its throw.
+  //
+  // A 'flagged' or 'truncated' result makes applyApprovalPolicyStage return
+  // something other than 'send' below, which this function already treats
+  // as "this attempt failed, try again or fall back" — no new branch, same
+  // ladder the gate already drove before this ticket.
+  const groundingBackstop = await verifyGroundingStage(ctx, gen.result)
+  if (groundingBackstop.status === 'flagged') {
+    console.warn('[agent] holding message grounding backstop caught an unverified claim', {
+      agentRunId,
+      attempt,
+      claimCount: groundingBackstop.claims.length,
+    })
+  }
+  if (groundingBackstop.status === 'truncated') {
+    console.warn('[agent] holding message grounding backstop truncated — treating as unclean (fail closed)', {
+      agentRunId,
+      attempt,
+    })
+  }
+
+  const approval = await applyApprovalPolicyStage(ctx, gen.result, groundingBackstop)
   if (approval.action !== 'send') {
     console.warn(
       `[agent] holding message attempt ${attempt} blocked by approval gate (${approval.action}) for guest=${ctx.guest.id}`,
