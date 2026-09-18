@@ -207,6 +207,7 @@ describe('the build allowlist', () => {
     `git -C ${SIDE} pull --ff-only`,
     `npx tsc --noEmit -p ${SIDE}`,
     `npx eslint ${SIDE}`,
+    `npx eslint --flag v10_config_lookup_from_file ${SIDE}`,
     `npx vitest run --root ${SIDE}`,
   ]
 
@@ -292,6 +293,7 @@ describe('the build allowlist', () => {
     'git worktree remove .worktrees/x --force',
     'git worktree remove -ff .worktrees/x',
     'git fetch origin +main:jaipal/tac-325-order-capture',
+    'git pull --ff-only origin +main:jaipal/tac-325-order-capture',
   ]
 
   it.each(PERMITTED)('permits %s', (command) => {
@@ -306,10 +308,10 @@ describe('the build allowlist', () => {
     expect(can(command)).toBe(true)
   })
 
-  // Each push gap has a twin in the side folder, which CLAUDE.md states in
-  // one sentence rather than listing them again.
-  it.each(KNOWN_GAPS.filter((gap) => gap.startsWith('git push ')))('KNOWN GAP: the side folder also permits the -C twin of %s', (gap) => {
-    expect(can(gap.replace('git push ', `git -C ${SIDE} push `))).toBe(true)
+  // Each push gap, and the pull one, has a twin in the side folder, which
+  // CLAUDE.md states in one sentence rather than listing them again.
+  it.each(KNOWN_GAPS.filter((gap) => /^git (push|pull --ff-only) /.test(gap)))('KNOWN GAP: the side folder also permits the -C twin of %s', (gap) => {
+    expect(can(gap.replace(/^git /, `git -C ${SIDE} `))).toBe(true)
   })
 
   it('grants git in the side folder by subcommand, at the one path', () => {
@@ -383,6 +385,27 @@ describe('what the prompts teach, the allowlist permits', () => {
     expect(commands).toContain(`npx vitest run --root ${SIDE}`)
     // The ruling: nothing relies on a cd lasting between commands.
     expect(commands.filter((command) => command.startsWith('cd '))).toEqual([])
+  })
+
+  // On a resume the checkout stays on main, so every step after 14 that
+  // commits, pushes, checks or opens the PR has to name the side folder.
+  // Run in the checkout, each one passes or does nothing while the branch's
+  // work stays behind (TAC-471, the third code review).
+  it.each([
+    [15, [`git -C ${SIDE} commit`, `git -C ${SIDE} push`]],
+    [20, [`npx tsc --noEmit -p ${SIDE}`]],
+    [21, [`npx eslint --flag v10_config_lookup_from_file ${SIDE}`]],
+    [22, [`npx vitest run --root ${SIDE}`]],
+    [25, [`git -C ${SIDE} add`, `git -C ${SIDE} commit`]],
+    [26, [`git -C ${SIDE} push`]],
+  ] as const)('work-ticket.md step %i names the side-folder form for a resume', (n, forms) => {
+    const step = between(read('.claude/commands/work-ticket.md'), `\n${n}. `, `\n${n + 1}. `)
+    const commands = commandsIn(step)
+    for (const form of forms) expect(commands).toContain(form)
+  })
+
+  it('work-ticket.md step 27 opens a resumed PR with --head', () => {
+    expect(between(read('.claude/commands/work-ticket.md'), '\n27. ', '\n28. ')).toContain('with `--head <branch>` on a resume')
   })
 
   it('the build prompt\'s command lines', () => {

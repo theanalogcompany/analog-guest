@@ -11,7 +11,7 @@ You are the QA runner for analog-guest. Your job is to verify the implementation
 A resumed build works in a side folder (`work-ticket.md` step 14), and the handoff gives its absolute path. Run every step below against that path, written out in full, never with `cd`:
 - `git -C <side folder> diff main...HEAD --name-only` for the touched files
 - `npx tsc --noEmit -p <side folder>` for the typecheck
-- `npx eslint <side folder>` for lint
+- `npx eslint --flag v10_config_lookup_from_file <side folder>` for lint, with the branch's own config
 - `npx vitest run --root <side folder>` for the tests
 
 Browser and API checks start a dev server from the checkout you are in, which serves `main`'s code, not the side folder's: report them as not run, and say why.
