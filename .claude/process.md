@@ -168,6 +168,13 @@ then the marker. **A comment's marker is the first `[MARKER]` after the
 prefix**, not a marker quoted anywhere in the body: an audit or a plan that
 quotes `[NEEDS-INPUT]` is still an audit or a plan.
 
+**Before checking whether a comment opens with the CC prefix, unescape `\[`
+to `[` and `\]` to `]`, then match with `startsWith`.** Linear can return
+brackets escaped, and a comment opening with a CC prefix in any bracket form
+is CC's own, never human input and never a ruling (TAC-396).
+`scripts/lib/comment-provenance.mjs` implements this rule and the ruling
+rule below, with tests. Extend it rather than writing the check again.
+
 **Post every comment flat, at the top level. Never set `parentId`.** Jaipal
 reads a ticket top to bottom, and a threaded reply puts an answer inside an
 earlier comment where that reading misses it.
@@ -190,13 +197,23 @@ earlier comment where that reading misses it.
 | `[OVER-LIMIT]` | The build session finished its work but used more turns than its limit, so claude-code-action failed the run afterwards | Bookkeeping, not a turn. Posted by the workflow, saying what was pushed. The run stays failed (ruled on TAC-447). Bookkeeping because it lands after the session's own last comment, often a PR link, and must not hide it |
 | `[CANCELLED]` | A fixture ticket has served its purpose | Posted just before cancelling the fixture, naming the ticket it was a fixture for. See "Testing a workflow change" |
 
-A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
+A comment that does **not** open with `**[FROM CLAUDE CODE]**` is human
+input, including one that quotes the prefix further down. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
 session may resume it. **Bookkeeping comments (`[SLACK]`, `[RESUME-CLAIM]`,
 `[DENIALS]`, `[OVER-LIMIT]`) never count as the newest comment.** They record what a workflow did, and
 counting them would bury the reply they were posted around. The build
 automation resumes only Ready and In Progress tickets; a reply on a ticket in
 any other status is recorded but starts nothing.
+
+**A reply advances a gate only when it is unprefixed or opens
+`**[FROM CLAUDE CHAT — RULING`.** A plain `**[FROM CLAUDE CHAT]**` comment
+is context and is never matched against `## Open questions`, whatever it
+says (TAC-396). Nor does it approve a plan, say a `[NEEDS-ACTION]` ran, or
+wind a ticket down. The build workflow's resume check is coarser: it reads only
+the CC prefix, without unescaping, so it can start a session on a plain
+`[FROM CLAUDE CHAT]` comment or on an escaped CC prefix. The session it
+starts applies both rules.
 
 **Only a comment that asks something waits for a reply**: one whose marker
 is `[NEEDS-INPUT]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]` or `[NEEDS-ACTION]`,
