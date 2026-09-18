@@ -9,6 +9,7 @@ import {
   ENDING,
   EXIT,
   MAX_LIST,
+  branchHeadState,
   classifyEnding,
   lastResult,
   readGitState,
@@ -248,6 +249,44 @@ describe('readGitState against a real repository', () => {
   })
 })
 
+describe('branchHeadState', () => {
+  it('reads the head and commit count off the ticket branch, no extra git call', () => {
+    const git = fakeGit({
+      [REFS]: 'refs/remotes/origin/jaipal/tac-447-x',
+      'log --format=%h %s refs/remotes/origin/main..refs/remotes/origin/jaipal/tac-447-x': 'bbb2222 second\naaa1111 first\n',
+    })
+    const state = readGitState(git, 'TAC-447')
+    expect(branchHeadState(state)).toEqual({ head: 'bbb2222', commits: 2 })
+  })
+
+  it('says none/0 when there is no branch on GitHub', () => {
+    expect(branchHeadState({ readable: true, branches: [] })).toEqual({ head: null, commits: 0 })
+  })
+
+  it('says none/0 when git could not be read at all', () => {
+    expect(branchHeadState({ readable: false })).toEqual({ head: null, commits: 0 })
+  })
+
+  it('picks the branch with the most commits ahead when more than one exists', () => {
+    const state = {
+      readable: true,
+      branches: [
+        { name: 'jaipal/tac-447-a', local: false, remote: true, onGitHub: ['aaa1111 x'], notPushed: [] },
+        { name: 'jaipal/tac-447-b', local: false, remote: true, onGitHub: ['bbb2222 y', 'ccc3333 z'], notPushed: [] },
+      ],
+    }
+    expect(branchHeadState(state)).toEqual({ head: 'bbb2222', commits: 2 })
+  })
+
+  it('skips a branch whose commits could not be read', () => {
+    const state = {
+      readable: true,
+      branches: [{ name: 'jaipal/tac-447-x', local: true, remote: true, onGitHub: null, notPushed: null }],
+    }
+    expect(branchHeadState(state)).toEqual({ head: null, commits: 0 })
+  })
+})
+
 describe('renderGitReport', () => {
   const state = {
     readable: true,
@@ -312,12 +351,18 @@ describe('the two notices', () => {
   const common = { ticket: 'TAC-447', turns: 61, maxTurns: 60, gitReport: 'REPORT', runUrl: 'https://run' }
 
   it('[TURN-LIMIT] is a comment the Linear helper accepts, with its own marker', () => {
-    const body = renderTurnLimit({ ...common, denials: '2', denied: ['Bash: npx eslint x', 'Edit: /a/b'] })
+    const body = renderTurnLimit({ ...common, denials: '2', denied: ['Bash: npx eslint x', 'Edit: /a/b'], head: 'aaa1111', commits: 3 })
     expect(checkCommentBody(body)).toMatchObject({ ok: true })
     expect(commentMarker(body)).toBe('TURN-LIMIT')
+    expect(body).toContain('[TURN-LIMIT] TAC-447 head=aaa1111 commits=3')
     expect(body).toContain('stopped at its turn limit (61 turns against a limit of 60)')
     expect(body).toContain('```text\nBash: npx eslint x\nEdit: /a/b\n```')
     expect(body).toContain('Reply here to continue.')
+  })
+
+  it('[TURN-LIMIT] defaults to head=none commits=0 when neither is given', () => {
+    const body = renderTurnLimit({ ...common, denials: '0', denied: [] })
+    expect(body).toContain('[TURN-LIMIT] TAC-447 head=none commits=0')
   })
 
   it('[OVER-LIMIT] is bookkeeping the helper accepts, with the run, turns and limit on its marker line', () => {
@@ -373,6 +418,11 @@ describe('run', () => {
     expect(out).toContain('- Permission denials: 2')
     expect(out).toContain('Edit: /a/b')
     expect(out).toContain('aaa1111 TAC-447: mentions')
+  })
+
+  it('notice embeds the branch head and commit count in the marker line, from the same git state as the report', () => {
+    const { out } = call(['notice', 'TAC-447', '/stopped.json', '60'])
+    expect(out).toContain('[TURN-LIMIT] TAC-447 head=aaa1111 commits=1')
   })
 
   it('notice prints [OVER-LIMIT] for a session that finished over the limit', () => {

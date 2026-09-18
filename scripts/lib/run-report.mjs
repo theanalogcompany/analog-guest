@@ -164,6 +164,22 @@ function fenced(items) {
 
 const UNKNOWN = '(unknown: git could not read it)';
 
+/**
+ * The current head short sha and commit-ahead count for the ticket's branch
+ * on GitHub, from the same state renderGitReport reads — no extra git call.
+ * Embedded in [TURN-LIMIT]'s marker line (TAC-480) so a later automatic
+ * restart decision can read progress off the notice itself, never assumed.
+ * `state.branches` is normally exactly one; if more than one exists, the one
+ * with the most commits ahead wins, since that is the one worth resuming.
+ */
+export function branchHeadState(state) {
+  if (!state.readable) return { head: null, commits: 0 };
+  const remote = state.branches.filter((b) => b.remote && b.onGitHub !== null);
+  if (remote.length === 0) return { head: null, commits: 0 };
+  const best = remote.reduce((a, b) => (b.onGitHub.length > a.onGitHub.length ? b : a));
+  return { head: best.onGitHub.length > 0 ? best.onGitHub[0].split(' ')[0] : null, commits: best.onGitHub.length };
+}
+
 /** The pushed / not pushed / not committed report, as markdown. */
 export function renderGitReport(state) {
   if (!state.readable) {
@@ -202,12 +218,20 @@ export function renderGitReport(state) {
 
 const PREFIX = '**[FROM CLAUDE CODE]**';
 
-/** [TURN-LIMIT]: the CLI stopped the session. Blocking, like [SILENT-RUN]. */
-export function renderTurnLimit({ ticket, turns, maxTurns, gitReport, runUrl, denials, denied }) {
+/**
+ * [TURN-LIMIT]: the CLI stopped the session. Blocking, like [SILENT-RUN].
+ * The marker line carries the branch's head and commit-ahead count
+ * (TAC-480) so a later automatic-restart decision can read progress off
+ * this notice itself; `head`/`commits` are optional so a caller that
+ * predates that mechanism (or a test) still gets a valid marker line.
+ *
+ * @param {{ ticket: string, turns: number|string, maxTurns: number, gitReport: string, runUrl: string, denials: string, denied: string[], head?: string|null, commits?: number }} opts
+ */
+export function renderTurnLimit({ ticket, turns, maxTurns, gitReport, runUrl, denials, denied, head, commits }) {
   return [
     PREFIX,
     '',
-    `[TURN-LIMIT] ${ticket}`,
+    `[TURN-LIMIT] ${ticket} head=${head ?? 'none'} commits=${commits ?? 0}`,
     '',
     `The build session was stopped at its turn limit (${turns} turns against a limit of ${maxTurns}) before it finished, so the work on this ticket is incomplete. This notice comes from the workflow, not the session.`,
     '',
@@ -292,16 +316,18 @@ export function run({ argv, env, readFile, git, stdout, stderr }) {
     const ending = classifyEnding(result, maxTurns);
     if (ending !== ENDING.STOPPED_AT_LIMIT && ending !== ENDING.FINISHED_OVER_LIMIT) return EXIT.OK;
 
+    const gitState = readGitState(git, ticket);
     const common = {
       ticket,
       turns: result.num_turns ?? 'an unknown number of',
       maxTurns,
-      gitReport: renderGitReport(readGitState(git, ticket)),
+      gitReport: renderGitReport(gitState),
       runUrl: env.RUN_URL ?? '(no run url)',
     };
     const body = ending === ENDING.STOPPED_AT_LIMIT
       ? renderTurnLimit({
           ...common,
+          ...branchHeadState(gitState),
           denials: env.DENIALS ?? '0',
           denied: lines(env.DENIED).map((l) => l.replace(/^- /, '')).filter((l) => l !== '(none)'),
         })
