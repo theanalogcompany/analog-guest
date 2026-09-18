@@ -685,6 +685,19 @@ export type VerifyGroundingInput = {
   // Record<ApprovalTrigger, ...>` total maps). Both production callers already
   // pass it; making it required costs nothing and fails `tsc` on the next one.
   runtimeContext: string
+  // TAC-376: true when there is no guest message this turn — a followup or
+  // the knowledge-gap holding message, both generated with no inbound to
+  // answer. REQUIRED, same convention as runtimeContext above: every call
+  // site has to decide rather than silently defaulting. Gates two things,
+  // both inside buildSystemPrompt/buildUserPrompt: the "Guest's message"
+  // framing line (there is none to quote), and one additional rule — a claim
+  // about what the GUEST did ("brought a friend in") is in remit on a
+  // proactive turn, because the assistant is the one asserting it rather than
+  // restating something the guest said. `false` renders the exact prompt this
+  // verifier always rendered before this field existed; the addendum is
+  // appended only when `true`, never woven into the base prompt, so an
+  // inbound call's prompt is byte-identical to what it was pre-TAC-376.
+  isProactive: boolean
 }
 
 export type VerifyGroundingResult = {

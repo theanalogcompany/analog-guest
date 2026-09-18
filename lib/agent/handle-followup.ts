@@ -26,6 +26,9 @@ import {
   APPROVAL_TRIGGERS,
   generateStage,
   retrieveCorpusStage,
+  type GroundingBackstopResult,
+  type MechanicOfferBackstopResult,
+  verifyGroundingStage,
   verifyMechanicOfferStage,
 } from './stages'
 import {
@@ -504,11 +507,60 @@ export async function handleFollowup(input: {
     // below so the auto-send row is stamped review_reason='demo_bypass'.
     // TAC-355: independent mechanic-offer backstop. Runs on the followup
     // path too — a mechanic can be offered on a proactive outbound message
-    // exactly as easily as in reply to a guest's question, unlike
-    // knowledge-gap grounding (inherently about answering a question the
-    // guest asked, so inbound-only). Runs for manual followups too since
-    // TAC-307, same as the gate itself.
-    const mechanicOfferBackstop = await verifyMechanicOfferStage(ctx, gen.result)
+    // exactly as easily as in reply to a guest's question. Runs for manual
+    // followups too since TAC-307, same as the gate itself.
+    // TAC-376: independent grounding backstop, run alongside it. Was
+    // inbound-only (verifyGroundingStage returned 'skipped' unconditionally
+    // when ctx.currentMessage was null) — per the 2026-09-17 ruling it now
+    // runs on every followup too, same verifier, same triggers, same
+    // failure posture as inbound. Promise.allSettled, not Promise.all, for
+    // the identical reason handle-inbound.ts gives: both stages are
+    // independent Haiku calls verified to never throw today, but Promise.all
+    // would let a hypothetical future throw in one silently discard the
+    // other's finding — a fail-open by accident on a gate that has to fail
+    // closed on truncation.
+    const [groundingSettled, mechanicOfferSettled] = await Promise.allSettled([
+      verifyGroundingStage(ctx, gen.result),
+      verifyMechanicOfferStage(ctx, gen.result),
+    ])
+    if (groundingSettled.status === 'rejected') {
+      console.warn('[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)', {
+        agentRunId,
+        error:
+          groundingSettled.reason instanceof Error
+            ? groundingSettled.reason.message
+            : String(groundingSettled.reason),
+      })
+    }
+    if (mechanicOfferSettled.status === 'rejected') {
+      console.warn(
+        '[agent] followup verifyMechanicOfferStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            mechanicOfferSettled.reason instanceof Error
+              ? mechanicOfferSettled.reason.message
+              : String(mechanicOfferSettled.reason),
+        },
+      )
+    }
+    const groundingBackstop: GroundingBackstopResult =
+      groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
+    const mechanicOfferBackstop: MechanicOfferBackstopResult =
+      mechanicOfferSettled.status === 'fulfilled'
+        ? mechanicOfferSettled.value
+        : { status: 'check_failed' }
+    if (groundingBackstop.status === 'flagged') {
+      console.warn('[agent] followup grounding backstop caught an unverified claim', {
+        agentRunId,
+        claimCount: groundingBackstop.claims.length,
+      })
+    }
+    if (groundingBackstop.status === 'truncated') {
+      console.warn('[agent] followup grounding backstop truncated — queuing (fail closed)', {
+        agentRunId,
+      })
+    }
     if (
       mechanicOfferBackstop.status === 'flagged' ||
       mechanicOfferBackstop.status === 'check_failed'
@@ -518,7 +570,12 @@ export async function handleFollowup(input: {
         status: mechanicOfferBackstop.status,
       })
     }
-    const approval = await applyApprovalPolicyStage(ctx, gen.result, null, mechanicOfferBackstop)
+    const approval = await applyApprovalPolicyStage(
+      ctx,
+      gen.result,
+      groundingBackstop,
+      mechanicOfferBackstop,
+    )
     console.log('[agent] followup approval decision', {
       agentRunId,
       triggerReason: input.trigger.reason,
@@ -540,18 +597,21 @@ export async function handleFollowup(input: {
           gen.result,
           approval.primaryTrigger,
           approval.existingPendingDraftId,
-          // TAC-308: always undefined on this path (the KNOWLEDGE_GAP
-          // trigger is inbound-only), passed for call-site symmetry so the
-          // two orchestrators can't drift.
-          // TAC-364: same symmetry. `ungroundedClaims` is always NULL on this
-          // path — `verifyGroundingStage` returns early when currentMessage is
-          // null, so no followup has a grounding backstop at all (that gap is
-          // TAC-376) — and NULL is precisely the value that records "the check
-          // did not run", as opposed to `[]`, which would claim it ran and
-          // found nothing. Every followup row in `messages.ungrounded_claims`
-          // is therefore NULL, and that is a true statement about the feature
-          // rather than a gap in the data. `reviewTriggers` IS real here and
-          // carries the same co-firing information an inbound draft does.
+          // TAC-308: `pendingUntil` is always undefined on this path — the
+          // KNOWLEDGE_GAP trigger itself stays inbound-only
+          // (knowledgeGapWillQueue requires ctx.currentMessage !== null), so
+          // that specific trigger can never fire here. Passed for call-site
+          // symmetry so the two orchestrators can't drift.
+          //
+          // TAC-376: `ungroundedClaims` is REAL here, same as inbound.
+          // Followups run verifyGroundingStage now (see the Promise.allSettled
+          // above), so a followup CAN produce a KNOWLEDGE_GAP_BACKSTOP or
+          // GROUNDING_CHECK_FAILED trigger and arm the same pendingUntil clock
+          // an inbound catch would (isGapTurn unions both signals regardless
+          // of which orchestrator fed it) — that used to be structurally
+          // impossible on this path; it no longer is. `reviewTriggers` was
+          // already real here and carries the same co-firing information an
+          // inbound draft does.
           //
           // TAC-394: a manual followup never regenerates over a card, even one
           // a 23505 reveals that the gate never saw ('never_regen').

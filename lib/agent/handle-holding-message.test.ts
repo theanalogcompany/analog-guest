@@ -32,6 +32,7 @@ const retrieveKnowledgeStageMock = vi.fn(async () => [
   },
 ])
 const applyApprovalPolicyStageMock = vi.fn()
+const verifyGroundingStageMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn().mockResolvedValue(undefined)
 const capturePostHogEventMock = vi.fn().mockResolvedValue(undefined)
@@ -57,6 +58,7 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('./stages', () => ({
   generateStage: (...a: unknown[]) => generateStageMock(...a),
   applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+  verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
   retrieveCorpusStage: vi.fn(async () => []),
   retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
   shouldRetrieveKnowledge: () => true,
@@ -144,6 +146,10 @@ beforeEach(() => {
   })
   generateStageMock.mockResolvedValue(goodGeneration())
   applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+  // TAC-376: default to 'skipped', matching production's most common case (a
+  // holding message with no gap-shaped finding). Tests that need a real
+  // verdict override with mockResolvedValueOnce.
+  verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
   optedOutMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
 })
 
@@ -359,6 +365,110 @@ describe('handleHoldingMessage (TAC-308)', () => {
     })
     expect(r).toMatchObject({ status: 'failed', stage: 'context_build' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+})
+
+// TAC-376: the holding message now runs the same grounding backstop
+// verifyGroundingStage gives an inbound reply — it was `null`-inert on this
+// path before this ticket (verifyGroundingStage returned 'skipped'
+// unconditionally when ctx.currentMessage was null, which it always is
+// here). There is no mechanic-offer backstop on this path (a holding
+// message doesn't offer mechanics) and no Promise.allSettled — grounding is
+// the only backstop call, called once per attempt, before the gate.
+describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
+  it('runs the grounding backstop once per attempt and threads its result into applyApprovalPolicyStage', async () => {
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'clean' })
+    await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
+    const [, generationArg] = verifyGroundingStageMock.mock.calls[0]
+    expect(generationArg).toMatchObject({ body: expect.any(String) })
+    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({ status: 'clean' })
+  })
+
+  // AC2 ("the fail-open/closed posture is explicit and tested in both
+  // directions") exercised at this orchestrator boundary too — a degraded
+  // (fail-open) call must not by itself stop the attempt from sending; a
+  // flagged or truncated (fail-closed) one must, the same way a `queue`
+  // verdict from any other trigger already does on this path (decision #2
+  // in the module's own header: no slot to queue into, so a trip here is a
+  // failed attempt, not a route).
+  it('a degraded (clean) grounding call does not fail the attempt on its own (fail-open)', async () => {
+    verifyGroundingStageMock.mockResolvedValue({ status: 'clean' })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(generateStageMock).toHaveBeenCalledTimes(1)
+    expect(r).toMatchObject({ status: 'sent', usedFallback: false })
+  })
+
+  it('a flagged grounding result fails the attempt and retries, then sends once the retry is clean', async () => {
+    verifyGroundingStageMock
+      .mockResolvedValueOnce({ status: 'flagged', claims: ['invented a fact'] })
+      .mockResolvedValueOnce({ status: 'clean' })
+    applyApprovalPolicyStageMock
+      .mockResolvedValueOnce({
+        action: 'queue',
+        triggers: ['knowledge_gap_backstop'],
+        primaryTrigger: 'knowledge_gap_backstop',
+        compMatchedPattern: null,
+        ungroundedClaims: ['invented a fact'],
+        existingPendingDraftId: null,
+      })
+      .mockResolvedValueOnce({ action: 'send' })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(generateStageMock).toHaveBeenCalledTimes(2)
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
+    expect(r).toMatchObject({ status: 'sent', usedFallback: false })
+  })
+
+  it('a truncated grounding call on both attempts falls back to the plain line (fail-closed)', async () => {
+    verifyGroundingStageMock.mockResolvedValue({ status: 'truncated' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['grounding_check_failed'],
+      primaryTrigger: 'grounding_check_failed',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+    })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(generateStageMock).toHaveBeenCalledTimes(2)
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
+    expect(r).toMatchObject({ status: 'sent', usedFallback: true })
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { body: string }
+    expect(sentGeneration.body).toBe(FALLBACK_HOLDING_BODY)
+  })
+
+  // The fallback bypasses generation and the gate entirely — grounding must
+  // never be asked to check a body that was never generated.
+  it('does not run the grounding backstop when generation itself was refused', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'refused',
+      attemptScores: [0.1],
+      finalScore: 0.1,
+    })
+    await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+    })
+    expect(verifyGroundingStageMock).not.toHaveBeenCalled()
   })
 })
 

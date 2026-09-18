@@ -424,6 +424,10 @@ export async function regenerateWithCritique(
       replyBody: gen.data.body,
       venueInfo: ctx.venue.venueInfo,
       knowledgeChunks,
+      // TAC-376: this path always has a real inbound (load.data.inbound.body
+      // above, the triggering message the regen is pinned to) — never
+      // proactive.
+      isProactive: false,
       // TAC-301 part 1.5: mirrored from verifyGroundingStage per this file's
       // standing obligation to track stages.ts's gating. Without it the regen
       // path shows the operator a false "ungrounded claim" warning on any

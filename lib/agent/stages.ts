@@ -857,14 +857,26 @@ export type GroundingBackstopResult =
  * second, independent check for a self-report that's already proven
  * unreliable under real traffic.
  *
+ * TAC-376: no longer inbound-only. Three call sites now reach here —
+ * handle-inbound.ts, handle-followup.ts (both engine and manual followups),
+ * and handle-holding-message.ts (the knowledge-gap holding message) — per the
+ * 2026-09-17 ruling: same verifier, same triggers, same failure posture as
+ * inbound, no parallel check built for the no-guest-message case.
+ * `isProactive` is derived HERE, from `ctx.currentMessage === null`, rather
+ * than threaded in by callers — same boundary this stage already owned for
+ * its other two skip conditions, so the two orchestrators that used to pass
+ * `null` for this stage's result just start getting a real one.
+ *
  * Skips (returns null without calling the model) when:
- *   - not inbound (ctx.currentMessage === null) — a followup isn't
- *     answering a specific guest question, mirrors knowledgeGapWillQueue.
  *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
  *     trigger, so spending a Haiku call here buys nothing.
  *   - the model already self-reported knowledgeGap=true — trust it; this is
  *     also what keeps the added cost to roughly half of inbound traffic
- *     (only turns where the model claims confidence pay for the check).
+ *     (only turns where the model claims confidence pay for the check). A
+ *     followup/holding-message generation always has knowledgeGap=false (the
+ *     field only means something on the inbound path), so neither of those
+ *     two callers ever hits this skip either — every one of their turns pays
+ *     for the check.
  *
  * Fails OPEN on a TRANSIENT AI-call error (network hiccup, provider 5xx,
  * timeout) — returns `clean`, logged via console.warn, not fireRedAlert.
@@ -873,7 +885,10 @@ export type GroundingBackstopResult =
  * (trust the model), never to something worse. Queuing every transient
  * failure closed would turn a rare Haiku hiccup into a broad, unrelated
  * availability regression for a check whose entire population already passed
- * self-report.
+ * self-report. Same posture on a proactive turn (2026-09-17 ruling, question
+ * 3) — nobody is waiting on a followup or a holding message the way a guest
+ * is waiting on an inbound reply, but the ruling kept the SAME posture rather
+ * than tightening it, so this file has one failure policy, not two.
  *
  * TAC-367 carves ONE cause out of that: output TRUNCATION fails CLOSED,
  * returning `truncated`, which queues via GROUNDING_CHECK_FAILED. The
@@ -893,15 +908,17 @@ export async function verifyGroundingStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus'>,
   generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body' | 'userPrompt'>,
 ): Promise<GroundingBackstopResult> {
-  if (ctx.currentMessage === null) return { status: 'skipped' }
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (generation.knowledgeGap === true) return { status: 'skipped' }
 
+  const isProactive = ctx.currentMessage === null
+
   const r = await verifyGrounding({
-    inboundBody: ctx.currentMessage.body,
+    inboundBody: ctx.currentMessage?.body ?? '',
     replyBody: generation.body,
     venueInfo: ctx.venue.venueInfo,
     knowledgeChunks: ctx.knowledgeCorpus ?? undefined,
+    isProactive,
     // TAC-301 part 1.5: hand over the generator's OWN composed user prompt,
     // unmodified. Do not rebuild this from ctx — the identity is the point.
     // Everything the generator knew about this guest and this moment lives
@@ -909,9 +926,8 @@ export async function verifyGroundingStage(
     // commitments, ## Visit history, ## Guest context, ## Recent
     // conversation), and without it every fact drawn from those blocks reads
     // to the verifier as unsupported. Six of six were measured doing exactly
-    // that against Le Mil's live config. (## Operator instruction renders
-    // only on the followup path, which this stage returns null for, so it
-    // never actually appears here.)
+    // that against Le Mil's live config. (## Operator instruction renders on
+    // the followup path too, since TAC-376, so it can now appear here.)
     runtimeContext: generation.userPrompt,
   })
   if (!r.ok) {
@@ -951,7 +967,10 @@ export async function verifyGroundingStage(
     agentRunId: ctx.agentRunId,
     venueId: ctx.venue.id,
     guestId: ctx.guest.id,
-    inboundBody: ctx.currentMessage.body,
+    // TAC-376: no inbound on a proactive turn (followup / holding message).
+    // `(none — proactive)` reads as a fact on the Slack card rather than as
+    // an empty, unexplained pair of quotes.
+    inboundBody: ctx.currentMessage?.body ?? '(none — proactive)',
     replyBody: generation.body,
     ungroundedClaims: r.data.ungroundedClaims,
   })
