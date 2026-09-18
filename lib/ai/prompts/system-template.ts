@@ -826,6 +826,29 @@
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.53.0 (TAC-417): RECOMMENDATION_REQUEST_INSTRUCTIONS gains a pointer to
+// ## Visit history. It was the one category in this family silent on it —
+// FOLLOW_UP_INSTRUCTIONS and MANUAL_INSTRUCTIONS already say to use runtime
+// context (mechanics, last visit, recognition state), and
+// PERSONAL_HISTORY_QUESTION_INSTRUCTIONS already says to answer from the
+// block when present. The transcript that filed this shows the gap exactly:
+// a returning guest asked what to get and got a first-visit reply ("I'd
+// start with the SoFi"), then forty seconds later, unprompted by any new
+// data, correctly named their one prior order when asked directly. Same
+// data, same turn's context, two different categories, one of them silent.
+//
+// Not a plumbing gap. The block already renders for recommendation_request
+// whenever recentVisits is non-empty, and only real transactions populate
+// it, so the new sentence cannot invent a history — it fires on block
+// presence, which is itself gated on confirmed orders. A genuinely new
+// guest renders no block and gets an ordinary first-visit recommendation.
+//
+// The new sentence is deliberately scoped away from this file's own
+// "regulars' habits" line two sentences earlier, which is about OTHER
+// people's habits, not this guest's own history — named explicitly so a
+// model reading "don't do regulars'-habits framing" doesn't fold the new
+// instruction into what it just forbade.
+//
 // v1.52.0 (TAC-423): the ## What you're hoping to get to first-touch opener's
 // fallback question changes from "ask whether it's their first time" to "ask
 // what they got". Since TAC-380/436 the opener already renders alongside
@@ -971,7 +994,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.52.0'
+export const PROMPT_VERSION = 'v1.53.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

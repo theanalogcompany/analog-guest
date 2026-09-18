@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.52.0 (TAC-423: the first-touch opener asks what they got)', () => {
-    expect(PROMPT_VERSION).toBe('v1.52.0')
+  it('is v1.53.0 (TAC-417: recommendation-request references known order history)', () => {
+    expect(PROMPT_VERSION).toBe('v1.53.0')
   })
 })
 
