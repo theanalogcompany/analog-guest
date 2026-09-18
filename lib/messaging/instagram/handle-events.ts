@@ -34,6 +34,11 @@
 // 'text' (migration 048) until TAC-472 removes the default, so an Instagram row
 // that omitted it would be recorded as a text message with no error at all.
 //
+// Every message, postback and echo row also carries `provider_sent_at`,
+// Instagram's own time for the event (TAC-479, migration 049). NULL only when
+// the item had no millisecond timestamp, which the outcome's hasProviderSentAt
+// flag makes visible in the logs. Sendblue never writes it.
+//
 // Two deliberate differences from Sendblue:
 //   - A delivery holds many events. Each is handled on its own, in order, and a
 //     failure or a throw in one never stops the rest.
@@ -84,6 +89,8 @@ export type InstagramEventOutcome =
       messageId: string
       guestCreated: boolean
       hasReferral: boolean
+      /** False when the item had no millisecond timestamp and provider_sent_at was saved NULL. */
+      hasProviderSentAt: boolean
     }
   | {
       status: 'duplicate'
@@ -216,6 +223,9 @@ function inboundInsert(
     body: (isMessage ? event.text : event.title) ?? '',
     media_urls: isMessage ? event.mediaUrls : [],
     provider_message_id: event.mid,
+    // Instagram's own time for the guest's action (TAC-479). TAC-469's 24-hour
+    // window gate and TAC-486's countdown run from this, never created_at.
+    provider_sent_at: event.providerSentAt,
     referral_ref: event.referral?.ref ?? null,
     referral_source: event.referral?.source ?? null,
   }
@@ -231,6 +241,13 @@ function echoInsert(event: InstagramEchoEvent, venueId: string, guestId: string)
     body: event.text ?? '',
     media_urls: event.mediaUrls,
     provider_message_id: event.mid,
+    // Written on echoes too, deliberately (TAC-479), because TAC-469 reads it.
+    // An echo is how a reply staff typed in the Instagram app is recorded, and
+    // TAC-469 reconciles its own sends onto echo rows. A reader working on
+    // Instagram's clock finds no time at all on an echo saved without this, so
+    // that reply would fall outside the window, as if it had never been sent in
+    // it. sent_at stays our receipt time, like every other row's.
+    provider_sent_at: event.providerSentAt,
     sent_at: new Date().toISOString(),
   }
 }
@@ -266,6 +283,7 @@ async function insertMessage(
     messageId: data.id,
     guestCreated: guest.created,
     hasReferral: event.kind !== 'echo' && event.referral !== null,
+    hasProviderSentAt: event.providerSentAt !== null,
   }
 }
 
@@ -369,6 +387,7 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
         messageId: outcome.messageId,
         guestCreated: outcome.guestCreated,
         hasReferral: outcome.hasReferral,
+        hasProviderSentAt: outcome.hasProviderSentAt,
       })
       return
     case 'duplicate':
