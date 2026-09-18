@@ -1,0 +1,304 @@
+// TAC-468: turn a verified Instagram webhook delivery into typed events.
+//
+// Pure. The route verifies the signature and parses the JSON; this decides
+// what each item in the delivery IS, and handle-events.ts decides what to save.
+// Kept apart so the rules here are tested against Meta's recorded payloads
+// (fixtures/) without a database.
+//
+// Meta batches: one delivery holds `entry[]`, and each entry holds a
+// `messaging[]` array (or `changes[]` / `standby[]` for fields this handler
+// does not handle). Events come back in delivery order, one per item, so a
+// guest's message and the venue's reply keep their order.
+//
+// Four kinds are handled, told apart by the item's own keys and never by
+// guessing from sender and recipient:
+//   message   `message` present, no `is_echo`: the guest wrote to the venue.
+//   echo      `message.is_echo === true`: the venue account sent it, by ANY
+//             means. Staff typing in the Instagram app, and (from TAC-469) the
+//             agent's own API sends. Sender and recipient are reversed.
+//   postback  `postback`: an icebreaker tap. Its `mid` is INSIDE `postback`.
+//   read      `read`: a read receipt. The key is `read`; `messaging_seen` is
+//             only the webhook subscription field's name. It names one `mid`.
+//
+// Everything else becomes an `unhandled` event carrying a reason and the NAMES
+// of what arrived, never values, so the route can log it and acknowledge it.
+// Nothing is dropped silently: an unexpected shape is how a future Meta change
+// shows up, and a silent drop would make it look like a bug somewhere else.
+
+export type InstagramReferral = {
+  /** The `ref` query parameter of the ig.me link the guest followed. */
+  ref: string | null
+  /** Meta's `source`, e.g. `SHORTLINK` on the recorded postback. */
+  source: string | null
+}
+
+type EventBase = {
+  /** `entry[].id`: the venue's Instagram professional account ID. */
+  accountId: string
+  /** The guest's Instagram-scoped ID: whichever party is not the account. */
+  guestIgsid: string
+  /** Meta's message ID. On a read receipt, the ID of the message that was read. */
+  mid: string
+}
+
+export type InstagramMessageEvent = EventBase & {
+  kind: 'message'
+  text: string | null
+  mediaUrls: string[]
+  referral: InstagramReferral | null
+}
+
+export type InstagramEchoEvent = EventBase & {
+  kind: 'echo'
+  text: string | null
+  mediaUrls: string[]
+}
+
+// The postback's `payload` (e.g. ICEBREAKER_HOURS) is deliberately not carried:
+// it is the venue's icebreaker configuration, not something the guest saw, and
+// there is no column for it. The `title` is what the thread shows as the
+// guest's message.
+export type InstagramPostbackEvent = EventBase & {
+  kind: 'postback'
+  title: string | null
+  referral: InstagramReferral | null
+}
+
+export type InstagramReadEvent = EventBase & { kind: 'read' }
+
+export type InstagramHandledEvent =
+  | InstagramMessageEvent
+  | InstagramEchoEvent
+  | InstagramPostbackEvent
+  | InstagramReadEvent
+
+export type InstagramUnhandledReason =
+  /** Top-level `object` is not `instagram`. `fields` holds the object's value. */
+  | 'not_instagram'
+  /** A structure that isn't the shape Meta documents, or is missing an ID. */
+  | 'malformed'
+  /** An `entry[].changes[]` item: comments, live_comments, mentions. `fields` holds its `field`. */
+  | 'changes_field'
+  /** An `entry[].standby[]` item. */
+  | 'standby'
+  /**
+   * An item carrying only a `referral`: a guest following an ig.me link into a
+   * thread that already has messages. There is no message to save it on, so its
+   * ref is lost. Its own reason so that loss can be counted.
+   */
+  | 'standalone_referral'
+  /** A `messaging[]` item of any other kind: reaction, message_edit, handover... */
+  | 'unhandled_messaging_type'
+  /** Sender and recipient don't fit the account, e.g. a guest message not addressed to it. */
+  | 'account_mismatch'
+  /** The guest unsent a message (`message.is_deleted`). */
+  | 'message_deleted'
+  /** Meta could not render the content (`message.is_unsupported`). */
+  | 'message_unsupported'
+  /** A message with neither text nor an attachment URL. */
+  | 'message_no_content'
+
+export type InstagramUnhandledEvent = {
+  kind: 'unhandled'
+  reason: InstagramUnhandledReason
+  /** Names of what arrived (keys, or a `field` / `object` value). Never content. */
+  fields: string[]
+}
+
+export type InstagramEvent = InstagramHandledEvent | InstagramUnhandledEvent
+
+/** Per-item keys that route an event rather than name it. */
+const ROUTING_KEYS: ReadonlySet<string> = new Set(['sender', 'recipient', 'timestamp'])
+
+// The same bounds summarize-payload.ts puts on what it logs: the names come
+// from a signed body, but they still end up in a log line.
+const MAX_FIELD_LENGTH = 64
+const MAX_FIELDS = 12
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function fieldNames(names: Iterable<string>): string[] {
+  const out: string[] = []
+  for (const name of names) {
+    if (out.length >= MAX_FIELDS) break
+    if (name.length > MAX_FIELD_LENGTH) continue
+    out.push(name)
+  }
+  return out.sort()
+}
+
+function itemFieldNames(item: Record<string, unknown>): string[] {
+  return fieldNames(Object.keys(item).filter((key) => !ROUTING_KEYS.has(key)))
+}
+
+function unhandled(reason: InstagramUnhandledReason, fields: string[] = []): InstagramUnhandledEvent {
+  return { kind: 'unhandled', reason, fields }
+}
+
+function idOf(party: unknown): string | null {
+  return isRecord(party) ? nonEmptyString(party.id) : null
+}
+
+function parseReferral(value: unknown): InstagramReferral | null {
+  if (!isRecord(value)) return null
+  const ref = nonEmptyString(value.ref)
+  const source = nonEmptyString(value.source)
+  if (ref === null && source === null) return null
+  return { ref, source }
+}
+
+// Every attachment kind Meta documents (image, video, audio, file, share,
+// story_mention, ig_reel) carries its link at `payload.url`. These are signed
+// CDN URLs that expire; they are kept as they arrive, as the Sendblue path
+// keeps its media URL.
+function attachmentUrls(message: Record<string, unknown>): string[] {
+  if (!Array.isArray(message.attachments)) return []
+  const urls: string[] = []
+  for (const attachment of message.attachments) {
+    if (!isRecord(attachment) || !isRecord(attachment.payload)) continue
+    const url = nonEmptyString(attachment.payload.url)
+    if (url !== null) urls.push(url)
+  }
+  return urls
+}
+
+function parseMessage(
+  item: Record<string, unknown>,
+  message: Record<string, unknown>,
+  accountId: string,
+  senderId: string,
+  recipientId: string,
+): InstagramEvent {
+  const isEcho = message.is_echo === true
+  // An echo is FROM the account; everything else is TO it. A self-addressed
+  // item fits neither and is refused rather than guessed at.
+  const fits = isEcho
+    ? senderId === accountId && recipientId !== accountId
+    : recipientId === accountId && senderId !== accountId
+  if (!fits) return unhandled('account_mismatch', itemFieldNames(item))
+
+  const mid = nonEmptyString(message.mid)
+  if (mid === null) return unhandled('malformed', fieldNames(Object.keys(message)))
+  if (message.is_deleted === true) return unhandled('message_deleted', fieldNames(Object.keys(message)))
+  if (message.is_unsupported === true) {
+    return unhandled('message_unsupported', fieldNames(Object.keys(message)))
+  }
+
+  const text = nonEmptyString(message.text)
+  const mediaUrls = attachmentUrls(message)
+  if (text === null && mediaUrls.length === 0) {
+    return unhandled('message_no_content', fieldNames(Object.keys(message)))
+  }
+
+  if (isEcho) {
+    return { kind: 'echo', accountId, guestIgsid: recipientId, mid, text, mediaUrls }
+  }
+  return {
+    kind: 'message',
+    accountId,
+    guestIgsid: senderId,
+    mid,
+    text,
+    mediaUrls,
+    // Inside `message` on an ad referral; beside it, where Meta has put it on
+    // other surfaces. Taking either costs nothing, and the ref arrives once.
+    referral: parseReferral(message.referral) ?? parseReferral(item.referral),
+  }
+}
+
+function parseMessagingItem(item: unknown, accountId: string | null): InstagramEvent {
+  if (!isRecord(item)) return unhandled('malformed')
+
+  const senderId = idOf(item.sender)
+  const recipientId = idOf(item.recipient)
+  if (accountId === null || senderId === null || recipientId === null) {
+    return unhandled('malformed', itemFieldNames(item))
+  }
+
+  if (isRecord(item.message)) {
+    return parseMessage(item, item.message, accountId, senderId, recipientId)
+  }
+
+  // A postback and a read receipt both come from the guest, to the account.
+  const fromGuest = recipientId === accountId && senderId !== accountId
+
+  if (isRecord(item.postback)) {
+    if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
+    const mid = nonEmptyString(item.postback.mid)
+    if (mid === null) return unhandled('malformed', fieldNames(Object.keys(item.postback)))
+    return {
+      kind: 'postback',
+      accountId,
+      guestIgsid: senderId,
+      mid,
+      title: nonEmptyString(item.postback.title),
+      referral: parseReferral(item.postback.referral) ?? parseReferral(item.referral),
+    }
+  }
+
+  if (isRecord(item.read)) {
+    if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
+    const mid = nonEmptyString(item.read.mid)
+    if (mid === null) return unhandled('malformed', fieldNames(Object.keys(item.read)))
+    return { kind: 'read', accountId, guestIgsid: senderId, mid }
+  }
+
+  if (isRecord(item.referral)) return unhandled('standalone_referral', itemFieldNames(item))
+
+  return unhandled('unhandled_messaging_type', itemFieldNames(item))
+}
+
+function parseEntry(entry: unknown): InstagramEvent[] {
+  if (!isRecord(entry)) return [unhandled('malformed')]
+
+  const accountId = nonEmptyString(entry.id)
+  const events: InstagramEvent[] = []
+  let sawItems = false
+
+  if (Array.isArray(entry.messaging)) {
+    sawItems = true
+    for (const item of entry.messaging) events.push(parseMessagingItem(item, accountId))
+  }
+  if (Array.isArray(entry.changes)) {
+    sawItems = true
+    for (const change of entry.changes) {
+      const field = isRecord(change) ? nonEmptyString(change.field) : null
+      events.push(unhandled('changes_field', field === null ? [] : fieldNames([field])))
+    }
+  }
+  if (Array.isArray(entry.standby)) {
+    sawItems = true
+    for (const item of entry.standby) {
+      events.push(unhandled('standby', isRecord(item) ? itemFieldNames(item) : []))
+    }
+  }
+
+  if (!sawItems) {
+    return [unhandled('malformed', fieldNames(Object.keys(entry).filter((k) => k !== 'id' && k !== 'time')))]
+  }
+  return events
+}
+
+/**
+ * Every event in a verified delivery, in delivery order. Never throws: the
+ * input is whatever JSON.parse returned, so every level is guarded, and a
+ * shape this doesn't recognize becomes an `unhandled` event rather than an
+ * exception or a silent drop.
+ */
+export function parseInstagramDelivery(parsed: unknown): InstagramEvent[] {
+  if (!isRecord(parsed)) return [unhandled('malformed')]
+
+  if (parsed.object !== 'instagram') {
+    const object = nonEmptyString(parsed.object)
+    return [unhandled('not_instagram', object === null ? [] : fieldNames([object]))]
+  }
+
+  if (!Array.isArray(parsed.entry)) return [unhandled('malformed', fieldNames(Object.keys(parsed)))]
+  return parsed.entry.flatMap(parseEntry)
+}

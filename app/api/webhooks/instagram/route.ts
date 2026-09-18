@@ -3,9 +3,13 @@
 // config is saved, then POST for every Instagram event delivery. We never call
 // ourselves.
 //
-// Still transport plumbing only (TAC-445): no persistence, no agent
-// invocation, no IGSID-to-guest identity, no outbound path. POST verifies the
-// delivery, logs its shape, and acknowledges.
+// POST verifies the delivery, logs its shape, and saves what it can (TAC-468):
+// guest messages and icebreaker postbacks as inbound rows, the venue account's
+// echoes as outbound rows, and read receipts matched to their row and logged.
+// The rules for each are in lib/messaging/instagram/handle-events.ts. It has
+// the Sendblue route's shape: save, answer 200, and hand a new guest message to
+// the agent in the background. For Instagram that hand-off is switched off
+// until outbound exists; see lib/messaging/instagram/agent-gate.ts.
 //
 // THREE deliberate divergences from the Sendblue and Square webhook routes,
 // each of which would otherwise read as an inconsistency:
@@ -18,14 +22,18 @@
 //    digest may reach a log line.
 //
 // 2. Once a delivery has verified, POST returns 200 on EVERY path, including a
-//    parse failure and an unhandled throw. So does a throw while reading the
-//    body, before verification, which logs nothing from the body. Sendblue and
-//    Square reserve 5xx for unhandled throws so the provider retries transient
-//    infra failures; that trade doesn't apply here, because a handler that
-//    persists nothing has no transient failure worth retrying, while Meta
-//    disables the subscription after repeated non-2xx. A signature refusal is
-//    the one non-2xx this route sends, and it is meant for forgeries: if
-//    GENUINE deliveries start getting it, Meta will eventually disable the
+//    parse failure, a failed save and an unhandled throw. So does a throw while
+//    reading the body, before verification, which logs nothing from the body.
+//    Sendblue and Square reserve 5xx for unhandled throws so the provider
+//    retries. Since TAC-468 this route saves, so a failed save does lose that
+//    event. That is accepted (ruled 2026-09-18): Meta disables a subscription
+//    after repeated non-2xx, and a failure that is not transient would keep
+//    failing until the channel was switched off, with nothing here to alert
+//    anyone. Sendblue loses messages the same way in practice: supabase-js
+//    returns a network failure as `{ error }` rather than throwing, so its
+//    route answers 200 on a failed insert too. A signature refusal is the one
+//    non-2xx this route sends, and it is meant for forgeries: if GENUINE
+//    deliveries start getting it, Meta will eventually disable the
 //    subscription, so treat that as a revert signal, not something to debug
 //    in place.
 //
@@ -35,9 +43,19 @@
 //    into Vercel logs on every successful handshake. Do not add it back for
 //    parity.
 
+import { waitUntil } from '@vercel/functions'
+// Aliased as in the Sendblue route: the agent's handleInbound is the
+// orchestrator a saved guest message is handed to.
+import { handleInbound as runInboundAgent } from '@/lib/agent'
+import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
 // no-sub-barrel precedent, and a barrel is the thing that lets a future
 // vi.mock hand these tests a stubbed verifier when they need the real one.
+import { agentMessageIdFor } from '@/lib/messaging/instagram/agent-gate'
+import {
+  logInstagramOutcome,
+  processInstagramDelivery,
+} from '@/lib/messaging/instagram/handle-events'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -116,13 +134,13 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 /**
- * Instagram event delivery. Verifies, logs its shape, and acknowledges;
- * handles nothing.
+ * Instagram event delivery. Verifies, logs its shape, saves each event, and
+ * acknowledges.
  *
  * 403 with an empty body when the signature does not verify, including when
  * INSTAGRAM_APP_SECRET is unset or empty. 200 on every other path: see divergence 2 in
- * the file header for why, including on a parse failure and an unhandled
- * throw.
+ * the file header for why, including on a parse failure, a failed save and an
+ * unhandled throw.
  */
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -173,12 +191,21 @@ export async function POST(request: Request): Promise<Response> {
       return new Response('OK', { status: 200 })
     }
 
-    // Shape only. summarize-payload.ts is what holds "no guest content in
-    // logs": it is the only thing this route logs about a payload.
+    // Shape only. summarize-payload.ts and logInstagramOutcome are what hold
+    // "no guest content in logs": they are the only things this route logs
+    // about a payload.
     console.log('instagram webhook: event received', {
       event: 'instagram_event',
       ...summarizeInstagramPayload(parsed),
     })
+
+    const outcomes = await processInstagramDelivery(parsed, createAdminClient())
+    for (const outcome of outcomes) {
+      logInstagramOutcome(outcome)
+      // Always null while agent-gate.ts holds the gate shut (until TAC-469).
+      const agentMessageId = agentMessageIdFor(outcome)
+      if (agentMessageId !== null) waitUntil(runInboundAgent(agentMessageId))
+    }
 
     return new Response('OK', { status: 200 })
   } catch (e) {
