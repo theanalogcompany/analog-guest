@@ -11,8 +11,13 @@ name: Build ready tickets
 #             Action, whose newest comment is human input. The ruling has
 #             landed, so /work-ticket picks up where it stopped.
 #
-# "Newest comment" skips [SLACK], [RESUME-CLAIM] and [DENIALS] bookkeeping, so a Slack
-# marker or an earlier claim never buries a ruling.
+# One ticket per run (TAC-447). Each session gets its own turn limit, so an
+# expensive ticket never uses up another ticket's turns. The cost is
+# throughput: a second ready ticket waits for the next scheduled run, which on
+# 2026-09-17 came 2.3 to 3.2 hours later. Ruled acceptable.
+#
+# "Newest comment" skips [SLACK], [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT]
+# bookkeeping, so a Slack marker or an earlier claim never buries a ruling.
 #
 # Blocked on Jaipal is a label, not a status: nothing here moves a ticket
 # between statuses.
@@ -37,6 +42,17 @@ name: Build ready tickets
 # without a comment gets [SILENT-RUN] and the run fails. Permission denials
 # are counted in the log on every run.
 #
+# The same step reports the turn limit, through scripts/run-report.mjs. A
+# session the CLI stopped at the limit gets [TURN-LIMIT]: it blocks like
+# [SILENT-RUN] and names what reached GitHub and what died with the runner. A
+# session that finished but went over the limit, which claude-code-action
+# fails after the fact (run 35288433905: 128 turns against 120), gets
+# [OVER-LIMIT] bookkeeping, and the run stays failed. max_turns (manual
+# dispatch only) lowers the limit so a fixture ticket can reach the first case.
+# The check runs a copy of the reporter taken before the session, never the
+# checkout's own: by then the checkout is the session's branch, which may be
+# older than the reporter or be editing it.
+#
 # full_output (manual dispatch only) prints the session transcript into the
 # run log. Off by default: this repo is public, so the log is too, and a
 # transcript of a real ticket carries guest message text.
@@ -56,9 +72,14 @@ name: Build ready tickets
 # permission. Not chased further.
 #
 # The Claude step does not run from a branch whose copy of this file differs
-# from main's: claude-code-action skips itself and exits green. So a change to
-# this file can only be tested after it merges, on a fixture ticket. Run
-# 35149594063 is the example, caught by the check below.
+# from main's: claude-code-action skips itself ("Workflow validation failed")
+# and exits green. The shell steps still run from the branch. So the ticket
+# selection (with dry_run), and the check's handling of a session that posted
+# nothing, can be tested before merge on a fixture ticket. The turn-limit
+# notices and anything the session does can be tested only after it merges.
+# Run 35149594063 is the example: the session skipped, and the check posted
+# [SILENT-RUN] on fixture TAC-430. .claude/process.md, "Testing a workflow
+# change", has the procedure.
 #
 # Scheduled workflows run only from the default branch.
 
@@ -83,6 +104,11 @@ on:
         required: false
         default: false
         type: boolean
+      max_turns:
+        description: "Turn limit for this run's session. Lower it only on a fixture ticket, to reach the turn-limit notice."
+        required: false
+        default: 120
+        type: number
 
 concurrency:
   group: ticket-builds-${{ github.repository }}
@@ -96,6 +122,11 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+    # One turn limit, read by the session and by the check that reports on
+    # it. Scheduled and repository_dispatch runs have no inputs, so they get
+    # 120.
+    env:
+      MAX_TURNS: ${{ inputs.max_turns || 120 }}
 
     steps:
       - uses: actions/checkout@v6
@@ -118,7 +149,8 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           ONE_TICKET: ${{ inputs.ticket || github.event.client_payload.ticket }}
           DRY_RUN: ${{ inputs.dry_run }}
-          LIMIT: "2"
+          # One ticket per session (TAC-447): see the header.
+          LIMIT: "1"
           MAX_ATTEMPTS: "2"
           # A [POLLING-STATE] older than this is a dead local session, not a
           # live one. Without a window, any ticket ever worked locally can
@@ -202,7 +234,7 @@ jobs:
                 [.labels.nodes[].name] as $labels
                 | (.comments.nodes | sort_by(.createdAt)) as $sorted
                 # the newest comment that is a turn: bookkeeping skipped
-                | ($sorted | map(select(.body | marker_is("RESUME-CLAIM|SLACK|DENIALS") | not)) | last) as $newest
+                | ($sorted | map(select(.body | marker_is("RESUME-CLAIM|SLACK|DENIALS|OVER-LIMIT") | not)) | last) as $newest
                 | . + {
                     blocked: ($labels | any(. == "Needs Decision" or . == "Needs Action")),
                     newestId: ($newest.id // ""),
@@ -347,6 +379,21 @@ jobs:
             echo "flagged $NAME"
           done
 
+      # The check after the session reports through scripts/run-report.mjs.
+      # By then the checkout is on the session's branch, which can predate the
+      # script or be a ticket that edits it, so the check runs this copy,
+      # taken from the checkout before the session starts (main, on every
+      # scheduled run). It lives outside the checkout.
+      - name: Keep a copy of the turn-limit reporter
+        if: steps.queue.outputs.tickets != ''
+        env:
+          REPORTER_DIR: ${{ runner.temp }}/turn-limit-reporter
+        run: |
+          set -euo pipefail
+          mkdir -p "$REPORTER_DIR/lib"
+          cp scripts/run-report.mjs "$REPORTER_DIR/"
+          cp scripts/lib/run-report.mjs scripts/lib/linear-cli.mjs scripts/lib/comment-provenance.mjs "$REPORTER_DIR/lib/"
+
       - name: Work
         id: work
         if: steps.queue.outputs.tickets != ''
@@ -357,19 +404,24 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
-            --max-turns 120
+            --max-turns ${{ env.MAX_TURNS }}
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash(npx tsc:*),Bash(npx vitest:*),Bash(npm run lint:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git fetch:*),Bash(git pull:*),Bash(git checkout main),Bash(git checkout -b:*),Bash(git checkout jaipal/:*),Bash(git branch --list:*),Bash(git branch --show-current),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh workflow list:*),Bash(curl:*),Bash(jq:*),Bash(rg:*),Bash(python3:*),Bash(node:*)"
             --disallowedTools "Bash(npx supabase:*),Bash(npx tsx:*),Bash(git reset:*),Bash(git clean:*),Bash(git branch -D:*)"
           prompt: |
-            You are working Linear tickets for the repo ${{ github.event.repository.name }}.
+            You are working a Linear ticket for the repo ${{ github.event.repository.name }}.
 
-            Tickets, in order: ${{ steps.queue.outputs.tickets }}
+            Ticket: ${{ steps.queue.outputs.tickets }}
 
             Read CLAUDE.md and .claude/process.md first. Then follow
-            .claude/commands/work-ticket.md for each ticket — it is the
-            specification for this task and it governs.
+            .claude/commands/work-ticket.md for it — it is the specification
+            for this task and it governs.
 
             Dependencies are already installed. Do not run npm install.
+
+            YOU HAVE ${{ env.MAX_TURNS }} TURNS. When they run out the session
+            stops, and anything not pushed is lost with the runner. Push each
+            commit the plan names as soon as it is made (work-ticket.md
+            Phase 3). Never save pushes for the end.
 
             LINEAR, FROM CI. There is no Linear MCP here. Read with curl, and
             write with the checked-in helper, node scripts/linear.mjs. The key
@@ -429,9 +481,10 @@ jobs:
             available.
 
             After you finish, this workflow checks that you posted a comment
-            on every ticket you were given, and counts your permission
-            denials. A ticket you worked without a comment gets a
-            [SILENT-RUN] notice and the run fails.
+            on the ticket, and counts your permission denials. If you posted
+            nothing, the ticket gets a [SILENT-RUN] notice and the run fails.
+            If you ran out of turns, it gets a [TURN-LIMIT] notice saying what
+            you pushed.
 
             NO SCHEDULEWAKEUP IN CI. There is no harness to re-fire this
             session. Wherever work-ticket.md says to write [POLLING-STATE]
@@ -439,7 +492,7 @@ jobs:
               - add the right Blocked On label (Needs Decision or Needs
                 Action) and leave the status alone
               - post the comment work-ticket.md specifies
-              - move on to the next ticket, or exit
+              - exit
             This workflow resumes the ticket on its next scheduled run after
             Jaipal replies. That can be hours.
 
@@ -448,13 +501,16 @@ jobs:
             build on an unapproved plan.
 
             RESUMING. If the newest comment on a ticket, skipping [SLACK],
-            [RESUME-CLAIM] and [DENIALS] bookkeeping, is human input, that is Jaipal's
+            [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT] bookkeeping, is human
+            input, that is Jaipal's
             ruling, often a Slack reply. Apply it to ## Open questions BEFORE
             checking whether any question is still open (work-ticket.md Phase
             0 step 2b, then 2c). Checking first finds his own question still
             there and ignores his answer. Then continue from where the earlier
-            session stopped. Do not change the status. Read `git status` and
-            `git diff` on the branch to establish what is already done.
+            session stopped. Do not change the status. If the ticket's branch
+            is on GitHub, check it out (work-ticket.md Phase 3 step 14) and
+            read `git log` and `git diff` against main to establish what is
+            already done.
 
             ALWAYS POST BEFORE YOU EXIT. Every ticket you touch ends with a
             comment saying what happened, even if the answer is "nothing, and
@@ -465,8 +521,8 @@ jobs:
             step 2c). A quiet exit leaves the ticket looking exactly like one
             still waiting for him.
 
-            Never self-commit beyond what work-ticket.md allows, never merge,
-            never mark a ticket Done.
+            Commit and push only to the ticket's own branch, never to main.
+            Never merge, and never mark a ticket Done.
 
       - name: Check the session posted on every ticket it worked
         if: ${{ !cancelled() && steps.queue.outputs.tickets != '' }}
@@ -477,6 +533,8 @@ jobs:
           WORK_OUTCOME: ${{ steps.work.outcome }}
           EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The copy taken before the session, not the checkout's scripts/.
+          REPORTER: ${{ runner.temp }}/turn-limit-reporter/run-report.mjs
         run: |
           set -euo pipefail
 
@@ -516,6 +574,40 @@ jobs:
             echo "::warning title=Permission denials::The session hit $DENIALS permission denials."
           fi
 
+          # How the session ended against its turn limit (TAC-447; see the
+          # header). stopped-at-limit posts [TURN-LIMIT], finished-over-limit
+          # posts [OVER-LIMIT] bookkeeping. If the script fails, ENDING is
+          # unknown and the check behaves exactly as it did before TAC-447.
+          ENDING=$(node "$REPORTER" ending "$EXECUTION_FILE" "$MAX_TURNS") || ENDING="unknown"
+          echo "Turn limit $MAX_TURNS; ending: $ENDING."
+          notice() {
+            DENIALS="$DENIALS" DENIED="$DENIED" node "$REPORTER" notice "$1" "$EXECUTION_FILE" "$MAX_TURNS"
+          }
+
+          post() {
+            gql "$(jq -nc --arg id "$1" --arg body "$2" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+          }
+
+          # Puts a ticket in front of Jaipal: adds Needs Decision unless a
+          # Blocked On label is already on. $1 is the issue id, $2 the issue
+          # as the loop below reads it.
+          block() {
+            if echo "$2" | jq -e '[.data.issue.labels.nodes[].name] | any(. == "Needs Decision" or . == "Needs Action")' > /dev/null; then
+              return 0
+            fi
+            LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+              | jq -r '.data.issueLabels.nodes[0].id // empty')
+            if [ -z "$LABEL_ID" ]; then
+              echo "::error::No Needs Decision label found in Linear."
+              exit 1
+            fi
+            gql "$(jq -nc --arg id "$1" --arg label "$LABEL_ID" \
+              '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+              | jq -e '.data.issueAddLabel.success' > /dev/null
+          }
+
           # A run that succeeds with denials looks identical to one without,
           # so the denials go on the ticket as bookkeeping every time: a
           # denial on a finished run usually means a prompt teaches a form the
@@ -542,6 +634,7 @@ jobs:
           }
 
           SILENT=""
+          LIMITED=""
           for TICKET in $TICKETS; do
             ISSUE=$(gql "$(jq -nc --arg t "$TICKET" \
               '{query: "query($t: String!) { issue(id: $t) { id labels { nodes { name } } comments(first: 250) { nodes { body createdAt } } } }", variables: {t: $t}}')")
@@ -554,11 +647,36 @@ jobs:
               | [.data.issue.comments.nodes[]
                   | select((.createdAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= $since)
                   | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*"))
-                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:RESUME-CLAIM|SLACK|DENIALS|SILENT-RUN)\\]") | not)]
+                  | select(.body | test("^\\s*\\*\\*\\[FROM CLAUDE CODE\\]\\*\\*\\s*\\[(?:RESUME-CLAIM|SLACK|DENIALS|SILENT-RUN|TURN-LIMIT|OVER-LIMIT)\\]") | not)]
               | length')
+
+            # Stopped at the limit: the work is incomplete whatever the
+            # session posted, so [TURN-LIMIT] takes the place of [SILENT-RUN]
+            # and [DENIALS]. It carries the denied list itself.
+            if [ "$ENDING" = "stopped-at-limit" ]; then
+              BODY=$(notice "$TICKET") || BODY=""
+              if [ -n "$BODY" ]; then
+                LIMITED="$LIMITED $TICKET"
+                echo "::error title=Turn limit::$TICKET: the session was stopped at its turn limit of $MAX_TURNS. Posting [TURN-LIMIT]."
+                post "$ID" "$BODY"
+                block "$ID" "$ISSUE"
+                continue
+              fi
+            fi
 
             if [ "$POSTED" -gt 0 ]; then
               echo "$TICKET: the session posted $POSTED comment(s)."
+              if [ "$ENDING" = "finished-over-limit" ]; then
+                BODY=$(notice "$TICKET") || BODY=""
+                # Bookkeeping: a failed post must not stop [DENIALS] below.
+                if [ -n "$BODY" ]; then
+                  if post "$ID" "$BODY"; then
+                    echo "$TICKET: posted [OVER-LIMIT], $TURNS turns against a limit of $MAX_TURNS."
+                  else
+                    echo "::warning title=Turn limit::$TICKET: posting [OVER-LIMIT] failed."
+                  fi
+                fi
+              fi
               if [ "$DENIALS" -gt 0 ]; then
                 post_denials "$ID" "$TICKET"
               fi
@@ -575,7 +693,7 @@ jobs:
           The build workflow worked this ticket and its session posted nothing, so nothing here says what it did. This notice comes from the workflow, not the session: a session that cannot write to Linear cannot report its own failure.
 
           - Run: ${RUN_URL}
-          - Work step: ${WORK_OUTCOME}. The session ended ${ENDED} after ${TURNS} turns.
+          - Work step: ${WORK_OUTCOME}. The session ended ${ENDED} after ${TURNS} turns, against a limit of ${MAX_TURNS}.
           - Permission denials: ${DENIALS}
 
           Denied, first 20, key redacted:
@@ -586,26 +704,18 @@ jobs:
 
           Read the run before replying. A reply here resumes the ticket on the next scheduled run, and until the cause is fixed the same failure repeats."
 
-            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
-              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
-              | jq -e '.data.commentCreate.success' > /dev/null
-
-            if echo "$ISSUE" | jq -e '[.data.issue.labels.nodes[].name] | any(. == "Needs Decision" or . == "Needs Action")' > /dev/null; then
-              continue
-            fi
-            LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
-              | jq -r '.data.issueLabels.nodes[0].id // empty')
-            if [ -z "$LABEL_ID" ]; then
-              echo "::error::No Needs Decision label found in Linear."
-              exit 1
-            fi
-            gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
-              '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
-              | jq -e '.data.issueAddLabel.success' > /dev/null
+            post "$ID" "$BODY"
+            block "$ID" "$ISSUE"
           done
+
+          if [ -n "$LIMITED" ]; then
+            echo "::error title=Turn limit::Stopped at the turn limit of $MAX_TURNS on:$LIMITED"
+          fi
 
           # A silent run is a failed run. Green would say the opposite.
           if [ -n "$SILENT" ]; then
             echo "::error title=Silent run::No comment from the session on:$SILENT"
+          fi
+          if [ -n "$SILENT" ] || [ -n "$LIMITED" ]; then
             exit 1
           fi
