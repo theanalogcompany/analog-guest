@@ -14,8 +14,8 @@
 //    and Square answer 401. The ticket (TAC-458) specified 403, it matches this
 //    route's GET refusal, and Meta treats any non-2xx the same way. The refusal
 //    is decided before anything from the body is logged, and it logs a reason,
-//    never a digest: see lib/messaging/instagram/verify-webhook.ts for why the
-//    computed digest must not reach a log line now that it is trusted.
+//    never a digest: see lib/messaging/instagram/verify-webhook.ts for why no
+//    digest may reach a log line.
 //
 // 2. Once a delivery has verified, POST returns 200 on EVERY path, including a
 //    parse failure and an unhandled throw. So does a throw while reading the
@@ -44,10 +44,11 @@ import {
   verifyMetaChallengeToken,
 } from '@/lib/messaging/instagram/verify-webhook'
 
-// The user-agent is logged on a refusal so a rejected Meta delivery (the revert
-// signal in divergence 2) can be told apart from a stranger's probe. It is
-// caller-controlled, so it is capped like everything else this route logs from
-// a request it has not yet trusted.
+// The user-agent is logged on a refusal as a hint to whether it was a rejected
+// Meta delivery (the revert signal in divergence 2) or a stranger's probe. A
+// hint, not proof: Meta's user-agent is public and any caller can send it. It
+// is caller-controlled, so it is capped like everything else this route logs
+// from a request it has not yet trusted.
 const MAX_USER_AGENT_LOGGED = 128
 
 // The verification handshake MUST see each request. A cached GET would replay
@@ -119,7 +120,7 @@ export async function GET(request: Request): Promise<Response> {
  * handles nothing.
  *
  * 403 with an empty body when the signature does not verify, including when
- * INSTAGRAM_APP_SECRET is unset. 200 on every other path: see divergence 2 in
+ * INSTAGRAM_APP_SECRET is unset or empty. 200 on every other path: see divergence 2 in
  * the file header for why, including on a parse failure and an unhandled
  * throw.
  */
@@ -144,7 +145,8 @@ export async function POST(request: Request): Promise<Response> {
 
     // Nothing derived from the body is logged above this line, and a refusal
     // logs a reason, never a digest. The user-agent is the one request value
-    // here, capped, so a refused Meta delivery can be told from a probe.
+    // here, capped: a hint to whether a refusal was Meta's, since a probe can
+    // send Meta's user-agent too.
     const signature = verifyInstagramSignature(rawBody, request.headers, appSecret)
     if (!signature.ok) {
       console.warn('instagram webhook: signature rejected', {

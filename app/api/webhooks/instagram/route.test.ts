@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto'
+import { formatWithOptions } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -37,11 +38,23 @@ const originalRawFlag = process.env.INSTAGRAM_LOG_RAW_INBOUND
 
 let logged: unknown[][] = []
 
-/** Everything written to the console this test, flattened for substring checks. */
+/**
+ * Everything written to the console this test, rendered the way console
+ * renders it, for substring checks.
+ *
+ * util.format, not JSON.stringify: JSON renders a Headers, an Error or a
+ * URLSearchParams as `{}`, so a leak through any of them passed every "never
+ * logs X" test in this file while console printed it in full. And unbounded,
+ * where console stops at depth 2 and 100 array items: a leak test that sees
+ * MORE than console prints can only fail safe.
+ */
 function loggedText(): string {
   return logged
     .map((args) =>
-      args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '),
+      formatWithOptions(
+        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        ...args,
+      ),
     )
     .join('\n')
 }

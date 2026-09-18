@@ -13,11 +13,13 @@
 // Two things changed with that, and both are why the result below carries a
 // reason and nothing else.
 //
-// 1. The computed digest is never returned. While nothing was enforced it was
-//    harmless to log. Once the route trusts the signature, our digest of an
-//    attacker's body IS a valid signature for that body, so a log line
-//    carrying it is a signing oracle for anyone who can read the logs.
-//    Returning only a reason makes that impossible to reintroduce by accident.
+// 1. The computed digest is never returned. Our digest of a body IS a valid
+//    signature for that body for as long as the secret is unchanged, so a log
+//    line carrying it lets anyone who can read the logs replay that body as a
+//    signed delivery. TAC-445 logged it on every delivery while nothing was
+//    enforced, which only looked harmless: enforcing made every one of those
+//    lines valid at once, and they stay valid until the secret is rotated.
+//    Returning only a reason makes it impossible to log one by accident.
 //
 // 2. An empty secret is refused here, not only in the route. HMAC accepts an
 //    empty key, and a signature keyed with one is computable by anyone, so a
@@ -37,8 +39,9 @@ const SIGNATURE_PREFIX = 'sha256='
  *   forgery: every genuine delivery fails this way until the secret is set.
  * - `missing_header` — no `x-hub-signature-256` header at all.
  * - `malformed_header` — present but not `sha256=<digest>`.
- * - `mismatch` — well-formed, wrong digest. What a forgery, a tampered body
- *   or a rotated secret all look like.
+ * - `mismatch` — `sha256=` followed by anything but the right digest,
+ *   including one of the wrong length or not hex. What a forgery, a tampered
+ *   body or a rotated secret all look like.
  */
 export type InstagramSignatureRejection =
   | 'secret_unset'
