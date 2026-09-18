@@ -200,8 +200,8 @@ describe('listPendingQueue', () => {
 
   // TAC-467. The Contract types guestPhoneFallback as a string, and
   // analog-operator parses `drafts` all-or-nothing with
-  // `guestPhoneFallback: z.string()`: one null fails the parse and the queue
-  // comes back empty for every operator who can see that venue. A guest who
+  // `guestPhoneFallback: z.string()`: one null fails the parse, and every
+  // operator who can see that venue gets an error instead of a queue. A guest who
   // came in on Instagram has no phone, so the projection must send ''. The
   // generated RPC types say `string`, which is why this needs a test rather
   // than a compiler.

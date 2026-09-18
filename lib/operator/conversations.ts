@@ -82,8 +82,8 @@ export async function listOperatorConversations(
       name: composeName(row.guest_first_name, row.guest_last_name),
       // TAC-467: '' for a guest with no phone (an Instagram guest), never
       // null. analog-operator parses this list all-or-nothing with
-      // `phoneFallback: z.string()`, so one null would empty the whole list
-      // for every operator who can see that venue. '' keeps the Contract's
+      // `phoneFallback: z.string()`, so one null fails the whole list: every
+      // operator who can see that venue gets an error instead of conversations. '' keeps the Contract's
       // type; the guest shows with a blank name until the operator app can
       // label an Instagram guest.
       phoneFallback: row.guest_phone ?? '',

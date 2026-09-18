@@ -21,11 +21,13 @@
 --      only as one venue's account sees them. Two venues seeing the same
 --      person get different IGSIDs. It is NOT a person identifier, which is
 --      why "scoped" is in the name.
---    - UNIQUE PER VENUE, not globally. Where two venue rows share one
---      Instagram account (locations of one group), the same person arrives
---      with the same IGSID at both, and a global unique would stop the
---      second venue's guest row being created, losing that message. Per
---      venue also matches UNIQUE (venue_id, phone_number).
+--    - UNIQUE PER VENUE, not globally. While venues.instagram_account_id is
+--      globally unique (6 below), an IGSID can only ever reach the one venue
+--      that owns its account, so per-venue and global behave the same today.
+--      Per venue is chosen because it mirrors UNIQUE (venue_id, phone_number),
+--      keeps each venue its own block, and stays correct if an account is
+--      ever allowed to map to more than one venue row, where a global unique
+--      would refuse the second venue's guest and lose that message.
 --    - A table constraint rather than a partial unique index, so a handler
 --      can upsert with onConflict 'venue_id,instagram_scoped_id' the way the
 --      phone path upserts on 'venue_id,phone_number'. PostgREST cannot target
@@ -52,7 +54,9 @@
 --    someone queries by channel. Every Instagram insert must set channel
 --    explicitly, and the default is removed as a tracked dependency of the
 --    Instagram outbound ticket once every insert site names its channel.
---    A constant default is a catalogue-only change (Postgres 11+): no rewrite.
+--    Adding the column with a constant default is a catalogue-only change
+--    (Postgres 11+), but the CHECK added after it scans every existing row
+--    under the lock: milliseconds at today's size (766 rows on 2026-09-18).
 --
 -- 5. messages.referral_ref and messages.referral_source: the `ref` and
 --    `source` of the referral an ig.me link carries (verified 2026-09-17 on a
@@ -78,13 +82,27 @@
 -- ORDERING: relaxes one constraint and adds everything else, and no deployed
 -- code writes a null phone or reads a new column, so it can be applied in
 -- Studio before or after the PR merges. Do NOT run `npm run db:types` on a
--- main that lacks the PR: regenerated types make phone_number nullable and
--- `tsc` fails at the sites this PR fixes. The PR carries the hand-patched
--- db/types.ts.
+-- main (or any branch) that lacks the PR: regenerated types make
+-- phone_number nullable and `tsc` fails at the sites this PR fixes. The PR
+-- carries the hand-patched db/types.ts.
+--
+-- LOCKS: every lock is taken up front, messages first. Altering guests
+-- before messages could deadlock with a Sendblue inbound, which holds its
+-- lock on messages and then needs guests for the foreign-key check; Postgres
+-- would abort one side, and the webhook answers 200 on a failed insert, so a
+-- lost race would lose the guest's text with no retry. Queries touching both
+-- tables start from messages, so taking messages first leaves no cycle. The
+-- 5-second lock_timeout means a busy table makes the whole migration fail
+-- cleanly (nothing applied, run it again) rather than queue every message
+-- read and write behind it. Apply outside Le Mil's hours (7am to 3pm
+-- America/Los_Angeles) anyway.
 --
 -- HIGH-STAKES: touches `guests` and `messages`.
 
 begin;
+
+set local lock_timeout = '5s';
+lock table messages, guests, venues in access exclusive mode;
 
 -- 1
 alter table guests alter column phone_number drop not null;
@@ -141,6 +159,8 @@ commit;
 -- ROLLBACK:
 --
 --   begin;
+--   set local lock_timeout = '5s';
+--   lock table messages, guests, venues in access exclusive mode;
 --   alter table venues drop column instagram_account_id;
 --   alter table messages drop column referral_source;
 --   alter table messages drop column referral_ref;

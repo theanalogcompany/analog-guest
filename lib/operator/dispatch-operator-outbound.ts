@@ -97,6 +97,11 @@ export type DispatchErrorCode =
   // operator hasn't written yet, or an edit submitted blank. Refused BEFORE
   // the optimistic review_state flip, so the card stays in the queue.
   | 'empty_body'
+  // TAC-467: the guest has no phone number (they came in on Instagram), and
+  // this path can only send by text. Refused BEFORE the flip, like
+  // empty_body. The routes map it to the same 502 body as sendblue_failed,
+  // so the operator API Contract does not change.
+  | 'no_phone_number'
 
 export interface DispatchFailure {
   ok: false
@@ -197,6 +202,20 @@ export async function dispatchOperatorOutbound(
     return { ok: false, errorCode: 'opted_out', error: 'guest opted out' }
   }
 
+  // ---- 3a. TAC-467: refuse a guest with no phone BEFORE the optimistic flip. ----
+  // sendMessage refuses a null recipient too, but after the flip below, which
+  // would strand the card exactly as step 3b describes. Existing code can
+  // queue a card for such a guest: a Command Center Follow Up at a venue that
+  // holds that category. Replying over Instagram is the outbound ticket's job.
+  const recipientPhone = guestRow.phone_number
+  if (recipientPhone === null) {
+    return {
+      ok: false,
+      errorCode: 'no_phone_number',
+      error: 'guest has no phone number; replies over Instagram are not built yet',
+    }
+  }
+
   // ---- 3b. TAC-309: refuse an empty body BEFORE the optimistic flip. ----
   //
   // `sendMessage` also refuses an empty body, but that check fires too late to
@@ -276,13 +295,8 @@ export async function dispatchOperatorOutbound(
   const sendBody = input.action === 'edit' ? input.editedBody!.trim() : row.body
   const sendResult = await sendMessage({
     venueId: row.venue_id,
-    // TAC-467: null for an Instagram guest. sendMessage refuses it
-    // (`recipient_has_no_phone_number`), but only AFTER the flip above, so the
-    // card lands in the v1 gap below. Few paths should reach it: the Instagram
-    // handler (TAC-468) is not to run the agent until replies can go out over
-    // Instagram, which leaves a Command Center Follow Up that queues at a
-    // venue holding that category. The outbound ticket owns routing by channel.
-    to: guestRow.phone_number,
+    // Never null here: step 3a refused a guest with no phone before the flip.
+    to: recipientPhone,
     body: sendBody,
   })
 

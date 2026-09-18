@@ -384,8 +384,8 @@ export async function listPendingQueue(
       guestDisplayName: row.guest_display_name,
       // TAC-467: '' for a guest with no phone (an Instagram guest), never
       // null. analog-operator parses the drafts array all-or-nothing with
-      // `guestPhoneFallback: z.string()`, so one null would empty the queue
-      // for every operator who can see that venue. The cast is deliberate:
+      // `guestPhoneFallback: z.string()`, so one null fails the whole queue:
+      // every operator who can see that venue gets an error instead of cards. The cast is deliberate:
       // generated types call every RPC return column non-null, and
       // regenerating them would put back a `string` that is not true.
       guestPhoneFallback: (row.guest_phone as string | null) ?? '',
