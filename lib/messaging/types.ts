@@ -8,9 +8,15 @@ export type ReactionType =
   | 'emphasize'
   | 'question'
 
+// TAC-467: `to` is nullable on the three inputs that take a guest's phone
+// straight from GuestContext (send, typing, mark-as-read). A guest who came in
+// on Instagram has no phone, and these refuse null with
+// `recipient_has_no_phone_number` before touching the provider. Reactions keep
+// a plain string: their only caller answers an inbound text, which always has
+// a number.
 export type SendMessageInput = {
   venueId: string
-  to: string
+  to: string | null
   body: string
   mediaUrls?: string[]
 }
@@ -26,12 +32,12 @@ export type SendReactionInput = {
 
 export type SendTypingIndicatorInput = {
   venueId: string
-  to: string
+  to: string | null
 }
 
 export type MarkAsReadInput = {
   venueId: string
-  to: string
+  to: string | null
   messageHandle: string
 }
 

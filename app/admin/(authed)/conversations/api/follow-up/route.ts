@@ -141,7 +141,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // null if the guest isn't at this venue).
   const { data: guestRow, error: guestErr } = await supabase
     .from('guests')
-    .select('id, opted_out_at')
+    .select('id, opted_out_at, phone_number')
     .eq('id', body.guestId)
     .eq('venue_id', body.venueId)
     .maybeSingle()
@@ -156,6 +156,19 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (guestRow.opted_out_at !== null) {
     return NextResponse.json({ error: 'guest opted out' }, { status: 403 })
+  }
+  // TAC-467: a guest who came in on Instagram has no phone number, and this
+  // pipeline can only send by text. Without this check the click still costs
+  // a generation, then either fails with a red alert or queues a card nobody
+  // can send (recorded as channel 'text', which it isn't). Refused up front.
+  if (guestRow.phone_number === null) {
+    return NextResponse.json(
+      {
+        error: 'guest has no phone number',
+        detail: 'This guest messaged on Instagram. Replies over Instagram are not built yet.',
+      },
+      { status: 400 },
+    )
   }
 
   // ---- invoke pipeline ----

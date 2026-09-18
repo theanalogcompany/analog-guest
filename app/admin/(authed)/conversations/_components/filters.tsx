@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { guestNameWithPhone } from '../../_lib/guest-name'
 import { FollowUpButton } from './follow-up-button'
 
 // Venue + guest pickers. Filter state lives in the URL (?venue=&guest=) so
@@ -27,7 +28,8 @@ interface FiltersProps {
   venues: Array<{ id: string; slug: string; name: string }>
   // Guests for the currently-selected venue (passed in by parent server fetch).
   // Empty when no venue selected.
-  guests: Array<{ id: string; firstName: string | null; lastName: string | null; phoneNumber: string }>
+  // TAC-467: phoneNumber is null for an Instagram guest.
+  guests: Array<{ id: string; firstName: string | null; lastName: string | null; phoneNumber: string | null }>
   selectedVenueId: string | null
   selectedGuestId: string | null
 }
@@ -94,7 +96,7 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
             <SelectItem value={NONE_VALUE}>— pick guest —</SelectItem>
             {guests.map((g) => (
               <SelectItem key={g.id} value={g.id}>
-                {formatGuestLabel(g)}
+                {guestNameWithPhone(g)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -121,13 +123,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   )
-}
-
-function formatGuestLabel(g: {
-  firstName: string | null
-  lastName: string | null
-  phoneNumber: string
-}): string {
-  const name = [g.firstName, g.lastName].filter(Boolean).join(' ').trim()
-  return name ? `${name} · ${g.phoneNumber}` : g.phoneNumber
 }

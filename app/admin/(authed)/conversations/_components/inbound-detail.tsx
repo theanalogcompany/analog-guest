@@ -19,7 +19,8 @@ export interface InboundDetailProps {
     providerMessageId: string | null
   }
   guestName: string
-  guestPhone: string
+  // TAC-467: null for an Instagram guest.
+  guestPhone: string | null
   venueTimezone: string
   triggeredOutboundId: string | null
   onSelectOutbound: (id: string) => void
@@ -47,7 +48,7 @@ export function InboundDetail({
         <div className="flex flex-col">
           <HairlineRow>
             <Row label="Phone">
-              <span className="font-fraunces-text">{guestPhone}</span>
+              <span className="font-fraunces-text">{guestPhone ?? 'None'}</span>
             </Row>
           </HairlineRow>
           <HairlineRow>

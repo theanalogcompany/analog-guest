@@ -17,6 +17,11 @@ export async function sendMessage(
 ): Promise<MessagingResult<{ providerMessageId: string; status: string }>> {
   const { venueId, to, body, mediaUrls } = input
 
+  // TAC-467: an Instagram guest has no phone number. Refused by name, so the
+  // red alert says what happened rather than calling null a malformed number.
+  if (to === null) {
+    return { ok: false, error: 'recipient_has_no_phone_number' }
+  }
   if (!E164_RE.test(to)) {
     return { ok: false, error: 'invalid_recipient_phone_number' }
   }

@@ -32,7 +32,8 @@ export interface VoicePageThread {
   guestId: string
   firstName: string | null
   lastName: string | null
-  phoneNumber: string
+  // TAC-467: null for an Instagram guest.
+  phoneNumber: string | null
   lastMessagePreview: string
   lastMessageAt: Date
   state: 'new' | 'returning' | 'regular' | 'raving_fan' | null
@@ -57,7 +58,7 @@ export interface VoicePageData {
     id: string
     firstName: string | null
     lastName: string | null
-    phoneNumber: string
+    phoneNumber: string | null
   } | null
   selectedMessages: VoicePageMessage[]
   lastRefinedAt: Date | null

@@ -193,3 +193,53 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     expect(updateSpy).toHaveBeenCalled()
   })
 })
+
+// TAC-467. A guest who came in on Instagram has no phone number, and this path
+// can only send by text. sendMessage refuses a null recipient too, but after
+// the flip, which strands the card the same way the empty-body case above
+// would. So, as there, the assertion that matters is the ordering.
+describe('dispatchOperatorOutbound — guest with no phone (TAC-467)', () => {
+  beforeEach(() => {
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: null, opted_out_at: null },
+      error: null,
+    })
+    rowMaybeSingleMock.mockResolvedValue(row('we open at 7'))
+  })
+
+  it('refuses with no_phone_number', async () => {
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(r).toMatchObject({ ok: false, errorCode: 'no_phone_number' })
+  })
+
+  it('refuses BEFORE flipping review_state, so the card stays queued', async () => {
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'edit',
+      editedBody: 'we open at 7',
+    })
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(sendMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('still refuses an opted-out guest as opted_out', async () => {
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: null, opted_out_at: '2026-09-01T00:00:00Z' },
+      error: null,
+    })
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(r).toMatchObject({ ok: false, errorCode: 'opted_out' })
+  })
+})

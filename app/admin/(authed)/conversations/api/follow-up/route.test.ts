@@ -43,7 +43,9 @@ const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const GUEST_ID = '22222222-2222-4222-8222-222222222222'
 const OTHER_VENUE_ID = '33333333-3333-4333-8333-333333333333'
 
-type GuestRow = { id: string; opted_out_at: string | null }
+// phone_number is optional so the pre-TAC-467 fixtures read as a guest with a
+// phone (undefined is not null); the no-phone test sets it to null explicitly.
+type GuestRow = { id: string; opted_out_at: string | null; phone_number?: string | null }
 type VenueRow = { id: string; messaging_phone_number: string | null }
 
 interface AdminMockOpts {
@@ -293,6 +295,34 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: 'guest opted out' })
+    expect(handleFollowup).not.toHaveBeenCalled()
+  })
+
+  // TAC-467: a guest who came in on Instagram has no phone number, and the
+  // pipeline can only send by text. Refused before any generation.
+  it('returns 400 with a plain-words detail when the guest has no phone number', async () => {
+    vi.mocked(createServerClient).mockResolvedValue(
+      makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
+    )
+    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      isAnalogAdmin: true,
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock({
+        guestRow: { id: GUEST_ID, opted_out_at: null, phone_number: null },
+      }) as never,
+    )
+
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'guest has no phone number',
+      detail: 'This guest messaged on Instagram. Replies over Instagram are not built yet.',
+    })
     expect(handleFollowup).not.toHaveBeenCalled()
   })
 

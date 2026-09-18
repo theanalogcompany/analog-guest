@@ -54,7 +54,9 @@ export function ThreadsList({
       return (
         name.includes(q) ||
         preview.includes(q) ||
-        t.phoneNumber.includes(q)
+        // TAC-467: null for an Instagram guest; `.includes` on it threw on
+        // the first keystroke and took the list down.
+        (t.phoneNumber?.includes(q) ?? false)
       )
     })
   }, [threads, query])
