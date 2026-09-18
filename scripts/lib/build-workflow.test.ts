@@ -47,6 +47,7 @@ function runBlock(stepName: string) {
 const INPUTS = between(WORKFLOW, '  workflow_dispatch:', 'concurrency:')
 const PROMPT = between(WORKFLOW, 'prompt: |', '- name: Check the session posted')
 const QUEUE = runBlock('Find tickets to work')
+const REFRESH = runBlock("Bring a resumed ticket's branch up to date with the Linear helper")
 const SNAPSHOT = runBlock('Keep a copy of the turn-limit reporter')
 const CHECK = runBlock('Check the session posted on every ticket it worked')
 
@@ -72,7 +73,7 @@ describe('build-ready.yml selects one ticket per run', () => {
   })
 
   it('tells the session it has one ticket', () => {
-    expect(PROMPT).toContain('Ticket: ${{ steps.queue.outputs.tickets }}')
+    expect(PROMPT).toContain('Ticket: ${{ steps.refresh.outputs.tickets }}')
     expect(PROMPT).not.toMatch(/Tickets, in order/)
     expect(PROMPT).not.toMatch(/next ticket/)
   })
@@ -297,6 +298,76 @@ describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)',
     const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
     expect(header).toContain('TAC-466')
     expect(header).toContain('cannot function as a second')
+  })
+})
+
+describe("build-ready.yml brings a resumed ticket's branch up to date (TAC-462)", () => {
+  it('is valid bash', () => {
+    const r = spawnSync('bash', ['-n'], { input: REFRESH, encoding: 'utf8' })
+    expect(r.stderr).toBe('')
+    expect(r.status).toBe(0)
+  })
+
+  it('runs after the ticket selection, before the turn-limit reporter is copied and before Work', () => {
+    const refreshAt = WORKFLOW.indexOf("- name: Bring a resumed ticket's branch up to date with the Linear helper")
+    expect(refreshAt).toBeGreaterThan(WORKFLOW.indexOf('- name: Find tickets to work'))
+    expect(refreshAt).toBeLessThan(WORKFLOW.indexOf('- name: Keep a copy of the turn-limit reporter'))
+    expect(refreshAt).toBeLessThan(WORKFLOW.indexOf('- name: Work\n'))
+  })
+
+  it('gates on the original selection, not on itself', () => {
+    const step = WORKFLOW.slice(WORKFLOW.indexOf("- name: Bring a resumed ticket's branch up to date"))
+    const ifLine = step.slice(0, step.indexOf('\n', step.indexOf('if:')))
+    expect(ifLine).toContain("if: steps.queue.outputs.tickets != ''")
+  })
+
+  it('hands the original ticket list to scripts/refresh-branch.mjs and writes only what survives as its own tickets output', () => {
+    expect(REFRESH).toContain('node scripts/refresh-branch.mjs')
+    expect(REFRESH).toContain('echo "tickets=$REMAINING" >> "$GITHUB_OUTPUT"')
+    // A failed ticket is the only outcome dropped from the working set — a
+    // stricter cut here would also drop a merged or up-to-date ticket, and a
+    // looser one would let a session start on a branch that still can't write.
+    expect(REFRESH).toContain('select(.outcome != "failed")')
+  })
+
+  it("every step after it reads its own tickets output, never the original selection", () => {
+    // The three steps this ticket exists to protect: the reporter snapshot,
+    // Work itself, and the post-session check. Each must see the branch this
+    // step could fix as fixed, and a ticket it could not fix as gone.
+    const afterRefresh = WORKFLOW.slice(WORKFLOW.indexOf('- name: Keep a copy of the turn-limit reporter'))
+    expect(afterRefresh).not.toContain('steps.queue.outputs.tickets')
+    expect(afterRefresh.match(/steps\.refresh\.outputs\.tickets/g)?.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("posts [STALE-BRANCH] and adds Needs Decision the same way Flag tickets that can't be built does — the plan's own \"third copy in this file\"", () => {
+    expect(REFRESH).toContain('[STALE-BRANCH] ${TICKET}')
+    expect(REFRESH).toContain('issueLabels(filter: { name: { eq: \\"Needs Decision\\" } })')
+    expect(REFRESH).toContain('issueAddLabel')
+    // Every [STALE-BRANCH] ships with the real merge error, never a guess at
+    // whether it was a genuine conflict or a transient GitHub failure — the
+    // plan's own framing for why the two are treated alike.
+    expect(REFRESH).toContain('${ERROR}')
+  })
+
+  it('names the missing files and the branch on the notice', () => {
+    const stale = REFRESH.slice(REFRESH.indexOf('[STALE-BRANCH]'))
+    expect(stale).toContain('${BRANCH}')
+    expect(stale).toContain('${MISSING}')
+  })
+
+  it('never fetches after a merge it could not make', () => {
+    // A courtesy fetch belongs only after a merge that succeeded (module
+    // header, refresh-branch.mjs) — this pins the workflow's own [STALE-BRANCH]
+    // branch never runs `git fetch` at all, since scripts/refresh-branch.mjs
+    // already handles the fetch internally on the success path only.
+    expect(REFRESH).not.toMatch(/git fetch/)
+  })
+
+  it('the header documents why it exists and what it is scoped to', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-462')
+    expect(header).toContain('scripts/refresh-branch.mjs')
+    expect(header).toContain('STALE-BRANCH')
   })
 })
 

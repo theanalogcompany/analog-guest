@@ -62,6 +62,16 @@ name: Build ready tickets
 # dry_run (manual dispatch only) prints what the run would start, resume and
 # flag, and writes nothing to Linear.
 #
+# Before the session starts, a shell step brings a resumed ticket's branch up
+# to date with the Linear write helper if it predates it (TAC-462): a branch
+# cut before TAC-444 has no scripts/linear.mjs, the taught prompt form below
+# calls it anyway, and every write fails with nothing the session can even
+# report with. scripts/refresh-branch.mjs checks the branch's own files
+# against the local checkout (no network call) and, when the helper or its
+# import chain is missing, merges main into the branch on GitHub. A ticket
+# the merge can't be made for is dropped from this run's tickets and gets
+# [STALE-BRANCH] instead of a session with no way to say anything.
+#
 # After the session, a shell step checks that it posted on every ticket it
 # worked. A session that cannot write to Linear cannot report its own
 # failure, so the check is the workflow's, not the session's. A ticket left
@@ -462,13 +472,110 @@ jobs:
             echo "flagged $NAME"
           done
 
+      # A resumed ticket's branch can predate scripts/linear.mjs (TAC-444):
+      # cut before that merge, it has no such file, and the taught prompt
+      # form below calls it unconditionally. Every Linear write then fails
+      # with MODULE_NOT_FOUND, and the session cannot even post a notice
+      # saying so — the [SILENT-RUN] failure class arriving through a new
+      # door, a session that works and cannot report because the tool it was
+      # told to use is not in its checkout (TAC-462).
+      #
+      # Checked here, before Claude starts, because the session itself
+      # cannot repair it: git merge and git rebase are not in its
+      # --allowedTools below, and a pre-session step in the workflow's own
+      # shell is the one shape that needs no new entry there. Scoped to
+      # exactly the files the taught write form needs — scripts/linear.mjs
+      # and its own import chain, scripts/lib/linear-cli.mjs and
+      # scripts/lib/comment-provenance.mjs (confirmed by reading both) —
+      # never generalised to "whatever main has that this branch doesn't":
+      # nothing else the prompts assume exists (scripts/claims.mjs,
+      # scripts/run-report.mjs) is ever invoked by the session, only by this
+      # workflow's own steps against its own checkout, so a wider check would
+      # start merging main into every resumed branch on every run for no
+      # ticket this repo has. scripts/refresh-branch.mjs does the check
+      # (against the local refs this checkout already fetched, fetch-depth:
+      # 0 above — no network call) and, when a file is missing, the repair
+      # (a real merge of main into the branch via the GitHub REST API,
+      # additive and never destructive, with no --force-with-lease judgement
+      # call in something unattended).
+      #
+      # A ticket the merge can't be made for — a real conflict or a
+      # transient GitHub failure, treated alike, since guessing which one
+      # and silently retrying is exactly the failure this exists to close —
+      # is dropped from this run's working set here and gets [STALE-BRANCH]
+      # instead of a session with no way to report anything. Every step
+      # below that used to read steps.queue.outputs.tickets now reads this
+      # step's own tickets output instead, so that ticket never reaches Work.
+      - name: Bring a resumed ticket's branch up to date with the Linear helper
+        id: refresh
+        if: steps.queue.outputs.tickets != ''
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TICKETS: ${{ steps.queue.outputs.tickets }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          TICKETS_JSON=$(printf '%s\n' $TICKETS | jq -R . | jq -sc 'map(select(length > 0))')
+          RESULTS=$(echo "$TICKETS_JSON" | node scripts/refresh-branch.mjs)
+          echo "$RESULTS" | jq -r '.[] | "\(.ticket): \(.outcome)\(if .branch then " (" + .branch + ")" else "" end)"'
+
+          REMAINING=$(echo "$RESULTS" | jq -r 'map(select(.outcome != "failed")) | map(.ticket) | join(" ")')
+          echo "tickets=$REMAINING" >> "$GITHUB_OUTPUT"
+
+          FENCE='```'
+          FAILED=$(echo "$RESULTS" | jq -c 'map(select(.outcome == "failed"))')
+          if [ "$(echo "$FAILED" | jq 'length')" -gt 0 ]; then
+            LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+              | jq -r '.data.issueLabels.nodes[0].id // empty')
+            if [ -z "$LABEL_ID" ]; then
+              echo "::error::No Needs Decision label found in Linear."
+              exit 1
+            fi
+
+            echo "$FAILED" | jq -c '.[]' | while read -r row; do
+              TICKET=$(echo "$row" | jq -r .ticket)
+              BRANCH=$(echo "$row" | jq -r .branch)
+              MISSING=$(echo "$row" | jq -r '.missing | join(", ")')
+              ERROR=$(echo "$row" | jq -r .error)
+              BODY="**[FROM CLAUDE CODE]**
+
+          [STALE-BRANCH] ${TICKET}
+
+          \`${BRANCH}\` predates the Linear write helper and is missing: ${MISSING}. Bringing it up to date by merging main in failed, so the session was not started this run — on this branch it would have had no way to write to Linear, including to say it was stuck.
+
+          ${FENCE}text
+          ${ERROR}
+          ${FENCE}
+
+          Reply here once the branch carries the helper, or push a merge or rebase of main into it yourself. The next scheduled run resumes the ticket."
+
+              ID=$(gql "$(jq -nc --arg t "$TICKET" '{query: "query($t: String!) { issue(id: $t) { id } }", variables: {t: $t}}')" | jq -er '.data.issue.id')
+              gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+                  '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+                | jq -e '.data.commentCreate.success' > /dev/null
+              gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+                  '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+                | jq -e '.data.issueAddLabel.success' > /dev/null
+              echo "flagged $TICKET as stale"
+            done
+          fi
+
       # The check after the session reports through scripts/run-report.mjs.
       # By then the checkout is on the session's branch, which can predate the
       # script or be a ticket that edits it, so the check runs this copy,
       # taken from the checkout before the session starts (main, on every
       # scheduled run). It lives outside the checkout.
       - name: Keep a copy of the turn-limit reporter
-        if: steps.queue.outputs.tickets != ''
+        if: steps.refresh.outputs.tickets != ''
         env:
           REPORTER_DIR: ${{ runner.temp }}/turn-limit-reporter
         run: |
@@ -479,7 +586,7 @@ jobs:
 
       - name: Work
         id: work
-        if: steps.queue.outputs.tickets != ''
+        if: steps.refresh.outputs.tickets != ''
         uses: anthropics/claude-code-action@v1
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
@@ -500,7 +607,7 @@ jobs:
           prompt: |
             You are working a Linear ticket for the repo ${{ github.event.repository.name }}.
 
-            Ticket: ${{ steps.queue.outputs.tickets }}
+            Ticket: ${{ steps.refresh.outputs.tickets }}
 
             Read CLAUDE.md and .claude/process.md first. Then follow
             .claude/commands/work-ticket.md for it — it is the specification
@@ -616,10 +723,10 @@ jobs:
             Never merge, and never mark a ticket Done.
 
       - name: Check the session posted on every ticket it worked
-        if: ${{ !cancelled() && steps.queue.outputs.tickets != '' }}
+        if: ${{ !cancelled() && steps.refresh.outputs.tickets != '' }}
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-          TICKETS: ${{ steps.queue.outputs.tickets }}
+          TICKETS: ${{ steps.refresh.outputs.tickets }}
           STARTED: ${{ steps.queue.outputs.started }}
           WORK_OUTCOME: ${{ steps.work.outcome }}
           EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
