@@ -67,7 +67,7 @@ export const USAGE = [
   'stdin: the selection\'s candidates, in priority order, each with',
   '  identifier, mode (start|resume), newestAt and comments { body createdAt updatedAt }',
   'env: LIMIT (tickets to take), LIVE_SESSION_HOURS (default 3), GITHUB_REPOSITORY',
-  'stdout: the tickets taken, as [{ id, identifier, newestId, mode, state }]',
+  'stdout: the tickets taken, as [{ id, identifier, newestId, mode, state, autoRestart }]',
 ].join('\n');
 
 function escapeRegExp(s) {
@@ -274,7 +274,17 @@ export function run({ env, stdin, git, gh, now, stdout, stderr }) {
   for (const s of skipped) {
     stderr(`skipped ${s.identifier} (${s.mode}, ${s.state}): another session has it: ${s.reason}.\n`);
   }
-  const out = picked.map(({ id, identifier, newestId, mode, state }) => ({ id, identifier, newestId, mode, state }));
+  // autoRestart (TAC-480): turn-limit-restart.mjs's own passthrough, null
+  // when a candidate never went through it. Lets the claiming loop tell an
+  // auto-eligible resume from a human-ruled one without re-deriving it.
+  const out = picked.map(({ id, identifier, newestId, mode, state, autoRestart }) => ({
+    id,
+    identifier,
+    newestId,
+    mode,
+    state,
+    autoRestart: autoRestart ?? null,
+  }));
   stdout(`${JSON.stringify(out)}\n`);
   return EXIT.OK;
 }

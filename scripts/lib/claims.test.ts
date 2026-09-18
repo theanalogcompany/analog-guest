@@ -431,10 +431,20 @@ describe('run', () => {
   it('prints the tickets taken, in the shape the claim loop reads, and says why one was skipped', () => {
     const r = invoke()
     expect(r.code).toBe(EXIT.OK)
-    expect(JSON.parse(r.out)).toEqual([{ id: 'uuid-TAC-438', identifier: 'TAC-438', newestId: '', mode: 'start', state: 'Ready' }])
+    expect(JSON.parse(r.out)).toEqual([
+      { id: 'uuid-TAC-438', identifier: 'TAC-438', newestId: '', mode: 'start', state: 'Ready', autoRestart: null },
+    ])
     expect(r.err).toBe(
       'skipped TAC-448 (start, Ready): another session has it: a commit on jaipal/tac-448-claim-check at 2026-09-18T03:10:00Z.\n',
     )
+  })
+
+  it('passes a candidate\'s autoRestart through, null when absent (TAC-480)', () => {
+    const withAutoRestart = { ...start('TAC-448'), autoRestart: { attempt: 1, headSha: 'aaa1111', body: 'x' } }
+    const r = invoke({ candidates: [withAutoRestart], git: () => MAIN })
+    expect(JSON.parse(r.out)).toEqual([
+      { id: 'uuid-TAC-448', identifier: 'TAC-448', newestId: '', mode: 'start', state: 'Ready', autoRestart: { attempt: 1, headSha: 'aaa1111', body: 'x' } },
+    ])
   })
 
   it('never prints comment bodies: the run log is public', () => {
