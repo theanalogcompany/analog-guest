@@ -182,6 +182,50 @@ describe('recommendation-request instructions (THE-228)', () => {
   })
 })
 
+describe('recommendation-request references known order history (TAC-417)', () => {
+  // A returning guest asking "what should I get" got a first-visit reply
+  // ("I'd start with the SoFi") even though the guest's own order history
+  // was in the prompt — the model answered a direct history question
+  // correctly forty seconds later using the same data. Sibling categories
+  // (follow_up, manual, personal_history_question) already point at runtime
+  // context / ## Visit history; recommendation_request was the one silent
+  // on it.
+  it('points at ## Visit history when present', () => {
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain('"## Visit history"')
+  })
+
+  it('asks for one clause of recognition, not a recitation', () => {
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
+      "Say so in one short clause naming what they've had",
+    )
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
+      "Don't recite the history back or turn the reply into a report",
+    )
+  })
+
+  it('disambiguates this guest\'s own history from the "regulars\' habits" framing above', () => {
+    // The existing anti-catalog line bans "regulars' habits" framing about
+    // OTHER people. Without this sentence a model could read that ban as
+    // also covering the guest's own history — collapsing the fix into the
+    // very line it has to coexist with.
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
+      "not the \"regulars' habits\" framing above, which is about other people",
+    )
+  })
+
+  it('never invents a history for a guest with none', () => {
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
+      "don't invent a history they don't have",
+    )
+    // The no-block branch reads as an ordinary first-visit recommendation,
+    // not a hedge about uncertain history — there is no "uncertain" state:
+    // the block is either rendered from real transactions or absent.
+    expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
+      'recommend as you would to someone you\'re meeting for the first time',
+    )
+  })
+})
+
 describe('casual-chatter instructions (THE-228)', () => {
   it('carries no mirroring directive (universal R19 owns it, TAC-314)', () => {
     expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain('Match their energy')

@@ -155,3 +155,53 @@ describe('composePrompt — promoted universal rules render on every category (T
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-417: recommendation-request references known order history.
+// ---------------------------------------------------------------------------
+//
+// A returning guest asking "what should I get" got a first-visit reply even
+// though their order history was in the prompt the whole time. Both halves
+// have to be checked together against the ASSEMBLED prompt: the category
+// instruction telling the model to use the history (system prompt), and the
+// history itself actually reaching the model (user prompt). Checking either
+// alone would pass while the other regressed — the exact shape of the
+// original defect (the block rendered; nothing pointed at it).
+
+describe('composePrompt — recommendation-request references known order history (TAC-417)', () => {
+  it('a returning guest with real order history gets both the instruction and the block', () => {
+    const { systemPrompt, userPrompt } = composePrompt(
+      makeInput({
+        category: 'recommendation_request',
+        runtime: {
+          recentVisits: [{ items: ['cortado'], visitedAt: new Date() }],
+        },
+      }),
+    )
+
+    // The instruction reaches the model.
+    expect(systemPrompt).toContain('## Category-specific instructions: recommendation_request')
+    expect(systemPrompt).toContain('"## Visit history"')
+    expect(systemPrompt).toContain("Say so in one short clause naming what they've had")
+
+    // The history it's being told to use actually reached the model too —
+    // this is the half that fails if the plumbing regresses even though the
+    // instruction text is untouched.
+    expect(userPrompt).toContain('## Visit history')
+    expect(userPrompt).toContain('cortado')
+  })
+
+  it('a genuinely new guest with no history gets no visit-history block to reference or invent', () => {
+    const { systemPrompt, userPrompt } = composePrompt(
+      makeInput({
+        category: 'recommendation_request',
+        runtime: {},
+      }),
+    )
+
+    // The instruction is still present (it's a category constant, not a
+    // conditional include) — what must be absent is any data to act on.
+    expect(systemPrompt).toContain("don't invent a history they don't have")
+    expect(userPrompt).not.toContain('## Visit history')
+  })
+})
