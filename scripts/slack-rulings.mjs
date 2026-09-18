@@ -35,6 +35,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { commentMarker, isBotComment } from './lib/comment-provenance.mjs';
 
 const LINEAR = process.env.LINEAR_API_KEY;
 const SLACK = process.env.SLACK_BOT_TOKEN;
@@ -117,14 +118,28 @@ function questionsOf(description) {
 // process.md: an agent comment opens with the prefix, a blank line, then the
 // marker. Matching the marker in that position, rather than anywhere in the
 // body, keeps a ruling or an audit that merely quotes a marker from counting
-// as a new blocking state.
-const BLOCKING_MARKER =
-  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[(NEEDS-INPUT|HUMAN-REVIEW-REQUIRED|PLAN|NEEDS-ACTION|AUDIT-SKIPPED|BUILD-SKIPPED|SILENT-RUN)\]/;
+// as a new blocking state. isBotComment/commentMarker (scripts/lib/
+// comment-provenance.mjs, TAC-396) are the shared, tested definition of that
+// rule — carrying a second copy here is what let this file and
+// build-ready.yml's jq drift in the first place.
+const BLOCKING_MARKERS = new Set([
+  'NEEDS-INPUT',
+  'HUMAN-REVIEW-REQUIRED',
+  'PLAN',
+  'NEEDS-ACTION',
+  'AUDIT-SKIPPED',
+  'BUILD-SKIPPED',
+  'SILENT-RUN',
+]);
+
+function isBlockingComment(body) {
+  return isBotComment(body) && BLOCKING_MARKERS.has(commentMarker(body) ?? '');
+}
 
 function newestBlockingComment(issue) {
   return (
     issue.comments.nodes
-      .filter(c => BLOCKING_MARKER.test(c.body))
+      .filter(c => isBlockingComment(c.body))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .at(-1) ?? null
   );
@@ -188,7 +203,7 @@ function replyLine(issue) {
   // A skip notice needs an edit to the ticket, whatever its status: the
   // automations read the Repo: line and labels, never a reply.
   const newest = newestBlockingComment(issue);
-  const marker = newest ? BLOCKING_MARKER.exec(newest.body)[1] : null;
+  const marker = newest ? commentMarker(newest.body) : null;
   if (marker === 'BUILD-SKIPPED') {
     return '_Replying here will not unblock it: the ticket needs splitting into one ticket per repo. Open the ticket._';
   }
@@ -216,7 +231,7 @@ function firstPostText(issue) {
 
 function updateText(issue) {
   const newest = newestBlockingComment(issue);
-  const marker = newest ? BLOCKING_MARKER.exec(newest.body)[1] : null;
+  const marker = newest ? commentMarker(newest.body) : null;
   return [
     `:arrows_counterclockwise: *Updated*  ${kindOf(issue)}  <${issue.url}|${issue.identifier}>`,
     ...(marker ? [`Newest in the ticket: \`[${marker}]\``] : []),
