@@ -154,14 +154,17 @@ describe('the Linear helper each prompt teaches is on its allowlist', () => {
 
   // Not in operator's test. Everything above also passes under Bash(node:*),
   // so without this nothing would notice the wildcard coming back, which is
-  // the change TAC-449 made. It lists the node rules, because probing `node -e`
-  // alone would miss Bash(node -p:*) or a second script. The list skips
-  // wildcard spellings such as Bash(node*) and Bash(*), so it also probes:
-  // `allows` throws on those, and a bare Bash allows every command.
-  it.each(WORKFLOWS)('%s carries no node rule but the helper\'s', (path) => {
+  // the change TAC-449 made, along with removing Bash(python3:*). It lists
+  // the node and python rules, because probing `node -e` alone would miss
+  // Bash(node -p:*) or a second script. The list skips wildcard spellings
+  // such as Bash(node*) and Bash(*), so it also probes: `allows` throws on
+  // those, and a bare Bash allows every command.
+  it.each(WORKFLOWS)('%s carries no node or python rule but the helper\'s', (path) => {
     const allowed = tools(claudeStep(read(path)).args, '--allowedTools')
-    expect(allowed.filter((rule) => /^Bash\(node(?=[\s:)])/.test(rule))).toEqual(['Bash(node scripts/linear.mjs:*)'])
-    expect(allowed.some((rule) => allows(rule, 'node -e 1'))).toBe(false)
+    expect(allowed.filter((rule) => /^Bash\((node|python3?)(?=[\s:)])/.test(rule))).toEqual(['Bash(node scripts/linear.mjs:*)'])
+    for (const command of ['node -e 1', 'python3 -c 1']) {
+      expect({ command, allowed: allowed.some((rule) => allows(rule, command)) }).toEqual({ command, allowed: false })
+    }
     expect(allowed).not.toContain('Bash')
   })
 })
