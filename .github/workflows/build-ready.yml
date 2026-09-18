@@ -1,7 +1,7 @@
 name: Build ready tickets
 
-# Two jobs of one workflow, scheduled every 15 minutes, which GitHub runs
-# hours apart (TAC-428):
+# Three paths through one workflow, scheduled every 15 minutes, which GitHub
+# runs hours apart (TAC-428):
 #
 #   START   — a Ready ticket with no Blocked On label. Runs /work-ticket,
 #             which plans, posts [PLAN], and adds Needs Decision for
@@ -11,7 +11,31 @@ name: Build ready tickets
 #             Action, whose newest comment is human input. The ruling has
 #             landed, so /work-ticket picks up where it stopped.
 #
-# Either way, a ticket another session has is skipped, and the log says why
+#   RESTART — a blocked ticket whose newest comment is [TURN-LIMIT], resumed
+#             without waiting for a human reply (TAC-480). Both TAC-325 and
+#             TAC-376 needed nothing but Jaipal noticing the notice and
+#             saying "continue" — the work itself needed no judgement.
+#             scripts/turn-limit-restart.mjs runs after the candidate list is
+#             built and before scripts/claims.mjs: a [TURN-LIMIT] that shows
+#             at least one commit pushed, with fewer than MAX_AUTO_RESTARTS
+#             prior [AUTO-RESTART] claims since the last human comment on the
+#             ticket, is claimed with [AUTO-RESTART] instead of
+#             [RESUME-CLAIM] and worked this run; Needs Decision comes off
+#             for it, the same way plan approval removes it, because the
+#             ticket is not actually waiting on anyone. A [TURN-LIMIT] with
+#             no commits, or a restarted attempt whose branch head never
+#             moved since its own [AUTO-RESTART] claim, is left alone —
+#             today's plain [TURN-LIMIT] handling already asks Jaipal and
+#             already names splitting. Reaching MAX_AUTO_RESTARTS posts
+#             [AUTO-RESTART-LIMIT] instead, names the attempt count, and adds
+#             Needs Decision back: the chain stops and the ticket waits for a
+#             human exactly as an unbounded [TURN-LIMIT] always has. A human
+#             reply resets the count, because it is a fresh ruling with its
+#             own attempts to spend. See CLAUDE.md, "Automatic turn-limit
+#             restarts", for the full reasoning.
+#
+# Either way (start or resume; restart is decided separately, above), a
+# ticket another session has is skipped, and the log says why
 # (TAC-448). scripts/claims.mjs decides: a local session's [CLAIM] that is
 # not released, a [POLLING-STATE], or a commit on the ticket's branch by
 # anyone but the build session, each within LIVE_SESSION_HOURS, and for a
@@ -192,6 +216,10 @@ jobs:
           # One ticket per session (TAC-447): see the header.
           LIMIT: "1"
           MAX_ATTEMPTS: "2"
+          # Consecutive automatic restarts of a turn-limited ticket, since
+          # the last human reply on it, before it waits for one again
+          # (TAC-480). See CLAUDE.md, "Automatic turn-limit restarts".
+          MAX_AUTO_RESTARTS: "2"
           # How long a session's trace keeps a ticket claimed: a [CLAIM] or
           # [POLLING-STATE] since its last edit, a commit since it was made.
           # Without a window, a session that died would hold its ticket
@@ -207,6 +235,7 @@ jobs:
 
           if [ -n "${ONE_TICKET:-}" ]; then
             echo "defects=[]" >> "$GITHUB_OUTPUT"
+            echo "exhausted=[]" >> "$GITHUB_OUTPUT"
             if [ "${DRY_RUN:-false}" = "true" ]; then
               echo "Dry run: would work $ONE_TICKET. Nothing worked."
               echo "tickets=" >> "$GITHUB_OUTPUT"
@@ -292,6 +321,7 @@ jobs:
                 | ($sorted | map(select(.body | marker_is("CLAIM|RESUME-CLAIM|SLACK|DENIALS|OVER-LIMIT") | not)) | last) as $newest
                 | . + {
                     blocked: ($labels | any(. == "Needs Decision" or . == "Needs Action")),
+                    hasNeedsDecision: ($labels | any(. == "Needs Decision")),
                     newestId: ($newest.id // ""),
                     # when the ruling landed: on a resume, only a claim
                     # newer than it counts
@@ -301,6 +331,10 @@ jobs:
                       else ($newest.body | is_bot | not)
                       end
                     ),
+                    # whether the newest turn is [TURN-LIMIT] (TAC-480):
+                    # scripts/turn-limit-restart.mjs decides whether that
+                    # makes this ticket an automatic restart.
+                    newestIsTurnLimit: ($newest != null and ($newest.body | marker_is("TURN-LIMIT"))),
                     # how many times CI has already claimed this exact ruling
                     attempts: (
                       [ $sorted[]
@@ -313,24 +347,41 @@ jobs:
 
             # START: Ready, unblocked.
             # RESUME: blocked on Jaipal, a human spoke last, attempts left.
+            # TURN-LIMITED: blocked, newest turn is [TURN-LIMIT] — handed to
+            # scripts/turn-limit-restart.mjs (TAC-480), below, to decide
+            # whether it becomes an automatic restart, stays waiting for
+            # Jaipal, or its restarts are exhausted. No apostrophe here: one
+            # would close this bash single quote and reopen it, silently.
             # Whether another session has it is for the claim check, below.
             | map(
                 if .state.name == "Ready" and (.blocked | not)
                 then . + { mode: "start" }
                 elif .blocked and .lastIsHuman and .attempts < $maxAttempts
                 then . + { mode: "resume" }
+                elif .blocked and .newestIsTurnLimit
+                then . + { mode: "turn-limited" }
                 else empty
                 end
               )
 
             | sort_by(if .priority == 0 then 99 else .priority end)
-            | map({ id, identifier, newestId, newestAt, mode, state: .state.name, comments: .comments.nodes })
+            | map({ id, identifier, newestId, newestAt, mode, state: .state.name, hasNeedsDecision, comments: .comments.nodes })
           ')
+
+          # Decide the "turn-limited" candidates before the claim check
+          # (TAC-480): each becomes an automatic restart (upgraded to mode
+          # "resume", carrying autoRestart, so the claim check and the
+          # claiming loop below treat it exactly like a human-ruled resume),
+          # is dropped back to waiting for Jaipal (today's [TURN-LIMIT]
+          # notice already covers that), or its restarts are exhausted
+          # (EXHAUSTED, flagged in its own step further down).
+          RESTARTED=$(echo "$CANDIDATES" | node scripts/turn-limit-restart.mjs)
+          EXHAUSTED=$(echo "$RESTARTED" | jq -c '.exhausted')
 
           # Skip any ticket another session has, then take LIMIT. Prints a
           # "skipped ... another session has it" line for each one passed
           # over. Fails the step when it can't check (scripts/claims.mjs).
-          SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)
+          SELECTED=$(echo "$RESTARTED" | jq -c '.candidates' | node scripts/claims.mjs)
 
           # Tickets this repo would have built but can't: two repo labels, or
           # a Repo: line naming no labelled repo. Noticed once; noticed again
@@ -347,30 +398,42 @@ jobs:
           ')
 
           TICKETS=$(echo "$SELECTED" | jq -r 'map(.identifier) | join(" ")')
-          echo "$SELECTED" | jq -r '.[] | "\(.mode): \(.identifier) (\(.state))"'
+          echo "$SELECTED" | jq -r '.[] | "\(.mode): \(.identifier) (\(.state))" + (if .autoRestart then " [AUTO-RESTART attempt=\(.autoRestart.attempt)]" else "" end)'
           echo "$DEFECTS" | jq -r '.[] | "flag: \(.identifier)"'
+          echo "$EXHAUSTED" | jq -r '.[] | "exhausted: \(.identifier)"'
 
           if [ "${DRY_RUN:-false}" = "true" ]; then
             echo "Dry run: no claims or flags written, nothing worked."
             echo "tickets=" >> "$GITHUB_OUTPUT"
             echo "defects=[]" >> "$GITHUB_OUTPUT"
+            echo "exhausted=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Claim every ticket before Claude runs. A resume's claim also
           # counts attempts: if the run dies, it is already recorded and the
-          # count holds. A start's tells a local session the run has it.
+          # count holds. A start's tells a local session the run has it. An
+          # automatic restart (TAC-480) posts scripts/turn-limit-restart.mjs's
+          # own [AUTO-RESTART] body instead, and is not waiting on Jaipal, so
+          # Needs Decision comes off right after — the same move a plan
+          # approval makes.
           echo "$SELECTED" | jq -c '.[]' | while read -r row; do
             ID=$(echo "$row" | jq -r .id)
             NAME=$(echo "$row" | jq -r .identifier)
-            if [ "$(echo "$row" | jq -r .mode)" = "resume" ]; then
+            AUTO_RESTART=$(echo "$row" | jq -c '.autoRestart // empty')
+            if [ -n "$AUTO_RESTART" ]; then
+              BODY=$(echo "$row" | jq -r '.autoRestart.body')
+            elif [ "$(echo "$row" | jq -r .mode)" = "resume" ]; then
               MARK="[RESUME-CLAIM] ruling=$(echo "$row" | jq -r .newestId) run=${GITHUB_RUN_ID}"
-            else
-              MARK="[CLAIM] ${NAME} run=${GITHUB_RUN_ID}"
-            fi
-            BODY="**[FROM CLAUDE CODE]**
+              BODY="**[FROM CLAUDE CODE]**
 
           ${MARK}"
+            else
+              MARK="[CLAIM] ${NAME} run=${GITHUB_RUN_ID}"
+              BODY="**[FROM CLAUDE CODE]**
+
+          ${MARK}"
+            fi
             curl -sS https://api.linear.app/graphql \
               -H "Content-Type: application/json" \
               -H "Authorization: $LINEAR_API_KEY" \
@@ -378,6 +441,14 @@ jobs:
                   '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
               | jq -e '.data.commentCreate.success' > /dev/null
             echo "claimed $NAME"
+
+            if [ -n "$AUTO_RESTART" ]; then
+              if node scripts/linear.mjs label remove "$NAME" "Needs Decision"; then
+                echo "unblocked $NAME (auto-restart)"
+              else
+                echo "::warning title=Auto-restart::Could not remove Needs Decision from $NAME."
+              fi
+            fi
           done
 
           # Reconcile status from GitHub, every run (TAC-466). Runs over
@@ -411,6 +482,7 @@ jobs:
           fi
           echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"
           echo "defects=$DEFECTS" >> "$GITHUB_OUTPUT"
+          echo "exhausted=$EXHAUSTED" >> "$GITHUB_OUTPUT"
 
       - name: Flag tickets that can't be built
         if: steps.queue.outputs.defects != '' && steps.queue.outputs.defects != '[]'
@@ -460,6 +532,50 @@ jobs:
                 | jq -e '.data.issueAddLabel.success' > /dev/null
             fi
             echo "flagged $NAME"
+          done
+
+      # A [TURN-LIMIT] ticket whose automatic restarts (TAC-480, above) ran
+      # out — the bound was reached, or the most recent restart pushed
+      # nothing new since its own claim. scripts/turn-limit-restart.mjs's own
+      # [AUTO-RESTART-LIMIT] body names the attempt count and says the next
+      # move is a split; this step only posts it and re-adds Needs Decision,
+      # the same way "Flag tickets that can't be built" does above.
+      - name: Flag turn-limited tickets whose automatic restarts are exhausted
+        if: steps.queue.outputs.exhausted != '' && steps.queue.outputs.exhausted != '[]'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          EXHAUSTED: ${{ steps.queue.outputs.exhausted }}
+        run: |
+          set -euo pipefail
+
+          gql() {
+            curl -sS https://api.linear.app/graphql \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $LINEAR_API_KEY" \
+              -d "$1"
+          }
+
+          LABEL_ID=$(gql '{"query":"query { issueLabels(filter: { name: { eq: \"Needs Decision\" } }) { nodes { id } } }"}' \
+            | jq -r '.data.issueLabels.nodes[0].id // empty')
+          if [ -z "$LABEL_ID" ]; then
+            echo "::error::No Needs Decision label found in Linear."
+            exit 1
+          fi
+
+          echo "$EXHAUSTED" | jq -c '.[]' | while read -r row; do
+            ID=$(echo "$row" | jq -r .id)
+            NAME=$(echo "$row" | jq -r .identifier)
+            BODY=$(echo "$row" | jq -r .body)
+
+            gql "$(jq -nc --arg id "$ID" --arg body "$BODY" \
+              '{query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }", variables: {id: $id, body: $body}}')" \
+              | jq -e '.data.commentCreate.success' > /dev/null
+            if [ "$(echo "$row" | jq -r .hasNeedsDecision)" != "true" ]; then
+              gql "$(jq -nc --arg id "$ID" --arg label "$LABEL_ID" \
+                '{query: "mutation($id: String!, $label: String!) { issueAddLabel(id: $id, labelId: $label) { success } }", variables: {id: $id, label: $label}}')" \
+                | jq -e '.data.issueAddLabel.success' > /dev/null
+            fi
+            echo "exhausted $NAME"
           done
 
       # The check after the session reports through scripts/run-report.mjs.

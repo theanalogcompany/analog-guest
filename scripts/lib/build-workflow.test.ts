@@ -86,7 +86,10 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
   })
 
   it('runs the claim check on every candidate before taking LIMIT', () => {
-    expect(QUEUE).toContain('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)')
+    // TAC-480: turn-limit-restart.mjs sits between building the candidate
+    // list and the claim check, so claims.mjs's input is $RESTARTED, not
+    // $CANDIDATES directly — but it is still every candidate, unsliced.
+    expect(QUEUE).toContain(`SELECTED=$(echo "$RESTARTED" | jq -c '.candidates' | node scripts/claims.mjs)`)
     // Cutting the list in jq would take a claimed ticket and then skip it,
     // leaving the run with nothing while the next ticket waits. Any
     // spelling of the cut: a slice, limit(), [first], [first(...)] or
@@ -248,6 +251,77 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
         rmSync(dir, { recursive: true, force: true })
       }
     })
+  })
+})
+
+describe('build-ready.yml restarts a turn-limited ticket automatically (TAC-480)', () => {
+  it('adds the turn-limited mode alongside start and resume', () => {
+    const modes = between(QUEUE, '# START: Ready, unblocked.', 'sort_by(if .priority == 0')
+    expect(modes).toContain('then . + { mode: "start" }')
+    expect(modes).toContain('then . + { mode: "resume" }')
+    expect(modes).toContain('then . + { mode: "turn-limited" }')
+    expect(modes).toContain('.newestIsTurnLimit')
+  })
+
+  it('decides restarts, and asks the exhausted ones, before the claim check ever runs', () => {
+    expect(QUEUE.indexOf('node scripts/turn-limit-restart.mjs')).toBeLessThan(QUEUE.indexOf('node scripts/claims.mjs'))
+    expect(QUEUE).toContain('RESTARTED=$(echo "$CANDIDATES" | node scripts/turn-limit-restart.mjs)')
+    expect(QUEUE).toContain(`EXHAUSTED=$(echo "$RESTARTED" | jq -c '.exhausted')`)
+  })
+
+  it('sets a bound in the same style as MAX_ATTEMPTS', () => {
+    const env = between(WORKFLOW, '      - name: Find tickets to work', '        run: |')
+    expect(env).toContain('MAX_AUTO_RESTARTS: "2"')
+  })
+
+  it('claims an automatic restart with its own rendered body, never RESUME-CLAIM or CLAIM', () => {
+    const loop = between(QUEUE, '# Claim every ticket before Claude runs.', '# Reconcile status from GitHub')
+    expect(loop).toContain(`AUTO_RESTART=$(echo "$row" | jq -c '.autoRestart // empty')`)
+    // An autoRestart row takes its own branch, decided FIRST, and never
+    // falls into the RESUME-CLAIM/CLAIM ones below it — the marker it
+    // posts is turn-limit-restart.mjs's own rendered [AUTO-RESTART] body,
+    // read verbatim off the row, not built here.
+    expect(loop).toContain(
+      [`if [ -n "$AUTO_RESTART" ]; then`, `    BODY=$(echo "$row" | jq -r '.autoRestart.body')`, `  elif [ "$(echo "$row" | jq -r .mode)" = "resume" ]; then`].join('\n'),
+    )
+  })
+
+  it('unblocks an automatic restart the same way a plan approval does: Needs Decision comes off', () => {
+    const loop = between(QUEUE, '# Claim every ticket before Claude runs.', '# Reconcile status from GitHub')
+    expect(loop).toContain('node scripts/linear.mjs label remove "$NAME" "Needs Decision"')
+    // Only for the rows this run decided were automatic restarts.
+    expect(loop.indexOf('label remove')).toBeGreaterThan(loop.indexOf('if [ -n "$AUTO_RESTART" ]; then\n'))
+  })
+
+  it('flags exhausted restarts in their own step, mirroring the defects step', () => {
+    expect(WORKFLOW).toContain('- name: Flag turn-limited tickets whose automatic restarts are exhausted')
+    const step = between(
+      WORKFLOW,
+      '- name: Flag turn-limited tickets whose automatic restarts are exhausted',
+      '# The check after the session reports through',
+    )
+    expect(step).toContain(`if: steps.queue.outputs.exhausted != '' && steps.queue.outputs.exhausted != '[]'`)
+    // The body is turn-limit-restart.mjs's own rendered [AUTO-RESTART-LIMIT]
+    // text, read verbatim off the row — this step invents no copy of its own.
+    expect(step).toContain('BODY=$(echo "$row" | jq -r .body)')
+    expect(step).toContain('issueAddLabel')
+    expect(step).toContain('if [ "$(echo "$row" | jq -r .hasNeedsDecision)" != "true" ]; then')
+  })
+
+  it('writes exhausted to GITHUB_OUTPUT on every exit path the queue step has', () => {
+    // The two early exits (a named ticket, a dry run) and the normal path:
+    // the flag step reads this output unconditionally, so a path that
+    // forgets it would read stale or empty and flag nothing that exhausted.
+    expect(QUEUE.match(/echo "exhausted=/g)).toHaveLength(3)
+  })
+
+  it('the header documents the mechanism and points at CLAUDE.md', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-480')
+    expect(header).toContain('RESTART')
+    expect(header).toContain('MAX_AUTO_RESTARTS')
+    expect(header).toContain('CLAUDE.md')
+    expect(header).toContain('Automatic turn-limit')
   })
 })
 
