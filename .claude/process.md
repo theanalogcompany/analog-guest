@@ -186,11 +186,13 @@ earlier comment where that reading misses it.
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
 | `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
+| `[TURN-LIMIT]` | The CLI stopped the build session at its turn limit, before it finished | Posted by the workflow, in place of `[SILENT-RUN]` and `[DENIALS]`. Names what reached GitHub and what died with the runner. Adds `Needs Decision` like `[SILENT-RUN]`, the run fails, and it is **not bookkeeping** for the same reason. A reply resumes the build from the ticket's branch on GitHub |
+| `[OVER-LIMIT]` | The build session finished its work but used more turns than its limit, so claude-code-action failed the run afterwards | Bookkeeping, not a turn. Posted by the workflow, saying what was pushed. The run stays failed (ruled on TAC-447). Bookkeeping because it lands after the session's own last comment, often a PR link, and must not hide it |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
 the newest comment on a ticket is human input, the ticket is unblocked and a
 session may resume it. **Bookkeeping comments (`[SLACK]`, `[RESUME-CLAIM]`,
-`[DENIALS]`) never count as the newest comment.** They record what a workflow did, and
+`[DENIALS]`, `[OVER-LIMIT]`) never count as the newest comment.** They record what a workflow did, and
 counting them would bury the reply they were posted around. The build
 automation resumes only Ready and In Progress tickets; a reply on a ticket in
 any other status is recorded but starts nothing.
@@ -273,6 +275,12 @@ looks identical to one without.
 This check exists because TAC-401's first resume ran green, hit 30
 permission denials, and wrote nothing.
 
+**The same check reports the turn limit** (TAC-447). A build run works one
+ticket, so the limit is that ticket's alone, and the session pushes each
+planned commit as it makes it. A session the CLI stops at the limit gets
+`[TURN-LIMIT]`, and one that finishes over it gets `[OVER-LIMIT]`; both say
+what reached GitHub, read from the runner's git after the session.
+
 **Nothing tests this.** It is instructions to the build session, not code.
 The workflow fixtures cover which tickets get picked up, not whether a
 session applies an answer. The loud-failure rule is instructions too, so it
@@ -282,6 +290,55 @@ is a real answer on a real ticket. After any change to this section or to
 Phase 0 of `work-ticket.md`, name one ticket, answer it, and check within a
 few hours that its questions left the block or a `[NEEDS-INPUT]` explains
 why not.
+
+## Testing a workflow change
+
+What a change to a ticket workflow can be tested on before it merges depends
+on which workflow it is.
+
+- **The audit workflow runs whole from a branch.** It passes the job's own
+  token and does no App-token exchange, so nothing compares the file with
+  `main`'s. Dispatch it from the branch against a fixture ticket
+  (`gh workflow run audit-new-todo.yml --ref <branch> -f ticket=<fixture>`)
+  and read the run and the fixture's comments. TAC-444's helper was tested
+  this way before merge, in run 35293187884.
+- **The build workflow runs its shell steps from a branch, but not its
+  session.** The App-token exchange refuses a workflow file that differs
+  from `main`'s ("Workflow validation failed"), so the Work step skips itself
+  and exits green: a green build run from a branch proves the session
+  skipped, not that it worked. The steps around it still run. Ticket selection
+  is checked from the branch with `-f dry_run=true`, which writes nothing, and
+  the check after the session is checked against a fixture ticket, where the
+  skipped session reads as a session that posted nothing (run 35149594063
+  posted `[SILENT-RUN]` on fixture TAC-430 this way). **What the session
+  does is only testable after merge**, by dispatching `main` against a
+  fixture. `-f max_turns=<a small number>` stops it early, to reach
+  `[TURN-LIMIT]`.
+
+**The fixture-ticket pattern:**
+
+1. Ask Jaipal before creating one: it is a Linear write outside the ticket
+   being worked.
+2. Create a throwaway ticket titled `FIXTURE: <what it tests> for TAC-XXX —
+   not real work, do not build`, with this repo's label and a Repo: line.
+   Keep guest, venue and production data off it: `full_output` puts a run's
+   transcript in this public repo's log, and it is only for fixtures.
+3. Dispatch the workflow from the branch, or from `main` after merge, with
+   `-f ticket=<fixture>`.
+4. Read the run and the fixture's comments.
+5. Cancel the fixture, with a `[CANCELLED]` comment naming the ticket it
+   was a fixture for. TAC-450, the fixture for TAC-444, is the model.
+
+## "Do not self-commit"
+
+Tickets often end their notes with "Do not self-commit". It means **no
+commit to `main`, and no merge**. It does not mean don't commit. A build
+commits to the ticket's own branch, pushes each commit as it makes it, and
+opens a draft PR (`work-ticket.md` Phases 3 and 5); Jaipal merges. An audit
+commits nothing, whatever a ticket says.
+
+Say it that way in new tickets: "**Commits:** to the ticket's branch, with a
+draft PR. Never to `main`, and never a merge."
 
 ## High-stakes work: a plan gate, and a narrower hard stop
 

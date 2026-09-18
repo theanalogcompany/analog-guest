@@ -143,7 +143,7 @@ export function readGitState(git, ticket) {
 // look-alike, as the workflow's [DENIALS] list does.
 function fenced(items) {
   const body = items.length > 0 ? items.join('\n') : '(none)';
-  return ['```text', body.replaceAll('`', 'ˋ'), '```'].join('\n');
+  return ['```text', body.replaceAll('`', '\u02cb'), '```'].join('\n');
 }
 
 /** The pushed / not pushed / not committed report, as markdown. */

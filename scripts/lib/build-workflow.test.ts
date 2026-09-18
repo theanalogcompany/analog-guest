@@ -191,6 +191,32 @@ describe('work-ticket.md', () => {
   })
 })
 
+describe('.claude/process.md', () => {
+  const doc = read('.claude/process.md')
+  const rows = doc.split('\n').filter((l) => /^\| `\[[A-Z-]+\]` \|/.test(l))
+
+  it('marks exactly the bookkeeping markers as bookkeeping in its marker table', () => {
+    const bookkeeping = rows.filter((r) => r.split(' | ')[2]?.startsWith('Bookkeeping, not a turn'))
+    expect(sorted(bookkeeping.map((r) => r.match(/^\| `\[([A-Z-]+)\]`/)![1]))).toEqual(BOOKKEEPING)
+  })
+
+  it('lists the same markers where it says bookkeeping is never the newest comment', () => {
+    expect(markersIn(between(doc, '**Bookkeeping comments (', ') never count as the newest comment.**'))).toEqual(BOOKKEEPING)
+  })
+
+  it('describes [TURN-LIMIT] as blocking', () => {
+    const row = rows.find((r) => r.startsWith('| `[TURN-LIMIT]` |'))
+    expect(row).toContain('**not bookkeeping**')
+    expect(row).toContain('Adds `Needs Decision`')
+  })
+
+  it('says how to test a workflow change and what "Do not self-commit" means', () => {
+    expect(doc).toContain('## Testing a workflow change')
+    expect(doc).toContain('**The fixture-ticket pattern:**')
+    expect(doc).toContain('It means **no\ncommit to `main`, and no merge**.')
+  })
+})
+
 describe('the Slack sync', () => {
   const slack = read('scripts/slack-rulings.mjs')
   const set = slack.match(/const BLOCKING_MARKERS = new Set\(\[([\s\S]*?)\]\)/)

@@ -250,7 +250,7 @@ describe('renderGitReport', () => {
 
   it('keeps a backtick in a commit subject from closing the fence', () => {
     const report = renderGitReport(state)
-    expect(report).toContain('ˋthirdˋ')
+    expect(report).toContain('\u02cbthird\u02cb')
     expect(report).not.toContain('`third`')
   })
 
