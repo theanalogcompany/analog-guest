@@ -28,8 +28,8 @@
  * The marker comment is EDITED, never re-created, so each ticket carries
  * exactly one. Creating it still makes it the newest comment, after any
  * ruling already on the ticket. build-ready.yml and work-ticket.md both skip
- * [SLACK], [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT] comments when deciding who spoke last, so the
- * marker never buries a ruling.
+ * [SLACK], [CLAIM], [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT] comments
+ * when deciding who spoke last, so the marker never buries a ruling.
  *
  * Env: LINEAR_API_KEY, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
  */

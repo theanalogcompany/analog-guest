@@ -9,12 +9,12 @@ You are working on Linear ticket $ARGUMENTS for analog-guest. Each invocation is
 
 1. **Re-read ticket state.** `Linear:get_issue` for body + status, `Linear:list_comments` for the full comment thread (createdAt order). In CI there is no Linear MCP — read with curl and write with `node scripts/linear.mjs`, in exactly the two forms the workflow prompt gives. CI Bash denies expanding an environment variable (so `$LINEAR_API_KEY` is denied: curl takes the key with `--variable`, and the helper reads it itself), command substitution, variable assignment, output redirection and heredocs. It also refuses jq, rg and the other shell tools on any file outside the checkout, which includes the runner temp folder: open those files with the Read tool. A denied command fails silently.
 
-2. **Compute.** Marker-detection convention: "contains `[MARKER]`" means the comment's marker is `[MARKER]`, and a comment's marker is the first `[...]` marker after its `**[FROM CLAUDE CODE]**` prefix (the prefix, a blank line, then the marker). It is NOT a substring match anywhere in the body: an `[AUDIT]` or a `[PLAN]` that quotes `[NEEDS-INPUT]` keeps its own meaning. The same holds for every marker: `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`, `[AUDIT]`, `[AUDIT-SKIPPED]`, `[BUILD-SKIPPED]`, `[FINDING]`, `[RESUME-CLAIM]`, `[SLACK]`, `[DENIALS]`, `[OVER-LIMIT]`, `[SILENT-RUN]`, `[TURN-LIMIT]`, `[CANCELLED]`.
+2. **Compute.** Marker-detection convention: "contains `[MARKER]`" means the comment's marker is `[MARKER]`, and a comment's marker is the first `[...]` marker after its `**[FROM CLAUDE CODE]**` prefix (the prefix, a blank line, then the marker). It is NOT a substring match anywhere in the body: an `[AUDIT]` or a `[PLAN]` that quotes `[NEEDS-INPUT]` keeps its own meaning. The same holds for every marker: `[POLLING-STATE]`, `[POLLING-ACK]`, `[POLLING-TIMEOUT]`, `[POLLING-CLOSED]`, `[NEEDS-INPUT]`, `[NEEDS-ACTION]`, `[PLAN]`, `[HUMAN-REVIEW-REQUIRED]`, `[AUDIT]`, `[AUDIT-SKIPPED]`, `[BUILD-SKIPPED]`, `[FINDING]`, `[CLAIM]`, `[RESUME-CLAIM]`, `[SLACK]`, `[DENIALS]`, `[OVER-LIMIT]`, `[SILENT-RUN]`, `[TURN-LIMIT]`, `[CANCELLED]`.
 
    **Provenance comes from the prefix, never from the author ID.** Every comment on every ticket is under Jaipal's account, your own included.
 
    - `botComments` — comments whose body opens with `**[FROM CLAUDE CODE]**`: unescape `\[` to `[` and `\]` to `]`, then match with `startsWith`, never a substring match. A comment that quotes the prefix further down, such as session output pasted back into Linear, is not a bot comment (TAC-396).
-   - `bookkeeping` — bot comments whose marker is `[SLACK]` (written by the Slack sync), `[RESUME-CLAIM]` (written by the build workflow before it resumes a ticket), `[DENIALS]` (written by the build or audit workflow after a session that hit permission denials) or `[OVER-LIMIT]` (written by the build workflow after a session that finished its work but went over its turn limit). They record what a workflow did; they are not a turn. **Every definition below skips them.** Without that, a claim posted a moment before this session started would look like the newest word on the ticket and bury Jaipal's reply.
+   - `bookkeeping` — bot comments whose marker is `[SLACK]` (written by the Slack sync), `[CLAIM]` (written by the build workflow before it starts a ticket, and by a local session before it works one; see "Claiming the ticket"), `[RESUME-CLAIM]` (written by the build workflow before it resumes a ticket), `[DENIALS]` (written by the build or audit workflow after a session that hit permission denials) or `[OVER-LIMIT]` (written by the build workflow after a session that finished its work but went over its turn limit). They record what a workflow did; they are not a turn. **Every definition below skips them.** Without that, a claim posted a moment before this session started would look like the newest word on the ticket and bury Jaipal's reply.
    - `humanComments` — every other comment. A comment with no recognised prefix is human input. A plain `**[FROM CLAUDE CHAT]**` comment is human input too, but it is context: it never advances a gate (Phase 0 step 2b, "Reply classification").
    - `lastBotComment` — most recent of `botComments`, skipping bookkeeping (null if none). **Used for terminal-state detection only.**
    - `newestComment` — most recent comment of any kind, skipping bookkeeping. "The newest comment" anywhere in this file means this one.
@@ -68,8 +68,30 @@ A `[TURN-LIMIT]` from the build workflow asks nothing of the session: route by `
 
 Leave the status alone throughout. `Needs Decision` comes off in Phase 0 when no question is left open, or on the `[PLAN]` route when the plan is approved.
 
+# Claiming the ticket (local sessions only)
+
+The build workflow skips a ticket another session has (TAC-448, `scripts/claims.mjs`). It sees a local session only through what that session writes to Linear or pushes to GitHub, so a local session claims the ticket as soon as Phase 0's gate 2a has passed, before anything else it writes. **In CI, skip this section**: the workflow claimed the ticket before your session started, and you post no `[CLAIM]`.
+
+1. **Look for a live build run.** A `[CLAIM]` or `[RESUME-CLAIM]` that names `run=<id>` is the build workflow's. If the newest one's run is still going (`gh run view <id> --json status --jq .status` prints `queued` or `in_progress`), that run has the ticket: tell the operator which run, and exit without writing anything. If `gh` cannot answer, say so and ask the operator before going on.
+2. **Look for another local session.** On your first invocation, a `[CLAIM]` naming no run and not `released`, or a `[POLLING-STATE]`, edited in the last 3 hours, is another session's. Ask the operator before going on.
+3. **Post your claim**, flat:
+
+   ```
+   **[FROM CLAUDE CODE]**
+
+   [CLAIM] TAC-XXX session=local
+   ```
+
+   It names no run; that is what marks it as a local session's. Capture its id. On a later invocation of the same session, do not post another, and leave it as it is: a polling wakeup that finds no new reply does not take back a `released` claim. Only step 4's "carry on" does. After posting, read the thread once more: a build run's claim can land in the seconds between your read and your post. If one did and its run is going, edit yours to `released` (step 4) and exit.
+4. **Keep it true.** The workflow honours a local claim for 3 hours from its last edit, whatever Jaipal rules in the meantime: his ruling reaches Linear when the Slack sync posts it, which can be long after you heard the answer another way.
+   - Edit it at least every 3 hours while you work. A commit pushed to the ticket's branch also holds the ticket for 3 hours from when it was made, but only on a branch named `jaipal/tac-xxx-...`: the workflow reads no other.
+   - **When you stop working the ticket**, edit it to `[CLAIM] TAC-XXX session=local released`, on every exit: after `[PLAN]`, `[NEEDS-INPUT]` or `[NEEDS-ACTION]`, after the PR link, after `[HUMAN-REVIEW-REQUIRED]` or `[POLLING-CLOSED]`, after a gate refusal, and when you start polling for a reply. A released claim holds nothing, so the next session can act on his answer. A polling chain stays protected by its `[POLLING-STATE]`, which the workflow reads as live for 10 minutes after each wakeup.
+   - **When you carry on** after his answer, edit `released` off before anything else.
+
+Nothing protects a session before its claim lands or its first push: until then the workflow cannot see it.
+
 # Phase 0 — Verify scope (runs every invocation)
-1. Re-read the ticket body and status — surfaces mid-flow edits.
+1. Re-read the ticket body and status — surfaces mid-flow edits. A local session claims the ticket ("Claiming the ticket") once gate 2a below has passed, before 2b writes anything.
 2. **Gate, with Jaipal's answers applied before the open-questions check.** The order in (b) and (c) matters: checking `## Open questions` before applying his answer finds his own question still there, exits, and ignores the answer until he edits the ticket by hand.
 
    **a. Status and repo.**
@@ -224,7 +246,7 @@ Status untouched. The agent never sets a ticket to Done; the permission hook den
 - No auto-merge. The merge gate stays manual. **Never commit or push to `main`**, and every PR opens as a draft: the PR is for Jaipal to read, not a request to merge.
 - **Build only from Ready or In Progress, and only a ticket with one repo label.** Todo means committed but not yet audited. Two repo labels means the ticket needs splitting: cross-repo work is two tickets, one per repo, linked.
 - **Apply Jaipal's answers before checking for open questions.** Phase 0 step 2b runs before 2c, every time.
-- **Never exit silently on a ticket carrying a `Blocked On` label when the newest comment, skipping `[SLACK]`, `[RESUME-CLAIM]`, `[DENIALS]` and `[OVER-LIMIT]` bookkeeping, is human input.** Post a comment saying what happened to his input first. An answer you cannot match gets `[NEEDS-INPUT]` saying so, never a quiet exit.
+- **Never exit silently on a ticket carrying a `Blocked On` label when the newest comment, skipping `[SLACK]`, `[CLAIM]`, `[RESUME-CLAIM]`, `[DENIALS]` and `[OVER-LIMIT]` bookkeeping, is human input.** Post a comment saying what happened to his input first. An answer you cannot match gets `[NEEDS-INPUT]` saying so, never a quiet exit.
 - **Never promote a ticket to Ready.** Only the audit puts a ticket there, whatever it finds. Never move an existing ticket to Todo; the only way into Todo is a new ticket, such as a split-off blocked item.
 - **Anything that needs Jaipal gets the right `Blocked On` label immediately**, and the status stays where it is. Never wait silently on a ticket that still looks available. A plan awaiting approval counts. A PR awaiting merge does not.
 - **Never run a production migration.** Write the SQL and hand it over via `[NEEDS-ACTION]`.
