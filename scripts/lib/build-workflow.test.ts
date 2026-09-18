@@ -1,6 +1,7 @@
-import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ENDING } from './run-report.mjs'
 
@@ -41,6 +42,7 @@ function runBlock(stepName: string) {
 const INPUTS = between(WORKFLOW, '  workflow_dispatch:', 'concurrency:')
 const PROMPT = between(WORKFLOW, 'prompt: |', '- name: Check the session posted')
 const QUEUE = runBlock('Find tickets to work')
+const SNAPSHOT = runBlock('Keep a copy of the turn-limit reporter')
 const CHECK = runBlock('Check the session posted on every ticket it worked')
 
 // Bookkeeping: posted by a workflow, never the newest comment on a ticket.
@@ -103,8 +105,15 @@ describe('the check after the session reports the turn limit', () => {
   })
 
   it('asks the report script how the session ended, against the same limit', () => {
-    expect(run).toContain('node scripts/run-report.mjs ending "$EXECUTION_FILE" "$MAX_TURNS"')
-    expect(run).toContain('node scripts/run-report.mjs notice "$1" "$EXECUTION_FILE" "$MAX_TURNS"')
+    expect(run).toContain('node "$REPORTER" ending "$EXECUTION_FILE" "$MAX_TURNS"')
+    expect(run).toContain('node "$REPORTER" notice "$1" "$EXECUTION_FILE" "$MAX_TURNS"')
+  })
+
+  it('runs the copy taken before the session, never the checkout the session changed', () => {
+    expect(run).not.toMatch(/node\s+(\.\/)?scripts\//)
+    expect(WORKFLOW).toContain('REPORTER: ${{ runner.temp }}/turn-limit-reporter/run-report.mjs')
+    expect(WORKFLOW).toContain('REPORTER_DIR: ${{ runner.temp }}/turn-limit-reporter\n')
+    expect(WORKFLOW.indexOf('- name: Keep a copy of the turn-limit reporter')).toBeLessThan(WORKFLOW.indexOf('- name: Work'))
   })
 
   it('branches on the endings the script prints', () => {
@@ -132,6 +141,46 @@ describe('the check after the session reports the turn limit', () => {
     const posted = run.slice(run.indexOf('if [ "$POSTED" -gt 0 ]'))
     expect(posted.indexOf('"$ENDING" = "finished-over-limit"')).toBeGreaterThan(-1)
     expect(posted.indexOf('"$ENDING" = "finished-over-limit"')).toBeLessThan(posted.indexOf('continue'))
+  })
+
+  it('lets a failed [OVER-LIMIT] post warn without stopping [DENIALS]', () => {
+    const over = between(run, 'if [ "$ENDING" = "finished-over-limit" ]', 'post_denials "$ID" "$TICKET"')
+    expect(over).toContain('if post "$ID" "$BODY"; then')
+    expect(over).not.toMatch(/^\s*post "\$ID" "\$BODY"$/m)
+  })
+})
+
+describe('the copy of the reporter', () => {
+  // Every module the entry imports, following relative imports.
+  function imports(entry: string): string[] {
+    const seen = new Set<string>()
+    const visit = (path: string) => {
+      if (seen.has(path)) return
+      seen.add(path)
+      for (const m of read(path).matchAll(/from '(\.[^']+)'/g)) visit(relative(ROOT, resolve(ROOT, dirname(path), m[1])))
+    }
+    visit(entry)
+    return [...seen].sort()
+  }
+
+  it('copies exactly the modules the reporter imports', () => {
+    const copied = [...SNAPSHOT.matchAll(/scripts\/[\w/-]+\.mjs/g)].map((m) => m[0])
+    expect(sorted(copied)).toEqual(imports('scripts/run-report.mjs'))
+  })
+
+  it('runs on its own, outside the checkout', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'reporter-copy-'))
+    try {
+      const r = spawnSync('bash', ['-c', SNAPSHOT], { cwd: ROOT, env: { ...process.env, REPORTER_DIR: dir }, encoding: 'utf8' })
+      expect(r.status, r.stderr).toBe(0)
+      const out = execFileSync('node', [join(dir, 'run-report.mjs'), 'ending', join(dir, 'no-such-file.json'), '120'], {
+        cwd: tmpdir(),
+        encoding: 'utf8',
+      })
+      expect(out).toBe('no-record\n')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -173,8 +222,9 @@ describe('work-ticket.md', () => {
 
   it('finds a branch an earlier run pushed', () => {
     const exists = line('- `branchExists` —')
-    expect(exists).toContain("`git branch --list -a '*jaipal/tac-xxx-*'`")
-    // The old glob used the uppercase id, which no branch name carries.
+    expect(exists).toContain("`git branch --list -a -i '*jaipal/tac-xxx-*'`")
+    // The old glob was case-sensitive and local-only, so it missed the
+    // lowercase branches CI sessions create and every branch on GitHub.
     expect(doc).not.toContain('jaipal/TAC-XXX')
   })
 

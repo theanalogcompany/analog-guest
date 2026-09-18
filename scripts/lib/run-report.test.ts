@@ -8,6 +8,7 @@ import { checkCommentBody } from './linear-cli.mjs'
 import {
   ENDING,
   EXIT,
+  MAX_LIST,
   classifyEnding,
   lastResult,
   readGitState,
@@ -165,6 +166,14 @@ describe('readGitState', () => {
     expect(state.onLocalMain).toEqual(['fff6666 oops'])
   })
 
+  it('reads a git call that failed as unknown, not as none', () => {
+    const state = readGitState(fakeGit({ [REFS]: 'refs/heads/jaipal/tac-447-x\nrefs/remotes/origin/jaipal/tac-447-x' }), 'TAC-447')
+    expect(state.branches).toEqual([
+      { name: 'jaipal/tac-447-x', local: true, remote: true, onGitHub: null, notPushed: null },
+    ])
+    expect(state.uncommitted).toBeNull()
+  })
+
   it('says so when git cannot be read at all', () => {
     expect(readGitState(fakeGit({}), 'TAC-447')).toEqual({ readable: false })
   })
@@ -176,9 +185,15 @@ describe('readGitState against a real repository', () => {
   // against real git.
   let dir: string
   let work: string
+  // A git hook (this test runs in the pre-commit hook) exports GIT_DIR and
+  // GIT_INDEX_FILE, which would point every call here at the outer repo, and
+  // a global config can change hash length or run hooks. Neither may reach
+  // the temporary repository.
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+  for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX', 'GIT_COMMON_DIR']) delete env[key]
   const git = (cwd: string) => (args: string[]) => {
     try {
-      return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      return execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     } catch {
       return null
     }
@@ -186,15 +201,17 @@ describe('readGitState against a real repository', () => {
   const sh = (cwd: string, ...args: string[]) =>
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
       cwd,
+      env,
       stdio: 'ignore',
     })
+  const subject = (line: string) => line.split(' ').slice(1).join(' ')
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'run-report-'))
     const origin = join(dir, 'origin.git')
     work = join(dir, 'work')
-    execFileSync('git', ['init', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
-    execFileSync('git', ['clone', origin, work], { stdio: 'ignore' })
+    execFileSync('git', ['init', '--bare', '-b', 'main', origin], { env, stdio: 'ignore' })
+    execFileSync('git', ['clone', origin, work], { env, stdio: 'ignore' })
     sh(work, 'checkout', '-b', 'main')
     writeFileSync(join(work, 'a.txt'), 'a')
     sh(work, 'add', '.')
@@ -222,8 +239,8 @@ describe('readGitState against a real repository', () => {
     expect(state.branches).toHaveLength(1)
     const [b] = state.branches ?? []
     expect(b.name).toBe('jaipal/tac-447-real')
-    expect(b.onGitHub.map((c: string) => c.slice(8))).toEqual(['TAC-447: pushed'])
-    expect(b.notPushed.map((c: string) => c.slice(8))).toEqual(['TAC-447: not pushed'])
+    expect(b.onGitHub.map(subject)).toEqual(['TAC-447: pushed'])
+    expect(b.notPushed.map(subject)).toEqual(['TAC-447: not pushed'])
     expect(state.uncommitted).toEqual(['?? d.txt'])
     expect(state.onLocalMain).toEqual([])
   })
@@ -264,6 +281,24 @@ describe('renderGitReport', () => {
     expect(renderGitReport({ ...state, onLocalMain: ['fff6666 oops'] })).toContain(
       'Committed to main on the runner, which a session must never do. Never pushed, and lost:',
     )
+  })
+
+  it('says a list is unknown when git could not read it, rather than empty', () => {
+    const report = renderGitReport({
+      ...state,
+      branches: [{ name: 'jaipal/tac-447-x', local: true, remote: true, onGitHub: null, notPushed: null }],
+      uncommitted: null,
+    })
+    expect(report).toContain('jaipal/tac-447-x (unknown: git could not read it)')
+    expect(report).not.toContain('(none)')
+    expect(report).not.toContain('commits ahead of main')
+  })
+
+  it('cuts a long list so the comment stays postable', () => {
+    const many = Array.from({ length: MAX_LIST + 7 }, (_, i) => `?? file-${i}.ts`)
+    const report = renderGitReport({ ...state, uncommitted: many })
+    expect(report).toContain(`?? file-${MAX_LIST - 1}.ts\n...and 7 more`)
+    expect(report).not.toContain(`?? file-${MAX_LIST}.ts`)
   })
 
   it('says the state is unknown when git could not be read', () => {
@@ -344,6 +379,12 @@ describe('run', () => {
     expect(out).toContain('[OVER-LIMIT] TAC-447 run=1 turns=128 limit=120')
   })
 
+  it('accepts a ticket id typed in lowercase on a manual dispatch', () => {
+    const { code, out } = call(['notice', 'tac-447', '/stopped.json', '60'])
+    expect(code).toBe(EXIT.OK)
+    expect(out).toContain('[TURN-LIMIT] TAC-447')
+  })
+
   it.each([['/finished.json'], ['/missing.json']])('notice prints nothing for %s', (file) => {
     expect(call(['notice', 'TAC-447', file, '120'])).toEqual({ code: EXIT.OK, out: '', err: '' })
   })
@@ -362,7 +403,7 @@ describe('run', () => {
     [['ending', '/stopped.json']],
     [['ending', '/stopped.json', 'lots']],
     [['ending', '/stopped.json', '0']],
-    [['notice', 'tac-447', '/stopped.json', '60']],
+    [['notice', 'not-a-ticket', '/stopped.json', '60']],
     [['notice', 'TAC-447', '/stopped.json']],
   ])('refuses %j with usage', (argv) => {
     const { code, out, err } = call(argv as string[])

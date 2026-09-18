@@ -49,6 +49,9 @@ name: Build ready tickets
 # fails after the fact (run 35288433905: 128 turns against 120), gets
 # [OVER-LIMIT] bookkeeping, and the run stays failed. max_turns (manual
 # dispatch only) lowers the limit so a fixture ticket can reach the first case.
+# The check runs a copy of the reporter taken before the session, never the
+# checkout's own: by then the checkout is the session's branch, which may be
+# older than the reporter or be editing it.
 #
 # full_output (manual dispatch only) prints the session transcript into the
 # run log. Off by default: this repo is public, so the log is too, and a
@@ -71,8 +74,9 @@ name: Build ready tickets
 # The Claude step does not run from a branch whose copy of this file differs
 # from main's: claude-code-action skips itself ("Workflow validation failed")
 # and exits green. The shell steps still run from the branch. So the ticket
-# selection (with dry_run) and the check after the session can be tested
-# before merge, on a fixture ticket, and the session only after it merges.
+# selection (with dry_run), and the check's handling of a session that posted
+# nothing, can be tested before merge on a fixture ticket. The turn-limit
+# notices and anything the session does can be tested only after it merges.
 # Run 35149594063 is the example: the session skipped, and the check posted
 # [SILENT-RUN] on fixture TAC-430. .claude/process.md, "Testing a workflow
 # change", has the procedure.
@@ -375,6 +379,21 @@ jobs:
             echo "flagged $NAME"
           done
 
+      # The check after the session reports through scripts/run-report.mjs.
+      # By then the checkout is on the session's branch, which can predate the
+      # script or be a ticket that edits it, so the check runs this copy,
+      # taken from the checkout before the session starts (main, on every
+      # scheduled run). It lives outside the checkout.
+      - name: Keep a copy of the turn-limit reporter
+        if: steps.queue.outputs.tickets != ''
+        env:
+          REPORTER_DIR: ${{ runner.temp }}/turn-limit-reporter
+        run: |
+          set -euo pipefail
+          mkdir -p "$REPORTER_DIR/lib"
+          cp scripts/run-report.mjs "$REPORTER_DIR/"
+          cp scripts/lib/run-report.mjs scripts/lib/linear-cli.mjs scripts/lib/comment-provenance.mjs "$REPORTER_DIR/lib/"
+
       - name: Work
         id: work
         if: steps.queue.outputs.tickets != ''
@@ -514,6 +533,8 @@ jobs:
           WORK_OUTCOME: ${{ steps.work.outcome }}
           EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The copy taken before the session, not the checkout's scripts/.
+          REPORTER: ${{ runner.temp }}/turn-limit-reporter/run-report.mjs
         run: |
           set -euo pipefail
 
@@ -557,10 +578,10 @@ jobs:
           # header). stopped-at-limit posts [TURN-LIMIT], finished-over-limit
           # posts [OVER-LIMIT] bookkeeping. If the script fails, ENDING is
           # unknown and the check behaves exactly as it did before TAC-447.
-          ENDING=$(node scripts/run-report.mjs ending "$EXECUTION_FILE" "$MAX_TURNS") || ENDING="unknown"
+          ENDING=$(node "$REPORTER" ending "$EXECUTION_FILE" "$MAX_TURNS") || ENDING="unknown"
           echo "Turn limit $MAX_TURNS; ending: $ENDING."
           notice() {
-            DENIALS="$DENIALS" DENIED="$DENIED" node scripts/run-report.mjs notice "$1" "$EXECUTION_FILE" "$MAX_TURNS"
+            DENIALS="$DENIALS" DENIED="$DENIED" node "$REPORTER" notice "$1" "$EXECUTION_FILE" "$MAX_TURNS"
           }
 
           post() {
@@ -647,9 +668,13 @@ jobs:
               echo "$TICKET: the session posted $POSTED comment(s)."
               if [ "$ENDING" = "finished-over-limit" ]; then
                 BODY=$(notice "$TICKET") || BODY=""
+                # Bookkeeping: a failed post must not stop [DENIALS] below.
                 if [ -n "$BODY" ]; then
-                  post "$ID" "$BODY"
-                  echo "$TICKET: posted [OVER-LIMIT], $TURNS turns against a limit of $MAX_TURNS."
+                  if post "$ID" "$BODY"; then
+                    echo "$TICKET: posted [OVER-LIMIT], $TURNS turns against a limit of $MAX_TURNS."
+                  else
+                    echo "::warning title=Turn limit::$TICKET: posting [OVER-LIMIT] failed."
+                  fi
                 fi
               fi
               if [ "$DENIALS" -gt 0 ]; then

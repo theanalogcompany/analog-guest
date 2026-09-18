@@ -10,8 +10,8 @@
  *   and names what reached GitHub and what died with the runner.
  * - The session finishes, and claude-code-action fails the step afterwards
  *   because `num_turns` is over the limit (run 35288433905: `success` at 128
- *   against 120; `base-action/src/run-claude-sdk.ts:241-250` at the pinned
- *   SHA). Nothing was cut short, so the ticket gets [OVER-LIMIT], which is
+ *   against 120; `base-action/src/run-claude-sdk.ts:241-250` in the action's
+ *   `v1` tag, 2261fcf when read). Nothing was cut short, so the ticket gets [OVER-LIMIT], which is
  *   bookkeeping. It must not count as the newest comment: posted after a PR
  *   link, a non-bookkeeping comment would hide it, and the next /work-ticket
  *   run would read the ticket as unbuilt.
@@ -114,7 +114,11 @@ export function readGitState(git, ticket) {
     byName.set(m[2], entry);
   }
 
-  const log = (range) => lines(git(['log', '--format=%h %s', range]));
+  // null when git could not answer: unknown, which is not the same as none.
+  const log = (range) => {
+    const out = git(['log', '--format=%h %s', range]);
+    return out === null ? null : lines(out);
+  };
   const branches = [...byName.values()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((b) => ({
@@ -131,20 +135,34 @@ export function readGitState(git, ticket) {
     readable: true,
     head: (git(['rev-parse', '--abbrev-ref', 'HEAD']) ?? '').trim() || null,
     branches,
-    uncommitted: lines(git(['status', '--porcelain'])),
+    uncommitted: (() => {
+      const out = git(['status', '--porcelain']);
+      return out === null ? null : lines(out);
+    })(),
     // A session must never commit to main. If one did, say so rather than
-    // letting it vanish with the runner.
-    onLocalMain: log('refs/remotes/origin/main..refs/heads/main'),
+    // letting it vanish with the runner. Unreadable here means no local main.
+    onLocalMain: log('refs/remotes/origin/main..refs/heads/main') ?? [],
   };
+}
+
+// Long lists are cut, so a session that touched many files still gets a
+// comment Linear accepts.
+export const MAX_LIST = 50;
+
+function capped(items) {
+  if (items.length <= MAX_LIST) return items;
+  return [...items.slice(0, MAX_LIST), `...and ${items.length - MAX_LIST} more`];
 }
 
 // The report goes inside ```text fences. A backtick run in a commit subject
 // or a file name would close the fence, so backticks are swapped for a
 // look-alike, as the workflow's [DENIALS] list does.
 function fenced(items) {
-  const body = items.length > 0 ? items.join('\n') : '(none)';
+  const body = items.length > 0 ? capped(items).join('\n') : '(none)';
   return ['```text', body.replaceAll('`', '\u02cb'), '```'].join('\n');
 }
+
+const UNKNOWN = '(unknown: git could not read it)';
 
 /** The pushed / not pushed / not committed report, as markdown. */
 export function renderGitReport(state) {
@@ -158,18 +176,22 @@ export function renderGitReport(state) {
     out.push('On GitHub, and kept: no branch for this ticket, so nothing.');
   } else {
     out.push('On GitHub, and kept:');
-    out.push(fenced(remote.flatMap((b) => [
-      `${b.name} (${b.onGitHub.length} commit${b.onGitHub.length === 1 ? '' : 's'} ahead of main)`,
-      ...b.onGitHub.map((c) => `  ${c}`),
-    ])));
+    out.push(fenced(remote.flatMap((b) => b.onGitHub === null
+      ? [`${b.name} ${UNKNOWN}`]
+      : [
+          `${b.name} (${b.onGitHub.length} commit${b.onGitHub.length === 1 ? '' : 's'} ahead of main)`,
+          ...b.onGitHub.map((c) => `  ${c}`),
+        ])));
   }
 
-  const notPushed = state.branches.filter((b) => b.notPushed.length > 0);
+  const notPushed = state.branches.filter((b) => b.notPushed === null || b.notPushed.length > 0);
   out.push('Committed on the runner but never pushed, and lost:');
-  out.push(fenced(notPushed.flatMap((b) => [b.name, ...b.notPushed.map((c) => `  ${c}`)])));
+  out.push(fenced(notPushed.flatMap((b) => b.notPushed === null
+    ? [`${b.name} ${UNKNOWN}`]
+    : [b.name, ...b.notPushed.map((c) => `  ${c}`)])));
 
   out.push(`Changed on the runner but never committed, and lost${state.head ? ` (on ${state.head})` : ''}:`);
-  out.push(fenced(state.uncommitted));
+  out.push(fenced(state.uncommitted ?? [UNKNOWN]));
 
   if (state.onLocalMain.length > 0) {
     out.push('Committed to main on the runner, which a session must never do. Never pushed, and lost:');
@@ -259,8 +281,10 @@ export function run({ argv, env, readFile, git, stdout, stderr }) {
 
   if (verb === 'notice') {
     if (rest.length !== 3) return usage('notice takes exactly three arguments: <ticket> <execution-file> <max-turns>');
-    const [ticket, file, limit] = rest;
-    if (!TICKET.test(ticket)) return usage(`"${ticket}" is not a ticket identifier`);
+    // A manual dispatch can pass the id in lowercase; Linear accepts either.
+    const ticket = rest[0].toUpperCase();
+    const [, file, limit] = rest;
+    if (!TICKET.test(ticket)) return usage(`"${rest[0]}" is not a ticket identifier`);
     const maxTurns = parseMaxTurns(limit);
     if (maxTurns === null) return usage(`"${limit}" is not a turn limit`);
 

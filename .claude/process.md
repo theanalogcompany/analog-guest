@@ -187,6 +187,7 @@ earlier comment where that reading misses it.
 | `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
 | `[TURN-LIMIT]` | The CLI stopped the build session at its turn limit, before it finished | Posted by the workflow, in place of `[SILENT-RUN]` and `[DENIALS]`. Names what reached GitHub and what died with the runner. Adds `Needs Decision` like `[SILENT-RUN]`, the run fails, and it is **not bookkeeping** for the same reason. A reply resumes the build from the ticket's branch on GitHub |
+| `[CANCELLED]` | A fixture ticket has served its purpose | Posted just before cancelling the fixture, naming the ticket it was a fixture for. See "Testing a workflow change" |
 | `[OVER-LIMIT]` | The build session finished its work but used more turns than its limit, so claude-code-action failed the run afterwards | Bookkeeping, not a turn. Posted by the workflow, saying what was pushed. The run stays failed (ruled on TAC-447). Bookkeeping because it lands after the session's own last comment, often a PR link, and must not hide it |
 
 A comment that does **not** carry `[FROM CLAUDE CODE]` is human input. When
@@ -275,12 +276,6 @@ looks identical to one without.
 This check exists because TAC-401's first resume ran green, hit 30
 permission denials, and wrote nothing.
 
-**The same check reports the turn limit** (TAC-447). A build run works one
-ticket, so the limit is that ticket's alone, and the session pushes each
-planned commit as it makes it. A session the CLI stops at the limit gets
-`[TURN-LIMIT]`, and one that finishes over it gets `[OVER-LIMIT]`; both say
-what reached GitHub, read from the runner's git after the session.
-
 **Nothing tests this.** It is instructions to the build session, not code.
 The workflow fixtures cover which tickets get picked up, not whether a
 session applies an answer. The loud-failure rule is instructions too, so it
@@ -290,6 +285,14 @@ is a real answer on a real ticket. After any change to this section or to
 Phase 0 of `work-ticket.md`, name one ticket, answer it, and check within a
 few hours that its questions left the block or a `[NEEDS-INPUT]` explains
 why not.
+
+**The check after the session also reports the turn limit** (TAC-447), and
+that part is code, tested in `scripts/lib/`. A build run works one ticket, so
+the limit is that ticket's alone, and the session pushes each planned commit
+as it makes it. A session the CLI stops at the limit gets `[TURN-LIMIT]`, and
+one that finishes over it gets `[OVER-LIMIT]`. Both say what reached GitHub,
+read from the runner's git after the session, by a copy of the reporter taken
+before the session so the session cannot change it.
 
 ## Testing a workflow change
 
@@ -318,7 +321,8 @@ on which workflow it is.
 **The fixture-ticket pattern:**
 
 1. Ask Jaipal before creating one: it is a Linear write outside the ticket
-   being worked.
+   being worked. Create it just before dispatching: a fixture in Ready with
+   this repo's label is a ticket any scheduled build run may pick up.
 2. Create a throwaway ticket titled `FIXTURE: <what it tests> for TAC-XXX —
    not real work, do not build`, with this repo's label and a Repo: line.
    Keep guest, venue and production data off it: `full_output` puts a run's
