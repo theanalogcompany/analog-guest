@@ -77,3 +77,25 @@ export function isRulingComment(body) {
 export function isContextChatComment(body) {
   return CHAT_PLAIN_PREFIX.test(unescapeBrackets(body));
 }
+
+/**
+ * The markers a workflow writes to record what it did, never a turn:
+ * `.claude/process.md`'s "Comments" table and `build-ready.yml`'s own
+ * `marker_is("CLAIM|RESUME-CLAIM|SLACK|DENIALS|OVER-LIMIT")` jq regex carry
+ * this same list. Kept here too, so a JS consumer (TAC-446's Needs Decision
+ * reconciler is the first) has one definition rather than a third copy —
+ * the jq copy stays, since there is no way to share code between bash and
+ * this module.
+ */
+export const BOOKKEEPING_MARKERS = ['CLAIM', 'RESUME-CLAIM', 'SLACK', 'DENIALS', 'OVER-LIMIT'];
+
+/**
+ * A bot comment whose marker is one of BOOKKEEPING_MARKERS. False for a
+ * non-bot comment, and false for a bot comment with no marker or an
+ * unrecognised one — this only ever answers "did a workflow file this as
+ * bookkeeping," never "is this comment safe to ignore" in general.
+ */
+export function isBookkeepingComment(body) {
+  const marker = commentMarker(body);
+  return marker !== null && BOOKKEEPING_MARKERS.includes(marker);
+}
