@@ -12,6 +12,7 @@ import {
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
 import { computeGuestState, type GuestState } from '@/lib/recognition'
+import type { RecentMessage } from '@/lib/ai'
 import { evaluateApprovalDecision } from './evaluate-approval-decision'
 import type { ScenarioSheetRow } from './scenario-schema'
 
@@ -406,6 +407,17 @@ export interface RunScenarioInput {
   scenario: ScenarioSheetRow
   venueId: string
   guestId: string
+  /**
+   * TAC-481: overrides the recentMessages buildRuntimeContext loaded from the
+   * real (empty, for a synthetic guest) message history. Lets a caller
+   * (scenario-sequence.ts) thread a synthetic conversation across several
+   * runScenario calls for the same guest — without this, a multi-turn
+   * scenario would have no way to make turn 2 aware of what turn 1's reply
+   * said, since this harness never persists anything to `messages`.
+   * Undefined (the default) leaves buildRuntimeContext's own load in place,
+   * so every existing caller is unaffected.
+   */
+  priorMessages?: RecentMessage[]
 }
 
 /**
@@ -419,7 +431,7 @@ export interface RunScenarioInput {
  * the caller can iterate without a try/catch of its own.
  */
 export async function runScenario(input: RunScenarioInput): Promise<ScenarioResult> {
-  const { scenario, venueId, guestId } = input
+  const { scenario, venueId, guestId, priorMessages } = input
   const start = Date.now()
   const base = {
     sampleId: scenario.sample_id,
@@ -462,6 +474,11 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
         receivedAt: new Date(),
       },
     })
+    // TAC-481: see RunScenarioInput.priorMessages — a no-op when omitted, so
+    // every pre-existing caller (run-test-scenarios.ts's CLI) is unaffected.
+    if (priorMessages !== undefined) {
+      ctx.recentMessages = priorMessages
+    }
     ctx.classification = await classifyStage(ctx)
 
     // TAC-348: harness parity with handle-inbound.ts's crisis-safety short

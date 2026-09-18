@@ -50,6 +50,9 @@ next-env.d.ts
 # local scratch dir for one-off experiments — not committed; pre-commit
 # tsc would otherwise scan WIP files that haven't been wired to deps yet.
 /scripts/sandbox
+# TAC-481: run-guest-scenario output — evidence of a specific run, not
+# source. Never overwritten by default (scenario-run-output.ts).
+/scripts/onboarding/scenario-runs
 .worktrees/
 .claude/scheduled_tasks.lock
 supabase/.temp/
