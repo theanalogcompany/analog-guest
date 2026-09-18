@@ -11,6 +11,13 @@
 // the agent in the background. For Instagram that hand-off is switched off
 // until outbound exists; see lib/messaging/instagram/agent-gate.ts.
 //
+// Also after the 200, and never before it (TAC-479): each guest with a saved
+// message or icebreaker tap gets their Instagram handle and display name
+// refreshed if it is due, via waitUntil beside the agent hand-off. It is a
+// Graph API call plus database reads and writes, so it must never sit on
+// Meta's delivery deadline (TAC-478). See
+// lib/messaging/instagram/refresh-profile.ts.
+//
 // THREE deliberate divergences from the Sendblue and Square webhook routes,
 // each of which would otherwise read as an inconsistency:
 //
@@ -56,6 +63,10 @@ import {
   logInstagramOutcome,
   processInstagramDelivery,
 } from '@/lib/messaging/instagram/handle-events'
+import {
+  profileRefreshTargetFor,
+  refreshInstagramProfile,
+} from '@/lib/messaging/instagram/refresh-profile'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -199,12 +210,24 @@ export async function POST(request: Request): Promise<Response> {
       ...summarizeInstagramPayload(parsed),
     })
 
-    const outcomes = await processInstagramDelivery(parsed, createAdminClient())
+    const supabase = createAdminClient()
+    const outcomes = await processInstagramDelivery(parsed, supabase)
+    // One profile refresh per guest per delivery, however many of their
+    // messages it carries.
+    const refreshing = new Set<string>()
     for (const outcome of outcomes) {
       logInstagramOutcome(outcome)
       // Always null while agent-gate.ts holds the gate shut (until TAC-469).
       const agentMessageId = agentMessageIdFor(outcome)
       if (agentMessageId !== null) waitUntil(runInboundAgent(agentMessageId))
+      // Not behind the agent gate: storing who the guest is doesn't reply to
+      // them. Handed to waitUntil, never awaited: awaiting it would put a Graph
+      // call inside Meta's delivery deadline.
+      const refreshTarget = profileRefreshTargetFor(outcome)
+      if (refreshTarget !== null && !refreshing.has(refreshTarget.guestId)) {
+        refreshing.add(refreshTarget.guestId)
+        waitUntil(refreshInstagramProfile(supabase, refreshTarget))
+      }
     }
 
     return new Response('OK', { status: 200 })
