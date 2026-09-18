@@ -279,8 +279,17 @@ describe('POST /api/webhooks/instagram', () => {
   // deliveries are failing. Without the route's check, this surfaces as an
   // ordinary rejection and the misconfiguration is indistinguishable from a
   // probe, which is what this test fails on.
-  it('reports a missing secret as misconfiguration, at error level, not as a rejection', async () => {
-    delete process.env.INSTAGRAM_APP_SECRET
+  //
+  // Both shapes, because an empty value is as much a misconfiguration as an
+  // unset one and the verifier would refuse it either way: a route check that
+  // only caught undefined would pass every status assertion in this file and
+  // still log an empty secret as an ordinary rejection.
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+  ])('reports a %s secret as misconfiguration, at error level, not as a rejection', async (_, value) => {
+    if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
+    else process.env.INSTAGRAM_APP_SECRET = value
     const body = JSON.stringify(PAYLOAD)
     await POST(postRequest(body, signed(body)))
 
@@ -293,8 +302,12 @@ describe('POST /api/webhooks/instagram', () => {
 
   // Decided before the body is touched. A request whose body cannot even be
   // read is refused rather than reaching the read-failure path's 200.
-  it('refuses without reading the body when the secret is unset', async () => {
-    delete process.env.INSTAGRAM_APP_SECRET
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+  ])('refuses without reading the body when the secret is %s', async (_, value) => {
+    if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
+    else process.env.INSTAGRAM_APP_SECRET = value
     const text = vi.fn(() => Promise.reject(new Error('stream aborted')))
     const unread = { url: ROUTE_URL, headers: new Headers(), text } as unknown as Request
 
