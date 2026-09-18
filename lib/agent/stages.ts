@@ -1845,9 +1845,11 @@ export function deriveFollowupContext(
 // TAC-332: extracted into its own exported function (previously inlined in
 // buildAiRuntime below) so `handle-inbound.ts` can reuse the SAME "is this
 // the opener turn" signal to gate `recordIntentionPrompts` — the opener
-// block instructs the model to greet + ask newness, never order, so there is
-// no legitimate path for a turn-one send to raise a first-touch intention,
-// and running the classifier there has no upside, only false-positive risk.
+// block instructs the model to greet and ask what the guest got (TAC-423),
+// which is understand_order's own question, not a tracked intention line, so
+// there is no legitimate path for a turn-one send to raise a first-touch
+// intention, and running the classifier there has no upside, only
+// false-positive risk.
 // Reusing this flag rather than inventing a new turn-index check keeps the
 // two call sites (what renders the opener, what's allowed to record against
 // it) structurally unable to disagree about what "the opener turn" means.

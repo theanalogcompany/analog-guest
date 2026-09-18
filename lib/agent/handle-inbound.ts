@@ -1084,9 +1084,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // direction, which is the direction TAC-385 §4 chose.
     //
     // TAC-332: never on the true opener turn either. The opener tells the model
-    // to greet and ask whether it's their first time, not to raise an
-    // intention, so the classifier there can only return a correct negative or
-    // a destructive false positive. Reuses computeFirstTouchAfterQrScan, the
+    // to greet and ask what they got (TAC-423) rather than raising a tracked
+    // intention line, so the classifier there can only return a correct
+    // negative or a destructive false positive. Reuses computeFirstTouchAfterQrScan, the
     // flag that renders the opener, so "is this the opener turn" can't diverge
     // between what renders it and what may record against it — and applying it
     // HERE means a queued opener draft stores nothing, so the dispatch path

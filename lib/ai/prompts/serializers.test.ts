@@ -689,26 +689,27 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
     expect(intentionLineIdx).toBeGreaterThan(openerIdx)
   })
 
-  // Carries the never-texted-vs-never-visited distinction from the ticket's
-  // own framing (created_via: 'qr_scan' means never-texted, not
-  // never-visited) so the question reads as genuinely open rather than
-  // hollow against a `Guest relationship: new` line that only reflects
-  // absence of signals, not absence of history. Also asserts the opener does
-  // NOT license physical-presence framing — that phrasing was in an earlier
-  // draft and was deliberately cut because it re-introduced exactly what the
-  // R1 rationale reword removes.
-  it('carries the never-texted-vs-never-visited framing and asks one question', () => {
+  // TAC-423: the opener used to ask whether it's the guest's first time — a
+  // second, independently-authored instruction competing with
+  // understand_order's own line in this same block. The QR sign is assumed
+  // to be at the drink pickup counter (ruled; not configurable), so the
+  // opener now asks what they got, agreeing with understand_order instead of
+  // racing it. Also asserts the opener does NOT license current-presence
+  // framing beyond the pickup-order fact itself — R1's carve-out already
+  // warns against assuming the guest is still on-site.
+  it('asks what they got instead of whether it is their first time', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
     expect(out).toContain(
-      "You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited.",
+      "They've already ordered and have it in hand. You don't know what it was.",
     )
     expect(out).toContain('thank them for coming in')
-    expect(out).toContain("ask whether it's their first time")
+    expect(out).toContain('ask what they got')
     expect(out).toContain('one question, then let their answer lead')
+    expect(out).not.toContain("ask whether it's their first time")
     expect(out).not.toContain('walking up for the first time')
     expect(out).not.toContain('someone present')
   })
@@ -908,8 +909,7 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
   // The sharper case: a fresh qr_scan guest's literal first message is the
   // opt-out itself, so firstTouchAfterQrScan is also true and the block
   // would otherwise carry the more directive opener ("thank them for coming
-  // in and ask whether it's their first time") rather than just the two
-  // soft state lines.
+  // in and ask what they got") rather than just the two soft state lines.
   it('omits the block entirely for opt_out even when firstTouchAfterQrScan is true', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
@@ -918,7 +918,7 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
     )
     expect(out).not.toContain("What you're hoping to get to")
     expect(out).not.toContain('scanned your sign')
-    expect(out).not.toContain("ask whether it's their first time")
+    expect(out).not.toContain('ask what they got')
   })
 
   it('still renders the block for a non-opt_out category with the same inputs', () => {

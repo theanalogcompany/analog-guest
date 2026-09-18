@@ -1023,6 +1023,18 @@ function formatMechanicEligibility(
 function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
+  // TAC-423, ruled 2026-09-18. The opener's fallback question used to be
+  // "ask whether it's their first time" — a second, independently-authored
+  // instruction competing with understand_order's own line in this same
+  // block, with nothing reconciling them. The QR sign is assumed to be at
+  // the drink pickup counter (ruled; not made configurable, no second venue
+  // yet), so the guest sending this message is standing there holding a
+  // drink they already ordered. Asking whether it's their first time primes
+  // curiosity about a new guest; it doesn't capture the one thing this turn
+  // can capture with no other path (TAC-325's whole premise). The opener now
+  // asks the same question understand_order already wants asked, so the two
+  // agree instead of racing.
+  //
   // TAC-436 ruling 1, approved 2026-09-17. See the block comment above for what
   // changed and why: one restraint removed, the openings named positively.
   //
@@ -1062,7 +1074,7 @@ function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: b
     'If nothing fits, let it wait. There will be other conversations.',
   ].join('\n')
   const opener = firstTouchAfterQrScan
-    ? "This is the guest's first message on this number, sent right after they scanned your sign. You know they've been in — you don't know whether they've been coming for years or walked in today, because scanning is the first time they've texted you, not the first time they've visited. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask whether it's their first time — one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
+    ? "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
     : ''
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
