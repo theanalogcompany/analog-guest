@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { venueLocalInstant } from '@/lib/guests/commitment-expiry'
 import type { MenuItem } from '@/lib/schemas'
 import type { RuntimeContext } from './types'
 
@@ -10,11 +11,25 @@ vi.mock('@/lib/ai', () => ({
 interface SupabaseMockState {
   existingTxn: { id: string } | null
   existingTxnError: { message: string } | null
-  guestRow: { created_at: string; first_contacted_at: string | null } | null
+  guestRow: {
+    created_at: string
+    first_contacted_at: string | null
+    last_visit_at?: string | null
+    last_visit_precision?: string | null
+  } | null
   guestRowError: { message: string } | null
   insertedRow: { id: string } | null
   insertError: { message: string; code?: string } | null
   insertPayload: Record<string, unknown> | null
+  // TAC-325: the ongoing-capture same-local-day merge lookup.
+  recentOngoing: { id: string; occurred_at: string; raw_data: unknown }[] | null
+  recentOngoingError: { message: string } | null
+  ongoingLookupFilters: [string, unknown][] | null
+  enrollmentGateFilters: [string, unknown][] | null
+  // TAC-325: the ongoing-capture merge UPDATE.
+  updatePayload: Record<string, unknown> | null
+  updateTargetId: string | null
+  updateError: { message: string } | null
   // TAC-377: the guests.last_visit_at advance.
   guestUpdatePayload: Record<string, unknown> | null
   guestUpdateFilter: string | null
@@ -25,11 +40,23 @@ function newSupabaseState(overrides: Partial<SupabaseMockState> = {}): SupabaseM
   return {
     existingTxn: null,
     existingTxnError: null,
-    guestRow: { created_at: new Date().toISOString(), first_contacted_at: new Date().toISOString() },
+    guestRow: {
+      created_at: new Date().toISOString(),
+      first_contacted_at: new Date().toISOString(),
+      last_visit_at: null,
+      last_visit_precision: null,
+    },
     guestRowError: null,
     insertedRow: { id: 'tx-new' },
     insertError: null,
     insertPayload: null,
+    recentOngoing: [],
+    recentOngoingError: null,
+    ongoingLookupFilters: null,
+    enrollmentGateFilters: null,
+    updatePayload: null,
+    updateTargetId: null,
+    updateError: null,
     guestUpdatePayload: null,
     guestUpdateFilter: null,
     guestUpdateError: null,
@@ -42,26 +69,50 @@ function makeSupabaseMock(state: SupabaseMockState) {
     from: (table: string) => {
       if (table === 'transactions') {
         return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  limit: () => ({
-                    maybeSingle: async () => ({
-                      data: state.existingTxn,
-                      error: state.existingTxnError,
-                    }),
-                  }),
-                }),
+          // Both the enrollment-gate lookup (`.limit().maybeSingle()`) and
+          // the TAC-325 ongoing-merge lookup (`.order().limit()`) go through
+          // this one chain — they diverge only in which terminal method they
+          // call, so both can be served by the same builder. `.eq()` calls
+          // are captured so a test can assert exactly which `source` value a
+          // given query filtered on (TAC-325's "never reads the enrollment
+          // row" guard).
+          select: () => {
+            const filters: [string, unknown][] = []
+            const chain = {
+              eq: (col: string, val: unknown) => {
+                filters.push([col, val])
+                return chain
+              },
+              limit: () => ({
+                maybeSingle: async () => {
+                  state.enrollmentGateFilters = filters
+                  return { data: state.existingTxn, error: state.existingTxnError }
+                },
               }),
-            }),
-          }),
+              order: () => ({
+                limit: async () => {
+                  state.ongoingLookupFilters = filters
+                  return { data: state.recentOngoing, error: state.recentOngoingError }
+                },
+              }),
+            }
+            return chain
+          },
           insert: (payload: Record<string, unknown>) => {
             state.insertPayload = payload
             return {
               select: () => ({
                 single: async () => ({ data: state.insertedRow, error: state.insertError }),
               }),
+            }
+          },
+          update: (payload: Record<string, unknown>) => {
+            state.updatePayload = payload
+            return {
+              eq: async (_col: string, id: string) => {
+                state.updateTargetId = id
+                return { error: state.updateError }
+              },
             }
           },
         }
@@ -505,21 +556,51 @@ describe('extractReportedOrder (orchestration gate)', () => {
     expect(extractReportedOrderAiMock).not.toHaveBeenCalled()
   })
 
-  it('returns already_reported when a guest_reported transaction already exists', async () => {
+  // TAC-325 REVERSES this. Pre-TAC-325, an existing guest_reported row
+  // permanently stopped extraction for that guest with no AI call at all.
+  // It now falls through to ongoing capture instead — enrollment's gate
+  // still runs (still zero AI calls when it PASSES both checks and enrolls),
+  // but failing gate 2 alone no longer terminates the run.
+  it('falls through to ongoing capture when a guest_reported transaction already exists', async () => {
     currentState = newSupabaseState({ existingTxn: { id: 'tx-old' } })
+    extractReportedOrderAiMock.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [{ name: 'Cortado', quantity: 1 }],
+        reportTiming: 'present',
+        occurredOnDate: '',
+        continuesRecentVisit: true,
+        promptVersion: 'v1',
+      },
+    })
     const outcome = await extractReportedOrder(makeCtx())
-    expect(outcome).toEqual({ kind: 'already_reported' })
-    expect(extractReportedOrderAiMock).not.toHaveBeenCalled()
+    expect(extractReportedOrderAiMock).toHaveBeenCalled()
+    expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
+    expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
   })
 
-  it('returns window_expired more than 7 days after guest creation', async () => {
+  // TAC-325 REVERSES this. Pre-TAC-325, more than 7 days past guests.created_at
+  // permanently stopped extraction with no AI call. It now falls through to
+  // ongoing capture — the enrollment window still gates enrollment itself,
+  // not order capture generally.
+  it('falls through to ongoing capture more than 7 days after guest creation', async () => {
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
     currentState = newSupabaseState({
       guestRow: { created_at: eightDaysAgo, first_contacted_at: eightDaysAgo },
     })
+    extractReportedOrderAiMock.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [{ name: 'Cortado', quantity: 1 }],
+        reportTiming: 'present',
+        occurredOnDate: '',
+        continuesRecentVisit: true,
+        promptVersion: 'v1',
+      },
+    })
     const outcome = await extractReportedOrder(makeCtx())
-    expect(outcome).toEqual({ kind: 'window_expired' })
-    expect(extractReportedOrderAiMock).not.toHaveBeenCalled()
+    expect(extractReportedOrderAiMock).toHaveBeenCalled()
+    expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
   })
 
   it('returns no_items_resolved when the model reports no items', async () => {
@@ -652,11 +733,29 @@ describe('extractReportedOrder (orchestration gate)', () => {
   // TAC-377: visit-time precision + the guests.last_visit_at advance.
   // ------------------------------------------------------------------
 
-  describe('visit precision and last_visit_at (TAC-377)', () => {
-    const mockOrder = (reportTiming: 'present' | 'past') =>
+  describe('visit precision and last_visit_at (TAC-377, widened by TAC-325)', () => {
+    const mockOrder = (reportTiming: 'present') =>
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
-        data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming, promptVersion: 'v1' },
+        data: {
+          items: [{ name: 'Cortado', quantity: 1 }],
+          reportTiming,
+          occurredOnDate: '',
+          continuesRecentVisit: true,
+          promptVersion: 'v1',
+        },
+      })
+
+    const mockSpecificPastDay = (occurredOnDate: string) =>
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: {
+          items: [{ name: 'Cortado', quantity: 1 }],
+          reportTiming: 'specific_past_day',
+          occurredOnDate,
+          continuesRecentVisit: true,
+          promptVersion: 'v1',
+        },
       })
 
     it('pins a present-tense report sent while the venue is open', async () => {
@@ -682,8 +781,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
       expect(currentState.insertPayload?.occurred_at_precision).toBe('approximate')
     })
 
-    it('does NOT pin a past-tense report, even during open hours', async () => {
-      mockOrder('past')
+    // TAC-325: 'specific_past_day' is ALWAYS approximate, whatever the
+    // venue's open/closed state — a resolved calendar day is still not a
+    // claim that this was the live moment.
+    it('does NOT pin a specific-past-day report, even during open hours', async () => {
+      mockSpecificPastDay('2026-06-03')
       const outcome = await extractReportedOrder(makeCtx())
       expect(outcome).toMatchObject({ kind: 'recorded', precision: 'approximate' })
     })
@@ -737,10 +839,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
     })
 
     it('writes last_visit_at for an approximate visit too — the profile is honest either way', async () => {
-      mockOrder('past')
+      mockSpecificPastDay('2026-06-03')
       await extractReportedOrder(makeCtx())
+      const expected = venueLocalInstant('America/Los_Angeles', 2026, 6, 3, 12 * 60)
       expect(currentState.guestUpdatePayload).toMatchObject({
-        last_visit_at: DURING_SERVICE.toISOString(),
+        last_visit_at: expected?.toISOString(),
         last_visit_precision: 'approximate',
       })
     })
@@ -772,6 +875,209 @@ describe('extractReportedOrder (orchestration gate)', () => {
       const outcome = await extractReportedOrder(makeCtx())
       expect(outcome).toEqual({ kind: 'no_items_resolved' })
       expect(currentState.guestUpdatePayload).toBeNull()
+    })
+  })
+
+  // ------------------------------------------------------------------
+  // TAC-325: ongoing order capture. Reached whenever enrollment gate 2
+  // (zero existing guest_reported rows) or gate 3 (within 7 days) fails —
+  // see the two "falls through" tests above for the fallthrough itself.
+  // ------------------------------------------------------------------
+
+  describe('ongoing order capture (TAC-325)', () => {
+    const menuCtx = () =>
+      makeCtx({
+        venue: {
+          id: 'venue-1',
+          timezone: 'America/Los_Angeles',
+          venueInfo: {
+            hours: OPEN_HOURS,
+            menu: {
+              items: [
+                makeMenuItem({ name: 'Cortado', price: 5 }),
+                makeMenuItem({ name: 'Croissant', price: 4.5 }),
+              ],
+            },
+          },
+        } as RuntimeContext['venue'],
+        currentMessage: {
+          id: 'm2',
+          body: 'i also got a matcha, i mean a cortado',
+          providerMessageId: 'p2',
+          receivedAt: DURING_SERVICE,
+        } as RuntimeContext['currentMessage'],
+      })
+
+    function ineligibleForEnrollment(overrides: Partial<SupabaseMockState> = {}) {
+      currentState = newSupabaseState({ existingTxn: { id: 'tx-enrolled' }, ...overrides })
+    }
+
+    function mockCortadoOrder(overrides: Record<string, unknown> = {}) {
+      extractReportedOrderAiMock.mockResolvedValue({
+        ok: true,
+        data: {
+          items: [{ name: 'Cortado', quantity: 1 }],
+          reportTiming: 'present',
+          occurredOnDate: '',
+          continuesRecentVisit: true,
+          promptVersion: 'v1',
+          ...overrides,
+        },
+      })
+    }
+
+    it('inserts a new guest_reported_ongoing row when no same-day row exists', async () => {
+      ineligibleForEnrollment({ recentOngoing: [] })
+      mockCortadoOrder()
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
+      expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
+    })
+
+    it('merges new items into the same-local-day row when one exists', async () => {
+      ineligibleForEnrollment({
+        recentOngoing: [
+          {
+            id: 'tx-ongoing-1',
+            occurred_at: DURING_SERVICE.toISOString(),
+            raw_data: {
+              pos_provider: 'guest_reported',
+              amount_source: 'menu_estimate',
+              line_items: [{ name: 'Croissant', quantity: 1, unit_price_cents: 450 }],
+            },
+          },
+        ],
+      })
+      mockCortadoOrder()
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toEqual({
+        kind: 'merged_ongoing',
+        transactionId: 'tx-ongoing-1',
+        amountCents: 950,
+        itemCount: 2,
+        addedItemCount: 1,
+      })
+      expect(currentState.updateTargetId).toBe('tx-ongoing-1')
+      expect(currentState.updatePayload).toMatchObject({ item_count: 2, amount_cents: 950 })
+      const rawData = currentState.updatePayload?.raw_data as { line_items: unknown[] }
+      expect(rawData.line_items).toEqual([
+        { name: 'Croissant', quantity: 1, unit_price_cents: 450 },
+        { name: 'Cortado', quantity: 1, unit_price_cents: 500 },
+      ])
+      // Nothing new is inserted when a report merges into an existing row.
+      expect(currentState.insertPayload).toBeNull()
+    })
+
+    it('writes nothing when every reported item is already on the same-day row', async () => {
+      ineligibleForEnrollment({
+        recentOngoing: [
+          {
+            id: 'tx-ongoing-1',
+            occurred_at: DURING_SERVICE.toISOString(),
+            raw_data: {
+              pos_provider: 'guest_reported',
+              amount_source: 'menu_estimate',
+              line_items: [{ name: 'Cortado', quantity: 1, unit_price_cents: 500 }],
+            },
+          },
+        ],
+      })
+      mockCortadoOrder()
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toEqual({ kind: 'no_new_items_ongoing' })
+      expect(currentState.updatePayload).toBeNull()
+    })
+
+    // TAC-325 ruling 6c: a genuinely vague past reference writes NOTHING —
+    // regardless of whether items were extracted, and on either path
+    // (enrollment or ongoing). The important thing here is that the message
+    // never becomes a false "today" record just because items resolved.
+    it('a vague past report writes nothing, even with items resolved', async () => {
+      ineligibleForEnrollment()
+      mockCortadoOrder({ reportTiming: 'vague_past' })
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toEqual({ kind: 'vague_past_report' })
+      expect(currentState.insertPayload).toBeNull()
+      expect(currentState.updatePayload).toBeNull()
+    })
+
+    it('continuesRecentVisit: false inserts a new row instead of merging, even on a same-day match', async () => {
+      ineligibleForEnrollment({
+        recentOngoing: [
+          {
+            id: 'tx-ongoing-1',
+            occurred_at: DURING_SERVICE.toISOString(),
+            raw_data: {
+              pos_provider: 'guest_reported',
+              amount_source: 'menu_estimate',
+              line_items: [{ name: 'Croissant', quantity: 1, unit_price_cents: 450 }],
+            },
+          },
+        ],
+      })
+      mockCortadoOrder({ continuesRecentVisit: false })
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing' })
+      expect(currentState.updatePayload).toBeNull()
+      expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
+    })
+
+    it('resolves a specific past day in a different DST regime (PST) to the correct UTC instant', async () => {
+      ineligibleForEnrollment()
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-01-15' })
+      const outcome = await extractReportedOrder(menuCtx())
+      const expected = venueLocalInstant('America/Los_Angeles', 2026, 1, 15, 12 * 60)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(expected?.toISOString())
+    })
+
+    it('falls back to the message timestamp when the model returns a malformed occurredOnDate', async () => {
+      ineligibleForEnrollment()
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: 'not-a-date' })
+      const outcome = await extractReportedOrder(menuCtx())
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+    })
+
+    it('still advances last_visit_at when the new report is a different local day than a pinned last visit', async () => {
+      ineligibleForEnrollment({
+        guestRow: {
+          created_at: new Date().toISOString(),
+          first_contacted_at: null,
+          last_visit_at: '2026-06-01T17:00:00.000Z',
+          last_visit_precision: 'pinned',
+        },
+      })
+      mockCortadoOrder()
+      await extractReportedOrder(menuCtx())
+      expect(currentState.guestUpdatePayload).toEqual({
+        last_visit_at: DURING_SERVICE.toISOString(),
+        last_visit_precision: 'pinned',
+      })
+    })
+
+    // TAC-325 ruling 7: never let an approximate write displace a pinned
+    // read of the SAME visit.
+    it('does not downgrade a pinned last_visit_at when a same-local-day approximate report arrives', async () => {
+      ineligibleForEnrollment({
+        guestRow: {
+          created_at: new Date().toISOString(),
+          first_contacted_at: null,
+          last_visit_at: DURING_SERVICE.toISOString(),
+          last_visit_precision: 'pinned',
+        },
+      })
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      await extractReportedOrder(menuCtx())
+      expect(currentState.guestUpdatePayload).toBeNull()
+    })
+
+    it('only ever reads guest_reported_ongoing rows for the merge lookup, never the enrollment row', async () => {
+      ineligibleForEnrollment({ recentOngoing: [] })
+      mockCortadoOrder()
+      await extractReportedOrder(menuCtx())
+      expect(currentState.ongoingLookupFilters).toContainEqual(['source', 'guest_reported_ongoing'])
+      expect(currentState.ongoingLookupFilters).not.toContainEqual(['source', 'guest_reported'])
     })
   })
 

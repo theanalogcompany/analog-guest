@@ -1,9 +1,11 @@
 import { extractReportedOrder as callExtractReportedOrder } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
+import { toJson } from '@/lib/db/json'
+import { venueLocalDate, venueLocalInstant } from '@/lib/guests/commitment-expiry'
 import { normalizeMenuItemName } from '@/lib/recognition/extract-menu-exploration'
 import { resolveOpenState, type VisitTimePrecision } from '@/lib/schemas'
 import type { MenuItem } from '@/lib/schemas'
-import type { ReportTiming } from '@/lib/ai/types'
+import type { Json } from '@/db/types'
 import type { RuntimeContext } from './types'
 
 // TAC-323: guest enrollment via static QR + self-reported orders. The venue
@@ -20,31 +22,66 @@ import type { RuntimeContext } from './types'
 // because it's easy to mistake for a bug later: the extracted order is NOT
 // available to generateStage, so the reply itself can never reference it.
 //
-// Gate (all three must hold, evaluated in this order):
+// TAC-325 adds a second, ONGOING capture path alongside enrollment's
+// original one-scan-and-done behavior. Gate (all still evaluated in order):
 //   1. Prefilter hit — the inbound body names a real menu item (pure string
 //      check, zero DB/LLM calls on a miss — most inbound messages never
-//      mention a menu item at all).
-//   2. Zero existing guest_reported transactions for this guest. Once one
-//      exists, this function is a permanent no-op for that guest — "one scan
-//      and done" with no dedupe window. An operator deleting the row from
-//      Command Center is the only re-arm path (by construction: this check
-//      reads the transactions table directly, no separate flag to reset).
-//   3. Within 7 days of the guest's created_at. Without this, a menu item
-//      mentioned months after enrollment would still write an order.
+//      mention a menu item at all). Shared by both paths.
+//   2 + 3. Enrollment eligibility: zero existing `guest_reported` rows for
+//      this guest, AND within 7 days of guests.created_at. When BOTH hold,
+//      a completed-order report enrolls as before (`source='guest_reported'`,
+//      the storage-layer index `idx_transactions_one_guest_reported_per_guest`
+//      still caps this at one row per guest, ever). When EITHER fails, the
+//      report falls through to ongoing capture instead of being dropped —
+//      that fallthrough, not a new gate, is what TAC-325 adds. Enrollment's
+//      own index, gate and delete-to-re-arm route (Command Center) are
+//      untouched.
 export const REPORTED_ORDER_WINDOW_DAYS = 7
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+// TAC-325. How many of a guest's most recent ongoing-capture rows to load
+// when looking for a same-venue-local-day merge target. A guest who reports
+// orders occasionally will never approach this; it exists only so a very
+// chatty guest's read stays bounded rather than scanning their whole
+// history.
+const ONGOING_MERGE_LOOKBACK_LIMIT = 10
 
 export type ExtractReportedOrderOutcome =
   | { kind: 'no_menu_item_mentioned' }
   | { kind: 'already_reported' }
-  | { kind: 'window_expired' }
   | { kind: 'no_items_resolved' }
+  // TAC-325: the model could not place the report on one identifiable
+  // calendar day (ruling 6c) — nothing is written, on either path.
+  | { kind: 'vague_past_report' }
+  // TAC-325: an ongoing report whose every item was already present on the
+  // same-local-day transaction it would have merged into. Nothing written.
+  | { kind: 'no_new_items_ongoing' }
   | {
       kind: 'recorded'
       transactionId: string
       amountCents: number | null
       itemCount: number
       precision: VisitTimePrecision
+    }
+  // TAC-325: a new `guest_reported_ongoing` row — no same-local-day
+  // transaction existed to merge into (or continuesRecentVisit said this is
+  // a separate trip).
+  | {
+      kind: 'recorded_ongoing'
+      transactionId: string
+      amountCents: number | null
+      itemCount: number
+      precision: VisitTimePrecision
+    }
+  // TAC-325: new items appended to an existing same-local-day
+  // `guest_reported_ongoing` row. `itemCount`/`amountCents` reflect the
+  // MERGED row, not just what this report added.
+  | {
+      kind: 'merged_ongoing'
+      transactionId: string
+      amountCents: number | null
+      itemCount: number
+      addedItemCount: number
     }
   | { kind: 'failed'; error: string }
 
@@ -77,9 +114,9 @@ const MIN_SIGNIFICANT_WORD_LENGTH = 3
 // either side of the comparison sees it.
 function stripDiacritics(value: string): string {
   // NFD decomposes an accented char into base char + combining mark(s);
-  // \u0300-\u036f is the Unicode combining diacritical marks block, so
-  // stripping it leaves the plain base characters ("cr\u00e8me" -> "creme").
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  // ̀-ͯ is the Unicode combining diacritical marks block, so
+  // stripping it leaves the plain base characters ("crème" -> "creme").
+  return value.normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
 // Splits a menu item name into its individually-matchable words. "Gibraltar
@@ -264,7 +301,9 @@ export function resolveReportedItems(
 
 /**
  * Combine the model's tense read with the venue's own hours to decide how
- * precisely this visit's time is known (TAC-377).
+ * precisely this visit's time is known (TAC-377). Only ever called for a
+ * 'present' report (TAC-325's 'specific_past_day' is never "pinned" — see
+ * resolveOccurredAt below).
  *
  * `pinned` requires BOTH halves: the guest described the order as happening
  * now, AND the venue was actually open when the message landed. A
@@ -285,14 +324,209 @@ export function resolveReportedItems(
  * resolveOpenState also returns `unknown` for a timezone this runtime can't
  * use, which lands on the same safe side for the same reason.
  */
-function resolveVisitPrecision(
-  reportTiming: ReportTiming,
-  ctx: RuntimeContext,
-  reportedAt: Date,
-): VisitTimePrecision {
-  if (reportTiming !== 'present') return 'approximate'
+function resolvePresentPrecision(ctx: RuntimeContext, reportedAt: Date): VisitTimePrecision {
   const openState = resolveOpenState(ctx.venue.venueInfo.hours, ctx.venue.timezone, reportedAt)
   return openState.state === 'closed' ? 'approximate' : 'pinned'
+}
+
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const
+
+function pad(value: number, width: number): string {
+  return String(value).padStart(width, '0')
+}
+
+// TAC-325. The venue-local "Weekday, YYYY-MM-DD" anchor handed to the
+// extractor so it can resolve a relative day ("yesterday", "Saturday")
+// against a real calendar date. Null when the venue's timezone can't be
+// read — see venueLocalDate's own contract. The extractor's prompt is
+// written to fall back to 'vague_past' rather than guess when this is null.
+function formatTodayInVenueTimezone(timezone: string, receivedAt: Date): string | null {
+  const local = venueLocalDate(timezone, receivedAt)
+  if (!local) return null
+  return `${WEEKDAY_NAMES[local.dayIndex]}, ${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
+}
+
+function parseYmd(value: string): { year: number; month: number; day: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  return { year, month, day }
+}
+
+// TAC-325. The venue-local calendar day string for an instant, used only to
+// compare two occurred_at values for "same day" purposes (the ongoing-merge
+// lookup and the last_visit_at pinned-downgrade guard). Falls back to the
+// instant's own UTC calendar day when the timezone is unreadable — a
+// same-day comparison that's occasionally off by a timezone offset is a far
+// smaller error than crashing or silently skipping the comparison.
+function venueLocalDayKey(timezone: string, instant: Date): string {
+  const local = venueLocalDate(timezone, instant)
+  if (!local) return instant.toISOString().slice(0, 10)
+  return `${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
+}
+
+function sameVenueLocalDay(aIso: string, bIso: string, timezone: string): boolean {
+  return venueLocalDayKey(timezone, new Date(aIso)) === venueLocalDayKey(timezone, new Date(bIso))
+}
+
+/**
+ * Resolve THIS report's occurred_at instant + precision (TAC-325).
+ *
+ * 'present' is unchanged from TAC-377 — resolvePresentPrecision combines the
+ * model's tense read with the venue's open/closed state.
+ *
+ * 'specific_past_day' resolves `occurredOnDate` to a venue-local NOON
+ * instant (there's no reported time-of-day, so noon is a synthetic anchor,
+ * not a claim about when in the day it happened) and is ALWAYS
+ * `approximate` — a resolved day is still not a claim that this was the
+ * live moment. A malformed `occurredOnDate`, or a venue timezone that can't
+ * be read, degrades to the message's OWN timestamp at `approximate`
+ * precision rather than losing the report — the same "unreadable clock
+ * never asserts a confident thing, but never throws the report away either"
+ * posture resolvePresentPrecision already carries.
+ */
+function resolveOccurredAt(
+  reportTiming: 'present' | 'specific_past_day',
+  occurredOnDate: string,
+  ctx: RuntimeContext,
+  reportedAt: Date,
+): { occurredAt: Date; precision: VisitTimePrecision } {
+  if (reportTiming === 'present') {
+    return { occurredAt: reportedAt, precision: resolvePresentPrecision(ctx, reportedAt) }
+  }
+  const parsed = parseYmd(occurredOnDate)
+  if (!parsed) {
+    return { occurredAt: reportedAt, precision: 'approximate' }
+  }
+  const instant = venueLocalInstant(ctx.venue.timezone, parsed.year, parsed.month, parsed.day, 12 * 60)
+  if (instant === null) {
+    return { occurredAt: reportedAt, precision: 'approximate' }
+  }
+  return { occurredAt: instant, precision: 'approximate' }
+}
+
+// The stored shape for one line item — omits unit_price_cents entirely
+// (rather than writing 0) when the item has no venue price, so parseTicket
+// (Command Center) renders a blank price cell instead of a fabricated
+// $0.00. `toJson` (lib/db/json.ts) is the repo's standard bridge from a
+// plain typed value to the `raw_data` column's `Json` type — a named
+// interface has no index signature, so TypeScript won't structurally accept
+// it as `Json` on its own.
+function buildStoredLineItems(items: readonly ResolvedReportedItem[]): Json[] {
+  return items.map((item) =>
+    toJson({
+      name: item.name,
+      quantity: item.quantity,
+      ...(item.unitPriceCents !== null ? { unit_price_cents: item.unitPriceCents } : {}),
+    }),
+  )
+}
+
+// Null when ANY item has no price — a partial sum looks complete and isn't.
+function computeAmountCents(items: readonly { unitPriceCents: number | null; quantity: number }[]): number | null {
+  if (items.some((i) => i.unitPriceCents === null)) return null
+  return items.reduce((sum, i) => sum + (i.unitPriceCents as number) * i.quantity, 0)
+}
+
+// TAC-325. Defensive read of a `guest_reported_ongoing` row's existing line
+// items — permissive at this boundary (drop anything malformed rather than
+// throwing) since this reads back data this same module already wrote.
+function parseStoredLineItems(
+  rawData: unknown,
+): { name: string; quantity: number; unitPriceCents: number | null }[] {
+  if (typeof rawData !== 'object' || rawData === null) return []
+  const lineItems = (rawData as Record<string, unknown>).line_items
+  if (!Array.isArray(lineItems)) return []
+  const result: { name: string; quantity: number; unitPriceCents: number | null }[] = []
+  for (const raw of lineItems) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const rec = raw as Record<string, unknown>
+    const name = typeof rec.name === 'string' ? rec.name : null
+    const quantity = typeof rec.quantity === 'number' ? rec.quantity : null
+    if (name === null || quantity === null) continue
+    const unitPriceCents = typeof rec.unit_price_cents === 'number' ? rec.unit_price_cents : null
+    result.push({ name, quantity, unitPriceCents })
+  }
+  return result
+}
+
+// TAC-325. Drops any newly-resolved item whose name already appears among
+// an ongoing row's existing line items — deliberately NAME-ONLY, not "was
+// this a re-order": "got another cortado" reads the same as "that cortado
+// was cold", both treated as no new information. Accepted simplification
+// (flagged, not solved) — the cost lands on item/spend attribution, never
+// on visit count, which is unaffected by how many line items one
+// transaction row carries.
+function dropAlreadyRecordedItems(
+  newItems: readonly ResolvedReportedItem[],
+  existingItems: readonly { name: string }[],
+): ResolvedReportedItem[] {
+  const existingNames = new Set(existingItems.map((i) => normalizeMenuItemName(i.name)))
+  return newItems.filter((item) => !existingNames.has(normalizeMenuItemName(item.name)))
+}
+
+type SupabaseAdminClient = ReturnType<typeof createAdminClient>
+
+/**
+ * Advance `guests.last_visit_at` / `last_visit_precision` (TAC-377, guarded
+ * per TAC-325 ruling 7). Shared by the enrollment and ongoing paths so the
+ * pinned-same-day guard exists once rather than twice.
+ *
+ * Forward-only per the `.or(...)` filter — a fresher last_visit_at is never
+ * walked backwards. On top of that, TAC-325 adds one more guard: an
+ * `approximate` write is never allowed to displace a `pinned` value that
+ * already anchors the SAME venue-local day, because that would downgrade
+ * confidence about a visit without changing which visit it is (and, per
+ * followups/engine.ts, would silently drop the post_visit_* dedup key
+ * precision needs to fire correctly).
+ *
+ * `currentLastVisitAt`/`currentLastVisitPrecision` are passed in rather than
+ * re-read here — both callers already loaded the guest row once at the top
+ * of `extractReportedOrder`, and re-reading here would be a second round
+ * trip for data the caller already has. Failure to write is logged and
+ * swallowed: the transaction row is the durable record of the visit and is
+ * already written by the time this runs; this cache is derived and the next
+ * report rebuilds it.
+ */
+async function advanceLastVisit(
+  supabase: SupabaseAdminClient,
+  guestId: string,
+  currentLastVisitAt: string | null,
+  currentLastVisitPrecision: string | null,
+  occurredAtIso: string,
+  precision: VisitTimePrecision,
+  timezone: string,
+): Promise<void> {
+  if (
+    currentLastVisitPrecision === 'pinned' &&
+    currentLastVisitAt !== null &&
+    sameVenueLocalDay(currentLastVisitAt, occurredAtIso, timezone)
+  ) {
+    return
+  }
+
+  const { error } = await supabase
+    .from('guests')
+    .update({ last_visit_at: occurredAtIso, last_visit_precision: precision })
+    .eq('id', guestId)
+    .or(`last_visit_at.is.null,last_visit_at.lt.${occurredAtIso}`)
+  if (error) {
+    console.warn('[agent] guest_reported last_visit_at update failed (continuing)', {
+      guestId,
+      error: error.message,
+    })
+  }
 }
 
 /**
@@ -325,31 +559,42 @@ export async function extractReportedOrder(
         .maybeSingle(),
       supabase
         .from('guests')
-        .select('created_at')
+        .select('created_at, last_visit_at, last_visit_precision')
         .eq('id', ctx.guest.id)
         .single(),
     ])
     if (existingResult.error) {
       return { kind: 'failed', error: existingResult.error.message }
     }
-    if (existingResult.data) {
-      return { kind: 'already_reported' }
-    }
     if (guestRowResult.error || !guestRowResult.data) {
       return { kind: 'failed', error: guestRowResult.error?.message ?? 'guest not found' }
     }
 
+    // TAC-325: gate 2+3 no longer terminate the run. Enrollment fires when
+    // BOTH hold; either failing falls through to ongoing capture instead of
+    // stopping — see the module header.
     const createdAt = new Date(guestRowResult.data.created_at)
-    if (Date.now() - createdAt.getTime() > REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY) {
-      return { kind: 'window_expired' }
-    }
+    const withinEnrollmentWindow =
+      Date.now() - createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+    const enrollmentEligible = !existingResult.data && withinEnrollmentWindow
+
+    const reportedAt = ctx.currentMessage.receivedAt
+    const todayInVenueTimezone = formatTodayInVenueTimezone(ctx.venue.timezone, reportedAt)
 
     const extraction = await callExtractReportedOrder({
       inboundBody: ctx.currentMessage.body,
       menuItemNames: menuItems.map((m) => m.name),
+      todayInVenueTimezone,
     })
     if (!extraction.ok) {
       return { kind: 'failed', error: extraction.error }
+    }
+    // TAC-325 ruling 6c: a genuinely vague past reference writes nothing on
+    // either path — checked before item resolution so an empty-items vague
+    // report and a populated-items vague report both report the same,
+    // more-informative outcome rather than collapsing into no_items_resolved.
+    if (extraction.data.reportTiming === 'vague_past') {
+      return { kind: 'vague_past_report' }
     }
     if (extraction.data.items.length === 0) {
       return { kind: 'no_items_resolved' }
@@ -360,35 +605,152 @@ export async function extractReportedOrder(
       return { kind: 'no_items_resolved' }
     }
 
-    // Null if ANY resolved item has no price — a partial sum looks complete
-    // and isn't. The unpriced item still renders in Command Center (name +
-    // quantity, blank price cell) via parseTicket's relaxed line-item parse.
-    const anyUnpriced = resolved.some((r) => r.unitPriceCents === null)
-    const amountCents = anyUnpriced
-      ? null
-      : resolved.reduce((sum, r) => sum + (r.unitPriceCents as number) * r.quantity, 0)
+    const { occurredAt, precision } = resolveOccurredAt(
+      extraction.data.reportTiming,
+      extraction.data.occurredOnDate,
+      ctx,
+      reportedAt,
+    )
+    const occurredAtIso = occurredAt.toISOString()
 
-    // TAC-377: the timestamp of THIS message. Until now this was the guest's
-    // first_contacted_at, on the reasoning that "a guest who answers three
-    // days later ordered three days ago" — a sound guess back when the row
-    // had no way to say how confident it was. It is superseded rather than
-    // wrong: `precision` below now carries that uncertainty explicitly, so
-    // the timestamp no longer has to encode it, and guessing backwards
-    // instead produced a visit time that drifts by the whole gap since
-    // enrollment for any returning guest.
-    const reportedAt = ctx.currentMessage.receivedAt
-    const occurredAt = reportedAt.toISOString()
-    const precision = resolveVisitPrecision(extraction.data.reportTiming, ctx, reportedAt)
+    if (enrollmentEligible) {
+      const amountCents = computeAmountCents(resolved)
 
-    const { data: inserted, error: insertError } = await supabase
+      const { data: inserted, error: insertError } = await supabase
+        .from('transactions')
+        .insert({
+          venue_id: ctx.venue.id,
+          guest_id: ctx.guest.id,
+          source: 'guest_reported',
+          amount_cents: amountCents,
+          item_count: resolved.length,
+          occurred_at: occurredAtIso,
+          occurred_at_precision: precision,
+          external_id: null,
+          matched_at: null,
+          match_method: null,
+          raw_data: {
+            pos_provider: 'guest_reported',
+            amount_source: 'menu_estimate',
+            line_items: buildStoredLineItems(resolved),
+          },
+        })
+        .select('id')
+        .single()
+      if (insertError || !inserted) {
+        // 23505: idx_transactions_one_guest_reported_per_guest lost a race
+        // against a concurrent inbound from the same guest — same outcome as
+        // finding the row already there.
+        if (insertError?.code === '23505') {
+          return { kind: 'already_reported' }
+        }
+        return { kind: 'failed', error: insertError?.message ?? 'insert returned no row' }
+      }
+
+      await advanceLastVisit(
+        supabase,
+        ctx.guest.id,
+        guestRowResult.data.last_visit_at,
+        guestRowResult.data.last_visit_precision,
+        occurredAtIso,
+        precision,
+        ctx.venue.timezone,
+      )
+
+      return {
+        kind: 'recorded',
+        transactionId: inserted.id,
+        amountCents,
+        itemCount: resolved.length,
+        precision,
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // TAC-325: ongoing capture. One row per guest per venue-local day;
+    // later items on the same day join the most recent row rather than
+    // starting a new one, unless the model reads this as a separate trip.
+    // ------------------------------------------------------------------
+
+    const { data: recentOngoing, error: recentOngoingError } = await supabase
+      .from('transactions')
+      .select('id, occurred_at, raw_data')
+      .eq('venue_id', ctx.venue.id)
+      .eq('guest_id', ctx.guest.id)
+      .eq('source', 'guest_reported_ongoing')
+      .order('occurred_at', { ascending: false })
+      .limit(ONGOING_MERGE_LOOKBACK_LIMIT)
+    if (recentOngoingError) {
+      return { kind: 'failed', error: recentOngoingError.message }
+    }
+
+    const mergeTarget = extraction.data.continuesRecentVisit
+      ? (recentOngoing ?? []).find(
+          (row) =>
+            typeof row.occurred_at === 'string' &&
+            sameVenueLocalDay(row.occurred_at, occurredAtIso, ctx.venue.timezone),
+        )
+      : undefined
+
+    if (mergeTarget) {
+      const existingRaw =
+        typeof mergeTarget.raw_data === 'object' && mergeTarget.raw_data !== null
+          ? (mergeTarget.raw_data as Record<string, Json>)
+          : {}
+      const existingLineItemsRaw: Json[] = Array.isArray(existingRaw.line_items)
+        ? (existingRaw.line_items as Json[])
+        : []
+      const existingParsed = parseStoredLineItems(mergeTarget.raw_data)
+
+      const itemsToAdd = dropAlreadyRecordedItems(resolved, existingParsed)
+      if (itemsToAdd.length === 0) {
+        return { kind: 'no_new_items_ongoing' }
+      }
+
+      const mergedRawLineItems: Json[] = [...existingLineItemsRaw, ...buildStoredLineItems(itemsToAdd)]
+      const amountCents = computeAmountCents([...existingParsed, ...itemsToAdd])
+
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({
+          raw_data: { ...existingRaw, line_items: mergedRawLineItems },
+          item_count: mergedRawLineItems.length,
+          amount_cents: amountCents,
+        })
+        .eq('id', mergeTarget.id)
+      if (updateError) {
+        return { kind: 'failed', error: updateError.message }
+      }
+
+      await advanceLastVisit(
+        supabase,
+        ctx.guest.id,
+        guestRowResult.data.last_visit_at,
+        guestRowResult.data.last_visit_precision,
+        occurredAtIso,
+        precision,
+        ctx.venue.timezone,
+      )
+
+      return {
+        kind: 'merged_ongoing',
+        transactionId: mergeTarget.id,
+        amountCents,
+        itemCount: mergedRawLineItems.length,
+        addedItemCount: itemsToAdd.length,
+      }
+    }
+
+    const amountCents = computeAmountCents(resolved)
+    const { data: insertedOngoing, error: insertOngoingError } = await supabase
       .from('transactions')
       .insert({
         venue_id: ctx.venue.id,
         guest_id: ctx.guest.id,
-        source: 'guest_reported',
+        source: 'guest_reported_ongoing',
         amount_cents: amountCents,
         item_count: resolved.length,
-        occurred_at: occurredAt,
+        occurred_at: occurredAtIso,
         occurred_at_precision: precision,
         external_id: null,
         matched_at: null,
@@ -396,62 +758,28 @@ export async function extractReportedOrder(
         raw_data: {
           pos_provider: 'guest_reported',
           amount_source: 'menu_estimate',
-          line_items: resolved.map((r) => ({
-            name: r.name,
-            quantity: r.quantity,
-            // Omitted (not 0) when unpriced — parseTicket keeps the item and
-            // renders a blank price cell rather than a fabricated $0.00.
-            ...(r.unitPriceCents !== null ? { unit_price_cents: r.unitPriceCents } : {}),
-          })),
+          line_items: buildStoredLineItems(resolved),
         },
       })
       .select('id')
       .single()
-    if (insertError || !inserted) {
-      // 23505: idx_transactions_one_guest_reported_per_guest lost a race
-      // against a concurrent inbound from the same guest — same outcome as
-      // finding the row already there.
-      if (insertError?.code === '23505') {
-        return { kind: 'already_reported' }
-      }
-      return { kind: 'failed', error: insertError?.message ?? 'insert returned no row' }
+    if (insertOngoingError || !insertedOngoing) {
+      return { kind: 'failed', error: insertOngoingError?.message ?? 'insert returned no row' }
     }
 
-    // TAC-377: advance the guest's last-visit cache. Before this,
-    // guests.last_visit_at was written ONLY by the two Square paths
-    // (lib/pos/reconcile.ts, lib/pos/reconcile-tap.ts), so at a venue with
-    // no POS integration every guest kept last_visit_at = null and both
-    // detectPostVisitReason and detectColdLapsedReason returned null
-    // forever — the follow-up cron ran, scanned, reported success, and could
-    // not fire.
-    //
-    // Guarded on the value being newer, mirroring reconcile.ts:72-79. It
-    // will essentially never block (occurred_at is this message's own
-    // timestamp), but it keeps a future out-of-order writer from walking a
-    // fresher visit backwards. Both columns move in ONE statement, so
-    // last_visit_precision can never end up describing a different visit
-    // than last_visit_at holds.
-    //
-    // Failure is logged and swallowed, matching reconcile.ts:80-88: the
-    // transaction row is the durable record of the visit and it is already
-    // written. This cache is derived, the next report rebuilds it, and
-    // throwing here would turn a recorded visit into a `failed` outcome.
-    const { error: lastVisitError } = await supabase
-      .from('guests')
-      .update({ last_visit_at: occurredAt, last_visit_precision: precision })
-      .eq('id', ctx.guest.id)
-      .or(`last_visit_at.is.null,last_visit_at.lt.${occurredAt}`)
-    if (lastVisitError) {
-      console.warn('[agent] guest_reported last_visit_at update failed (continuing)', {
-        guestId: ctx.guest.id,
-        transactionId: inserted.id,
-        error: lastVisitError.message,
-      })
-    }
+    await advanceLastVisit(
+      supabase,
+      ctx.guest.id,
+      guestRowResult.data.last_visit_at,
+      guestRowResult.data.last_visit_precision,
+      occurredAtIso,
+      precision,
+      ctx.venue.timezone,
+    )
 
     return {
-      kind: 'recorded',
-      transactionId: inserted.id,
+      kind: 'recorded_ongoing',
+      transactionId: insertedOngoing.id,
       amountCents,
       itemCount: resolved.length,
       precision,

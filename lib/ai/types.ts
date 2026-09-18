@@ -577,9 +577,17 @@ export type AIResult<T> =
 // TAC-323: standalone order-extraction call, deliberately decoupled from the
 // classify/generate contract (see lib/agent/extract-reported-order.ts for
 // the gate + resolution logic that wraps this call).
+//
+// TAC-325: `todayInVenueTimezone` is the venue-local "Weekday, YYYY-MM-DD"
+// anchor the caller resolved via lib/guests/commitment-expiry.ts's
+// `venueLocalDate` — null when the venue's timezone couldn't be read. It
+// exists so the model can resolve a relative day ("yesterday", "Saturday")
+// against a real calendar date rather than guessing; when null, the prompt
+// tells the model not to attempt that resolution at all.
 export type ExtractReportedOrderInput = {
   inboundBody: string
   menuItemNames: readonly string[]
+  todayInVenueTimezone: string | null
 }
 
 export type ExtractedReportedOrderItem = {
@@ -587,20 +595,42 @@ export type ExtractedReportedOrderItem = {
   quantity: number
 }
 
-// TAC-377: 'present' means the guest is reporting the order as happening now
-// or just now ("just grabbed a cortado", "in line waiting on my latte") —
-// the message timestamp is the visit time. 'past' is everything else,
-// including a report that names a day ("came in Tuesday"): resolving a
-// relative date to an actual one is deliberately NOT attempted in v1, so a
-// dated report is honestly `approximate` rather than falsely pinned to the
-// message time. Only the caller knows the venue's hours, so this is the
-// tense read alone — lib/agent/extract-reported-order.ts combines it with
-// the open/closed verdict to reach a VisitTimePrecision.
-export type ReportTiming = 'present' | 'past'
+// TAC-377 introduced 'present' | 'past'. TAC-325 splits 'past' into two:
+// resolving a relative date to an actual one is now attempted, but only for
+// a report the model can pin to ONE identifiable day — a genuinely vague
+// reference still can't be trusted with a real date.
+//
+// - 'present': the guest is reporting the order as happening now or just now
+//   ("just grabbed a cortado", "in line waiting on my latte") — the message
+//   timestamp is the visit time.
+// - 'specific_past_day': the message places the order on one identifiable
+//   calendar day that isn't literally this moment — "yesterday", a named
+//   weekday, "earlier today", or (see occurredOnDate below) no explicit
+//   timing cue at all. `occurredOnDate` carries the resolved date.
+// - 'vague_past': the message signals an unspecified or longer stretch of
+//   time that doesn't resolve to one day ("last week", "a while back", "the
+//   other day") — the caller writes nothing rather than falsely dating it.
+export type ReportTiming = 'present' | 'specific_past_day' | 'vague_past'
 
 export type ExtractReportedOrderResult = {
   items: ExtractedReportedOrderItem[]
   reportTiming: ReportTiming
+  // TAC-325. Populated (YYYY-MM-DD) only when reportTiming is
+  // 'specific_past_day'; empty string otherwise. Required rather than
+  // optional/nullable per the GeneratedMessageSchema precedent (explicit
+  // presence is more reliable against Anthropic's structured-output
+  // validator) — an empty string is the "not applicable" sentinel, the same
+  // pattern `approvalReason` uses. Not Zod-`.regex()`-constrained on the
+  // schema itself (that would reject the empty-string sentinel); the caller
+  // validates the shape defensively post-LLM, same posture as THE-157's
+  // quantity clamp.
+  occurredOnDate: string
+  // TAC-325. True unless the message itself signals this report describes a
+  // DIFFERENT, separate visit from a recent one ("came back later", "stopped
+  // by again", "another trip today") — default-true framing in the prompt.
+  // The caller uses this to decide whether a same-local-day report merges
+  // into an existing transaction or starts a new one.
+  continuesRecentVisit: boolean
   promptVersion: string
 }
 
