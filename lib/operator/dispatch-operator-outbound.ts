@@ -276,6 +276,12 @@ export async function dispatchOperatorOutbound(
   const sendBody = input.action === 'edit' ? input.editedBody!.trim() : row.body
   const sendResult = await sendMessage({
     venueId: row.venue_id,
+    // TAC-467: null for an Instagram guest. sendMessage refuses it
+    // (`recipient_has_no_phone_number`), but only AFTER the flip above, so the
+    // card lands in the v1 gap below. Few paths should reach it: the Instagram
+    // handler (TAC-468) is not to run the agent until replies can go out over
+    // Instagram, which leaves a Command Center Follow Up that queues at a
+    // venue holding that category. The outbound ticket owns routing by channel.
     to: guestRow.phone_number,
     body: sendBody,
   })

@@ -32,6 +32,25 @@ beforeEach(() => {
   })
 })
 
+// TAC-467: a guest who came in on Instagram has no phone number, and every
+// send path hands the guest's phone straight to sendMessage. Refusing null
+// before the venue lookup is what keeps such a guest from being sent anything
+// until replies can go out over Instagram.
+describe('sendMessage — recipient without a phone number (TAC-467)', () => {
+  it('refuses null by name and never reaches the provider', async () => {
+    const r = await sendMessage({ venueId: VENUE, to: null, body: 'hi' })
+    expect(r).toEqual({ ok: false, error: 'recipient_has_no_phone_number' })
+    expect(getVenueMessagingNumberMock).not.toHaveBeenCalled()
+    expect(sendblueSendMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('still calls a malformed number malformed', async () => {
+    const r = await sendMessage({ venueId: VENUE, to: '5555550123', body: 'hi' })
+    expect(r).toEqual({ ok: false, error: 'invalid_recipient_phone_number' })
+    expect(sendblueSendMessageMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('sendMessage — content guard (TAC-309)', () => {
   it('sends a normal body', async () => {
     const r = await sendMessage({ venueId: VENUE, to: TO, body: 'yeah, oat and almond' })

@@ -78,6 +78,28 @@ describe('listOperatorConversations', () => {
     if (result.ok) expect(result.conversations[0].name).toBeNull()
   })
 
+  // TAC-467. The Contract types phoneFallback as a string, and analog-operator
+  // parses the whole list with `phoneFallback: z.string()`: one null in one
+  // row fails the parse and the operator sees no conversations at all. A guest
+  // who came in on Instagram has no phone, so the projection must send ''.
+  it('sends an empty string, never null, for a guest with no phone, and keeps every other row', async () => {
+    const phoneless = {
+      ...RAW_ROW,
+      guest_id: '00000000-0000-0000-0000-000000000002',
+      guest_first_name: null,
+      guest_last_name: null,
+      guest_phone: null,
+    }
+    rpcMock.mockResolvedValueOnce({ data: [phoneless, RAW_ROW], error: null })
+    const result = await listOperatorConversations(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.conversations).toHaveLength(2)
+    expect(result.conversations[0].phoneFallback).toBe('')
+    expect(result.conversations[1].phoneFallback).toBe('+15551110001')
+    for (const c of result.conversations) expect(typeof c.phoneFallback).toBe('string')
+  })
+
   it('normalizes an unrecognized recognition_state to null', async () => {
     rpcMock.mockResolvedValueOnce({
       data: [{ ...RAW_ROW, recognition_state: 'something_unexpected' }],

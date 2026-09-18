@@ -42,7 +42,8 @@ interface RawConversationRow {
   agent_name: string
   guest_first_name: string | null
   guest_last_name: string | null
-  guest_phone: string
+  // TAC-467: null for an Instagram guest. See the projection below.
+  guest_phone: string | null
   recognition_state: string | null
   last_message_at: string
   last_message_direction: string
@@ -79,7 +80,13 @@ export async function listOperatorConversations(
       venueTimezone: row.venue_timezone,
       agentName: row.agent_name,
       name: composeName(row.guest_first_name, row.guest_last_name),
-      phoneFallback: row.guest_phone,
+      // TAC-467: '' for a guest with no phone (an Instagram guest), never
+      // null. analog-operator parses this list all-or-nothing with
+      // `phoneFallback: z.string()`, so one null would empty the whole list
+      // for every operator who can see that venue. '' keeps the Contract's
+      // type; the guest shows with a blank name until the operator app can
+      // label an Instagram guest.
+      phoneFallback: row.guest_phone ?? '',
       recognitionState: normalizeRecognitionState(row.recognition_state),
       lastMessageAt: row.last_message_at,
       lastMessageDirection: row.last_message_direction,

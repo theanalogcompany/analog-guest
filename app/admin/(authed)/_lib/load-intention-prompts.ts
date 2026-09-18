@@ -68,7 +68,8 @@ export interface IntentionPromptsPage {
 interface JoinedGuestShape {
   first_name: string | null
   last_name: string | null
-  phone_number: string
+  // TAC-467: null for an Instagram guest.
+  phone_number: string | null
 }
 
 interface JoinedVenueShape {

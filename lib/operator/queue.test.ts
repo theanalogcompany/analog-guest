@@ -198,6 +198,44 @@ describe('listPendingQueue', () => {
     expect(result).toEqual({ ok: false, error: 'function does not exist' })
   })
 
+  // TAC-467. The Contract types guestPhoneFallback as a string, and
+  // analog-operator parses `drafts` all-or-nothing with
+  // `guestPhoneFallback: z.string()`: one null fails the parse and the queue
+  // comes back empty for every operator who can see that venue. A guest who
+  // came in on Instagram has no phone, so the projection must send ''. The
+  // generated RPC types say `string`, which is why this needs a test rather
+  // than a compiler.
+  it('sends an empty string, never null, for a guest with no phone, and keeps every other draft', async () => {
+    const row = {
+      venue_id: 'v1',
+      venue_slug: 'mock-cafe',
+      guest_display_name: null,
+      guest_opted_out_at: null,
+      draft_body: 'hello',
+      category: 'reply',
+      voice_fidelity: 0.8,
+      review_reason: null,
+      recognition_state: 'new',
+      created_at: '2026-05-12T20:00:00.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+    }
+    rpcMock.mockResolvedValue({
+      data: [
+        { ...row, draft_id: 'd1', guest_id: 'g1', guest_phone: null },
+        { ...row, draft_id: 'd2', guest_id: 'g2', guest_phone: '+15555550009' },
+      ],
+      error: null,
+    })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts).toHaveLength(2)
+    expect(result.drafts[0]!.guestPhoneFallback).toBe('')
+    expect(result.drafts[1]!.guestPhoneFallback).toBe('+15555550009')
+    for (const d of result.drafts) expect(typeof d.guestPhoneFallback).toBe('string')
+  })
+
   describe('reviewReason normalization', () => {
     const baseRow = {
       draft_id: 'd1',

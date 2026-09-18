@@ -3,6 +3,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import { Card } from '@/components/ui/card'
 import { Eyebrow, StatePill } from '@/lib/ui'
 import type { GuestState } from '@/lib/recognition'
+import { formatGuestPhone } from '../../_lib/guest-name'
 
 // Compact guest context. Densified for the 240px context-row slot. Pulls
 // from latest guest_states + lightweight rollups + the loaded conversation
@@ -18,7 +19,8 @@ interface GuestContextProps {
     id: string
     firstName: string | null
     lastName: string | null
-    phoneNumber: string
+    // TAC-467: null for an Instagram guest.
+    phoneNumber: string | null
     distanceMiles: number | null
     createdVia: string
   }
@@ -51,7 +53,7 @@ export function GuestContext({
   venueTimezone,
 }: GuestContextProps) {
   const fullName = [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
-  const formattedPhone = formatPhone(guest.phoneNumber)
+  const formattedPhone = formatGuestPhone(guest.phoneNumber)
   const sinceLabel = sinceAt ? formatInTimeZone(sinceAt, venueTimezone, 'MMM d') : null
 
   const lastVisitLabel = lastVisitAt
@@ -146,14 +148,6 @@ function formatRelativeVisit(date: Date, tz: string, now: Date): string {
     return `${formatInTimeZone(date, tz, 'EEE')} · ${time}`
   }
   return `${formatInTimeZone(date, tz, 'MMM d')} · ${time}`
-}
-
-// "+17869530853" → "+1 786 953 0853" for legibility. Falls back to the raw
-// string when the format doesn't match (international numbers etc).
-function formatPhone(phone: string): string {
-  const m = phone.match(/^\+1(\d{3})(\d{3})(\d{4})$/)
-  if (!m) return phone
-  return `+1 ${m[1]} ${m[2]} ${m[3]}`
 }
 
 function formatDollars(cents: number): string {

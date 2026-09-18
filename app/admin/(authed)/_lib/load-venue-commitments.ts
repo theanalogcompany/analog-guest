@@ -107,7 +107,8 @@ export interface VenueCommitments {
 interface JoinedGuestShape {
   first_name: string | null
   last_name: string | null
-  phone_number: string
+  // TAC-467: null for an Instagram guest.
+  phone_number: string | null
 }
 
 /** PostgREST returns a to-one embed as an object, but has returned arrays; normalize both. */
