@@ -21,14 +21,14 @@
  * The marker's q= field is a hash of what the ticket is blocked on: its
  * ## Open questions block plus the id of its newest [NEEDS-INPUT],
  * [HUMAN-REVIEW-REQUIRED], [PLAN], [NEEDS-ACTION], [AUDIT-SKIPPED],
- * [BUILD-SKIPPED] or [SILENT-RUN] comment. A thread reply
+ * [BUILD-SKIPPED], [SILENT-RUN] or [TURN-LIMIT] comment. A thread reply
  * goes out only when that hash changes, so a ticket sitting unanswered gets
  * nothing run after run. (TAC-406)
  *
  * The marker comment is EDITED, never re-created, so each ticket carries
  * exactly one. Creating it still makes it the newest comment, after any
  * ruling already on the ticket. build-ready.yml and work-ticket.md both skip
- * [SLACK], [RESUME-CLAIM] and [DENIALS] comments when deciding who spoke last, so the
+ * [SLACK], [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT] comments when deciding who spoke last, so the
  * marker never buries a ruling.
  *
  * Env: LINEAR_API_KEY, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
@@ -130,6 +130,7 @@ const BLOCKING_MARKERS = new Set([
   'AUDIT-SKIPPED',
   'BUILD-SKIPPED',
   'SILENT-RUN',
+  'TURN-LIMIT',
 ]);
 
 function isBlockingComment(body) {
@@ -209,6 +210,9 @@ function replyLine(issue) {
   }
   if (marker === 'SILENT-RUN') {
     return '_The last build run on this ticket posted nothing. Read the run linked in the ticket before replying: a reply here re-runs it, and until the cause is fixed the same failure repeats._';
+  }
+  if (marker === 'TURN-LIMIT') {
+    return '_The last build run on this ticket ran out of turns. The ticket says what was pushed. A reply here resumes the build from the pushed branch; if the ticket is too big for one run, split it instead._';
   }
   if (marker === 'AUDIT-SKIPPED') {
     return '_Replying here will not unblock it: the ticket needs its Repo: line or repo labels fixed. Open the ticket._';
