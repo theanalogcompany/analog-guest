@@ -33,8 +33,8 @@ export function permits(allowed: readonly string[], disallowed: readonly string[
 // each part of a compound command (&&, ||, ;, |) on its own and refuses the
 // line if any part is refused. The build prompt names forms CI denies
 // however they are arranged: expanding a variable, command substitution,
-// redirection and heredocs; this refuses a $ or < or > outside single
-// quotes. `cd` has no rule: Claude Code admits a single cd to a directory
+// redirection and heredocs; this refuses a $, a backtick, < or > outside
+// single quotes, and a lone & (a background job), which it does not model. `cd` has no rule: Claude Code admits a single cd to a directory
 // inside the checkout on its own, and refuses a second in one command (run
 // 35323004309), so a cd is admitted when it is the only one and its path is
 // relative with no `..`, or under `root`.
@@ -50,7 +50,7 @@ export function permitsCommandLine(
   for (let i = 0; i < line.length; i++) {
     const c = line[i]
     if (quote) {
-      if (quote === '"' && c === '$') return false
+      if (quote === '"' && (c === '$' || c === '`')) return false
       current += c
       if (c === quote) quote = null
       continue
@@ -73,6 +73,9 @@ export function permitsCommandLine(
       current = ''
       continue
     }
+    // A lone & runs what precedes it in the background: not modelled, so
+    // refused rather than read as one command.
+    if (c === '&') return false
     current += c
   }
   if (quote) return false

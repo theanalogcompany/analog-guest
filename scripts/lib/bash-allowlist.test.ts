@@ -43,6 +43,7 @@ const PLACEHOLDERS: Record<string, string> = {
   '<number>': '221',
   '<path>': 'lib/utils.ts',
   '<ref>': 'jaipal/tac-325-order-capture',
+  '<repo>': 'theanalogcompany/analog-guest',
   '<x>': 'x',
 }
 const FENCE = /```[a-z]*\n([\s\S]*?)```/g
@@ -126,6 +127,8 @@ describe('permitsCommandLine', () => {
     expect(run('git diff $(cat ref)')).toBe(false)
     expect(run('jq . <<EOF')).toBe(false)
     expect(run("git diff 'unclosed")).toBe(false)
+    expect(run('git status & git push --force')).toBe(false)
+    expect(run('git diff "`cat ref`"')).toBe(false)
   })
 
   it('admits one cd inside the checkout, and no other', () => {
@@ -170,6 +173,10 @@ describe('the build allowlist', () => {
     'git push -u origin jaipal/tac-471-allowlist-and-resume',
     'git push',
     'gh pr create --draft',
+    'gh pr list --head jaipal/tac-325-order-capture',
+    'gh pr view 221',
+    'gh pr diff 221',
+    'gh pr checks 221',
     "gh api repos/theanalogcompany/analog-guest/activity --jq '.[] | .actor.login'",
   ]
 
@@ -206,6 +213,11 @@ describe('the build allowlist', () => {
     'git rebase main',
     'rm -f .git-commit-msg-tac443.txt',
     'gh pr merge 221 --squash',
+    // gh takes the repo flag before the subcommand, so a deny rule for
+    // `gh pr merge` alone would let this through; no allow rule admits it.
+    'gh pr -R theanalogcompany/analog-guest merge 221 --squash',
+    'gh pr ready 221',
+    'gh pr close 221',
     'gh pr checkout 221',
     'gh api repos/theanalogcompany/analog-guest/pulls',
     'gh api -X DELETE repos/theanalogcompany/analog-guest/git/refs/heads/jaipal/tac-325-order-capture',
@@ -262,6 +274,25 @@ describe('the build allowlist', () => {
     },
   )
 
+  // Redundant while gh pr is granted by subcommand, and there for the day it
+  // is widened again.
+  it.each(['gh pr merge 221 --squash', 'gh pr checkout 221'])(
+    'still refuses %s if a later edit permits every gh pr command',
+    (command) => {
+      expect(permits([...allowed, 'Bash(gh pr:*)'], disallowed, command)).toBe(false)
+    },
+  )
+
+  it('grants gh pr by subcommand only', () => {
+    expect(allowed.filter((rule) => rule.startsWith('Bash(gh pr'))).toEqual([
+      'Bash(gh pr create:*)',
+      'Bash(gh pr list:*)',
+      'Bash(gh pr view:*)',
+      'Bash(gh pr diff:*)',
+      'Bash(gh pr checks:*)',
+    ])
+  })
+
   it('no longer carries the checkout rule that never matched a branch name', () => {
     expect(allowed).not.toContain('Bash(git checkout jaipal/:*)')
     expect(allowed.filter((rule) => rule.startsWith('Bash(git checkout'))).toEqual(['Bash(git checkout main)', 'Bash(git checkout -b:*)'])
@@ -273,8 +304,9 @@ describe('the build allowlist', () => {
 })
 
 // A command the prompts teach is never one the allowlist refuses. Each text
-// may name a refused command only to say it is refused, and those are pinned
-// here one by one, so a second mention, or a refused command taught, fails.
+// may name a refused command only to say it is refused. Those are pinned one
+// by one, with the words around each, so a second mention fails, and so does
+// a mention rewritten into an instruction to run it.
 // process.md is not scanned: its fenced blocks are example comments, and its
 // one command (dispatching a workflow against a fixture) is Jaipal's.
 describe('what the prompts teach, the allowlist permits', () => {
@@ -282,6 +314,9 @@ describe('what the prompts teach, the allowlist permits', () => {
     const commands = commandsIn(read('.claude/commands/work-ticket.md'))
     // Step 14 says npm install is refused; Phase 5 says Jaipal runs the merge.
     expect(refusedIn(commands)).toEqual(['npm install', 'gh pr merge --squash --delete-branch'])
+    const doc = read('.claude/commands/work-ticket.md')
+    expect(doc).toContain('`npm install` is refused, so say so and stop')
+    expect(doc).toContain('He runs `gh pr merge --squash --delete-branch` after reviewing the PR')
     // Zero would pass every assertion and prove nothing.
     expect(commands).toContain('git worktree add .worktrees/jaipal/tac-325-order-capture jaipal/tac-325-order-capture')
     expect(commands).toContain('git log --oneline origin/main..origin/jaipal/tac-325-order-capture')
@@ -315,6 +350,7 @@ describe('what the prompts teach, the allowlist permits', () => {
     ])
     // Named once, to say it is what the baseline used to use.
     expect(refusedIn(commands)).toEqual(['git stash'])
+    expect(read('CLAUDE.md')).toContain('this used to be `git stash`, which CI refuses')
   })
 
   it('CLAUDE.md\'s push-actor check', () => {
