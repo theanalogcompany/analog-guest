@@ -1,4 +1,6 @@
 import { createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { formatWithOptions } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -469,5 +471,28 @@ describe('POST /api/webhooks/instagram', () => {
     expect(res.status).toBe(200)
     expect(findEntry('instagram_unexpected_error')).toBeDefined()
     expect(findEntry('instagram_event')).toBeUndefined()
+  })
+})
+
+// Real deliveries captured from Meta on 2026-09-17, identifiers replaced (see
+// lib/messaging/instagram/fixtures/README.md). The synthetic payloads above
+// test the rules; these test that a body shaped exactly as Meta sends it,
+// including an echo and a read receipt, verifies, is acknowledged, and puts
+// none of its identifiers or text in the logs.
+describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
+  const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
+
+  it.each(['message', 'echo', 'read'])('verifies and acknowledges the recorded %s delivery', async (name) => {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    const body = readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+
+    const res = await POST(postRequest(body, signed(body)))
+    expect(res.status).toBe(200)
+    expect(findEntry('instagram_event')).toMatchObject({ object: 'instagram', entryCount: 1 })
+
+    const values = [...body.matchAll(/"(?:id|mid|text)":"([^"]+)"/g)].map((m) => m[1] ?? '')
+    expect(values.length).toBeGreaterThan(0)
+    const text = loggedText()
+    for (const value of values) expect(text).not.toContain(value)
   })
 })
