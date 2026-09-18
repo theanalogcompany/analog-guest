@@ -204,9 +204,10 @@ export async function dispatchOperatorOutbound(
 
   // ---- 3a. TAC-467: refuse a guest with no phone BEFORE the optimistic flip. ----
   // sendMessage refuses a null recipient too, but after the flip below, which
-  // would strand the card exactly as step 3b describes. Existing code can
-  // queue a card for such a guest: a Command Center Follow Up at a venue that
-  // holds that category. Replying over Instagram is the outbound ticket's job.
+  // would strand the card exactly as step 3b describes. Nothing queues a card
+  // for such a guest today (the Command Center Follow Up refuses them, and the
+  // Instagram handler does not run the agent); this keeps a future path from
+  // stranding one. Replying over Instagram is the outbound ticket's job.
   const recipientPhone = guestRow.phone_number
   if (recipientPhone === null) {
     return {

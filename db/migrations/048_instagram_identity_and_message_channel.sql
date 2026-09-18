@@ -93,8 +93,9 @@
 -- lost race would lose the guest's text with no retry. Queries touching both
 -- tables start from messages, so taking messages first leaves no cycle. The
 -- 5-second lock_timeout means a busy table makes the whole migration fail
--- cleanly (nothing applied, run it again) rather than queue every message
--- read and write behind it. Apply outside Le Mil's hours (7am to 3pm
+-- cleanly (nothing applied, run it again) rather than hold every message
+-- read and write queued behind it indefinitely; for up to those 5 seconds
+-- they do wait. Apply outside Le Mil's hours (7am to 3pm
 -- America/Los_Angeles) anyway.
 --
 -- HIGH-STAKES: touches `guests` and `messages`.

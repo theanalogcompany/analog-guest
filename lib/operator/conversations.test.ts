@@ -80,8 +80,9 @@ describe('listOperatorConversations', () => {
 
   // TAC-467. The Contract types phoneFallback as a string, and analog-operator
   // parses the whole list with `phoneFallback: z.string()`: one null in one
-  // row fails the parse, and the operator gets an error instead of a list. A guest
-  // who came in on Instagram has no phone, so the projection must send ''.
+  // row fails the parse, and the operator gets an error instead of a list.
+  // A guest who came in on Instagram has no phone, so the projection must
+  // send ''.
   it('sends an empty string, never null, for a guest with no phone, and keeps every other row', async () => {
     const phoneless = {
       ...RAW_ROW,
