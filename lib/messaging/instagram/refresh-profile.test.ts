@@ -142,17 +142,17 @@ afterEach(() => {
 describe('isProfileRefreshDue', () => {
   const now = new Date(NOW)
   it.each<[string, string | null, string | null, boolean]>([
-    ['never fetched or tried', null, null, true],
-    ['fetched 25 hours ago', ago(25 * HOUR), ago(25 * HOUR), true],
-    ['fetched exactly 24 hours ago', ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), true],
-    ['fetched 23 hours ago', ago(23 * HOUR), ago(23 * HOUR), false],
-    ['never fetched, a failed try 30 minutes ago', null, ago(30 * 60 * 1000), false],
-    ['never fetched, a failed try 61 minutes ago', null, ago(61 * 60 * 1000), true],
-    ['never fetched, a failed try exactly an hour ago', null, ago(INSTAGRAM_PROFILE_RETRY_AFTER_MS), true],
-    ['fetched 2 days ago, a failed try 30 minutes ago', ago(48 * HOUR), ago(30 * 60 * 1000), false],
-    ['fetched 2 days ago, a failed try 2 hours ago', ago(48 * HOUR), ago(2 * HOUR), true],
-    ['an unreadable stored time', 'not a time', 'not a time', true],
-  ])('%s: due is %s', (_label, fetchedAt, attemptedAt, due) => {
+    ['never fetched or tried: due', null, null, true],
+    ['fetched 25 hours ago: due', ago(25 * HOUR), ago(25 * HOUR), true],
+    ['fetched exactly 24 hours ago: due', ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), true],
+    ['fetched 23 hours ago: not due', ago(23 * HOUR), ago(23 * HOUR), false],
+    ['never fetched, a failed try 30 minutes ago: not due', null, ago(30 * 60 * 1000), false],
+    ['never fetched, a failed try 61 minutes ago: due', null, ago(61 * 60 * 1000), true],
+    ['never fetched, a failed try exactly an hour ago: due', null, ago(INSTAGRAM_PROFILE_RETRY_AFTER_MS), true],
+    ['fetched 2 days ago, a failed try 30 minutes ago: not due', ago(48 * HOUR), ago(30 * 60 * 1000), false],
+    ['fetched 2 days ago, a failed try 2 hours ago: due', ago(48 * HOUR), ago(2 * HOUR), true],
+    ['an unreadable stored time: due', 'not a time', 'not a time', true],
+  ])('%s', (_label, fetchedAt, attemptedAt, due) => {
     expect(isProfileRefreshDue({ fetchedAt, attemptedAt }, now)).toBe(due)
   })
 })
