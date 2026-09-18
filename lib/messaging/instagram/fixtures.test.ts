@@ -79,9 +79,9 @@ describe('recorded Instagram payloads: what Meta sends', () => {
 
   // Identifier formats. The account id is 17 digits. Both guest IGSIDs seen
   // on 2026-09-17 (the one in these fixtures, and a second guest's from an
-  // earlier postback that aged out of the logs) were 16, so an account id and a guest id are
-  // not the same length and a validator for one must not be reused for the
-  // other. Two samples do not show that every IGSID is 16 digits, so the
+  // earlier postback that aged out of the logs) were 16, so an account id
+  // and a guest id are not the same length and a validator for one must not
+  // be reused for the other. Two samples do not show that every IGSID is 16 digits, so the
   // guest id is pinned to digits only.
   it('uses digit-string ids, 17 digits for the account', () => {
     for (const name of FIXTURE_NAMES) {
@@ -110,14 +110,15 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     expect(postback.mid).toEqual(expect.stringMatching(/ZDZD$/))
   })
 
-  // Per Jaipal, this thread was deleted and reopened through the ig.me link
-  // before this capture; which side deleted it isn't recorded, and the payload
-  // can't show it. The referral fired as it does on a new thread, but in this
-  // capture the thread id inside its mid is the one the earlier messages
-  // carry. So on this path (an icebreaker tap into a chat that was empty
-  // again) a new thread id can't be what spots a returning guest; the
-  // referral is. Other ways back in weren't captured.
-  it('kept the thread id across the deleted and reopened thread in this capture', () => {
+  // Jaipal deleted this thread from the guest side and reopened it through
+  // the ig.me link before this capture (the payload can't show that). The
+  // referral fired as it does on a new thread, and the thread id inside its
+  // mid is the one the earlier messages carry, as expected: Instagram deletes
+  // a chat only for the side that deletes it, so the venue still had it. On
+  // this path (an icebreaker tap into a chat that was empty again) a new
+  // thread id can't be what spots a returning guest; the referral is. Other
+  // ways back in weren't captured.
+  it('kept the thread id after the guest deleted and reopened the thread in this capture', () => {
     const postback = firstItem('postback-referral').item.postback as { mid: string }
     const message = firstItem('message').item.message as { mid: string }
     const [, , postbackThread, postbackItem] = decodeMid(postback.mid)
