@@ -371,8 +371,10 @@ jobs:
 
             Dependencies are already installed. Do not run npm install.
 
-            LINEAR, FROM CI. There is no Linear MCP here. Use the GraphQL API
-            with curl; the key is in the LINEAR_API_KEY environment variable.
+            LINEAR, FROM CI. There is no Linear MCP here. Read with curl, and
+            write with the checked-in helper, node scripts/linear.mjs. The key
+            is in the LINEAR_API_KEY environment variable; the helper reads it
+            itself.
 
             YOUR BASH IS RESTRICTED, AND A DENIED COMMAND FAILS SILENTLY.
             These are denied however you arrange them: expanding an
@@ -380,43 +382,50 @@ jobs:
             command substitution ($(...) or backticks), variable assignment
             (NAME=...), output redirection in every form, including >, >> and
             2>&1 — a command cannot capture its own stderr — and heredocs
-            (<<). This
-            workflow's own shell steps use those forms; you cannot. Pass the
-            key with curl's own --variable and --expand-header, exactly as
-            below. Use exactly these two forms.
+            (<<). This workflow's own shell steps use those forms; you cannot.
+
+            SHELL TOOLS CANNOT TOUCH FILES OUTSIDE THIS CHECKOUT. Claude Code
+            checks the file arguments of jq, rg, grep, cat, wc, sed, head and
+            tail, and refuses any path outside this checkout, whatever the
+            allowlist says. ${{ runner.temp }} is outside it, and so are the
+            files Claude Code saves a large response to. Open those files with
+            the Read tool, never with a shell command. A pipeline or && chain
+            is refused whole if any part of it is refused.
+
+            Use exactly these two forms.
 
             1. A read, with the request inline in single quotes:
 
                  curl -sS https://api.linear.app/graphql --variable %LINEAR_API_KEY --expand-header "Authorization: {{LINEAR_API_KEY}}" -H "Content-Type: application/json" -d '{"query":"query { issue(id: \"TAC-395\") { id identifier title description state { name } labels { nodes { id name } } comments(first: 250) { nodes { id body createdAt } } } }"}'
 
-               Piping the response to jq is allowed: append | jq '...'.
+               Piping the response to jq is allowed: append | jq '...'. For
+               the description as plain markdown, append
+               | jq -r '.data.issue.description'. A response too large to show
+               is saved to a file: open that file with the Read tool.
 
-            2. Every write, and any request too long to inline: use the Write
-               tool to write the whole JSON request body to
-               ${{ runner.temp }}/linear-request.json, replacing the file each
-               time, then send the file:
+            2. Every write, with the helper. For a comment or a description,
+               first use the Write tool to write the text as plain markdown,
+               with nothing escaped, to a new file under ${{ runner.temp }}.
+               Give every write its own file name; never reuse one. Then:
 
-                 curl -sS https://api.linear.app/graphql --variable %LINEAR_API_KEY --expand-header "Authorization: {{LINEAR_API_KEY}}" -H "Content-Type: application/json" -d @${{ runner.temp }}/linear-request.json
+                 node scripts/linear.mjs comment TAC-395 ${{ runner.temp }}/tac-395-plan.md
+                 node scripts/linear.mjs describe TAC-395 ${{ runner.temp }}/tac-395-description.md
+                 node scripts/linear.mjs label add TAC-395 "Needs Decision"
+                 node scripts/linear.mjs label remove TAC-395 "Needs Decision"
+                 node scripts/linear.mjs state TAC-395 Ready
 
-               The file is JSON, so escape newlines as \n and double quotes
-               as \". A comment, for example:
+               The helper takes a ticket identifier and plain names, and looks
+               up every id itself. It posts comments flat, and refuses one that
+               does not open with **[FROM CLAUDE CODE]**, a blank line, then its
+               marker. describe replaces the whole description: read it first,
+               edit it, and write all of it back. The helper prints a line
+               starting "ok:" and exits 0 only when Linear returns
+               "success": true. Anything else is a failed write, not a finished
+               step: read the error, fix the cause, and run it again.
 
-                 {"query":"mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }","variables":{"id":"<issue uuid>","body":"**[FROM CLAUDE CODE]**\n\n[PLAN] ..."}}
-
-            Read every response. Only "success": true means the write
-            happened; anything else is a failed write, not a finished step.
-
-            READ FILES WITH THE READ TOOL AND SEARCH WITH GREP OR rg, never
-            with a shell pipeline. cat, grep, cut and env are not available,
-            and every denied pipeline on record was a shell text tool feeding
-            jq.
-
-            Post comments flat: never pass parentId. Change status with
-            issueUpdate and stateId. Add or remove a label with
-            issueAddLabel / issueRemoveLabel (id, labelId); never set labels
-            through issueUpdate's labelIds, which replaces every label on the
-            ticket. Resolve state and label ids by querying workflowStates
-            and issueLabels. Never invent an id.
+            READ FILES WITH THE READ TOOL AND SEARCH WITH THE GREP TOOL OR rg,
+            never with a shell pipeline. cat, grep, cut, wc and env are not
+            available.
 
             After you finish, this workflow checks that you posted a comment
             on every ticket you were given, and counts your permission
