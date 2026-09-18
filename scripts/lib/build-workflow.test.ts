@@ -84,9 +84,11 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
 
   it('runs the claim check on every candidate before taking LIMIT', () => {
     expect(QUEUE).toContain('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)')
-    // Slicing in jq would take a claimed ticket and then skip it, leaving
-    // the run with nothing while the next ticket waits.
-    expect(QUEUE).not.toContain('.[:$limit]')
+    // Cutting the list in jq would take a claimed ticket and then skip it,
+    // leaving the run with nothing while the next ticket waits. Any
+    // spelling of the cut: a slice, limit() or first.
+    const program = between(QUEUE, 'CANDIDATES=$(', 'SELECTED=$(echo')
+    expect(program).not.toMatch(/\.\[\s*-?\d*\s*:|\blimit\s*\(|\bfirst\b|\$limit/)
     expect(QUEUE.indexOf('node scripts/claims.mjs')).toBeLessThan(QUEUE.indexOf('TICKETS=$('))
   })
 
@@ -141,7 +143,8 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
           nodes: [
             issue('TAC-396', 'In Progress', ['Needs Action'], [
               comment('55ebb992', '**[FROM CLAUDE CODE]**\n\n[NEEDS-ACTION] TAC-396', '2026-09-18T00:13:09.365Z'),
-              comment('55bea2c5', '**[FROM CLAUDE CHAT — RULING]**\n\n**Reopening.**', '2026-09-18T01:33:27.001Z'),
+              // Edited after the claim: the ruling's time is when it landed.
+              { ...comment('55bea2c5', '**[FROM CLAUDE CHAT — RULING]**\n\n**Reopening.**', '2026-09-18T01:33:27.001Z'), updatedAt: '2026-09-18T02:45:00.000Z' },
               comment('c1', '**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-396 session=local', '2026-09-18T02:31:00.000Z'),
             ]),
             issue('TAC-448', 'Ready', [], [], 1),
