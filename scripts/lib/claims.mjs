@@ -220,8 +220,9 @@ function positiveNumber(text, fallback) {
  * The entry, with its I/O injected: git(args) and gh(args) return stdout, or
  * null when the command fails.
  *
- * Fails closed when the branches can't be read, or come back without main:
- * taking a ticket without the check is the defect this exists to stop. Fails open, with a warning, when
+ * Fails closed when the branches can't be read, or come back without main
+ * (nothing fetched from GitHub): taking a ticket without the check is the
+ * defect this exists to stop. Fails open, with a warning, when
  * the open PRs can't be read: that signal only saves a wasted run on a
  * finished ticket, and the other two still hold.
  */
@@ -246,8 +247,10 @@ export function run({ env, stdin, git, gh, now, stdout, stderr }) {
 
   const refsText = git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/remotes/origin/']);
   const refs = refsText === null ? [] : parseRefs(refsText);
-  // No main among them means the checkout did not fetch GitHub's branches
-  // (fetch-depth), and every commit signal would be silently missing.
+  // No main among them means the checkout fetched no branches from GitHub,
+  // and every commit signal would be silently missing. A shallow checkout
+  // of main still lists main, so this cannot catch that; the fetch-depth: 0
+  // pin in build-workflow.test.ts is what protects the scheduled run.
   if (!refs.some((ref) => ref.name === 'main')) {
     stderr('::error title=Claim check::Could not read the branches on GitHub from the checkout, so no ticket can be checked for another session. Taking nothing.\n');
     return EXIT.FAILED;

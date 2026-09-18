@@ -89,10 +89,10 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
     expect(QUEUE).toContain('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)')
     // Cutting the list in jq would take a claimed ticket and then skip it,
     // leaving the run with nothing while the next ticket waits. Any
-    // spelling of the cut: a slice, limit(), [first] or [.[0]]. A first()
-    // used inside an expression is not a cut and is not refused.
+    // spelling of the cut: a slice, limit(), [first], [first(...)] or
+    // [.[0]]. A first() inside an expression is not a cut and is not refused.
     const program = between(QUEUE, 'CANDIDATES=$(', 'SELECTED=$(echo')
-    expect(program).not.toMatch(/\.\[\s*-?\d*\s*:|\blimit\s*\(|\[\s*first\s*\]|\[\s*\.\[\s*0\s*\]\s*\]|\$limit/)
+    expect(program).not.toMatch(/\.\[\s*-?\d*\s*:|\blimit\s*\(|\[\s*first\s*[\](]|\[\s*\.\[\s*0\s*\]\s*\]|\$limit/)
     expect(QUEUE.indexOf('node scripts/claims.mjs')).toBeLessThan(QUEUE.indexOf('TICKETS=$('))
   })
 
@@ -126,8 +126,9 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
   })
 
   it('checks out every branch, which is where the commit signal comes from', () => {
-    // A shallow checkout lists no branches from GitHub; claims.mjs then
-    // fails the step rather than check blind.
+    // A shallow checkout of main lists only main: every commit signal would
+    // vanish without a word, and claims.mjs cannot tell. This pin is what
+    // protects the scheduled run.
     expect(between(WORKFLOW, '      - uses: actions/checkout@v6', '      - uses: actions/setup-node')).toContain('fetch-depth: 0')
   })
 

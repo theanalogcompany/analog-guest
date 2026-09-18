@@ -82,10 +82,10 @@ The build workflow skips a ticket another session has (TAC-448, `scripts/claims.
    [CLAIM] TAC-XXX session=local
    ```
 
-   It names no run; that is what marks it as a local session's. Capture its id. On a later invocation of the same session, edit it rather than posting another. Then read the thread once more: a build run's claim can land in the seconds between your read and your post. If one did and its run is going, edit yours to `released` (step 4) and exit.
+   It names no run; that is what marks it as a local session's. Capture its id. On a later invocation of the same session, do not post another, and leave it as it is: a polling wakeup that finds no new reply does not take back a `released` claim. Only step 4's "carry on" does. After posting, read the thread once more: a build run's claim can land in the seconds between your read and your post. If one did and its run is going, edit yours to `released` (step 4) and exit.
 4. **Keep it true.** The workflow honours a local claim for 3 hours from its last edit, whatever Jaipal rules in the meantime: his ruling reaches Linear when the Slack sync posts it, which can be long after you heard the answer another way.
    - Edit it at least every 3 hours while you work. A commit pushed to the ticket's branch also holds the ticket for 3 hours from when it was made, but only on a branch named `jaipal/tac-xxx-...`: the workflow reads no other.
-   - **When you hand the ticket back**, edit it to `[CLAIM] TAC-XXX session=local released`: when you post `[PLAN]`, `[NEEDS-INPUT]` or `[NEEDS-ACTION]` and exit, or start polling for the reply. A released claim holds nothing, so the next session can act on his answer. A polling chain stays protected by its `[POLLING-STATE]`, which the workflow reads as live for 10 minutes after each wakeup.
+   - **When you stop working the ticket**, edit it to `[CLAIM] TAC-XXX session=local released`, on every exit: after `[PLAN]`, `[NEEDS-INPUT]` or `[NEEDS-ACTION]`, after the PR link, after `[HUMAN-REVIEW-REQUIRED]` or `[POLLING-CLOSED]`, after a gate refusal, and when you start polling for a reply. A released claim holds nothing, so the next session can act on his answer. A polling chain stays protected by its `[POLLING-STATE]`, which the workflow reads as live for 10 minutes after each wakeup.
    - **When you carry on** after his answer, edit `released` off before anything else.
 
 Nothing protects a session before its claim lands or its first push: until then the workflow cannot see it.

@@ -139,7 +139,7 @@ describe('a local claim on a resume', () => {
     }
   })
 
-  it('holds again once edited back from released', () => {
+  it('dates a claim by its last edit', () => {
     const edited = [LOCAL_CLAIM('2026-09-18T01:00:00Z', '2026-09-18T02:00:00Z'), ...TAC_396_THREAD]
     expect(claimOf(resume396(edited), ctx(INCIDENT_NOW))).toMatch(/last edited 2026-09-18T02:00:00Z/)
   })
@@ -420,8 +420,9 @@ describe('run', () => {
   })
 
   it('takes nothing and fails when the branches come back without main', () => {
-    // A shallow checkout lists no branches from GitHub, and every commit
-    // signal would be missing without a word.
+    // A checkout that fetched nothing from GitHub, where every commit signal
+    // would be missing without a word. (A shallow checkout of main still
+    // lists main; build-workflow.test.ts pins fetch-depth: 0 for that.)
     const r = invoke({ git: () => '' })
     expect(r.code).toBe(EXIT.FAILED)
     expect(r.out).toBe('')
