@@ -251,6 +251,30 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
   })
 })
 
+describe('build-ready.yml pushes with the App token (TAC-463)', () => {
+  // Until TAC-463 every build push went out as github-actions[bot]: the
+  // checkout's persisted header outranked the App token in the remote URL,
+  // and the job's token can never push a file under .github/workflows.
+  const CHECKOUT = between(WORKFLOW, '      - uses: actions/checkout@v6', '      - uses: actions/setup-node')
+  const WORK = between(WORKFLOW, '      - name: Work\n', '      - name: Check the session posted')
+
+  it('keeps no credential in git config after the checkout', () => {
+    expect(CHECKOUT).toContain('\n          persist-credentials: false\n')
+    // The only checkout in the workflow: a second one would persist again.
+    expect(WORKFLOW.match(/uses: actions\/checkout@/g)).toHaveLength(1)
+  })
+
+  it('asks the exchange for workflows: write', () => {
+    expect(WORK).toContain('\n          additional_permissions: |\n            workflows: write\n')
+  })
+
+  it('never hands the session the job token', () => {
+    // github_token replaces the App token with the one given, and the job's
+    // token cannot push a workflow file whatever its permissions say.
+    expect(WORK).not.toMatch(/^\s*github_token:/m)
+  })
+})
+
 describe('build-ready.yml sets its turn limit in one place', () => {
   it('defaults to 120 when a run has no inputs', () => {
     expect(WORKFLOW).toContain('    env:\n      MAX_TURNS: ${{ inputs.max_turns || 120 }}\n')
