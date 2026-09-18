@@ -11,20 +11,26 @@
  * A candidate is claimed when another session has left a trace the
  * selection can read, recent enough to be live (the live window):
  *
- * - a [CLAIM] from a local session, or a [POLLING-STATE], created or last
- *   edited within the window. An edit counts, so a session keeps its claim
- *   live by editing the comment;
+ * - a local session's [CLAIM], created or last edited within the window,
+ *   unless its marker line says `released`. A session keeps its claim live
+ *   by editing it, and hands the ticket back by editing it to `released`
+ *   when it stops to wait for Jaipal or backs off. A claim that is not
+ *   released holds whatever the ruling: the ruling's time is when the
+ *   comment reached Linear, which can be long after a local session heard
+ *   the answer another way (Slack, or chat);
+ * - a [POLLING-STATE] edited within the window;
  * - a commit on the ticket's branch on GitHub within the window, by anyone
  *   but the build workflow's own session (claude[bot]);
  * - for a start only, an open PR from the ticket's branch. The build is
  *   finished and waiting for Jaipal to merge it.
  *
- * For a resume, a trace counts only if it is newer than the ruling being
- * resumed. A session that claimed the ticket and then stopped to wait for
- * Jaipal has not seen his answer, so the answer is the next session's to
- * act on. One exception: a [POLLING-STATE] edited in the last
- * POLL_HEARTBEAT_MINUTES. A polling session looks at least every 5 minutes
- * and edits that comment each time, so it will pick the ruling up itself.
+ * For a resume, a [POLLING-STATE] or a commit counts only if it is no older
+ * than the ruling being resumed. A polling session that stopped, or a
+ * branch last pushed before Jaipal answered, has not acted on the answer,
+ * so the answer is the next session's. One exception: a [POLLING-STATE]
+ * edited in the last POLL_HEARTBEAT_MINUTES. A polling session looks at
+ * least every 5 minutes (work-ticket.md, "Backoff") and edits that comment
+ * each time, so it will pick the ruling up itself.
  *
  * The build workflow's own traces are ignored: its claims ([CLAIM] naming a
  * run, and [RESUME-CLAIM]) and its session's commits. Its concurrency group
@@ -32,8 +38,9 @@
  * check runs. Those claims exist for local sessions to read.
  *
  * What this cannot see: a local session that has written nothing to Linear
- * and pushed nothing to GitHub. Nothing protects that window, and nothing
- * here pretends to.
+ * and pushed nothing to GitHub, or pushed only to a branch not named
+ * jaipal/<ticket>-.... Nothing protects that window, and nothing here
+ * pretends to.
  *
  * No I/O at module load, and none outside run's injected dependencies.
  */
@@ -79,19 +86,29 @@ function touchedAt(comment) {
   return times.length > 0 ? Math.max(...times) : NaN;
 }
 
+// The rest of a claim's marker line, after the marker.
+function claimLine(body) {
+  return unescapeBrackets(body).match(/\[(?:CLAIM|RESUME-CLAIM)\]([^\n]*)/)?.[1] ?? '';
+}
+
 /**
  * The run a claim names, or null. A claim that names a run is the build
  * workflow's own; a local session's claim names none.
  */
 export function claimRun(body) {
-  const line = unescapeBrackets(body).match(/\[(?:CLAIM|RESUME-CLAIM)\]([^\n]*)/);
-  return line?.[1].match(/\brun=(\d+)/)?.[1] ?? null;
+  return claimLine(body).match(/\brun=(\d+)/)?.[1] ?? null;
+}
+
+/** Whether a local claim has been handed back: `released` on its marker line. */
+export function claimReleased(body) {
+  return /\breleased\b/.test(claimLine(body));
 }
 
 /**
  * The comments that can claim a ticket for another session: a local
- * session's [CLAIM], and [POLLING-STATE]. Provenance is the prefix
- * (comment-provenance.mjs), never the author: every comment shares one.
+ * session's [CLAIM] that is not released, and [POLLING-STATE]. Provenance
+ * is the prefix (comment-provenance.mjs), never the author: every comment
+ * shares one.
  */
 export function sessionComments(comments) {
   const out = [];
@@ -99,7 +116,8 @@ export function sessionComments(comments) {
     const body = comment?.body ?? '';
     if (!isBotComment(body)) continue;
     const marker = commentMarker(body);
-    const local = marker === 'POLLING-STATE' || (marker === 'CLAIM' && claimRun(body) === null);
+    const local =
+      marker === 'POLLING-STATE' || (marker === 'CLAIM' && claimRun(body) === null && !claimReleased(body));
     if (!local) continue;
     const at = touchedAt(comment);
     if (Number.isFinite(at)) out.push({ marker, at });
@@ -149,11 +167,12 @@ export function claimOf(candidate, ctx) {
 
   for (const trace of sessionComments(candidate.comments)) {
     if (trace.at < windowStart) continue;
-    const who = trace.marker === 'CLAIM' ? `a local session's [CLAIM]` : 'a [POLLING-STATE]';
-    if (trace.at > since) {
-      return `${who}, last edited ${iso(trace.at)}${afterRuling}`;
-    }
-    if (trace.marker === 'POLLING-STATE' && trace.at >= ctx.now - POLL_HEARTBEAT_MINUTES * MINUTE) {
+    // Not released: the session is working, whenever the ruling landed.
+    if (trace.marker === 'CLAIM') return `a local session's [CLAIM], last edited ${iso(trace.at)}`;
+    // >= rather than >: Linear can return updatedAt a few ms before
+    // createdAt, so a trace posted with the ruling must not fall behind it.
+    if (trace.at >= since) return `a [POLLING-STATE], last edited ${iso(trace.at)}${afterRuling}`;
+    if (trace.at >= ctx.now - POLL_HEARTBEAT_MINUTES * MINUTE) {
       return `a polling session's [POLLING-STATE], last edited ${iso(trace.at)}: it will pick the ruling up itself`;
     }
   }
@@ -161,7 +180,7 @@ export function claimOf(candidate, ctx) {
   const pushes = ctx.refs
     .filter((ref) => isTicketBranch(candidate.identifier, ref.name))
     .filter((ref) => ref.email !== BUILD_SESSION_COMMITTER)
-    .filter((ref) => ref.at >= windowStart && ref.at > since)
+    .filter((ref) => ref.at >= windowStart && ref.at >= since)
     .sort((a, b) => b.at - a.at);
   if (pushes.length > 0) {
     return `a commit on ${pushes[0].name} at ${iso(pushes[0].at)}${afterRuling}`;
@@ -201,8 +220,8 @@ function positiveNumber(text, fallback) {
  * The entry, with its I/O injected: git(args) and gh(args) return stdout, or
  * null when the command fails.
  *
- * Fails closed when the branches can't be read: taking a ticket without the
- * check is the defect this exists to stop. Fails open, with a warning, when
+ * Fails closed when the branches can't be read, or come back without main:
+ * taking a ticket without the check is the defect this exists to stop. Fails open, with a warning, when
  * the open PRs can't be read: that signal only saves a wasted run on a
  * finished ticket, and the other two still hold.
  */
@@ -226,7 +245,10 @@ export function run({ env, stdin, git, gh, now, stdout, stderr }) {
   if (liveHours === null) return usage(`LIVE_SESSION_HOURS "${env.LIVE_SESSION_HOURS}" is not a number above 0`);
 
   const refsText = git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/remotes/origin/']);
-  if (refsText === null) {
+  const refs = refsText === null ? [] : parseRefs(refsText);
+  // No main among them means the checkout did not fetch GitHub's branches
+  // (fetch-depth), and every commit signal would be silently missing.
+  if (!refs.some((ref) => ref.name === 'main')) {
     stderr('::error title=Claim check::Could not read the branches on GitHub from the checkout, so no ticket can be checked for another session. Taking nothing.\n');
     return EXIT.FAILED;
   }
@@ -244,7 +266,7 @@ export function run({ env, stdin, git, gh, now, stdout, stderr }) {
     stderr('::warning title=Claim check::Could not list open PRs. A ticket with an open PR may be started and exit at once.\n');
   }
 
-  const ctx = { now, liveHours, refs: parseRefs(refsText), openPrBranches };
+  const ctx = { now, liveHours, refs, openPrBranches };
   const { picked, skipped } = pickUnclaimed(candidates, ctx, limit);
   for (const s of skipped) {
     stderr(`skipped ${s.identifier} (${s.mode}, ${s.state}): another session has it: ${s.reason}.\n`);

@@ -192,7 +192,7 @@ earlier comment where that reading misses it.
 | `[AUDIT-SKIPPED]` | The audit automation can't tell which repo works the ticket | Add `Needs Decision`. Deliberately not `[AUDIT]`, so the ticket is audited once fixed |
 | `[BUILD-SKIPPED]` | The ticket carries two repo labels, or its Repo: line and labels disagree | Add `Needs Decision`. Never start the build |
 | `[SLACK]` | The Slack sync posted the ticket; edited in place as it syncs | Bookkeeping, not a turn |
-| `[CLAIM]` | A session is about to work the ticket: the build workflow before it starts one, naming its run, or a local session before anything else it writes, naming none | Bookkeeping, not a turn. The build workflow skips a ticket a local session has claimed, and a local session leaves alone a ticket whose build run is still going. See "Claims" |
+| `[CLAIM]` | A session is about to work the ticket: the build workflow before it starts one or works one named in a dispatch, naming its run, or a local session before anything else it writes, naming none. A local session edits its own to `released` when it hands the ticket back | Bookkeeping, not a turn. The build workflow skips a ticket a local session has claimed, and a local session leaves alone a ticket whose build run is still going. See "Claims" |
 | `[RESUME-CLAIM]` | The build workflow is about to resume the ticket after a ruling | Bookkeeping, not a turn. Two claims on the same ruling and the workflow stops retrying it |
 | `[DENIALS]` | A build or audit session hit permission denials on a ticket it worked | Bookkeeping, not a turn. Posted by the workflow, listing the denied commands with the key redacted. A denial on a run that otherwise succeeded usually means a prompt teaches a form the allowlist refuses |
 | `[SILENT-RUN]` | The build workflow's check after the session found no comment from the session on a ticket it worked | Posted by the workflow, not a session. Adds `Needs Decision` if no `Blocked On` label is on, and the run fails. **Not bookkeeping, deliberately**: it counts as the newest comment, so nothing retries the ticket until Jaipal replies. Retrying a permission failure would only repeat it. Read the run before replying: a reply resumes the ticket |
@@ -237,38 +237,51 @@ exists (TAC-448, ruling 2), so a ticket can be taken long before its
 status says so. The build workflow still starts only Ready tickets, but it
 decides whether another session has one from what that session left behind:
 
-- **A local session's `[CLAIM]`**, or a `[POLLING-STATE]`, edited in the
-  last 3 hours (`LIVE_SESSION_HOURS`). A local session posts its claim
-  before anything else it writes (`work-ticket.md`, "Claiming the ticket").
+- **A local session's `[CLAIM]`**, edited in the last 3 hours
+  (`LIVE_SESSION_HOURS`), unless it says `released`. A local session posts
+  its claim before anything else it writes, and edits it to `released` when
+  it hands the ticket back to wait for Jaipal (`work-ticket.md`, "Claiming
+  the ticket"). A claim that is not released holds whatever Jaipal rules in
+  the meantime: his ruling reaches Linear when the Slack sync posts it, which
+  can be long after a local session heard the answer another way.
+- **A `[POLLING-STATE]`** edited in the last 3 hours.
 - **A commit on the ticket's branch on GitHub** in the last 3 hours, by
-  anyone but the build session itself.
+  anyone but the build session itself. Only a branch named
+  `jaipal/tac-xxx-...` counts.
 - **An open PR from the ticket's branch.** For a start only: the build is
-  finished and waiting for Jaipal to merge it.
+  finished and waiting for Jaipal to merge it. A ticket reopened while its
+  old PR is still open is not started until that PR is merged or closed.
 
-When resuming on a ruling, only a claim or commit newer than the ruling
-counts. A session that claimed the ticket and then stopped to wait for
-Jaipal has not seen his answer, so the answer is the next session's to act
-on. The one exception is a `[POLLING-STATE]` edited in the last 10
-minutes: that session polls at least every 5 minutes and will read the
-ruling itself.
+When resuming on a ruling, a `[POLLING-STATE]` or a commit counts only if it
+is no older than the ruling. A polling chain that stopped, or a branch last
+pushed before he answered, has not acted on the answer, so it is the next
+session's to act on. The one exception is a `[POLLING-STATE]` edited in the
+last 10 minutes: that session polls at least every 5 minutes and will read
+the ruling itself.
 
 A skipped ticket is named in the run log with the reason. The check is
 `scripts/claims.mjs`; if it cannot read the branches it takes nothing and
-fails the run rather than choose blind.
+fails the run rather than choose blind. A skip can be harmless: a commit
+made in GitHub's web editor ("Update branch") counts as a session's, and
+holds the ticket for 3 hours like any other.
 
-The other direction: the build workflow posts `[CLAIM]` (on a start) or
-`[RESUME-CLAIM]` (on a resume) naming its run before its session starts,
-and a local session leaves the ticket alone while that run is still going.
-Two build runs never overlap: the workflow's concurrency group runs one at
-a time.
+The other direction: the build workflow posts `[CLAIM]` (on a start, and
+for a ticket named in a dispatch) or `[RESUME-CLAIM]` (on a resume) naming
+its run, before its session starts, and a local session leaves the ticket
+alone while that run is still going. Two build runs never overlap: the
+workflow's concurrency group runs one at a time.
 
-**What nothing protects.** A session that has neither posted to the
-ticket nor pushed to its branch is invisible, so a local session is
-unprotected until its `[CLAIM]` lands, and an ad hoc session that never
-posts one is unprotected until it first pushes. A build run dispatched with
-a named ticket skips the selection and with it this check. Two local
-sessions are kept apart only by each reading the other's claim before it
-starts.
+**What nothing protects.** A session that has neither posted to the ticket
+nor pushed to its branch is invisible, so a local session is unprotected
+until its `[CLAIM]` lands, and one that never posts a claim is unprotected
+until it first pushes to a `jaipal/tac-xxx-...` branch. A session whose
+claim is released or more than 3 hours old is unprotected on a resume unless
+it has pushed since the ruling. A build dispatched with a named ticket skips
+the selection, and with it this check. A local session and a build run that
+read the thread in the same few seconds can both proceed; the local session
+reads again after posting its claim, which narrows that window without
+closing it. Two local sessions are kept apart only by each reading the
+other's claim before it starts.
 
 ## Asking Jaipal a question
 

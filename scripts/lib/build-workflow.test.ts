@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { claimRun } from './claims.mjs'
+import { commentMarker } from './comment-provenance.mjs'
+import { checkCommentBody } from './linear-cli.mjs'
 import { ENDING } from './run-report.mjs'
 
 // Nothing runs a workflow under test, so these read the files as text, like
@@ -86,9 +89,10 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
     expect(QUEUE).toContain('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)')
     // Cutting the list in jq would take a claimed ticket and then skip it,
     // leaving the run with nothing while the next ticket waits. Any
-    // spelling of the cut: a slice, limit() or first.
+    // spelling of the cut: a slice, limit(), [first] or [.[0]]. A first()
+    // used inside an expression is not a cut and is not refused.
     const program = between(QUEUE, 'CANDIDATES=$(', 'SELECTED=$(echo')
-    expect(program).not.toMatch(/\.\[\s*-?\d*\s*:|\blimit\s*\(|\bfirst\b|\$limit/)
+    expect(program).not.toMatch(/\.\[\s*-?\d*\s*:|\blimit\s*\(|\[\s*first\s*\]|\[\s*\.\[\s*0\s*\]\s*\]|\$limit/)
     expect(QUEUE.indexOf('node scripts/claims.mjs')).toBeLessThan(QUEUE.indexOf('TICKETS=$('))
   })
 
@@ -121,12 +125,42 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
     expect(PROMPT).toContain('you post no [CLAIM] of your own')
   })
 
+  it('checks out every branch, which is where the commit signal comes from', () => {
+    // A shallow checkout lists no branches from GitHub; claims.mjs then
+    // fails the step rather than check blind.
+    expect(between(WORKFLOW, '      - uses: actions/checkout@v6', '      - uses: actions/setup-node')).toContain('fetch-depth: 0')
+  })
+
+  it('claims a ticket named in a dispatch, which skips the selection, but not on a dry run', () => {
+    const named = between(QUEUE, 'if [ -n "${ONE_TICKET:-}" ]; then', '  exit 0\nfi')
+    const dry = between(named, 'if [ "${DRY_RUN:-false}" = "true" ]; then', 'else')
+    expect(dry).not.toContain('linear.mjs')
+    expect(named).toContain('node scripts/linear.mjs comment "$NAMED" "$RUNNER_TEMP/claim-$NAMED.md"')
+    expect(named.indexOf('linear.mjs comment')).toBeLessThan(named.indexOf('echo "tickets=$ONE_TICKET"'))
+    // The body printf writes is one the helper accepts, and reads back as
+    // the build workflow's own claim.
+    const format = named.match(/printf '([^']+)' "\$NAMED" "\$GITHUB_RUN_ID"/)?.[1]
+    if (!format) throw new Error('the claim printf moved')
+    const body = format.replace('%s', 'TAC-403').replace('%s', '35299836324').replaceAll('\\n', '\n')
+    expect(checkCommentBody(body)).toEqual({ ok: true })
+    expect(commentMarker(body)).toBe('CLAIM')
+    expect(claimRun(body)).toBe('35299836324')
+  })
+
   describe("the selection's jq, run on a fixture", () => {
     // TAC-396 on 2026-09-18: Needs Action, Jaipal's 01:33 ruling, then a
     // local session's [CLAIM]. The claim must not bury the ruling, or the
     // ticket stops being a candidate and the log never says why.
-    const program = QUEUE.slice(QUEUE.indexOf("RULES='") + "RULES='".length, QUEUE.indexOf("'\n\n", QUEUE.indexOf("RULES='")))
-      + between(QUEUE, `--argjson maxAttempts "$MAX_ATTEMPTS" "$RULES"'`, "\n')").slice(`--argjson maxAttempts "$MAX_ATTEMPTS" "$RULES"'`.length)
+    // The program is RULES followed by the text between the "$RULES"' that
+    // opens the CANDIDATES jq and the ') that closes it, so a new --arg on
+    // that jq does not move the anchor.
+    const rules = QUEUE.slice(QUEUE.indexOf("RULES='") + "RULES='".length, QUEUE.indexOf("'\n\n", QUEUE.indexOf("RULES='")))
+    const open = QUEUE.indexOf(`"$RULES"'`, QUEUE.indexOf('CANDIDATES=$(')) + `"$RULES"'`.length
+    const program = rules + QUEUE.slice(open, QUEUE.indexOf("\n')", open))
+    // Times relative to now: the claim check reads the real clock, and a
+    // fixture pinned to a date stops being live three hours after it.
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+    const RULING_AT = ago(60)
     const comment = (id: string, body: string, createdAt: string) => ({ id, body, createdAt, updatedAt: createdAt })
     const issue = (identifier: string, state: string, labels: string[], comments: object[], priority = 2) => ({
       id: `uuid-${identifier}`,
@@ -142,10 +176,10 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
         issues: {
           nodes: [
             issue('TAC-396', 'In Progress', ['Needs Action'], [
-              comment('55ebb992', '**[FROM CLAUDE CODE]**\n\n[NEEDS-ACTION] TAC-396', '2026-09-18T00:13:09.365Z'),
+              comment('55ebb992', '**[FROM CLAUDE CODE]**\n\n[NEEDS-ACTION] TAC-396', ago(120)),
               // Edited after the claim: the ruling's time is when it landed.
-              { ...comment('55bea2c5', '**[FROM CLAUDE CHAT — RULING]**\n\n**Reopening.**', '2026-09-18T01:33:27.001Z'), updatedAt: '2026-09-18T02:45:00.000Z' },
-              comment('c1', '**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-396 session=local', '2026-09-18T02:31:00.000Z'),
+              { ...comment('55bea2c5', '**[FROM CLAUDE CHAT — RULING]**\n\n**Reopening.**', RULING_AT), updatedAt: ago(10) },
+              comment('c1', '**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-396 session=local', ago(30)),
             ]),
             issue('TAC-448', 'Ready', [], [], 1),
           ],
@@ -175,7 +209,7 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
       expect(c.map((x: { identifier: string; mode: string }) => `${x.identifier}:${x.mode}`)).toEqual(['TAC-448:start', 'TAC-396:resume'])
       const resume = c[1]
       expect(resume.newestId).toBe('55bea2c5')
-      expect(resume.newestAt).toBe('2026-09-18T01:33:27.001Z')
+      expect(resume.newestAt).toBe(RULING_AT)
       // The claim check reads the claims from here.
       expect(resume.comments).toHaveLength(3)
     })
@@ -183,8 +217,6 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
     it('hands the claim check what it needs, and the claim check skips TAC-396', () => {
       const dir = mkdtempSync(join(tmpdir(), 'queue-claims-'))
       try {
-        // An empty repository: no branches on GitHub, so only the comment
-        // can claim anything.
         // Inside the pre-commit hook git exports GIT_DIR and GIT_INDEX_FILE,
         // which would point both git and the check at this repository, so
         // every GIT_ variable goes. gh gets an empty config and no token, so
@@ -194,7 +226,11 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
           if (key.startsWith('GIT_') && !key.startsWith('GIT_CONFIG_')) delete env[key]
         }
         for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_REPOSITORY']) delete env[key]
-        execFileSync('git', ['init', '-q'], { cwd: dir, env })
+        // Only main on GitHub, so only the comment can claim anything.
+        const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' })
+        git('init', '-q')
+        git('-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x')
+        git('update-ref', 'refs/remotes/origin/main', 'HEAD')
         const onlyResume = candidates().filter((x: { mode: string }) => x.mode === 'resume')
         const r = spawnSync('node', [resolve(ROOT, 'scripts/claims.mjs')], {
           cwd: dir,

@@ -70,11 +70,11 @@ Leave the status alone throughout. `Needs Decision` comes off in Phase 0 when no
 
 # Claiming the ticket (local sessions only)
 
-The build workflow skips a ticket another session has (TAC-448, `scripts/claims.mjs`). It sees a local session only through what that session writes to Linear or pushes to GitHub, so a local session claims the ticket before it writes anything else. **In CI, skip this section**: the workflow claimed the ticket before your session started, and you post no `[CLAIM]`.
+The build workflow skips a ticket another session has (TAC-448, `scripts/claims.mjs`). It sees a local session only through what that session writes to Linear or pushes to GitHub, so a local session claims the ticket as soon as Phase 0's gate 2a has passed, before anything else it writes. **In CI, skip this section**: the workflow claimed the ticket before your session started, and you post no `[CLAIM]`.
 
 1. **Look for a live build run.** A `[CLAIM]` or `[RESUME-CLAIM]` that names `run=<id>` is the build workflow's. If the newest one's run is still going (`gh run view <id> --json status --jq .status` prints `queued` or `in_progress`), that run has the ticket: tell the operator which run, and exit without writing anything. If `gh` cannot answer, say so and ask the operator before going on.
-2. **Look for another local session.** On your first invocation, a `[CLAIM]` naming no run, or a `[POLLING-STATE]`, edited in the last 3 hours is another session's. Ask the operator before going on.
-3. **Post your claim**, flat, before anything else you write to the ticket:
+2. **Look for another local session.** On your first invocation, a `[CLAIM]` naming no run and not `released`, or a `[POLLING-STATE]`, edited in the last 3 hours, is another session's. Ask the operator before going on.
+3. **Post your claim**, flat:
 
    ```
    **[FROM CLAUDE CODE]**
@@ -82,13 +82,16 @@ The build workflow skips a ticket another session has (TAC-448, `scripts/claims.
    [CLAIM] TAC-XXX session=local
    ```
 
-   It names no run; that is what marks it as a local session's. Capture its id. On a later invocation of the same session, edit it rather than posting another.
-4. **Keep it live.** The workflow honours a local claim for 3 hours from its last edit, and when resuming on a ruling, only a claim edited after that ruling. So edit it each time you act on a new reply from Jaipal, and at least every 3 hours while you work. A commit pushed to the ticket's branch also holds the ticket for 3 hours from when it was made.
+   It names no run; that is what marks it as a local session's. Capture its id. On a later invocation of the same session, edit it rather than posting another. Then read the thread once more: a build run's claim can land in the seconds between your read and your post. If one did and its run is going, edit yours to `released` (step 4) and exit.
+4. **Keep it true.** The workflow honours a local claim for 3 hours from its last edit, whatever Jaipal rules in the meantime: his ruling reaches Linear when the Slack sync posts it, which can be long after you heard the answer another way.
+   - Edit it at least every 3 hours while you work. A commit pushed to the ticket's branch also holds the ticket for 3 hours from when it was made, but only on a branch named `jaipal/tac-xxx-...`: the workflow reads no other.
+   - **When you hand the ticket back**, edit it to `[CLAIM] TAC-XXX session=local released`: when you post `[PLAN]`, `[NEEDS-INPUT]` or `[NEEDS-ACTION]` and exit, or start polling for the reply. A released claim holds nothing, so the next session can act on his answer. A polling chain stays protected by its `[POLLING-STATE]`, which the workflow reads as live for 10 minutes after each wakeup.
+   - **When you carry on** after his answer, edit `released` off before anything else.
 
 Nothing protects a session before its claim lands or its first push: until then the workflow cannot see it.
 
 # Phase 0 — Verify scope (runs every invocation)
-1. Re-read the ticket body and status — surfaces mid-flow edits. A local session then claims the ticket ("Claiming the ticket") before the gate below writes anything.
+1. Re-read the ticket body and status — surfaces mid-flow edits. A local session claims the ticket ("Claiming the ticket") once gate 2a below has passed, before 2b writes anything.
 2. **Gate, with Jaipal's answers applied before the open-questions check.** The order in (b) and (c) matters: checking `## Open questions` before applying his answer finds his own question still there, exits, and ignores the answer until he edits the ticket by hand.
 
    **a. Status and repo.**

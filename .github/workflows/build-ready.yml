@@ -12,13 +12,14 @@ name: Build ready tickets
 #             landed, so /work-ticket picks up where it stopped.
 #
 # Either way, a ticket another session has is skipped, and the log says why
-# (TAC-448). scripts/claims.mjs decides: a local session's [CLAIM] or a
-# [POLLING-STATE] edited in the last LIVE_SESSION_HOURS, a commit on the
-# ticket's branch by anyone but the build session, and for a start an open
-# PR. For a resume, only a trace newer than the ruling counts. The status is
-# not read as a claim. A local session that has posted nothing and pushed
-# nothing is invisible here, and nothing protects it. A dispatch that names
-# a ticket skips the selection, and with it this check.
+# (TAC-448). scripts/claims.mjs decides: a local session's [CLAIM] that is
+# not released, a [POLLING-STATE], or a commit on the ticket's branch by
+# anyone but the build session, each within LIVE_SESSION_HOURS, and for a
+# start an open PR. For a resume, a [POLLING-STATE] or a commit counts only
+# if it is no older than the ruling. The status is not read as a claim. A
+# local session that has posted nothing and pushed nothing is invisible
+# here, and nothing protects it. A dispatch that names a ticket skips the
+# selection, and with it this check, but still posts its [CLAIM].
 #
 # One ticket per run (TAC-447). Each session gets its own turn limit, so an
 # expensive ticket never uses up another ticket's turns. The cost is
@@ -183,7 +184,13 @@ jobs:
               echo "Dry run: would work $ONE_TICKET. Nothing worked."
               echo "tickets=" >> "$GITHUB_OUTPUT"
             else
-              # work-ticket.md's own gate refuses a ticket this repo can't build.
+              # work-ticket.md's own gate refuses a ticket this repo can't
+              # build. A named ticket skips the selection and the claim
+              # check, but is still claimed, so a local session can see the
+              # run has it. The helper takes the id in uppercase.
+              NAMED=$(echo "$ONE_TICKET" | tr '[:lower:]' '[:upper:]')
+              printf '**[FROM CLAUDE CODE]**\n\n[CLAIM] %s run=%s\n' "$NAMED" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/claim-$NAMED.md"
+              node scripts/linear.mjs comment "$NAMED" "$RUNNER_TEMP/claim-$NAMED.md"
               echo "tickets=$ONE_TICKET" >> "$GITHUB_OUTPUT"
             fi
             exit 0

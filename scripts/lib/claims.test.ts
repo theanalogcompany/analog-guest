@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   BUILD_SESSION_COMMITTER,
@@ -10,6 +10,7 @@ import {
   POLL_HEARTBEAT_MINUTES,
   REF_FORMAT,
   claimOf,
+  claimReleased,
   claimRun,
   isTicketBranch,
   parseRefs,
@@ -32,7 +33,12 @@ const cc = (markerLine: string, at: string, updatedAt = at): Comment => ({
   updatedAt,
 })
 const LOCAL_CLAIM = (at: string, updatedAt = at) => cc('[CLAIM] TAC-396 session=local', at, updatedAt)
+const RELEASED_CLAIM = (at: string, updatedAt = at) => cc('[CLAIM] TAC-396 session=local released', at, updatedAt)
 const JAIPAL = 'jaipal@foncii.com'
+// The committer on jaipal/tac-396-comment-provenance-module, pushed by the
+// build session in run 35288433905. Written out rather than imported, so
+// the fixtures check the constant against what was seen.
+const CLAUDE_BOT = '41898282+claude[bot]@users.noreply.github.com'
 
 // TAC-396's thread on 2026-09-18, from Linear, bodies cut to the prefix and
 // the marker line. At 02:34:18 run 35299836324 (attempt 1) resumed it on the
@@ -48,7 +54,7 @@ const INCIDENT_NOW = t('2026-09-18T02:34:18Z')
 // was pushed by the build session that ran at 23:48; the local session's
 // branch had no commit until 02:35:19.
 const TAC_396_REFS: Ref[] = [
-  { name: 'jaipal/tac-396-comment-provenance-module', at: t('2026-09-18T00:11:38Z'), email: BUILD_SESSION_COMMITTER },
+  { name: 'jaipal/tac-396-comment-provenance-module', at: t('2026-09-18T00:11:38Z'), email: CLAUDE_BOT },
   { name: 'main', at: t('2026-09-18T02:32:23Z'), email: 'noreply@github.com' },
 ]
 
@@ -90,7 +96,7 @@ describe('the 2026-09-17 incident: TAC-396 resumed under a local session', () =>
   it('is caught once the local session has posted its [CLAIM]', () => {
     const thread = [...TAC_396_THREAD, LOCAL_CLAIM('2026-09-18T02:31:00Z')]
     expect(claimOf(resume396(thread), ctx(INCIDENT_NOW, TAC_396_REFS))).toBe(
-      "a local session's [CLAIM], last edited 2026-09-18T02:31:00Z, after the ruling it would resume on",
+      "a local session's [CLAIM], last edited 2026-09-18T02:31:00Z",
     )
   })
 
@@ -106,6 +112,10 @@ describe('the 2026-09-17 incident: TAC-396 resumed under a local session', () =>
     expect(claimOf(resume396(), ctx(INCIDENT_NOW, refs))).toBeNull()
   })
 
+  it('names the build session by the identity it was seen committing as', () => {
+    expect(BUILD_SESSION_COMMITTER).toBe(CLAUDE_BOT)
+  })
+
   it("ignores the build workflow's own [RESUME-CLAIM]", () => {
     const thread = [...TAC_396_THREAD, cc('[RESUME-CLAIM] ruling=55bea2c5 run=35299836324', '2026-09-18T02:34:19.032Z')]
     expect(claimOf(resume396(thread), ctx(t('2026-09-18T02:38:00Z'), TAC_396_REFS))).toBeNull()
@@ -113,13 +123,23 @@ describe('the 2026-09-17 incident: TAC-396 resumed under a local session', () =>
 })
 
 describe('a local claim on a resume', () => {
-  it('counts only when it is newer than the ruling', () => {
-    // A session that claimed, asked, and stopped has not seen the answer.
+  it('holds even when the ruling reached Linear after it', () => {
+    // Jaipal answers in Slack, a local session claims and starts building,
+    // and the Slack sync posts his answer to Linear later. The ruling's time
+    // is the sync's, not his, so it must not release a working session.
     const before = [LOCAL_CLAIM('2026-09-18T01:00:00Z'), ...TAC_396_THREAD]
-    expect(claimOf(resume396(before), ctx(INCIDENT_NOW))).toBeNull()
+    expect(claimOf(resume396(before), ctx(INCIDENT_NOW))).toBe("a local session's [CLAIM], last edited 2026-09-18T01:00:00Z")
   })
 
-  it('counts when an edit made it newer than the ruling', () => {
+  it('holds nothing once released, before or after the ruling', () => {
+    // The session stopped to wait for Jaipal and handed the ticket back, so
+    // the next session acts on his answer.
+    for (const at of ['2026-09-18T01:00:00Z', '2026-09-18T02:00:00Z']) {
+      expect(claimOf(resume396([...TAC_396_THREAD, RELEASED_CLAIM(at)]), ctx(INCIDENT_NOW))).toBeNull()
+    }
+  })
+
+  it('holds again once edited back from released', () => {
     const edited = [LOCAL_CLAIM('2026-09-18T01:00:00Z', '2026-09-18T02:00:00Z'), ...TAC_396_THREAD]
     expect(claimOf(resume396(edited), ctx(INCIDENT_NOW))).toMatch(/last edited 2026-09-18T02:00:00Z/)
   })
@@ -130,9 +150,10 @@ describe('a local claim on a resume', () => {
     expect(claimOf(resume396(thread), ctx(later))).toBeNull()
   })
 
-  it('counts when the ruling time cannot be read, rather than resuming blind', () => {
-    const thread = [LOCAL_CLAIM('2026-09-18T01:00:00Z')]
-    expect(claimOf({ ...resume396(thread), newestAt: '' }, ctx(INCIDENT_NOW))).toMatch(/\[CLAIM\]/)
+  it('counts a commit when the ruling time cannot be read, rather than resuming blind', () => {
+    const refs = [{ name: 'jaipal/tac-396-x', at: t('2026-09-18T01:00:00Z'), email: JAIPAL }]
+    expect(claimOf({ ...resume396(), newestAt: '' }, ctx(INCIDENT_NOW, refs))).toMatch(/a commit on jaipal\/tac-396-x/)
+    expect(claimOf(resume396(), ctx(INCIDENT_NOW, refs))).toBeNull()
   })
 })
 
@@ -160,6 +181,21 @@ describe('a [POLLING-STATE] on a resume', () => {
   it('counts when it was edited after the ruling', () => {
     expect(claimOf(withPoll('2026-09-18T02:31:00Z'), ctx(t('2026-09-18T03:30:00Z')))).toMatch(/after the ruling/)
   })
+
+  it('counts when it was touched at the ruling time itself', () => {
+    // Linear returned TAC-396's ruling with updatedAt 31 ms before
+    // createdAt: a trace posted with the ruling must not fall behind it.
+    expect(claimOf(withPoll(ruling), ctx(t('2026-09-18T03:30:00Z')))).toMatch(/after the ruling/)
+  })
+
+  it('outlasts the longest gap between two polls', () => {
+    // work-ticket.md polls at most every 300s. A heartbeat shorter than
+    // twice that would read a live chain as dead between two wakeups.
+    const doc = readFileSync(resolve(__dirname, '..', '..', '.claude/commands/work-ticket.md'), 'utf8')
+    const cap = Number(doc.match(/cap at (\d+)\./)?.[1])
+    expect(cap).toBeGreaterThan(0)
+    expect(POLL_HEARTBEAT_MINUTES * 60).toBeGreaterThanOrEqual(2 * cap)
+  })
 })
 
 describe('a start', () => {
@@ -181,6 +217,10 @@ describe('a start', () => {
 
   it('is not claimed by a dead one', () => {
     expect(claimOf(start('TAC-448', [LOCAL_CLAIM('2026-09-17T23:00:00Z')]), ctx(NOW))).toBeNull()
+  })
+
+  it('is not claimed by a released local claim', () => {
+    expect(claimOf(start('TAC-448', [RELEASED_CLAIM('2026-09-18T03:20:00Z')]), ctx(NOW))).toBeNull()
   })
 
   it("ignores the build workflow's own [CLAIM], which names its run", () => {
@@ -237,6 +277,12 @@ describe('which comments are claims', () => {
   it('never reads a claim quoted inside another marker as a claim', () => {
     const plan = { body: '**[FROM CLAUDE CODE]**\n\n[PLAN] TAC-1\n\nThe session posts [CLAIM] first.', createdAt: '2026-09-18T03:00:00Z' }
     expect(sessionComments([plan])).toEqual([])
+  })
+
+  it('reads released only on the marker line', () => {
+    expect(claimReleased('**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-1 session=local released')).toBe(true)
+    expect(claimReleased('**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-1 session=local\n\nNot released yet.')).toBe(false)
+    expect(sessionComments([RELEASED_CLAIM('2026-09-18T03:00:00Z')])).toEqual([])
   })
 
   it('tells the build workflow\'s claims from a local session\'s by the run they name', () => {
@@ -324,7 +370,8 @@ describe('pickUnclaimed', () => {
 
 describe('run', () => {
   const NOW = t('2026-09-18T03:30:00Z')
-  const REFS_OUT = `jaipal/tac-448-claim-check\t${t('2026-09-18T03:10:00Z') / 1000}\t<${JAIPAL}>\n`
+  const MAIN = `main\t${t('2026-09-18T02:53:02Z') / 1000}\t<noreply@github.com>\n`
+  const REFS_OUT = `${MAIN}jaipal/tac-448-claim-check\t${t('2026-09-18T03:10:00Z') / 1000}\t<${JAIPAL}>\n`
   const REFS_ARGS = ['for-each-ref', `--format=${REF_FORMAT}`, 'refs/remotes/origin/']
 
   function invoke({
@@ -372,6 +419,15 @@ describe('run', () => {
     expect(r.err).toContain('::error title=Claim check::')
   })
 
+  it('takes nothing and fails when the branches come back without main', () => {
+    // A shallow checkout lists no branches from GitHub, and every commit
+    // signal would be missing without a word.
+    const r = invoke({ git: () => '' })
+    expect(r.code).toBe(EXIT.FAILED)
+    expect(r.out).toBe('')
+    expect(r.err).toContain('::error title=Claim check::')
+  })
+
   it('warns and carries on when the open PRs cannot be read', () => {
     const r = invoke({ gh: () => null, candidates: [start('TAC-438')] })
     expect(r.code).toBe(EXIT.OK)
@@ -387,7 +443,7 @@ describe('run', () => {
   })
 
   it('skips a start with an open PR from the list gh returns', () => {
-    const r = invoke({ git: () => '', gh: () => JSON.stringify([{ headRefName: 'jaipal/tac-448-claim-check' }]) })
+    const r = invoke({ git: () => MAIN, gh: () => JSON.stringify([{ headRefName: 'jaipal/tac-448-claim-check' }]) })
     expect(JSON.parse(r.out).map((c: { identifier: string }) => c.identifier)).toEqual(['TAC-438'])
     expect(r.err).toContain('an open PR from jaipal/tac-448-claim-check')
   })
