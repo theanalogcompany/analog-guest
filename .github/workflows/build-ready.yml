@@ -230,7 +230,15 @@ jobs:
             def repo_line_names:
               [(.description // "") | capture("(?:^|\\n)[ \\t>*_]*Repos?[*_]*[ \\t]*:(?<line>[^\\n]*)"; "i") | .line]
               | if length == 0 then []
-                else [.[0] | gsub("<[^>]*>"; "") | gsub("https?://[^\\s)>]*"; "") | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
+                else [.[0]
+                      | gsub("<[^>]*>"; "")
+                      | gsub("https?://[^\\s)>]*"; "")
+                      # The assignment is the head of the line, up to the first
+                      # sentence-ending period. Prose after that point — naming
+                      # a second repo only to explain why it is not the owner
+                      # (TAC-443) — must not count.
+                      | capture("^(?<head>[^.]*)").head
+                      | scan("analog-[a-z]+(?:-[a-z]+)*"; "i") | ascii_downcase]
                 end;
             def owner:
               repo_labels as $labels
