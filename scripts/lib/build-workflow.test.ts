@@ -9,7 +9,9 @@ import { ENDING } from './run-report.mjs'
 // linear-prompts.test.ts does. What they guard (TAC-447): one ticket per
 // run, one turn limit read in one place, the turn-limit notices wired to
 // the script that writes them, and the new markers agreeing with every list
-// that routes on markers.
+// that routes on markers. TAC-448 adds the claim check, and runs the
+// selection's own jq against a fixture: a jq program nobody runs is not
+// tested by reading it.
 
 const ROOT = resolve(__dirname, '..', '..')
 const read = (path: string) => readFileSync(resolve(ROOT, path), 'utf8')
@@ -46,7 +48,7 @@ const SNAPSHOT = runBlock('Keep a copy of the turn-limit reporter')
 const CHECK = runBlock('Check the session posted on every ticket it worked')
 
 // Bookkeeping: posted by a workflow, never the newest comment on a ticket.
-const BOOKKEEPING = ['DENIALS', 'OVER-LIMIT', 'RESUME-CLAIM', 'SLACK']
+const BOOKKEEPING = ['CLAIM', 'DENIALS', 'OVER-LIMIT', 'RESUME-CLAIM', 'SLACK']
 // Posted by the workflow after a session, so never the session's own comment.
 const WORKFLOW_NOTICES = [...BOOKKEEPING, 'SILENT-RUN', 'TURN-LIMIT'].sort()
 
@@ -70,6 +72,142 @@ describe('build-ready.yml selects one ticket per run', () => {
     expect(PROMPT).toContain('Ticket: ${{ steps.queue.outputs.tickets }}')
     expect(PROMPT).not.toMatch(/Tickets, in order/)
     expect(PROMPT).not.toMatch(/next ticket/)
+  })
+})
+
+describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
+  it('is valid bash', () => {
+    const r = spawnSync('bash', ['-n'], { input: QUEUE, encoding: 'utf8' })
+    expect(r.stderr).toBe('')
+    expect(r.status).toBe(0)
+  })
+
+  it('runs the claim check on every candidate before taking LIMIT', () => {
+    expect(QUEUE).toContain('SELECTED=$(echo "$CANDIDATES" | node scripts/claims.mjs)')
+    // Slicing in jq would take a claimed ticket and then skip it, leaving
+    // the run with nothing while the next ticket waits.
+    expect(QUEUE).not.toContain('.[:$limit]')
+    expect(QUEUE.indexOf('node scripts/claims.mjs')).toBeLessThan(QUEUE.indexOf('TICKETS=$('))
+  })
+
+  it('leaves liveness to the claim check alone', () => {
+    // A second liveness rule in jq (createdAt, start only) is how the resume
+    // path went unchecked: two rules, and only one of them was ever read.
+    expect(between(QUEUE, 'CANDIDATES=$(', "SELECTED=$(echo")).not.toContain('POLLING-STATE')
+    expect(QUEUE).not.toMatch(/\.live\b/)
+  })
+
+  it('reads when each comment was last edited, which is how a claim stays live', () => {
+    expect(QUEUE).toContain('comments(first: 250) { nodes { id body createdAt updatedAt } }')
+  })
+
+  it('gives the check a token to list open PRs, and the live window', () => {
+    const env = between(WORKFLOW, '      - name: Find tickets to work', '        run: |')
+    expect(env).toContain('GH_TOKEN: ${{ github.token }}')
+    expect(env).toContain('LIVE_SESSION_HOURS: "3"')
+  })
+
+  it('claims every ticket it takes, naming its run, before the session starts', () => {
+    const loop = between(QUEUE, '# Claim every ticket before Claude runs.', 'echo "claimed $NAME"')
+    expect(loop).toContain(`echo "$SELECTED" | jq -c '.[]' | while read -r row; do`)
+    expect(loop).toContain('MARK="[RESUME-CLAIM] ruling=$(echo "$row" | jq -r .newestId) run=${GITHUB_RUN_ID}"')
+    expect(loop).toContain('MARK="[CLAIM] ${NAME} run=${GITHUB_RUN_ID}"')
+    expect(QUEUE.indexOf('# Claim every ticket')).toBeGreaterThan(QUEUE.indexOf('if [ "${DRY_RUN:-false}" = "true" ]; then\n  echo "Dry run: no claims'))
+  })
+
+  it('tells the session not to post a claim of its own', () => {
+    expect(PROMPT).toContain('you post no [CLAIM] of your own')
+  })
+
+  describe("the selection's jq, run on a fixture", () => {
+    // TAC-396 on 2026-09-18: Needs Action, Jaipal's 01:33 ruling, then a
+    // local session's [CLAIM]. The claim must not bury the ruling, or the
+    // ticket stops being a candidate and the log never says why.
+    const program = QUEUE.slice(QUEUE.indexOf("RULES='") + "RULES='".length, QUEUE.indexOf("'\n\n", QUEUE.indexOf("RULES='")))
+      + between(QUEUE, `--argjson maxAttempts "$MAX_ATTEMPTS" "$RULES"'`, "\n')").slice(`--argjson maxAttempts "$MAX_ATTEMPTS" "$RULES"'`.length)
+    const comment = (id: string, body: string, createdAt: string) => ({ id, body, createdAt, updatedAt: createdAt })
+    const issue = (identifier: string, state: string, labels: string[], comments: object[], priority = 2) => ({
+      id: `uuid-${identifier}`,
+      identifier,
+      description: '**Repo:** `analog-guest`.',
+      priority,
+      state: { name: state },
+      labels: { nodes: [{ name: 'analog-guest' }, ...labels.map((name) => ({ name }))] },
+      comments: { nodes: comments },
+    })
+    const response = {
+      data: {
+        issues: {
+          nodes: [
+            issue('TAC-396', 'In Progress', ['Needs Action'], [
+              comment('55ebb992', '**[FROM CLAUDE CODE]**\n\n[NEEDS-ACTION] TAC-396', '2026-09-18T00:13:09.365Z'),
+              comment('55bea2c5', '**[FROM CLAUDE CHAT — RULING]**\n\n**Reopening.**', '2026-09-18T01:33:27.001Z'),
+              comment('c1', '**[FROM CLAUDE CODE]**\n\n[CLAIM] TAC-396 session=local', '2026-09-18T02:31:00.000Z'),
+            ]),
+            issue('TAC-448', 'Ready', [], [], 1),
+          ],
+        },
+      },
+    }
+
+    function candidates() {
+      const r = spawnSync('jq', ['-c', '--arg', 'repo', 'analog-guest', '--argjson', 'maxAttempts', '2', program], {
+        input: JSON.stringify(response),
+        encoding: 'utf8',
+      })
+      expect(r.stderr).toBe('')
+      return JSON.parse(r.stdout)
+    }
+
+    it('carries no apostrophe, which would close the shell quote around it', () => {
+      // bash -n catches one stray apostrophe but not two: a pair reopens the
+      // quote and the step runs a different program than the one written.
+      expect(program).not.toContain("'")
+      expect(program).toContain('def owner:')
+      expect(program).toContain('sort_by(if .priority == 0 then 99 else .priority end)')
+    })
+
+    it('keeps a claimed resume as a candidate, with the ruling it would act on', () => {
+      const c = candidates()
+      expect(c.map((x: { identifier: string; mode: string }) => `${x.identifier}:${x.mode}`)).toEqual(['TAC-448:start', 'TAC-396:resume'])
+      const resume = c[1]
+      expect(resume.newestId).toBe('55bea2c5')
+      expect(resume.newestAt).toBe('2026-09-18T01:33:27.001Z')
+      // The claim check reads the claims from here.
+      expect(resume.comments).toHaveLength(3)
+    })
+
+    it('hands the claim check what it needs, and the claim check skips TAC-396', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'queue-claims-'))
+      try {
+        // An empty repository: no branches on GitHub, so only the comment
+        // can claim anything.
+        // Inside the pre-commit hook git exports GIT_DIR and GIT_INDEX_FILE,
+        // which would point both git and the check at this repository, so
+        // every GIT_ variable goes. gh gets an empty config and no token, so
+        // it fails at once instead of calling GitHub from a unit test.
+        const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir, GH_CONFIG_DIR: dir, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
+        for (const key of Object.keys(env)) {
+          if (key.startsWith('GIT_') && !key.startsWith('GIT_CONFIG_')) delete env[key]
+        }
+        for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_REPOSITORY']) delete env[key]
+        execFileSync('git', ['init', '-q'], { cwd: dir, env })
+        const onlyResume = candidates().filter((x: { mode: string }) => x.mode === 'resume')
+        const r = spawnSync('node', [resolve(ROOT, 'scripts/claims.mjs')], {
+          cwd: dir,
+          input: JSON.stringify(onlyResume),
+          encoding: 'utf8',
+          env: { ...env, LIMIT: '1' },
+        })
+        expect(r.status, r.stderr).toBe(0)
+        expect(JSON.parse(r.stdout)).toEqual([])
+        expect(r.stderr).toContain("skipped TAC-396 (resume, In Progress): another session has it: a local session's [CLAIM]")
+        // gh could not list PRs, and the check carried on without them.
+        expect(r.stderr).toContain('::warning title=Claim check::Could not list open PRs.')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
   })
 })
 
