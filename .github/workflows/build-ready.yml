@@ -78,11 +78,19 @@ name: Build ready tickets
 # own: a PR opened with the job token triggers no other workflows, so build's
 # PRs would get no CI and no preview build.
 #
-# Known unknown: which permissions that token carries inside this repo. The
-# exchange sends no permissions request and its response states only the
-# expiry, so nothing here shows, for example, whether the session can push a
-# change to a file under .github/workflows, which needs the workflows
-# permission. Not chased further.
+# Until TAC-463 the session's git push did not use that token. checkout
+# writes the job's token into git config as an extra header, in a file the
+# repo's config includes with includeIf.gitdir. claude-code-action's scrub
+# looks only at the local config and include.path entries, so the header
+# survived. git sends it on every request, so the token in the remote URL was
+# never used. GitHub recorded every build push as github-actions[bot], while
+# the same sessions opened their PRs as app/claude. Run 35299836324 was
+# refused a push to .github/workflows/audit-new-todo.yml because the job's
+# token can never carry the workflows permission: GitHub offers no workflows
+# key for the permissions block below. So the checkout keeps no credential,
+# and the Work step asks the exchange for workflows: write, which the App
+# installation holds. Without that request the exchange asks for no
+# permissions, and its response doesn't say which ones the token got.
 #
 # The Claude step does not run from a branch whose copy of this file differs
 # from main's: claude-code-action skips itself ("Workflow validation failed")
@@ -142,9 +150,15 @@ jobs:
       MAX_TURNS: ${{ inputs.max_turns || 120 }}
 
     steps:
+      # No persisted credential, so the session's git reaches GitHub only
+      # with the App token claude-code-action puts in the remote URL
+      # (TAC-463, above). No step needs the job's token in git config: the
+      # checkout fetches with it before removing it, the claim check and the
+      # reporter read local refs, and this repo is public.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -426,6 +440,13 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # So a session can push a change under .github/workflows (TAC-463).
+          # With this set, the action asks the exchange for contents,
+          # pull_requests and issues write plus what is listed here, instead
+          # of asking for nothing. GitHub documents the endpoints gh run reads
+          # as needing no permission on a public repo, so actions is not here.
+          additional_permissions: |
+            workflows: write
           show_full_output: ${{ inputs.full_output == true }}
           claude_args: |
             --max-turns ${{ env.MAX_TURNS }}
