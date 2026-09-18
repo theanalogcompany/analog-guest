@@ -22,6 +22,23 @@ vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient })
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
 vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
 
+// The real gate, except that a test can open it. That is the one thing
+// TAC-469 changes, so the route's own hand-off gets tested as it will run
+// then, while every other test runs with the gate as it ships. Two details
+// keep this mock from hiding a bypass: an `enabled` the ROUTE passes is
+// honoured, so a route that forced the gate open fails the shut-gate tests;
+// and with no test opening it, the real constant decides, so flipping that
+// constant fails them too.
+const gate = vi.hoisted(() => ({ open: false }))
+vi.mock('@/lib/messaging/instagram/agent-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/agent-gate')>()
+  return {
+    ...actual,
+    agentMessageIdFor: (outcome: Parameters<typeof actual.agentMessageIdFor>[0], enabled?: boolean) =>
+      actual.agentMessageIdFor(outcome, enabled ?? (gate.open || actual.INSTAGRAM_AGENT_REPLIES_ENABLED)),
+  }
+})
+
 let db = createInstagramDbFake()
 
 function useDb(seed: Parameters<typeof createInstagramDbFake>[0] = {}): void {
@@ -125,6 +142,7 @@ beforeEach(() => {
   mocks.createAdminClient.mockReset()
   mocks.handleInbound.mockReset()
   mocks.waitUntil.mockReset()
+  gate.open = false
   useDb()
 })
 
@@ -613,5 +631,61 @@ describe('POST /api/webhooks/instagram saving events', () => {
       reason: 'venue_not_found',
     })
     expect(db.inserts('messages')).toEqual([])
+  })
+})
+
+// With the gate open, as TAC-469 will run it. Without these, deleting the
+// route's hand-off line passes every other test in this file, since they can
+// only assert that the agent is NOT called.
+describe('POST /api/webhooks/instagram with the agent gate open', () => {
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function recorded(name: string): string {
+    return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  }
+
+  it.each(['message', 'postback-referral'])(
+    'hands the newly saved %s row to the agent in the background',
+    async (name) => {
+      gate.open = true
+      useDb({ venues: [FIXTURE_VENUE] })
+      const agentRun = Promise.resolve()
+      mocks.handleInbound.mockReturnValue(agentRun)
+
+      const res = await post(recorded(name))
+
+      expect(res.status).toBe(200)
+      const [saved] = db.tables.messages
+      expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+      expect(mocks.handleInbound).toHaveBeenCalledWith(saved?.id)
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+      expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
+    },
+  )
+
+  it.each(['echo', 'read'])('never hands the recorded %s to the agent', async (name) => {
+    gate.open = true
+    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: name === 'read' ? [echoRow] : [] })
+
+    await post(recorded(name))
+
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
+    expect(mocks.waitUntil).not.toHaveBeenCalled()
+  })
+
+  it('never hands a redelivered message to the agent a second time', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE] })
+    const body = recorded('message')
+
+    await post(body)
+    await post(body)
+
+    expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+    expect(findEntry('instagram_event_duplicate')).toBeDefined()
   })
 })

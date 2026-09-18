@@ -117,6 +117,44 @@ describe('a guest message', () => {
     expect(db.inserts('messages')[0]?.guest_id).not.toBe('guest-elsewhere')
   })
 
+  // A guest who follows an ig.me link and then types, rather than tapping an
+  // icebreaker, may bring the referral on the message instead (not captured
+  // yet, so synthetic). It arrives once and can't be fetched later, so a
+  // regression here would lose the attribution silently.
+  it.each<[string, Record<string, unknown>]>([
+    ['inside `message`', { message: { mid: 'm-ref', text: 'hi', referral: { ref: 'QR1', source: 'SHORTLINK' } } }],
+    ['beside `message`', { message: { mid: 'm-ref', text: 'hi' }, referral: { ref: 'QR1', source: 'SHORTLINK' } }],
+  ])('saves the referral on a guest message when it arrives %s', async (_where, parts) => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [{ sender: { id: GUEST_IGSID }, recipient: { id: ACCOUNT_ID }, timestamp: 1, ...parts }],
+        },
+      ],
+    }
+    const outcomes = await processInstagramDelivery(payload, db.client)
+
+    expect(db.inserts('messages')).toEqual([
+      {
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        channel: 'instagram',
+        direction: 'inbound',
+        status: 'received',
+        body: 'hi',
+        media_urls: [],
+        provider_message_id: 'm-ref',
+        referral_ref: 'QR1',
+        referral_source: 'SHORTLINK',
+      },
+    ])
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'message', hasReferral: true }])
+  })
+
   // Two first contacts from the same new guest in parallel deliveries. The
   // losing insert gets 23505 and must file its message under the winner's
   // guest. Sendblue's path loses the message here.

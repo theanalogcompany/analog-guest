@@ -13,6 +13,15 @@
 // needs wiring. agent-gate.test.ts pins the constant at false; that assertion
 // is expected to change with it.
 //
+// Before lifting it, TAC-469 has three things the shut gate is hiding:
+//   - a postback saved with no title has body '' and no media, a row the
+//     Sendblue path never produces (it refuses empty content before
+//     inserting), and it would reach the agent as an empty inbound;
+//   - a message the guest unsent is only logged (message_deleted), so it stays
+//     in the thread and in the agent's history;
+//   - a STOP received while the gate was shut was never classified, so for
+//     that guest nothing opt-out-shaped ever happened.
+//
 // The kind check below is NOT part of the gate and stays when it goes: an echo
 // is the venue's own message and a read receipt is not a message, so neither
 // is ever handed to the agent. Without it, the agent would answer its own

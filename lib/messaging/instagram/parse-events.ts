@@ -81,6 +81,8 @@ export type InstagramUnhandledReason =
   | 'changes_field'
   /** An `entry[].standby[]` item. */
   | 'standby'
+  /** An entry key other than id, time, messaging, changes and standby. */
+  | 'unrecognized_entry_field'
   /**
    * An item carrying only a `referral`: a guest following an ig.me link into a
    * thread that already has messages. There is no message to save it on, so its
@@ -106,6 +108,9 @@ export type InstagramUnhandledEvent = {
 }
 
 export type InstagramEvent = InstagramHandledEvent | InstagramUnhandledEvent
+
+/** Entry keys this parser reads. Any other key is reported, not ignored. */
+const KNOWN_ENTRY_KEYS: ReadonlySet<string> = new Set(['id', 'time', 'messaging', 'changes', 'standby'])
 
 /** Per-item keys that route an event rather than name it. */
 const ROUTING_KEYS: ReadonlySet<string> = new Set(['sender', 'recipient', 'timestamp'])
@@ -279,9 +284,11 @@ function parseEntry(entry: unknown): InstagramEvent[] {
     }
   }
 
-  if (!sawItems) {
-    return [unhandled('malformed', fieldNames(Object.keys(entry).filter((k) => k !== 'id' && k !== 'time')))]
-  }
+  // A new array Meta adds beside `messaging` would otherwise reach no log at
+  // all: summarize-payload.ts only reads keys inside `messaging` items.
+  const unknownKeys = Object.keys(entry).filter((key) => !KNOWN_ENTRY_KEYS.has(key))
+  if (unknownKeys.length > 0) events.push(unhandled('unrecognized_entry_field', fieldNames(unknownKeys)))
+  else if (!sawItems) events.push(unhandled('malformed'))
   return events
 }
 

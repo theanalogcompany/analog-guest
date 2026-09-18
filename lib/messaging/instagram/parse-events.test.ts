@@ -266,7 +266,30 @@ describe('parseInstagramDelivery on fields this handler does not handle (synthet
 
   it('reports an entry with nothing it recognizes', () => {
     expect(parseInstagramDelivery({ object: 'instagram', entry: [{ id: ACCOUNT_ID, time: 1, other: [] }] })).toEqual([
-      { kind: 'unhandled', reason: 'malformed', fields: ['other'] },
+      { kind: 'unhandled', reason: 'unrecognized_entry_field', fields: ['other'] },
+    ])
+    expect(parseInstagramDelivery({ object: 'instagram', entry: [{ id: ACCOUNT_ID, time: 1 }] })).toEqual([
+      { kind: 'unhandled', reason: 'malformed', fields: [] },
+    ])
+  })
+
+  // summarize-payload.ts only reads keys inside `messaging` items, so an array
+  // Meta adds beside `messaging` would otherwise reach no log at all.
+  it('reports an unknown array beside `messaging` and still reads the messaging', () => {
+    const events = parseInstagramDelivery({
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [{ ...fromGuest, message: { mid: 'm1', text: 'hi' } }],
+          new_thing: [{ x: 1 }],
+        },
+      ],
+    })
+    expect(events.map((e) => (e.kind === 'unhandled' ? `${e.reason}:${e.fields.join(',')}` : e.kind))).toEqual([
+      'message',
+      'unrecognized_entry_field:new_thing',
     ])
   })
 

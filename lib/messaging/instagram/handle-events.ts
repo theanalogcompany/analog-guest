@@ -10,7 +10,15 @@
 //   postback  inbound row, body = the icebreaker's title. Creates the guest if
 //             absent. Saved even with no title: TAC-469 computes the 24-hour
 //             reply window from the newest inbound Instagram row, and a
-//             postback opens that window as much as a message does.
+//             postback opens that window as much as a message does. That row
+//             has body '' and no media, and messages_has_content accepts it
+//             only because array_length('{}', 1) is NULL and a CHECK passes on
+//             NULL (the TAC-309 gotcha); the test fake models no CHECKs, so no
+//             test proves it. A guest message with nothing to show (unsupported
+//             content, or no text and no attachment URL) is NOT saved the same
+//             way, as planned and approved on 2026-09-18: it is logged as
+//             unhandled, so it creates no guest and does not count toward the
+//             window. Revisit in TAC-469 if replies are refused after one.
 //   echo      outbound row, status 'sent', shaped like sendReaction's outbound
 //             insert (lib/messaging/expressions.ts), the one other outbound row
 //             written outside the agent: no review_state, no generated_by.
@@ -102,6 +110,9 @@ export type InstagramEventOutcome =
 type Failure = { stage: InstagramFailureStage; error: string; code: string | null }
 type Step<T> = { ok: true; value: T } | { ok: false; failure: Failure }
 
+// Only the error's `message` and `code` are kept, and they are what a failed
+// save logs. Never add PostgREST's `details` or `hint`: `details` carries the
+// failing row's values ("Failing row contains (...)"), message text included.
 function fail(stage: InstagramFailureStage, error: { message: string; code?: string } | null): Failure {
   return { stage, error: error?.message ?? 'no row returned', code: error?.code ?? null }
 }
@@ -337,7 +348,8 @@ export async function processInstagramDelivery(
 /**
  * One log line per outcome. The only place an outcome reaches a log, so the
  * TAC-458 rule (no IGSID, mid, text or referral value) is held here: every
- * field below is our own row ID, a count, a flag, or a name.
+ * field below is our own row ID, a flag, or a name, except a failed save's
+ * error message and code (see fail() for what may never be added to those).
  */
 export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
   switch (outcome.status) {
@@ -378,8 +390,11 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
       return
     case 'skipped':
       // venue_not_found: no venue has this account in venues.instagram_account_id.
-      // The account ID is not logged (TAC-458); read it from a delivery's
-      // entry.id when mapping the venue.
+      // The account ID is not logged (TAC-458), so it cannot be read from
+      // these logs. Get it from the Graph API with the venue's Instagram User
+      // token: GET https://graph.instagram.com/me?fields=user_id,username
+      // returns it as `user_id` (NOT `id`, which is app-scoped). Once it is
+      // set, these lines stop and instagram_event_persisted appears.
       console.warn('instagram webhook: event skipped', {
         event: 'instagram_event_skipped',
         kind: outcome.kind,
