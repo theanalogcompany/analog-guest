@@ -58,6 +58,14 @@ export function commentMarker(body) {
  * non-CC-prefixed comment shape that advances a gate (TAC-396, question 2) —
  * a plain `**[FROM CLAUDE CHAT]**` comment with no `— RULING` is context and
  * never counts, whatever it says.
+ *
+ * No call site yet as of TAC-396: the intended consumer is the
+ * CHAT-vs-RULING distinction in .claude/process.md and
+ * .claude/commands/work-ticket.md (prose an LLM follows, not code that
+ * imports this), and that doc edit is blocked pending a [NEEDS-ACTION] on
+ * the ticket — Claude Code's own tool refuses writes to those two files as
+ * "sensitive" from a session with no human present to grant it. Not dead
+ * code to clean up.
  */
 export function isRulingComment(body) {
   return CHAT_RULING_PREFIX.test(unescapeBrackets(body));
@@ -66,6 +74,8 @@ export function isRulingComment(body) {
 /**
  * A plain `**[FROM CLAUDE CHAT]**` comment with no `— RULING` suffix.
  * Context, not a decision — never matched against ## Open questions.
+ *
+ * No call site yet either, same reason as isRulingComment above.
  */
 export function isContextChatComment(body) {
   return CHAT_PLAIN_PREFIX.test(unescapeBrackets(body));
