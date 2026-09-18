@@ -48,7 +48,15 @@ import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './ty
 // correct replies against source material it already had. The name it objected
 // to was in `venue_info.staff` (which it receives) and, on `1b221692`, in the
 // guest's own inbound.
-export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.4.0'
+// v1.5.0 (TAC-376): the check now also runs on turns with no guest message —
+// followups and the knowledge-gap holding message. The base SYSTEM_PROMPT
+// text above is UNCHANGED; a proactive-only addendum is appended by
+// buildSystemPrompt when isProactive is true, and buildUserPrompt swaps the
+// literal "Guest's message" line for proactive framing. An inbound call's
+// rendered prompt is byte-for-byte what v1.4.0 produced — the version moves
+// because the function can now render a prompt it never could before, and the
+// two populations must stay distinguishable in analytics.
+export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.5.0'
 
 /**
  * TAC-367. Was 500, which this verifier had quietly outgrown: measured
@@ -116,6 +124,32 @@ Work through the evidence first, then decide. If your reasoning concludes a clai
 
 Set hasUngroundedClaim=true only when you found at least one claim you would flag; list each such claim in ungroundedClaims, quoting or closely paraphrasing the ungrounded part of the reply. Otherwise hasUngroundedClaim=false and ungroundedClaims is empty.`
 
+/**
+ * TAC-376. Appended to SYSTEM_PROMPT only when isProactive is true — never
+ * woven into the base prompt, so an inbound call's system prompt stays
+ * byte-for-byte what it was before this ticket.
+ *
+ * One rule, per the 2026-09-17 ruling (question 5): the single point where a
+ * proactive check must diverge from an inbound one. On an inbound turn, a
+ * reply restating something the guest just said about themselves ("so glad
+ * you brought your friend!" right after the guest said as much) is licensed
+ * by the guest's own message — nobody wrote that rule down because the guest
+ * message itself is the license. On a proactive message there is no guest
+ * message to license it: the ASSISTANT is the one asserting what the guest
+ * did, unprompted, and that assertion is exactly the kind of specific,
+ * checkable claim the base prompt already governs. The addendum exists so it
+ * is not mistaken for warm conversational filler ("Do not flag: General
+ * conversation with no specific venue fact in it") — thanking a guest for a
+ * referral reads exactly like that unless the rule is explicit that it isn't.
+ */
+const PROACTIVE_ADDENDUM = `This reply was NOT written in response to anything the guest said. It is a proactive message the venue is sending on its own initiative — a scheduled or operator-triggered follow-up, or a placeholder note sent while a question is still being checked. There is no guest message this turn; ignore any instruction elsewhere about a "Guest's message" section, because none is present.
+
+One rule applies only here: a claim about something the GUEST did — that they visited, ordered something, brought a friend in, referred someone, or similar — is a specific, checkable fact and must be checked exactly like any other, never waved through as friendly conversational warmth. On an inbound reply, the guest's own message is what licenses a line like that; here there is none, so the assistant is the one asserting it, and it must be supported by the source material (a recorded visit, order, or referral) or flagged. "So glad you brought a friend in" with nothing in the source material recording a referral is exactly the claim this rule exists to catch.`
+
+function buildSystemPrompt(isProactive: boolean): string {
+  return isProactive ? `${SYSTEM_PROMPT}\n\n${PROACTIVE_ADDENDUM}` : SYSTEM_PROMPT
+}
+
 function buildSourceMaterial(input: VerifyGroundingInput): string {
   const sections = [venueInfoToProse(input.venueInfo)]
   // knowledgeChunksToProse renders the explicit "no specific venue knowledge
@@ -139,7 +173,13 @@ function buildSourceMaterial(input: VerifyGroundingInput): string {
 }
 
 function buildUserPrompt(input: VerifyGroundingInput): string {
-  return `Guest's message: "${input.inboundBody}"\n\nAssistant's reply, about to be sent: "${input.replyBody}"\n\nSource material the assistant had access to:\n\n${buildSourceMaterial(input)}\n\nDoes the reply state any specific factual claim not supported by the source material above?`
+  // TAC-376: unchanged for isProactive=false — the literal line every inbound
+  // call has always sent. A proactive turn has no guest message to quote, so
+  // it gets explicit framing instead of an empty pair of quotes.
+  const guestLine = input.isProactive
+    ? "This message is proactive — the venue is sending it on its own initiative, not in reply to anything the guest said this turn."
+    : `Guest's message: "${input.inboundBody}"`
+  return `${guestLine}\n\nAssistant's reply, about to be sent: "${input.replyBody}"\n\nSource material the assistant had access to:\n\n${buildSourceMaterial(input)}\n\nDoes the reply state any specific factual claim not supported by the source material above?`
 }
 
 /**
@@ -195,7 +235,7 @@ export async function verifyGrounding(
   try {
     const { object } = await generateObject({
       model: getClassificationModel(),
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(input.isProactive),
       prompt: buildUserPrompt(input),
       schema,
       // Analytical task — keep determinism high, same as classify-message.ts.

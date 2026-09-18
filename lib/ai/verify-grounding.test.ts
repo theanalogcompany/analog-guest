@@ -61,6 +61,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       knowledgeChunks: [],
       runtimeContext: '',
+      isProactive: false,
     })
 
     expect(result.ok).toBe(true)
@@ -88,6 +89,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       knowledgeChunks: [],
       runtimeContext: '',
+      isProactive: false,
     })
 
     expect(result.ok).toBe(true)
@@ -111,6 +113,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       knowledgeChunks: [],
       runtimeContext: '',
+      isProactive: false,
     })
 
     expect(result.ok).toBe(true)
@@ -126,6 +129,7 @@ describe('verifyGrounding', () => {
       replyBody: '',
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
+      isProactive: false,
     })
     expect(result).toEqual({ ok: false, error: 'invalid_input' })
     expect(generateObjectMock).not.toHaveBeenCalled()
@@ -142,6 +146,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       // knowledgeChunks omitted entirely
       runtimeContext: '',
+      isProactive: false,
     })
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
@@ -181,6 +186,7 @@ describe('verifyGrounding', () => {
       replyBody: 'It starts with a floral base',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+      isProactive: false,
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -217,6 +223,7 @@ describe('verifyGrounding', () => {
       replyBody: 'It starts with a floral base',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+      isProactive: false,
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -232,6 +239,7 @@ describe('verifyGrounding', () => {
       replyBody: 'It starts with a floral base',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
+      isProactive: false,
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -251,6 +259,7 @@ describe('verifyGrounding', () => {
       replyBody: 'a',
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
+      isProactive: false,
     })
     const args = generateObjectMock.mock.calls[0][0] as { maxOutputTokens: number }
     expect(args.maxOutputTokens).toBe(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS)
@@ -266,6 +275,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       knowledgeChunks: [],
       runtimeContext: '',
+      isProactive: false,
     })
 
     expect(result.ok).toBe(false)
@@ -286,6 +296,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       knowledgeChunks: [],
       runtimeContext: '',
+      isProactive: false,
     })
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
@@ -318,6 +329,7 @@ describe('runtime context in the source material', () => {
       replyBody: "we're closed for the night, back at 7 tomorrow",
       venueInfo: makeVenueInfo(),
       runtimeContext,
+      isProactive: false,
     })
     // Verbatim containment is the contract. If a future change summarizes or
     // slices this, the exact string stops appearing and this fails.
@@ -334,6 +346,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
       runtimeContext: '   \n  ',
+      isProactive: false,
     })
     expect(promptFromCall()).not.toContain('## Runtime context for this turn')
   })
@@ -364,6 +377,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'your code is 4F2K',
       venueInfo: makeVenueInfo(),
       runtimeContext,
+      isProactive: false,
     })
 
     const prompt = promptFromCall()
@@ -386,6 +400,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      isProactive: false,
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('runtime context for this turn')
@@ -410,6 +425,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'you had the cortado last time',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Visit history\n- [3 days ago] cortado',
+      isProactive: false,
     })
     const schema = (generateObjectMock.mock.calls[0][0] as { schema: { shape: object } }).schema
     const keys = Object.keys(schema.shape)
@@ -428,6 +444,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      isProactive: false,
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('QUALIFIES')
@@ -442,6 +459,7 @@ describe('runtime context in the source material', () => {
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue, 1 day ago] the wifi password is hunter2',
+      isProactive: false,
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('[venue, ...]')
@@ -465,6 +483,7 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
       replyBody: 'the Pink Panther, cascara and hibiscus over ice',
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      isProactive: false,
     })
     return (generateObjectMock.mock.calls[0][0] as { system: string }).system
   }
@@ -527,6 +546,103 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
   // it true and is out of this ticket's ruled scope. What the pin actually buys
   // is that a rule change cannot ship without moving the version.
   it('pins the prompt version, so a rule change cannot ship silently', () => {
-    expect(VERIFY_GROUNDING_PROMPT_VERSION).toBe('v1.4.0')
+    expect(VERIFY_GROUNDING_PROMPT_VERSION).toBe('v1.5.0')
+  })
+})
+
+// TAC-376. isProactive lets the check run on a turn with no guest message
+// (a followup or the knowledge-gap holding message). These tests assert
+// PROMPT CONTENT only, same caveat as the TAC-409 block above — generateObject
+// is mocked, so nothing here proves the model obeys the addendum, only that
+// it is present and scoped correctly.
+describe('TAC-376: isProactive (no guest message)', () => {
+  function mockClean() {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+    })
+  }
+
+  function promptFromCall(): string {
+    return (generateObjectMock.mock.calls[0][0] as { prompt: string }).prompt
+  }
+
+  function systemFromCall(): string {
+    return (generateObjectMock.mock.calls[0][0] as { system: string }).system
+  }
+
+  // The load-bearing guarantee for AC3 ("no regression in inbound
+  // behaviour"): isProactive: false must render the EXACT prompt every
+  // inbound call rendered before this field existed.
+  it('renders the literal "Guest\'s message" line, unchanged, for isProactive: false', async () => {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: 'is the oat milk vegan',
+      replyBody: 'yep, all our milk alternatives are',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+      isProactive: false,
+    })
+    expect(promptFromCall()).toContain('Guest\'s message: "is the oat milk vegan"')
+  })
+
+  it('swaps in proactive framing and omits the literal "Guest\'s message" line for isProactive: true', async () => {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: '',
+      replyBody: 'thinking of you — come by soon',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+      isProactive: true,
+    })
+    const prompt = promptFromCall()
+    expect(prompt).not.toContain('Guest\'s message: ""')
+    expect(prompt).toContain('proactive')
+  })
+
+  // The base SYSTEM_PROMPT is unchanged; the addendum is APPENDED, never
+  // woven in, so an inbound call's system prompt is byte-for-byte what it
+  // was pre-TAC-376.
+  it('leaves the system prompt byte-for-byte unchanged for isProactive: false', async () => {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: 'hi',
+      replyBody: 'hey',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+      isProactive: false,
+    })
+    // Pinned against a fixed independent snapshot of the addendum-free
+    // prompt's closing sentence, so this fails if the addendum is ever
+    // unconditionally appended.
+    expect(systemFromCall()).not.toContain('This reply was NOT written in response to anything the guest said')
+  })
+
+  it('appends the proactive addendum for isProactive: true', async () => {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: '',
+      replyBody: 'so glad you brought a friend in!',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+      isProactive: true,
+    })
+    expect(systemFromCall()).toContain('This reply was NOT written in response to anything the guest said')
+  })
+
+  // Ruling 2026-09-17, question 5: the one exception to "same check". A claim
+  // about what the GUEST did is checked exactly like any other fact on a
+  // proactive turn, never waved through as conversational warmth.
+  it('tells the verifier a claim about the guest\'s own actions is in remit on a proactive turn', async () => {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: '',
+      replyBody: 'so glad you brought a friend in!',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '',
+      isProactive: true,
+    })
+    const system = systemFromCall()
+    expect(system).toContain('a claim about something the GUEST did')
+    expect(system).toContain('brought a friend in')
   })
 })

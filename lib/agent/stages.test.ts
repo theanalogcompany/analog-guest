@@ -2349,11 +2349,58 @@ describe('verifyGroundingStage (TAC-350)', () => {
     }
   }
 
-  it('returns skipped without calling the model on the outbound (followup) path', async () => {
+  // TAC-376 REVERSES this test. It used to assert the outbound (followup)
+  // path skipped entirely — the exact gap this ticket closes. Per the
+  // 2026-09-17 ruling, a followup now gets the same check an inbound reply
+  // gets, with isProactive derived from ctx.currentMessage === null.
+  it('calls the model on the outbound (followup) path with isProactive: true and an empty inboundBody', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+    })
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toEqual({ status: 'skipped' })
-    expect(verifyGroundingMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ status: 'clean' })
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      isProactive: boolean
+      inboundBody: string
+    }
+    expect(args.isProactive).toBe(true)
+    expect(args.inboundBody).toBe('')
+  })
+
+  // Same shape, a holding-message ctx (manual followup trigger, no inbound) —
+  // the second of the two proactive orchestrators this ticket wires up.
+  it('calls the model for a holding-message-shaped ctx (manual trigger, no inbound) with isProactive: true', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+    })
+    const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'manual', triggeredAt: new Date() } })
+    const result = await verifyGroundingStage(ctx, makeGen())
+    expect(result).toEqual({ status: 'clean' })
+    const args = verifyGroundingMock.mock.calls[0][0] as { isProactive: boolean }
+    expect(args.isProactive).toBe(true)
+  })
+
+  // Mutation-verified pair: a hardcoded `isProactive: false` (or `true`) must
+  // fail one of these two tests. Together with the two above, this pins the
+  // derivation to `ctx.currentMessage === null` rather than any other signal
+  // (followupTrigger, category, etc.) that happens to correlate with it.
+  it('calls the model on the inbound path with isProactive: false and the real inbound body', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ status: 'clean' })
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      isProactive: boolean
+      inboundBody: string
+    }
+    expect(args.isProactive).toBe(false)
+    expect(args.inboundBody).toBe("what's the wifi password?")
   })
 
   it('returns skipped without calling the model for a demo guest', async () => {
@@ -3424,8 +3471,11 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
   })
 
-  // Same shape as the TAC-350 backstop block's fixture: an inbound turn, since
-  // verifyGroundingStage is inbound-only by construction.
+  // Same shape as the TAC-350 backstop block's fixture: an inbound turn. This
+  // block tests applyApprovalPolicyStage directly with a groundingBackstop
+  // ARGUMENT already supplied, so it's exercising the gate's own trigger
+  // logic, not verifyGroundingStage's decision about when to call the model
+  // (which, since TAC-376, also runs on followups — see that describe block).
   const inboundCtx = () =>
     makeCtx({
       currentMessage: {
