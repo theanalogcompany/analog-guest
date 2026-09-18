@@ -477,8 +477,9 @@ describe('POST /api/webhooks/instagram', () => {
 // Real deliveries captured from Meta on 2026-09-17, identifiers replaced (see
 // lib/messaging/instagram/fixtures/README.md). The synthetic payloads above
 // test the rules; these test that a body shaped exactly as Meta sends it,
-// including an echo, a read receipt and a postback carrying a referral, verifies, is acknowledged, and puts
-// none of its identifiers or text in the logs.
+// including an echo, a read receipt and a postback carrying a referral,
+// verifies, is acknowledged, and puts none of its identifiers, text, ref,
+// title or payload in the logs.
 describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
   const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
 
@@ -490,7 +491,7 @@ describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
     expect(res.status).toBe(200)
     expect(findEntry('instagram_event')).toMatchObject({ object: 'instagram', entryCount: 1 })
 
-    const values = [...body.matchAll(/"(?:id|mid|text)":"([^"]+)"/g)].map((m) => m[1] ?? '')
+    const values = [...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g)].map((m) => m[1] ?? '')
     expect(values.length).toBeGreaterThan(0)
     const text = loggedText()
     for (const value of values) expect(text).not.toContain(value)

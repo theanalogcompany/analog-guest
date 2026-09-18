@@ -78,8 +78,8 @@ describe('recorded Instagram payloads: what Meta sends', () => {
   })
 
   // Identifier formats. The account id is 17 digits. Both guest IGSIDs seen
-  // on 2026-09-17 (the one in these fixtures, and one from an earlier capture
-  // that aged out of the logs) were 16, so an account id and a guest id are
+  // on 2026-09-17 (the one in these fixtures, and a second guest's from an
+  // earlier postback that aged out of the logs) were 16, so an account id and a guest id are
   // not the same length and a validator for one must not be reused for the
   // other. Two samples do not show that every IGSID is 16 digits, so the
   // guest id is pinned to digits only.
@@ -93,7 +93,8 @@ describe('recorded Instagram payloads: what Meta sends', () => {
   })
 
   // Tapping an icebreaker after opening an ig.me link arrives as a postback,
-  // with the link's referral inside it and the ref carried through verbatim.
+  // with the link's referral inside it. The ref arrived unchanged in this one
+  // (uppercase alphanumeric) sample.
   // The mid is INSIDE `postback`, as it is inside `message` on a message: a
   // hand transcription of this payload put it beside `postback`, which the
   // logged body contradicted.
@@ -109,13 +110,14 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     expect(postback.mid).toEqual(expect.stringMatching(/ZDZD$/))
   })
 
-  // This postback was captured after the guest deleted the thread and opened
-  // it again through the ig.me link. The referral fired as it does on a new
-  // thread, but the thread id inside its mid is the one the earlier messages
-  // carry. Deleting a thread does not start a new conversation id, so a
-  // handler can't use a new thread id to spot a returning guest re-entering
-  // through a link; the referral is the signal.
-  it('keeps the thread id across a deleted and reopened thread', () => {
+  // Per Jaipal, this thread was deleted and reopened through the ig.me link
+  // before this capture; which side deleted it isn't recorded, and the payload
+  // can't show it. The referral fired as it does on a new thread, but in this
+  // capture the thread id inside its mid is the one the earlier messages
+  // carry. So on this path (an icebreaker tap into a chat that was empty
+  // again) a new thread id can't be what spots a returning guest; the
+  // referral is. Other ways back in weren't captured.
+  it('kept the thread id across the deleted and reopened thread in this capture', () => {
     const postback = firstItem('postback-referral').item.postback as { mid: string }
     const message = firstItem('message').item.message as { mid: string }
     const [, , postbackThread, postbackItem] = decodeMid(postback.mid)
@@ -160,10 +162,10 @@ describe('summarizeInstagramPayload on recorded payloads', () => {
     expect(summary.events).toEqual([{ time: expect.any(Number), types }])
   })
 
-  it.each(FIXTURE_NAMES)('keeps every id, mid and text of the %s delivery out of the summary', (name) => {
+  it.each(FIXTURE_NAMES)('keeps every id, mid, text, ref, title and payload of the %s delivery out of the summary', (name) => {
     const body = raw(name)
     const serialized = JSON.stringify(summarizeInstagramPayload(JSON.parse(body)))
-    const values = [...body.matchAll(/"(?:id|mid|text)":"([^"]+)"/g)].map((m) => m[1])
+    const values = [...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g)].map((m) => m[1])
     expect(values.length).toBeGreaterThan(0)
     for (const value of values) expect(serialized).not.toContain(value)
   })
