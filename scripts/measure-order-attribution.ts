@@ -30,9 +30,20 @@ import { generateMessage } from '@/lib/ai/generate-message'
 import type { GenerateMessageInput, RecentMessage } from '@/lib/ai/types'
 import { verifyGrounding } from '@/lib/ai/verify-grounding'
 import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '@/lib/schemas'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import { scoreConflationClaims } from './measure-order-attribution-scoring'
 
 const DEFAULT_N = 20
+
+// The channel copy every generation is measured under. 'text' (Sendblue), not
+// 'instagram' and not null, because the incident this replays happened there:
+// the held draft is channel 'text' and the guest has a phone number and no
+// Instagram ID. It is also the only copy any Le Mil's guest gets today, since
+// the agent does not run for Instagram guests until TAC-469 lifts its gate.
+// Null would render the Instagram wording (TAC-495), which is a different
+// prompt from the one being measured. Held fixed so a later "after" run
+// compares against the same channel copy.
+const CHANNEL: MessageChannel = 'text'
 
 type VariantId = 1 | 2 | 3
 const ALL_VARIANT_IDS: readonly VariantId[] = [1, 2, 3]
@@ -148,6 +159,7 @@ function buildInput(variant: Variant): GenerateMessageInput {
         venueTimezone: 'America/Los_Angeles',
       },
     },
+    channel: CHANNEL,
   }
 }
 
@@ -297,7 +309,7 @@ async function main(): Promise<void> {
   const variants = VARIANTS.filter((v) => variantIds.includes(v.id))
 
   console.log('TAC-483 order-attribution measurement — ships no fix, measures the live prompt as-is.')
-  console.log(`N=${n} per variant. Variants: ${variantIds.join(', ')}\n`)
+  console.log(`N=${n} per variant. Variants: ${variantIds.join(', ')}. Channel copy: ${CHANNEL}\n`)
 
   const allSummaries: Array<{ variant: Variant; outcomes: GenerationOutcome[] }> = []
   for (const variant of variants) {
