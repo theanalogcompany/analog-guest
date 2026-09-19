@@ -55,7 +55,7 @@
 // TAC-495 gave Instagram guests their own channel copy (the first-visit
 // opener, R1, R5, R32 and the other lines listed in system-template.ts's
 // SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS), chosen by
-// lib/agent/conversation-channel.ts. Four more things for TAC-469, all on its
+// lib/agent/conversation-channel.ts. Five more things for TAC-469, all on its
 // pre-flight list:
 //   - A returning guest is greeted as a first-timer (TAC-497). The first-visit
 //     gate's `recentMessages.length === 0` sees only our database, and the
@@ -64,7 +64,16 @@
 //     and the opener.
 //   - Measure it. Generate Instagram replies on first-visit and ordinary turns
 //     and look for a phone number, texting, and Instagram idioms ("DM", "check
-//     our stories"). Post the bar and the arms before generating.
+//     our stories"). Post the bar and the arms before generating. If the
+//     Instagram voice reads more formal than Sendblue's, look first at the
+//     casual formality line ("message a friend" for "text a friend"; see
+//     serializers.ts).
+//   - Surface an unresolved channel. buildRuntimeContext only console.warns
+//     when resolveConversationChannel returns null. Once the gate is open, that
+//     is a real guest getting copy chosen without knowing their channel, and a
+//     log line nobody watches surfaces nothing. Its main cause is migration
+//     048's 'text' default on an Instagram row, which also blinds the
+//     webhook-silence alarm. Build a real signal before lifting the gate.
 //   - Guests with both identifiers. With no inbound message (followups, the
 //     holding message, a decline), resolveConversationChannel picks the SMS
 //     copy for any guest with a phone number, because every such send goes to

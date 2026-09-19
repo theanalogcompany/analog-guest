@@ -267,6 +267,14 @@ const INSTAGRAM_HEADS_UP_EXAMPLES =
   'When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue\'s voice. Examples: "comped you an oat latte, give me a heads up when you\'re heading over" / "next one\'s on us. message me when you\'re close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are — send me a heads-up if you want it tonight").'
 const INSTAGRAM_NAMED_PERSON =
   'You are Sana, staff at the venue, messaging as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
+// The last two lines ruled on (2026-09-19). SMS transcribed from 40fc720;
+// Instagram from the approved wording.
+const SENDBLUE_UNKNOWN_CLOSE = 'It should sound like a real busy person texting back in their own natural voice.'
+const INSTAGRAM_UNKNOWN_CLOSE = 'It should sound like a real busy person messaging back in their own natural voice.'
+const SENDBLUE_CASUAL_FORMALITY =
+  'casual — Use contractions; lowercase starts are fine; write the way you would text a friend.'
+const INSTAGRAM_CASUAL_FORMALITY =
+  'casual — Use contractions; lowercase starts are fine; write the way you would message a friend.'
 const INSTAGRAM_OPENER =
   "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
 
@@ -354,15 +362,12 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   // AC2, over every prompt an Instagram guest can get: every category, every
   // formality and every speaker framing, system and user prompt. A first
   // version checked one fixture only (a casual 'reply'), and code review found
-  // two lines it never rendered. Those two are named below until their wording
-  // is ruled on; anything else that claims the channel fails here.
+  // two lines it never rendered (the unknown category's "texting back" and the
+  // casual formality line's "text a friend"). Both now have Instagram wording,
+  // so no line anywhere may claim the channel.
   it('an Instagram prompt names no iMessage, no phone number and no texting, on any category, formality or framing', () => {
     const CHANNEL_CLAIM =
       /imessage|this number|\btext(ing|ed)\b|\btext (me|us|them|a friend|back)\b|would (actually )?text\b/i
-    const PENDING_RULING = [
-      'a real busy person texting back', // UNKNOWN_INSTRUCTIONS
-      'write the way you would text a friend', // FORMALITY_GUIDANCE.casual
-    ]
     const residual = new Set<string>()
     for (const category of MESSAGE_CATEGORIES) {
       for (const formality of ['casual', 'warm', 'formal'] as const) {
@@ -387,17 +392,22 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
         }
       }
     }
-    // Each exempt line is a whole instruction string, so only the pending
-    // phrase is exempt: strip it and the rest of the line must claim nothing.
-    for (const line of residual) {
-      const withoutPending = PENDING_RULING.reduce((rest, phrase) => rest.replace(phrase, ''), line)
-      expect(CHANNEL_CLAIM.test(withoutPending), line).toBe(false)
-    }
-    // Both pending lines really do render somewhere, so this list can't go
-    // stale silently once they're decided.
-    for (const phrase of PENDING_RULING) {
-      expect([...residual].some((line) => line.includes(phrase)), phrase).toBe(true)
-    }
+    expect([...residual]).toEqual([])
+  })
+
+  // The two lines ruled on last, on the paths that render them: the unknown
+  // category, and a casual venue.
+  it('an unknown turn at a casual venue gets the Instagram category close and formality line, and none of the SMS ones', () => {
+    const ig = composePrompt(firstTouchInput({ channel: 'instagram', category: 'unknown' })).systemPrompt
+    expect(ig).toContain(INSTAGRAM_UNKNOWN_CLOSE)
+    expect(ig).toContain(`\n${INSTAGRAM_CASUAL_FORMALITY}\n`)
+    expect(ig).not.toContain(SENDBLUE_UNKNOWN_CLOSE)
+    expect(ig).not.toContain(SENDBLUE_CASUAL_FORMALITY)
+    const sms = composePrompt(firstTouchInput({ channel: 'text', category: 'unknown' })).systemPrompt
+    expect(sms).toContain(SENDBLUE_UNKNOWN_CLOSE)
+    expect(sms).toContain(`\n${SENDBLUE_CASUAL_FORMALITY}\n`)
+    expect(sms).not.toContain(INSTAGRAM_UNKNOWN_CLOSE)
+    expect(sms).not.toContain(INSTAGRAM_CASUAL_FORMALITY)
   })
 
   it('an Instagram conversation gets the Instagram opener, and not the SMS one', () => {
@@ -448,8 +458,14 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
         .replace(INSTAGRAM_PLAIN_TEXT_RULE, SENDBLUE_PLAIN_TEXT_RULE)
         .replace(INSTAGRAM_HEADS_UP_EXAMPLES, SENDBLUE_HEADS_UP_EXAMPLES)
         .replace(INSTAGRAM_NAMED_PERSON, SENDBLUE_NAMED_PERSON)
+        .replace(INSTAGRAM_CASUAL_FORMALITY, SENDBLUE_CASUAL_FORMALITY)
+        .replace(INSTAGRAM_UNKNOWN_CLOSE, SENDBLUE_UNKNOWN_CLOSE)
     expect(backToSms(ig.systemPrompt)).toBe(sms.systemPrompt)
     expect(backToSms(ig.userPrompt)).toBe(sms.userPrompt)
+    const smsUnknown = composePrompt(firstTouchInput({ channel: 'text', category: 'unknown' }))
+    const igUnknown = composePrompt(firstTouchInput({ channel: 'instagram', category: 'unknown' }))
+    expect(backToSms(igUnknown.systemPrompt)).toBe(smsUnknown.systemPrompt)
+    expect(backToSms(igUnknown.userPrompt)).toBe(smsUnknown.userPrompt)
   })
 })
 

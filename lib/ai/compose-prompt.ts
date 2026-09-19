@@ -1,4 +1,4 @@
-import { getCategoryInstructions } from './prompts/categories'
+import { categoryInstructionsFor } from './prompts/categories'
 import {
   knowledgeChunksToProse,
   personaToProse,
@@ -44,7 +44,7 @@ export function composePrompt(input: GenerateMessageInput): {
     sections.push(knowledgeChunksToProse(knowledgeChunks))
   }
 
-  sections.push(`## Category-specific instructions: ${category}\n${getCategoryInstructions(category)}`)
+  sections.push(`## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel)}`)
 
   return {
     systemPrompt: sections.join('\n\n'),

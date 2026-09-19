@@ -36,6 +36,37 @@ const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
   formal: 'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
 }
 
+// TAC-495: the casual line's Instagram variant says "message a friend", not
+// "text a friend" (approved 2026-09-19), made like the other channel variants
+// (channel-variants.ts). The phrase does register work: it is a yardstick for
+// how casual to be, and "texting a friend" is the sharper, more universally
+// understood anchor, so the swap costs a little precision. It was taken because
+// the bigger risk is the model echoing "text" to a guest who isn't texting. If
+// the Instagram voice reads more formal than Sendblue's (TAC-469's behavioural
+// check), this line is the first place to look. Warm and formal claim no
+// channel and are identical on both.
+const CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [{ from: 'write the way you would text a friend.', to: 'write the way you would message a friend.' }],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    FORMALITY_GUIDANCE.casual,
+    CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS.text,
+    'FORMALITY_GUIDANCE.casual/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    FORMALITY_GUIDANCE.casual,
+    CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS.instagram,
+    'FORMALITY_GUIDANCE.casual/instagram',
+  ),
+}
+
+function formalityGuidanceFor(formality: BrandPersona['formality'], channel: MessageChannel | null): string {
+  return formality === 'casual' ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)] : FORMALITY_GUIDANCE[formality]
+}
+
 const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
   never: 'Do not use emoji.',
   sparingly: 'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
@@ -144,7 +175,7 @@ function personaBullet(text: string): string {
 }
 
 /**
- * `channel` picks the channel copy (today, only the named_person line).
+ * `channel` picks the channel copy (the named_person line and the casual formality line).
  * Required, with no default: there are two production callers and each has to
  * decide. composePrompt passes the conversation's channel; the classifier
  * passes 'text', because its prompt is not guest-facing and TAC-495 leaves it
@@ -155,7 +186,7 @@ export function personaToProse(persona: BrandPersona, channel: MessageChannel | 
 
   sections.push(`## Voice and Tone\n${persona.tone}`)
   sections.push(`## How to address the guest\n${speakerFramingProse(persona, channel)}`)
-  sections.push(`## Formality\n${persona.formality} — ${FORMALITY_GUIDANCE[persona.formality]}`)
+  sections.push(`## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`)
   sections.push(`## Length\n${persona.lengthGuide}`)
   sections.push(`## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`)
 

@@ -860,6 +860,25 @@ import {
 // copy, which is false on neither channel. The serializers' first-visit opener
 // has its own variant, the same way (serializers.ts, firstTouchOpenerFor).
 //
+// Every line the Instagram copy changes, all approved line by line: in this
+// template, the opening line ("through Instagram messages"), the register line
+// ("would actually message"), the plain-text rule ("- Plain text."), the
+// heads-up examples ("message me", "send me a heads-up"), R1, R5 and R32; in
+// the serializers, the first-visit opener, the named-speaker persona line
+// ("messaging as yourself") and the casual formality line ("message a
+// friend"); in the category layer, the unknown category's close ("messaging
+// back"). The first-touch signal line and all presence language are shared.
+//
+// One swap costs something, recorded here so nobody has to rediscover it. The
+// casual formality line's "write the way you would text a friend" is a register
+// yardstick as much as a channel claim, and "texting a friend" is the sharper,
+// more universally understood anchor for how casual to be. "Message a friend"
+// was taken anyway, because the bigger risk is the model echoing "text" to a
+// guest who isn't texting. If TAC-469's behavioural check shows the Instagram
+// voice reading more formal than Sendblue's, that line is the first place to
+// look (FORMALITY_GUIDANCE / CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS in
+// serializers.ts).
+//
 // v1.53.0 (TAC-417): RECOMMENDATION_REQUEST_INSTRUCTIONS gains a pointer to
 // ## Visit history. It was the one category in this family silent on it —
 // FOLLOW_UP_INSTRUCTIONS and MANUAL_INSTRUCTIONS already say to use runtime

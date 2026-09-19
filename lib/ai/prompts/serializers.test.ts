@@ -2745,18 +2745,37 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
     expect(personaToProse(named, null)).toBe(personaToProse(named, 'instagram'))
   })
 
-  // The persona's scope guard: only the named_person line varies, and only
-  // by its verb. The venue and owner framings name no channel.
-  it('differs between channels only in the named-speaker verb, for every framing', () => {
+  // The persona's scope guard: only the named_person line and the casual
+  // formality line vary, each by one phrase. Venue and owner framings, and warm
+  // and formal venues, name no channel.
+  it('differs between channels only in the named-speaker verb and the casual formality phrase', () => {
     for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
-      const persona = makePersona({ speakerFraming, speakerName: 'Sana' })
-      expect(
-        personaToProse(persona, 'instagram').replace('messaging as yourself', 'texting as yourself'),
-      ).toBe(personaToProse(persona, 'text'))
+      for (const formality of ['casual', 'warm', 'formal'] as const) {
+        const persona = makePersona({ speakerFraming, formality, speakerName: 'Sana' })
+        expect(
+          personaToProse(persona, 'instagram')
+            .replace('messaging as yourself', 'texting as yourself')
+            .replace('write the way you would message a friend.', 'write the way you would text a friend.'),
+        ).toBe(personaToProse(persona, 'text'))
+      }
     }
-    expect(personaToProse(makePersona({ speakerFraming: 'venue' }), 'instagram')).toBe(
-      personaToProse(makePersona({ speakerFraming: 'venue' }), 'text'),
+    expect(personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'instagram')).toBe(
+      personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'text'),
     )
+  })
+
+  // Approved 2026-09-19. The phrase is a register yardstick, so the swap costs
+  // a little precision; the source comment says where to look if the
+  // Instagram voice reads more formal.
+  it('the casual formality line says text on SMS and message on Instagram', () => {
+    const casual = makePersona({ formality: 'casual' })
+    expect(personaToProse(casual, 'text')).toContain(
+      '## Formality\ncasual — Use contractions; lowercase starts are fine; write the way you would text a friend.',
+    )
+    expect(personaToProse(casual, 'instagram')).toContain(
+      '## Formality\ncasual — Use contractions; lowercase starts are fine; write the way you would message a friend.',
+    )
+    expect(personaToProse(casual, null)).toBe(personaToProse(casual, 'instagram'))
   })
 
   // The name is filled in after the substitution; a function replacement
