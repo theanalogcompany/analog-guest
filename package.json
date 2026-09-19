@@ -19,7 +19,8 @@
     "instagram-smoke": "tsx --env-file=.env.local scripts/instagram-send-smoke.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky"
+    "prepare": "husky",
+    "measure-instagram-copy": "tsx --env-file=.env.local scripts/measurement/instagram-channel-copy.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
