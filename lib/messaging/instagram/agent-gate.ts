@@ -44,9 +44,10 @@
 //         recorded) gives the model two instructions that disagree. The opener
 //         says to answer the question instead of asking what they got; the
 //         block's first natural opening says one short question on the end of
-//         an answer is fine, with understand_order listed. Sendblue never hits
-//         this, because its first message is a fixed greeting. What the model
-//         does with it isn't known: measure it, don't assume either.
+//         an answer is fine, with understand_order listed. On Sendblue the
+//         first message is the venue's stored QR string, so this arises there
+//         only if a venue makes that string a question. What the model does
+//         with it isn't known: measure it, don't assume either.
 //     Check both before lifting the gate, and again whenever anyone edits the
 //     icebreaker copy or the menu, because it breaks with no error. It is a
 //     named pre-flight item on TAC-469.
