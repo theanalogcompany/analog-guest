@@ -103,12 +103,10 @@ const SHORTLINK_SOURCE = 'SHORTLINK'
 
 export type InstagramGuestCreatedVia = 'qr_scan' | 'inbound_message'
 
-type GuestStep = {
-  guestId: string
-  created: boolean
-  /** What the guest was created as, or null when this event didn't create them. */
-  createdVia: InstagramGuestCreatedVia | null
-}
+/** The guest an event is filed under, and what it was created as if this event created it. */
+type GuestStep =
+  | { guestId: string; created: true; createdVia: InstagramGuestCreatedVia }
+  | { guestId: string; created: false; createdVia: null }
 
 export type InstagramFailureStage =
   | 'venue_lookup'

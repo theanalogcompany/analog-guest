@@ -18,8 +18,9 @@
 //     Sendblue path never produces (it refuses empty content before
 //     inserting), and it would reach the agent as an empty inbound. Since
 //     TAC-492 it can also be a QR guest's opener turn. And because the history
-//     query skips empty bodies, if nothing is saved in reply to it the opener
-//     fires on the guest's NEXT message instead;
+//     query skips empty bodies, if no reply with a body is saved to it (a blank
+//     knowledge-gap or crash card counts as none), the opener fires on the
+//     guest's NEXT message instead;
 //   - a message the guest unsent is only logged (message_deleted), so it stays
 //     in the thread and in the agent's history;
 //   - a STOP received while the gate was shut was never classified, so for
@@ -32,14 +33,20 @@
 //         turn (applyCurrentTurnSuppression, TAC-326). The opener's own text
 //         still says to ask what they got, but the block then lists learn_name
 //         first, and if nothing else is open the whole block goes, opener
-//         included. Sendblue's fixed QR string is checked against the menu in
-//         extract-reported-order.test.ts ("QR prefilled-body collision
-//         guard"); check each title the same way, with bodyMentionsMenuItem,
-//         not by eye. It matches single words: "Hi Le Mil's!" matches an item
-//         named "Le Mil's Blend" on "mil".
+//         included. The same title also sends the opener turn to
+//         extractReportedOrder's model call, and a transaction it records
+//         satisfies understand_order for good. Sendblue's fixed QR string is
+//         checked against the menu in extract-reported-order.test.ts ("QR
+//         prefilled-body collision guard"); check each title the same way, with
+//         bodyMentionsMenuItem, not by eye. It matches single words: "Hi Le
+//         Mil's!" matches an item named "Le Mil's Blend" on "mil".
 //       - A title that asks something ("What are your hours?", the one
-//         recorded) makes the opener answer it instead of asking what they got,
-//         as the opener's text says to.
+//         recorded) gives the model two instructions that disagree. The opener
+//         says to answer the question instead of asking what they got; the
+//         block's first natural opening says one short question on the end of
+//         an answer is fine, with understand_order listed. Sendblue never hits
+//         this, because its first message is a fixed greeting. What the model
+//         does with it isn't known: measure it, don't assume either.
 //     Check both before lifting the gate, and again whenever anyone edits the
 //     icebreaker copy or the menu, because it breaks with no error. It is a
 //     named pre-flight item on TAC-469.

@@ -48,6 +48,10 @@ type StoreError = { message: string; code?: string }
 //   from(t).select(cols).eq(...)...maybeSingle()
 //   from(t).insert(row).select(cols).single()
 // Anything else is undefined on it and throws, so an unexpected write fails.
+// A maybeSingle matching more than one row returns PostgREST's PGRST116, as
+// the Instagram test store does: with the neighbouring venue every test seeds
+// (useStore), a lookup that lost its venue filter errors instead of quietly
+// taking the first row.
 function createStore(seed: Partial<Record<Table, Row[]>>) {
   const tables: Record<Table, Row[]> = {
     venues: [...(seed.venues ?? [])],
@@ -84,7 +88,11 @@ function createStore(seed: Partial<Record<Table, Row[]>>) {
                 failures.delete(table)
                 return { data: null, error: failure }
               }
-              const row = tables[table].find((r) => filters.every(([c, v]) => r[c] === v))
+              const matches = tables[table].filter((r) => filters.every(([c, v]) => r[c] === v))
+              if (matches.length > 1) {
+                return { data: null, error: { code: 'PGRST116', message: 'multiple rows returned' } }
+              }
+              const [row] = matches
               return { data: row ? project(row, columns) : null, error: null }
             },
           }
@@ -130,6 +138,18 @@ function configRow(info: unknown): Row {
   return { id: 'config-1', venue_id: VENUE_ID, venue_info: info }
 }
 
+// Another venue on its own number, with its own QR message and a guest who
+// has the same phone number. Seeded into every test, so both lookups have to
+// be scoped to the venue: the guest lookup, or this venue's guest would be
+// found and nobody enrolled; the config lookup, or two rows match and the
+// scan reads as a failed lookup.
+const NEIGHBOUR_ID = 'venue-2'
+const NEIGHBOUR_ROWS: Partial<Record<Table, Row[]>> = {
+  venues: [{ id: NEIGHBOUR_ID, messaging_phone_number: '+15550008888' }],
+  venue_configs: [{ id: 'config-2', venue_id: NEIGHBOUR_ID, venue_info: venueInfo('Hi neighbour!') }],
+  guests: [{ id: 'guest-elsewhere', venue_id: NEIGHBOUR_ID, phone_number: GUEST_NUMBER, created_via: 'qr_scan' }],
+}
+
 function inbound(content: string | null, handle = 'handle-1'): Request {
   const payload = {
     accountEmail: 'ops@example.com',
@@ -163,7 +183,10 @@ function newGuestRow(createdVia: 'qr_scan' | 'inbound_message'): Record<string, 
 let store: ReturnType<typeof createStore>
 
 function useStore(seed: Partial<Record<Table, Row[]>>): void {
-  store = createStore(seed)
+  const tables: Table[] = ['venues', 'guests', 'venue_configs', 'messages']
+  store = createStore(
+    Object.fromEntries(tables.map((t) => [t, [...(NEIGHBOUR_ROWS[t] ?? []), ...(seed[t] ?? [])]])),
+  )
   mocks.createAdminClient.mockReturnValue(store.client)
 }
 
@@ -204,11 +227,14 @@ describe('Sendblue inbound: a new guest who sends the venue QR message', () => {
     expect(store.inserted('guests')).toEqual([newGuestRow('qr_scan')])
   })
 
-  it('saves the message itself exactly as before, with no channel of its own', async () => {
+  // The whole row as the route writes it today. It names no channel, relying
+  // on messages.channel's 'text' default; TAC-472 changes that on purpose, and
+  // this assertion should change with it.
+  it('saves the message row as the route writes it today', async () => {
     useStore({ venues: [VENUE], venue_configs: [configRow(venueInfo(ENROLLMENT))] })
     await POST(inbound(ENROLLMENT))
 
-    const [guest] = store.tables.guests
+    const guest = store.tables.guests.find((g) => g.venue_id === VENUE_ID)
     expect(store.inserted('messages')).toEqual([
       {
         venue_id: VENUE_ID,
@@ -244,9 +270,11 @@ describe('Sendblue inbound: a new guest who sends anything else', () => {
     expect(store.inserted('guests')).toEqual([newGuestRow('inbound_message')])
   })
 
-  it('is created as inbound_message when the stored QR message is blank', async () => {
+  // Both blank, so they are equal once trimmed: only the route's two blank
+  // guards keep this from reading as a scan.
+  it('is created as inbound_message when the stored QR message and the body are both blank', async () => {
     useStore({ venues: [VENUE], venue_configs: [configRow(venueInfo('   '))] })
-    await POST(inbound('   hi'))
+    await POST(inbound('   '))
 
     expect(store.inserted('guests')).toEqual([newGuestRow('inbound_message')])
   })
@@ -282,7 +310,7 @@ describe('Sendblue inbound: a guest the venue already has', () => {
 
     expect(store.inserted('guests')).toEqual([])
     expect(store.reads.some((r) => r.table === 'venue_configs')).toBe(false)
-    expect(store.tables.guests).toEqual([existing])
+    expect(store.tables.guests.filter((g) => g.venue_id === VENUE_ID)).toEqual([existing])
     expect(store.inserted('messages')).toMatchObject([{ guest_id: 'guest-1', body: ENROLLMENT }])
   })
 })

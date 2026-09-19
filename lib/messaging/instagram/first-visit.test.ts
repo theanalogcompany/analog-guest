@@ -1,21 +1,31 @@
 // TAC-492: from Meta's recorded delivery to the first-visit behaviours.
 //
-// The handler saves a delivery into the test store, and the rows it wrote are
+// The handler saves a delivery into the test store, and what it wrote is
 // handed to the REAL gate the agent uses for the opener,
 // computeFirstTouchAfterQrScan (lib/agent/stages.ts). Nothing here restates
 // that gate, so a guest the handler labels wrongly, or a gate that stops
 // reading created_via, fails this test.
 //
-// What it does NOT cover, stated so it isn't assumed: understand_order. Its
-// arming turns created_via 'qr_scan' into the confirmed-visit date inside
-// buildRuntimeContext, which nothing runs for real under test. That link is
-// pinned by the source-level test in lib/agent/build-runtime-context.test.ts
-// ("resolves it from QR enrollment ..."), and the arming itself by
-// lib/agent/intentions/derive.test.ts ("arms understand_order on a confirmed
-// visit ..."). Together with the created_via this test proves, those are the
-// chain. Restating the mapping here would only prove derive works on a date
-// this file computed. The end-to-end proof is device QA once TAC-469 turns
-// the agent on for Instagram guests.
+// Of the four things the gate reads, only created_via comes from the handler.
+// A saved message is what makes currentMessage non-null; recentMessages ([])
+// and createdAt (the database default, now) are set here, as they would be on
+// a guest's first message.
+//
+// What is NOT tested, stated so it isn't assumed:
+//   - buildRuntimeContext reading guests.created_via into ctx.guest.createdVia
+//     (its select and its mapping). Nothing runs buildRuntimeContext for real
+//     under test. The code predates TAC-492 and Sendblue guests go through it
+//     too.
+//   - understand_order. Its arming turns created_via 'qr_scan' into the
+//     confirmed-visit date inside buildRuntimeContext. That line is pinned by
+//     the source-level test in lib/agent/build-runtime-context.test.ts
+//     ("resolves it from QR enrollment ..."), and the arming itself by
+//     lib/agent/intentions/derive.test.ts ("arms understand_order on a
+//     confirmed visit ..."). With the created_via this test proves, those are
+//     the chain, less the first link above. Restating the mapping here would
+//     only prove derive works on a date this file computed.
+// The end-to-end proof is device QA once TAC-469 turns the agent on for
+// Instagram guests.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -96,8 +106,11 @@ describe('the first-visit opener for an Instagram guest', () => {
   })
 
   // The gate's other conditions apply to Instagram exactly as to Sendblue.
-  // One case, to show the qr_scan label alone doesn't bypass them.
-  it('does not fire once the thread already has a message, such as a staff reply', async () => {
+  // One case, to show the qr_scan label alone doesn't bypass them. This tests
+  // the gate only, on a history built here. That a staff echo reaches that
+  // history holds by reading the query (build-runtime-context.ts: venue,
+  // guest, non-empty body, no channel or direction filter), not by this test.
+  it('does not fire once the thread already has a message', async () => {
     const ctx = await firstTurnContext(fixture('postback-referral'))
     const withReply = {
       ...ctx,
