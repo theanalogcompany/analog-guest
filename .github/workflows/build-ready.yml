@@ -608,9 +608,10 @@ jobs:
             2c). Checking first finds his own question still there and
             ignores his answer. Then continue from where the earlier
             session stopped. Do not change the status. If the ticket's
-            branch is on GitHub, check it out (work-ticket.md Phase 3 step
-            14) and read `git log` and `git diff` against main to establish
-            what is already done.
+            branch is on GitHub, do not check it out: read what is already
+            done from GitHub's copy, and continue it in the side folder
+            ${{ github.workspace }}/.worktrees/resume, by that absolute path
+            and never with cd (work-ticket.md Phase 3 step 14).
 
             When it is not — the newest comment is a plain chat comment and
             nothing else is new — post [POLLING-ACK] per work-ticket.md's
