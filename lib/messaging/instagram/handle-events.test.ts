@@ -97,6 +97,7 @@ describe('a guest message', () => {
         guestCreated: true,
         hasReferral: false,
         hasProviderSentAt: true,
+        titlelessPostback: false,
         guestCreatedVia: 'inbound_message',
       },
     ])
@@ -195,7 +196,7 @@ describe('an icebreaker postback', () => {
         referral_source: 'SHORTLINK',
       },
     ])
-    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', hasReferral: true }])
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', hasReferral: true, titlelessPostback: false }])
   })
 
   it('creates the guest when a postback is their first action', async () => {
@@ -220,8 +221,33 @@ describe('an icebreaker postback', () => {
         },
       ],
     }
-    await processInstagramDelivery(payload, db.client)
+    const outcomes = await processInstagramDelivery(payload, db.client)
     expect(db.inserts('messages')).toMatchObject([{ direction: 'inbound', channel: 'instagram', body: '' }])
+    // TAC-469: saved, and flagged, so the agent gate skips it (an empty
+    // message is nothing to reply to) while the window still opens.
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', titlelessPostback: true }])
+  })
+
+  it('treats a whitespace-only title as no title', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [
+            {
+              sender: { id: GUEST_IGSID },
+              recipient: { id: ACCOUNT_ID },
+              timestamp: 1,
+              postback: { mid: 'p2', title: '   ', payload: 'X' },
+            },
+          ],
+        },
+      ],
+    }
+    expect(await processInstagramDelivery(payload, db.client)).toMatchObject([{ titlelessPostback: true }])
   })
 })
 
@@ -603,12 +629,12 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
     ],
     [
-      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
-      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
+      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
+      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
