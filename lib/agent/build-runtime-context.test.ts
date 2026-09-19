@@ -247,15 +247,16 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     // number without naming either column.
     expect(warn).not.toMatch(/\bguestRow\b(?!\.)/)
     expect(warn).not.toMatch(/\bguestRow\./)
-    // And not under any other name or shape either: every line of the payload
-    // is pinned, from the object's own brace, so a new key, a quoted key or a
-    // spread (...guestResult.data logs the whole row) fails here.
-    const payload = warn.slice(warn.indexOf('{', warn.indexOf('console.warn(')) + 1)
-    const lines = payload
+    // And not under any other name or shape either: every line of the call is
+    // pinned, so a new key, a quoted key, a spread (...guestResult.data logs
+    // the whole row) or an extra argument before the object fails here.
+    const call = warn.slice(warn.indexOf('console.warn('))
+    const lines = call
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '')
     expect(lines).toEqual([
+      "console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {",
       'agentRunId: input.agentRunId,',
       'venueId: input.venueId,',
       'guestId: input.guestId,',
