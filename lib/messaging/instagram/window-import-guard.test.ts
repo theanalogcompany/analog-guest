@@ -22,6 +22,17 @@ const INSTAGRAM_OUTBOUND_MODULES = ['window', 'send', 'send-target', 'reply-chec
 const ALLOWED_IMPORTERS = [
   join('lib', 'agent', 'dispatch-instagram-reply.ts'),
   join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
+  // TAC-469's one-off smoke test, run by hand against a test account. It is
+  // the only thing that can settle whether the Send API's message_id is the
+  // echo's mid, which every reconciliation on both arms rests on.
+  join('scripts', 'instagram-send-smoke.ts'),
+  // The smoke test's own pure half. It imports the send failure-kind UNION as a
+  // type, to key a total map deciding which refusals are evidence about the
+  // byte cap and which say nothing about it. Declaring that union locally
+  // instead would be a second copy of Meta's failure vocabulary, and the
+  // totality is the guard: a new kind has to be decided about rather than
+  // read as a size refusal, which is the bug that put this entry here.
+  join('scripts', 'lib', 'instagram-smoke.ts'),
 ]
 
 function sourceFiles(): string[] {
@@ -93,6 +104,8 @@ describe('Instagram outbound stays on the Instagram side (TAC-469 rule 1)', () =
   // The Instagram arm must never reach the phone-number provider's transport,
   // its read receipts, or its number lookup, which fails closed without one.
   it.each(ALLOWED_IMPORTERS)('keeps %s off the Sendblue transport and the phone-number lookup', (file) => {
+    // Applies to the smoke script too: it must exercise the Instagram path and
+    // nothing else, or it would prove the wrong thing.
     const source = readFileSync(join(ROOT, file), 'utf8')
     expect(source).not.toMatch(/from '@\/lib\/messaging'/)
     expect(source).not.toMatch(/from '@\/lib\/messaging\/(send|expressions|venue-lookup|sendblue-client)'/)
