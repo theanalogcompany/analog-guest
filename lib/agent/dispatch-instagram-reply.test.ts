@@ -221,6 +221,23 @@ describe('dispatchInstagramReply: what the row says it answers', () => {
     )
     expect(savedRows(d)[0]!.reply_to_message_id).toBe('question-1')
   })
+
+  // EVERY row, not just the first: a holding message is often two sentences
+  // and the coin splits it, and a second row naming nothing would silence the
+  // agent's next reply exactly as the first one would have.
+  it('names it on every message of a split holding message', async () => {
+    const d = deps()
+    const ctx = { ...makeCtx(), currentMessage: null } as RuntimeContext
+    await dispatchInstagramReply(
+      ctx,
+      generation('Still checking on that. I will come back to you.'),
+      { replyCheck: { inboundMessageId: 'question-1' }, answersInboundId: 'question-1', onUndelivered: 'none', rng: SPLIT },
+      d,
+    )
+    const rows = savedRows(d)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.reply_to_message_id)).toEqual(['question-1', 'question-1'])
+  })
 })
 
 describe('dispatchInstagramReply: what reached the guest', () => {

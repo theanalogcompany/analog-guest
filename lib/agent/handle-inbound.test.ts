@@ -1667,6 +1667,36 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-8' }))
   })
 
+  // The load-bearing half of the delivered-body fix: the RECORDER decides which
+  // intentions close. An ask that sat in the message that never went out must
+  // not close one.
+  it('records the ask against what reached the guest, not the whole reply', async () => {
+    setUpSendDecision()
+    buildRuntimeContextMock.mockResolvedValue({
+      ...instagramCtx(),
+      openIntentions: [
+        {
+          key: 'learn_name',
+          promptLine: "You don't know this guest's name yet.",
+          eligibleAt: new Date('2026-09-13T12:00:00.000Z'),
+        },
+      ],
+    })
+    recordIntentionPromptsMock.mockResolvedValue({ kind: 'recorded', raisedKeys: [], classifierAttempts: 1 })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'ig-row-1',
+      providerMessageId: 'mid-1',
+      generationId: 'gen-1',
+      bubbleCount: 1,
+      deliveredBody: 'first half',
+      undelivered: { reason: 'rate_limited', cardId: 'card-8' },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(recordIntentionPromptsMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
+    expect(captureIntentionPromptRaisedMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
+  })
+
   it('a message staff already answered in the app sends nothing, pushes nothing, records nothing (rule 3)', async () => {
     setUpSendDecision()
     dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
