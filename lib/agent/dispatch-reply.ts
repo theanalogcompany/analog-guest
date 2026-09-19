@@ -50,7 +50,10 @@ export async function dispatchReply(
         rng: options.rng,
         renderedIntentions: options.renderedIntentions,
       })
-      return { kind: 'sent', ...sent, undelivered: null }
+      // The text arm sends the whole reply or throws, so what was delivered is
+      // the generated body, verbatim: recording on this path is byte-for-byte
+      // what it was before TAC-469.
+      return { kind: 'sent', ...sent, deliveredBody: generation.body, undelivered: null }
     }
     case 'instagram':
       return dispatchInstagramReply(ctx, generation, options)

@@ -357,7 +357,7 @@ export async function dispatchOperatorOutbound(
         error: await settleFailedInstagramOperatorSend(supabase, {
           messageId: row.id,
           flippedTo: targetReviewState,
-          kind: sent.kind,
+          sent,
         }),
       }
     }
@@ -372,7 +372,10 @@ export async function dispatchOperatorOutbound(
       return {
         ok: false,
         errorCode: 'db_error',
-        error: `dispatch metadata stamp failed: ${stamped.error} (providerMessageId=${sent.mid})`,
+        // No mid in the message, unlike the Sendblue arm below: a mid encodes
+        // the account, conversation and message IDs, and this string reaches
+        // the route's 500 body (TAC-458). The row id identifies the card.
+        error: `dispatch metadata stamp failed for message=${row.id}: ${stamped.error}`,
       }
     }
     providerMessageId = sent.mid

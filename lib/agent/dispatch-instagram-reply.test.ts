@@ -199,6 +199,51 @@ describe('dispatchInstagramReply: the window is open', () => {
   })
 })
 
+describe('dispatchInstagramReply: what the row says it answers', () => {
+  it("names the run's own inbound by default", async () => {
+    const d = deps()
+    await dispatchInstagramReply(makeCtx(), generation('Open until 3'), INBOUND_REPLY, d)
+    expect(savedRows(d)[0]!.reply_to_message_id).toBe('in-1')
+  })
+
+  // The holding message's context has no currentMessage, so without this the
+  // row would name nothing, and the reply check reads a row naming nothing as
+  // answering everything before it: the holding message would silence the
+  // agent's own reply to whatever the guest asked while it was written.
+  it('names the question a holding message is holding, not nothing', async () => {
+    const d = deps()
+    const ctx = { ...makeCtx(), currentMessage: null } as RuntimeContext
+    await dispatchInstagramReply(
+      ctx,
+      generation('still checking on that'),
+      { replyCheck: { inboundMessageId: 'question-1' }, answersInboundId: 'question-1', onUndelivered: 'none' },
+      d,
+    )
+    expect(savedRows(d)[0]!.reply_to_message_id).toBe('question-1')
+  })
+})
+
+describe('dispatchInstagramReply: what reached the guest', () => {
+  it('reports the whole reply when it all went out', async () => {
+    const d = deps()
+    const result = await dispatchInstagramReply(makeCtx(), generation('Open until 3. Oat milk too.'), { ...INBOUND_REPLY, rng: SPLIT }, d)
+    expect(result).toMatchObject({ kind: 'sent', deliveredBody: 'Open until 3 Oat milk too' })
+  })
+
+  // What the intention recorder judges: an ask that sat in the message that
+  // never went out must not be recorded as asked.
+  it('reports only the messages that went out when a later one failed', async () => {
+    let n = 0
+    const d = deps({
+      sendText: vi.fn(async () =>
+        ++n === 1 ? { ok: true as const, mid: 'mid-1' } : { ok: false as const, kind: 'rate_limited' as const, failure: null },
+      ),
+    })
+    const result = await dispatchInstagramReply(makeCtx(), generation('Open until 3. Oat milk too.'), { ...INBOUND_REPLY, rng: SPLIT }, d)
+    expect(result).toMatchObject({ kind: 'sent', deliveredBody: 'Open until 3' })
+  })
+})
+
 describe('dispatchInstagramReply: the window is closed', () => {
   it("cards the whole reply when the guest's last action is over 24 hours old, sending nothing", async () => {
     const d = deps({
@@ -324,6 +369,30 @@ describe('dispatchInstagramReply: send failures become cards (rule 4)', () => {
     )
   })
 
+  it('marks a Meta 5xx as possibly delivered: its side failed, it may have taken the message', async () => {
+    const d = deps({
+      sendText: vi.fn(async () => ({
+        ok: false as const,
+        kind: 'graph_error' as const,
+        failure: { reason: 'graph_error' as const, httpStatus: 503, code: 2, subcode: null, type: 'OAuthException', fbtraceId: null },
+      })),
+    })
+    await dispatchInstagramReply(makeCtx(), generation('hi'), INBOUND_REPLY, d)
+    expect(captureSendFailedMock).toHaveBeenCalledWith(expect.objectContaining({ reason: 'graph_error', outcomeUnknown: true }))
+  })
+
+  it('marks a Meta 4xx as definitely not delivered', async () => {
+    const d = deps({
+      sendText: vi.fn(async () => ({
+        ok: false as const,
+        kind: 'graph_error' as const,
+        failure: { reason: 'graph_error' as const, httpStatus: 400, code: 100, subcode: null, type: 'IGApiException', fbtraceId: null },
+      })),
+    })
+    await dispatchInstagramReply(makeCtx(), generation('hi'), INBOUND_REPLY, d)
+    expect(captureSendFailedMock).toHaveBeenCalledWith(expect.objectContaining({ outcomeUnknown: false }))
+  })
+
   it('marks a timed-out send as possibly delivered', async () => {
     const d = deps({ sendText: vi.fn(async () => ({ ok: false as const, kind: 'timeout' as const, failure: { reason: 'timeout' as const } })) })
     await dispatchInstagramReply(makeCtx(), generation('hi'), INBOUND_REPLY, d)
@@ -397,6 +466,21 @@ describe('dispatchInstagramReply: the reply check (rule 3)', () => {
     expect(captureSupersededMock).toHaveBeenCalledWith(
       expect.objectContaining({ inboundMessageId: 'in-1', answeredByMessageId: 'echo-1' }),
     )
+  })
+
+  // Runs before the window and the configuration checks: a message staff
+  // already answered needs no card, however the rest of the send would have
+  // gone. With a missing token, every inbound would otherwise card a reply.
+  it('is checked before the window and the account, so an answered message cards nothing', async () => {
+    const d = deps({
+      findReplyToInbound: vi.fn(async () => ({ ok: true as const, value: { id: 'echo-1' } })),
+      loadTarget: vi.fn(async () => ({ ok: false as const, problem: 'token_missing' as const })),
+      loadLastGuestActionAt: vi.fn(async () => ({ ok: true as const, value: null })),
+    })
+    const result = await dispatchInstagramReply(makeCtx(), generation('hi'), INBOUND_REPLY, d)
+    expect(result).toEqual({ kind: 'superseded', byMessageId: 'echo-1' })
+    expect(d.writeCard).not.toHaveBeenCalled()
+    expect(captureSendFailedMock).not.toHaveBeenCalled()
   })
 
   it('asks about the message this reply answers', async () => {

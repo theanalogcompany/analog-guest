@@ -39,8 +39,7 @@ import {
   fitsInstagramTextCap,
   INSTAGRAM_MAX_TEXT_BYTES,
   sendInstagramText,
-  sendOutcomeUnknown,
-  type InstagramSendFailureKind,
+  sendResultOutcomeUnknown,
   type InstagramSendResult,
 } from '@/lib/messaging/instagram/send'
 import { loadInstagramSendTarget, type InstagramSendTarget } from '@/lib/messaging/instagram/send-target'
@@ -141,13 +140,18 @@ export async function restoreCardAfterRefusedSend(
  */
 export async function settleFailedInstagramOperatorSend(
   supabase: AdminSupabaseClient,
-  input: { messageId: string; flippedTo: string; kind: InstagramSendFailureKind },
+  input: { messageId: string; flippedTo: string; sent: Extract<InstagramSendResult, { ok: false }> },
 ): Promise<string> {
-  if (sendOutcomeUnknown(input.kind)) {
-    return `Instagram didn't confirm this send (${input.kind}). Check the thread before sending again.`
+  const { kind } = input.sent
+  if (sendResultOutcomeUnknown(input.sent)) {
+    return `Instagram didn't confirm this send (${kind}). Check the thread before sending again.`
   }
   const restored = await restoreCardAfterRefusedSend(supabase, { messageId: input.messageId, flippedTo: input.flippedTo })
-  return `Instagram refused this send (${input.kind}).${restored ? ' The card is back in the queue.' : ''}`
+  if (restored) return `Instagram refused this send (${kind}). The card is back in the queue.`
+  // The likeliest reason the card can't go back is migration 041: a message
+  // the guest sent while this was in flight queued a card into the same slot.
+  // The operator's text is out of the queue, so say what to do about it.
+  return `Instagram refused this send (${kind}). This card could not go back in the queue, so its text has to be retyped.`
 }
 
 /**

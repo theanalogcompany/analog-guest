@@ -658,7 +658,13 @@ describe('handleHoldingMessage — Instagram (TAC-469)', () => {
     expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ replyCheck: { inboundMessageId: QUESTION_MESSAGE_ID }, onUndelivered: 'none' }),
+      expect.objectContaining({
+        replyCheck: { inboundMessageId: QUESTION_MESSAGE_ID },
+        // The row names the question, so it can't read as an answer to
+        // whatever the guest asked while it was being written.
+        answersInboundId: QUESTION_MESSAGE_ID,
+        onUndelivered: 'none',
+      }),
     )
   })
 

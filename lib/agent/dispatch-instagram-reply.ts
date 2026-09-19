@@ -18,15 +18,16 @@
 //      WHOLE sentences. Never truncated: a reply that can't be repacked (one
 //      sentence over the cap, or more than MAX_BUBBLES_PER_RESPONSE messages)
 //      is not sent at all and becomes a card.
-//   2. Load the venue's account, the guest's scoped ID and the token. Missing
-//      any of them: a card.
-//   3. The window (a guard, not a router: an inbound reply is inside it by
-//      definition). Closed: a card. Unreadable: sent anyway, and Meta decides.
-//   4. The reply check (rule 3): if the guest's message already has a reply,
-//      usually one staff typed in the Instagram app, send nothing. The
+//   2. The reply check (rule 3): if the guest's message already has a reply,
+//      usually one staff typed in the Instagram app, send nothing. First,
+//      because an answered message needs no card however the rest goes. The
 //      crisis-safety reply is exempt (ruled 2026-09-19): silencing it leaves
 //      someone in crisis with nothing, while a duplicate gives them resources
 //      twice. Unreadable: sent anyway, since two answers beat none.
+//   3. Load the venue's account, the guest's scoped ID and the token. Missing
+//      any of them: a card.
+//   4. The window (a guard, not a router: an inbound reply is inside it by
+//      definition). Closed: a card. Unreadable: sent anyway, and Meta decides.
 //   5. Send each message, re-checking the window before each one, and save it.
 //      Our own row usually lands first; when Meta's echo got there first, the
 //      insert collides on provider_message_id and we fill in that echo row
@@ -49,8 +50,7 @@ import { findReplyToInbound } from '@/lib/messaging/instagram/reply-check'
 import {
   fitsInstagramTextCap,
   sendInstagramText,
-  sendOutcomeUnknown,
-  type InstagramSendFailureKind,
+  sendResultOutcomeUnknown,
   type InstagramSendResult,
 } from '@/lib/messaging/instagram/send'
 import { loadInstagramSendTarget, type InstagramSendTargetResult } from '@/lib/messaging/instagram/send-target'
@@ -262,6 +262,16 @@ export interface InstagramReplyOptions {
   /** The guest message this reply answers, for the reply check; 'exempt' skips the check (crisis-safety). */
   replyCheck: { inboundMessageId: string } | 'exempt'
   /**
+   * The inbound this reply answers, written to `reply_to_message_id`. Only the
+   * holding message passes it: its context has no currentMessage, so the row
+   * would otherwise name no inbound, and the reply check reads a row naming
+   * none as answering EVERYTHING before it (the rule for staff replies typed
+   * in the app). A holding message that named nothing would silence the
+   * agent's own reply to a question the guest asked after it, which is the one
+   * thing that rule must never do. Defaults to the run's own inbound.
+   */
+  answersInboundId?: string
+  /**
    * What a reply that didn't go out becomes. 'card' for an inbound reply;
    * 'none' for the holding message, whose knowledge-gap card already holds the
    * guest's place in the queue.
@@ -276,6 +286,12 @@ export type InstagramReplyOutcome =
       providerMessageId: string
       generationId: string
       bubbleCount: number
+      /**
+       * The text that actually reached the guest, which is the whole reply
+       * unless a later message failed. What the intention recorder judges, so
+       * an ask that sat in an undelivered message is not recorded as asked.
+       */
+      deliveredBody: string
       /** The rest of a split reply that didn't go out, and the card it became. */
       undelivered: { reason: string; cardId: string | null } | null
     }
@@ -331,8 +347,13 @@ function failure(reason: string, windowRemainingMs: number | null = null): Failu
   return { reason, windowRemainingMs, meta: null, outcomeUnknown: false }
 }
 
-function sendFailure(kind: InstagramSendFailureKind, meta: GraphFailure | null, windowRemainingMs: number | null): Failure {
-  return { reason: kind, windowRemainingMs, meta, outcomeUnknown: sendOutcomeUnknown(kind) }
+function sendFailure(sent: Extract<InstagramSendResult, { ok: false }>, windowRemainingMs: number | null): Failure {
+  return {
+    reason: sent.kind,
+    windowRemainingMs,
+    meta: sent.failure,
+    outcomeUnknown: sendResultOutcomeUnknown(sent),
+  }
 }
 
 export async function dispatchInstagramReply(
@@ -394,20 +415,9 @@ export async function dispatchInstagramReply(
   if (!fit.ok) return wholeReplyFailed(failure(fit.reason), split.length)
   const bubbles = fit.bubbles
 
-  const target = await deps.loadTarget(ctx.venue.id, ctx.guest.id)
-  if (!target.ok) return wholeReplyFailed(failure(target.problem), bubbles.length)
-
-  const lastAction = await deps.loadLastGuestActionAt(ctx.venue.id, ctx.guest.id)
-  if (!lastAction.ok) {
-    console.warn('[agent] instagram window unreadable; sending and letting Meta decide', {
-      agentRunId: ctx.agentRunId,
-      error: lastAction.error,
-    })
-  } else {
-    const state = instagramWindowState(lastAction.value, deps.now())
-    if (!state.open) return wholeReplyFailed(failure('window_closed_by_gate', state.remainingMs), bubbles.length)
-  }
-
+  // The reply check runs BEFORE the window and the configuration checks: a
+  // message staff already answered needs no card, and with a missing token or
+  // a shut window every inbound would otherwise card a reply nobody needs.
   if (options.replyCheck !== 'exempt') {
     const answered = await deps.findReplyToInbound({
       venueId: ctx.venue.id,
@@ -431,6 +441,20 @@ export async function dispatchInstagramReply(
     }
   }
 
+  const target = await deps.loadTarget(ctx.venue.id, ctx.guest.id)
+  if (!target.ok) return wholeReplyFailed(failure(target.problem), bubbles.length)
+
+  const lastAction = await deps.loadLastGuestActionAt(ctx.venue.id, ctx.guest.id)
+  if (!lastAction.ok) {
+    console.warn('[agent] instagram window unreadable; sending and letting Meta decide', {
+      agentRunId: ctx.agentRunId,
+      error: lastAction.error,
+    })
+  } else {
+    const state = instagramWindowState(lastAction.value, deps.now())
+    if (!state.open) return wholeReplyFailed(failure('window_closed_by_gate', state.remainingMs), bubbles.length)
+  }
+
   const generationId = randomUUID()
   const persistedIds: string[] = []
   let firstMid: string | null = null
@@ -452,7 +476,7 @@ export async function dispatchInstagramReply(
 
     const sent = await deps.sendText({ ...target.target, text: bubbles[index]! })
     if (!sent.ok) {
-      stopped = sendFailure(sent.kind, sent.failure, remainingMs)
+      stopped = sendFailure(sent, remainingMs)
       break
     }
     sentCount += 1
@@ -467,6 +491,10 @@ export async function dispatchInstagramReply(
         review_reason: options.reviewReason ?? null,
         sent_at: deps.now().toISOString(),
         provider_message_id: sent.mid,
+        // See answersInboundId: the holding message names the question it is
+        // holding, so it can't read as an answer to anything the guest sends
+        // after it.
+        ...(options.answersInboundId !== undefined ? { reply_to_message_id: options.answersInboundId } : {}),
         // First row of the response only, as on the text arm (TAC-436).
         rendered_intentions:
           index === 0 && options.renderedIntentions !== undefined
@@ -514,6 +542,7 @@ export async function dispatchInstagramReply(
     providerMessageId: firstMid!,
     generationId,
     bubbleCount: persistedIds.length,
+    deliveredBody: bubbles.slice(0, sentCount).join(' '),
     undelivered,
   }
 }

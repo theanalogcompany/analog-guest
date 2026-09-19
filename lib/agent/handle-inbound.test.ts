@@ -1612,6 +1612,7 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
       providerMessageId: 'mid-1',
       generationId: 'gen-1',
       bubbleCount: 1,
+      deliveredBody: 'ok',
       undelivered: null,
     })
     const r = await handleInbound(INBOUND_ID)
@@ -1658,6 +1659,7 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
       providerMessageId: 'mid-1',
       generationId: 'gen-1',
       bubbleCount: 1,
+      deliveredBody: 'first half',
       undelivered: { reason: 'rate_limited', cardId: 'card-8' },
     })
     const r = await handleInbound(INBOUND_ID)
@@ -1686,6 +1688,27 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     expect(await handleInbound(INBOUND_ID)).toEqual({ status: 'failed', stage: 'persist', error: 'persist_failed' })
   })
 
+  // The fixed crisis body is two sentences, so on Instagram it can dispatch as
+  // two messages, and the resource line is the second one. If the rest didn't
+  // go out, the operator must be pushed: this is the turn where silence is
+  // worst.
+  it('pushes for the card when only part of the crisis-safety reply went out', async () => {
+    buildRuntimeContextMock.mockResolvedValue(instagramCtx())
+    classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'crisis-ig',
+      providerMessageId: 'mid-c',
+      generationId: 'gen-c',
+      bubbleCount: 1,
+      deliveredBody: 'first half',
+      undelivered: { reason: 'rate_limited', cardId: 'card-crisis' },
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'crisis-ig' })
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-crisis' }))
+  })
+
   it('exempts the crisis-safety reply from the reply check (ruled 2026-09-19)', async () => {
     buildRuntimeContextMock.mockResolvedValue(instagramCtx())
     classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
@@ -1695,6 +1718,7 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
       providerMessageId: 'mid-c',
       generationId: 'gen-c',
       bubbleCount: 1,
+      deliveredBody: 'resources',
       undelivered: null,
     })
     const r = await handleInbound(INBOUND_ID)

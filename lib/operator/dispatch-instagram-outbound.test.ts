@@ -173,21 +173,71 @@ describe('stampInstagramOperatorSend: the echo got here first (rule 6)', () => {
 })
 
 describe('settleFailedInstagramOperatorSend', () => {
+  const refused = (kind: 'window_closed' | 'rate_limited') => ({ ok: false as const, kind, failure: null })
+
   it('puts the card back when Meta definitely refused, and says so', async () => {
     const { client, queries } = queryRecorder({ messages: [{ data: [{ id: 'card-1' }], error: null }] })
-    expect(await settleFailedInstagramOperatorSend(client, { messageId: 'card-1', flippedTo: 'approved', kind: 'window_closed' })).toBe(
-      'Instagram refused this send (window_closed). The card is back in the queue.',
-    )
+    expect(
+      await settleFailedInstagramOperatorSend(client, { messageId: 'card-1', flippedTo: 'approved', sent: refused('window_closed') }),
+    ).toBe('Instagram refused this send (window_closed). The card is back in the queue.')
     expect(queries).toHaveLength(1)
+  })
+
+  // Migration 041: a message the guest sent while this was in flight can take
+  // the slot, so the card can't go back. The operator has to be told.
+  it('says the text has to be retyped when the card could not go back', async () => {
+    const { client } = queryRecorder({ messages: [{ data: [], error: null }] })
+    const message = await settleFailedInstagramOperatorSend(client, {
+      messageId: 'card-1',
+      flippedTo: 'approved',
+      sent: refused('rate_limited'),
+    })
+    expect(message).toContain('retyped')
+    expect(message).not.toContain('The card is back in the queue')
   })
 
   it.each(['timeout', 'network', 'malformed_response'] as const)(
     'leaves the card out after %s, since it may already be in the thread',
     async (kind) => {
       const { client, queries } = queryRecorder({})
-      const message = await settleFailedInstagramOperatorSend(client, { messageId: 'card-1', flippedTo: 'approved', kind })
+      const message = await settleFailedInstagramOperatorSend(client, {
+        messageId: 'card-1',
+        flippedTo: 'approved',
+        sent: { ok: false, kind, failure: null },
+      })
       expect(message).toContain('Check the thread')
       expect(queries).toHaveLength(0)
     },
   )
+
+  // Meta's own side failed: it may have accepted the message before it did.
+  it('leaves the card out after a Graph error carrying a 5xx', async () => {
+    const { client, queries } = queryRecorder({})
+    const message = await settleFailedInstagramOperatorSend(client, {
+      messageId: 'card-1',
+      flippedTo: 'approved',
+      sent: {
+        ok: false,
+        kind: 'graph_error',
+        failure: { reason: 'graph_error', httpStatus: 503, code: 2, subcode: null, type: 'OAuthException', fbtraceId: null },
+      },
+    })
+    expect(message).toContain('Check the thread')
+    expect(queries).toHaveLength(0)
+  })
+
+  it('puts the card back after a Graph error carrying a 4xx, which Meta did refuse', async () => {
+    const { client, queries } = queryRecorder({ messages: [{ data: [{ id: 'card-1' }], error: null }] })
+    const message = await settleFailedInstagramOperatorSend(client, {
+      messageId: 'card-1',
+      flippedTo: 'approved',
+      sent: {
+        ok: false,
+        kind: 'graph_error',
+        failure: { reason: 'graph_error', httpStatus: 400, code: 100, subcode: null, type: 'IGApiException', fbtraceId: null },
+      },
+    })
+    expect(message).toContain('back in the queue')
+    expect(queries).toHaveLength(1)
+  })
 })

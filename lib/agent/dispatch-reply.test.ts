@@ -56,6 +56,9 @@ describe('dispatchReply (TAC-469)', () => {
       providerMessageId: 'h1',
       generationId: 'g',
       bubbleCount: 1,
+      // The text arm sends the whole reply or throws, and reports the body
+      // verbatim, so intention recording on this path is what it always was.
+      deliveredBody: 'Open until 3',
       undelivered: null,
     })
     // Only scheduleAndSend's own options: nothing Instagram-shaped reaches the

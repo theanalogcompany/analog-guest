@@ -581,6 +581,19 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           return undeliveredAgentResult(ctx, dispatched)
         }
         const { outboundMessageId } = dispatched
+        // The fixed crisis body is two sentences, so on Instagram it can
+        // dispatch as two messages and the resource line is the second one. If
+        // it didn't all go out, the remainder is a card like any other and the
+        // operator is pushed: this is the turn where silence is worst.
+        if (dispatched.undelivered !== null) {
+          console.warn('[agent] crisis-safety reply partly delivered', {
+            agentRunId,
+            outboundMessageId,
+            reason: dispatched.undelivered.reason,
+            cardId: dispatched.undelivered.cardId,
+          })
+          if (dispatched.undelivered.cardId !== null) pushSendFailureCard(ctx, dispatched.undelivered.cardId)
+        }
         crisisSpan.end({ output: { outboundMessageId } })
         console.log('[agent] inbound crisis-safety reply sent', {
           agentRunId,
@@ -1455,7 +1468,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             venueId,
             guestId,
             messageId,
-            sentBody: gen.result.body,
+            // TAC-469: what REACHED the guest, which is the whole reply unless
+            // a later Instagram message failed. Recording an ask that sat in an
+            // undelivered message would close an intention the guest never saw.
+            sentBody: dispatched.deliveredBody,
             openIntentions: renderedIntentions,
             now: new Date(),
           })
@@ -1481,7 +1497,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
                   raisedKeys: outcome.raisedKeys,
                   offeredKeys: renderedIntentions.map((o) => o.key),
                   classifierAttempts: outcome.classifierAttempts,
-                  sentBody: gen.result.body,
+                  sentBody: dispatched.deliveredBody,
                 })
               } else if (outcome.kind === 'closed_pessimistically') {
                 // Ruling 4: nothing re-asks, but these closed without a

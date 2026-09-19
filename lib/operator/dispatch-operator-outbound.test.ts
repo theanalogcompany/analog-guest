@@ -342,7 +342,7 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     expect(settleFailedMock).toHaveBeenCalledWith(expect.anything(), {
       messageId: MESSAGE_ID,
       flippedTo: 'approved',
-      kind: 'window_closed',
+      sent: { ok: false, kind: 'window_closed', failure: null },
     })
     expect(stampInstagramMock).not.toHaveBeenCalled()
   })
@@ -353,6 +353,29 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     const r = await approve()
     expect(r).toMatchObject({ ok: false, errorCode: 'channel_unresolved' })
     expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  // The mutant this kills: `if (recipientPhone === null)` in place of
+  // `if (channel === 'instagram')` passed the whole suite, because every
+  // Instagram test used a phoneless guest and the text test a phoned one. A
+  // guest with BOTH identifiers is exactly what TAC-469's channel rule is for.
+  it("routes on the card's channel, not on whether the guest has a phone", async () => {
+    guestMaybeSingleMock.mockResolvedValue({ data: { phone_number: '+15555550123', opted_out_at: null }, error: null })
+    rowMaybeSingleMock.mockResolvedValue(instagramRow())
+    expect((await approve()).ok).toBe(true)
+    expect(sendInstagramMock).toHaveBeenCalled()
+    expect(sendMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('sends a text card to a guest who also has an Instagram ID over Sendblue', async () => {
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: '+15555550123', instagram_scoped_id: '1000000000000001', opted_out_at: null },
+      error: null,
+    })
+    rowMaybeSingleMock.mockResolvedValue(row('Open until 3'))
+    expect((await approve()).ok).toBe(true)
+    expect(sendMessageMock).toHaveBeenCalled()
+    expect(prepareInstagramMock).not.toHaveBeenCalled()
   })
 
   it('a text card never touches the Instagram arm', async () => {

@@ -81,9 +81,20 @@ export type InstagramSendResult =
   | { ok: true; mid: string }
   | { ok: false; kind: InstagramSendFailureKind; failure: GraphFailure | null }
 
-/** Whether Meta may have delivered a send that reported this failure. */
-export function sendOutcomeUnknown(kind: InstagramSendFailureKind): boolean {
-  return kind === 'timeout' || kind === 'network' || kind === 'malformed_response'
+/**
+ * Whether Meta may have delivered a send that reported this failure. A Graph
+ * error carrying a 5xx counts too: Meta's own side failed, and it may have
+ * accepted the message before it did.
+ */
+export function sendOutcomeUnknown(kind: InstagramSendFailureKind, httpStatus: number | null = null): boolean {
+  if (kind === 'timeout' || kind === 'network' || kind === 'malformed_response') return true
+  return kind === 'graph_error' && httpStatus !== null && httpStatus >= 500
+}
+
+/** The same question, asked of a whole failure result. */
+export function sendResultOutcomeUnknown(result: Extract<InstagramSendResult, { ok: false }>): boolean {
+  const status = result.failure?.reason === 'graph_error' ? result.failure.httpStatus : null
+  return sendOutcomeUnknown(result.kind, status)
 }
 
 export function classifySendFailure(failure: GraphFailure): InstagramSendFailureKind {

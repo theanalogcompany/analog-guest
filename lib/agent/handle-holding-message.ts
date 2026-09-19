@@ -105,6 +105,11 @@ async function dispatchHolding(
     // TAC-421 the only time it would add is the inter-bubble gap on a split.
     skipHumanFeelDelay: true,
     replyCheck: { inboundMessageId: questionMessageId },
+    // The row names the question it is holding. Without it the row names no
+    // inbound, which the reply check reads as answering everything before it,
+    // and a holding message would silence the agent's reply to whatever the
+    // guest asked while it was being written.
+    answersInboundId: questionMessageId,
     onUndelivered: 'none',
   })
   switch (outcome.kind) {
