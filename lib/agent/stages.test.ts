@@ -172,6 +172,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
     currentMessage: null,
     followupTrigger: null,
+    conversationChannel: 'text' as const,
     pendingQuestion: null,
     recentMessages: [],
     recognition: {} as RuntimeContext['recognition'],
@@ -1938,6 +1939,7 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
         body: 'what grade is the matcha?',
         providerMessageId: 'p1',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category: 'new_question',
@@ -2031,6 +2033,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         body: 'what are the four SoFi variations?',
         providerMessageId: 'p1',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category: 'new_question',
@@ -2331,6 +2334,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
         body: "what's the wifi password?",
         providerMessageId: 'p1',
         receivedAt: new Date(),
+        channel: 'text',
       },
       knowledgeCorpus: [],
       ...overrides,
@@ -2837,6 +2841,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         body: 'are you open till 6?',
         providerMessageId: 'p2',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category: 'new_question',
@@ -3012,6 +3017,7 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
         body: 'what grade is the matcha?',
         providerMessageId: 'p1',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category: 'new_question',
@@ -3059,12 +3065,25 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
   })
 })
 
+describe('generateStage — hands the conversation channel to generateMessage (TAC-495)', () => {
+  // The channel picks the channel copy in composePrompt. Every generation on
+  // every path goes through here (or the Voices regen, tested in its own file),
+  // so this is where a dropped or hardcoded channel would give every guest
+  // the same copy again.
+  it.each(['text', 'instagram', null] as const)('passes %s through unchanged', async (channel) => {
+    generateMessageMock.mockResolvedValue({ ok: true, data: makeGenerationResult({ voiceFidelity: 0.8 }) })
+    await generateStage(makeCtx({ corpus: [], conversationChannel: channel }), 'reply')
+    expect(generateMessageMock).toHaveBeenCalledWith(expect.objectContaining({ channel }))
+  })
+})
+
 describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)', () => {
   const inbound = {
     id: 'inbound-1',
     body: 'what grade is the matcha?',
     providerMessageId: 'p1',
     receivedAt: new Date(),
+    channel: 'text' as const,
   }
   const subFloorGap = () => ({
     ok: true,
@@ -3483,6 +3502,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
         body: 'what are the four SoFi variations?',
         providerMessageId: 'p1',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category: 'new_question',
@@ -3682,6 +3702,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
         body: 'what time do you open on sundaus',
         providerMessageId: 'p2',
         receivedAt: new Date(),
+        channel: 'text',
       },
       classification: {
         category,

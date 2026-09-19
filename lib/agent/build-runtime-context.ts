@@ -23,6 +23,7 @@ import {
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
+import { resolveConversationChannel } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { groupIntoResponses } from './group-responses'
 import {
@@ -161,7 +162,9 @@ export async function buildRuntimeContext(input: {
       .single(),
     supabase
       .from('guests')
-      .select('id, phone_number, first_name, created_at, created_via, is_demo, context, last_visit_at')
+      .select(
+        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, is_demo, context, last_visit_at',
+      )
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
@@ -342,6 +345,28 @@ export async function buildRuntimeContext(input: {
     // ignores this field for post_visit_* reasons (those anchor on
     // recentVisits[0]).
     lastVisitAt: guestRow.last_visit_at ? new Date(guestRow.last_visit_at) : null,
+  }
+
+  // TAC-495: the conversation's channel, for choosing prompt copy. Read from
+  // the guest's identifiers and the inbound message, never a venue setting;
+  // the rule and its table are in conversation-channel.ts. The Instagram ID is
+  // only tested for presence and never enters the context.
+  const channelResolution = resolveConversationChannel({
+    inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
+    hasPhone: guestRow.phone_number !== null,
+    hasInstagramId: guestRow.instagram_scoped_id !== null,
+  })
+  if (channelResolution.channel === null) {
+    console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {
+      agentRunId: input.agentRunId,
+      venueId: input.venueId,
+      guestId: input.guestId,
+      inboundMessageId: input.currentMessage?.id ?? null,
+      inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
+      hasPhone: guestRow.phone_number !== null,
+      hasInstagramId: guestRow.instagram_scoped_id !== null,
+      reason: channelResolution.unresolvedReason,
+    })
   }
 
   const recognition: RecognitionSnapshot = {
@@ -551,6 +576,7 @@ export async function buildRuntimeContext(input: {
     guest,
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
+    conversationChannel: channelResolution.channel,
     recentMessages,
     recognition,
     mechanics,

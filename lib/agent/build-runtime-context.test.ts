@@ -173,3 +173,39 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
     expect(call).not.toMatch(lastVisit)
   })
 })
+
+// TAC-495: the conversation's channel, which picks the prompt copy. Source-level
+// for the same reason as the blocks above. The rule itself is tested in
+// conversation-channel.test.ts; these check this file feeds it the right
+// inputs and returns its answer, which no behavioural test can reach.
+describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const callStart = src.indexOf('resolveConversationChannel({')
+  const call = src.slice(callStart, src.indexOf('})', callStart))
+
+  // Without the column, every guest would read as having no Instagram ID and
+  // an Instagram guest with no inbound message would resolve as unknown.
+  it('selects instagram_scoped_id with the guest', () => {
+    const guestQuery = src.slice(src.indexOf(".from('guests')"))
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(/\binstagram_scoped_id\b/)
+  })
+
+  it('resolves from the inbound message and the guest identifiers', () => {
+    expect(callStart).toBeGreaterThan(-1)
+    expect(call).toContain(
+      'inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,',
+    )
+    expect(call).toContain('hasPhone: guestRow.phone_number !== null,')
+    expect(call).toContain('hasInstagramId: guestRow.instagram_scoped_id !== null,')
+  })
+
+  it('returns the resolved channel on the context', () => {
+    expect(src).toContain('conversationChannel: channelResolution.channel,')
+  })
+
+  // The Instagram ID is only tested for presence. It must not ride on the
+  // context, where it would reach prompts, traces and logs.
+  it('keeps the Instagram ID itself out of the context', () => {
+    expect(src).not.toMatch(/instagramScopedId\s*:/)
+  })
+})

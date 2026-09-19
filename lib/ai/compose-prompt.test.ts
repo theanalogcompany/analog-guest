@@ -33,6 +33,7 @@ function makeInput(
     venueInfo: makeVenueInfo(),
     ragChunks: [],
     runtime: {},
+    channel: 'text',
     ...overrides,
   }
 }

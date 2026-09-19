@@ -92,6 +92,7 @@ function newDbState(overrides: Partial<DbMockState> = {}): DbMockState {
       direction: 'inbound',
       created_at: '2026-05-08T10:00:00.000Z',
       provider_message_id: 'sb_xyz',
+      channel: 'text',
     },
     outboundError: null,
     inboundError: null,
@@ -149,6 +150,7 @@ const baseCtx = {
     holdAllOutbound: false,
   },
   guest: { id: GUEST_ID },
+  conversationChannel: 'text' as const,
   recentMessages: [
     { direction: 'inbound' as const, body: 'hi', createdAt: new Date('2026-05-08T09:55:00Z') },
   ],
@@ -377,6 +379,45 @@ describe('regenerateWithCritique — happy path', () => {
         runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       }),
     )
+  })
+
+  // TAC-495: this file mirrors generateStage, and the channel is part of what
+  // it mirrors. Without these, the Voices playground would regenerate an
+  // Instagram guest's reply with the SMS copy and nobody would see why.
+  it("threads the triggering inbound's channel into buildRuntimeContext", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(
+        newDbState({
+          inboundRow: {
+            id: INBOUND_ID,
+            body: 'do you have oat milk',
+            direction: 'inbound',
+            created_at: '2026-05-08T10:00:00.000Z',
+            provider_message_id: 'sb_xyz',
+            channel: 'instagram',
+          },
+        }),
+      ) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
+    const call = vi.mocked(buildRuntimeContext).mock.calls[0][0]
+    expect(call.currentMessage?.channel).toBe('instagram')
+  })
+
+  it("passes the context's conversation channel to generateMessage", async () => {
+    vi.mocked(buildRuntimeContext).mockResolvedValue({
+      ...baseCtx,
+      conversationChannel: 'instagram',
+    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
+    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
+    expect(generateMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'instagram' }))
+  })
+
+  // The admin mock ignores select()'s argument, so only the source shows the
+  // column is loaded at all.
+  it('selects the channel column when loading the triggering inbound', async () => {
+    const src = await readFile(new URL('./regenerate-with-critique.ts', import.meta.url), 'utf-8')
+    expect(src).toContain(".select('id, body, created_at, provider_message_id, direction, channel')")
   })
 
   it('threads historyEndIso = inbound.created_at into buildRuntimeContext', async () => {

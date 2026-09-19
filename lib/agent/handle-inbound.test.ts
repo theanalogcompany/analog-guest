@@ -9,6 +9,8 @@
 //
 // Modelled on handle-operator-decline.test.ts (the sibling orchestrator test).
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ./stages pulls in @/lib/rag → voyageai, whose ESM build trips vitest's
@@ -248,8 +250,10 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       providerMessageId: 'p1',
       body: 'is rayan working tomorrow',
       receivedAt: new Date(),
+      channel: 'text',
     },
     followupTrigger: null,
+    conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
     recognition: { score: 0.5, state: 'regular', signals: {}, computedAt: new Date() },
@@ -279,6 +283,7 @@ beforeEach(() => {
       venue_id: VENUE_ID,
       guest_id: GUEST_ID,
       direction: 'inbound',
+      channel: 'text',
     },
     error: null,
   })
@@ -1157,6 +1162,73 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
 // `groundingBackstop` from the handleInbound call site would silently
 // disable the backstop for all live inbound traffic while every other test
 // in this file (and every pure-function test in stages.test.ts) kept passing.
+// TAC-495: the inbound row's channel is what picks the channel copy, so it has
+// to reach buildRuntimeContext intact. Two halves, because the supabase mock
+// above ignores its select() argument: the behavioural test proves the row's
+// value is carried through and parsed, the source test proves the column is
+// actually selected. Without the second, dropping `channel` from the select
+// would pass every test here while every real inbound arrived as unknown.
+describe('handleInbound — the inbound message carries its channel (TAC-495)', () => {
+  it('hands the row\'s channel to buildRuntimeContext on the current message', async () => {
+    inboundSingleMock.mockResolvedValue({
+      data: {
+        id: INBOUND_ID,
+        body: 'hi',
+        provider_message_id: 'p1',
+        created_at: new Date().toISOString(),
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        direction: 'inbound',
+        channel: 'instagram',
+      },
+      error: null,
+    })
+    generateStageMock.mockResolvedValue(GEN_FAILED)
+
+    await handleInbound(INBOUND_ID)
+
+    expect(buildRuntimeContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: expect.objectContaining({ channel: 'instagram' }),
+      }),
+    )
+  })
+
+  it('passes an unrecognized channel through as null, never as text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    inboundSingleMock.mockResolvedValue({
+      data: {
+        id: INBOUND_ID,
+        body: 'hi',
+        provider_message_id: 'p1',
+        created_at: new Date().toISOString(),
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        direction: 'inbound',
+        channel: 'sms',
+      },
+      error: null,
+    })
+    generateStageMock.mockResolvedValue(GEN_FAILED)
+
+    await handleInbound(INBOUND_ID)
+
+    expect(buildRuntimeContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: expect.objectContaining({ channel: null }),
+      }),
+    )
+    warn.mockRestore()
+  })
+
+  it('selects the channel column when loading the inbound row', () => {
+    const src = readFileSync(join(__dirname, 'handle-inbound.ts'), 'utf-8')
+    const load = src.slice(src.indexOf('async function loadInbound('), src.indexOf('async function findExistingReply('))
+    expect(load).toMatch(/\.select\('[^']*\bchannel\b[^']*'\)/)
+    expect(load).toContain('channel: parseMessageChannel(data.channel),')
+  })
+})
+
 // TAC-367. The positive half of the pair whose negatives live in
 // handle-holding-message.test.ts and handle-followup.test.ts: inbound SHOULD
 // retrieve, outbound should not. Stating it here makes the distinction a
