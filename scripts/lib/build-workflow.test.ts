@@ -188,11 +188,12 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
       },
     }
 
-    function candidates() {
-      const r = spawnSync('jq', ['-c', '--arg', 'repo', 'analog-guest', '--argjson', 'maxAttempts', '2', program], {
-        input: JSON.stringify(response),
-        encoding: 'utf8',
-      })
+    function candidates(pendingIds: string[] = []) {
+      const r = spawnSync(
+        'jq',
+        ['-c', '--arg', 'repo', 'analog-guest', '--argjson', 'maxAttempts', '2', '--argjson', 'pendingIds', JSON.stringify(pendingIds), program],
+        { input: JSON.stringify(response), encoding: 'utf8' },
+      )
       expect(r.stderr).toBe('')
       return JSON.parse(r.stdout)
     }
@@ -213,6 +214,20 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
       expect(resume.newestAt).toBe(RULING_AT)
       // The claim check reads the claims from here.
       expect(resume.comments).toHaveLength(3)
+    })
+
+    // TAC-453: a Ready, unblocked candidate whose thread still asks a
+    // question nothing answered must never become "start" — mutation-style,
+    // run against the SAME fixture and the SAME extracted jq program, so an
+    // empty pendingIds proves the clause is load-bearing rather than
+    // decorative (it selects TAC-448 either way; only $pendingIds decides
+    // whether it does).
+    it('excludes a Ready, unblocked candidate named in $pendingIds from "start"', () => {
+      expect(candidates(['TAC-448']).map((x: { identifier: string }) => x.identifier)).not.toContain('TAC-448')
+    })
+
+    it('selects the same candidate when $pendingIds is empty', () => {
+      expect(candidates([]).map((x: { identifier: string }) => x.identifier)).toContain('TAC-448')
     })
 
     it('hands the claim check what it needs, and the claim check skips TAC-396', () => {
@@ -251,13 +266,104 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
   })
 })
 
+describe('build-ready.yml refuses to start a ticket still waiting on an answer (TAC-453)', () => {
+  const PENDING_BLOCK = between(QUEUE, 'PENDING=$(echo "$RESPONSE"', '\n\n# Every candidate')
+  const LABEL_DRIFT = runBlock('Flag tickets whose blocking label was cleared without an answer')
+
+  it('runs before CANDIDATES decides mode', () => {
+    expect(QUEUE.indexOf('PENDING=$(echo "$RESPONSE"')).toBeLessThan(QUEUE.indexOf('CANDIDATES=$('))
+  })
+
+  it('runs after the ONE_TICKET dispatch early exit, which skips the selection entirely', () => {
+    const named = between(QUEUE, 'if [ -n "${ONE_TICKET:-}" ]; then', '  exit 0\nfi')
+    expect(named).not.toContain('PENDING')
+  })
+
+  it('never aborts the step: both reads that can fail have a fallback', () => {
+    // The candidate jq AND the pending-question script each need their own
+    // `|| echo '[]'` under `set -euo pipefail` — a fallback on only one
+    // leaves the other free to abort the step and skip tickets=$TICKETS,
+    // the same MAJOR the TAC-466 reconcile block guards against below.
+    expect(PENDING_BLOCK.match(/\|\| echo '\[\]'/g)).toHaveLength(2)
+    expect(PENDING_BLOCK).toContain('node scripts/pending-question.mjs')
+  })
+
+  it('checks exactly the population CANDIDATES would otherwise call "start"', () => {
+    expect(PENDING_BLOCK).toContain('select(.state.name == "Ready"')
+    expect(PENDING_BLOCK).toContain('has_label("Needs Decision") or has_label("Needs Action")')
+    expect(PENDING_BLOCK).toContain('select(owner == $repo and (repo_labels | length) == 1)')
+  })
+
+  it('hands $pendingIds into the mode jq, and mode excludes anything named in it', () => {
+    expect(QUEUE).toContain(`--argjson pendingIds "$(echo "$PENDING" | jq -c 'map(.identifier)')"`)
+    const mode = between(QUEUE, 'if .state.name == "Ready" and (.blocked | not)', 'sort_by(if .priority')
+    expect(mode).toContain('$pendingIds')
+  })
+
+  it('carries no apostrophe in the jq program text it adds, which would close the shell quote', () => {
+    const open = PENDING_BLOCK.indexOf(`"$RULES"'`) + `"$RULES"'`.length
+    const jqBody = PENDING_BLOCK.slice(open, PENDING_BLOCK.indexOf("\n'", open))
+    expect(jqBody).not.toContain("'")
+    expect(jqBody).toContain('.data.issues.nodes')
+  })
+
+  it('forces pending=[] on both early exits: the named-ticket dispatch and dry run', () => {
+    const named = between(QUEUE, 'if [ -n "${ONE_TICKET:-}" ]; then', '  exit 0\nfi')
+    expect(named).toContain('echo "pending=[]" >> "$GITHUB_OUTPUT"')
+    const dry = between(QUEUE, 'if [ "${DRY_RUN:-false}" = "true" ]; then\n  echo "Dry run: no claims', 'exit 0\nfi')
+    expect(dry).toContain('echo "pending=[]" >> "$GITHUB_OUTPUT"')
+  })
+
+  it('prints a restore: line and writes pending= for the real run', () => {
+    expect(QUEUE).toContain(`echo "$PENDING" | jq -r '.[] | "restore: \\(.identifier) (\\(.label))"'`)
+    expect(QUEUE).toContain('echo "pending=$PENDING" >> "$GITHUB_OUTPUT"')
+    // Printed and written before the dry-run exit, so `-f dry_run=true`
+    // shows what this would restore without writing anything.
+    expect(QUEUE.indexOf('restore:')).toBeLessThan(QUEUE.indexOf('if [ "${DRY_RUN:-false}" = "true" ]; then\n  echo "Dry run: no claims'))
+  })
+
+  describe('the flag step', () => {
+    it('is valid bash', () => {
+      const r = spawnSync('bash', ['-n'], { input: LABEL_DRIFT, encoding: 'utf8' })
+      expect(r.stderr).toBe('')
+      expect(r.status).toBe(0)
+    })
+
+    it('only runs when the queue step found something pending', () => {
+      const step = between(WORKFLOW, '- name: Flag tickets whose blocking label was cleared without an answer', 'run: |')
+      expect(step).toContain("if: steps.queue.outputs.pending != '' && steps.queue.outputs.pending != '[]'")
+    })
+
+    it('posts [LABEL-DRIFT] naming the ticket, and restores the label the row names', () => {
+      expect(LABEL_DRIFT).toContain('[LABEL-DRIFT] ${NAME}')
+      expect(LABEL_DRIFT).toContain('label was gone')
+      expect(LABEL_DRIFT).toContain('label_id "Needs Decision"')
+      expect(LABEL_DRIFT).toContain('label_id "Needs Action"')
+    })
+
+    it('restores Needs Action when the row says Needs Action, Needs Decision otherwise', () => {
+      const loop = between(LABEL_DRIFT, "echo \"$PENDING\" | jq -c '.[]'", 'done')
+      expect(loop).toContain('if [ "$LABEL" = "Needs Action" ]; then')
+      expect(loop).toContain('LABEL_ID="$NEEDS_ACTION_ID"')
+      expect(loop).toContain('LABEL_ID="$NEEDS_DECISION_ID"')
+    })
+  })
+
+  it('the header states the interaction with TAC-446: which mechanism owns what', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-453')
+    expect(header).toContain('TAC-446')
+    expect(header).toContain('cannot un-select a ticket this run already chose')
+  })
+})
+
 describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)', () => {
   // "$STATUS_CANDIDATES" would collide as a `between()` anchor: it contains
   // "CANDIDATES=$(" as a substring, the same anchor TAC-448's own tests use,
   // so the workflow names this STATUS_ROWS instead. This test pins that the
   // avoidance holds, since a future rename back would silently break both
   // this describe block and the TAC-448 one above it.
-  const RECONCILE = between(QUEUE, 'STATUS_ROWS=$(', 'echo "tickets=$TICKETS"')
+  const RECONCILE = between(QUEUE, 'STATUS_ROWS=$(', 'NEEDS_DECISION_ROWS=$(')
 
   it('runs after the claim check and after the dry-run exit, never before', () => {
     const at = QUEUE.indexOf('STATUS_ROWS=$(')
@@ -297,6 +403,52 @@ describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)',
     const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
     expect(header).toContain('TAC-466')
     expect(header).toContain('cannot function as a second')
+  })
+})
+
+describe('build-ready.yml reconciles Needs Decision from the comment thread (TAC-446)', () => {
+  const NEEDS_DECISION_RECONCILE = between(QUEUE, 'NEEDS_DECISION_ROWS=$(', 'echo "tickets=$TICKETS"')
+
+  it('runs after the status reconcile and before tickets= reaches GITHUB_OUTPUT', () => {
+    const at = QUEUE.indexOf('NEEDS_DECISION_ROWS=$(')
+    expect(at).toBeGreaterThan(QUEUE.indexOf('STATUS_WRITES=$('))
+    expect(at).toBeLessThan(QUEUE.indexOf('echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"'))
+  })
+
+  it('reconciles every owner-matched candidate, not just what the claim check selected this run', () => {
+    expect(NEEDS_DECISION_RECONCILE).not.toContain('$SELECTED')
+    expect(NEEDS_DECISION_RECONCILE).toContain('select(owner == $repo and (repo_labels | length) == 1)')
+  })
+
+  it('hands the candidates their own labels and full comment thread, and skips a ticket already on Needs Action', () => {
+    expect(NEEDS_DECISION_RECONCILE).toContain('hasNeedsDecision: has_label("Needs Decision")')
+    expect(NEEDS_DECISION_RECONCILE).toContain('hasNeedsAction: has_label("Needs Action")')
+    expect(NEEDS_DECISION_RECONCILE).toContain('comments: [.comments.nodes[] | {body, createdAt}]')
+  })
+
+  it('hands the candidates to the reconcile script and writes only the action it returns, never a literal add or remove', () => {
+    expect(NEEDS_DECISION_RECONCILE).toContain('node scripts/reconcile-needs-decision.mjs')
+    expect(NEEDS_DECISION_RECONCILE).toContain('node scripts/linear.mjs label "$ACTION" "$IDENTIFIER" "Needs Decision"')
+    // The action always comes from $ACTION; spelling "add" or "remove" here
+    // directly would let a value outside reconcile()'s own two-value output
+    // creep in without going through its guard.
+    expect(NEEDS_DECISION_RECONCILE).not.toMatch(/label\s+"(add|remove)"/)
+  })
+
+  it('never aborts the step: both reads that can fail have a fallback, and the write is if/else', () => {
+    // Same shape as the status reconcile's own guard: the candidate jq AND
+    // the reconcile-script call each need their own `|| echo '[]'` under
+    // `set -euo pipefail`, or a failure on either aborts the step and skips
+    // tickets=$TICKETS below it.
+    expect(NEEDS_DECISION_RECONCILE.match(/\|\| echo '\[\]'/g)).toHaveLength(2)
+    expect(NEEDS_DECISION_RECONCILE).toContain('if node scripts/linear.mjs label "$ACTION" "$IDENTIFIER" "Needs Decision"; then')
+    expect(NEEDS_DECISION_RECONCILE).toContain('::warning title=Needs Decision reconcile::')
+  })
+
+  it('the header documents it as a projection, never a claim', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-446')
+    expect(header).toContain('scripts/reconcile-needs-decision.mjs')
   })
 })
 
