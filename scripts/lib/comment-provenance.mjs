@@ -79,19 +79,21 @@ export function isContextChatComment(body) {
 }
 
 /**
- * Markers a workflow posts to record what it did, never a turn (TAC-396,
- * TAC-448, TAC-466). build-ready.yml's jq, work-ticket.md's `bookkeeping`
- * definition and .claude/process.md's "Bookkeeping comments ... never count
- * as the newest comment" line each carry this same list with no shared code
- * today — this is the one place it lives; the other three should read it
- * from here rather than growing a fourth independent copy.
+ * The markers a workflow writes to record what it did, never a turn:
+ * `.claude/process.md`'s "Comments" table and `build-ready.yml`'s own
+ * `marker_is("CLAIM|RESUME-CLAIM|SLACK|DENIALS|OVER-LIMIT")` jq regex carry
+ * this same list. Kept here too, so a JS consumer (TAC-446's Needs Decision
+ * reconciler is the first) has one definition rather than a third copy —
+ * the jq copy stays, since there is no way to share code between bash and
+ * this module.
  */
 export const BOOKKEEPING_MARKERS = ['CLAIM', 'RESUME-CLAIM', 'SLACK', 'DENIALS', 'OVER-LIMIT'];
 
 /**
- * A bot comment whose marker is one of BOOKKEEPING_MARKERS. False for any
- * comment that isn't CC's own, whatever it contains — `commentMarker`
- * already returns null there.
+ * A bot comment whose marker is one of BOOKKEEPING_MARKERS. False for a
+ * non-bot comment, and false for a bot comment with no marker or an
+ * unrecognised one — this only ever answers "did a workflow file this as
+ * bookkeeping," never "is this comment safe to ignore" in general.
  */
 export function isBookkeepingComment(body) {
   const marker = commentMarker(body);

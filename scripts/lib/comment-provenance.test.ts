@@ -121,6 +121,29 @@ describe('unescapeBrackets', () => {
   })
 })
 
+describe('isBookkeepingComment', () => {
+  it('recognises every marker in BOOKKEEPING_MARKERS', () => {
+    for (const marker of BOOKKEEPING_MARKERS) {
+      expect(isBookkeepingComment(`**[FROM CLAUDE CODE]**\n\n[${marker}] TAC-1 run=1`)).toBe(true)
+    }
+  })
+
+  it('does not recognise a marker that merely resembles one, such as AUDIT or PLAN', () => {
+    expect(isBookkeepingComment(PLAN_COMMENT)).toBe(false)
+    expect(isBookkeepingComment(QUOTES_MARKER_MIDBODY)).toBe(false)
+  })
+
+  it('does not recognise a non-bot comment, even one that quotes a bookkeeping marker mid-body', () => {
+    expect(isBookkeepingComment(CHAT_PLAIN)).toBe(false)
+    expect(isBookkeepingComment(SLACK_REPLY)).toBe(false)
+    expect(isBookkeepingComment('Some text mentioning [DENIALS] in passing.')).toBe(false)
+  })
+
+  it('recognises an escaped CC prefix around a bookkeeping marker', () => {
+    expect(isBookkeepingComment('**\\[FROM CLAUDE CODE\\]**\n\n\\[SLACK\\] channel=C1 ts=1')).toBe(true)
+  })
+})
+
 // A HUMAN-REVIEW-REQUIRED comment written by CC must never be readable, by
 // any of these functions, as a human ruling — the exact failure this ticket
 // exists to close (TAC-396).
