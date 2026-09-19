@@ -367,7 +367,11 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   // so no line anywhere may claim the channel.
   it('an Instagram prompt names no iMessage, no phone number and no texting, on any category, formality or framing', () => {
     const CHANNEL_CLAIM =
-      /imessage|this number|\btext(ing|ed)\b|\btext (me|us|them|a friend|back)\b|would (actually )?text\b/i
+      /imessage|\bSMS\b|\bphone\b|this number|\btext(s|ing|ed)\b|\ba text\b|\btext (me|us|them|a friend|back)\b|would (actually )?text\b/i
+    // Ruled to stay on both channels: R3's rationale explains the em-dash rule
+    // and instructs nothing. Only this phrase is exempt; the rest of its line
+    // must still claim nothing.
+    const SHARED_BY_RULING = ['Em dashes read as AI writing in casual texts']
     const residual = new Set<string>()
     for (const category of MESSAGE_CATEGORIES) {
       for (const formality of ['casual', 'warm', 'formal'] as const) {
@@ -387,7 +391,8 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
             }),
           )
           for (const line of `${systemPrompt}\n${userPrompt}`.split('\n')) {
-            if (CHANNEL_CLAIM.test(line)) residual.add(line)
+            const unruled = SHARED_BY_RULING.reduce((rest, phrase) => rest.replace(phrase, ''), line)
+            if (CHANNEL_CLAIM.test(unruled)) residual.add(line)
           }
         }
       }

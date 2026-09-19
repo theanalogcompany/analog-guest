@@ -247,6 +247,20 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     // number without naming either column.
     expect(warn).not.toMatch(/\bguestRow\b(?!\.)/)
     expect(warn).not.toMatch(/\bguestRow\./)
+    // And not under any other name either: the payload's keys are pinned
+    // exactly, so a new key (guest: guestResult.data, say) fails here.
+    const payload = warn.slice(warn.indexOf('{'))
+    const keys = [...payload.matchAll(/^\s+(\w+)[,:]/gm)].map((m) => m[1])
+    expect(keys).toEqual([
+      'agentRunId',
+      'venueId',
+      'guestId',
+      'inboundMessageId',
+      'inboundChannel',
+      'hasPhone',
+      'hasInstagramId',
+      'reason',
+    ])
   })
 
   // A number-less venue with an unresolvable conversation must not blame the
