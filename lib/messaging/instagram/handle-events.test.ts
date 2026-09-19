@@ -660,8 +660,9 @@ describe('provider_sent_at', () => {
   // is what keeps it NULL on every Sendblue row, and it holds only while this
   // handler is the one place that writes it. The check is by mention, so a
   // reader (TAC-469's window gate) is also added here, deliberately, along
-  // with any second writer.
-  it('is named by this handler and nothing else in the app', () => {
+  // with any second writer. TAC-469 added its two readers: the window gate
+  // and the reply check, both Instagram-only.
+  it('is named by this handler and the Instagram outbound readers, and nothing else in the app', () => {
     const root = join(__dirname, '..', '..', '..')
     const writers: string[] = []
     const walk = (dir: string): void => {
@@ -677,6 +678,10 @@ describe('provider_sent_at', () => {
     }
     for (const dir of ['app', 'lib', 'scripts']) walk(join(root, dir))
 
-    expect(writers.sort()).toEqual([join('lib', 'messaging', 'instagram', 'handle-events.ts')])
+    expect(writers.sort()).toEqual([
+      join('lib', 'messaging', 'instagram', 'handle-events.ts'),
+      join('lib', 'messaging', 'instagram', 'reply-check.ts'),
+      join('lib', 'messaging', 'instagram', 'window.ts'),
+    ])
   })
 })
