@@ -131,6 +131,8 @@ function row(overrides: Record<string, unknown> = {}) {
       review_state: 'pending',
       created_at: new Date().toISOString(),
       pending_commitment: null,
+      // TAC-469: every row has a channel; this card is a text conversation's.
+      channel: 'text',
       rendered_intentions: [{ key: 'understand_order', eligibleAt: ANCHOR }],
       ...overrides,
     },

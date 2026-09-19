@@ -19,7 +19,10 @@ const ROOT = join(__dirname, '..', '..', '..')
 const INSTAGRAM_OUTBOUND_MODULES = ['window', 'send', 'send-target', 'reply-check'] as const
 
 /** Everything outside lib/messaging/instagram/ allowed to import them. */
-const ALLOWED_IMPORTERS = [join('lib', 'agent', 'dispatch-instagram-reply.ts')]
+const ALLOWED_IMPORTERS = [
+  join('lib', 'agent', 'dispatch-instagram-reply.ts'),
+  join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
+]
 
 function sourceFiles(): string[] {
   const files: string[] = []
@@ -79,17 +82,18 @@ describe('Instagram outbound stays on the Instagram side (TAC-469 rule 1)', () =
     }
   })
 
-  it('lets the routing switch reach Instagram only through the Instagram arm', () => {
-    const source = readFileSync(join(ROOT, 'lib', 'agent', 'dispatch-reply.ts'), 'utf8')
-    const instagramImports = source.match(/from '[^']*instagram[^']*'/g) ?? []
-    expect(instagramImports).toEqual(["from './dispatch-instagram-reply'"])
+  it('lets the routing switches reach Instagram only through their Instagram arms', () => {
+    const agent = readFileSync(join(ROOT, 'lib', 'agent', 'dispatch-reply.ts'), 'utf8')
+    expect(agent.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual(["from './dispatch-instagram-reply'"])
+    const operator = readFileSync(join(ROOT, 'lib', 'operator', 'dispatch-operator-outbound.ts'), 'utf8')
+    expect(operator.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual(["from './dispatch-instagram-outbound'"])
   })
 
   // An Instagram-only venue has no messaging_phone_number (TAC-469 pre-flight).
   // The Instagram arm must never reach the phone-number provider's transport,
   // its read receipts, or its number lookup, which fails closed without one.
-  it('keeps the Instagram arm off the Sendblue transport and the phone-number lookup', () => {
-    const source = readFileSync(join(ROOT, 'lib', 'agent', 'dispatch-instagram-reply.ts'), 'utf8')
+  it.each(ALLOWED_IMPORTERS)('keeps %s off the Sendblue transport and the phone-number lookup', (file) => {
+    const source = readFileSync(join(ROOT, file), 'utf8')
     expect(source).not.toMatch(/from '@\/lib\/messaging'/)
     expect(source).not.toMatch(/from '@\/lib\/messaging\/(send|expressions|venue-lookup|sendblue-client)'/)
     expect(source).not.toContain('messaging_phone_number')

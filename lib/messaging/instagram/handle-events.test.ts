@@ -663,6 +663,10 @@ describe('provider_sent_at', () => {
   // with any second writer. TAC-469 added its two readers, the window gate
   // and the reply check, and the Instagram send arm, which names the column
   // only to say it never writes it: an echo row it fills in keeps Meta's time.
+  // And its operator arm, which is a WRITER, onto Instagram card rows only: when
+  // an echo lands before an approved card's mid, it copies the echo's time onto
+  // the card before deleting the echo (ruled 2026-09-19). Still never a
+  // Sendblue row.
   it('is named by this handler and the Instagram outbound readers, and nothing else in the app', () => {
     const root = join(__dirname, '..', '..', '..')
     const writers: string[] = []
@@ -684,6 +688,7 @@ describe('provider_sent_at', () => {
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),
+      join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
     ])
   })
 })
