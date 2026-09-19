@@ -257,7 +257,7 @@ describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)',
   // so the workflow names this STATUS_ROWS instead. This test pins that the
   // avoidance holds, since a future rename back would silently break both
   // this describe block and the TAC-448 one above it.
-  const RECONCILE = between(QUEUE, 'STATUS_ROWS=$(', 'echo "tickets=$TICKETS"')
+  const RECONCILE = between(QUEUE, 'STATUS_ROWS=$(', 'NEEDS_DECISION_ROWS=$(')
 
   it('runs after the claim check and after the dry-run exit, never before', () => {
     const at = QUEUE.indexOf('STATUS_ROWS=$(')
@@ -297,6 +297,52 @@ describe('build-ready.yml reconciles ticket status from GitHub state (TAC-466)',
     const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
     expect(header).toContain('TAC-466')
     expect(header).toContain('cannot function as a second')
+  })
+})
+
+describe('build-ready.yml reconciles Needs Decision from the comment thread (TAC-446)', () => {
+  const NEEDS_DECISION_RECONCILE = between(QUEUE, 'NEEDS_DECISION_ROWS=$(', 'echo "tickets=$TICKETS"')
+
+  it('runs after the status reconcile and before tickets= reaches GITHUB_OUTPUT', () => {
+    const at = QUEUE.indexOf('NEEDS_DECISION_ROWS=$(')
+    expect(at).toBeGreaterThan(QUEUE.indexOf('STATUS_WRITES=$('))
+    expect(at).toBeLessThan(QUEUE.indexOf('echo "tickets=$TICKETS" >> "$GITHUB_OUTPUT"'))
+  })
+
+  it('reconciles every owner-matched candidate, not just what the claim check selected this run', () => {
+    expect(NEEDS_DECISION_RECONCILE).not.toContain('$SELECTED')
+    expect(NEEDS_DECISION_RECONCILE).toContain('select(owner == $repo and (repo_labels | length) == 1)')
+  })
+
+  it('hands the candidates their own labels and full comment thread, and skips a ticket already on Needs Action', () => {
+    expect(NEEDS_DECISION_RECONCILE).toContain('hasNeedsDecision: has_label("Needs Decision")')
+    expect(NEEDS_DECISION_RECONCILE).toContain('hasNeedsAction: has_label("Needs Action")')
+    expect(NEEDS_DECISION_RECONCILE).toContain('comments: [.comments.nodes[] | {body, createdAt}]')
+  })
+
+  it('hands the candidates to the reconcile script and writes only the action it returns, never a literal add or remove', () => {
+    expect(NEEDS_DECISION_RECONCILE).toContain('node scripts/reconcile-needs-decision.mjs')
+    expect(NEEDS_DECISION_RECONCILE).toContain('node scripts/linear.mjs label "$ACTION" "$IDENTIFIER" "Needs Decision"')
+    // The action always comes from $ACTION; spelling "add" or "remove" here
+    // directly would let a value outside reconcile()'s own two-value output
+    // creep in without going through its guard.
+    expect(NEEDS_DECISION_RECONCILE).not.toMatch(/label\s+"(add|remove)"/)
+  })
+
+  it('never aborts the step: both reads that can fail have a fallback, and the write is if/else', () => {
+    // Same shape as the status reconcile's own guard: the candidate jq AND
+    // the reconcile-script call each need their own `|| echo '[]'` under
+    // `set -euo pipefail`, or a failure on either aborts the step and skips
+    // tickets=$TICKETS below it.
+    expect(NEEDS_DECISION_RECONCILE.match(/\|\| echo '\[\]'/g)).toHaveLength(2)
+    expect(NEEDS_DECISION_RECONCILE).toContain('if node scripts/linear.mjs label "$ACTION" "$IDENTIFIER" "Needs Decision"; then')
+    expect(NEEDS_DECISION_RECONCILE).toContain('::warning title=Needs Decision reconcile::')
+  })
+
+  it('the header documents it as a projection, never a claim', () => {
+    const header = WORKFLOW.slice(0, WORKFLOW.indexOf('\non:\n'))
+    expect(header).toContain('TAC-446')
+    expect(header).toContain('scripts/reconcile-needs-decision.mjs')
   })
 })
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BOOKKEEPING_MARKERS,
   commentMarker,
+  isBookkeepingComment,
   isBotComment,
   isContextChatComment,
   isRulingComment,
@@ -115,6 +117,29 @@ describe('unescapeBrackets', () => {
 
   it('is a no-op on text with no escaped brackets', () => {
     expect(unescapeBrackets(PLAN_COMMENT)).toBe(PLAN_COMMENT)
+  })
+})
+
+describe('isBookkeepingComment', () => {
+  it('recognises every marker in BOOKKEEPING_MARKERS', () => {
+    for (const marker of BOOKKEEPING_MARKERS) {
+      expect(isBookkeepingComment(`**[FROM CLAUDE CODE]**\n\n[${marker}] TAC-1 run=1`)).toBe(true)
+    }
+  })
+
+  it('does not recognise a marker that merely resembles one, such as AUDIT or PLAN', () => {
+    expect(isBookkeepingComment(PLAN_COMMENT)).toBe(false)
+    expect(isBookkeepingComment(QUOTES_MARKER_MIDBODY)).toBe(false)
+  })
+
+  it('does not recognise a non-bot comment, even one that quotes a bookkeeping marker mid-body', () => {
+    expect(isBookkeepingComment(CHAT_PLAIN)).toBe(false)
+    expect(isBookkeepingComment(SLACK_REPLY)).toBe(false)
+    expect(isBookkeepingComment('Some text mentioning [DENIALS] in passing.')).toBe(false)
+  })
+
+  it('recognises an escaped CC prefix around a bookkeeping marker', () => {
+    expect(isBookkeepingComment('**\\[FROM CLAUDE CODE\\]**\n\n\\[SLACK\\] channel=C1 ts=1')).toBe(true)
   })
 })
 
