@@ -99,3 +99,48 @@ export function isBookkeepingComment(body) {
   const marker = commentMarker(body);
   return marker !== null && BOOKKEEPING_MARKERS.includes(marker);
 }
+
+// A section heading in the shape audit-ticket.md's own sections use: an
+// optional markdown heading prefix, an optional "N. " number, then an
+// ALL-CAPS name, wrapped in an optional run of asterisks either side.
+// "**3. QUESTIONS**" and "## 3. QUESTIONS" both match; a numbered prose
+// line such as "1. **What counts...**" does not, because its name would
+// have to be entirely uppercase letters/spaces/slashes/dashes to the end
+// of the line, and prose isn't.
+const SECTION_HEADING = /^[ \t]*#{0,6}[ \t]*\**[ \t]*(?:\d+\.[ \t]*)?([A-Z][A-Z /-]*?)[ \t]*\**[ \t]*$/;
+
+function sections(text) {
+  const lines = text.split('\n');
+  const found = [];
+  let offset = 0;
+  for (const line of lines) {
+    const m = line.match(SECTION_HEADING);
+    if (m) found.push({ headingStart: offset, contentStart: offset + line.length + 1, name: m[1].trim() });
+    offset += line.length + 1;
+  }
+  return found;
+}
+
+/**
+ * Whether an [AUDIT] comment's own QUESTIONS section still asks Jaipal
+ * something, as opposed to a clean audit ("None.") or one that lists only
+ * calls it decided without asking (audit-ticket.md, "Decided without
+ * asking" — those carry a reason, never a question, whatever precedes
+ * them). Heading-tolerant (see SECTION_HEADING above): real audits have
+ * used both the bold-heading form the spec gives and a "## N. NAME" form.
+ *
+ * An audit whose QUESTIONS section this cannot find defaults to TRUE —
+ * still asking — because an unparseable audit should read as needing a
+ * look, not silently lose its label.
+ */
+export function auditHasQuestions(body) {
+  const text = unescapeBrackets(body);
+  const found = sections(text);
+  const i = found.findIndex((s) => s.name.toUpperCase() === 'QUESTIONS');
+  if (i === -1) return true;
+  const start = found[i].contentStart;
+  const end = i + 1 < found.length ? found[i + 1].headingStart : text.length;
+  const section = text.slice(start, end);
+  const beforeDecided = section.split(/decided without asking/i)[0];
+  return /^[ \t]*\d+\.[ \t]/m.test(beforeDecided);
+}
