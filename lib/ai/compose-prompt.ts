@@ -28,7 +28,7 @@ export function composePrompt(input: GenerateMessageInput): {
   // template's variant for 'text' is SYSTEM_TEMPLATE itself, unedited.
   const sections: string[] = [
     systemTemplateFor(input.channel),
-    personaToProse(persona),
+    personaToProse(persona, input.channel),
     venueInfoToProse(venueInfo),
   ]
 

@@ -1629,7 +1629,7 @@ describe('personaToProse — voice anti-patterns', () => {
         },
       ],
     })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).toContain('## Anti-patterns (what NOT to sound like)')
     expect(out).toContain('- no marketing flourishes')
     expect(out).toContain('- no closing acknowledgments')
@@ -1641,11 +1641,11 @@ describe('personaToProse — voice anti-patterns', () => {
     const persona = makePersona({
       voiceAntiPatterns: ['no marketing flourishes'] as unknown as BrandPersona['voiceAntiPatterns'],
     })
-    expect(personaToProse(persona)).toContain('- no marketing flourishes')
+    expect(personaToProse(persona, 'text')).toContain('- no marketing flourishes')
   })
 
   it('omits the block entirely when voiceAntiPatterns is empty', () => {
-    const out = personaToProse(makePersona({ voiceAntiPatterns: [] }))
+    const out = personaToProse(makePersona({ voiceAntiPatterns: [] }), 'text')
     expect(out).not.toContain('## Anti-patterns')
   })
 })
@@ -1669,7 +1669,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
 
   it('named_person: states staff identity as first person, not "on the venue\'s behalf"', () => {
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).toContain('You are Sana, staff at the venue, texting as yourself.')
     expect(out).toContain('You ARE that person')
     expect(out).not.toMatch(/on the venue's behalf/)
@@ -1680,7 +1680,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
   // venue needed a manual anti-pattern rule to undo.
   it('named_person: does not instruct signing messages', () => {
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).not.toContain('Sign messages')
     expect(out).toContain('Do not sign messages with your name.')
   })
@@ -1691,7 +1691,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
     // serializer's own defensive fallback directly rather than going through
     // a persona shape the schema would reject.
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse({ ...persona, speakerName: undefined })
+    const out = personaToProse({ ...persona, speakerName: undefined }, 'text')
     expect(out).toContain('You are [name missing], staff at the venue')
   })
 })
@@ -2342,6 +2342,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).toContain('- For questions outside the venue domain')
     expect(out).toContain('  Nearby places are a separate case. Name them with confidence.')
@@ -2355,6 +2356,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).not.toContain('\nNearby places are a separate case')
   })
@@ -2364,6 +2366,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).not.toMatch(/[ \t]+\n/)
   })
@@ -2385,6 +2388,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
           { text: 'Do not use em dashes.', source: 'manual' },
         ],
       }),
+      'text',
     )
     expect(out).toContain('  - One pick, nothing after it.')
     expect(out).toContain('  - Two picks stated flat, no framing.')
@@ -2403,6 +2407,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
         voiceAntiPatterns: [{ text: 'no marketing flourishes', source: 'manual' }],
         voiceTouchstones: ['dry, warm, unhurried'],
       }),
+      'text',
     )
     expect(out).toContain('- see you soon')
     expect(out).toContain('- politics')
@@ -2534,13 +2539,13 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // assertions exist to make a well-meaning reword of a working path fail
   // loudly rather than silently change two venues.
   it('never keeps its exact prohibition, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'never' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'never' }), 'text')).toContain(
       '## Emojis\nnever — Do not use emoji.',
     )
   })
 
   it('sparingly keeps its exact wording, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }), 'text')).toContain(
       '## Emojis\nsparingly — You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
     )
   })
@@ -2549,13 +2554,13 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // licence: identical on every turn, and a model with no memory of last
   // turn takes it every time — 10 of 11 responses at Le Mil's.
   it('frequent no longer carries a standing licence to use emoji', () => {
-    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')
     expect(out).not.toContain('Use them where they feel natural')
     expect(out).not.toContain('do not stuff them')
   })
 
   it('frequent defers the per-message call and refuses to imply a rate', () => {
-    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')
     expect(out).toContain('decided per message')
     expect(out).toContain('Do not read a general rate into this line.')
   })
@@ -2565,7 +2570,7 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // field isn't set. So the sentence has to carry its own default rather than
   // pointing at an instruction that may not be there.
   it('frequent states a default for when no per-message block renders', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')).toContain(
       'if no such instruction appears, do not use one',
     )
   })
@@ -2698,5 +2703,60 @@ describe('intention suppression: render side and record side agree (TAC-436)', (
   // never sees it), so it is asserted separately rather than folded above.
   it('offers nothing to the recorder while a knowledge-gap question is pending', () => {
     expect(renderableIntentions(asOpen, 'reply', true)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-495: the named-speaker persona line's channel variant.
+// ---------------------------------------------------------------------------
+describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  const named = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+
+  it('the SMS line is unchanged and the Instagram line says messaging', () => {
+    expect(personaToProse(named, 'text')).toContain(
+      'You are Sana, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.',
+    )
+    expect(personaToProse(named, 'instagram')).toContain(
+      'You are Sana, staff at the venue, messaging as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.',
+    )
+  })
+
+  it('an unknown channel gets the Instagram line', () => {
+    expect(personaToProse(named, null)).toBe(personaToProse(named, 'instagram'))
+  })
+
+  // The persona's scope guard: only the named_person line varies, and only
+  // by its verb. The venue and owner framings name no channel.
+  it('differs between channels only in the named-speaker verb, for every framing', () => {
+    for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
+      const persona = makePersona({ speakerFraming, speakerName: 'Sana' })
+      expect(
+        personaToProse(persona, 'instagram').replace('messaging as yourself', 'texting as yourself'),
+      ).toBe(personaToProse(persona, 'text'))
+    }
+    expect(personaToProse(makePersona({ speakerFraming: 'venue' }), 'instagram')).toBe(
+      personaToProse(makePersona({ speakerFraming: 'venue' }), 'text'),
+    )
+  })
+
+  // The name is filled in after the substitution; a function replacement
+  // keeps a name that looks like a replacement pattern exactly as typed.
+  it('inserts the speaker name literally', () => {
+    const odd = makePersona({ speakerFraming: 'named_person', speakerName: "A$&B$'" })
+    expect(personaToProse(odd, 'instagram')).toContain("You are A$&B$', staff at the venue, messaging as yourself.")
+    expect(personaToProse({ ...named, speakerName: undefined }, 'text')).toContain(
+      'You are [name missing], staff at the venue, texting as yourself.',
+    )
   })
 })

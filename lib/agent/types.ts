@@ -47,7 +47,10 @@ export interface VenueContext {
   brandPersona: BrandPersona
   venueInfo: VenueInfo
   timezone: string
-  sendblueNumber: string
+  // TAC-495: null only for an Instagram conversation at a venue with no
+  // messaging number (buildRuntimeContext requires it otherwise). Nothing reads
+  // this field: every send looks the number up in lib/messaging/venue-lookup.ts.
+  sendblueNumber: string | null
   // TAC-XXX: per-venue "hold all outbound" flag. When true, every
   // guest-facing content message is held for operator review (the
   // hold_all_outbound trigger in applyApprovalPolicyStage queues it instead

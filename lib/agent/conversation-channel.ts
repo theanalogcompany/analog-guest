@@ -79,3 +79,14 @@ export function resolveConversationChannel(input: ConversationChannelInput): Con
   if (input.hasInstagramId) return { channel: 'instagram' }
   return { channel: null, unresolvedReason: 'guest_has_no_identifier' }
 }
+
+/**
+ * Whether building the agent context needs the venue's messaging phone number.
+ * Not for an Instagram conversation: an Instagram-only venue has no number, and
+ * Le Mil's becomes one when its number is deleted. Unknown (null) and text
+ * still need it. This decides only buildRuntimeContext's precondition; every
+ * send path looks the number up itself (lib/messaging/venue-lookup.ts).
+ */
+export function venueMessagingNumberRequired(channel: MessageChannel | null): boolean {
+  return channel !== 'instagram'
+}

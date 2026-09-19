@@ -1582,6 +1582,10 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
     "- Don't reference actions the guest didn't take.", // R1
     '- Never refer guests to alternative channels', // R5
     '- Never tell the guest to send a message', // R32
+    'You work at a hospitality venue', // the opening line
+    '- Sound like whichever of those would actually', // the register line
+    '- Plain text', // the plain-text rule
+    'When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP', // the heads-up examples
   ]
   const sms = systemTemplateFor('text')
   const ig = systemTemplateFor('instagram')
@@ -1608,6 +1612,19 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
     for (const prefix of CHANNEL_LINES) {
       expect(differing.some((line) => line.startsWith(prefix))).toBe(true)
     }
+  })
+
+  // The frame the whole conversation sits in: no iMessage anywhere, and the
+  // plain-text rule names no channel at all on Instagram (ruled 2026-09-19:
+  // the rule is the same constraint on both, and the opening line already
+  // says where the guest is).
+  it('the Instagram template names no iMessage and no texting', () => {
+    expect(ig).not.toMatch(/imessage/i)
+    expect(ig).not.toMatch(/\btext(ing|ed)\b|\btext me\b|would actually text\b/i)
+    expect(lineStarting(ig, CHANNEL_LINES[3])).toContain('through Instagram messages')
+    expect(lineStarting(ig, CHANNEL_LINES[5])).toBe(
+      '- Plain text. No HTML, no markdown formatting in the message body, no headers or bullet points.',
+    )
   })
 
   it('the Instagram R1 and R32 claim no phone number and no texting', () => {

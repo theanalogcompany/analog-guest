@@ -55,7 +55,7 @@
 // TAC-495 gave Instagram guests their own channel copy (the first-visit
 // opener, R1, R5, R32 and the other lines listed in system-template.ts's
 // SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS), chosen by
-// lib/agent/conversation-channel.ts. Three more things for TAC-469, all on its
+// lib/agent/conversation-channel.ts. Four more things for TAC-469, all on its
 // pre-flight list:
 //   - A returning guest is greeted as a first-timer (TAC-497). The first-visit
 //     gate's `recentMessages.length === 0` sees only our database, and the
@@ -71,6 +71,11 @@
 //     a phone number today. When TAC-469 routes those sends by channel, that
 //     rule has to change with the routing. And resolveConversationChannel's
 //     null means "unknown", not Instagram: never route a send on it.
+//   - An Instagram-only venue. Le Mil's messaging number is to be deleted once
+//     Instagram works. buildRuntimeContext no longer requires the number for an
+//     Instagram conversation (TAC-495, venueMessagingNumberRequired), but every
+//     Sendblue send still looks it up (lib/messaging/venue-lookup.ts) and fails
+//     closed without it. The Instagram transport must not depend on it.
 //
 // The kind check below is NOT part of the gate and stays when it goes: an echo
 // is the venue's own message and a read receipt is not a message, so neither

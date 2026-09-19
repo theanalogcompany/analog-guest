@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveConversationChannel } from './conversation-channel'
+import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 
 // TAC-495: the full truth table, one row per case, written out rather than
 // derived so a changed rule has to change a row someone can read.
@@ -82,5 +82,22 @@ describe('resolveConversationChannel', () => {
         resolveConversationChannel({ inboundChannel: undefined, hasPhone: false, hasInstagramId: false }),
       ).toEqual({ channel: null, unresolvedReason: 'guest_has_no_identifier' })
     })
+  })
+})
+
+describe('venueMessagingNumberRequired (TAC-495)', () => {
+  // An Instagram-only venue (Le Mil's, once its number is deleted) has no
+  // messaging number, and an Instagram conversation doesn't need one.
+  it('does not require a number for an Instagram conversation', () => {
+    expect(venueMessagingNumberRequired('instagram')).toBe(false)
+  })
+
+  it('requires one for a text conversation', () => {
+    expect(venueMessagingNumberRequired('text')).toBe(true)
+  })
+
+  // Unknown is a data problem; failing loudly at context build is right.
+  it('requires one when the channel is unknown', () => {
+    expect(venueMessagingNumberRequired(null)).toBe(true)
   })
 })

@@ -223,6 +223,7 @@ describe('composePrompt — recommendation-request references known order histor
 
 const SENDBLUE_OPENING_LINE =
   "You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's."
+const SENDBLUE_REGISTER_LINE = '- Sound like whichever of those would actually text: short, native, human.'
 const SENDBLUE_PLAIN_TEXT_RULE =
   '- Plain text suitable for iMessage. No HTML, no markdown formatting in the message body, no headers or bullet points.'
 const SENDBLUE_HEADS_UP_EXAMPLES =
@@ -250,6 +251,15 @@ const INSTAGRAM_R5 =
   '- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don\'t tell them to email, call, text, or "ask next time you\'re in" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don\'t yet manage (e.g., "for reservations, use Resy" if Resy is the venue\'s booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don\'t push the guest to another channel.'
 const INSTAGRAM_R32 =
   '- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already messaging you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to message again in the future for a different visit. That is a distinct, legitimate invitation.'
+const INSTAGRAM_OPENING_LINE =
+  "You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests through Instagram messages, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's."
+const INSTAGRAM_REGISTER_LINE = '- Sound like whichever of those would actually message: short, native, human.'
+const INSTAGRAM_PLAIN_TEXT_RULE =
+  '- Plain text. No HTML, no markdown formatting in the message body, no headers or bullet points.'
+const INSTAGRAM_HEADS_UP_EXAMPLES =
+  'When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue\'s voice. Examples: "comped you an oat latte, give me a heads up when you\'re heading over" / "next one\'s on us. message me when you\'re close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are — send me a heads-up if you want it tonight").'
+const INSTAGRAM_NAMED_PERSON =
+  'You are Sana, staff at the venue, messaging as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
 const INSTAGRAM_OPENER =
   "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
 
@@ -281,6 +291,7 @@ describe('composePrompt — Sendblue channel copy is pinned (TAC-495)', () => {
   it('the system prompt carries the Sendblue opening line, plain-text rule and heads-up examples', () => {
     const { systemPrompt } = composePrompt(firstTouchInput())
     expect(systemPrompt.startsWith(`${SENDBLUE_OPENING_LINE}\n`)).toBe(true)
+    expect(systemPrompt).toContain(`\n${SENDBLUE_REGISTER_LINE}\n`)
     expect(systemPrompt).toContain(`\n${SENDBLUE_PLAIN_TEXT_RULE}\n`)
     expect(systemPrompt).toContain(`\n${SENDBLUE_HEADS_UP_EXAMPLES}\n`)
   })
@@ -315,6 +326,34 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
     expect(systemPrompt).not.toContain(SENDBLUE_R32)
   })
 
+  it('an Instagram conversation gets the Instagram opening line, register line, plain-text rule, heads-up examples and persona line', () => {
+    const { systemPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    expect(systemPrompt.startsWith(`${INSTAGRAM_OPENING_LINE}\n`)).toBe(true)
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_REGISTER_LINE}\n`)
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_PLAIN_TEXT_RULE}\n`)
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_HEADS_UP_EXAMPLES}\n`)
+    expect(systemPrompt).toContain(INSTAGRAM_NAMED_PERSON)
+    for (const sms of [
+      SENDBLUE_OPENING_LINE,
+      SENDBLUE_REGISTER_LINE,
+      SENDBLUE_PLAIN_TEXT_RULE,
+      SENDBLUE_HEADS_UP_EXAMPLES,
+      SENDBLUE_NAMED_PERSON,
+    ]) {
+      expect(systemPrompt).not.toContain(sms)
+    }
+  })
+
+  // AC2, stated over the whole assembled prompt rather than line by line.
+  it('an Instagram prompt names no iMessage, no phone number and no texting anywhere', () => {
+    const { systemPrompt, userPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    for (const prompt of [systemPrompt, userPrompt]) {
+      expect(prompt).not.toMatch(/imessage/i)
+      expect(prompt).not.toMatch(/this number|save this number/i)
+      expect(prompt).not.toMatch(/\btext(ing|ed)\b|\btext me\b|would actually text/i)
+    }
+  })
+
   it('an Instagram conversation gets the Instagram opener, and not the SMS one', () => {
     const { userPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
     expect(userPrompt).toContain(`\n${INSTAGRAM_OPENER}\n`)
@@ -325,7 +364,16 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   // carries none of the Instagram wording anywhere.
   it('a Sendblue conversation gets none of the Instagram copy', () => {
     const { systemPrompt, userPrompt } = composePrompt(firstTouchInput())
-    for (const instagram of [INSTAGRAM_R1, INSTAGRAM_R5, INSTAGRAM_R32]) {
+    for (const instagram of [
+      INSTAGRAM_R1,
+      INSTAGRAM_R5,
+      INSTAGRAM_R32,
+      INSTAGRAM_OPENING_LINE,
+      INSTAGRAM_REGISTER_LINE,
+      INSTAGRAM_PLAIN_TEXT_RULE,
+      INSTAGRAM_HEADS_UP_EXAMPLES,
+      INSTAGRAM_NAMED_PERSON,
+    ]) {
       expect(systemPrompt).not.toContain(instagram)
     }
     expect(userPrompt).not.toContain(INSTAGRAM_OPENER)
@@ -349,6 +397,11 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
         .replace(INSTAGRAM_R5, SENDBLUE_R5)
         .replace(INSTAGRAM_R32, SENDBLUE_R32)
         .replace(INSTAGRAM_OPENER, SENDBLUE_OPENER)
+        .replace(INSTAGRAM_OPENING_LINE, SENDBLUE_OPENING_LINE)
+        .replace(INSTAGRAM_REGISTER_LINE, SENDBLUE_REGISTER_LINE)
+        .replace(INSTAGRAM_PLAIN_TEXT_RULE, SENDBLUE_PLAIN_TEXT_RULE)
+        .replace(INSTAGRAM_HEADS_UP_EXAMPLES, SENDBLUE_HEADS_UP_EXAMPLES)
+        .replace(INSTAGRAM_NAMED_PERSON, SENDBLUE_NAMED_PERSON)
     expect(backToSms(ig.systemPrompt)).toBe(sms.systemPrompt)
     expect(backToSms(ig.userPrompt)).toBe(sms.userPrompt)
   })

@@ -66,12 +66,44 @@ const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
 // text reads like an email, not a text from a person — and at least one
 // venue needed a manual anti-pattern rule to undo this. Removed outright
 // rather than reworded; the sentence had no other job.
-function speakerFramingProse(persona: BrandPersona): string {
+//
+// TAC-495: the named_person line has a channel variant, made the same way as
+// the system template's (channel-variants.ts): the SMS line is written out in
+// full and takes no substitutions, and Instagram swaps "texting" for
+// "messaging". TAC-338's "as yourself" framing is identical on both. The
+// {speakerName} slot is filled after the substitution, so the table is
+// applied once, at module load, to a constant.
+const NAMED_PERSON_LINE =
+  'You are {speakerName}, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
+
+const NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [{ from: 'staff at the venue, texting as yourself.', to: 'staff at the venue, messaging as yourself.' }],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    NAMED_PERSON_LINE,
+    NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS.text,
+    'NAMED_PERSON_LINE/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    NAMED_PERSON_LINE,
+    NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS.instagram,
+    'NAMED_PERSON_LINE/instagram',
+  ),
+}
+
+function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | null): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
     case 'named_person':
-      return `You are ${persona.speakerName ?? '[name missing]'}, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.`
+      // A function replacement, so a name containing "$&" is inserted as typed.
+      return NAMED_PERSON_LINE_BY_CHANNEL[copyVariantFor(channel)].replace(
+        '{speakerName}',
+        () => persona.speakerName ?? '[name missing]',
+      )
     case 'owner':
       return 'Speak as the owner of the venue, in first person. Do not name yourself unless the guest asks.'
   }
@@ -111,11 +143,18 @@ function personaBullet(text: string): string {
   return [`- ${first}`, ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`))].join('\n')
 }
 
-export function personaToProse(persona: BrandPersona): string {
+/**
+ * `channel` picks the channel copy (today, only the named_person line).
+ * Required, with no default: there are two production callers and each has to
+ * decide. composePrompt passes the conversation's channel; the classifier
+ * passes 'text', because its prompt is not guest-facing and TAC-495 leaves it
+ * exactly as it was.
+ */
+export function personaToProse(persona: BrandPersona, channel: MessageChannel | null): string {
   const sections: string[] = []
 
   sections.push(`## Voice and Tone\n${persona.tone}`)
-  sections.push(`## How to address the guest\n${speakerFramingProse(persona)}`)
+  sections.push(`## How to address the guest\n${speakerFramingProse(persona, channel)}`)
   sections.push(`## Formality\n${persona.formality} — ${FORMALITY_GUIDANCE[persona.formality]}`)
   sections.push(`## Length\n${persona.lengthGuide}`)
   sections.push(`## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`)

@@ -1198,14 +1198,48 @@ You may see two retrieval sections in the system prompt: "Examples of how the ve
 
 // TAC-495: the channel variants of SYSTEM_TEMPLATE. The SMS copy is the
 // template itself, with no substitutions, so it is byte-identical by
-// construction. Each Instagram substitution swaps one phrase inside R1, R5 or
-// R32 and must match exactly once, or this module throws at load (see
-// channel-variants.ts for why that is safe and wanted). Adding a row here is
-// adding channel-specific copy: the scope guard in system-template.test.ts
-// fails until it is updated on purpose.
+// construction. Each Instagram substitution swaps one phrase and must match
+// exactly once, or this module throws at load (see channel-variants.ts for why
+// that is safe and wanted). The lines they touch: the opening line, the
+// "would actually text" register line, the plain-text rule, the heads-up
+// examples, R1, R5 and R32. Adding a row here is adding channel-specific copy:
+// the scope guard in system-template.test.ts fails until it is updated on
+// purpose. Wording approved on the ticket, 2026-09-19.
 const SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [
+    // The opening line frames the whole conversation. It names the platform,
+    // not its vocabulary: left unnamed, the model falls back on its default
+    // picture of a cafe messaging a guest, which is texting, and R5's
+    // Instagram list only reads right if the model knows where it is.
+    {
+      from: 'You communicate with its guests via iMessage,',
+      to: 'You communicate with its guests through Instagram messages,',
+    },
+    // Register: "would actually text" still puts texting in the frame, one
+    // line from the opening.
+    {
+      from: 'Sound like whichever of those would actually text:',
+      to: 'Sound like whichever of those would actually message:',
+    },
+    // The plain-text rule is the same constraint on both channels (neither
+    // renders markdown), so the Instagram line drops the channel name
+    // entirely; the opening line has already said where the guest is.
+    {
+      from: '- Plain text suitable for iMessage.',
+      to: '- Plain text.',
+    },
+    // The heads-up examples in # Commitments. "Send me", not "message me",
+    // for the second: "message me a heads-up" reads awkwardly. The em dash in
+    // that example is on both channels and is TAC-498's, not this table's.
+    {
+      from: "next one's on us. text me when you're close.",
+      to: "next one's on us. message me when you're close.",
+    },
+    {
+      from: 'text me a heads-up if you want it tonight',
+      to: 'send me a heads-up if you want it tonight',
+    },
     // R1, base rule.
     {
       from: 'If the only signal is an inbound text with no prior context',

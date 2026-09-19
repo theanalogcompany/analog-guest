@@ -207,6 +207,20 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     expect(src).toContain('conversationChannel: channelResolution.channel,')
   })
 
+  // An Instagram-only venue has no messaging number, and Le Mil's becomes one
+  // when its number is deleted. The precondition must use the channel, so the
+  // channel has to be resolved before it runs.
+  it('requires the venue messaging number only when the channel needs it, after resolving the channel', () => {
+    expect(src).toContain(
+      'if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {',
+    )
+    expect(src.indexOf('resolveConversationChannel({')).toBeLessThan(
+      src.indexOf('venueMessagingNumberRequired(channelResolution.channel)'),
+    )
+    // No other check on the number may remain that would throw regardless.
+    expect(src.match(/!venueRow\.messaging_phone_number\b/g)).toHaveLength(1)
+  })
+
   // The Instagram ID is only tested for presence. It must not ride on the
   // context, where it would reach prompts, traces and logs.
   it('keeps the Instagram ID itself out of the context', () => {
