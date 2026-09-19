@@ -1686,3 +1686,129 @@ export async function captureCommitmentExpired(
 ): Promise<void> {
   await capturePostHogEvent('commitment_expired', props.guestId, { ...props })
 }
+
+// ---------------------------------------------------------------------------
+// TAC-469: a conversation whose channel could not be resolved
+// ---------------------------------------------------------------------------
+
+export interface ConversationChannelUnresolvedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  inboundMessageId: string | null
+  /** The inbound message's channel; undefined when the run had no inbound message. */
+  inboundChannel: string | null | undefined
+  hasPhone: boolean
+  hasInstagramId: boolean
+  reason: string | null
+}
+
+/**
+ * Fires from buildRuntimeContext when resolveConversationChannel returns null.
+ *
+ * SLACK-RELAYED. Before TAC-469 this was a console.warn and only picked the
+ * prompt copy; now that sends route on the channel, an unresolved channel is a
+ * guest whose reply cannot be routed at all, because nothing routes on null.
+ * Its main cause is migration 048's 'text' default on an Instagram row, the
+ * same hazard that would blind the webhook-silence alarm. Carries only
+ * presence flags: never the phone number or the Instagram ID.
+ */
+export async function captureConversationChannelUnresolved(
+  props: ConversationChannelUnresolvedProps,
+): Promise<void> {
+  const inboundChannel = props.inboundChannel === undefined ? 'none' : (props.inboundChannel ?? 'unparseable')
+  await capturePostHogEvent('conversation_channel_unresolved', props.guestId, { ...props, inboundChannel })
+  await postToSlack(
+    [
+      "*Conversation channel unresolved*: this guest's reply can't be routed",
+      `reason: \`${props.reason ?? 'unknown'}\` · inbound channel: \`${inboundChannel}\``,
+      `has phone: \`${props.hasPhone}\` · has Instagram ID: \`${props.hasInstagramId}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `run: \`${props.agentRunId}\``,
+      props.inboundMessageId ? `inbound message: \`${props.inboundMessageId}\`` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TAC-469: an agent reply to an Instagram guest that did not go out
+// ---------------------------------------------------------------------------
+
+export interface InstagramSendFailedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** Why: a transport failure kind, the gate's window refusal, the cap, or missing configuration. */
+  reason: string
+  /** Whether the whole reply failed, or only the messages after the ones that went out. */
+  scope: 'whole_reply' | 'remainder'
+  bubbleCount: number
+  deliveredBubbles: number
+  /**
+   * Milliseconds until Meta's window closes when the send was attempted, margin
+   * not subtracted; null when unknown. A Meta refusal with subcode 2534022
+   * while this was positive is the evidence the 5-minute margin is too small.
+   */
+  windowRemainingMs: number | null
+  metaCode: number | null
+  metaSubcode: number | null
+  fbtraceId: string | null
+  /** True when Meta may have delivered it anyway (a timeout, a lost connection, an unreadable 200). */
+  outcomeUnknown: boolean
+  /** The card the reply became, or null when none was written. */
+  cardId: string | null
+  /** Why no card was written, when cardId is null. */
+  cardSkipped: string | null
+  undeliveredBody: string
+}
+
+/**
+ * SLACK-RELAYED, with the undelivered text: this is the one record of what the
+ * guest did not get, including when no card could be written (the guest opted
+ * out, or another card holds the slot). TAC-469 rule 4: a failed send is never
+ * a log line alone.
+ */
+export async function captureInstagramSendFailed(props: InstagramSendFailedProps): Promise<void> {
+  await capturePostHogEvent('instagram_send_failed', props.guestId, { ...props })
+  const meta =
+    props.metaCode !== null
+      ? ` · Meta code \`${props.metaCode}\`${props.metaSubcode !== null ? `/\`${props.metaSubcode}\`` : ''}${props.fbtraceId ? ` · fbtrace \`${props.fbtraceId}\`` : ''}`
+      : ''
+  await postToSlack(
+    [
+      `*Instagram reply didn't send*: \`${props.reason}\` (${props.scope === 'remainder' ? 'the rest of a split reply' : 'the whole reply'})${meta}`,
+      props.outcomeUnknown ? 'Meta may have delivered it anyway: check the thread before sending again.' : '',
+      props.windowRemainingMs !== null
+        ? `window: \`${Math.round(props.windowRemainingMs / 1000)}s\` until Meta closes it`
+        : '',
+      `delivered \`${props.deliveredBubbles}\` of \`${props.bubbleCount}\` messages`,
+      props.cardId !== null ? `card: \`${props.cardId}\`` : `no card written: \`${props.cardSkipped ?? 'unknown'}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `run: \`${props.agentRunId}\``,
+      `undelivered: "${truncate(props.undeliveredBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
+}
+
+export interface InstagramReplySupersededProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  inboundMessageId: string
+  answeredByMessageId: string
+}
+
+/**
+ * The agent held back a reply because the guest's message already had one,
+ * usually a reply staff typed in the Instagram app. PostHog only: it is the
+ * intended behaviour (TAC-469 rule 3), not an alert.
+ */
+export async function captureInstagramReplySuperseded(props: InstagramReplySupersededProps): Promise<void> {
+  await capturePostHogEvent('instagram_reply_superseded', props.guestId, { ...props })
+}

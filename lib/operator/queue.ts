@@ -114,7 +114,12 @@ export type ListPendingQueueResult =
 //     the gate takes a GenerateMessageResult and a crash never produced one.
 //     Until TAC-364 this card was stamped `knowledge_gap`, which made its copy
 //     a lie — see GENERATION_FAILED_REVIEW_REASON in lib/agent/stages.ts.
-type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed'
+//   instagram_send_failed — TAC-469: an agent reply to an Instagram guest
+//     did not go out (the 24-hour window, the 1000-byte cap, a Meta error, a
+//     timeout, missing configuration), so the Instagram dispatch wrote the
+//     reply as a card instead. Outside APPROVAL_TRIGGERS for the decline's
+//     reason: the gate had already said send.
+type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed' | 'instagram_send_failed'
 
 // Operator-facing copy for `messages.review_reason`.
 //
@@ -213,6 +218,10 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // this said "a guest asked something I don't have an answer for", which was
   // false — the guest may have asked something perfectly answerable.
   generation_failed: 'Something went wrong writing this one.',
+  // TAC-469, copy approved in the plan (2026-09-19). "Check the thread"
+  // because a send that timed out may have gone out after all, and the echo
+  // would be in the Instagram thread.
+  instagram_send_failed: "This reply didn't send on Instagram. Check the thread before sending it again.",
 
   // --- You're mid-thread with this guest ------------------------------------
   // Ranked 9th, so it only ever wins when nothing else fired: the draft itself

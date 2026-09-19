@@ -62,6 +62,15 @@ export const POST = withOperatorAuth<{ id: string }>(
         // flip, so the card stays queued. Same body as sendblue_failed on
         // purpose: the operator app already handles it, so the Contract holds.
         case 'no_phone_number':
+        // TAC-469: an Instagram card that can't be sent (no scoped ID, over
+        // the byte cap, outside the 24-hour window, an unknown channel, or
+        // Meta refusing it). The same 502 body, so the operator API Contract
+        // holds; `detail` says why in plain words.
+        case 'no_instagram_id':
+        case 'over_byte_cap':
+        case 'instagram_window_closed':
+        case 'channel_unresolved':
+        case 'instagram_send_failed':
         case 'sendblue_failed':
           return NextResponse.json(
             { error: 'dispatch failed', detail: result.error },

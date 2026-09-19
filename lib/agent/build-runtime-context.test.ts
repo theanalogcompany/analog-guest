@@ -268,6 +268,45 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     ])
   })
 
+  // TAC-469 pre-flight: the warning alone was a log line nobody watches. Now
+  // that sends route on the channel, an unresolved one is a reply that can't be
+  // routed, so it relays to Slack. Pinned line by line like the warning, for
+  // the same reason: the guest row must never ride along.
+  it('raises the Slack-relayed event, with the same fields as the warning, whenever the channel is unresolved', () => {
+    const block = src.slice(
+      src.indexOf('if (channelResolution.channel === null) {\n    console.warn('),
+      src.indexOf('// TAC-495: a venue\'s messaging phone number is required'),
+    )
+    const start = block.indexOf('await captureConversationChannelUnresolved({')
+    expect(start).toBeGreaterThan(-1)
+    const lines = block
+      .slice(start, block.indexOf('})', start))
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+    expect(lines).toEqual([
+      'await captureConversationChannelUnresolved({',
+      'agentRunId: input.agentRunId,',
+      'venueId: input.venueId,',
+      'guestId: input.guestId,',
+      'inboundMessageId: input.currentMessage?.id ?? null,',
+      'inboundChannel,',
+      'hasPhone,',
+      'hasInstagramId,',
+      'reason: channelResolution.unresolvedReason ?? null,',
+    ])
+  })
+
+  // TAC-469: a guest with both identifiers follows the channel they last
+  // messaged on. Read only when there is no inbound message and the guest has
+  // both, so no other run pays for the query.
+  it('reads the last inbound channel only for a guest with both identifiers and no inbound message', () => {
+    expect(src).toContain(
+      'inboundChannel === undefined && hasPhone && hasInstagramId\n      ? await loadLastInboundChannel(input.venueId, input.guestId, supabase)\n      : undefined',
+    )
+    expect(call).toContain('lastInboundChannel,')
+  })
+
   // A number-less venue with an unresolvable conversation must not blame the
   // number alone.
   it('names an unresolved channel in the missing-number error', () => {

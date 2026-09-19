@@ -194,11 +194,13 @@ export interface RuntimeContext {
   guest: GuestContext
   currentMessage: InboundMessage | null
   followupTrigger: FollowupTrigger | null
-  // TAC-495: the conversation's channel, for choosing prompt copy only. Set
-  // once by build-runtime-context.ts via resolveConversationChannel, from the
-  // guest's identifiers and the inbound message's channel. Null means unknown,
-  // not Instagram: it gets the Instagram wording because that wording is false
-  // on neither channel. Nothing may route a send on this value.
+  // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
+  // via resolveConversationChannel, from the guest's identifiers, the inbound
+  // message's channel and (TAC-469) the guest's last inbound channel. It picks
+  // the prompt copy AND, since TAC-469, the transport (lib/agent/dispatch-reply.ts),
+  // so the two cannot disagree. Null means unknown, not Instagram: it gets the
+  // Instagram wording because that wording is false on neither channel, and
+  // nothing routes a send on it.
   conversationChannel: MessageChannel | null
   recentMessages: RecentMessage[]
   recognition: RecognitionSnapshot
@@ -282,4 +284,8 @@ export type AgentResult =
       protectedDraftId: string
       triggers: string[]
     }
+  // TAC-469: an Instagram guest's message already had a reply when the agent
+  // came to send, usually one staff typed in the Instagram app. Nothing sent,
+  // by design (rule 3). Only handleInbound produces it.
+  | { status: 'superseded'; byMessageId: string }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

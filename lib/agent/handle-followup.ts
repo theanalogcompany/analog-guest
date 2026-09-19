@@ -260,6 +260,27 @@ export async function handleFollowup(input: {
       return { status: 'failed', stage: 'context_build', error: errMsg }
     }
 
+    // TAC-469 rule 2: a follow-up never auto-sends on Instagram, whatever
+    // triggered it (the engine, the Command Center button, a perk unlock) and
+    // whatever the window says. It fires days after the guest last wrote, when
+    // the window is almost always shut, and there is no reliable later window
+    // to wait for. On Instagram a due follow-up is an operator task (the engine
+    // records it; TAC-486 shows it). Refused here, before generating, so no
+    // caller can reach an Instagram send by this path. Pre-persist, so the
+    // engine releases its claim. An unresolved channel is refused the same
+    // way: nothing routes on null.
+    if (ctx.conversationChannel !== 'text') {
+      const reason =
+        ctx.conversationChannel === 'instagram' ? 'instagram_followups_are_manual' : 'channel_unresolved'
+      console.warn('[agent] followup refused: not a text conversation', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        reason,
+      })
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+
     // Synthesize a Classification from the trigger reason — used for prompt
     // category and for the outbound row's category column persisted by
     // scheduleAndSend. classifierConfidence=1.0 since the trigger is

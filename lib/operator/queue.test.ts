@@ -1,3 +1,4 @@
+import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from '@/lib/agent/dispatch-instagram-reply'
 // Offline tests for listPendingQueue's row-normalization layer. The lateral
 // join itself runs in Postgres (migration 018's list_operator_queue RPC) and
 // is covered by the four-scenario manual UAT in the PR description. Here we
@@ -296,6 +297,13 @@ describe('listPendingQueue', () => {
       // knowledge_gap's, which claimed the guest had asked something
       // unanswerable when in fact the generator fell over.
       ['generation_failed', 'Something went wrong writing this one.'],
+      // TAC-469: the copy is transcribed from the approved plan on the ticket
+      // ([PLAN], section 6), never read back out of REVIEW_REASON_LABELS; the
+      // KEY is imported, so renaming the constant without moving the copy
+      // fails here instead of shipping a card that falls back to
+      // 'Needs review' and loses the only line telling the operator the send
+      // may have gone through.
+      [INSTAGRAM_SEND_FAILED_REVIEW_REASON, "This reply didn't send on Instagram. Check the thread before sending it again."],
       // --- You're mid-thread with this guest ---
       ['previous_pending_held', 'Held behind an earlier message to this guest.'],
       [

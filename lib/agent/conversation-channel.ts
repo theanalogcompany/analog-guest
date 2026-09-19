@@ -8,19 +8,22 @@
 // number), and the Instagram copy must never tell an Instagram guest they
 // texted one.
 //
-// The answer is for PROMPT COPY ONLY. It is not a routing decision, and null
-// in particular means "unknown", not "Instagram": null gets the Instagram
-// wording because that wording is false on neither channel (a text is also a
-// message), which is a property of the copy, not of the guest. Anything that
-// routes a send (TAC-469) must not read null as Instagram.
+// Prompt copy and routing read the same answer (TAC-469), so the two can never
+// disagree about which channel a guest is on. Null means "unknown", never
+// Instagram: it gets the Instagram WORDING because that wording is false on
+// neither channel (a text is also a message), which is a property of the copy,
+// not of the guest. Nothing routes a send on null: lib/agent/dispatch-reply.ts
+// refuses it, and handle-inbound stops before generating.
 //
-//   inbound message   guest has          result
-//   text              a phone number     text
-//   instagram         an Instagram ID    instagram
-//   either            no ID for it       null (warned)
-//   none              a phone number     text   (including a guest with both)
-//   none              an Instagram ID    instagram
-//   none              neither            null (warned)
+//   inbound message   guest has            last inbound   result
+//   text              a phone number       -              text
+//   instagram         an Instagram ID      -              instagram
+//   either            no ID for it         -              null (warned)
+//   none              only a phone number  -              text
+//   none              only an Instagram ID -              instagram
+//   none              both                 text/instagram that channel (TAC-469)
+//   none              both                 unknown        text
+//   none              neither              -              null (warned)
 //
 // With an inbound message, the message decides, as long as the guest has the
 // identifier that channel needs. A text from a guest with no phone number is
@@ -29,10 +32,12 @@
 // rather than trusting either side.
 //
 // With no inbound message (followups, the knowledge-gap holding message, an
-// operator decline), a phone number decides it, even when the guest also has
-// an Instagram ID: every send path with no inbound message sends to a phone
-// number today. When TAC-469 routes those sends by channel, this branch has to
-// follow the routing. It is on TAC-469's pre-flight list and in agent-gate.ts.
+// operator decline), a guest with ONE identifier is on that channel. A guest
+// with BOTH is on the channel they last messaged us on (TAC-469): that is the
+// conversation they are actually in, and the one a reply belongs in. When that
+// can't be read, a phone number decides, as it did before TAC-469. No guest has
+// both as of 2026-09-19; the rule exists so the first one is routed and worded
+// for the conversation they chose.
 //
 // Neither identifier cannot happen: migration 048's guests_must_have_identity
 // requires at least one. It still gets a defined answer rather than a throw,
@@ -45,6 +50,12 @@ export type ConversationChannelInput = {
   inboundChannel: MessageChannel | null | undefined
   hasPhone: boolean
   hasInstagramId: boolean
+  /**
+   * TAC-469: the channel of the guest's most recent inbound message, read only
+   * when there is no inbound message and the guest has both identifiers.
+   * Undefined or null (not read, or unreadable) falls back to the phone.
+   */
+  lastInboundChannel?: MessageChannel | null
 }
 
 export type ConversationChannelResolution = {
@@ -74,6 +85,14 @@ export function resolveConversationChannel(input: ConversationChannelInput): Con
       return { channel: null, unresolvedReason: 'inbound_channel_without_identifier' }
     }
     return { channel: input.inboundChannel }
+  }
+  if (
+    input.hasPhone &&
+    input.hasInstagramId &&
+    input.lastInboundChannel !== undefined &&
+    input.lastInboundChannel !== null
+  ) {
+    return { channel: input.lastInboundChannel }
   }
   if (input.hasPhone) return { channel: 'text' }
   if (input.hasInstagramId) return { channel: 'instagram' }

@@ -113,6 +113,14 @@ vi.mock('./schedule-and-send', () => ({
   persistOrRegenQueuedDraft: (...a: unknown[]) => persistOrRegenQueuedDraftMock(...a),
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
+// TAC-469: the Instagram arm, mocked so this file pins the ORCHESTRATOR's
+// mapping of its outcomes. The arm's own behaviour is
+// dispatch-instagram-reply.test.ts's. dispatch-reply.ts (the switch) is real.
+const dispatchInstagramReplyMock = vi.fn()
+vi.mock('./dispatch-instagram-reply', () => ({
+  INSTAGRAM_SEND_FAILED_REVIEW_REASON: 'instagram_send_failed',
+  dispatchInstagramReply: (...a: unknown[]) => dispatchInstagramReplyMock(...a),
+}))
 // TAC-394: the crash card reads the guest's pending slots. Only that database
 // read is mocked; decideSlotAction and the identity helpers are forwarded REAL,
 // so a test here cannot pass on a mock's opinion of which slot a card is in.
@@ -1562,5 +1570,204 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
 
     const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(opts.renderedIntentions).toEqual([])
+  })
+})
+
+// TAC-469: an Instagram conversation's reply goes through the Instagram arm,
+// and what it reports back decides the run's result.
+describe('handleInbound — Instagram replies (TAC-469)', () => {
+  const instagramCtx = () =>
+    makeCtx({
+      conversationChannel: 'instagram',
+      guest: {
+        id: GUEST_ID,
+        phoneNumber: null,
+        firstName: 'Sam',
+        createdAt: new Date(),
+        createdVia: 'inbound_message',
+        isDemo: false,
+        context: {},
+        lastVisitAt: null,
+      },
+      currentMessage: {
+        id: INBOUND_ID,
+        providerMessageId: 'mid-in',
+        body: 'do you have oat milk?',
+        receivedAt: new Date(),
+        channel: 'instagram',
+      },
+    })
+
+  function setUpSendDecision() {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    buildRuntimeContextMock.mockResolvedValue(instagramCtx())
+  }
+
+  it('sends through the Instagram arm, never scheduleAndSend, with the reply check on this message', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'ig-row-1',
+      providerMessageId: 'mid-1',
+      generationId: 'gen-1',
+      bubbleCount: 1,
+      deliveredBody: 'ok',
+      undelivered: null,
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-row-1' })
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ replyCheck: { inboundMessageId: INBOUND_ID }, onUndelivered: 'card' }),
+    )
+  })
+
+  it("a text conversation never reaches the Instagram arm", async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+
+  it('a reply that became a card queues the run and pushes the operator (rule 4)', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'carded', reason: 'window_closed_by_gate', cardId: 'card-7' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({
+      status: 'queued',
+      outboundMessageId: 'card-7',
+      triggers: ['instagram_send_failed'],
+      primaryTrigger: 'instagram_send_failed',
+    })
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: 'card-7', primaryTrigger: 'instagram_send_failed' }),
+    )
+    // Nothing reached the guest, so nothing is recorded as asked.
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  it('pushes for the card the rest of a split reply became', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'ig-row-1',
+      providerMessageId: 'mid-1',
+      generationId: 'gen-1',
+      bubbleCount: 1,
+      deliveredBody: 'first half',
+      undelivered: { reason: 'rate_limited', cardId: 'card-8' },
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-row-1' })
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-8' }))
+  })
+
+  // The load-bearing half of the delivered-body fix: the RECORDER decides which
+  // intentions close. An ask that sat in the message that never went out must
+  // not close one.
+  it('records the ask against what reached the guest, not the whole reply', async () => {
+    setUpSendDecision()
+    buildRuntimeContextMock.mockResolvedValue({
+      ...instagramCtx(),
+      openIntentions: [
+        {
+          key: 'learn_name',
+          promptLine: "You don't know this guest's name yet.",
+          eligibleAt: new Date('2026-09-13T12:00:00.000Z'),
+        },
+      ],
+    })
+    recordIntentionPromptsMock.mockResolvedValue({ kind: 'recorded', raisedKeys: [], classifierAttempts: 1 })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'ig-row-1',
+      providerMessageId: 'mid-1',
+      generationId: 'gen-1',
+      bubbleCount: 1,
+      deliveredBody: 'first half',
+      undelivered: { reason: 'rate_limited', cardId: 'card-8' },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(recordIntentionPromptsMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
+    expect(captureIntentionPromptRaisedMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
+  })
+
+  it('a message staff already answered in the app sends nothing, pushes nothing, records nothing (rule 3)', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'superseded', byMessageId: 'echo-1' })
+    expect(sendDraftFlaggedPushMock).not.toHaveBeenCalled()
+    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+  })
+
+  it('a reply that neither sent nor carded fails the run', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'not_sent', reason: 'window_closed_by_gate' })
+    expect(await handleInbound(INBOUND_ID)).toEqual({ status: 'failed', stage: 'send', error: 'window_closed_by_gate' })
+  })
+
+  it('a reply that went out but saved no row fails at persist', async () => {
+    setUpSendDecision()
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'sent_unrecorded', providerMessageId: 'mid-1', reason: 'persist_failed' })
+    expect(await handleInbound(INBOUND_ID)).toEqual({ status: 'failed', stage: 'persist', error: 'persist_failed' })
+  })
+
+  // The fixed crisis body is two sentences, so on Instagram it can dispatch as
+  // two messages, and the resource line is the second one. If the rest didn't
+  // go out, the operator must be pushed: this is the turn where silence is
+  // worst.
+  it('pushes for the card when only part of the crisis-safety reply went out', async () => {
+    buildRuntimeContextMock.mockResolvedValue(instagramCtx())
+    classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'crisis-ig',
+      providerMessageId: 'mid-c',
+      generationId: 'gen-c',
+      bubbleCount: 1,
+      deliveredBody: 'first half',
+      undelivered: { reason: 'rate_limited', cardId: 'card-crisis' },
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'crisis-ig' })
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-crisis' }))
+  })
+
+  it('exempts the crisis-safety reply from the reply check (ruled 2026-09-19)', async () => {
+    buildRuntimeContextMock.mockResolvedValue(instagramCtx())
+    classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'crisis-ig',
+      providerMessageId: 'mid-c',
+      generationId: 'gen-c',
+      bubbleCount: 1,
+      deliveredBody: 'resources',
+      undelivered: null,
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'crisis-ig' })
+    expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ replyCheck: 'exempt' }),
+    )
+  })
+
+  it('stops a run with an unresolved channel before classifying: nothing routes on null', async () => {
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ conversationChannel: null }))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'failed', stage: 'context_build' })
+    expect(classifyStageMock).not.toHaveBeenCalled()
+    expect(generateStageMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'context_build' }))
   })
 })

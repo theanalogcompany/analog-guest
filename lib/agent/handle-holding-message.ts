@@ -35,7 +35,7 @@ import { randomUUID } from 'node:crypto'
 import { createAdminClient } from '@/lib/db/admin'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
-import { scheduleAndSend } from './schedule-and-send'
+import { dispatchReply } from './dispatch-reply'
 import {
   applyApprovalPolicyStage,
   generateStage,
@@ -76,9 +76,53 @@ export type HoldingMessageResult =
   | { status: 'sent'; outboundMessageId: string; usedFallback: boolean }
   // Deliberately not sent. The guest opted out, or the venue holds every
   // outbound for review. Distinct from 'failed' so the processor can count
-  // policy suppression separately from breakage.
-  | { status: 'suppressed'; reason: 'opted_out' | 'hold_all_outbound' | 'policy_hold' }
+  // policy suppression separately from breakage. TAC-469 adds
+  // 'answered_by_hand': on Instagram the question already has a reply (usually
+  // staff typing in the Instagram app), so "still checking" would arrive after
+  // the answer. The knowledge-gap card stays for the operator either way.
+  | { status: 'suppressed'; reason: 'opted_out' | 'hold_all_outbound' | 'policy_hold' | 'answered_by_hand' }
   | { status: 'failed'; stage: 'context_build' | 'send'; error: string }
+
+/**
+ * TAC-469: send a holding message through the reply dispatch. The text arm is
+ * scheduleAndSend as before (and throws as before); the Instagram arm checks
+ * the window and whether the question already has a reply. A holding message
+ * that doesn't go out becomes NO card: the knowledge-gap card it belongs to
+ * already holds the guest's place in the queue.
+ */
+async function dispatchHolding(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  questionMessageId: string,
+): Promise<
+  | { kind: 'sent'; outboundMessageId: string }
+  | { kind: 'answered_by_hand' }
+  | { kind: 'failed'; error: string }
+> {
+  const outcome = await dispatchReply(ctx, generation, {
+    // The guest has already waited out the whole window. Typing theatre on a
+    // message that is late by construction is the wrong register, and since
+    // TAC-421 the only time it would add is the inter-bubble gap on a split.
+    skipHumanFeelDelay: true,
+    replyCheck: { inboundMessageId: questionMessageId },
+    // The row names the question it is holding. Without it the row names no
+    // inbound, which the reply check reads as answering everything before it,
+    // and a holding message would silence the agent's reply to whatever the
+    // guest asked while it was being written.
+    answersInboundId: questionMessageId,
+    onUndelivered: 'none',
+  })
+  switch (outcome.kind) {
+    case 'sent':
+      return { kind: 'sent', outboundMessageId: outcome.outboundMessageId }
+    case 'superseded':
+      return { kind: 'answered_by_hand' }
+    case 'carded':
+    case 'not_sent':
+    case 'sent_unrecorded':
+      return { kind: 'failed', error: outcome.reason }
+  }
+}
 
 /**
  * Generate and send the holding message for one knowledge-gap card.
@@ -91,6 +135,11 @@ export async function handleHoldingMessage(input: {
   guestId: string
   /** The guest's outstanding question + when they asked it. */
   pendingQuestion: Omit<PendingQuestion, 'mode'>
+  /**
+   * TAC-469: the inbound message that asked it (the card's
+   * reply_to_message_id), for the Instagram reply check.
+   */
+  questionMessageId: string
 }): Promise<HoldingMessageResult> {
   const agentRunId = randomUUID()
   const trace = startAgentTrace({
@@ -260,7 +309,7 @@ export async function handleHoldingMessage(input: {
       console.warn(
         `[agent] holding message corpus retrieval failed for guest=${input.guestId}, using fallback: ${errMsg}`,
       )
-      return await sendFallback(ctx, agentRunId, 'corpus_failed')
+      return await sendFallback(ctx, agentRunId, 'corpus_failed', input.questionMessageId)
       // NOTE: no 'corpus' failure stage exists on HoldingMessageResult — this
       // path always resolves to the fallback's sent-or-failed, never to a
       // corpus-specific failure.
@@ -272,13 +321,20 @@ export async function handleHoldingMessage(input: {
 
       const sendSpan = trace.span('send', { attempt, bodyLength: generated.body.length })
       try {
-        const { outboundMessageId } = await scheduleAndSend(ctx, generated, {
-          // The guest has already waited out the whole window. Typing
-          // theatre on a message that is late by construction is the wrong
-          // register, and since TAC-421 the only time it would add is the
-          // inter-bubble gap on a split.
-          skipHumanFeelDelay: true,
-        })
+        const dispatched = await dispatchHolding(ctx, generated, input.questionMessageId)
+        if (dispatched.kind === 'answered_by_hand') {
+          sendSpan.end({ output: { suppressed: 'answered_by_hand', attempt } })
+          console.log('[agent] holding message suppressed — the question already has a reply', {
+            agentRunId,
+            guestId: input.guestId,
+          })
+          return { status: 'suppressed', reason: 'answered_by_hand' }
+        }
+        if (dispatched.kind === 'failed') {
+          sendSpan.end({ level: 'ERROR', statusMessage: dispatched.error })
+          return { status: 'failed', stage: 'send', error: dispatched.error }
+        }
+        const { outboundMessageId } = dispatched
         sendSpan.end({ output: { outboundMessageId, attempt } })
         await capturePostHogEvent('holding_message_sent', input.guestId, {
           agentRunId,
@@ -301,7 +357,7 @@ export async function handleHoldingMessage(input: {
       }
     }
 
-    return await sendFallback(ctx, agentRunId, 'gates_failed')
+    return await sendFallback(ctx, agentRunId, 'gates_failed', input.questionMessageId)
   } finally {
     await trace.flushAsync()
   }
@@ -380,12 +436,14 @@ async function sendFallback(
   ctx: RuntimeContext,
   agentRunId: string,
   cause: 'corpus_failed' | 'gates_failed',
+  questionMessageId: string,
 ): Promise<HoldingMessageResult> {
   const fallbackGeneration = buildFallbackGeneration()
   try {
-    const { outboundMessageId } = await scheduleAndSend(ctx, fallbackGeneration, {
-      skipHumanFeelDelay: true,
-    })
+    const dispatched = await dispatchHolding(ctx, fallbackGeneration, questionMessageId)
+    if (dispatched.kind === 'answered_by_hand') return { status: 'suppressed', reason: 'answered_by_hand' }
+    if (dispatched.kind === 'failed') return { status: 'failed', stage: 'send', error: dispatched.error }
+    const { outboundMessageId } = dispatched
     console.warn('[agent] holding message used plain fallback', {
       agentRunId,
       guestId: ctx.guest.id,

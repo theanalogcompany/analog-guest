@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { handleFollowup } from '@/lib/agent'
+import { resolveConversationChannel } from '@/lib/agent/conversation-channel'
+import { loadLastInboundChannel } from '@/lib/agent/last-inbound-channel'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
@@ -18,7 +20,8 @@ import { createServerClient } from '@/lib/db/server'
 //   2. Allowlist: venueId must be in the operator's allowedVenueIds.
 //   3. Venue + messaging_phone_number: surface misconfiguration as a clean
 //      400 here instead of letting the pipeline 502 from a deeper failure
-//      when scheduleAndSend has nothing to dial.
+//      when scheduleAndSend has nothing to dial. Checked only for a text
+//      conversation (TAC-469): an Instagram guest is refused before it.
 //   4. Opt-out: the agent pipeline doesn't pre-send-check
 //      guests.opted_out_at — we add that here so the manual button can't
 //      be the path that violates it. (THE-todo: hoist into the pipeline
@@ -124,15 +127,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!venueRow) {
     return NextResponse.json({ error: 'venue not found' }, { status: 404 })
   }
-  if (!venueRow.messaging_phone_number) {
-    return NextResponse.json(
-      {
-        error: 'venue not configured',
-        detail: 'venue has no messaging_phone_number; assign a Sendblue number before sending',
-      },
-      { status: 400 },
-    )
-  }
 
   // ---- opt-out check ----
   // The agent pipeline doesn't currently pre-send-check opted_out_at; we
@@ -141,7 +135,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // null if the guest isn't at this venue).
   const { data: guestRow, error: guestErr } = await supabase
     .from('guests')
-    .select('id, opted_out_at, phone_number')
+    .select('id, opted_out_at, phone_number, instagram_scoped_id')
     .eq('id', body.guestId)
     .eq('venue_id', body.venueId)
     .maybeSingle()
@@ -157,15 +151,37 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (guestRow.opted_out_at !== null) {
     return NextResponse.json({ error: 'guest opted out' }, { status: 403 })
   }
-  // TAC-467: a guest who came in on Instagram has no phone number, and this
-  // pipeline can only send by text. Without this check the click still costs
-  // a generation, then either fails with a red alert or queues a card nobody
-  // can send (recorded as channel 'text', which it isn't). Refused up front.
-  if (guestRow.phone_number === null) {
+  // TAC-469 rule 2: a follow-up is never sent automatically on Instagram.
+  // Decided by the conversation's channel, from the same resolver the agent
+  // uses (a guest with both identifiers is on the channel they last wrote on),
+  // so this button and handleFollowup can't disagree. handleFollowup refuses it
+  // too; refusing here saves the generation and gives the operator a reason.
+  const hasPhone = typeof guestRow.phone_number === 'string'
+  const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'
+  const { channel } = resolveConversationChannel({
+    inboundChannel: undefined,
+    hasPhone,
+    hasInstagramId,
+    lastInboundChannel:
+      hasPhone && hasInstagramId ? await loadLastInboundChannel(body.venueId, body.guestId, supabase) : undefined,
+  })
+  if (channel !== 'text') {
     return NextResponse.json(
       {
-        error: 'guest has no phone number',
-        detail: 'This guest messaged on Instagram. Replies over Instagram are not built yet.',
+        error: 'not a text conversation',
+        detail:
+          channel === 'instagram'
+            ? "This guest is on Instagram. Follow-ups aren't sent there automatically: Instagram only allows a reply within 24 hours of the guest's last message."
+            : "This guest's channel can't be determined, so nothing can be sent.",
+      },
+      { status: 400 },
+    )
+  }
+  if (!venueRow.messaging_phone_number) {
+    return NextResponse.json(
+      {
+        error: 'venue not configured',
+        detail: 'venue has no messaging_phone_number; assign a Sendblue number before sending',
       },
       { status: 400 },
     )

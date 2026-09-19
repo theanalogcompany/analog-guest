@@ -62,11 +62,72 @@ describe('resolveConversationChannel', () => {
       ).toEqual({ channel: 'text' })
     })
 
-    // Every send path with no inbound message sends to a phone number today,
-    // so the reply is a text. TAC-469 revisits this when it routes by channel.
-    it('a guest with both identifiers is text', () => {
+    // TAC-469: a guest with both identifiers is on the channel they last
+    // messaged us on, because routing now follows this answer too.
+    it('a guest with both identifiers follows their last inbound message', () => {
+      expect(
+        resolveConversationChannel({
+          inboundChannel: undefined,
+          hasPhone: true,
+          hasInstagramId: true,
+          lastInboundChannel: 'instagram',
+        }),
+      ).toEqual({ channel: 'instagram' })
+      expect(
+        resolveConversationChannel({
+          inboundChannel: undefined,
+          hasPhone: true,
+          hasInstagramId: true,
+          lastInboundChannel: 'text',
+        }),
+      ).toEqual({ channel: 'text' })
+    })
+
+    // Not read, or unreadable: the phone number decides, as before TAC-469.
+    it('a guest with both identifiers and no readable last inbound is text', () => {
       expect(
         resolveConversationChannel({ inboundChannel: undefined, hasPhone: true, hasInstagramId: true }),
+      ).toEqual({ channel: 'text' })
+      expect(
+        resolveConversationChannel({
+          inboundChannel: undefined,
+          hasPhone: true,
+          hasInstagramId: true,
+          lastInboundChannel: null,
+        }),
+      ).toEqual({ channel: 'text' })
+    })
+
+    // The last inbound decides only between identifiers the guest has. With
+    // one identifier, that identifier decides whatever the history says.
+    it('a guest with one identifier ignores the last inbound channel', () => {
+      expect(
+        resolveConversationChannel({
+          inboundChannel: undefined,
+          hasPhone: true,
+          hasInstagramId: false,
+          lastInboundChannel: 'instagram',
+        }),
+      ).toEqual({ channel: 'text' })
+      expect(
+        resolveConversationChannel({
+          inboundChannel: undefined,
+          hasPhone: false,
+          hasInstagramId: true,
+          lastInboundChannel: 'text',
+        }),
+      ).toEqual({ channel: 'instagram' })
+    })
+
+    // With an inbound message, the message decides; the history is not read.
+    it('an inbound message outranks the last inbound channel', () => {
+      expect(
+        resolveConversationChannel({
+          inboundChannel: 'text',
+          hasPhone: true,
+          hasInstagramId: true,
+          lastInboundChannel: 'instagram',
+        }),
       ).toEqual({ channel: 'text' })
     })
 

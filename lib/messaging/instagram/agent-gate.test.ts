@@ -19,6 +19,7 @@ const saved = (kind: 'message' | 'postback' | 'echo'): InstagramEventOutcome => 
   guestCreated: false,
   hasReferral: false,
   hasProviderSentAt: true,
+  titlelessPostback: false,
   guestCreatedVia: null,
 })
 
@@ -49,5 +50,13 @@ describe('the Instagram agent gate', () => {
 
   it.each(notSaved)('never hands %s to the agent, even once open', (_name, outcome) => {
     expect(agentMessageIdFor(outcome, true)).toBeNull()
+  })
+
+  // TAC-469: an icebreaker tap Meta sent with no title is an empty inbound;
+  // there is nothing to reply to. The row is still saved and still opens the
+  // reply window; only the agent run is skipped.
+  it('never hands a titleless postback to the agent, even once open', () => {
+    const titleless = { ...saved('postback'), titlelessPostback: true } as InstagramEventOutcome
+    expect(agentMessageIdFor(titleless, true)).toBeNull()
   })
 })

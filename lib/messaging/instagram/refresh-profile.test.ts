@@ -167,6 +167,7 @@ describe('profileRefreshTargetFor', () => {
     guestCreated: true,
     hasReferral: false,
     hasProviderSentAt: true,
+    titlelessPostback: false,
     guestCreatedVia: 'inbound_message',
   })
 

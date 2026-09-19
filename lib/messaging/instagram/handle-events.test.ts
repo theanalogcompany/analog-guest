@@ -97,6 +97,7 @@ describe('a guest message', () => {
         guestCreated: true,
         hasReferral: false,
         hasProviderSentAt: true,
+        titlelessPostback: false,
         guestCreatedVia: 'inbound_message',
       },
     ])
@@ -195,7 +196,7 @@ describe('an icebreaker postback', () => {
         referral_source: 'SHORTLINK',
       },
     ])
-    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', hasReferral: true }])
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', hasReferral: true, titlelessPostback: false }])
   })
 
   it('creates the guest when a postback is their first action', async () => {
@@ -220,8 +221,33 @@ describe('an icebreaker postback', () => {
         },
       ],
     }
-    await processInstagramDelivery(payload, db.client)
+    const outcomes = await processInstagramDelivery(payload, db.client)
     expect(db.inserts('messages')).toMatchObject([{ direction: 'inbound', channel: 'instagram', body: '' }])
+    // TAC-469: saved, and flagged, so the agent gate skips it (an empty
+    // message is nothing to reply to) while the window still opens.
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'postback', titlelessPostback: true }])
+  })
+
+  it('treats a whitespace-only title as no title', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [
+            {
+              sender: { id: GUEST_IGSID },
+              recipient: { id: ACCOUNT_ID },
+              timestamp: 1,
+              postback: { mid: 'p2', title: '   ', payload: 'X' },
+            },
+          ],
+        },
+      ],
+    }
+    expect(await processInstagramDelivery(payload, db.client)).toMatchObject([{ titlelessPostback: true }])
   })
 })
 
@@ -603,12 +629,12 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
     ],
     [
-      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
-      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
+      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
+      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
@@ -660,8 +686,14 @@ describe('provider_sent_at', () => {
   // is what keeps it NULL on every Sendblue row, and it holds only while this
   // handler is the one place that writes it. The check is by mention, so a
   // reader (TAC-469's window gate) is also added here, deliberately, along
-  // with any second writer.
-  it('is named by this handler and nothing else in the app', () => {
+  // with any second writer. TAC-469 added its two readers, the window gate
+  // and the reply check, and the Instagram send arm, which names the column
+  // only to say it never writes it: an echo row it fills in keeps Meta's time.
+  // And its operator arm, which is a WRITER, onto Instagram card rows only: when
+  // an echo lands before an approved card's mid, it copies the echo's time onto
+  // the card before deleting the echo (ruled 2026-09-19). Still never a
+  // Sendblue row.
+  it('is named by this handler and the Instagram outbound readers, and nothing else in the app', () => {
     const root = join(__dirname, '..', '..', '..')
     const writers: string[] = []
     const walk = (dir: string): void => {
@@ -677,6 +709,12 @@ describe('provider_sent_at', () => {
     }
     for (const dir of ['app', 'lib', 'scripts']) walk(join(root, dir))
 
-    expect(writers.sort()).toEqual([join('lib', 'messaging', 'instagram', 'handle-events.ts')])
+    expect(writers.sort()).toEqual([
+      join('lib', 'agent', 'dispatch-instagram-reply.ts'),
+      join('lib', 'messaging', 'instagram', 'handle-events.ts'),
+      join('lib', 'messaging', 'instagram', 'reply-check.ts'),
+      join('lib', 'messaging', 'instagram', 'window.ts'),
+      join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
+    ])
   })
 })

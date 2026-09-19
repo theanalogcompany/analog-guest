@@ -413,6 +413,29 @@ describe('QR prefilled-body collision guard (TAC-326)', () => {
         'Wired Wonka',
       ],
     },
+    // TAC-469 pre-flight. Le Mil's first message arrives two ways: the
+    // Sendblue QR sign's prefilled text (venue_info.qrEnrollmentMessage), and,
+    // on Instagram, the title of the icebreaker the guest tapped, which lives
+    // in Meta's settings and nowhere in this repo. Both are checked here
+    // against the live menu (read 2026-09-19). The icebreaker title is the one
+    // Jaipal configured ({"question": "Hi Le Mil's!", "payload":
+    // "ICEBREAKER_HELLO"}); read the LIVE titles from Meta before lifting the
+    // Instagram agent gate and update this if they differ. Titles stay
+    // greetings (ruled 2026-09-19): a question would suppress the opener's
+    // ask every time. Update this entry whenever the menu or either string
+    // changes: nothing errors when it goes stale.
+    ...[
+      { slug: 'le-mils-coffee', qrEnrollmentMessage: 'Hi Himanshu!' },
+      { slug: 'le-mils-coffee (Instagram icebreaker)', qrEnrollmentMessage: "Hi Le Mil's!" },
+    ].map((entry) => ({
+      ...entry,
+      menuItemNames: [
+        'Pour Over', 'Espresso', 'Cortado', 'Americano', 'Cappuccino', 'Latte',
+        'SoFi', 'Almost Latte', 'Spiced Cold Brew', 'Blossom Tonic',
+        'Pink Panther', 'Gulab Jamun Cake', 'Rose Pistachio Barfi',
+        'Mango Cardamom Barfi', 'Mango Lassi', 'Flat White',
+      ],
+    })),
   ]
 
   for (const venue of knownVenueConfigs) {

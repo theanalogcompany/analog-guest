@@ -129,6 +129,12 @@ export type InstagramEventOutcome =
       hasReferral: boolean
       /** False when the item had no millisecond timestamp and provider_sent_at was saved NULL. */
       hasProviderSentAt: boolean
+      /**
+       * TAC-469: an icebreaker postback that arrived with no title, saved with
+       * body ''. It still opens the reply window, but the agent is not run on
+       * it (agent-gate.ts): an empty message is nothing to reply to.
+       */
+      titlelessPostback: boolean
       /** The new guest's created_via, or null when the guest already existed. */
       guestCreatedVia: InstagramGuestCreatedVia | null
     }
@@ -337,6 +343,7 @@ async function insertMessage(
     guestCreated: guest.created,
     hasReferral: event.kind !== 'echo' && event.referral !== null,
     hasProviderSentAt: event.providerSentAt !== null,
+    titlelessPostback: event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
   }
 }
@@ -443,6 +450,7 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
         guestCreated: outcome.guestCreated,
         hasReferral: outcome.hasReferral,
         hasProviderSentAt: outcome.hasProviderSentAt,
+        titlelessPostback: outcome.titlelessPostback,
         guestCreatedVia: outcome.guestCreatedVia,
       })
       return

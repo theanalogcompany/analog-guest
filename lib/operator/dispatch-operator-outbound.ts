@@ -36,6 +36,13 @@ import { createAdminClient } from '@/lib/db/admin'
 import { createCommitmentFromPending } from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
 import { PendingCommitmentSchema } from '@/lib/schemas'
+import { parseMessageChannel } from '@/lib/schemas/message-channel'
+import {
+  prepareInstagramOperatorSend,
+  sendInstagramOperatorText,
+  settleFailedInstagramOperatorSend,
+  stampInstagramOperatorSend,
+} from './dispatch-instagram-outbound'
 // TAC-385 PR 1: imported BY PATH, not through a barrel. record.ts pulls
 // classifyIntentionPrompts from @/lib/ai, and CLAUDE.md documents twice
 // (emoji-cadence, VERIFY_GROUNDING_TRUNCATED_ERROR_CODE) what a barrel mock
@@ -102,6 +109,15 @@ export type DispatchErrorCode =
   // empty_body. The routes map it to the same 502 body as sendblue_failed,
   // so the operator API Contract does not change.
   | 'no_phone_number'
+  // TAC-469: an Instagram card. The first four are refused BEFORE the flip,
+  // so the card stays queued; instagram_send_failed is Meta refusing or not
+  // answering after it. All map to the existing 502 body with a plain-words
+  // detail, so the operator API Contract does not change.
+  | 'no_instagram_id'
+  | 'over_byte_cap'
+  | 'instagram_window_closed'
+  | 'channel_unresolved'
+  | 'instagram_send_failed'
 
 export interface DispatchFailure {
   ok: false
@@ -138,7 +154,7 @@ export async function dispatchOperatorOutbound(
   const { data: row, error: readErr } = await supabase
     .from('messages')
     .select(
-      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment, rendered_intentions',
+      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment, rendered_intentions, channel',
     )
     .eq('id', input.messageId)
     .maybeSingle()
@@ -202,18 +218,32 @@ export async function dispatchOperatorOutbound(
     return { ok: false, errorCode: 'opted_out', error: 'guest opted out' }
   }
 
+  // ---- 3-. TAC-469: which transport. The card's own channel decides: it was
+  // written for the conversation it belongs to. Nothing routes on an unknown
+  // one, and that is refused before the flip too.
+  const channel = parseMessageChannel(row.channel)
+  if (channel === null) {
+    return {
+      ok: false,
+      errorCode: 'channel_unresolved',
+      error: "This card's channel can't be determined, so it can't be sent.",
+    }
+  }
+
   // ---- 3a. TAC-467: refuse a guest with no phone BEFORE the optimistic flip. ----
   // sendMessage refuses a null recipient too, but after the flip below, which
   // would strand the card exactly as step 3b describes. Nothing queues a card
   // for such a guest today (the Command Center Follow Up refuses them, and the
   // Instagram handler does not run the agent); this keeps a future path from
   // stranding one. Replying over Instagram is the outbound ticket's job.
+  // Text arm only (TAC-469): an Instagram card is sent to the guest's scoped
+  // ID, and its checks are in step 3c.
   const recipientPhone = guestRow.phone_number
-  if (recipientPhone === null) {
+  if (channel === 'text' && recipientPhone === null) {
     return {
       ok: false,
       errorCode: 'no_phone_number',
-      error: 'guest has no phone number; replies over Instagram are not built yet',
+      error: 'guest has no phone number',
     }
   }
 
@@ -240,6 +270,22 @@ export async function dispatchOperatorOutbound(
         input.action === 'edit'
           ? 'cannot send an empty message'
           : 'this card has no draft yet — open it and write the answer',
+    }
+  }
+
+  // ---- 3c. TAC-469: an Instagram card's checks, BEFORE the flip, so a
+  // refused card stays in the queue: the byte cap (sent verbatim, never split),
+  // the account and token, and the 24-hour window.
+  let instagramTarget: Awaited<ReturnType<typeof prepareInstagramOperatorSend>> | null = null
+  if (channel === 'instagram') {
+    instagramTarget = await prepareInstagramOperatorSend(supabase, {
+      venueId: row.venue_id,
+      guestId: row.guest_id,
+      body: input.action === 'edit' ? input.editedBody!.trim() : row.body,
+      now: new Date(),
+    })
+    if (!instagramTarget.ok) {
+      return { ok: false, errorCode: instagramTarget.errorCode, error: instagramTarget.error }
     }
   }
 
@@ -292,46 +338,88 @@ export async function dispatchOperatorOutbound(
     }
   }
 
-  // ---- 5. dispatch via Sendblue ----
+  // ---- 5. dispatch ----
   const sendBody = input.action === 'edit' ? input.editedBody!.trim() : row.body
-  const sendResult = await sendMessage({
-    venueId: row.venue_id,
-    // Never null here: step 3a refused a guest with no phone before the flip.
-    to: recipientPhone,
-    body: sendBody,
-  })
 
-  if (!sendResult.ok) {
-    // Known v1 gap: the row is now review_state=approved|edited with
-    // provider_message_id=null. Surfaces via the failure mode documented in
-    // CLAUDE.md "Operator API" section; recovery is manual SQL or the v2
-    // failed_dispatch reconciliation ticket. We do NOT roll back the state
-    // flip because doing so naively reintroduces double-send risk.
-    return {
-      ok: false,
-      errorCode: 'sendblue_failed',
-      error: sendResult.error,
+  // TAC-469: the Instagram arm sends, writes the mid, and returns here; the
+  // text arm below is unchanged. Steps 7 and 8 are shared, so they run after
+  // either transport.
+  let providerMessageId: string
+  if (instagramTarget !== null && instagramTarget.ok) {
+    const sent = await sendInstagramOperatorText(instagramTarget.target, sendBody)
+    if (!sent.ok) {
+      // Meta definitely refused: nothing reached the guest, so the card goes
+      // back in the queue (rule 4). An unknown outcome stays out, as on
+      // Sendblue, because it may already be in the thread.
+      return {
+        ok: false,
+        errorCode: 'instagram_send_failed',
+        error: await settleFailedInstagramOperatorSend(supabase, {
+          messageId: row.id,
+          flippedTo: targetReviewState,
+          sent,
+        }),
+      }
     }
-  }
-
-  // ---- 6. stamp dispatch metadata ----
-  const { error: stampErr } = await supabase
-    .from('messages')
-    .update({
-      status: 'sent',
-      sent_at: now,
-      provider_message_id: sendResult.data.providerMessageId,
+    const stamped = await stampInstagramOperatorSend(supabase, {
+      messageId: row.id,
+      venueId: row.venue_id,
+      guestId: row.guest_id,
+      mid: sent.mid,
+      sentAt: now,
     })
-    .eq('id', row.id)
-
-  if (stampErr) {
-    // Sendblue accepted but our row write failed — log the providerMessageId
-    // via the error so an operator can hand-stitch the row if needed.
-    return {
-      ok: false,
-      errorCode: 'db_error',
-      error: `dispatch metadata stamp failed: ${stampErr.message} (providerMessageId=${sendResult.data.providerMessageId})`,
+    if (!stamped.ok) {
+      return {
+        ok: false,
+        errorCode: 'db_error',
+        // No mid in the message, unlike the Sendblue arm below: a mid encodes
+        // the account, conversation and message IDs, and this string reaches
+        // the route's 500 body (TAC-458). The row id identifies the card.
+        error: `dispatch metadata stamp failed for message=${row.id}: ${stamped.error}`,
+      }
     }
+    providerMessageId = sent.mid
+  } else {
+    const sendResult = await sendMessage({
+      venueId: row.venue_id,
+      // Never null here: step 3a refused a guest with no phone before the flip.
+      to: recipientPhone,
+      body: sendBody,
+    })
+
+    if (!sendResult.ok) {
+      // Known v1 gap: the row is now review_state=approved|edited with
+      // provider_message_id=null. Surfaces via the failure mode documented in
+      // CLAUDE.md "Operator API" section; recovery is manual SQL or the v2
+      // failed_dispatch reconciliation ticket. We do NOT roll back the state
+      // flip because doing so naively reintroduces double-send risk.
+      return {
+        ok: false,
+        errorCode: 'sendblue_failed',
+        error: sendResult.error,
+      }
+    }
+
+    // ---- 6. stamp dispatch metadata ----
+    const { error: stampErr } = await supabase
+      .from('messages')
+      .update({
+        status: 'sent',
+        sent_at: now,
+        provider_message_id: sendResult.data.providerMessageId,
+      })
+      .eq('id', row.id)
+
+    if (stampErr) {
+      // Sendblue accepted but our row write failed — log the providerMessageId
+      // via the error so an operator can hand-stitch the row if needed.
+      return {
+        ok: false,
+        errorCode: 'db_error',
+        error: `dispatch metadata stamp failed: ${stampErr.message} (providerMessageId=${sendResult.data.providerMessageId})`,
+      }
+    }
+    providerMessageId = sendResult.data.providerMessageId
   }
 
   // ---- 7. TAC-297: materialize the commitment row if intent was carried ----
@@ -493,7 +581,7 @@ export async function dispatchOperatorOutbound(
     guestId: row.guest_id,
     category: row.category,
     voiceFidelity: row.voice_fidelity,
-    providerMessageId: sendResult.data.providerMessageId,
+    providerMessageId,
     createdAt: row.created_at,
     originalBody: row.body,
   }

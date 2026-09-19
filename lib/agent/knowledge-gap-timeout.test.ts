@@ -157,6 +157,8 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
         venueId: 'venue-1',
         guestId: 'guest-card-1',
         pendingQuestion: expect.objectContaining({ question: 'what grade is the matcha?' }),
+        // TAC-469: the card's own question row, for the Instagram reply check.
+        questionMessageId: 'inbound-1',
       }),
     )
   })

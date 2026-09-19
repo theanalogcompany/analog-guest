@@ -674,3 +674,54 @@ describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
     expect(captureManualFollowupSlotOccupiedMock).not.toHaveBeenCalled()
   })
 })
+
+// TAC-469 rule 2: a follow-up never auto-sends on Instagram. Refused before
+// generating, so no caller (the engine, the Command Center button, a perk
+// unlock, a demo guest) can reach an Instagram send by this path.
+describe('handleFollowup: never on Instagram (TAC-469)', () => {
+  const trigger = (reason: 'day_3' | 'manual' | 'perk_unlock' | 'cold_lapsed') => ({
+    reason,
+    triggeredAt: new Date(),
+  })
+
+  it.each(['day_3', 'manual', 'perk_unlock', 'cold_lapsed'] as const)(
+    'refuses a %s follow-up for an Instagram conversation before generating',
+    async (reason) => {
+      buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'instagram',
+      }))
+      const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger(reason) })
+      expect(result).toEqual({ status: 'refused', reason: 'instagram_followups_are_manual' })
+      expect(generateStageMock).not.toHaveBeenCalled()
+      expect(scheduleAndSendMock).not.toHaveBeenCalled()
+      expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('refuses a demo guest on Instagram too: the demo bypass is about approval, not channel', async () => {
+    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => {
+      const ctx = makeCtx(args.followupTrigger)
+      return { ...ctx, conversationChannel: 'instagram', guest: { ...ctx.guest, isDemo: true } }
+    })
+    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
+    expect(result).toEqual({ status: 'refused', reason: 'instagram_followups_are_manual' })
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unresolved channel: nothing routes on null', async () => {
+    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+      ...makeCtx(args.followupTrigger),
+      conversationChannel: null,
+    }))
+    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
+    expect(result).toEqual({ status: 'refused', reason: 'channel_unresolved' })
+    expect(generateStageMock).not.toHaveBeenCalled()
+  })
+
+  it('still sends a text follow-up, unchanged', async () => {
+    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
+    expect(generateStageMock).toHaveBeenCalledTimes(1)
+    expect(result.status).not.toBe('refused')
+  })
+})

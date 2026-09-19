@@ -69,6 +69,12 @@ vi.mock('./build-runtime-context', () => ({
 vi.mock('./schedule-and-send', () => ({
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
+// TAC-469: the Instagram arm, mocked; its behaviour is
+// dispatch-instagram-reply.test.ts's. dispatch-reply.ts (the switch) is real.
+const dispatchInstagramReplyMock = vi.fn()
+vi.mock('./dispatch-instagram-reply', () => ({
+  dispatchInstagramReply: (...a: unknown[]) => dispatchInstagramReplyMock(...a),
+}))
 vi.mock('./alerts', () => ({
   fireRedAlert: (...a: unknown[]) => fireRedAlertMock(...a),
   capturePostHogEvent: (...a: unknown[]) => capturePostHogEventMock(...a),
@@ -90,6 +96,9 @@ function makeCtx() {
     guest: { id: 'guest-1', firstName: 'Sam' },
     currentMessage: null,
     followupTrigger: { reason: 'manual', triggeredAt: new Date() },
+    // TAC-469: routing reads this. A real context always carries it (set by
+    // buildRuntimeContext); these tests are the text arm, unchanged.
+    conversationChannel: 'text',
     pendingQuestion: null,
     corpus: null,
     knowledgeCorpus: null,
@@ -132,6 +141,8 @@ function goodGeneration(body = "still tracking that down for you") {
   }
 }
 
+// TAC-469: the inbound row that asked it, for the Instagram reply check.
+const QUESTION_MESSAGE_ID = 'inbound-question-1'
 const QUESTION = {
   question: 'what grade is the matcha?',
   askedAt: new Date('2026-08-07T12:00:00Z'),
@@ -159,6 +170,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1', usedFallback: false })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
@@ -180,6 +192,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
   })
@@ -198,6 +211,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     // Snapshotted INSIDE the mock: ctx is one object mutated in place, so
     // reading it after the run pins the final value rather than the value
@@ -215,6 +229,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     const ctxUsed = generateStageMock.mock.calls[0]?.[0] as { pendingQuestion: unknown }
     expect(ctxUsed.pendingQuestion).toEqual({
@@ -229,6 +244,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(scheduleAndSendMock.mock.calls[0]?.[2]).toMatchObject({ skipHumanFeelDelay: true })
   })
@@ -241,6 +257,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: false })
@@ -269,6 +286,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: false })
@@ -286,6 +304,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: true })
@@ -303,6 +322,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(fireRedAlertMock).toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'generation' }),
@@ -321,6 +341,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { voiceFidelity: number }
     expect(sentGeneration.voiceFidelity).toBe(0)
@@ -338,6 +359,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     // Two gate calls would mean an attempt was gated; zero means both
     // generations refused upstream and the fallback went straight out.
@@ -351,6 +373,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toMatchObject({ status: 'failed', stage: 'send' })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
@@ -362,6 +385,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toMatchObject({ status: 'failed', stage: 'context_build' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
@@ -382,6 +406,7 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
     const [, generationArg] = verifyGroundingStageMock.mock.calls[0]
@@ -404,6 +429,7 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(r).toMatchObject({ status: 'sent', usedFallback: false })
@@ -427,6 +453,7 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
@@ -447,6 +474,7 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
@@ -467,6 +495,7 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(verifyGroundingStageMock).not.toHaveBeenCalled()
   })
@@ -482,6 +511,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toEqual({ status: 'suppressed', reason: 'opted_out' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
@@ -495,6 +525,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toMatchObject({ status: 'suppressed', reason: 'opted_out' })
   })
@@ -511,6 +542,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toEqual({ status: 'suppressed', reason: 'hold_all_outbound' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
@@ -535,6 +567,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toEqual({ status: 'suppressed', reason: 'policy_hold' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
@@ -556,6 +589,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r).toEqual({ status: 'suppressed', reason: 'policy_hold' })
   })
@@ -574,6 +608,7 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     expect(r.status).not.toBe('suppressed')
   })
@@ -585,10 +620,61 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
       venueId: 'venue-1',
       guestId: 'guest-1',
       pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
     })
     const ctxUsed = scheduleAndSendMock.mock.calls[0]?.[0] as {
       classification: { category: string } | null
     }
     expect(ctxUsed.classification?.category).toBe('manual')
+  })
+})
+
+// TAC-469: on Instagram the holding message goes through the Instagram arm,
+// with the reply check pointed at the question the card holds.
+describe('handleHoldingMessage — Instagram (TAC-469)', () => {
+  const run = () =>
+    handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
+    })
+
+  beforeEach(() => {
+    buildRuntimeContextMock.mockResolvedValue({ ...makeCtx(), conversationChannel: 'instagram' })
+  })
+
+  it('sends through the Instagram arm, checking whether the question already has a reply, and writes no card', async () => {
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'ig-1',
+      providerMessageId: 'mid-1',
+      generationId: 'g',
+      bubbleCount: 1,
+      undelivered: null,
+    })
+    expect(await run()).toEqual({ status: 'sent', outboundMessageId: 'ig-1', usedFallback: false })
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        replyCheck: { inboundMessageId: QUESTION_MESSAGE_ID },
+        // The row names the question, so it can't read as an answer to
+        // whatever the guest asked while it was being written.
+        answersInboundId: QUESTION_MESSAGE_ID,
+        onUndelivered: 'none',
+      }),
+    )
+  })
+
+  it('is suppressed, not failed, when staff already answered the question in the app', async () => {
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
+    expect(await run()).toEqual({ status: 'suppressed', reason: 'answered_by_hand' })
+  })
+
+  it('fails when the holding message could not go out (the card is already there)', async () => {
+    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'not_sent', reason: 'window_closed_by_gate' })
+    expect(await run()).toEqual({ status: 'failed', stage: 'send', error: 'window_closed_by_gate' })
   })
 })

@@ -1,3 +1,4 @@
+import { captureConversationChannelUnresolved } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { AgentTrace } from '@/lib/observability'
 import {
@@ -25,6 +26,7 @@ import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
+import { loadLastInboundChannel } from './last-inbound-channel'
 import { groupIntoResponses } from './group-responses'
 import {
   applyCurrentTurnSuppression,
@@ -272,10 +274,18 @@ export async function buildRuntimeContext(input: {
   // through a cast) resolves as unparseable, never as "no inbound message",
   // which would hand a guest with both identifiers the SMS copy.
   const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined
+  // TAC-469: a guest with both identifiers and no inbound message is on the
+  // channel they last messaged us on. Read only then, so every other run pays
+  // nothing for it.
+  const lastInboundChannel =
+    inboundChannel === undefined && hasPhone && hasInstagramId
+      ? await loadLastInboundChannel(input.venueId, input.guestId, supabase)
+      : undefined
   const channelResolution = resolveConversationChannel({
     inboundChannel,
     hasPhone,
     hasInstagramId,
+    lastInboundChannel,
   })
   if (channelResolution.channel === null) {
     console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {
@@ -287,6 +297,20 @@ export async function buildRuntimeContext(input: {
       hasPhone,
       hasInstagramId,
       reason: channelResolution.unresolvedReason,
+    })
+    // TAC-469 pre-flight: a real signal, not only a log line nobody watches.
+    // Once Instagram replies are on, an unresolved channel is a guest whose
+    // reply cannot be routed at all (dispatch never routes on null). The same
+    // fields as the warning above, and never the guest row.
+    await captureConversationChannelUnresolved({
+      agentRunId: input.agentRunId,
+      venueId: input.venueId,
+      guestId: input.guestId,
+      inboundMessageId: input.currentMessage?.id ?? null,
+      inboundChannel,
+      hasPhone,
+      hasInstagramId,
+      reason: channelResolution.unresolvedReason ?? null,
     })
   }
 
