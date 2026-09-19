@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
@@ -12,6 +14,8 @@ import {
 } from '../../schemas'
 import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../types'
 import {
+  FIRST_TOUCH_SIGNAL_LINE,
+  firstTouchOpenerFor,
   knowledgeChunksToProse,
   personaToProse,
   runtimeToProse,
@@ -19,6 +23,28 @@ import {
 } from './serializers'
 import { renderableIntentions } from '../../agent/intentions/derive'
 import { MESSAGE_CATEGORIES } from '../types'
+import { MESSAGE_CHANNELS } from '../../schemas/message-channel'
+
+const REPO_ROOT = join(__dirname, '../../..')
+
+// TAC-495: every channel, plus null (unknown), the three values runtimeToProse
+// can be handed.
+const CHANNELS_AND_UNKNOWN = [...MESSAGE_CHANNELS, null] as const
+
+// TAC-495: absence checks for the first-visit opener. These used to look for the
+// fragment 'scanned your sign', which would stop matching the day the opener
+// was reworded, leaving every one of them passing while testing nothing (an
+// opener could then leak into opt_out or comp_complaint turns unseen). They now
+// look for the whole opener, in every channel's variant, read from the module.
+// For an ABSENCE check that is the right source: the risk is the check going
+// vacuous, not the code agreeing with itself. Positive checks transcribe
+// literals instead (compose-prompt.test.ts). Each caller also runs a positive
+// control, proving the same needle does render when it should.
+function expectNoOpener(out: string): void {
+  for (const channel of MESSAGE_CHANNELS) {
+    expect(out).not.toContain(firstTouchOpenerFor(channel))
+  }
+}
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -737,12 +763,21 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
     )
     const withFlagUndefined = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
     expect(withFlagFalse).toBe(withFlagUndefined)
-    expect(withFlagFalse).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expectNoOpener(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: false }, 'reply', NOW, channel),
+      )
+      // Positive control: the same inputs with the flag on do render it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('omits the opener when firstTouchAfterQrScan is undefined', () => {
-    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expectNoOpener(runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW, channel))
+    }
   })
 
   // The specific edge case the AC names: a DB read failure for
@@ -750,13 +785,20 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   // a true first-touch turn. The whole block — opener included — must stay
   // omitted, not render an opener with nothing under it.
   it('omits the block entirely when openIntentions is empty even though firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions: [], firstTouchAfterQrScan: true },
-      'reply',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions: [], firstTouchAfterQrScan: true },
+        'reply',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      // Positive control: with an open intention the same turn renders it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('still carries the non-steering paragraph verbatim after the opener', () => {
@@ -878,13 +920,20 @@ describe("runtimeToProse — ## What you're hoping to get to comp_complaint supp
   // The sharper case, mirroring the opt_out pair: a fresh scan whose first
   // message is the complaint would otherwise carry the more directive opener.
   it('omits it for comp_complaint even when firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'comp_complaint',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'comp_complaint',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      // Positive control: the same first touch on a reply turn renders it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('still renders the block for an ordinary reply with the same inputs', () => {
@@ -911,24 +960,32 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
   // would otherwise carry the more directive opener ("thank them for coming
   // in and ask what they got") rather than just the two soft state lines.
   it('omits the block entirely for opt_out even when firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'opt_out',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
-    expect(out).not.toContain('ask what they got')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'opt_out',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      expect(out).not.toContain('ask what they got')
+    }
   })
 
+  // The positive control for the test above, on every channel.
   it('still renders the block for a non-opt_out category with the same inputs', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'reply',
-      NOW,
-    )
-    expect(out).toContain("## What you're hoping to get to")
-    expect(out).toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'reply',
+        NOW,
+        channel,
+      )
+      expect(out).toContain("## What you're hoping to get to")
+      expect(out).toContain(firstTouchOpenerFor(channel))
+      expect(out).toContain('ask what they got')
+    }
   })
 })
 
@@ -947,14 +1004,119 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
     expect(signalIdx).toBeGreaterThan(inboundIdx)
   })
 
+  // TAC-495: the absence checks use the exported line itself, so a reworded
+  // line can't turn them vacuous, with a positive control per channel.
   it('omits the line when firstTouchAfterQrScan is false', () => {
-    const out = runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW)
-    expect(out).not.toContain("This is the guest's first message")
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW, channel),
+      ).not.toContain(FIRST_TOUCH_SIGNAL_LINE)
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
+      ).toContain(FIRST_TOUCH_SIGNAL_LINE)
+    }
   })
 
   it('omits the line when firstTouchAfterQrScan is undefined', () => {
-    const out = runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW)
-    expect(out).not.toContain("This is the guest's first message")
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW, channel)).not.toContain(
+        FIRST_TOUCH_SIGNAL_LINE,
+      )
+    }
+  })
+
+  // B carries no channel claim, so it is one line on every channel. The
+  // transcribed literal above pins its wording; this pins that the channel
+  // never changes it.
+  it('renders the same line on every channel', () => {
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
+      ).toContain("\nThis is the guest's first message, sent after they scanned your venue's QR sign.\n")
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-495: the first-visit opener's channel variants.
+// ---------------------------------------------------------------------------
+//
+// The SMS opener is TAC-423's wording, unchanged. The Instagram opener swaps
+// two phrases and nothing else. The literals here are transcribed from the
+// approved wording; the full strings are pinned against the assembled prompt in
+// compose-prompt.test.ts.
+describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
+  const SMS_OPENER =
+    "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  const INSTAGRAM_OPENER =
+    "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+
+  it('the SMS opener is unchanged and the Instagram opener is the approved wording', () => {
+    expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
+    expect(firstTouchOpenerFor('instagram')).toBe(INSTAGRAM_OPENER)
+  })
+
+  it('an unknown channel gets the Instagram opener', () => {
+    expect(firstTouchOpenerFor(null)).toBe(INSTAGRAM_OPENER)
+  })
+
+  // The scope guard for the opener: undo the two approved swaps and the
+  // Instagram opener must be the SMS opener exactly.
+  it('the Instagram opener differs from the SMS one only in its two channel phrases', () => {
+    expect(
+      firstTouchOpenerFor('instagram')
+        .replace("This is the guest's first message,", "This is the guest's first message on this number,")
+        .replace("who they're messaging,", "who they're texting,"),
+    ).toBe(firstTouchOpenerFor('text'))
+  })
+
+  it('the Instagram opener claims no phone number and no texting', () => {
+    expect(firstTouchOpenerFor('instagram')).not.toMatch(/\bnumber\b|\btext(ed|ing)?\b/i)
+  })
+
+  it('every presence phrase is identical on both channels', () => {
+    for (const phrase of [
+      'sent right after they scanned your sign at pickup.',
+      "They've already ordered and have it in hand.",
+      "You don't know what it was.",
+      'thank them for coming in and ask what they got',
+    ]) {
+      expect(firstTouchOpenerFor('text')).toContain(phrase)
+      expect(firstTouchOpenerFor('instagram')).toContain(phrase)
+    }
+  })
+
+  it('runtimeToProse renders the opener for the channel it is handed', () => {
+    const runtime: RuntimeContext = {
+      mechanics: [],
+      openIntentions: ["You haven't heard what this guest ordered yet."],
+      firstTouchAfterQrScan: true,
+    }
+    expect(runtimeToProse(runtime, 'reply', NOW, 'text')).toContain(`\n${SMS_OPENER}\n`)
+    expect(runtimeToProse(runtime, 'reply', NOW, 'instagram')).toContain(`\n${INSTAGRAM_OPENER}\n`)
+    // The default is the unknown channel, never the SMS copy.
+    expect(runtimeToProse(runtime, 'reply', NOW)).toContain(`\n${INSTAGRAM_OPENER}\n`)
+  })
+
+  // runtimeToProse defaults its channel, which is only safe while composePrompt,
+  // which always passes GenerateMessageInput.channel, is its only production
+  // caller. A second caller would silently get the default.
+  it('has exactly one production caller, composePrompt', () => {
+    const callers: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === 'node_modules' || entry.startsWith('.')) continue
+        const full = join(dir, entry)
+        if (statSync(full).isDirectory()) walk(full)
+        else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
+          if (/\bruntimeToProse\(/.test(readFileSync(full, 'utf8'))) callers.push(relative(REPO_ROOT, full))
+        }
+      }
+    }
+    for (const dir of ['lib', 'app', 'scripts']) walk(join(REPO_ROOT, dir))
+    expect(callers.sort()).toEqual(['lib/ai/compose-prompt.ts', 'lib/ai/prompts/serializers.ts'])
+    const composeSrc = readFileSync(join(REPO_ROOT, 'lib/ai/compose-prompt.ts'), 'utf8')
+    expect(composeSrc).toContain('runtimeToProse(runtime, category, undefined, input.channel)')
   })
 })
 

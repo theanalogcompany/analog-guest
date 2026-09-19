@@ -26,14 +26,29 @@
 //     only prove derive works on a date this file computed.
 // The end-to-end proof is device QA once TAC-469 turns the agent on for
 // Instagram guests.
+//
+// TAC-495: the opener the gate turns on now has an Instagram variant, and this
+// file used to prove only that the gate fires, which meant an Instagram guest
+// got the SMS opener ("first message on this number ... who they're texting").
+// The last block below goes on from the same saved rows to the channel the
+// prompt copy is chosen by (resolveConversationChannel, fed exactly what
+// buildRuntimeContext feeds it) and the opener that channel renders. A
+// Sendblue-shaped pair of rows is run through the same steps and must still get
+// the SMS opener. Not tested here, and pinned at the source instead: that
+// buildRuntimeContext selects instagram_scoped_id and hands these values to the
+// resolver (build-runtime-context.test.ts), and that handleInbound loads
+// messages.channel (handle-inbound.test.ts).
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resolveConversationChannel } from '@/lib/agent/conversation-channel'
 import { computeFirstTouchAfterQrScan } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
+import { firstTouchOpenerFor, runtimeToProse } from '@/lib/ai/prompts/serializers'
+import { parseMessageChannel } from '@/lib/schemas/message-channel'
 
 import { processInstagramDelivery } from './handle-events'
 import { createInstagramDbFake, type FakeRow } from './testing/db-fake'
@@ -117,5 +132,60 @@ describe('the first-visit opener for an Instagram guest', () => {
       recentMessages: [{ direction: 'outbound', body: 'ECHO', createdAt: new Date(NOW), delivery: 'delivered' }],
     } as RuntimeContext
     expect(computeFirstTouchAfterQrScan(withReply, new Date(NOW))).toBe(false)
+  })
+})
+
+// TAC-495: from the saved rows to the opener the guest's prompt carries.
+describe('the first-visit opener an Instagram guest gets is the Instagram one', () => {
+  // Exactly what buildRuntimeContext hands the resolver: the inbound message's
+  // parsed channel, and whether the guest row holds each identifier.
+  function channelFor(guest: FakeRow, message: FakeRow) {
+    return resolveConversationChannel({
+      inboundChannel: parseMessageChannel(message.channel as string | null | undefined),
+      hasPhone: typeof guest.phone_number === 'string',
+      hasInstagramId: typeof guest.instagram_scoped_id === 'string',
+    }).channel
+  }
+
+  function openerRendered(channel: ReturnType<typeof channelFor>): string {
+    return runtimeToProse(
+      {
+        inboundMessage: 'hi',
+        mechanics: [],
+        openIntentions: ["You haven't heard what this guest ordered yet."],
+        firstTouchAfterQrScan: true,
+      },
+      'reply',
+      new Date(NOW),
+      channel,
+    )
+  }
+
+  it("resolves the recorded icebreaker tap's rows to the instagram channel and renders its opener", async () => {
+    const db = createInstagramDbFake({ venues: [{ id: 'venue-1', instagram_account_id: ACCOUNT_ID }] })
+    await processInstagramDelivery(fixture('postback-referral'), db.client)
+    const [guest] = db.tables.guests as FakeRow[]
+    const [message] = db.tables.messages as FakeRow[]
+    if (!guest || !message) throw new Error('the handler saved no guest or no message')
+
+    const channel = channelFor(guest, message)
+    expect(channel).toBe('instagram')
+    const out = openerRendered(channel)
+    expect(out).toContain(firstTouchOpenerFor('instagram'))
+    expect(out).not.toContain(firstTouchOpenerFor('text'))
+    expect(out).not.toMatch(/\bthis number\b|\btexting\b/)
+  })
+
+  // The control: a guest who texted a phone number, shaped as the Sendblue
+  // route saves them, still gets the SMS opener word for word.
+  it('a Sendblue guest and message resolve to text and keep the SMS opener', () => {
+    const guest: FakeRow = { id: 'guest-sms', phone_number: '+15555550123', instagram_scoped_id: null }
+    const message: FakeRow = { id: 'msg-sms', channel: 'text' }
+
+    const channel = channelFor(guest, message)
+    expect(channel).toBe('text')
+    expect(openerRendered(channel)).toContain(
+      "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words.",
+    )
   })
 })

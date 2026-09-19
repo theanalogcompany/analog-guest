@@ -195,8 +195,12 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     expect(call).toContain(
       'inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,',
     )
-    expect(call).toContain('hasPhone: guestRow.phone_number !== null,')
-    expect(call).toContain('hasInstagramId: guestRow.instagram_scoped_id !== null,')
+    expect(call).toContain('hasPhone,')
+    expect(call).toContain('hasInstagramId,')
+    // typeof, never `!== null`: an undefined (a column dropped from the
+    // select) must read as absent, not as a phone number.
+    expect(src).toContain("const hasPhone = typeof guestRow.phone_number === 'string'")
+    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
   })
 
   it('returns the resolved channel on the context', () => {

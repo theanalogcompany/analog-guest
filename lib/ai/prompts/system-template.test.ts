@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` alias without a
 // vitest.config.ts. Other tests in this repo use relative imports too.
-import { PROMPT_VERSION, SYSTEM_TEMPLATE } from './system-template'
+import { PROMPT_VERSION, SYSTEM_TEMPLATE, systemTemplateFor } from './system-template'
 import {
   UNIVERSAL_RULES_DISPLAY,
   UNIVERSAL_RULES_UNDISPLAYED,
@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.53.0 (TAC-417: recommendation-request references known order history)', () => {
-    expect(PROMPT_VERSION).toBe('v1.53.0')
+  it('is v1.54.0 (TAC-495: Instagram gets its own channel copy)', () => {
+    expect(PROMPT_VERSION).toBe('v1.54.0')
   })
 })
 
@@ -1565,5 +1565,89 @@ describe('hold availability is venue-conditional (TAC-301 part 2)', () => {
   // other two and must not be swept up in a future tidy of this area.
   it('leaves the resource-commitment self-flag wording alone', () => {
     expect(SYSTEM_TEMPLATE).toContain('holding or setting something aside')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-495: the channel variants of SYSTEM_TEMPLATE.
+// ---------------------------------------------------------------------------
+//
+// The SMS copy is SYSTEM_TEMPLATE itself, untouched. The Instagram copy swaps
+// named phrases, and this block is the scope guard on which lines those may
+// touch. Once the composer can vary by channel, any rule could; widening this
+// list is a deliberate act, in its own ticket, never a side effect.
+describe('systemTemplateFor — channel variants (TAC-495)', () => {
+  // The lines allowed to differ between the channels, by the start of the line.
+  const CHANNEL_LINES = [
+    "- Don't reference actions the guest didn't take.", // R1
+    '- Never refer guests to alternative channels', // R5
+    '- Never tell the guest to send a message', // R32
+  ]
+  const sms = systemTemplateFor('text')
+  const ig = systemTemplateFor('instagram')
+  const lineStarting = (template: string, prefix: string) => {
+    const hits = template.split('\n').filter((l) => l.startsWith(prefix))
+    expect(hits).toHaveLength(1)
+    return hits[0]
+  }
+
+  it('the SMS variant is SYSTEM_TEMPLATE itself', () => {
+    expect(sms).toBe(SYSTEM_TEMPLATE)
+  })
+
+  it('an unknown channel gets the Instagram variant', () => {
+    expect(systemTemplateFor(null)).toBe(ig)
+  })
+
+  it('the variants differ only on the listed lines, and on every one of them', () => {
+    const smsLines = sms.split('\n')
+    const igLines = ig.split('\n')
+    expect(igLines).toHaveLength(smsLines.length)
+    const differing = smsLines.flatMap((line, i) => (line === igLines[i] ? [] : [line]))
+    expect(differing).toHaveLength(CHANNEL_LINES.length)
+    for (const prefix of CHANNEL_LINES) {
+      expect(differing.some((line) => line.startsWith(prefix))).toBe(true)
+    }
+  })
+
+  it('the Instagram R1 and R32 claim no phone number and no texting', () => {
+    for (const prefix of [CHANNEL_LINES[0], CHANNEL_LINES[2]]) {
+      expect(lineStarting(ig, prefix)).not.toMatch(/\bnumber\b|\btext(ed|ing)?\b/i)
+    }
+  })
+
+  // R5 names the other channel on each side: Instagram on SMS, texting on
+  // Instagram. Never the channel the guest is already on.
+  it('R5 names the other channel on each side', () => {
+    expect(lineStarting(sms, CHANNEL_LINES[1])).toContain('DM Instagram')
+    const igR5 = lineStarting(ig, CHANNEL_LINES[1])
+    expect(igR5).not.toMatch(/instagram|\bDM\b/i)
+    expect(igR5).toContain("Don't tell them to email, call, text, or")
+  })
+
+  // Presence language is out of scope on both channels by ruling, and R1's
+  // exception trigger must match on both, or the first-touch signal line stops
+  // switching it on for Instagram guests.
+  it('R1 keeps its trigger and every presence phrase identical on both channels', () => {
+    for (const phrase of [
+      "when the context says this is the guest's first message after they scanned a sign at the venue",
+      'treat the channel itself as the shared context',
+      "without assuming they're still on-site",
+      'Do not narrate the scan or thank them for it.',
+      'assumes the guest visited, scanned, scheduled, or interacted',
+    ]) {
+      expect(lineStarting(sms, CHANNEL_LINES[0])).toContain(phrase)
+      expect(lineStarting(ig, CHANNEL_LINES[0])).toContain(phrase)
+    }
+  })
+})
+
+// TAC-495: the Voices rail describes the rules to operators and moves in
+// lockstep with the template (CLAUDE.md). The rail shows one entry per rule, so
+// each rule with an Instagram variant says so in its summary, and no other does.
+describe('UNIVERSAL_RULES_DISPLAY — channel variants are named on the rail (TAC-495)', () => {
+  it('exactly R1, R5 and R32 mention their Instagram wording', () => {
+    const ids = UNIVERSAL_RULES_DISPLAY.filter((r) => /\bon instagram\b/i.test(r.summary)).map((r) => r.id)
+    expect(ids).toEqual(['R1', 'R5', 'R32'])
   })
 })

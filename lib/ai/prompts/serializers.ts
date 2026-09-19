@@ -8,7 +8,13 @@ import {
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
+import {
+  applyChannelSubstitutions,
+  type ChannelSubstitution,
+  copyVariantFor,
+} from './channel-variants'
 import type {
   FollowupContext,
   FollowupReason,
@@ -1020,7 +1026,48 @@ function formatMechanicEligibility(
 // "take the one listed first", is what makes that order mean something to the
 // model. Without it the ranking ruled on the ticket (event-armed intentions
 // first, because they perish) would be decorative.
-function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
+// TAC-495: the first-visit opener, written out as the SMS copy (TAC-423's
+// wording, unchanged), with an Instagram variant made by swapping two phrases.
+// Only the channel claims move: "on this number" goes, and "texting" becomes
+// "messaging". Every presence phrase (scanned at pickup, already ordered, in
+// hand, coming in, what they got) is identical on both channels by ruling.
+// channel-variants.ts has the mechanism; a phrase that stops matching throws
+// at load, which is what makes TAC-423's pending rewrite of this paragraph
+// break loudly here instead of leaving the two channels out of step.
+const FIRST_TOUCH_OPENER =
+  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+
+const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [
+    { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
+    { from: "let them know who they're texting,", to: "let them know who they're messaging," },
+  ],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const FIRST_TOUCH_OPENER_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    FIRST_TOUCH_OPENER,
+    FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS.text,
+    'FIRST_TOUCH_OPENER/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    FIRST_TOUCH_OPENER,
+    FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS.instagram,
+    'FIRST_TOUCH_OPENER/instagram',
+  ),
+}
+
+/** The first-visit opener for a conversation's channel; null gets the Instagram copy. */
+export function firstTouchOpenerFor(channel: MessageChannel | null): string {
+  return FIRST_TOUCH_OPENER_BY_CHANNEL[copyVariantFor(channel)]
+}
+
+function formatOpenIntentions(
+  lines: readonly string[],
+  firstTouchAfterQrScan: boolean,
+  channel: MessageChannel | null,
+): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
   // TAC-423, ruled 2026-09-18. The opener's fallback question used to be
@@ -1073,9 +1120,7 @@ function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: b
     '',
     'If nothing fits, let it wait. There will be other conversations.',
   ].join('\n')
-  const opener = firstTouchAfterQrScan
-    ? "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
-    : ''
+  const opener = firstTouchAfterQrScan ? `${firstTouchOpenerFor(channel)}\n\n` : ''
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
@@ -1133,10 +1178,33 @@ function formatEmojiDirective(directive: EmojiDirective): string {
   return `## Emoji for this message\n${body}`
 }
 
+// TAC-495: the first-touch signal line. Identical on both channels: it claims
+// no number and no texting, and "scanned" is presence language, out of scope by
+// ruling. Exported so tests can assert its absence by the real string rather
+// than a fragment that would stop matching the day it was reworded.
+//
+// It is also what switches on R1's exception in SYSTEM_TEMPLATE, which applies
+// "when the context says this is the guest's first message after they scanned a
+// sign at the venue". Nothing structural links the two: the model matches them.
+// The opener's first sentence says the same thing, so R1 still fires where the
+// opener renders; on opt_out, comp_complaint and empty-intention turns this line
+// is the only trigger. compose-prompt.test.ts holds the pair together.
+export const FIRST_TOUCH_SIGNAL_LINE =
+  "This is the guest's first message, sent after they scanned your venue's QR sign."
+
+/**
+ * `channel` picks the channel copy (today, only the first-visit opener's). It
+ * defaults to null, the unknown channel, which gets the copy that asserts no
+ * phone number: absence is the safe direction, which is what licenses a
+ * default here (the TAC-362 emojiDirective rule). composePrompt is the only
+ * production caller and always passes GenerateMessageInput.channel; a test pins
+ * that it is the only one.
+ */
 export function runtimeToProse(
   runtime: RuntimeContext,
   category: MessageCategory,
   now: Date = new Date(),
+  channel: MessageChannel | null = null,
 ): string {
   const blocks: string[] = []
 
@@ -1166,7 +1234,11 @@ export function runtimeToProse(
   // openIntentions to inbound runs), so it never actually co-renders with
   // ## Follow-up context, but the position is fixed regardless of that.
   if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
-    const block = formatOpenIntentions(runtime.openIntentions, runtime.firstTouchAfterQrScan === true)
+    const block = formatOpenIntentions(
+      runtime.openIntentions,
+      runtime.firstTouchAfterQrScan === true,
+      channel,
+    )
     if (block) blocks.push(block)
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
@@ -1250,7 +1322,7 @@ export function runtimeToProse(
   // a guest arrived via QR scan, since createdVia isn't rendered anywhere
   // else. See SYSTEM_TEMPLATE's R1 for the exception this enables.
   if (runtime.firstTouchAfterQrScan) {
-    lines.push("This is the guest's first message, sent after they scanned your venue's QR sign.")
+    lines.push(FIRST_TOUCH_SIGNAL_LINE)
   }
   if (runtime.recognition?.state) {
     lines.push(`Guest relationship: ${runtime.recognition.state}`)

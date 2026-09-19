@@ -6,7 +6,7 @@ import {
   runtimeToProse,
   venueInfoToProse,
 } from './prompts/serializers'
-import { SYSTEM_TEMPLATE } from './prompts/system-template'
+import { systemTemplateFor } from './prompts/system-template'
 import type { GenerateMessageInput } from './types'
 
 /**
@@ -24,8 +24,10 @@ export function composePrompt(input: GenerateMessageInput): {
 } {
   const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } = input
 
+  // TAC-495: the channel picks the channel copy in both prompts. The system
+  // template's variant for 'text' is SYSTEM_TEMPLATE itself, unedited.
   const sections: string[] = [
-    SYSTEM_TEMPLATE,
+    systemTemplateFor(input.channel),
     personaToProse(persona),
     venueInfoToProse(venueInfo),
   ]
@@ -46,6 +48,6 @@ export function composePrompt(input: GenerateMessageInput): {
 
   return {
     systemPrompt: sections.join('\n\n'),
-    userPrompt: runtimeToProse(runtime, category),
+    userPrompt: runtimeToProse(runtime, category, undefined, input.channel),
   }
 }

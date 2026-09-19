@@ -1,3 +1,10 @@
+import type { MessageChannel } from '@/lib/schemas/message-channel'
+import {
+  applyChannelSubstitutions,
+  type ChannelSubstitution,
+  copyVariantFor,
+} from './channel-variants'
+
 // Bump PROMPT_VERSION when SYSTEM_TEMPLATE, the serializers, or any category
 // instruction file changes. Used for observability so a stored message can be
 // traced back to the prompt version that produced it.
@@ -826,6 +833,33 @@
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.54.0 (TAC-495): Instagram gets its own channel copy; the SMS copy is
+// byte-identical. TAC-492 turned the first-visit opener on for Instagram guests,
+// and the copy it turned on told them they had texted "this number". So did R1,
+// R32 (on every turn, down to inviting them to "save this number") and R5, which
+// named "DM Instagram" as an alternative channel to steer an Instagram guest off
+// the one they were on.
+//
+// Branch by channel, never converge (ruled 2026-09-19): the SMS copy is correct
+// for a guest who texted a phone number, and the mock venues and any future
+// venue on a number need it to keep saying so. So SYSTEM_TEMPLATE below is not
+// edited at all. systemTemplateFor(channel) returns it untouched for 'text' and,
+// for 'instagram', applies the phrase substitutions in
+// SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS (channel-variants.ts has the mechanism
+// and why it throws at load). The Instagram wording says "message", never "DM":
+// it needs to stop asserting a phone number, not adopt Instagram's vocabulary.
+// R5's Instagram list names "text" where the SMS list names "DM Instagram",
+// because the other channel is the one to name.
+//
+// Presence language (scanned, at pickup, on-site) is identical on both channels
+// by ruling, and the scope guard in system-template.test.ts holds the variants
+// to differing only in the rules listed there.
+//
+// The channel comes from the conversation, never a venue setting
+// (lib/agent/conversation-channel.ts). An unknown channel gets the Instagram
+// copy, which is false on neither channel. The serializers' first-visit opener
+// has its own variant, the same way (serializers.ts, firstTouchOpenerFor).
+//
 // v1.53.0 (TAC-417): RECOMMENDATION_REQUEST_INSTRUCTIONS gains a pointer to
 // ## Visit history. It was the one category in this family silent on it —
 // FOLLOW_UP_INSTRUCTIONS and MANUAL_INSTRUCTIONS already say to use runtime
@@ -994,7 +1028,7 @@
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.53.0'
+export const PROMPT_VERSION = 'v1.54.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1161,3 +1195,63 @@ The "Voice and Tone" section, the corpus examples, and the persona description b
 
 # Voice vs knowledge
 You may see two retrieval sections in the system prompt: "Examples of how the venue actually communicates" (voice) and "Venue knowledge" (content). Voice tells you HOW to talk; knowledge tells you WHAT IS TRUE about the venue. The knowledge section, when present, is what you ground substantive answers in — sourcing, staff, ceremony, mechanic explanations, philosophy, recommendations. Speak in the venue's voice regardless of how the knowledge is phrased; do not mimic the prose style of knowledge entries.`
+
+// TAC-495: the channel variants of SYSTEM_TEMPLATE. The SMS copy is the
+// template itself, with no substitutions, so it is byte-identical by
+// construction. Each Instagram substitution swaps one phrase inside R1, R5 or
+// R32 and must match exactly once, or this module throws at load (see
+// channel-variants.ts for why that is safe and wanted). Adding a row here is
+// adding channel-specific copy: the scope guard in system-template.test.ts
+// fails until it is updated on purpose.
+const SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [
+    // R1, base rule.
+    {
+      from: 'If the only signal is an inbound text with no prior context',
+      to: 'If the only signal is an inbound message with no prior context',
+    },
+    // R1, the exception's rationale: the only concrete content after its colon,
+    // so it is swapped, never cut.
+    {
+      from: 'they know which number they just texted and why',
+      to: 'they know who they just messaged and why',
+    },
+    // R5: name the other channel, as the SMS copy does.
+    {
+      from: "Don't tell them to email, call, DM Instagram, or",
+      to: "Don't tell them to email, call, text, or",
+    },
+    // R32, on every turn for every guest.
+    {
+      from: 'They are already texting you, right now, in this thread.',
+      to: 'They are already messaging you, right now, in this thread.',
+    },
+    {
+      from: 'It also does not restrict inviting them to save this number or text again in the future for a different visit.',
+      to: 'It also does not restrict inviting them to message again in the future for a different visit.',
+    },
+  ],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const SYSTEM_TEMPLATE_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    SYSTEM_TEMPLATE,
+    SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS.text,
+    'SYSTEM_TEMPLATE/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    SYSTEM_TEMPLATE,
+    SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS.instagram,
+    'SYSTEM_TEMPLATE/instagram',
+  ),
+}
+
+/**
+ * The system template for a conversation's channel. `null` (unknown) gets the
+ * Instagram copy, which asserts no phone number (copyVariantFor). composePrompt
+ * is the only caller; nothing else should read SYSTEM_TEMPLATE for a guest.
+ */
+export function systemTemplateFor(channel: MessageChannel | null): string {
+  return SYSTEM_TEMPLATE_BY_CHANNEL[copyVariantFor(channel)]
+}

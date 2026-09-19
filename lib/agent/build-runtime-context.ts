@@ -350,11 +350,15 @@ export async function buildRuntimeContext(input: {
   // TAC-495: the conversation's channel, for choosing prompt copy. Read from
   // the guest's identifiers and the inbound message, never a venue setting;
   // the rule and its table are in conversation-channel.ts. The Instagram ID is
-  // only tested for presence and never enters the context.
+  // only tested for presence and never enters the context. `typeof`, not
+  // `!== null`: a column dropped from the select arrives undefined, and reading
+  // that as "has a phone number" would hand an Instagram guest the SMS copy.
+  const hasPhone = typeof guestRow.phone_number === 'string'
+  const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'
   const channelResolution = resolveConversationChannel({
     inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
-    hasPhone: guestRow.phone_number !== null,
-    hasInstagramId: guestRow.instagram_scoped_id !== null,
+    hasPhone,
+    hasInstagramId,
   })
   if (channelResolution.channel === null) {
     console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {
@@ -363,8 +367,8 @@ export async function buildRuntimeContext(input: {
       guestId: input.guestId,
       inboundMessageId: input.currentMessage?.id ?? null,
       inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
-      hasPhone: guestRow.phone_number !== null,
-      hasInstagramId: guestRow.instagram_scoped_id !== null,
+      hasPhone,
+      hasInstagramId,
       reason: channelResolution.unresolvedReason,
     })
   }

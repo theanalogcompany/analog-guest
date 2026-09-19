@@ -240,8 +240,25 @@ const FIRST_TOUCH_SIGNAL =
 const SENDBLUE_NAMED_PERSON =
   'You are Sana, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
 
+// TAC-495: the Instagram variants, transcribed from the wording approved on the
+// ticket (2026-09-19), not from the code. Each differs from its SMS twin only in
+// the channel phrases; the scope guards in system-template.test.ts and
+// serializers.test.ts pin that nothing else moved.
+const INSTAGRAM_R1 =
+  '- Don\'t reference actions the guest didn\'t take. Don\'t say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest\'s history confirms it. If the only signal is an inbound message with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest\'s first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know who they just messaged and why. Greet them on that basis, without assuming they\'re still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn\'t confirm.'
+const INSTAGRAM_R5 =
+  '- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don\'t tell them to email, call, text, or "ask next time you\'re in" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don\'t yet manage (e.g., "for reservations, use Resy" if Resy is the venue\'s booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don\'t push the guest to another channel.'
+const INSTAGRAM_R32 =
+  '- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already messaging you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to message again in the future for a different visit. That is a distinct, legitimate invitation.'
+const INSTAGRAM_OPENER =
+  "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+
 function firstTouchInput(overrides: Partial<GenerateMessageInput> = {}): GenerateMessageInput {
   return makeInput({
+    // Explicit, not inherited from makeInput: this is the Sendblue fixture,
+    // and the pins below are the proof that a Sendblue guest still gets the
+    // Sendblue copy.
+    channel: 'text',
     persona: BrandPersonaSchema.parse({
       tone: 'warm and direct',
       formality: 'casual',
@@ -284,5 +301,93 @@ describe('composePrompt — Sendblue channel copy is pinned (TAC-495)', () => {
     const { userPrompt } = composePrompt(firstTouchInput())
     expect(userPrompt).toContain(`\n${SENDBLUE_OPENER}\n`)
     expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
+  })
+})
+
+describe('composePrompt — each channel gets its own channel copy (TAC-495)', () => {
+  it('an Instagram conversation gets the Instagram R1, R5 and R32, and none of the SMS ones', () => {
+    const { systemPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_R1}\n`)
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_R5}\n`)
+    expect(systemPrompt).toContain(`\n${INSTAGRAM_R32}\n`)
+    expect(systemPrompt).not.toContain(SENDBLUE_R1)
+    expect(systemPrompt).not.toContain(SENDBLUE_R5)
+    expect(systemPrompt).not.toContain(SENDBLUE_R32)
+  })
+
+  it('an Instagram conversation gets the Instagram opener, and not the SMS one', () => {
+    const { userPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    expect(userPrompt).toContain(`\n${INSTAGRAM_OPENER}\n`)
+    expect(userPrompt).not.toContain(SENDBLUE_OPENER)
+  })
+
+  // The other half of AC1, stated the other way round: the Sendblue fixture
+  // carries none of the Instagram wording anywhere.
+  it('a Sendblue conversation gets none of the Instagram copy', () => {
+    const { systemPrompt, userPrompt } = composePrompt(firstTouchInput())
+    for (const instagram of [INSTAGRAM_R1, INSTAGRAM_R5, INSTAGRAM_R32]) {
+      expect(systemPrompt).not.toContain(instagram)
+    }
+    expect(userPrompt).not.toContain(INSTAGRAM_OPENER)
+  })
+
+  // Null is unknown, and gets the copy that asserts no phone number.
+  it('an unknown channel gets exactly the Instagram prompts', () => {
+    expect(composePrompt(firstTouchInput({ channel: null }))).toEqual(
+      composePrompt(firstTouchInput({ channel: 'instagram' })),
+    )
+  })
+
+  // Nothing outside the channel copy moves: swap the Instagram strings back for
+  // the SMS ones and the two conversations' prompts are identical.
+  it('the channels differ only in the channel copy', () => {
+    const sms = composePrompt(firstTouchInput({ channel: 'text' }))
+    const ig = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    const backToSms = (s: string) =>
+      s
+        .replace(INSTAGRAM_R1, SENDBLUE_R1)
+        .replace(INSTAGRAM_R5, SENDBLUE_R5)
+        .replace(INSTAGRAM_R32, SENDBLUE_R32)
+        .replace(INSTAGRAM_OPENER, SENDBLUE_OPENER)
+    expect(backToSms(ig.systemPrompt)).toBe(sms.systemPrompt)
+    expect(backToSms(ig.userPrompt)).toBe(sms.userPrompt)
+  })
+})
+
+// TAC-495: R1's exception in the system prompt applies "when the context says
+// this is the guest's first message after they scanned a sign at the venue".
+// What says so is the first-touch signal line in the user prompt (and, where it
+// renders, the opener's first sentence). Nothing structural links them: the
+// model matches the prose. So this holds the pair together, per channel: if
+// either side is reworded, this fails and says why, instead of R1's exception
+// silently stopping on the turns where the signal line is its only trigger
+// (opt_out, comp_complaint, an empty intentions block).
+describe('composePrompt — R1 exception and the first-touch signal line move together (TAC-495)', () => {
+  const R1_TRIGGER =
+    "when the context says this is the guest's first message after they scanned a sign at the venue"
+
+  it.each(['text', 'instagram', null] as const)('on channel %s, both halves render', (channel) => {
+    const { systemPrompt, userPrompt } = composePrompt(firstTouchInput({ channel }))
+    expect(systemPrompt).toContain(R1_TRIGGER)
+    expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
+  })
+
+  it('the signal line carries the words the trigger keys on', () => {
+    for (const word of ["first message", 'scanned', 'sign']) {
+      expect(R1_TRIGGER).toContain(word)
+      expect(FIRST_TOUCH_SIGNAL).toContain(word)
+    }
+  })
+
+  // The case that makes the signal line load-bearing: on comp_complaint the
+  // intentions block (and so the opener) is suppressed, so the signal line is
+  // the only thing that can trigger R1's exception.
+  it('on a comp_complaint first touch, the signal line still renders without the opener', () => {
+    for (const channel of ['text', 'instagram'] as const) {
+      const { userPrompt } = composePrompt(firstTouchInput({ channel, category: 'comp_complaint' }))
+      expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
+      expect(userPrompt).not.toContain(SENDBLUE_OPENER)
+      expect(userPrompt).not.toContain(INSTAGRAM_OPENER)
+    }
   })
 })
