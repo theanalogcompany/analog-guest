@@ -284,4 +284,8 @@ export type AgentResult =
       protectedDraftId: string
       triggers: string[]
     }
+  // TAC-469: an Instagram guest's message already had a reply when the agent
+  // came to send, usually one staff typed in the Instagram app. Nothing sent,
+  // by design (rule 3). Only handleInbound produces it.
+  | { status: 'superseded'; byMessageId: string }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

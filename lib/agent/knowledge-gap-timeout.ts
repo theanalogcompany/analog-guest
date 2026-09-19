@@ -152,6 +152,8 @@ export async function processDueKnowledgeGaps(
         venueId: card.venue_id,
         guestId: card.guest_id,
         pendingQuestion: question,
+        // TAC-469: the Instagram reply check needs the question's own row.
+        questionMessageId: card.reply_to_message_id,
       })
       if (result.status === 'failed') {
         console.error('[cron pending-timeout] holding message failed', {

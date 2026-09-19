@@ -296,6 +296,9 @@ describe('listPendingQueue', () => {
       // knowledge_gap's, which claimed the guest had asked something
       // unanswerable when in fact the generator fell over.
       ['generation_failed', 'Something went wrong writing this one.'],
+      // TAC-469: transcribed from the approved plan on the ticket ([PLAN],
+      // section 6), never read back out of REVIEW_REASON_LABELS.
+      ['instagram_send_failed', "This reply didn't send on Instagram. Check the thread before sending it again."],
       // --- You're mid-thread with this guest ---
       ['previous_pending_held', 'Held behind an earlier message to this guest.'],
       [

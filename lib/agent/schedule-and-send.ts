@@ -233,7 +233,7 @@ export type PersistQueuedDraftSkipped = {
  * null out at insert time so the partial index `WHERE langfuse_trace_id IS
  * NOT NULL` only includes real traces.
  */
-function buildOutboundInsert(
+export function buildOutboundInsert(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   overrides: Partial<MessageInsert> & Required<Pick<MessageInsert, 'status'>>,
@@ -242,6 +242,13 @@ function buildOutboundInsert(
     venue_id: ctx.venue.id,
     guest_id: ctx.guest.id,
     direction: 'outbound',
+    // TAC-469: every agent-written outbound row names its channel. For a text
+    // conversation that is the value migration 048's default would have written
+    // anyway; for Instagram it is what keeps the row from being recorded as a
+    // text (the default's hazard). An unresolved channel omits the key, as
+    // every row did before TAC-469: nothing routes a send on null, and TAC-472
+    // makes the column required once every insert site names it.
+    ...(ctx.conversationChannel !== null ? { channel: ctx.conversationChannel } : {}),
     category: ctx.classification?.category ?? null,
     // TAC-313: the DEFAULT is the delimiter-free single-message form, which is
     // what the queue path wants — a draft is one row an operator reads and
@@ -628,27 +635,43 @@ export async function scheduleAndSend(
   // the first row keeps `guest_commitments.source_message_id` pointing at the
   // start of the response regardless of how many bubbles it became.
   const firstMessageId = persistedIds[0]!
-  const pending: PendingCommitment | null = pendingFromEmission(generation.commitment)
-  if (pending !== null) {
-    const commitmentResult = await createCommitmentFromPending({
-      guestId: ctx.guest.id,
-      venueId: ctx.venue.id,
-      pendingCommitment: pending,
-      sourceMessageId: firstMessageId,
-      now: new Date(),
-    })
-    if (!commitmentResult.ok) {
-      console.warn(
-        `[agent] scheduleAndSend: inline commitment materialization failed for message=${firstMessageId}: ${commitmentResult.error}. Message already sent.`,
-      )
-    }
-  }
+  await materializeInlineCommitment(ctx, generation, firstMessageId)
 
   return {
     outboundMessageId: firstMessageId,
     providerMessageId: firstProviderMessageId,
     generationId,
     bubbleCount: persistedIds.length,
+  }
+}
+
+/**
+ * TAC-297: create the guest_commitments row for a response that went out on
+ * the auto-send path. Once per response, anchored to its first row. Shared by
+ * both transports (TAC-469) because creating the row is the same act whichever
+ * channel carried the message.
+ *
+ * Failure is LOGGED + accepted: the message has been sent, and rolling back
+ * would only mean the operator never learns the commitment was made.
+ */
+export async function materializeInlineCommitment(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  firstMessageId: string,
+): Promise<void> {
+  const pending: PendingCommitment | null = pendingFromEmission(generation.commitment)
+  if (pending === null) return
+  const commitmentResult = await createCommitmentFromPending({
+    guestId: ctx.guest.id,
+    venueId: ctx.venue.id,
+    pendingCommitment: pending,
+    sourceMessageId: firstMessageId,
+    now: new Date(),
+  })
+  if (!commitmentResult.ok) {
+    console.warn(
+      `[agent] scheduleAndSend: inline commitment materialization failed for message=${firstMessageId}: ${commitmentResult.error}. Message already sent.`,
+    )
   }
 }
 
@@ -1115,6 +1138,10 @@ async function tryRegenUpdate(
           ? null
           : buildRenderedIntentionsPayload(options.renderedIntentions),
     }
+    // TAC-469: the card belongs to the conversation this draft was written
+    // for, so a regeneration names it too (a guest with both identifiers can
+    // move between them). Omitted when unresolved, as on the INSERT path.
+    if (ctx.conversationChannel !== null) updatePayload.channel = ctx.conversationChannel
     // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
     // omitted from the payload unless the caller explicitly passed a new
     // clock. Two behaviors depend on the omission:

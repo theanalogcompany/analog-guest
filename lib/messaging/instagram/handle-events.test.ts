@@ -660,8 +660,9 @@ describe('provider_sent_at', () => {
   // is what keeps it NULL on every Sendblue row, and it holds only while this
   // handler is the one place that writes it. The check is by mention, so a
   // reader (TAC-469's window gate) is also added here, deliberately, along
-  // with any second writer. TAC-469 added its two readers: the window gate
-  // and the reply check, both Instagram-only.
+  // with any second writer. TAC-469 added its two readers, the window gate
+  // and the reply check, and the Instagram send arm, which names the column
+  // only to say it never writes it: an echo row it fills in keeps Meta's time.
   it('is named by this handler and the Instagram outbound readers, and nothing else in the app', () => {
     const root = join(__dirname, '..', '..', '..')
     const writers: string[] = []
@@ -679,6 +680,7 @@ describe('provider_sent_at', () => {
     for (const dir of ['app', 'lib', 'scripts']) walk(join(root, dir))
 
     expect(writers.sort()).toEqual([
+      join('lib', 'agent', 'dispatch-instagram-reply.ts'),
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),

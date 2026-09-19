@@ -32,7 +32,9 @@ import {
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
-import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { persistOrRegenQueuedDraft } from './schedule-and-send'
+import { dispatchReply, type DispatchReplyOutcome } from './dispatch-reply'
+import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from './dispatch-instagram-reply'
 import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
@@ -307,6 +309,60 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
 }
 
 /**
+ * TAC-469: push the operator about a card an Instagram reply became. Fired by
+ * the orchestrator, like every other card's push. shouldSendDraftFlaggedPush
+ * fails OPEN on a value outside PUSH_POLICY's total map, so this card pushes,
+ * as it should: nobody is coming to look at it otherwise.
+ */
+function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
+  if (!shouldSendDraftFlaggedPush(INSTAGRAM_SEND_FAILED_REVIEW_REASON)) return
+  waitUntil(
+    sendDraftFlaggedPush({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      guestFirstName: ctx.guest.firstName,
+      draftId: cardId,
+      primaryTrigger: INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+    }).catch(() => {}),
+  )
+}
+
+/**
+ * TAC-469: what an agent reply that did not simply go out means for the run.
+ * Only the Instagram arm produces these; the text arm sends or throws.
+ *
+ *   carded           the reply became an operator card (rule 4), so the run
+ *                    queued, like the crash card
+ *   superseded       the message already had a reply, usually from staff in
+ *                    the Instagram app (rule 3); nothing was sent, by design
+ *   not_sent         nothing went out and no card could be written; the Slack
+ *                    event carries the text
+ *   sent_unrecorded  it went out, but no row saved; its echo will record it
+ */
+function undeliveredAgentResult(
+  ctx: RuntimeContext,
+  outcome: Exclude<DispatchReplyOutcome, { kind: 'sent' }>,
+): AgentResult {
+  switch (outcome.kind) {
+    case 'carded':
+      pushSendFailureCard(ctx, outcome.cardId)
+      return {
+        status: 'queued',
+        outboundMessageId: outcome.cardId,
+        triggers: [INSTAGRAM_SEND_FAILED_REVIEW_REASON],
+        primaryTrigger: INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+      }
+    case 'superseded':
+      return { status: 'superseded', byMessageId: outcome.byMessageId }
+    case 'not_sent':
+      return { status: 'failed', stage: 'send', error: outcome.reason }
+    case 'sent_unrecorded':
+      return { status: 'failed', stage: 'persist', error: outcome.reason }
+  }
+}
+
+/**
  * Top-level orchestrator for inbound messages.
  *
  * Server-only. Generates an agentRunId, idempotency-checks against existing
@@ -406,6 +462,15 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
           'inbound run invariant violated: ctx.currentMessage must be set and ctx.followupTrigger must be null on the inbound flow',
         )
       }
+      // TAC-469: the reply is routed on the conversation's channel, and nothing
+      // routes on an unknown one. Stop before classifying or generating: there
+      // is nowhere to send the result. buildRuntimeContext has already raised
+      // conversation_channel_unresolved with the reason; the catch below adds
+      // the red alert for the run. Unreachable for a Sendblue guest, whose
+      // text arrives from the phone number the guest row holds.
+      if (ctx.conversationChannel === null) {
+        throw new Error('conversation channel unresolved: the reply has nowhere to be routed')
+      }
       contextSpan.end({
         output: {
           recognitionState: ctx.recognition.state,
@@ -501,10 +566,21 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       const crisisSpan = trace.span('crisis_safety', { category: ctx.classification.category })
       try {
         const result = buildCrisisSafetyResult()
-        const { outboundMessageId } = await scheduleAndSend(ctx, result, {
+        const dispatched = await dispatchReply(ctx, result, {
           skipHumanFeelDelay: true,
           reviewReason: CRISIS_SAFETY_REVIEW_REASON,
+          // TAC-469 (ruled 2026-09-19): the crisis-safety reply is exempt from
+          // the Instagram reply check. Silencing it because staff typed
+          // something leaves someone in crisis with nothing; a duplicate gives
+          // them the resources twice, and a hand-typed reply won't carry them.
+          replyCheck: 'exempt',
+          onUndelivered: 'card',
         })
+        if (dispatched.kind !== 'sent') {
+          crisisSpan.end({ level: 'WARNING', output: { outcome: dispatched.kind } })
+          return undeliveredAgentResult(ctx, dispatched)
+        }
+        const { outboundMessageId } = dispatched
         crisisSpan.end({ output: { outboundMessageId } })
         console.log('[agent] inbound crisis-safety reply sent', {
           agentRunId,
@@ -1315,16 +1391,37 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // normal untriggered send).
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId, generationId, bubbleCount } =
-        await scheduleAndSend(ctx, gen.result, {
-          skipHumanFeelDelay: ctx.guest.isDemo === true,
-          reviewReason: approval.reason,
-          // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
-          // and this branch records against, so what a card carries and what
-          // an auto-send carries cannot drift. Audit only on this path — the
-          // recording below is what actually closes the intentions.
-          renderedIntentions,
+      const dispatched = await dispatchReply(ctx, gen.result, {
+        skipHumanFeelDelay: ctx.guest.isDemo === true,
+        reviewReason: approval.reason,
+        // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
+        // and this branch records against, so what a card carries and what
+        // an auto-send carries cannot drift. Audit only on this path — the
+        // recording below is what actually closes the intentions.
+        renderedIntentions,
+        // TAC-469: the Instagram reply check. If this message already has an
+        // answer (usually one staff typed in the Instagram app), send nothing.
+        // Ignored on the text arm.
+        replyCheck: { inboundMessageId: ctx.currentMessage.id },
+        onUndelivered: 'card',
+      })
+      if (dispatched.kind !== 'sent') {
+        sendSpan.end({ level: 'WARNING', output: { outcome: dispatched.kind } })
+        trace.update({ output: { status: dispatched.kind } })
+        return undeliveredAgentResult(ctx, dispatched)
+      }
+      const { outboundMessageId, providerMessageId, generationId, bubbleCount } = dispatched
+      if (dispatched.undelivered !== null) {
+        // Part of a split Instagram reply went out; the rest became a card (or
+        // couldn't, and the Slack event says why).
+        console.warn('[agent] inbound reply partly delivered', {
+          agentRunId,
+          outboundMessageId,
+          reason: dispatched.undelivered.reason,
+          cardId: dispatched.undelivered.cardId,
         })
+        if (dispatched.undelivered.cardId !== null) pushSendFailureCard(ctx, dispatched.undelivered.cardId)
+      }
       sendSpan.end({
         output: {
           outboundMessageId,
