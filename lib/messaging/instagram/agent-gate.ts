@@ -13,14 +13,36 @@
 // needs wiring. agent-gate.test.ts pins the constant at false; that assertion
 // is expected to change with it.
 //
-// Before lifting it, TAC-469 has three things the shut gate is hiding:
+// Before lifting it, TAC-469 has four things the shut gate is hiding:
 //   - a postback saved with no title has body '' and no media, a row the
 //     Sendblue path never produces (it refuses empty content before
-//     inserting), and it would reach the agent as an empty inbound;
+//     inserting), and it would reach the agent as an empty inbound. Since
+//     TAC-492 it can also be a QR guest's opener turn. And because the history
+//     query skips empty bodies, if nothing is saved in reply to it the opener
+//     fires on the guest's NEXT message instead;
 //   - a message the guest unsent is only logged (message_deleted), so it stays
 //     in the thread and in the agent's history;
 //   - a STOP received while the gate was shut was never classified, so for
-//     that guest nothing opt-out-shaped ever happened.
+//     that guest nothing opt-out-shaped ever happened;
+//   - the icebreaker titles (TAC-492). A QR guest's first message is the title
+//     of the icebreaker they tapped, which lives in Meta's settings and nowhere
+//     in this repo, so no test can see it. Two things in it change the opener
+//     turn:
+//       - A title that names a menu item drops understand_order's line for that
+//         turn (applyCurrentTurnSuppression, TAC-326). The opener's own text
+//         still says to ask what they got, but the block then lists learn_name
+//         first, and if nothing else is open the whole block goes, opener
+//         included. Sendblue's fixed QR string is checked against the menu in
+//         extract-reported-order.test.ts ("QR prefilled-body collision
+//         guard"); check each title the same way, with bodyMentionsMenuItem,
+//         not by eye. It matches single words: "Hi Le Mil's!" matches an item
+//         named "Le Mil's Blend" on "mil".
+//       - A title that asks something ("What are your hours?", the one
+//         recorded) makes the opener answer it instead of asking what they got,
+//         as the opener's text says to.
+//     Check both before lifting the gate, and again whenever anyone edits the
+//     icebreaker copy or the menu, because it breaks with no error. It is a
+//     named pre-flight item on TAC-469.
 //
 // The kind check below is NOT part of the gate and stays when it goes: an echo
 // is the venue's own message and a read receipt is not a message, so neither

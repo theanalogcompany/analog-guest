@@ -97,6 +97,7 @@ describe('a guest message', () => {
         guestCreated: true,
         hasReferral: false,
         hasProviderSentAt: true,
+        guestCreatedVia: 'inbound_message',
       },
     ])
   })
@@ -200,7 +201,7 @@ describe('an icebreaker postback', () => {
   it('creates the guest when a postback is their first action', async () => {
     const db = createInstagramDbFake({ venues: [VENUE] })
     await processInstagramDelivery(fixture('postback-referral'), db.client)
-    expect(db.inserts('guests')).toMatchObject([{ instagram_scoped_id: GUEST_IGSID, created_via: 'inbound_message' }])
+    expect(db.inserts('guests')).toMatchObject([{ instagram_scoped_id: GUEST_IGSID }])
   })
 
   // TAC-469 computes the reply window from the newest inbound Instagram row.
@@ -221,6 +222,151 @@ describe('an icebreaker postback', () => {
     }
     await processInstagramDelivery(payload, db.client)
     expect(db.inserts('messages')).toMatchObject([{ direction: 'inbound', channel: 'instagram', body: '' }])
+  })
+})
+
+// TAC-492: a new guest is 'qr_scan' when the event creating them carries a
+// SHORTLINK referral, which is what the opener and understand_order key on.
+// Every payload here is a recorded fixture or one changed in a single named
+// way, so each case differs from Meta's real delivery by exactly the thing it
+// tests.
+describe("a new guest's created_via", () => {
+  type Json = Record<string, unknown>
+  type PostbackItem = { postback: Json & { referral?: Json } }
+
+  /** postback-referral.json with its postback changed in place. */
+  function postbackWith(change: (postback: PostbackItem['postback']) => void): unknown {
+    const delivery = structuredClone(fixture('postback-referral')) as { entry: Array<{ messaging: PostbackItem[] }> }
+    const item = delivery.entry[0]?.messaging[0]
+    if (!item) throw new Error('postback-referral fixture has no messaging item')
+    change(item.postback)
+    return delivery
+  }
+
+  /** The referral object exactly as the recorded postback carried it. */
+  function recordedReferral(): Json {
+    const referral = (fixture('postback-referral') as { entry: Array<{ messaging: PostbackItem[] }> }).entry[0]
+      ?.messaging[0]?.postback.referral
+    if (!referral) throw new Error('postback-referral fixture has no referral')
+    return referral
+  }
+
+  function guestRow(createdVia: 'qr_scan' | 'inbound_message'): Json {
+    return {
+      venue_id: VENUE_ID,
+      instagram_scoped_id: GUEST_IGSID,
+      created_via: createdVia,
+      first_contacted_at: NOW,
+      last_inbound_at: NOW,
+      last_interaction_at: NOW,
+    }
+  }
+
+  async function createdGuests(delivery: unknown): Promise<{ rows: Json[]; outcomes: InstagramEventOutcome[] }> {
+    const db = createInstagramDbFake({ venues: [VENUE] })
+    const outcomes = await processInstagramDelivery(delivery, db.client)
+    return { rows: db.inserts('guests'), outcomes }
+  }
+
+  it('is qr_scan for the recorded icebreaker tap that followed an ig.me link', async () => {
+    const { rows, outcomes } = await createdGuests(fixture('postback-referral'))
+    expect(rows).toEqual([guestRow('qr_scan')])
+    expect(outcomes).toMatchObject([{ status: 'persisted', guestCreated: true, guestCreatedVia: 'qr_scan' }])
+  })
+
+  it('is inbound_message for the same tap without the referral', async () => {
+    const { rows, outcomes } = await createdGuests(postbackWith((p) => delete p.referral))
+    expect(rows).toEqual([guestRow('inbound_message')])
+    expect(outcomes).toMatchObject([{ guestCreatedVia: 'inbound_message' }])
+  })
+
+  it('is inbound_message for the recorded message, which carries no referral', async () => {
+    const { rows } = await createdGuests(fixture('message'))
+    expect(rows).toEqual([guestRow('inbound_message')])
+  })
+
+  // The icebreaker's payload is a label the venue chose, not evidence of a
+  // scan (ruled 2026-09-18; TAC-455 on how it drifts). It must decide nothing.
+  it.each<[string, (p: PostbackItem['postback']) => void, 'qr_scan' | 'inbound_message']>([
+    [
+      'a hello payload without the referral',
+      (p) => {
+        p.payload = 'ICEBREAKER_HELLO'
+        delete p.referral
+      },
+      'inbound_message',
+    ],
+    ['no payload at all, with the referral', (p) => delete p.payload, 'qr_scan'],
+  ])('ignores the icebreaker payload: %s', async (_case, change, expected) => {
+    const { rows } = await createdGuests(postbackWith(change))
+    expect(rows).toEqual([guestRow(expected)])
+  })
+
+  // Only Meta's source decides. The ref is not required, and nothing but the
+  // exact SHORTLINK value counts.
+  it.each<[string, (referral: Json) => void, 'qr_scan' | 'inbound_message']>([
+    ['SHORTLINK with no ref', (r) => delete r.ref, 'qr_scan'],
+    ['a ref with no source', (r) => delete r.source, 'inbound_message'],
+    ['another source', (r) => (r.source = 'ADS'), 'inbound_message'],
+    ['SHORTLINK in another case', (r) => (r.source = 'shortlink'), 'inbound_message'],
+  ])('reads only the referral source: %s', async (_case, change, expected) => {
+    const { rows } = await createdGuests(
+      postbackWith((p) => {
+        if (!p.referral) throw new Error('postback-referral fixture has no referral')
+        change(p.referral)
+      }),
+    )
+    expect(rows).toEqual([guestRow(expected)])
+  })
+
+  // Synthetic: a typed first message carrying a referral has never been
+  // captured, so whether Meta sends one, and where, is still open (device QA).
+  // Built from the recorded message plus the recorded referral, in both places
+  // the parser accepts one. If Meta does send it, it counts: the evidence is
+  // Meta's classification, not whether the guest tapped or typed.
+  it.each<[string, (item: Json & { message: Json }) => void]>([
+    ['inside `message`', (item) => (item.message.referral = recordedReferral())],
+    ['beside `message`', (item) => (item.referral = recordedReferral())],
+  ])('is qr_scan for a typed first message carrying the referral %s', async (_where, attach) => {
+    const delivery = structuredClone(fixture('message')) as { entry: Array<{ messaging: Array<Json & { message: Json }> }> }
+    const item = delivery.entry[0]?.messaging[0]
+    if (!item) throw new Error('message fixture has no messaging item')
+    attach(item)
+
+    const { rows } = await createdGuests(delivery)
+    expect(rows).toEqual([guestRow('qr_scan')])
+  })
+
+  // As on Sendblue, only creation sets it. The store has no update, so any
+  // attempt to re-label would throw rather than pass.
+  it('never re-labels a guest the venue already has', async () => {
+    const existing: FakeRow = { ...GUEST, created_via: 'inbound_message' }
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [existing] })
+    const outcomes = await processInstagramDelivery(fixture('postback-referral'), db.client)
+
+    expect(db.inserts('guests')).toEqual([])
+    expect(db.tables.guests).toEqual([{ ...GUEST, created_via: 'inbound_message' }])
+    expect(outcomes).toMatchObject([{ status: 'persisted', guestCreated: false, guestCreatedVia: null }])
+  })
+
+  it('is decided by the first event that creates the guest in a delivery', async () => {
+    const { rows, outcomes } = await createdGuests(batch('message', 'postback-referral'))
+    expect(rows).toEqual([guestRow('inbound_message')])
+    expect(outcomes).toMatchObject([
+      { kind: 'message', guestCreated: true, guestCreatedVia: 'inbound_message' },
+      { kind: 'postback', guestCreated: false, guestCreatedVia: null },
+    ])
+  })
+
+  it("keeps the racing delivery's guest as it was created", async () => {
+    const db = createInstagramDbFake({ venues: [VENUE] })
+    db.beforeNextInsert('guests', () =>
+      db.tables.guests.push({ ...GUEST, id: 'guest-winner', created_via: 'inbound_message' }),
+    )
+    const outcomes = await processInstagramDelivery(fixture('postback-referral'), db.client)
+
+    expect(db.tables.guests).toEqual([{ ...GUEST, id: 'guest-winner', created_via: 'inbound_message' }])
+    expect(outcomes).toMatchObject([{ status: 'persisted', guestId: 'guest-winner', guestCreatedVia: null }])
   })
 })
 
@@ -457,8 +603,12 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, guestCreatedVia: 'qr_scan' },
+    ],
+    [
+      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
+      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, guestCreatedVia: null },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
