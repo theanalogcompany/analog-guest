@@ -75,7 +75,9 @@
 //     Instagram works. buildRuntimeContext no longer requires the number for an
 //     Instagram conversation (TAC-495, venueMessagingNumberRequired), but every
 //     Sendblue send still looks it up (lib/messaging/venue-lookup.ts) and fails
-//     closed without it. The Instagram transport must not depend on it.
+//     closed without it. The Instagram transport must not depend on it. The
+//     test harness breaks there too: its synthetic guests all have phone
+//     numbers, so every scenario is an SMS conversation that needs the number.
 //
 // The kind check below is NOT part of the gate and stays when it goes: an echo
 // is the venue's own message and a read receipt is not a message, so neither

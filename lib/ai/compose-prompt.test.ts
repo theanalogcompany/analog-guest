@@ -387,8 +387,11 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
         }
       }
     }
+    // Each exempt line is a whole instruction string, so only the pending
+    // phrase is exempt: strip it and the rest of the line must claim nothing.
     for (const line of residual) {
-      expect(PENDING_RULING.some((phrase) => line.includes(phrase)), line).toBe(true)
+      const withoutPending = PENDING_RULING.reduce((rest, phrase) => rest.replace(phrase, ''), line)
+      expect(CHANNEL_CLAIM.test(withoutPending), line).toBe(false)
     }
     // Both pending lines really do render somewhere, so this list can't go
     // stale silently once they're decided.

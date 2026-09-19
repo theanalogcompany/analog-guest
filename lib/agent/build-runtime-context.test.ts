@@ -243,6 +243,10 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     const warn = src.slice(start, src.indexOf('})', start))
     expect(warn).toContain('conversation channel unresolved')
     expect(warn).toContain('reason: channelResolution.unresolvedReason,')
+    // Not the row itself, which would log the Instagram ID and the phone
+    // number without naming either column.
+    expect(warn).not.toMatch(/\bguestRow\b(?!\.)/)
+    expect(warn).not.toMatch(/\bguestRow\./)
   })
 
   // A number-less venue with an unresolvable conversation must not blame the
