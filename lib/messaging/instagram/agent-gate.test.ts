@@ -19,6 +19,7 @@ const saved = (kind: 'message' | 'postback' | 'echo'): InstagramEventOutcome => 
   guestCreated: false,
   hasReferral: false,
   hasProviderSentAt: true,
+  guestCreatedVia: null,
 })
 
 const notSaved: Array<[string, InstagramEventOutcome]> = [

@@ -39,12 +39,39 @@
 // the item had no millisecond timestamp, which the outcome's hasProviderSentAt
 // flag makes visible in the logs. Sendblue never writes it.
 //
+// A new guest's created_via (TAC-492) is 'qr_scan' when the event that creates
+// them carries a referral whose source is SHORTLINK, and 'inbound_message'
+// otherwise. SHORTLINK is Meta's own statement that the guest opened the thread
+// from an ig.me link, which is what the venue's QR code is. It is the whole
+// signal (ruled 2026-09-18): the icebreaker's `payload` is a label we chose, it
+// can drift (TAC-455), and the parser doesn't carry it; `ref` isn't required.
+// A typed first message carrying the referral counts the same as a postback:
+// Meta's classification is the evidence, not whether the guest tapped or typed.
+// (Whether Meta ever attaches one to a typed message hasn't been observed.)
+//
+// created_via is the carrier because both first-visit behaviours already read
+// it: the opener (computeFirstTouchAfterQrScan, lib/agent/stages.ts) and the
+// understand_order arming (lib/agent/build-runtime-context.ts). So an
+// Instagram QR guest gets exactly what a Sendblue QR guest gets, and only the
+// detection differs. Sendblue's resolveCreatedVia compares the body with
+// venue_info.qrEnrollmentMessage; it is not shared with this and must stay
+// separate. As on Sendblue, only guest creation sets it: a guest the venue
+// already has is never re-labelled, whatever the event carries.
+//
+// Two consequences to know rather than rediscover:
+//   - ANY ig.me link counts, including one shared online. That guest is
+//     thanked for coming in and asked what they got.
+//   - If staff reply by hand in the Instagram app before the agent reads the
+//     thread, the echo is in the guest's history and the opener doesn't fire.
+//     That is the intended behaviour, not a gap: a person already greeted the
+//     guest, and the agent must not follow with "thanks for coming in".
+//
 // Two deliberate differences from Sendblue:
 //   - A delivery holds many events. Each is handled on its own, in order, and a
 //     failure or a throw in one never stops the rest.
 //   - When two first contacts from a new guest race, the losing guest insert
 //     gets 23505 and re-reads the winner's row. Sendblue logs that insert as
-//     failed and loses the message.
+//     failed and loses the message. The winner's created_via stands.
 //
 // Nothing here logs an IGSID, a mid, message text, or a referral value
 // (TAC-458): the outcome carries our own row IDs, and logInstagramOutcome is
@@ -61,6 +88,7 @@ import {
   type InstagramMessageEvent,
   type InstagramPostbackEvent,
   type InstagramReadEvent,
+  type InstagramReferral,
   type InstagramUnhandledReason,
 } from './parse-events'
 
@@ -69,6 +97,16 @@ type MessageInsert = Database['public']['Tables']['messages']['Insert']
 type GuestInsert = Database['public']['Tables']['guests']['Insert']
 
 const UNIQUE_VIOLATION = '23505'
+
+/** Meta's `referral.source` for a thread opened from an ig.me link (TAC-492). */
+const SHORTLINK_SOURCE = 'SHORTLINK'
+
+export type InstagramGuestCreatedVia = 'qr_scan' | 'inbound_message'
+
+/** The guest an event is filed under, and what it was created as if this event created it. */
+type GuestStep =
+  | { guestId: string; created: true; createdVia: InstagramGuestCreatedVia }
+  | { guestId: string; created: false; createdVia: null }
 
 export type InstagramFailureStage =
   | 'venue_lookup'
@@ -91,6 +129,8 @@ export type InstagramEventOutcome =
       hasReferral: boolean
       /** False when the item had no millisecond timestamp and provider_sent_at was saved NULL. */
       hasProviderSentAt: boolean
+      /** The new guest's created_via, or null when the guest already existed. */
+      guestCreatedVia: InstagramGuestCreatedVia | null
     }
   | {
       status: 'duplicate'
@@ -164,36 +204,49 @@ async function findGuest(
   return { ok: true, value: data?.id ?? null }
 }
 
+/**
+ * A new guest's created_via, from the referral on the event that creates them
+ * (TAC-492; see the header). Meta's source value is compared exactly: anything
+ * else, a missing referral included, is an ordinary first contact.
+ */
+function createdViaForReferral(referral: InstagramReferral | null): InstagramGuestCreatedVia {
+  return referral?.source === SHORTLINK_SOURCE ? 'qr_scan' : 'inbound_message'
+}
+
 async function findOrCreateGuest(
   supabase: AdminSupabaseClient,
   venueId: string,
   igsid: string,
-): Promise<Step<{ guestId: string; created: boolean }>> {
+  createdVia: InstagramGuestCreatedVia,
+): Promise<Step<GuestStep>> {
   const existing = await findGuest(supabase, venueId, igsid)
   if (!existing.ok) return existing
-  if (existing.value !== null) return { ok: true, value: { guestId: existing.value, created: false } }
+  if (existing.value !== null) {
+    return { ok: true, value: { guestId: existing.value, created: false, createdVia: null } }
+  }
 
   const nowIso = new Date().toISOString()
   // No phone_number: an Instagram guest has none, and migration 048's
-  // guests_must_have_identity accepts the IGSID instead. created_via is always
-  // 'inbound_message' (ruled 2026-09-18): a referral ref alone can't tell a QR
-  // sign at the counter from a link shared online.
+  // guests_must_have_identity accepts the IGSID instead.
   const guest: GuestInsert = {
     venue_id: venueId,
     instagram_scoped_id: igsid,
-    created_via: 'inbound_message',
+    created_via: createdVia,
     first_contacted_at: nowIso,
     last_inbound_at: nowIso,
     last_interaction_at: nowIso,
   }
   const { data, error } = await supabase.from('guests').insert(guest).select('id').single()
-  if (!error && data) return { ok: true, value: { guestId: data.id, created: true } }
+  if (!error && data) return { ok: true, value: { guestId: data.id, created: true, createdVia } }
 
   if (error?.code === UNIQUE_VIOLATION) {
     // Another delivery created this guest between our read and our insert.
+    // Its created_via stands.
     const winner = await findGuest(supabase, venueId, igsid)
     if (!winner.ok) return winner
-    if (winner.value !== null) return { ok: true, value: { guestId: winner.value, created: false } }
+    if (winner.value !== null) {
+      return { ok: true, value: { guestId: winner.value, created: false, createdVia: null } }
+    }
   }
   return { ok: false, failure: fail('guest_insert', error) }
 }
@@ -256,7 +309,7 @@ async function insertMessage(
   supabase: AdminSupabaseClient,
   event: InstagramMessageEvent | InstagramPostbackEvent | InstagramEchoEvent,
   venueId: string,
-  guest: { guestId: string; created: boolean },
+  guest: GuestStep,
 ): Promise<InstagramEventOutcome> {
   const existing = await findMessageId(supabase, event.mid)
   if (!existing.ok) return failedOutcome(event.kind, existing.failure)
@@ -284,6 +337,7 @@ async function insertMessage(
     guestCreated: guest.created,
     hasReferral: event.kind !== 'echo' && event.referral !== null,
     hasProviderSentAt: event.providerSentAt !== null,
+    guestCreatedVia: guest.createdVia,
   }
 }
 
@@ -316,7 +370,8 @@ async function handleEvent(
 
   // Only a guest's own action creates a guest.
   if (event.kind === 'message' || event.kind === 'postback') {
-    const guest = await findOrCreateGuest(supabase, venueId, event.guestIgsid)
+    const createdVia = createdViaForReferral(event.referral)
+    const guest = await findOrCreateGuest(supabase, venueId, event.guestIgsid, createdVia)
     if (!guest.ok) return failedOutcome(event.kind, guest.failure)
     return insertMessage(supabase, event, venueId, guest.value)
   }
@@ -326,7 +381,7 @@ async function handleEvent(
   if (guest.value === null) return { status: 'skipped', kind: event.kind, reason: 'unknown_guest' }
 
   if (event.kind === 'echo') {
-    return insertMessage(supabase, event, venueId, { guestId: guest.value, created: false })
+    return insertMessage(supabase, event, venueId, { guestId: guest.value, created: false, createdVia: null })
   }
   return matchRead(supabase, event, venueId, guest.value)
 }
@@ -388,6 +443,7 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
         guestCreated: outcome.guestCreated,
         hasReferral: outcome.hasReferral,
         hasProviderSentAt: outcome.hasProviderSentAt,
+        guestCreatedVia: outcome.guestCreatedVia,
       })
       return
     case 'duplicate':

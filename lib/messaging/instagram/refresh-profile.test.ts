@@ -167,6 +167,7 @@ describe('profileRefreshTargetFor', () => {
     guestCreated: true,
     hasReferral: false,
     hasProviderSentAt: true,
+    guestCreatedVia: 'inbound_message',
   })
 
   it.each(['message', 'postback'] as const)('refreshes the guest behind a saved %s', (kind) => {
