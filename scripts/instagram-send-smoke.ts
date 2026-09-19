@@ -20,6 +20,14 @@
 // It sends up to three real messages from the venue's Instagram account, so it
 // refuses to do anything without --confirm.
 //
+// EVERY CHECK NEEDS THE 24-HOUR REPLY WINDOW OPEN, so the run refuses to start
+// with it shut. Meta refuses every send outside it with code 10, and that one
+// refusal looks identical whatever a check was asking, which is how the first
+// real run (2026-09-19, 25 minutes past the close) reported a cap PASS and a
+// cap FAIL that were both really the window. A PASSING RUN THEREFORE HAS A
+// SHELF LIFE OF ABOUT 24 HOURS from the guest's last inbound message: after
+// that it has to be re-run against a fresh one, not cited.
+//
 // The token is NOT read from a committed file: pass it for the one run, e.g.
 //   INSTAGRAM_ACCESS_TOKEN=... npm run instagram-smoke -- --venue le-mils-coffee --guest <uuid> --confirm
 // An environment variable set on the command line wins over .env.local, so the
@@ -33,10 +41,11 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import { insertOrReconcileEcho } from '@/lib/agent/dispatch-instagram-reply'
-import { graphRequest } from '@/lib/messaging/instagram/graph'
-import { INSTAGRAM_MAX_TEXT_BYTES, sendInstagramText } from '@/lib/messaging/instagram/send'
+import { graphRequest, type GraphFailure } from '@/lib/messaging/instagram/graph'
+import { INSTAGRAM_MAX_TEXT_BYTES, classifySendFailure, sendInstagramText } from '@/lib/messaging/instagram/send'
 import { loadInstagramSendTarget, type InstagramSendTarget } from '@/lib/messaging/instagram/send-target'
-import { idForLog as idForLogPure, parseSmokeArgs, textOfBytes } from './lib/instagram-smoke-text'
+import { instagramWindowState, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
+import { capVerdictBlocker, idForLog as idForLogPure, parseSmokeArgs, textOfBytes } from './lib/instagram-smoke'
 
 type Verdict = 'PASS' | 'FAIL' | 'INCONCLUSIVE' | 'NOTE'
 
@@ -53,6 +62,15 @@ function record(check: string, verdict: Verdict, detail: string): void {
 const idForLog = (value: string): string => idForLogPure(value, showIds)
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Under this much window left, the run could start open and finish closed. */
+const TIGHT_WINDOW_MS = 10 * 60 * 1000
+
+/** " 3.2h ago", or nothing when the close time is unknown. */
+function closedAgo(closesAt: Date | null): string {
+  if (closesAt === null) return ''
+  return ` (${((Date.now() - closesAt.getTime()) / 3_600_000).toFixed(1)}h ago)`
+}
 
 type Supabase = ReturnType<typeof createAdminClient>
 
@@ -124,7 +142,10 @@ async function checkIdentity(
   const startedAt = new Date(Date.now() - 5000)
   const sent = await sendInstagramText({ ...target, fetchImpl: fetch, text: 'analog smoke test 1 of 3, please ignore' })
   if (!sent.ok) {
-    record('A identity', 'FAIL', `the send itself failed: ${sent.kind}`)
+    // Not a FAIL: a send that never left says nothing about whether the
+    // Send API's message_id and the echo's mid are the same string, and the
+    // summary reads a check-A FAIL as "the design has to change".
+    record('A identity', 'INCONCLUSIVE', `the send itself failed (${sent.kind}), so nothing was asked of the identity question`)
     return null
   }
   console.log(`  sent, waiting up to 60s for the echo | message_id=${idForLog(sent.mid)}`)
@@ -160,16 +181,35 @@ async function checkIdentity(
 
 // --- B. the 1000-byte boundary --------------------------------------------
 
+/** Meta's own words for a refusal, for a person deciding what it meant. */
+function graphFailureDetail(failure: GraphFailure): string {
+  if (failure.reason !== 'graph_error') return failure.reason
+  return `code ${failure.code ?? '?'}, subcode ${failure.subcode ?? '?'}, HTTP ${failure.httpStatus}`
+}
+
 async function checkCap(target: InstagramSendTarget): Promise<void> {
+  // BOTH verdicts below read a refusal as evidence about the message's SIZE,
+  // so both must first establish that size is what Meta was judging. A refusal
+  // for any other reason refuses 1000 and 1001 bytes identically.
   const atCap = await sendInstagramText({ ...target, fetchImpl: fetch, text: textOfBytes(INSTAGRAM_MAX_TEXT_BYTES, 'analog smoke test 2 of 3') })
-  if (!atCap.ok) {
-    record(
-      'B cap',
-      'FAIL',
-      `Meta refused exactly ${INSTAGRAM_MAX_TEXT_BYTES} bytes (${atCap.kind}). The cap has to be lower: change INSTAGRAM_MAX_TEXT_BYTES and its tests.`,
-    )
-  } else {
+  if (atCap.ok) {
     record('B cap', 'PASS', `Meta accepted exactly ${INSTAGRAM_MAX_TEXT_BYTES} bytes, so the cap is right where it is`)
+  } else {
+    const blocker = capVerdictBlocker(atCap.kind)
+    if (blocker !== null) {
+      record(
+        'B cap',
+        'INCONCLUSIVE',
+        `the ${INSTAGRAM_MAX_TEXT_BYTES}-byte send never reached a judgement about its size: ${blocker} (${atCap.kind}). The cap is neither confirmed nor disproved; fix that and re-run.`,
+      )
+    } else {
+      record(
+        'B cap',
+        'FAIL',
+        `Meta refused exactly ${INSTAGRAM_MAX_TEXT_BYTES} bytes with an unrecognised error (${atCap.failure ? graphFailureDetail(atCap.failure) : atCap.kind}). ` +
+          'Read that code before changing anything: if it means the message was too long, INSTAGRAM_MAX_TEXT_BYTES has to be lower, and if it means something else this check is inconclusive and the code belongs on the ticket.',
+      )
+    }
   }
 
   // One byte over, posted straight at Graph: our own transport would refuse
@@ -186,10 +226,24 @@ async function checkCap(target: InstagramSendTarget): Promise<void> {
       'NOTE',
       `Meta ACCEPTED ${INSTAGRAM_MAX_TEXT_BYTES + 1} bytes, so its real limit is higher than the documented one. Ours stays where it is; nothing is broken.`,
     )
-  } else {
-    const code = probe.failure.reason === 'graph_error' ? `code ${probe.failure.code ?? '?'}` : probe.failure.reason
-    record('B cap', 'PASS', `Meta refused ${INSTAGRAM_MAX_TEXT_BYTES + 1} bytes (${code}), which is the line we enforce`)
+    return
   }
+  // Classified through the transport's own classifier so this script's reading
+  // of Meta's codes cannot drift from the one production sends through.
+  const blocker = capVerdictBlocker(classifySendFailure(probe.failure))
+  if (blocker !== null) {
+    record(
+      'B cap',
+      'INCONCLUSIVE',
+      `the ${INSTAGRAM_MAX_TEXT_BYTES + 1}-byte probe was refused for a reason that is not about size: ${blocker} (${graphFailureDetail(probe.failure)}). It does not show where Meta draws the line.`,
+    )
+    return
+  }
+  record(
+    'B cap',
+    'PASS',
+    `Meta refused ${INSTAGRAM_MAX_TEXT_BYTES + 1} bytes (${graphFailureDetail(probe.failure)}), which is the line we enforce`,
+  )
 }
 
 // --- C. one row, whichever write lands first ------------------------------
@@ -293,7 +347,33 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  // PRE-FLIGHT: the 24-hour reply window. Every check sends, Meta refuses
+  // every send outside the window, and one refusal looks the same whatever the
+  // check was asking — so a run with the window shut produces verdicts about
+  // the window wearing the labels of identity, the cap and the race. Bail here
+  // rather than leave a person reading error codes to notice.
+  const lastAction = await loadLastGuestActionAt(supabase, venue.id, args.guest)
+  if (!lastAction.ok) {
+    console.error(
+      `✗ cannot read the reply window: ${lastAction.error}. Not running: with the window shut every check is meaningless, and this is the check for that.`,
+    )
+    process.exit(3)
+  }
+  const windowState = instagramWindowState(lastAction.value, new Date())
+  if (!windowState.open) {
+    console.error(
+      windowState.reason === 'no_guest_action'
+        ? '✗ the 24-hour reply window has never opened: this guest has no saved Instagram message or icebreaker postback. Send a DM to the venue from that Instagram account and re-run.'
+        : `✗ the 24-hour reply window is closed${closedAgo(windowState.closesAt)}. Every send would be refused with code 10, which is not an answer to anything this script asks. Send a DM to the venue from that Instagram account and re-run.`,
+    )
+    process.exit(3)
+  }
+
   console.log(`Instagram outbound smoke test | venue=${venue.slug} | guest=${args.guest}`)
+  console.log(`Reply window open, ${(windowState.remainingMs / 3_600_000).toFixed(1)}h left.`)
+  if (windowState.remainingMs < TIGHT_WINDOW_MS) {
+    console.log('  That is tight: this run takes about two minutes and could straddle the close.')
+  }
   console.log('Sending up to three real messages. Each check prints its own verdict.\n')
 
   const echoedMid = await checkIdentity(supabase, target.target, venue.id, args.guest)
