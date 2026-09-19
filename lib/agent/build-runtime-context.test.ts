@@ -192,9 +192,12 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
 
   it('resolves from the inbound message and the guest identifiers', () => {
     expect(callStart).toBeGreaterThan(-1)
-    expect(call).toContain(
-      'inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,',
+    // A message whose channel is missing resolves as unparseable (null),
+    // never as "no inbound message" (undefined).
+    expect(src).toContain(
+      'const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined',
     )
+    expect(call).toContain('inboundChannel,')
     expect(call).toContain('hasPhone,')
     expect(call).toContain('hasInstagramId,')
     // typeof, never `!== null`: an undefined (a column dropped from the
@@ -222,8 +225,31 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
   })
 
   // The Instagram ID is only tested for presence. It must not ride on the
-  // context, where it would reach prompts, traces and logs.
-  it('keeps the Instagram ID itself out of the context', () => {
+  // context, a log line or anything else, where it would reach prompts, traces
+  // and Vercel logs. So the column is named twice in this file (the select and
+  // the presence check) and read once, whatever a leak would be spelled.
+  it('keeps the Instagram ID itself out of the context and the logs', () => {
     expect(src).not.toMatch(/instagramScopedId\s*:/)
+    expect(src.match(/guestRow\.instagram_scoped_id\b/g)).toHaveLength(1)
+    expect(src.match(/\binstagram_scoped_id\b/g)).toHaveLength(2)
+    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
+  })
+
+  // The warning is the only place an unresolved channel shows up, and its main
+  // cause is migration 048's 'text' default on an Instagram row.
+  it('warns, with the reason, whenever the channel is unresolved', () => {
+    const start = src.indexOf('if (channelResolution.channel === null) {\n    console.warn(')
+    expect(start).toBeGreaterThan(-1)
+    const warn = src.slice(start, src.indexOf('})', start))
+    expect(warn).toContain('conversation channel unresolved')
+    expect(warn).toContain('reason: channelResolution.unresolvedReason,')
+  })
+
+  // A number-less venue with an unresolvable conversation must not blame the
+  // number alone.
+  it('names an unresolved channel in the missing-number error', () => {
+    expect(src).toContain(
+      "? ` (and this conversation's channel is unresolved: ${channelResolution.unresolvedReason})`",
+    )
   })
 })

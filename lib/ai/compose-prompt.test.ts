@@ -6,7 +6,14 @@ import {
   VenueInfoSchema,
 } from '../schemas'
 import { composePrompt } from './compose-prompt'
-import type { GenerateMessageInput, KnowledgeCorpusChunk, MessageCategory } from './types'
+import { FIRST_TOUCH_SIGNAL_LINE } from './prompts/serializers'
+import { systemTemplateFor } from './prompts/system-template'
+import {
+  type GenerateMessageInput,
+  type KnowledgeCorpusChunk,
+  MESSAGE_CATEGORIES,
+  type MessageCategory,
+} from './types'
 
 function makePersona(): BrandPersona {
   return BrandPersonaSchema.parse({
@@ -344,13 +351,49 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
     }
   })
 
-  // AC2, stated over the whole assembled prompt rather than line by line.
-  it('an Instagram prompt names no iMessage, no phone number and no texting anywhere', () => {
-    const { systemPrompt, userPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
-    for (const prompt of [systemPrompt, userPrompt]) {
-      expect(prompt).not.toMatch(/imessage/i)
-      expect(prompt).not.toMatch(/this number|save this number/i)
-      expect(prompt).not.toMatch(/\btext(ing|ed)\b|\btext me\b|would actually text/i)
+  // AC2, over every prompt an Instagram guest can get: every category, every
+  // formality and every speaker framing, system and user prompt. A first
+  // version checked one fixture only (a casual 'reply'), and code review found
+  // two lines it never rendered. Those two are named below until their wording
+  // is ruled on; anything else that claims the channel fails here.
+  it('an Instagram prompt names no iMessage, no phone number and no texting, on any category, formality or framing', () => {
+    const CHANNEL_CLAIM =
+      /imessage|this number|\btext(ing|ed)\b|\btext (me|us|them|a friend|back)\b|would (actually )?text\b/i
+    const PENDING_RULING = [
+      'a real busy person texting back', // UNKNOWN_INSTRUCTIONS
+      'write the way you would text a friend', // FORMALITY_GUIDANCE.casual
+    ]
+    const residual = new Set<string>()
+    for (const category of MESSAGE_CATEGORIES) {
+      for (const formality of ['casual', 'warm', 'formal'] as const) {
+        for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
+          const { systemPrompt, userPrompt } = composePrompt(
+            firstTouchInput({
+              channel: 'instagram',
+              category,
+              persona: BrandPersonaSchema.parse({
+                tone: 't',
+                formality,
+                speakerFraming,
+                speakerName: 'Sana',
+                emojiPolicy: 'frequent',
+                lengthGuide: 'short',
+              }),
+            }),
+          )
+          for (const line of `${systemPrompt}\n${userPrompt}`.split('\n')) {
+            if (CHANNEL_CLAIM.test(line)) residual.add(line)
+          }
+        }
+      }
+    }
+    for (const line of residual) {
+      expect(PENDING_RULING.some((phrase) => line.includes(phrase)), line).toBe(true)
+    }
+    // Both pending lines really do render somewhere, so this list can't go
+    // stale silently once they're decided.
+    for (const phrase of PENDING_RULING) {
+      expect([...residual].some((line) => line.includes(phrase)), phrase).toBe(true)
     }
   })
 
@@ -425,10 +468,18 @@ describe('composePrompt — R1 exception and the first-touch signal line move to
     expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
   })
 
-  it('the signal line carries the words the trigger keys on', () => {
-    for (const word of ["first message", 'scanned', 'sign']) {
-      expect(R1_TRIGGER).toContain(word)
-      expect(FIRST_TOUCH_SIGNAL).toContain(word)
+  // Read from the production strings, not the literals above, so rewording
+  // either side fails here.
+  it('the signal line carries the words the trigger keys on, on both channels', () => {
+    for (const channel of ['text', 'instagram'] as const) {
+      const r1 = systemTemplateFor(channel)
+        .split('\n')
+        .find((line) => line.startsWith("- Don't reference actions the guest didn't take."))
+      expect(r1).toBeDefined()
+      for (const word of ['first message', 'scanned', 'sign']) {
+        expect(r1).toContain(word)
+        expect(FIRST_TOUCH_SIGNAL_LINE).toContain(word)
+      }
     }
   })
 

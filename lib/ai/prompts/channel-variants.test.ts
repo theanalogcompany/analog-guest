@@ -41,6 +41,12 @@ describe('applyChannelSubstitutions (TAC-495)', () => {
     ).toThrow(/found 2/)
   })
 
+  // An empty phrase would otherwise "occur" everywhere, and split-and-join
+  // would put the replacement between every character.
+  it('throws on an empty phrase', () => {
+    expect(() => applyChannelSubstitutions('abc', [{ from: '', to: 'x' }], 't')).toThrow(/found 0/)
+  })
+
   it('counts non-overlapping occurrences', () => {
     expect(() => applyChannelSubstitutions('aaa', [{ from: 'aa', to: 'b' }], 't')).not.toThrow()
   })

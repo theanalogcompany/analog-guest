@@ -268,8 +268,12 @@ export async function buildRuntimeContext(input: {
   // that as "has a phone number" would hand an Instagram guest the SMS copy.
   const hasPhone = typeof guestRow.phone_number === 'string'
   const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'
+  // `?? null`: a message whose channel is missing (an InboundMessage built
+  // through a cast) resolves as unparseable, never as "no inbound message",
+  // which would hand a guest with both identifiers the SMS copy.
+  const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined
   const channelResolution = resolveConversationChannel({
-    inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
+    inboundChannel,
     hasPhone,
     hasInstagramId,
   })
@@ -279,7 +283,7 @@ export async function buildRuntimeContext(input: {
       venueId: input.venueId,
       guestId: input.guestId,
       inboundMessageId: input.currentMessage?.id ?? null,
-      inboundChannel: input.currentMessage ? input.currentMessage.channel : undefined,
+      inboundChannel,
       hasPhone,
       hasInstagramId,
       reason: channelResolution.unresolvedReason,
@@ -298,7 +302,10 @@ export async function buildRuntimeContext(input: {
   const venueRow = venueResult.data
   if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {
     throw new Error(
-      `buildRuntimeContext: venue ${input.venueId} has no messaging_phone_number`,
+      `buildRuntimeContext: venue ${input.venueId} has no messaging_phone_number` +
+        (channelResolution.channel === null
+          ? ` (and this conversation's channel is unresolved: ${channelResolution.unresolvedReason})`
+          : ''),
     )
   }
 

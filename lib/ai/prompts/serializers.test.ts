@@ -1102,6 +1102,9 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
   // which always passes GenerateMessageInput.channel, is its only production
   // caller. A second caller would silently get the default.
   it('has exactly one production caller, composePrompt', () => {
+    // Callers AND importers: an aliased import (`runtimeToProse as render`)
+    // would call it under another name.
+    const importers: string[] = []
     const callers: string[] = []
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
@@ -1109,12 +1112,18 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
         const full = join(dir, entry)
         if (statSync(full).isDirectory()) walk(full)
         else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
-          if (/\bruntimeToProse\(/.test(readFileSync(full, 'utf8'))) callers.push(relative(REPO_ROOT, full))
+          const text = readFileSync(full, 'utf8')
+          if (/\bruntimeToProse\(/.test(text)) callers.push(relative(REPO_ROOT, full))
+          // Bounded by the import braces: this codebase has no semicolons to stop on.
+          if (/import\s+(?:type\s+)?\{[^}]*\bruntimeToProse\b[^}]*\}\s*from/.test(text)) {
+            importers.push(relative(REPO_ROOT, full))
+          }
         }
       }
     }
     for (const dir of ['lib', 'app', 'scripts']) walk(join(REPO_ROOT, dir))
     expect(callers.sort()).toEqual(['lib/ai/compose-prompt.ts', 'lib/ai/prompts/serializers.ts'])
+    expect(importers).toEqual(['lib/ai/compose-prompt.ts'])
     const composeSrc = readFileSync(join(REPO_ROOT, 'lib/ai/compose-prompt.ts'), 'utf8')
     expect(composeSrc).toContain('runtimeToProse(runtime, category, undefined, input.channel)')
   })
