@@ -205,3 +205,83 @@ describe('composePrompt — recommendation-request references known order histor
     expect(userPrompt).not.toContain('## Visit history')
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-495: the Sendblue channel copy, pinned before Instagram gets its own.
+// ---------------------------------------------------------------------------
+//
+// Every string below was transcribed from origin/main at 40fc720, before
+// TAC-495 changed anything, and this block was committed on its own and green
+// against that code. They are the SMS copy: correct for a guest who texted a
+// phone number, and required to stay byte-identical for one. TAC-495 adds an
+// Instagram variant beside each; if any assertion here has to change, the
+// Sendblue copy changed, which TAC-495's acceptance criteria forbid.
+//
+// Literals, not reads of the constants: a test that read SYSTEM_TEMPLATE to
+// build its expectation could only confirm the template equals itself.
+
+const SENDBLUE_OPENING_LINE =
+  "You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's."
+const SENDBLUE_PLAIN_TEXT_RULE =
+  '- Plain text suitable for iMessage. No HTML, no markdown formatting in the message body, no headers or bullet points.'
+const SENDBLUE_HEADS_UP_EXAMPLES =
+  'When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue\'s voice. Examples: "comped you an oat latte, give me a heads up when you\'re heading over" / "next one\'s on us. text me when you\'re close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are — text me a heads-up if you want it tonight").'
+const SENDBLUE_R1 =
+  '- Don\'t reference actions the guest didn\'t take. Don\'t say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest\'s history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest\'s first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know which number they just texted and why. Greet them on that basis, without assuming they\'re still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn\'t confirm.'
+const SENDBLUE_R5 =
+  '- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don\'t tell them to email, call, DM Instagram, or "ask next time you\'re in" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don\'t yet manage (e.g., "for reservations, use Resy" if Resy is the venue\'s booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don\'t push the guest to another channel.'
+const SENDBLUE_R32 =
+  "- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation."
+const SENDBLUE_OPENER =
+  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+const FIRST_TOUCH_SIGNAL =
+  "This is the guest's first message, sent after they scanned your venue's QR sign."
+const SENDBLUE_NAMED_PERSON =
+  'You are Sana, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
+
+function firstTouchInput(overrides: Partial<GenerateMessageInput> = {}): GenerateMessageInput {
+  return makeInput({
+    persona: BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'named_person',
+      speakerName: 'Sana',
+      emojiPolicy: 'never',
+      lengthGuide: 'short',
+    }),
+    runtime: {
+      inboundMessage: 'Hi Sana!',
+      mechanics: [],
+      openIntentions: ["You haven't heard what this guest ordered yet."],
+      firstTouchAfterQrScan: true,
+    },
+    ...overrides,
+  })
+}
+
+describe('composePrompt — Sendblue channel copy is pinned (TAC-495)', () => {
+  it('the system prompt carries the Sendblue opening line, plain-text rule and heads-up examples', () => {
+    const { systemPrompt } = composePrompt(firstTouchInput())
+    expect(systemPrompt.startsWith(`${SENDBLUE_OPENING_LINE}\n`)).toBe(true)
+    expect(systemPrompt).toContain(`\n${SENDBLUE_PLAIN_TEXT_RULE}\n`)
+    expect(systemPrompt).toContain(`\n${SENDBLUE_HEADS_UP_EXAMPLES}\n`)
+  })
+
+  it('the system prompt carries the Sendblue R1, R5 and R32', () => {
+    const { systemPrompt } = composePrompt(firstTouchInput())
+    expect(systemPrompt).toContain(`\n${SENDBLUE_R1}\n`)
+    expect(systemPrompt).toContain(`\n${SENDBLUE_R5}\n`)
+    expect(systemPrompt).toContain(`\n${SENDBLUE_R32}\n`)
+  })
+
+  it('the persona block carries the Sendblue named-speaker line', () => {
+    const { systemPrompt } = composePrompt(firstTouchInput())
+    expect(systemPrompt).toContain(SENDBLUE_NAMED_PERSON)
+  })
+
+  it('the user prompt carries the Sendblue opener and the first-touch signal line', () => {
+    const { userPrompt } = composePrompt(firstTouchInput())
+    expect(userPrompt).toContain(`\n${SENDBLUE_OPENER}\n`)
+    expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
+  })
+})
