@@ -34,6 +34,8 @@ export interface VoicePageThread {
   lastName: string | null
   // TAC-467: null for an Instagram guest.
   phoneNumber: string | null
+  // TAC-479: the guest's Instagram handle, null until fetched.
+  instagramUsername: string | null
   lastMessagePreview: string
   lastMessageAt: Date
   state: 'new' | 'returning' | 'regular' | 'raving_fan' | null
@@ -59,6 +61,7 @@ export interface VoicePageData {
     firstName: string | null
     lastName: string | null
     phoneNumber: string | null
+    instagramUsername: string | null
   } | null
   selectedMessages: VoicePageMessage[]
   lastRefinedAt: Date | null
@@ -145,7 +148,7 @@ export async function loadVoicePage(input: {
       .order('created_at', { ascending: false }),
     supabase
       .from('messages')
-      .select('id, guest_id, body, direction, created_at, reply_to_message_id, guests(first_name, last_name, phone_number)')
+      .select('id, guest_id, body, direction, created_at, reply_to_message_id, guests(first_name, last_name, phone_number, instagram_username)')
       .eq('venue_id', venue.id)
       .neq('body', '')
       .order('created_at', { ascending: false })
@@ -163,7 +166,7 @@ export async function loadVoicePage(input: {
     selectedGuestId
       ? supabase
           .from('guests')
-          .select('id, first_name, last_name, phone_number')
+          .select('id, first_name, last_name, phone_number, instagram_username')
           .eq('id', selectedGuestId)
           .eq('venue_id', venue.id)
           .maybeSingle()
@@ -238,6 +241,7 @@ export async function loadVoicePage(input: {
       firstName: guest.first_name,
       lastName: guest.last_name,
       phoneNumber: guest.phone_number,
+      instagramUsername: guest.instagram_username,
       lastMessagePreview: m.body,
       lastMessageAt: new Date(m.created_at),
       state: guestStateMap.get(m.guest_id) ?? null,
@@ -253,6 +257,7 @@ export async function loadVoicePage(input: {
         firstName: selectedGuestRow.first_name,
         lastName: selectedGuestRow.last_name,
         phoneNumber: selectedGuestRow.phone_number,
+        instagramUsername: selectedGuestRow.instagram_username,
       }
     : null
 

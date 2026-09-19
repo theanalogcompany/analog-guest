@@ -460,6 +460,9 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
         providerMessageId: `synthetic-${scenario.sample_id}`,
         body: scenario.inbound_message,
         receivedAt: new Date(),
+        // TAC-495: synthetic guests all have phone numbers, so they are SMS
+        // conversations and get the Sendblue copy.
+        channel: 'text',
       },
     })
     ctx.classification = await classifyStage(ctx)

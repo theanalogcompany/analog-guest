@@ -15,6 +15,7 @@
     "ingest-response-review": "tsx --env-file=.env.local scripts/ingest-response-review.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",
     "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
+    "measure-order-attribution": "tsx --env-file=.env.local scripts/measure-order-attribution.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky"

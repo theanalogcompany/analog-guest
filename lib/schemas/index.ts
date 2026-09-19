@@ -39,6 +39,12 @@ export {
 } from './venue-hours'
 export { parseVisitPrecision, type VisitTimePrecision } from './visit-precision'
 export {
+  isMessageChannel,
+  MESSAGE_CHANNELS,
+  type MessageChannel,
+  parseMessageChannel,
+} from './message-channel'
+export {
   parseRenderedIntentions,
   type RenderedIntention,
   RenderedIntentionSchema,

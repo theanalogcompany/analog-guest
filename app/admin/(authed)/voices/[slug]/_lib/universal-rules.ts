@@ -121,7 +121,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R1',
     summary:
-      "Don't reference actions the guest didn't take ('you stopped by', 'thanks for visiting'). Narrow exception: a qr_scan guest's first message can be greeted on the strength of shared channel context (they know why they're texting this number), without assuming they're still on-site or narrating the scan.",
+      "Don't reference actions the guest didn't take ('you stopped by', 'thanks for visiting'). Narrow exception: a qr_scan guest's first message can be greeted on the strength of shared channel context (they know why they're texting this number; on Instagram, who they're messaging), without assuming they're still on-site or narrating the scan.",
   },
   {
     id: 'R2',
@@ -141,7 +141,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R5',
     summary:
-      "Don't refer guests to alt channels (email, Instagram, 'next time you're in') for things the venue can answer.",
+      "Don't refer guests to alt channels (email, Instagram, 'next time you're in') for things the venue can answer. On Instagram the list names texting instead.",
   },
   {
     id: 'R6',
@@ -243,7 +243,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R32',
     summary:
-      "Don't tell the guest to send a message, reach out, or get in touch as if that's a separate, future action — they're already texting you, right now. Ask directly. Doesn't restrict inviting them to save this number or text again later; that's a different, legitimate thing.",
+      "Don't tell the guest to send a message, reach out, or get in touch as if that's a separate, future action — they're already texting you, right now. Ask directly. Doesn't restrict inviting them to save this number or text again later; that's a different, legitimate thing. On Instagram it says messaging, and nothing about saving a number.",
   },
   {
     id: 'R33',

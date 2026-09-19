@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
-import type { MessageCategory } from '../../types'
+import { MESSAGE_CATEGORIES, type MessageCategory } from '../../types'
 import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
 import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
 import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
 import { EVENT_INVITE_INSTRUCTIONS } from './event-invite'
 import { EVENT_QUESTION_INSTRUCTIONS } from './event-question'
 import { FOLLOW_UP_INSTRUCTIONS } from './follow-up'
-import { getCategoryInstructions } from './index'
+import { categoryInstructionsFor, getCategoryInstructions } from './index'
 import { MANUAL_INSTRUCTIONS } from './manual'
 import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
@@ -639,5 +639,40 @@ describe('category blocks carry no pursuit authority (TAC-327)', () => {
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain(
       "not authority over whether you act on a goal you're already carrying",
     )
+  })
+})
+
+// TAC-495: the category layer's channel variants. SMS is getCategoryInstructions
+// itself; Instagram differs only in the unknown category, and only by the one
+// approved phrase. Adding a channel variant to any other category fails here
+// until someone decides it on purpose.
+describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
+  // Every category there is, not a hand list, so a new one is covered too.
+  const categories = MESSAGE_CATEGORIES
+
+  it('the SMS copy is getCategoryInstructions itself, for every category', () => {
+    for (const category of categories) {
+      expect(categoryInstructionsFor(category, 'text')).toBe(getCategoryInstructions(category))
+    }
+  })
+
+  it('Instagram differs only in the unknown category, and only by "messaging back"', () => {
+    for (const category of categories) {
+      const ig = categoryInstructionsFor(category, 'instagram')
+      if (category === 'unknown') {
+        expect(ig).toContain('It should sound like a real busy person messaging back in their own natural voice.')
+        expect(ig.replace('a real busy person messaging back', 'a real busy person texting back')).toBe(
+          getCategoryInstructions('unknown'),
+        )
+      } else {
+        expect(ig).toBe(getCategoryInstructions(category))
+      }
+    }
+  })
+
+  it('an unknown channel gets the Instagram copy', () => {
+    for (const category of categories) {
+      expect(categoryInstructionsFor(category, null)).toBe(categoryInstructionsFor(category, 'instagram'))
+    }
   })
 })
