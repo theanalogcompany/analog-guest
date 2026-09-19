@@ -20,6 +20,7 @@ import type {
   VenueInfo,
 } from '@/lib/schemas'
 import type { ApprovalPolicy } from '@/lib/schemas/approval-policy'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
@@ -46,7 +47,10 @@ export interface VenueContext {
   brandPersona: BrandPersona
   venueInfo: VenueInfo
   timezone: string
-  sendblueNumber: string
+  // TAC-495: null only for an Instagram conversation at a venue with no
+  // messaging number (buildRuntimeContext requires it otherwise). Nothing reads
+  // this field: every send looks the number up in lib/messaging/venue-lookup.ts.
+  sendblueNumber: string | null
   // TAC-XXX: per-venue "hold all outbound" flag. When true, every
   // guest-facing content message is held for operator review (the
   // hold_all_outbound trigger in applyApprovalPolicyStage queues it instead
@@ -111,6 +115,10 @@ export interface InboundMessage {
   providerMessageId: string
   body: string
   receivedAt: Date
+  // TAC-495: messages.channel, parsed. Null only when the stored value is not
+  // one parseMessageChannel recognizes, which migration 048's CHECK forbids.
+  // Read by resolveConversationChannel to pick the prompt copy.
+  channel: MessageChannel | null
 }
 
 export interface FollowupTrigger {
@@ -186,6 +194,12 @@ export interface RuntimeContext {
   guest: GuestContext
   currentMessage: InboundMessage | null
   followupTrigger: FollowupTrigger | null
+  // TAC-495: the conversation's channel, for choosing prompt copy only. Set
+  // once by build-runtime-context.ts via resolveConversationChannel, from the
+  // guest's identifiers and the inbound message's channel. Null means unknown,
+  // not Instagram: it gets the Instagram wording because that wording is false
+  // on neither channel. Nothing may route a send on this value.
+  conversationChannel: MessageChannel | null
   recentMessages: RecentMessage[]
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in

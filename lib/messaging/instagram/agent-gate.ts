@@ -52,6 +52,42 @@
 //     icebreaker copy or the menu, because it breaks with no error. It is a
 //     named pre-flight item on TAC-469.
 //
+// TAC-495 gave Instagram guests their own channel copy (the first-visit
+// opener, R1, R5, R32 and the other lines listed in system-template.ts's
+// SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS), chosen by
+// lib/agent/conversation-channel.ts. Five more things for TAC-469, all on its
+// pre-flight list:
+//   - A returning guest is greeted as a first-timer (TAC-497). The first-visit
+//     gate's `recentMessages.length === 0` sees only our database, and the
+//     venue's Instagram account may hold months of DM history from before the
+//     integration. A returning guest who taps the QR link gets a new guest row
+//     and the opener.
+//   - Measure it. Generate Instagram replies on first-visit and ordinary turns
+//     and look for a phone number, texting, and Instagram idioms ("DM", "check
+//     our stories"). Post the bar and the arms before generating. If the
+//     Instagram voice reads more formal than Sendblue's, look first at the
+//     casual formality line ("message a friend" for "text a friend"; see
+//     serializers.ts).
+//   - Surface an unresolved channel. buildRuntimeContext only console.warns
+//     when resolveConversationChannel returns null. Once the gate is open, that
+//     is a real guest getting copy chosen without knowing their channel, and a
+//     log line nobody watches surfaces nothing. Its main cause is migration
+//     048's 'text' default on an Instagram row, which also blinds the
+//     webhook-silence alarm. Build a real signal before lifting the gate.
+//   - Guests with both identifiers. With no inbound message (followups, the
+//     holding message, a decline), resolveConversationChannel picks the SMS
+//     copy for any guest with a phone number, because every such send goes to
+//     a phone number today. When TAC-469 routes those sends by channel, that
+//     rule has to change with the routing. And resolveConversationChannel's
+//     null means "unknown", not Instagram: never route a send on it.
+//   - An Instagram-only venue. Le Mil's messaging number is to be deleted once
+//     Instagram works. buildRuntimeContext no longer requires the number for an
+//     Instagram conversation (TAC-495, venueMessagingNumberRequired), but every
+//     Sendblue send still looks it up (lib/messaging/venue-lookup.ts) and fails
+//     closed without it. The Instagram transport must not depend on it. The
+//     test harness breaks there too: its synthetic guests all have phone
+//     numbers, so every scenario is an SMS conversation that needs the number.
+//
 // The kind check below is NOT part of the gate and stays when it goes: an echo
 // is the venue's own message and a read receipt is not a message, so neither
 // is ever handed to the agent. Without it, the agent would answer its own

@@ -186,7 +186,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.53.0')
+      expect(r.data.promptVersion).toBe('v1.54.0')
     })
   }
 })
@@ -584,5 +584,35 @@ describe('classifyMessage — crisisSafety round-trip (TAC-348)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.crisisSafety).toBe(false)
+  })
+})
+
+// TAC-495: the classifier's prompt is not guest-facing, and TAC-495 leaves it
+// exactly as it was: its persona section always carries the SMS named-speaker
+// line, on every channel. The generation prompt is where the channel matters.
+describe('classifyMessage — persona section keeps the SMS copy (TAC-495)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+    })
+  })
+
+  it('renders the named-speaker line unchanged', async () => {
+    const { BrandPersonaSchema } = await import('../schemas')
+    await classifyMessage({
+      inboundBody: 'hi',
+      persona: BrandPersonaSchema.parse({
+        tone: 't',
+        formality: 'casual',
+        speakerFraming: 'named_person',
+        speakerName: 'Sana',
+        emojiPolicy: 'never',
+        lengthGuide: 'short',
+      }),
+    })
+    const prompt = await getCapturedUserPrompt()
+    expect(prompt).toContain('You are Sana, staff at the venue, texting as yourself.')
+    expect(prompt).not.toContain('messaging as yourself')
   })
 })

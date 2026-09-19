@@ -131,7 +131,10 @@ export async function classifyMessage(
       : input.inboundBody
 
   const contextSections: string[] = []
-  if (input.persona) contextSections.push(personaToProse(input.persona))
+  // TAC-495: 'text', deliberately. The classifier's prompt is not guest-facing,
+  // and TAC-495 leaves it as it was, the same call as its "inbound text
+  // messages" line. The generation prompt picks its persona copy by channel.
+  if (input.persona) contextSections.push(personaToProse(input.persona, 'text'))
   if (input.venueInfo) contextSections.push(venueInfoToProse(input.venueInfo))
 
   const userPromptParts: string[] = []
