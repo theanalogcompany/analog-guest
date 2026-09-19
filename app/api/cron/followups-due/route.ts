@@ -35,6 +35,7 @@ export async function GET(request: Request): Promise<Response> {
     guestsEvaluated: summary.guestsEvaluated,
     guestsDue: summary.guestsDue,
     guestsDispatched: summary.guestsDispatched,
+    guestsTasked: summary.guestsTasked,
     guestsSuppressed: summary.guestsSuppressed,
     guestsConflicted: summary.guestsConflicted,
     guestsDispatchFailed: summary.guestsDispatchFailed,

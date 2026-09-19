@@ -25,11 +25,13 @@ vi.mock('@/lib/agent/handle-followup', () => ({
 vi.mock('@/lib/analytics/posthog', () => ({
   captureFollowupSuppressed: vi.fn(),
   captureFollowupScanComplete: vi.fn(),
+  captureFollowupManualTaskRecorded: vi.fn(),
 }))
 vi.mock('./log', () => ({
   claimFollowupLogRows: vi.fn(),
   finalizeFollowupLogClaim: vi.fn(),
   releaseFollowupLogClaim: vi.fn(),
+  recordManualFollowupTask: vi.fn(),
   loadFollowupSnapshotsForVenue: vi.fn(),
   emptyFollowupGuestSignals: () => ({
     weeklyCount: 0,
@@ -42,6 +44,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import { computeGuestState } from '@/lib/recognition/compute-state'
 import { handleFollowup } from '@/lib/agent/handle-followup'
 import {
+  captureFollowupManualTaskRecorded,
   captureFollowupScanComplete,
   captureFollowupSuppressed,
 } from '@/lib/analytics/posthog'
@@ -49,6 +52,7 @@ import {
   claimFollowupLogRows,
   finalizeFollowupLogClaim,
   loadFollowupSnapshotsForVenue,
+  recordManualFollowupTask,
   releaseFollowupLogClaim,
 } from './log'
 import { processDueFollowups } from './engine'
@@ -73,6 +77,7 @@ interface VenueLoadShape {
 // that drops the column from the query passes every behavioural test while
 // production reads `undefined` and silently degrades to always-permissive.
 let capturedGuestSelect: string | null = null
+let capturedGuestOrFilter: string | null = null
 
 function makeSupabaseMock(opts: {
   venues: VenueLoadShape[]
@@ -87,6 +92,13 @@ function makeSupabaseMock(opts: {
     // (passing null at the call site; dropping the column from the SELECT)
     // survived the whole suite.
     last_visit_precision?: string | null
+    // TAC-469 PR B. REQUIRED, for the same reason last_visit_precision carries
+    // the comment above: the engine now resolves a channel from these two, and
+    // a fixture omitting them reads `undefined` on both, which resolves to no
+    // channel and quietly takes the SMS branch. Every test would stay green
+    // while the Instagram branch was unreachable.
+    phone_number: string | null
+    instagram_scoped_id: string | null
   }>
 }) {
   const builders: Record<string, unknown> = {
@@ -96,10 +108,11 @@ function makeSupabaseMock(opts: {
     guests: {
       select: (columns: string) => ({
         eq: (_c: string, _v: unknown) => ({
-          not: (_c2: string, _op: string, _v2: unknown) => ({
+          or: (filter: string) => ({
             is: (_c3: string, _v3: unknown) => ({
               in: (_c4: string, _vs: unknown[]) => {
                 capturedGuestSelect = columns
+                capturedGuestOrFilter = filter
                 return Promise.resolve({ data: opts.guests, error: null })
               },
             }),
@@ -132,6 +145,7 @@ function makeSupabaseMock(opts: {
 
 beforeEach(() => {
   capturedGuestSelect = null
+  capturedGuestOrFilter = null
   vi.mocked(createAdminClient).mockReset()
   vi.mocked(computeGuestState).mockReset()
   vi.mocked(handleFollowup).mockReset()
@@ -141,6 +155,8 @@ beforeEach(() => {
   vi.mocked(finalizeFollowupLogClaim).mockReset()
   vi.mocked(releaseFollowupLogClaim).mockReset()
   vi.mocked(loadFollowupSnapshotsForVenue).mockReset()
+  vi.mocked(recordManualFollowupTask).mockReset()
+  vi.mocked(captureFollowupManualTaskRecorded).mockReset()
 
   // Default mock returns suitable for a single-venue, single-guest happy path.
   vi.mocked(createAdminClient).mockImplementation(
@@ -163,6 +179,8 @@ beforeEach(() => {
             last_inbound_at: null,
             // 7 days ago → post_visit_day_7 detector fires.
             last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+            phone_number: '+15551230000',
+            instagram_scoped_id: null,
           },
         ],
       }) as unknown as ReturnType<typeof createAdminClient>,
@@ -190,6 +208,10 @@ beforeEach(() => {
     outboundMessageId: 'msg-1',
   })
   vi.mocked(finalizeFollowupLogClaim).mockResolvedValue({
+    ok: true,
+    data: { updatedCount: 1 },
+  })
+  vi.mocked(recordManualFollowupTask).mockResolvedValue({
     ok: true,
     data: { updatedCount: 1 },
   })
@@ -242,6 +264,8 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
         // precision is the only thing that can stop it.
         last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
         last_visit_precision: precision,
+        phone_number: '+15551230000',
+        instagram_scoped_id: null,
       },
     ],
   })
@@ -329,6 +353,8 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
               opted_out_at: null,
               last_inbound_at: null,
               last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              phone_number: '+15551230000',
+              instagram_scoped_id: null,
             },
           ],
         }) as unknown as ReturnType<typeof createAdminClient>,
@@ -454,6 +480,8 @@ describe('processDueFollowups — gate suppression', () => {
               opted_out_at: '2026-01-01T00:00:00Z',
               last_inbound_at: null,
               last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              phone_number: '+15551230000',
+              instagram_scoped_id: null,
             },
           ],
         }) as unknown as ReturnType<typeof createAdminClient>,
@@ -477,5 +505,134 @@ describe('processDueFollowups — venue local-hour filter', () => {
     expect(result.venuesScanned).toBe(1)
     expect(result.venuesDispatching).toBe(0)
     expect(result.guestsEvaluated).toBe(0)
+  })
+})
+
+
+// TAC-469 PR B. Instagram has a 24-hour reply window that only the guest can
+// reopen, so a SCHEDULED follow-up there is never a send: it is recorded as a
+// task for a human. Rule 2 — outbound splits by ORIGIN, not by window state —
+// so this holds whether or not the window happens to be open right now, and
+// nothing here checks it.
+describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
+  const instagramGuest = (overrides: Record<string, unknown> = {}) => ({
+    venues: [
+      {
+        id: VENUE_ID,
+        timezone: 'America/Los_Angeles',
+        venue_configs: {
+          followup_rules: null,
+          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+        },
+      },
+    ],
+    guests: [
+      {
+        id: GUEST_ID,
+        opted_out_at: null,
+        last_inbound_at: null,
+        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        phone_number: null,
+        instagram_scoped_id: '17841400000000001',
+        ...overrides,
+      },
+    ],
+  })
+
+  const useGuest = (shape: ReturnType<typeof instagramGuest>) => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () => makeSupabaseMock(shape) as unknown as ReturnType<typeof createAdminClient>,
+    )
+  }
+
+  // The engine could not even SEE an Instagram guest before this: the scan
+  // filtered `phone_number is not null`, so their follow-ups were silently
+  // never considered. Asserted on the filter itself because a guest who is
+  // never returned is indistinguishable from one with nothing due.
+  it('scans guests reachable on either channel, not just those with a phone', async () => {
+    useGuest(instagramGuest())
+    await processDueFollowups(NOW)
+    expect(capturedGuestOrFilter).toBe(
+      'phone_number.not.is.null,instagram_scoped_id.not.is.null',
+    )
+    expect(capturedGuestSelect).toContain('instagram_scoped_id')
+    expect(capturedGuestSelect).toContain('phone_number')
+  })
+
+  it('records a task and never calls handleFollowup', async () => {
+    useGuest(instagramGuest())
+    const result = await processDueFollowups(NOW)
+
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(recordManualFollowupTask).toHaveBeenCalledWith(['log-1'], NOW)
+    expect(result.guestsTasked).toBe(1)
+    expect(result.guestsDispatched).toBe(0)
+  })
+
+  // The claim is KEPT. Releasing would burn nothing and the guest would be
+  // re-detected tomorrow, and every morning after, for the same visit.
+  it('keeps the claim, so the dedup burns exactly as a send would', async () => {
+    useGuest(instagramGuest())
+    await processDueFollowups(NOW)
+    expect(releaseFollowupLogClaim).not.toHaveBeenCalled()
+    expect(finalizeFollowupLogClaim).not.toHaveBeenCalled()
+  })
+
+  // Until TAC-486 builds the card surface this relay is the ONLY way anyone
+  // learns the venue owed this guest a touch.
+  it('fires the recorded-task event with the log rows TAC-486 reads', async () => {
+    useGuest(instagramGuest())
+    await processDueFollowups(NOW)
+    expect(captureFollowupManualTaskRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        channel: 'instagram',
+        followupLogIds: ['log-1'],
+        reasons: ['post_visit_day_7'],
+        primaryReason: 'post_visit_day_7',
+      }),
+    )
+  })
+
+  // A failed write leaves the claim in place rather than releasing it: the row
+  // is the only durable record the touch was owed, and releasing would re-detect
+  // tomorrow. It reads as an orphaned claim, which is the audit signal.
+  it('leaves the claim in place when the task write fails', async () => {
+    useGuest(instagramGuest())
+    vi.mocked(recordManualFollowupTask).mockResolvedValue({
+      ok: false,
+      error: 'recordManualFollowupTask: boom',
+    })
+    const result = await processDueFollowups(NOW)
+
+    expect(releaseFollowupLogClaim).not.toHaveBeenCalled()
+    expect(captureFollowupManualTaskRecorded).not.toHaveBeenCalled()
+    expect(result.guestsTasked).toBe(0)
+    expect(result.guestsDispatchFailed).toBe(1)
+  })
+
+  // The positive half, and the one that would catch this change silently
+  // swallowing SMS: an ordinary phone guest still dispatches, and is never
+  // recorded as a task.
+  it('leaves an SMS guest dispatching exactly as before', async () => {
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(recordManualFollowupTask).not.toHaveBeenCalled()
+    expect(captureFollowupManualTaskRecorded).not.toHaveBeenCalled()
+    expect(result.guestsTasked).toBe(0)
+    expect(result.guestsDispatched).toBe(1)
+  })
+
+  // A guest with both identifiers resolves phone-first, because every proactive
+  // send goes to a phone number today. No such guest exists on file; this pins
+  // the choice so it is revisited deliberately rather than discovered.
+  it('sends to a guest who has both identifiers, rather than recording a task', async () => {
+    useGuest(instagramGuest({ phone_number: '+15551230000' }))
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(recordManualFollowupTask).not.toHaveBeenCalled()
+    expect(result.guestsDispatched).toBe(1)
+    expect(result.guestsTasked).toBe(0)
   })
 })

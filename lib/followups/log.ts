@@ -163,6 +163,40 @@ export async function finalizeFollowupLogClaim(
 }
 
 /**
+ * Mark the just-claimed rows as a task for a human to complete rather than a
+ * message that was sent (TAC-469 PR B, migration 050).
+ *
+ * The Instagram counterpart of finalizeFollowupLogClaim, and deliberately NOT a
+ * release: the claim is KEPT, so the dedup burns exactly as a send would and
+ * the guest is not re-detected every morning for the same visit. The task also
+ * counts toward the weekly cap, because from the guest's side it is the touch.
+ *
+ * `message_id` stays null, which is also what an orphaned claim looks like —
+ * the timestamp is what tells the two apart, and migration 050's CHECK stops a
+ * row ever claiming to be both.
+ */
+export async function recordManualFollowupTask(
+  claimIds: readonly string[],
+  recordedAt: Date,
+): Promise<RAGResult<{ updatedCount: number }>> {
+  if (claimIds.length === 0) return { ok: true, data: { updatedCount: 0 } }
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('followup_log')
+    .update({ manual_task_recorded_at: recordedAt.toISOString() })
+    .in('id', claimIds)
+    .select('id')
+  if (error) {
+    return {
+      ok: false,
+      error: `recordManualFollowupTask: ${error.message}`,
+      errorCode: error.code ?? undefined,
+    }
+  }
+  return { ok: true, data: { updatedCount: data?.length ?? 0 } }
+}
+
+/**
  * Delete the just-claimed rows so dedup isn't burned. Called from the
  * engine on AgentResult.refused / .failed; preserves the "same-day
  * retry on next tick" semantics.

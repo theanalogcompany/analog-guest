@@ -149,6 +149,7 @@ export type Database = {
           dedup_key: string
           guest_id: string
           id: string
+          manual_task_recorded_at: string | null
           message_id: string | null
           reason: string
           venue_id: string
@@ -158,6 +159,7 @@ export type Database = {
           dedup_key: string
           guest_id: string
           id?: string
+          manual_task_recorded_at?: string | null
           message_id?: string | null
           reason: string
           venue_id: string
@@ -167,6 +169,7 @@ export type Database = {
           dedup_key?: string
           guest_id?: string
           id?: string
+          manual_task_recorded_at?: string | null
           message_id?: string | null
           reason?: string
           venue_id?: string
