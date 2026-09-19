@@ -954,10 +954,56 @@ function formatFollowupSuppressed(props: FollowupSuppressedProps): string {
   ].join('\n')
 }
 
+/**
+ * A follow-up that was RECORDED as a task for a human rather than sent
+ * (TAC-469 PR B). Instagram only today: a scheduled follow-up never auto-sends
+ * there, because the 24-hour reply window is usually shut when one fires and
+ * nothing reopens it but the guest.
+ *
+ * Slack-relayed deliberately. Until TAC-486 builds the card surface these rows
+ * have NO operator-facing surface at all, so the relay is the only way anyone
+ * learns the venue owed a guest a touch. That is also the signal to watch: a
+ * steady drip here is the backlog TAC-486 inherits.
+ *
+ * Carries no message body — there is no draft. TAC-486 generates the text when
+ * it creates the card, so a day-3 line written now cannot be read on day 9.
+ */
+export interface FollowupManualTaskRecordedProps {
+  venueId: string
+  guestId: string
+  /** Every reason this task covers, the render enum strings. */
+  reasons: readonly string[]
+  /** The highest-priority reason, or null when none survived the filter. */
+  primaryReason: string | null
+  /** The followup_log rows marked, which is what TAC-486 reads. */
+  followupLogIds: readonly string[]
+  channel: string
+}
+
+export async function captureFollowupManualTaskRecorded(
+  props: FollowupManualTaskRecordedProps,
+): Promise<void> {
+  await capturePostHogEvent('followup_manual_task_recorded', props.guestId, { ...props })
+  await postToSlack(formatFollowupManualTaskRecorded(props))
+}
+
+function formatFollowupManualTaskRecorded(props: FollowupManualTaskRecordedProps): string {
+  const reasonList = props.reasons.map((r) => `\`${r}\``).join(', ')
+  return [
+    `*Follow-up recorded as a task* — ${props.channel} cannot be sent to on a schedule, so a human has to send this one.`,
+    `reasons: ${reasonList || '(none)'}`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `followup_log: ${props.followupLogIds.map((id) => `\`${id}\``).join(', ') || '(none)'}`,
+  ].join('\n')
+}
+
 export interface FollowupVenueBreakdown {
   venueId: string
   guestsEvaluated: number
   guestsDue: number
+  /** Recorded as tasks rather than sent (TAC-469). */
+  guestsTasked: number
   guestsDispatched: number
   guestsSuppressed: number
   guestsConflicted: number
@@ -973,6 +1019,7 @@ export interface FollowupScanCompleteProps {
     guestsEvaluated: number
     guestsDue: number
     guestsDispatched: number
+    guestsTasked: number
     guestsSuppressed: number
     suppressedBy: Record<string, number>
     guestsConflicted: number

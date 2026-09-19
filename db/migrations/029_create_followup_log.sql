@@ -52,6 +52,18 @@
 --      created_at > 1 day ago) are the audit signal for manual operator
 --      investigation. Documented in CLAUDE.md "Common gotchas".
 --
+--      NARROWED BY MIGRATION 050 (TAC-469). An Instagram follow-up is
+--      RECORDED rather than sent, and that claim is kept deliberately
+--      with message_id NULL too — so `message_id IS NULL` alone now
+--      matches every recorded task as well as every orphan. The audit
+--      signal is:
+--
+--        message_id is null
+--        and manual_task_recorded_at is null
+--        and created_at < now() - interval '1 day'
+--
+--      Step 7 itself is unchanged; only what "orphan" selects for is.
+--
 -- this gives us "claim before side-effect" with a clean failure mode:
 -- exactly one engine run can dispatch for a given (venue, guest, reason),
 -- and a failed dispatch doesn't lose the guest. the trade-off is one

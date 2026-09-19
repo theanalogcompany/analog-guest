@@ -53,6 +53,7 @@ import {
 } from '@/lib/schemas'
 import {
   captureFollowupScanComplete,
+  captureFollowupManualTaskRecorded,
   captureFollowupSuppressed,
   type FollowupVenueBreakdown,
 } from '@/lib/analytics/posthog'
@@ -61,6 +62,7 @@ import {
   type FollowupSuppressionReason,
 } from '@/lib/agent/followup-rules'
 import { handleFollowup } from '@/lib/agent/handle-followup'
+import { resolveConversationChannel } from '@/lib/agent/conversation-channel'
 import type { FollowupTrigger } from '@/lib/agent/types'
 import {
   dedupKeyForReason,
@@ -71,6 +73,7 @@ import {
 } from './detectors'
 import {
   claimFollowupLogRows,
+  recordManualFollowupTask,
   emptyFollowupGuestSignals,
   finalizeFollowupLogClaim,
   loadFollowupSnapshotsForVenue,
@@ -90,6 +93,8 @@ export interface ProcessDueFollowupsResult {
   guestsDue: number
   /** Guests whose dispatch fired (sent or queued) at least one followup. */
   guestsDispatched: number
+  /** Instagram guests whose follow-up was recorded as a task, never sent. */
+  guestsTasked: number
   /** Guests suppressed by canSendFollowup (Gate 1). */
   guestsSuppressed: number
   /** Per-suppression-reason counts (Gate 1). */
@@ -168,6 +173,8 @@ interface EnrolledGuestRow {
   // precision was ever recorded, which detectPostVisitReason treats as
   // permissive — see its own comment for why that direction is deliberate.
   lastVisitPrecision: VisitTimePrecision | null
+  hasPhone: boolean
+  hasInstagramId: boolean
 }
 
 interface RedemptionRow {
@@ -191,6 +198,7 @@ export async function processDueFollowups(
     guestsEvaluated: 0,
     guestsDue: 0,
     guestsDispatched: 0,
+    guestsTasked: 0,
     guestsSuppressed: 0,
     suppressedBy: {
       opted_out: 0,
@@ -233,6 +241,7 @@ export async function processDueFollowups(
       guestsEvaluated: summary.guestsEvaluated,
       guestsDue: summary.guestsDue,
       guestsDispatched: summary.guestsDispatched,
+      guestsTasked: summary.guestsTasked,
       guestsSuppressed: summary.guestsSuppressed,
       suppressedBy: summary.suppressedBy,
       guestsConflicted: summary.guestsConflicted,
@@ -312,6 +321,7 @@ async function scanVenue(
     guestsEvaluated: 0,
     guestsDue: 0,
     guestsDispatched: 0,
+    guestsTasked: 0,
     guestsSuppressed: 0,
     guestsConflicted: 0,
     guestsDispatchFailed: 0,
@@ -322,9 +332,15 @@ async function scanVenue(
   const [guestsResult, mechanicsResult, redemptionsResult] = await Promise.all([
     supabase
       .from('guests')
-      .select('id, opted_out_at, last_inbound_at, last_visit_at, last_visit_precision')
+      .select(
+        'id, opted_out_at, last_inbound_at, last_visit_at, last_visit_precision, phone_number, instagram_scoped_id',
+      )
       .eq('venue_id', ctx.id)
-      .not('phone_number', 'is', null)
+      // A guest reachable on EITHER channel. Instagram guests were excluded
+      // entirely until TAC-469 PR B, so the engine could not even see them;
+      // now they are scanned like anyone else and their follow-up is recorded
+      // as a task instead of sent (rule 2: outbound splits by origin).
+      .or('phone_number.not.is.null,instagram_scoped_id.not.is.null')
       .is('opted_out_at', null)
       .in('status', ['new', 'active']),
     supabase
@@ -370,6 +386,9 @@ async function scanVenue(
     lastInboundAt: g.last_inbound_at ? new Date(g.last_inbound_at) : null,
     lastVisitAt: g.last_visit_at ? new Date(g.last_visit_at) : null,
     lastVisitPrecision: parseVisitPrecision(g.last_visit_precision),
+    hasPhone: typeof g.phone_number === 'string' && g.phone_number.trim() !== '',
+    hasInstagramId:
+      typeof g.instagram_scoped_id === 'string' && g.instagram_scoped_id.trim() !== '',
   }))
 
   const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
@@ -525,6 +544,45 @@ async function scanVenue(
     }
     const claims = claimResult.claimed
     const claimIds = claims.map((c) => c.id)
+
+    // RULE 2: outbound splits by ORIGIN, not by window state. A scheduled
+    // follow-up never auto-sends on Instagram, whether or not the window
+    // happens to be open right now — it becomes a task for a human. The claim
+    // is KEPT, so the dedup burns exactly as a send would and this guest is not
+    // re-detected tomorrow for the same visit.
+    const channel = resolveConversationChannel({
+      // No inbound message: a follow-up is proactive. A guest with both
+      // identifiers resolves phone-first, which is what every proactive send
+      // does today; the 0 such guests on file make it moot for now.
+      inboundChannel: undefined,
+      hasPhone: guest.hasPhone,
+      hasInstagramId: guest.hasInstagramId,
+    }).channel
+    if (channel === 'instagram') {
+      const recorded = await recordManualFollowupTask(claimIds, now)
+      if (!recorded.ok) {
+        // The claim is already written and cannot be released safely: releasing
+        // would re-detect tomorrow, and the row is the only durable record that
+        // this touch was owed. Left in place as the orphan-claim audit signal.
+        console.warn(
+          `[followup-engine] manual task record failed for guest=${guest.id}: ${recorded.error}`,
+        )
+        breakdown.guestsDispatchFailed += 1
+        summary.guestsDispatchFailed += 1
+        continue
+      }
+      captureFollowupManualTaskRecorded({
+        venueId: ctx.id,
+        guestId: guest.id,
+        reasons: allowedReasons,
+        primaryReason: allowedReasons[0] ?? null,
+        followupLogIds: claimIds,
+        channel: 'instagram',
+      })
+      breakdown.guestsTasked += 1
+      summary.guestsTasked += 1
+      continue
+    }
 
     const dispatchResult = await dispatchOnce({
       ctx,
