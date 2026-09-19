@@ -73,6 +73,7 @@ const guestRow = (overrides: Record<string, unknown> = {}) => ({
   first_name: null,
   last_name: null,
   phone_number: '+15555550142',
+  instagram_username: null,
   created_at: daysAgoIso(2),
   context: {},
   ...overrides,
@@ -116,6 +117,18 @@ describe('loadVenueOpenIntentions', () => {
 
     const { rows } = await loadVenueOpenIntentions(VENUE_ID, NOW)
     expect(rows[0].guestLabel).toBe('Liam Chen · +15555550142')
+  })
+
+  // TAC-479: an Instagram guest with no name shows their handle, once fetched.
+  it('labels an Instagram guest with no name by their handle', async () => {
+    mockTables({
+      guest_intention_prompts: { data: [eligibility('are_they_local', 1)], error: null },
+      guests: { data: [guestRow({ phone_number: null, instagram_username: 'maya.oakland' })], error: null },
+      transactions: { data: [], error: null },
+    })
+
+    const { rows } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows[0].guestLabel).toBe('@maya.oakland')
   })
 
   // TAC-380 trap 1 on this surface. Without the prompted_at filter every

@@ -44,6 +44,7 @@ import {
 import type { EmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
+import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 
 export interface RegenerateWithCritiqueInput {
@@ -146,6 +147,7 @@ interface OriginalOutboundLoad {
     body: string
     created_at: string
     provider_message_id: string | null
+    channel: string
   }
   guestId: string
 }
@@ -198,7 +200,7 @@ async function loadOriginalOutbound(
 
   const { data: inbound, error: inErr } = await supabase
     .from('messages')
-    .select('id, body, created_at, provider_message_id, direction')
+    .select('id, body, created_at, provider_message_id, direction, channel')
     .eq('id', outbound.reply_to_message_id)
     .maybeSingle()
   if (inErr || !inbound) {
@@ -229,6 +231,7 @@ async function loadOriginalOutbound(
         body: inbound.body,
         created_at: inbound.created_at,
         provider_message_id: inbound.provider_message_id,
+        channel: inbound.channel,
       },
       guestId: outbound.guest_id,
     },
@@ -258,6 +261,9 @@ export async function regenerateWithCritique(
         providerMessageId: load.data.inbound.provider_message_id ?? '',
         body: load.data.inbound.body,
         receivedAt: new Date(load.data.inbound.created_at),
+        // TAC-495: mirrored from handle-inbound's loadInbound, so the regen
+        // gets the same channel copy the original generation did.
+        channel: parseMessageChannel(load.data.inbound.channel),
       },
       historyEndIso: load.data.inbound.created_at,
     })
@@ -403,6 +409,8 @@ export async function regenerateWithCritique(
     ragChunks,
     knowledgeChunks,
     runtime,
+    // TAC-495: mirrored from generateStage (lib/agent/stages.ts).
+    channel: ctx.conversationChannel,
   })
   if (!gen.ok) {
     return { ok: false, errorCode: 'generate_failed', error: gen.error }

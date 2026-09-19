@@ -39,6 +39,15 @@ type EventBase = {
   guestIgsid: string
   /** Meta's message ID. On a read receipt, the ID of the message that was read. */
   mid: string
+  /**
+   * When this happened by Instagram's clock, as an ISO string: the item's
+   * `timestamp`, NOT `entry.time` (TAC-479). `entry.time` is when Meta sent
+   * the delivery, 0.4 to 1.1 seconds later in every recorded payload, and far
+   * later on a redelivery; Instagram's 24-hour reply window runs from the
+   * guest's action. Null when the item carries no millisecond timestamp (see
+   * providerSentAtOf).
+   */
+  providerSentAt: string | null
 }
 
 export type InstagramMessageEvent = EventBase & {
@@ -150,6 +159,24 @@ function idOf(party: unknown): string | null {
   return isRecord(party) ? nonEmptyString(party.id) : null
 }
 
+// Meta sends `timestamp` in milliseconds since the epoch (13 digits in every
+// recorded payload). Anything else becomes null rather than a guess. The bounds
+// are what make a value in SECONDS null instead of a date in January 1970,
+// which TAC-469's window gate would read as a window that closed decades ago.
+// 1e12 ms is 2001-09-09 and 1e13 ms is 2286: every real value is between them,
+// and no seconds value is. Not compared against the current time: this module
+// is pure, and a timestamp slightly ahead of our clock is Meta's clock, not an
+// error.
+const MIN_EPOCH_MS = 1e12
+const MAX_EPOCH_MS = 1e13
+
+function providerSentAtOf(item: Record<string, unknown>): string | null {
+  const value = item.timestamp
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null
+  if (value < MIN_EPOCH_MS || value >= MAX_EPOCH_MS) return null
+  return new Date(value).toISOString()
+}
+
 function parseReferral(value: unknown): InstagramReferral | null {
   if (!isRecord(value)) return null
   const ref = nonEmptyString(value.ref)
@@ -202,13 +229,22 @@ function parseMessage(
   }
 
   if (isEcho) {
-    return { kind: 'echo', accountId, guestIgsid: recipientId, mid, text, mediaUrls }
+    return {
+      kind: 'echo',
+      accountId,
+      guestIgsid: recipientId,
+      mid,
+      providerSentAt: providerSentAtOf(item),
+      text,
+      mediaUrls,
+    }
   }
   return {
     kind: 'message',
     accountId,
     guestIgsid: senderId,
     mid,
+    providerSentAt: providerSentAtOf(item),
     text,
     mediaUrls,
     // Inside `message` on an ad referral; beside it, where Meta has put it on
@@ -242,6 +278,7 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
       accountId,
       guestIgsid: senderId,
       mid,
+      providerSentAt: providerSentAtOf(item),
       title: nonEmptyString(item.postback.title),
       referral: parseReferral(item.postback.referral) ?? parseReferral(item.referral),
     }
@@ -251,7 +288,7 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
     if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
     const mid = nonEmptyString(item.read.mid)
     if (mid === null) return unhandled('malformed', fieldNames(Object.keys(item.read)))
-    return { kind: 'read', accountId, guestIgsid: senderId, mid }
+    return { kind: 'read', accountId, guestIgsid: senderId, mid, providerSentAt: providerSentAtOf(item) }
   }
 
   if (isRecord(item.referral)) return unhandled('standalone_referral', itemFieldNames(item))

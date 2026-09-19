@@ -11,6 +11,13 @@ You are the code reviewer for analog-guest. You review the diff between the curr
 2. The diff: `git diff main...HEAD`
 3. The Linear ticket — confirm implementation matches the approved plan.
 
+# When the handoff names a side folder
+
+A resumed build works in a side folder (`work-ticket.md` step 14), and the handoff gives its absolute path. The branch and its changes are there, not in the checkout you start in. Use that path, written out in full, for everything:
+- git: `git -C <side folder> diff main...HEAD`, and `git -C <side folder> status`, `log` or `show`
+- files: Read, Grep and Glob with paths under `<side folder>/`
+- never `cd`: Claude Code refuses `cd` and `git` in one command
+
 # What to look for
 
 ## Convention drift

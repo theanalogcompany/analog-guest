@@ -1,4 +1,5 @@
 import type { EligibleMechanic, GuestState } from '@/lib/recognition'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from './emoji-cadence'
 import type {
   ActiveCommitment,
@@ -383,6 +384,13 @@ export type GenerateMessageInput = {
   // explicit no-match framing (TAC-242).
   knowledgeChunks?: KnowledgeCorpusChunk[]
   runtime: RuntimeContext
+  // TAC-495: the conversation's channel, which picks the channel copy (the
+  // system prompt's channel lines, the named-speaker persona line, and the
+  // first-visit opener). Required, not optional: a new caller has to decide,
+  // because leaving it out must never quietly mean the SMS copy. Null means
+  // unknown and gets the Instagram wording, which is false on neither channel.
+  // Set from RuntimeContext.conversationChannel (lib/agent) by both callers.
+  channel: MessageChannel | null
 }
 
 // TAC-296: agent-emitted patch for guests.context, threaded onto every

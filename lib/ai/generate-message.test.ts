@@ -44,6 +44,7 @@ function makeInput(): GenerateMessageInput {
     ragChunks: [
       { id: 'c1', text: 'sample voice corpus chunk', sourceType: 'sample_text' },
     ],
+    channel: 'text',
     runtime: {
       inboundMessage: 'hi',
       today: {
@@ -386,12 +387,31 @@ describe('generateMessage — basic shape', () => {
     expect(r.error).toBe('invalid_input')
   })
 
-  it('exposes promptVersion v1.53.0 on a successful result', async () => {
+  // TAC-495: a missing channel smuggled past the type by a cast must fail as
+  // a value, never quietly become the SMS copy. Null is a real answer (the
+  // channel is unknown) and generates normally.
+  it('returns invalid_input when channel is missing or not a channel, before calling the model', async () => {
+    for (const channel of [undefined, 'sms', 'Instagram']) {
+      const r = await generateMessage({ ...makeInput(), channel } as unknown as GenerateMessageInput)
+      expect(r.ok).toBe(false)
+      if (r.ok) continue
+      expect(r.error).toBe('invalid_input')
+    }
+    expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a null channel', async () => {
+    queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
+    const r = await generateMessage({ ...makeInput(), channel: null })
+    expect(r.ok).toBe(true)
+  })
+
+  it('exposes promptVersion v1.54.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.53.0')
+    expect(r.data.promptVersion).toBe('v1.54.0')
   })
 })
 

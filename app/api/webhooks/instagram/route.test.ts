@@ -17,10 +17,19 @@ const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   handleInbound: vi.fn(),
   waitUntil: vi.fn(),
+  refreshInstagramProfile: vi.fn(),
 }))
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
 vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
+// TAC-479. The refresh itself is replaced by a spy, so these tests see what
+// the route hands to waitUntil and never make a Graph call. Which outcomes get
+// one is decided by the REAL profileRefreshTargetFor, so a route that stopped
+// asking it would fail here.
+vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/refresh-profile')>()
+  return { ...actual, refreshInstagramProfile: mocks.refreshInstagramProfile }
+})
 
 // The real gate, except that a test can open it. That is the one thing
 // TAC-469 changes, so the route's own hand-off gets tested as it will run
@@ -142,6 +151,8 @@ beforeEach(() => {
   mocks.createAdminClient.mockReset()
   mocks.handleInbound.mockReset()
   mocks.waitUntil.mockReset()
+  mocks.refreshInstagramProfile.mockReset()
+  mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
   gate.open = false
   useDb()
 })
@@ -576,13 +587,18 @@ describe('POST /api/webhooks/instagram saving events', () => {
     'saves the recorded %s as an Instagram row and does not run the agent',
     async (name) => {
       useDb({ venues: [FIXTURE_VENUE] })
+      const refresh = Promise.resolve({ status: 'not_due' })
+      mocks.refreshInstagramProfile.mockReturnValue(refresh)
       const res = await post(recorded(name))
 
       expect(res.status).toBe(200)
       expect(db.inserts('messages')).toMatchObject([{ channel: 'instagram', direction: 'inbound' }])
       expect(findEntry('instagram_event_persisted')).toMatchObject({ guestCreated: true })
       expect(mocks.handleInbound).not.toHaveBeenCalled()
-      expect(mocks.waitUntil).not.toHaveBeenCalled()
+      // The profile refresh (TAC-479) is the only background work, and it is
+      // not behind the agent gate.
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+      expect(mocks.waitUntil).toHaveBeenCalledWith(refresh)
     },
   )
 
@@ -661,7 +677,8 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
       const [saved] = db.tables.messages
       expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
       expect(mocks.handleInbound).toHaveBeenCalledWith(saved?.id)
-      expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+      // The agent run and the profile refresh (TAC-479), each handed off once.
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(2)
       expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
     },
   )
@@ -687,5 +704,101 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
 
     expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
     expect(findEntry('instagram_event_duplicate')).toBeDefined()
+  })
+})
+
+// TAC-479. The profile refresh runs AFTER the webhook answers: handed to
+// waitUntil, never awaited, so no Graph call sits on Meta's delivery
+// deadline. The refresh's own behaviour is tested in refresh-profile.test.ts.
+describe('POST /api/webhooks/instagram refreshing the guest profile', () => {
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function recorded(name: string): string {
+    return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  }
+
+  /** One delivery carrying a guest message per (igsid, mid) pair. */
+  function messages(...items: Array<[igsid: string, mid: string]>): string {
+    return JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: FIXTURE_ACCOUNT_ID,
+          time: 1789704055296,
+          messaging: items.map(([igsid, mid]) => ({
+            sender: { id: igsid },
+            recipient: { id: FIXTURE_ACCOUNT_ID },
+            timestamp: 1789704054588,
+            message: { mid, text: 'hi' },
+          })),
+        },
+      ],
+    })
+  }
+
+  // A refresh that never finishes. If the route awaited it, POST would never
+  // resolve and this test would time out rather than pass.
+  it.each(['message', 'postback-referral'])(
+    'hands the refresh for a saved %s to waitUntil and answers without waiting for it',
+    async (name) => {
+      useDb({ venues: [FIXTURE_VENUE] })
+      const neverFinishes = new Promise(() => undefined)
+      mocks.refreshInstagramProfile.mockReturnValue(neverFinishes)
+
+      const res = await post(recorded(name))
+
+      expect(res.status).toBe(200)
+      const [guest] = db.tables.guests
+      expect(mocks.refreshInstagramProfile).toHaveBeenCalledTimes(1)
+      expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, { guestId: guest?.id, venueId: 'venue-1' })
+      expect(mocks.waitUntil).toHaveBeenCalledWith(neverFinishes)
+    },
+    2000,
+  )
+
+  it.each(['echo', 'read'])('does not refresh anyone for a recorded %s', async (name) => {
+    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: name === 'read' ? [echoRow] : [] })
+
+    await post(recorded(name))
+
+    expect(mocks.refreshInstagramProfile).not.toHaveBeenCalled()
+    expect(mocks.waitUntil).not.toHaveBeenCalled()
+  })
+
+  it('does not refresh again for a redelivered message', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    const body = recorded('message')
+
+    await post(body)
+    await post(body)
+
+    expect(mocks.refreshInstagramProfile).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes a guest once however many of their messages a delivery carries', async () => {
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+
+    await post(messages([FIXTURE_GUEST_IGSID, 'm-1'], [FIXTURE_GUEST_IGSID, 'm-2'], [FIXTURE_GUEST_IGSID, 'm-3']))
+
+    expect(db.inserts('messages')).toHaveLength(3)
+    expect(mocks.refreshInstagramProfile).toHaveBeenCalledTimes(1)
+    expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, { guestId: 'guest-1', venueId: 'venue-1' })
+  })
+
+  // 15 and 16 digits have both been seen. Nothing here may assume a width.
+  it('refreshes each guest in a delivery, whatever the length of their scoped ID', async () => {
+    const shortIdGuest: FakeRow = { id: 'guest-2', venue_id: 'venue-1', instagram_scoped_id: '100000000000002' }
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST, shortIdGuest] })
+
+    await post(messages([FIXTURE_GUEST_IGSID, 'm-1'], ['100000000000002', 'm-2']))
+
+    expect(mocks.refreshInstagramProfile.mock.calls.map((call) => call[1])).toEqual([
+      { guestId: 'guest-1', venueId: 'venue-1' },
+      { guestId: 'guest-2', venueId: 'venue-1' },
+    ])
   })
 })

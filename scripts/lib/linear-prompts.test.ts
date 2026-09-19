@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
+import { allows, claudeStep, toolList } from './bash-allowlist'
 import { parseArgs } from './linear-cli.mjs'
 
 // The two CI sessions (build and audit) are taught to reach Linear by the
@@ -106,35 +106,6 @@ describe('the Linear block of the workflow prompts', () => {
 // these parse the workflows as YAML, so a vitest run is also the YAML check
 // a CI session used to make with `node -e`.
 describe('the Linear helper each prompt teaches is on its allowlist', () => {
-  type Step = { uses?: string; with?: { claude_args?: string; prompt?: string } }
-
-  const claudeStep = (src: string) => {
-    const doc = yaml.load(src) as { jobs: Record<string, { steps: Step[] }> }
-    const step = Object.values(doc.jobs)
-      .flatMap((job) => job.steps)
-      .find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
-    if (!step?.with?.claude_args || !step.with.prompt) throw new Error('no claude-code-action step')
-    return { args: step.with.claude_args, prompt: step.with.prompt }
-  }
-
-  const tools = (args: string, flag: string) => {
-    const m = new RegExp(`${flag} "([^"]*)"`).exec(args)
-    if (!m) throw new Error(`no ${flag}`)
-    return m[1].split(',')
-  }
-
-  // Bash(x) allows exactly x; Bash(x:*) allows x followed by anything. Any
-  // other `*` is a wildcard form this doesn't model, and treating it as an
-  // exact match would let a deny rule such as Bash(node *) pass unseen.
-  const allows = (rule: string, command: string) => {
-    const m = /^Bash\((.*)\)$/.exec(rule)
-    if (!m) return false
-    if (m[1].replace(/:\*$/, '').includes('*')) throw new Error(`unmodelled wildcard rule: ${rule}`)
-    if (!m[1].endsWith(':*')) return command === m[1]
-    const prefix = m[1].slice(0, -2)
-    return command === prefix || command.startsWith(`${prefix} `)
-  }
-
   it.each(WORKFLOWS)('%s', (path) => {
     const { args, prompt } = claudeStep(read(path))
     const taught = prompt
@@ -144,8 +115,8 @@ describe('the Linear helper each prompt teaches is on its allowlist', () => {
     // comment, describe, label add, label remove, state. Zero would pass
     // every assertion below and prove nothing.
     expect(taught).toHaveLength(5)
-    const allowed = tools(args, '--allowedTools')
-    const disallowed = tools(args, '--disallowedTools')
+    const allowed = toolList(args, '--allowedTools')
+    const disallowed = toolList(args, '--disallowedTools')
     for (const command of taught) {
       expect({ command, allowed: allowed.some((rule) => allows(rule, command)) }).toEqual({ command, allowed: true })
       expect({ command, disallowed: disallowed.some((rule) => allows(rule, command)) }).toEqual({ command, disallowed: false })
@@ -163,7 +134,7 @@ describe('the Linear helper each prompt teaches is on its allowlist', () => {
   // not see a rule that reaches an interpreter another way, such as
   // Bash(env python3:*) or Bash(bash:*).
   it.each(WORKFLOWS)('%s carries no node or python rule but the helper\'s', (path) => {
-    const allowed = tools(claudeStep(read(path)).args, '--allowedTools')
+    const allowed = toolList(claudeStep(read(path)).args, '--allowedTools')
     expect(allowed.filter((rule) => /^Bash\((?:\S*\/)?(nodejs|node|python[\d.]*)(?=[\s:)])/.test(rule))).toEqual(['Bash(node scripts/linear.mjs:*)'])
     for (const command of ['node -e 1', 'python3 -c 1']) {
       expect({ command, allowed: allowed.some((rule) => allows(rule, command)) }).toEqual({ command, allowed: false })

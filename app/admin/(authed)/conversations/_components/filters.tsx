@@ -29,7 +29,14 @@ interface FiltersProps {
   // Guests for the currently-selected venue (passed in by parent server fetch).
   // Empty when no venue selected.
   // TAC-467: phoneNumber is null for an Instagram guest.
-  guests: Array<{ id: string; firstName: string | null; lastName: string | null; phoneNumber: string | null }>
+  // TAC-479: instagramUsername is the handle shown in its place, null until fetched.
+  guests: Array<{
+    id: string
+    firstName: string | null
+    lastName: string | null
+    phoneNumber: string | null
+    instagramUsername: string | null
+  }>
   selectedVenueId: string | null
   selectedGuestId: string | null
 }
