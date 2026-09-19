@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
@@ -12,6 +14,8 @@ import {
 } from '../../schemas'
 import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../types'
 import {
+  FIRST_TOUCH_SIGNAL_LINE,
+  firstTouchOpenerFor,
   knowledgeChunksToProse,
   personaToProse,
   runtimeToProse,
@@ -19,6 +23,28 @@ import {
 } from './serializers'
 import { renderableIntentions } from '../../agent/intentions/derive'
 import { MESSAGE_CATEGORIES } from '../types'
+import { MESSAGE_CHANNELS } from '../../schemas/message-channel'
+
+const REPO_ROOT = join(__dirname, '../../..')
+
+// TAC-495: every channel, plus null (unknown), the three values runtimeToProse
+// can be handed.
+const CHANNELS_AND_UNKNOWN = [...MESSAGE_CHANNELS, null] as const
+
+// TAC-495: absence checks for the first-visit opener. These used to look for the
+// fragment 'scanned your sign', which would stop matching the day the opener
+// was reworded, leaving every one of them passing while testing nothing (an
+// opener could then leak into opt_out or comp_complaint turns unseen). They now
+// look for the whole opener, in every channel's variant, read from the module.
+// For an ABSENCE check that is the right source: the risk is the check going
+// vacuous, not the code agreeing with itself. Positive checks transcribe
+// literals instead (compose-prompt.test.ts). Each caller also runs a positive
+// control, proving the same needle does render when it should.
+function expectNoOpener(out: string): void {
+  for (const channel of MESSAGE_CHANNELS) {
+    expect(out).not.toContain(firstTouchOpenerFor(channel))
+  }
+}
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
@@ -737,12 +763,21 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
     )
     const withFlagUndefined = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
     expect(withFlagFalse).toBe(withFlagUndefined)
-    expect(withFlagFalse).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expectNoOpener(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: false }, 'reply', NOW, channel),
+      )
+      // Positive control: the same inputs with the flag on do render it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('omits the opener when firstTouchAfterQrScan is undefined', () => {
-    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expectNoOpener(runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW, channel))
+    }
   })
 
   // The specific edge case the AC names: a DB read failure for
@@ -750,13 +785,20 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   // a true first-touch turn. The whole block — opener included — must stay
   // omitted, not render an opener with nothing under it.
   it('omits the block entirely when openIntentions is empty even though firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions: [], firstTouchAfterQrScan: true },
-      'reply',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions: [], firstTouchAfterQrScan: true },
+        'reply',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      // Positive control: with an open intention the same turn renders it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('still carries the non-steering paragraph verbatim after the opener', () => {
@@ -878,13 +920,20 @@ describe("runtimeToProse — ## What you're hoping to get to comp_complaint supp
   // The sharper case, mirroring the opt_out pair: a fresh scan whose first
   // message is the complaint would otherwise carry the more directive opener.
   it('omits it for comp_complaint even when firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'comp_complaint',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'comp_complaint',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      // Positive control: the same first touch on a reply turn renders it.
+      expect(
+        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+      ).toContain(firstTouchOpenerFor(channel))
+    }
   })
 
   it('still renders the block for an ordinary reply with the same inputs', () => {
@@ -911,24 +960,32 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
   // would otherwise carry the more directive opener ("thank them for coming
   // in and ask what they got") rather than just the two soft state lines.
   it('omits the block entirely for opt_out even when firstTouchAfterQrScan is true', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'opt_out',
-      NOW,
-    )
-    expect(out).not.toContain("What you're hoping to get to")
-    expect(out).not.toContain('scanned your sign')
-    expect(out).not.toContain('ask what they got')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'opt_out',
+        NOW,
+        channel,
+      )
+      expect(out).not.toContain("What you're hoping to get to")
+      expectNoOpener(out)
+      expect(out).not.toContain('ask what they got')
+    }
   })
 
+  // The positive control for the test above, on every channel.
   it('still renders the block for a non-opt_out category with the same inputs', () => {
-    const out = runtimeToProse(
-      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
-      'reply',
-      NOW,
-    )
-    expect(out).toContain("## What you're hoping to get to")
-    expect(out).toContain('scanned your sign')
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+        'reply',
+        NOW,
+        channel,
+      )
+      expect(out).toContain("## What you're hoping to get to")
+      expect(out).toContain(firstTouchOpenerFor(channel))
+      expect(out).toContain('ask what they got')
+    }
   })
 })
 
@@ -947,14 +1004,128 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
     expect(signalIdx).toBeGreaterThan(inboundIdx)
   })
 
+  // TAC-495: the absence checks use the exported line itself, so a reworded
+  // line can't turn them vacuous, with a positive control per channel.
   it('omits the line when firstTouchAfterQrScan is false', () => {
-    const out = runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW)
-    expect(out).not.toContain("This is the guest's first message")
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW, channel),
+      ).not.toContain(FIRST_TOUCH_SIGNAL_LINE)
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
+      ).toContain(FIRST_TOUCH_SIGNAL_LINE)
+    }
   })
 
   it('omits the line when firstTouchAfterQrScan is undefined', () => {
-    const out = runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW)
-    expect(out).not.toContain("This is the guest's first message")
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW, channel)).not.toContain(
+        FIRST_TOUCH_SIGNAL_LINE,
+      )
+    }
+  })
+
+  // B carries no channel claim, so it is one line on every channel. The
+  // transcribed literal above pins its wording; this pins that the channel
+  // never changes it.
+  it('renders the same line on every channel', () => {
+    for (const channel of CHANNELS_AND_UNKNOWN) {
+      expect(
+        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
+      ).toContain("\nThis is the guest's first message, sent after they scanned your venue's QR sign.\n")
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-495: the first-visit opener's channel variants.
+// ---------------------------------------------------------------------------
+//
+// The SMS opener is TAC-423's wording, unchanged. The Instagram opener swaps
+// two phrases and nothing else. The literals here are transcribed from the
+// approved wording; the full strings are pinned against the assembled prompt in
+// compose-prompt.test.ts.
+describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
+  const SMS_OPENER =
+    "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  const INSTAGRAM_OPENER =
+    "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+
+  it('the SMS opener is unchanged and the Instagram opener is the approved wording', () => {
+    expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
+    expect(firstTouchOpenerFor('instagram')).toBe(INSTAGRAM_OPENER)
+  })
+
+  it('an unknown channel gets the Instagram opener', () => {
+    expect(firstTouchOpenerFor(null)).toBe(INSTAGRAM_OPENER)
+  })
+
+  // The scope guard for the opener: undo the two approved swaps and the
+  // Instagram opener must be the SMS opener exactly.
+  it('the Instagram opener differs from the SMS one only in its two channel phrases', () => {
+    expect(
+      firstTouchOpenerFor('instagram')
+        .replace("This is the guest's first message,", "This is the guest's first message on this number,")
+        .replace("who they're messaging,", "who they're texting,"),
+    ).toBe(firstTouchOpenerFor('text'))
+  })
+
+  it('the Instagram opener claims no phone number and no texting', () => {
+    expect(firstTouchOpenerFor('instagram')).not.toMatch(/\bnumber\b|\btext(ed|ing)?\b/i)
+  })
+
+  it('every presence phrase is identical on both channels', () => {
+    for (const phrase of [
+      'sent right after they scanned your sign at pickup.',
+      "They've already ordered and have it in hand.",
+      "You don't know what it was.",
+      'thank them for coming in and ask what they got',
+    ]) {
+      expect(firstTouchOpenerFor('text')).toContain(phrase)
+      expect(firstTouchOpenerFor('instagram')).toContain(phrase)
+    }
+  })
+
+  it('runtimeToProse renders the opener for the channel it is handed', () => {
+    const runtime: RuntimeContext = {
+      mechanics: [],
+      openIntentions: ["You haven't heard what this guest ordered yet."],
+      firstTouchAfterQrScan: true,
+    }
+    expect(runtimeToProse(runtime, 'reply', NOW, 'text')).toContain(`\n${SMS_OPENER}\n`)
+    expect(runtimeToProse(runtime, 'reply', NOW, 'instagram')).toContain(`\n${INSTAGRAM_OPENER}\n`)
+    // The default is the unknown channel, never the SMS copy.
+    expect(runtimeToProse(runtime, 'reply', NOW)).toContain(`\n${INSTAGRAM_OPENER}\n`)
+  })
+
+  // runtimeToProse defaults its channel, which is only safe while composePrompt,
+  // which always passes GenerateMessageInput.channel, is its only production
+  // caller. A second caller would silently get the default.
+  it('has exactly one production caller, composePrompt', () => {
+    // Callers AND importers: an aliased import (`runtimeToProse as render`)
+    // would call it under another name.
+    const importers: string[] = []
+    const callers: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === 'node_modules' || entry.startsWith('.')) continue
+        const full = join(dir, entry)
+        if (statSync(full).isDirectory()) walk(full)
+        else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
+          const text = readFileSync(full, 'utf8')
+          if (/\bruntimeToProse\(/.test(text)) callers.push(relative(REPO_ROOT, full))
+          // Bounded by the import braces: this codebase has no semicolons to stop on.
+          if (/import\s+(?:type\s+)?\{[^}]*\bruntimeToProse\b[^}]*\}\s*from/.test(text)) {
+            importers.push(relative(REPO_ROOT, full))
+          }
+        }
+      }
+    }
+    for (const dir of ['lib', 'app', 'scripts']) walk(join(REPO_ROOT, dir))
+    expect(callers.sort()).toEqual(['lib/ai/compose-prompt.ts', 'lib/ai/prompts/serializers.ts'])
+    expect(importers).toEqual(['lib/ai/compose-prompt.ts'])
+    const composeSrc = readFileSync(join(REPO_ROOT, 'lib/ai/compose-prompt.ts'), 'utf8')
+    expect(composeSrc).toContain('runtimeToProse(runtime, category, undefined, input.channel)')
   })
 })
 
@@ -1467,7 +1638,7 @@ describe('personaToProse — voice anti-patterns', () => {
         },
       ],
     })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).toContain('## Anti-patterns (what NOT to sound like)')
     expect(out).toContain('- no marketing flourishes')
     expect(out).toContain('- no closing acknowledgments')
@@ -1479,11 +1650,11 @@ describe('personaToProse — voice anti-patterns', () => {
     const persona = makePersona({
       voiceAntiPatterns: ['no marketing flourishes'] as unknown as BrandPersona['voiceAntiPatterns'],
     })
-    expect(personaToProse(persona)).toContain('- no marketing flourishes')
+    expect(personaToProse(persona, 'text')).toContain('- no marketing flourishes')
   })
 
   it('omits the block entirely when voiceAntiPatterns is empty', () => {
-    const out = personaToProse(makePersona({ voiceAntiPatterns: [] }))
+    const out = personaToProse(makePersona({ voiceAntiPatterns: [] }), 'text')
     expect(out).not.toContain('## Anti-patterns')
   })
 })
@@ -1507,7 +1678,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
 
   it('named_person: states staff identity as first person, not "on the venue\'s behalf"', () => {
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).toContain('You are Sana, staff at the venue, texting as yourself.')
     expect(out).toContain('You ARE that person')
     expect(out).not.toMatch(/on the venue's behalf/)
@@ -1518,7 +1689,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
   // venue needed a manual anti-pattern rule to undo.
   it('named_person: does not instruct signing messages', () => {
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse(persona)
+    const out = personaToProse(persona, 'text')
     expect(out).not.toContain('Sign messages')
     expect(out).toContain('Do not sign messages with your name.')
   })
@@ -1529,7 +1700,7 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
     // serializer's own defensive fallback directly rather than going through
     // a persona shape the schema would reject.
     const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
-    const out = personaToProse({ ...persona, speakerName: undefined })
+    const out = personaToProse({ ...persona, speakerName: undefined }, 'text')
     expect(out).toContain('You are [name missing], staff at the venue')
   })
 })
@@ -2180,6 +2351,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).toContain('- For questions outside the venue domain')
     expect(out).toContain('  Nearby places are a separate case. Name them with confidence.')
@@ -2193,6 +2365,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).not.toContain('\nNearby places are a separate case')
   })
@@ -2202,6 +2375,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         voiceAntiPatterns: [{ text: multiParagraph, source: 'manual' }],
       }),
+      'text',
     )
     expect(out).not.toMatch(/[ \t]+\n/)
   })
@@ -2223,6 +2397,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
           { text: 'Do not use em dashes.', source: 'manual' },
         ],
       }),
+      'text',
     )
     expect(out).toContain('  - One pick, nothing after it.')
     expect(out).toContain('  - Two picks stated flat, no framing.')
@@ -2241,6 +2416,7 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
         voiceAntiPatterns: [{ text: 'no marketing flourishes', source: 'manual' }],
         voiceTouchstones: ['dry, warm, unhurried'],
       }),
+      'text',
     )
     expect(out).toContain('- see you soon')
     expect(out).toContain('- politics')
@@ -2372,13 +2548,13 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // assertions exist to make a well-meaning reword of a working path fail
   // loudly rather than silently change two venues.
   it('never keeps its exact prohibition, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'never' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'never' }), 'text')).toContain(
       '## Emojis\nnever — Do not use emoji.',
     )
   })
 
   it('sparingly keeps its exact wording, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }), 'text')).toContain(
       '## Emojis\nsparingly — You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
     )
   })
@@ -2387,13 +2563,13 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // licence: identical on every turn, and a model with no memory of last
   // turn takes it every time — 10 of 11 responses at Le Mil's.
   it('frequent no longer carries a standing licence to use emoji', () => {
-    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')
     expect(out).not.toContain('Use them where they feel natural')
     expect(out).not.toContain('do not stuff them')
   })
 
   it('frequent defers the per-message call and refuses to imply a rate', () => {
-    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }))
+    const out = personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')
     expect(out).toContain('decided per message')
     expect(out).toContain('Do not read a general rate into this line.')
   })
@@ -2403,7 +2579,7 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // field isn't set. So the sentence has to carry its own default rather than
   // pointing at an instruction that may not be there.
   it('frequent states a default for when no per-message block renders', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }))).toContain(
+    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')).toContain(
       'if no such instruction appears, do not use one',
     )
   })
@@ -2536,5 +2712,79 @@ describe('intention suppression: render side and record side agree (TAC-436)', (
   // never sees it), so it is asserted separately rather than folded above.
   it('offers nothing to the recorder while a knowledge-gap question is pending', () => {
     expect(renderableIntentions(asOpen, 'reply', true)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-495: the named-speaker persona line's channel variant.
+// ---------------------------------------------------------------------------
+describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
+  function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
+    return BrandPersonaSchema.parse({
+      tone: 'warm and direct',
+      formality: 'casual',
+      speakerFraming: 'venue',
+      emojiPolicy: 'never',
+      lengthGuide: 'short — 1-2 sentences',
+      ...overrides,
+    })
+  }
+
+  const named = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+
+  it('the SMS line is unchanged and the Instagram line says messaging', () => {
+    expect(personaToProse(named, 'text')).toContain(
+      'You are Sana, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.',
+    )
+    expect(personaToProse(named, 'instagram')).toContain(
+      'You are Sana, staff at the venue, messaging as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.',
+    )
+  })
+
+  it('an unknown channel gets the Instagram line', () => {
+    expect(personaToProse(named, null)).toBe(personaToProse(named, 'instagram'))
+  })
+
+  // The persona's scope guard: only the named_person line and the casual
+  // formality line vary, each by one phrase. Venue and owner framings, and warm
+  // and formal venues, name no channel.
+  it('differs between channels only in the named-speaker verb and the casual formality phrase', () => {
+    for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
+      for (const formality of ['casual', 'warm', 'formal'] as const) {
+        const persona = makePersona({ speakerFraming, formality, speakerName: 'Sana' })
+        expect(
+          personaToProse(persona, 'instagram')
+            .replace('messaging as yourself', 'texting as yourself')
+            .replace('write the way you would message a friend.', 'write the way you would text a friend.'),
+        ).toBe(personaToProse(persona, 'text'))
+      }
+    }
+    expect(personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'instagram')).toBe(
+      personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'text'),
+    )
+  })
+
+  // Approved 2026-09-19. The phrase is a register yardstick, so the swap costs
+  // a little precision; the source comment says where to look if the
+  // Instagram voice reads more formal.
+  it('the casual formality line says text on SMS and message on Instagram', () => {
+    const casual = makePersona({ formality: 'casual' })
+    expect(personaToProse(casual, 'text')).toContain(
+      '## Formality\ncasual — Use contractions; lowercase starts are fine; write the way you would text a friend.',
+    )
+    expect(personaToProse(casual, 'instagram')).toContain(
+      '## Formality\ncasual — Use contractions; lowercase starts are fine; write the way you would message a friend.',
+    )
+    expect(personaToProse(casual, null)).toBe(personaToProse(casual, 'instagram'))
+  })
+
+  // The name is filled in after the substitution; a function replacement
+  // keeps a name that looks like a replacement pattern exactly as typed.
+  it('inserts the speaker name literally', () => {
+    const odd = makePersona({ speakerFraming: 'named_person', speakerName: "A$&B$'" })
+    expect(personaToProse(odd, 'instagram')).toContain("You are A$&B$', staff at the venue, messaging as yourself.")
+    expect(personaToProse({ ...named, speakerName: undefined }, 'text')).toContain(
+      'You are [name missing], staff at the venue, texting as yourself.',
+    )
   })
 })

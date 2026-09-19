@@ -733,6 +733,9 @@ export async function generateStage(
     ragChunks,
     knowledgeChunks,
     runtime: buildAiRuntime(ctx),
+    // TAC-495: picks the channel copy. Every path that generates goes through
+    // here or the Voices regen, which passes the same field.
+    channel: ctx.conversationChannel,
   })
   if (!r.ok) return { status: 'failed', error: r.error, errorCode: r.errorCode }
 

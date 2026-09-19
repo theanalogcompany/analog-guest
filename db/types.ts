@@ -453,7 +453,11 @@ export type Database = {
           first_name: string | null
           home_postal_code: string | null
           id: string
+          instagram_name: string | null
+          instagram_profile_attempted_at: string | null
+          instagram_profile_fetched_at: string | null
           instagram_scoped_id: string | null
+          instagram_username: string | null
           is_demo: boolean
           is_test_synthetic: boolean
           last_inbound_at: string | null
@@ -478,7 +482,11 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          instagram_name?: string | null
+          instagram_profile_attempted_at?: string | null
+          instagram_profile_fetched_at?: string | null
           instagram_scoped_id?: string | null
+          instagram_username?: string | null
           is_demo?: boolean
           is_test_synthetic?: boolean
           last_inbound_at?: string | null
@@ -503,7 +511,11 @@ export type Database = {
           first_name?: string | null
           home_postal_code?: string | null
           id?: string
+          instagram_name?: string | null
+          instagram_profile_attempted_at?: string | null
+          instagram_profile_fetched_at?: string | null
           instagram_scoped_id?: string | null
+          instagram_username?: string | null
           is_demo?: boolean
           is_test_synthetic?: boolean
           last_inbound_at?: string | null
@@ -760,6 +772,7 @@ export type Database = {
           previous_review_state: string | null
           prompt_version: string | null
           provider_message_id: string | null
+          provider_sent_at: string | null
           reaction_type: string | null
           referral_ref: string | null
           referral_source: string | null
@@ -800,6 +813,7 @@ export type Database = {
           previous_review_state?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
+          provider_sent_at?: string | null
           reaction_type?: string | null
           referral_ref?: string | null
           referral_source?: string | null
@@ -840,6 +854,7 @@ export type Database = {
           previous_review_state?: string | null
           prompt_version?: string | null
           provider_message_id?: string | null
+          provider_sent_at?: string | null
           reaction_type?: string | null
           referral_ref?: string | null
           referral_source?: string | null

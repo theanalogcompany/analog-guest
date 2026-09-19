@@ -9,6 +9,12 @@
 // update on a read receipt, fails the test rather than being answered by a
 // mock's opinion of what the query meant.
 //
+// TAC-479 adds the one update shape refresh-profile.ts sends, and ONLY for the
+// tables a test names in `updatable`:
+//   from(t).update(patch).eq(...).is(col, null)...[.select(cols)]
+// The handler's tests never name one, so an update from the handler still
+// throws there.
+//
 // Every call is recorded in `calls`, in order, so tests can assert what was
 // NOT asked as well as what was.
 //
@@ -24,11 +30,18 @@ import type { Database } from '@/db/types'
 
 export type FakeTable = 'venues' | 'guests' | 'messages'
 export type FakeRow = { id: string; [column: string]: unknown }
-export type FakeError = { code?: string; message: string }
+/** `details` is PostgREST's, which holds the failing row's values: what a store failure must never log. */
+export type FakeError = { code?: string; message: string; details?: string }
 
 export type FakeCall =
   | { op: 'select'; table: FakeTable; columns: string; filters: Array<[string, unknown]> }
   | { op: 'insert'; table: FakeTable; row: Record<string, unknown> }
+  | {
+      op: 'update'
+      table: FakeTable
+      patch: Record<string, unknown>
+      filters: Array<[string, 'eq' | 'is', unknown]>
+    }
 
 const UNIQUE_KEYS: Record<FakeTable, string[][]> = {
   venues: [['instagram_account_id']],
@@ -47,7 +60,8 @@ function isTable(name: string): name is FakeTable {
 
 function project(row: FakeRow, columns: string): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const column of columns.split(',').map((c) => c.trim())) out[column] = row[column]
+  // A column the row was seeded without reads as NULL, as Postgres returns it.
+  for (const column of columns.split(',').map((c) => c.trim())) out[column] = row[column] ?? null
   return out
 }
 
@@ -58,18 +72,25 @@ function conflicts(table: FakeTable, rows: FakeRow[], candidate: Record<string, 
   })
 }
 
-export function createInstagramDbFake(seed: Partial<Record<FakeTable, FakeRow[]>> = {}) {
+type FakeOp = 'select' | 'insert' | 'update'
+
+export function createInstagramDbFake(
+  seed: Partial<Record<FakeTable, FakeRow[]>> = {},
+  options: { updatable?: FakeTable[] } = {},
+) {
+  const updatable: ReadonlySet<FakeTable> = new Set(options.updatable ?? [])
   const tables: Record<FakeTable, FakeRow[]> = {
     venues: [...(seed.venues ?? [])],
     guests: [...(seed.guests ?? [])],
     messages: [...(seed.messages ?? [])],
   }
   const calls: FakeCall[] = []
-  const queuedErrors: Array<{ table: FakeTable; op: 'select' | 'insert'; error: FakeError }> = []
+  const queuedErrors: Array<{ table: FakeTable; op: FakeOp; error: FakeError }> = []
   const beforeInsert: Array<{ table: FakeTable; run: () => void }> = []
+  const beforeUpdate: Array<{ table: FakeTable; run: () => void }> = []
   let nextId = 1
 
-  function takeError(table: FakeTable, op: 'select' | 'insert'): FakeError | null {
+  function takeError(table: FakeTable, op: FakeOp): FakeError | null {
     const index = queuedErrors.findIndex((q) => q.table === table && q.op === op)
     if (index === -1) return null
     const [queued] = queuedErrors.splice(index, 1)
@@ -123,12 +144,49 @@ export function createInstagramDbFake(seed: Partial<Record<FakeTable, FakeRow[]>
     }
   }
 
+  function updateBuilder(table: FakeTable, patch: Record<string, unknown>) {
+    const filters: Array<[string, 'eq' | 'is', unknown]> = []
+    let columns: string | null = null
+    async function run(): Promise<{ data: Record<string, unknown>[] | null; error: FakeError | null }> {
+      calls.push({ op: 'update', table, patch, filters: [...filters] })
+      const hookIndex = beforeUpdate.findIndex((h) => h.table === table)
+      if (hookIndex !== -1) beforeUpdate.splice(hookIndex, 1)[0]?.run()
+      const error = takeError(table, 'update')
+      if (error) return { data: null, error }
+      // `is` matches a missing column as NULL, as Postgres would.
+      const matches = tables[table].filter((row) =>
+        filters.every(([column, op, value]) => (op === 'is' ? (row[column] ?? null) === value : row[column] === value)),
+      )
+      for (const row of matches) Object.assign(row, patch)
+      return { data: columns === null ? null : matches.map((row) => project(row, columns ?? '')), error: null }
+    }
+    const builder = {
+      eq(column: string, value: unknown) {
+        filters.push([column, 'eq', value])
+        return builder
+      },
+      is(column: string, value: null) {
+        filters.push([column, 'is', value])
+        return builder
+      },
+      select(cols: string) {
+        columns = cols
+        return builder
+      },
+      then<T>(resolve: (value: Awaited<ReturnType<typeof run>>) => T, reject?: (reason: unknown) => T) {
+        return run().then(resolve, reject)
+      },
+    }
+    return builder
+  }
+
   const client = {
     from(table: string) {
       if (!isTable(table)) throw new Error(`db fake: unexpected table ${table}`)
       return {
         select: (columns: string) => selectBuilder(table, columns),
         insert: (row: Record<string, unknown>) => insertBuilder(table, row),
+        ...(updatable.has(table) ? { update: (patch: Record<string, unknown>) => updateBuilder(table, patch) } : {}),
       }
     },
   }
@@ -141,8 +199,12 @@ export function createInstagramDbFake(seed: Partial<Record<FakeTable, FakeRow[]>
     inserts(table: FakeTable): Record<string, unknown>[] {
       return calls.flatMap((c) => (c.op === 'insert' && c.table === table ? [c.row] : []))
     },
-    /** The next select (or insert) on `table` returns `error` instead. One-shot. */
-    failNext(table: FakeTable, op: 'select' | 'insert', error: FakeError): void {
+    /** Patches passed to update on `table`, in order, with their filters. */
+    updates(table: FakeTable): Array<{ patch: Record<string, unknown>; filters: Array<[string, 'eq' | 'is', unknown]> }> {
+      return calls.flatMap((c) => (c.op === 'update' && c.table === table ? [{ patch: c.patch, filters: c.filters }] : []))
+    },
+    /** The next select, insert or update on `table` returns `error` instead. One-shot. */
+    failNext(table: FakeTable, op: FakeOp, error: FakeError): void {
       queuedErrors.push({ table, op, error })
     },
     /**
@@ -152,6 +214,10 @@ export function createInstagramDbFake(seed: Partial<Record<FakeTable, FakeRow[]>
      */
     beforeNextInsert(table: FakeTable, run: () => void): void {
       beforeInsert.push({ table, run })
+    },
+    /** The same for the next update: how a test lands a competing claim first. */
+    beforeNextUpdate(table: FakeTable, run: () => void): void {
+      beforeUpdate.push({ table, run })
     },
   }
 }

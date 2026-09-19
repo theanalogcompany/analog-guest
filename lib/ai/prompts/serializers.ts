@@ -8,7 +8,13 @@ import {
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
+import {
+  applyChannelSubstitutions,
+  type ChannelSubstitution,
+  copyVariantFor,
+} from './channel-variants'
 import type {
   FollowupContext,
   FollowupReason,
@@ -28,6 +34,37 @@ const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
   casual: 'Use contractions; lowercase starts are fine; write the way you would text a friend.',
   warm: 'Conversational and friendly. Contractions are fine. Avoid stiffness, but stay clear and complete.',
   formal: 'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
+}
+
+// TAC-495: the casual line's Instagram variant says "message a friend", not
+// "text a friend" (approved 2026-09-19), made like the other channel variants
+// (channel-variants.ts). The phrase does register work: it is a yardstick for
+// how casual to be, and "texting a friend" is the sharper, more universally
+// understood anchor, so the swap costs a little precision. It was taken because
+// the bigger risk is the model echoing "text" to a guest who isn't texting. If
+// the Instagram voice reads more formal than Sendblue's (TAC-469's behavioural
+// check), this line is the first place to look. Warm and formal claim no
+// channel and are identical on both.
+const CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [{ from: 'write the way you would text a friend.', to: 'write the way you would message a friend.' }],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    FORMALITY_GUIDANCE.casual,
+    CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS.text,
+    'FORMALITY_GUIDANCE.casual/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    FORMALITY_GUIDANCE.casual,
+    CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS.instagram,
+    'FORMALITY_GUIDANCE.casual/instagram',
+  ),
+}
+
+function formalityGuidanceFor(formality: BrandPersona['formality'], channel: MessageChannel | null): string {
+  return formality === 'casual' ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)] : FORMALITY_GUIDANCE[formality]
 }
 
 const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
@@ -60,12 +97,44 @@ const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
 // text reads like an email, not a text from a person — and at least one
 // venue needed a manual anti-pattern rule to undo this. Removed outright
 // rather than reworded; the sentence had no other job.
-function speakerFramingProse(persona: BrandPersona): string {
+//
+// TAC-495: the named_person line has a channel variant, made the same way as
+// the system template's (channel-variants.ts): the SMS line is written out in
+// full and takes no substitutions, and Instagram swaps "texting" for
+// "messaging". TAC-338's "as yourself" framing is identical on both. The
+// {speakerName} slot is filled after the substitution, so the table is
+// applied once, at module load, to a constant.
+const NAMED_PERSON_LINE =
+  'You are {speakerName}, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
+
+const NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [{ from: 'staff at the venue, texting as yourself.', to: 'staff at the venue, messaging as yourself.' }],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    NAMED_PERSON_LINE,
+    NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS.text,
+    'NAMED_PERSON_LINE/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    NAMED_PERSON_LINE,
+    NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS.instagram,
+    'NAMED_PERSON_LINE/instagram',
+  ),
+}
+
+function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | null): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
     case 'named_person':
-      return `You are ${persona.speakerName ?? '[name missing]'}, staff at the venue, texting as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.`
+      // A function replacement, so a name containing "$&" is inserted as typed.
+      return NAMED_PERSON_LINE_BY_CHANNEL[copyVariantFor(channel)].replace(
+        '{speakerName}',
+        () => persona.speakerName ?? '[name missing]',
+      )
     case 'owner':
       return 'Speak as the owner of the venue, in first person. Do not name yourself unless the guest asks.'
   }
@@ -105,12 +174,19 @@ function personaBullet(text: string): string {
   return [`- ${first}`, ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`))].join('\n')
 }
 
-export function personaToProse(persona: BrandPersona): string {
+/**
+ * `channel` picks the channel copy (the named_person line and the casual formality line).
+ * Required, with no default: there are two production callers and each has to
+ * decide. composePrompt passes the conversation's channel; the classifier
+ * passes 'text', because its prompt is not guest-facing and TAC-495 leaves it
+ * exactly as it was.
+ */
+export function personaToProse(persona: BrandPersona, channel: MessageChannel | null): string {
   const sections: string[] = []
 
   sections.push(`## Voice and Tone\n${persona.tone}`)
-  sections.push(`## How to address the guest\n${speakerFramingProse(persona)}`)
-  sections.push(`## Formality\n${persona.formality} — ${FORMALITY_GUIDANCE[persona.formality]}`)
+  sections.push(`## How to address the guest\n${speakerFramingProse(persona, channel)}`)
+  sections.push(`## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`)
   sections.push(`## Length\n${persona.lengthGuide}`)
   sections.push(`## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`)
 
@@ -1020,7 +1096,48 @@ function formatMechanicEligibility(
 // "take the one listed first", is what makes that order mean something to the
 // model. Without it the ranking ruled on the ticket (event-armed intentions
 // first, because they perish) would be decorative.
-function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: boolean): string | null {
+// TAC-495: the first-visit opener, written out as the SMS copy (TAC-423's
+// wording, unchanged), with an Instagram variant made by swapping two phrases.
+// Only the channel claims move: "on this number" goes, and "texting" becomes
+// "messaging". Every presence phrase (scanned at pickup, already ordered, in
+// hand, coming in, what they got) is identical on both channels by ruling.
+// channel-variants.ts has the mechanism; a phrase that stops matching throws
+// at load, which is what makes TAC-423's pending rewrite of this paragraph
+// break loudly here instead of leaving the two channels out of step.
+const FIRST_TOUCH_OPENER =
+  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+
+const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
+  text: [],
+  instagram: [
+    { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
+    { from: "let them know who they're texting,", to: "let them know who they're messaging," },
+  ],
+} as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
+
+const FIRST_TOUCH_OPENER_BY_CHANNEL: Record<MessageChannel, string> = {
+  text: applyChannelSubstitutions(
+    FIRST_TOUCH_OPENER,
+    FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS.text,
+    'FIRST_TOUCH_OPENER/text',
+  ),
+  instagram: applyChannelSubstitutions(
+    FIRST_TOUCH_OPENER,
+    FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS.instagram,
+    'FIRST_TOUCH_OPENER/instagram',
+  ),
+}
+
+/** The first-visit opener for a conversation's channel; null gets the Instagram copy. */
+export function firstTouchOpenerFor(channel: MessageChannel | null): string {
+  return FIRST_TOUCH_OPENER_BY_CHANNEL[copyVariantFor(channel)]
+}
+
+function formatOpenIntentions(
+  lines: readonly string[],
+  firstTouchAfterQrScan: boolean,
+  channel: MessageChannel | null,
+): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
   // TAC-423, ruled 2026-09-18. The opener's fallback question used to be
@@ -1073,9 +1190,7 @@ function formatOpenIntentions(lines: readonly string[], firstTouchAfterQrScan: b
     '',
     'If nothing fits, let it wait. There will be other conversations.',
   ].join('\n')
-  const opener = firstTouchAfterQrScan
-    ? "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on.\n\n"
-    : ''
+  const opener = firstTouchAfterQrScan ? `${firstTouchOpenerFor(channel)}\n\n` : ''
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
@@ -1133,10 +1248,33 @@ function formatEmojiDirective(directive: EmojiDirective): string {
   return `## Emoji for this message\n${body}`
 }
 
+// TAC-495: the first-touch signal line. Identical on both channels: it claims
+// no number and no texting, and "scanned" is presence language, out of scope by
+// ruling. Exported so tests can assert its absence by the real string rather
+// than a fragment that would stop matching the day it was reworded.
+//
+// It is also what switches on R1's exception in SYSTEM_TEMPLATE, which applies
+// "when the context says this is the guest's first message after they scanned a
+// sign at the venue". Nothing structural links the two: the model matches them.
+// The opener's first sentence says the same thing, so R1 still fires where the
+// opener renders; on opt_out, comp_complaint and empty-intention turns this line
+// is the only trigger. compose-prompt.test.ts holds the pair together.
+export const FIRST_TOUCH_SIGNAL_LINE =
+  "This is the guest's first message, sent after they scanned your venue's QR sign."
+
+/**
+ * `channel` picks the channel copy (today, only the first-visit opener's). It
+ * defaults to null, the unknown channel, which gets the copy that asserts no
+ * phone number: absence is the safe direction, which is what licenses a
+ * default here (the TAC-362 emojiDirective rule). composePrompt is the only
+ * production caller and always passes GenerateMessageInput.channel; a test pins
+ * that it is the only one.
+ */
 export function runtimeToProse(
   runtime: RuntimeContext,
   category: MessageCategory,
   now: Date = new Date(),
+  channel: MessageChannel | null = null,
 ): string {
   const blocks: string[] = []
 
@@ -1166,7 +1304,11 @@ export function runtimeToProse(
   // openIntentions to inbound runs), so it never actually co-renders with
   // ## Follow-up context, but the position is fixed regardless of that.
   if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
-    const block = formatOpenIntentions(runtime.openIntentions, runtime.firstTouchAfterQrScan === true)
+    const block = formatOpenIntentions(
+      runtime.openIntentions,
+      runtime.firstTouchAfterQrScan === true,
+      channel,
+    )
     if (block) blocks.push(block)
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
@@ -1250,7 +1392,7 @@ export function runtimeToProse(
   // a guest arrived via QR scan, since createdVia isn't rendered anywhere
   // else. See SYSTEM_TEMPLATE's R1 for the exception this enables.
   if (runtime.firstTouchAfterQrScan) {
-    lines.push("This is the guest's first message, sent after they scanned your venue's QR sign.")
+    lines.push(FIRST_TOUCH_SIGNAL_LINE)
   }
   if (runtime.recognition?.state) {
     lines.push(`Guest relationship: ${runtime.recognition.state}`)

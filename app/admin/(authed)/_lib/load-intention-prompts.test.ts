@@ -89,6 +89,17 @@ describe('loadIntentionPrompts', () => {
     expect(rows[0].guestLabel).toBe('+15555550142')
   })
 
+  // TAC-479: an Instagram guest with no name shows their handle, once fetched.
+  it('shows the Instagram handle for a guest with no name and no phone', async () => {
+    mockQuery({
+      data: [dbRow({ guest: { first_name: null, last_name: null, phone_number: null, instagram_username: 'maya.oakland' } })],
+      error: null,
+    })
+
+    const { rows } = await loadIntentionPrompts([])
+    expect(rows[0].guestLabel).toBe('@maya.oakland')
+  })
+
   it('preserves a null message_id rather than inventing one', async () => {
     mockQuery({ data: [dbRow({ message_id: null })], error: null })
 
@@ -153,7 +164,7 @@ describe('loadIntentionPrompts', () => {
 
     expect(from).toHaveBeenCalledWith('guest_intention_prompts')
     const select = calls.find((c) => c.method === 'select')?.args[0] as string
-    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number)')
+    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number, instagram_username)')
     expect(select).toContain('venue:venues!inner(name)')
     expect(select).toContain('prompt_source')
     expect(calls.find((c) => c.method === 'order')?.args).toEqual([

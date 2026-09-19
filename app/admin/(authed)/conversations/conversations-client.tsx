@@ -54,6 +54,8 @@ export interface InitialData {
     lastName: string | null
     // TAC-467: null for an Instagram guest.
     phoneNumber: string | null
+    // TAC-479: the guest's Instagram handle, null until fetched.
+    instagramUsername: string | null
     distanceMiles: number | null
     createdVia: string
   }

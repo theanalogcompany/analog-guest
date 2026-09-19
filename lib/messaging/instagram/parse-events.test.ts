@@ -36,6 +36,8 @@ function delivery(item: Record<string, unknown>, entry: Record<string, unknown> 
   return { object: 'instagram', entry: [{ id: ACCOUNT_ID, time: 1, messaging: [item], ...entry }] }
 }
 
+// `timestamp: 1` is not a millisecond epoch, so every synthetic event built on
+// these reads providerSentAt as null. The providerSentAt block sets real values.
 const fromGuest = { sender: { id: GUEST_IGSID }, recipient: { id: ACCOUNT_ID }, timestamp: 1 }
 const fromVenue = { sender: { id: ACCOUNT_ID }, recipient: { id: GUEST_IGSID }, timestamp: 1 }
 
@@ -47,6 +49,7 @@ describe('parseInstagramDelivery on the recorded Meta deliveries', () => {
         accountId: ACCOUNT_ID,
         guestIgsid: GUEST_IGSID,
         mid: midOf('message', 'message'),
+        providerSentAt: '2026-09-18T04:00:54.588Z',
         text: 'MSGTEXT',
         mediaUrls: [],
         referral: null,
@@ -64,6 +67,7 @@ describe('parseInstagramDelivery on the recorded Meta deliveries', () => {
         accountId: ACCOUNT_ID,
         guestIgsid: GUEST_IGSID,
         mid: midOf('echo', 'message'),
+        providerSentAt: '2026-09-18T04:02:26.605Z',
         text: 'ECHO',
         mediaUrls: [],
       },
@@ -75,7 +79,13 @@ describe('parseInstagramDelivery on the recorded Meta deliveries', () => {
   it('reads a read receipt by its `read` key, naming the message that was read', () => {
     const events = parseInstagramDelivery(fixture('read'))
     expect(events).toEqual([
-      { kind: 'read', accountId: ACCOUNT_ID, guestIgsid: GUEST_IGSID, mid: midOf('read', 'read') },
+      {
+        kind: 'read',
+        accountId: ACCOUNT_ID,
+        guestIgsid: GUEST_IGSID,
+        mid: midOf('read', 'read'),
+        providerSentAt: '2026-09-18T04:02:30.514Z',
+      },
     ])
     // The captured receipt points at the staff reply in echo.json.
     expect(midOf('read', 'read')).toBe(midOf('echo', 'message'))
@@ -88,6 +98,7 @@ describe('parseInstagramDelivery on the recorded Meta deliveries', () => {
         accountId: ACCOUNT_ID,
         guestIgsid: GUEST_IGSID,
         mid: midOf('postback-referral', 'postback'),
+        providerSentAt: '2026-09-18T04:24:24.295Z',
         title: 'What are your hours?',
         referral: { ref: 'TESTVENUE', source: 'SHORTLINK' },
       },
@@ -102,6 +113,74 @@ describe('parseInstagramDelivery on the recorded Meta deliveries', () => {
       ),
     }
     expect(parseInstagramDelivery(batched).map((e) => e.kind)).toEqual(['message', 'echo', 'read'])
+  })
+})
+
+// TAC-479: Instagram's own time for each event. TAC-469's 24-hour window gate
+// and TAC-486's countdown run from it, so the source matters: the ITEM's
+// `timestamp` (when the guest acted), never `entry.time` (when Meta sent the
+// delivery, later in every recorded payload).
+describe('providerSentAt, Instagram\'s own time for the event', () => {
+  it.each<[FixtureName]>([['message'], ['echo'], ['read'], ['postback-referral']])(
+    'takes the recorded %s delivery\'s time from the item, not from the entry',
+    (name) => {
+      const raw = fixture(name) as { entry: Array<{ time: number; messaging: Array<{ timestamp: number }> }> }
+      const entryTime = raw.entry[0]?.time
+      const itemTime = raw.entry[0]?.messaging[0]?.timestamp
+      if (entryTime === undefined || itemTime === undefined) throw new Error(`fixture ${name} has no times`)
+      // The two differ in every capture; if a re-capture made them equal, this
+      // test could no longer tell which one the parser read.
+      expect(entryTime).not.toBe(itemTime)
+
+      const [event] = parseInstagramDelivery(raw)
+      expect(event).toHaveProperty('providerSentAt', new Date(itemTime).toISOString())
+      expect(event).not.toHaveProperty('providerSentAt', new Date(entryTime).toISOString())
+    },
+  )
+
+  it('keeps the milliseconds', () => {
+    const [event] = parseInstagramDelivery(delivery({ ...fromGuest, timestamp: 1789704054588, message: { mid: 'm1', text: 'hi' } }))
+    expect(event).toHaveProperty('providerSentAt', '2026-09-18T04:00:54.588Z')
+  })
+
+  it('accepts the lowest millisecond value it allows', () => {
+    const [event] = parseInstagramDelivery(delivery({ ...fromGuest, timestamp: 1e12, message: { mid: 'm1', text: 'hi' } }))
+    expect(event).toHaveProperty('providerSentAt', '2001-09-09T01:46:40.000Z')
+  })
+
+  // Seconds is the realistic unit mistake, and the dangerous one: read as
+  // milliseconds it is January 1970, a window that closed decades ago.
+  it.each<[string, unknown]>([
+    ['a value in seconds', 1789704054],
+    ['a numeric string', '1789704054588'],
+    ['a fraction of a millisecond', 1789704054588.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a negative value', -1789704054588],
+    ['zero', 0],
+    ['a value past the upper bound', 1e13],
+    ['null', null],
+  ])('reads %s as no time at all', (_label, timestamp) => {
+    const [event] = parseInstagramDelivery(delivery({ ...fromGuest, timestamp, message: { mid: 'm1', text: 'hi' } }))
+    expect(event).toHaveProperty('providerSentAt', null)
+  })
+
+  it('reads a missing timestamp as no time at all', () => {
+    const [event] = parseInstagramDelivery(
+      delivery({ sender: { id: GUEST_IGSID }, recipient: { id: ACCOUNT_ID }, message: { mid: 'm1', text: 'hi' } }),
+    )
+    expect(event).toHaveProperty('providerSentAt', null)
+  })
+
+  it('reads an echo\'s and a postback\'s time the same way as a message\'s', () => {
+    const echo = parseInstagramDelivery(
+      delivery({ ...fromVenue, timestamp: 1789704146605, message: { mid: 'e1', is_echo: true, text: 'ok' } }),
+    )
+    const postback = parseInstagramDelivery(
+      delivery({ ...fromGuest, timestamp: 1789705464295, postback: { mid: 'p1', title: 'Hours?' } }),
+    )
+    expect(echo).toMatchObject([{ kind: 'echo', providerSentAt: '2026-09-18T04:02:26.605Z' }])
+    expect(postback).toMatchObject([{ kind: 'postback', providerSentAt: '2026-09-18T04:24:24.295Z' }])
   })
 })
 
@@ -127,6 +206,7 @@ describe('parseInstagramDelivery on synthetic message shapes (not captured from 
         accountId: ACCOUNT_ID,
         guestIgsid: GUEST_IGSID,
         mid: 'm1',
+        providerSentAt: null,
         text: null,
         mediaUrls: ['https://cdn.example/a.jpg', 'https://cdn.example/s.mp4'],
         referral: null,
@@ -158,6 +238,7 @@ describe('parseInstagramDelivery on synthetic message shapes (not captured from 
         accountId: ACCOUNT_ID,
         guestIgsid: GUEST_IGSID,
         mid: 'e1',
+        providerSentAt: null,
         text: null,
         mediaUrls: ['https://cdn.example/x.jpg'],
       },
@@ -166,7 +247,7 @@ describe('parseInstagramDelivery on synthetic message shapes (not captured from 
 
   it('reads a postback with no title as a postback, so it still counts as a guest action', () => {
     expect(parseInstagramDelivery(delivery({ ...fromGuest, postback: { mid: 'p1', payload: 'X' } }))).toEqual([
-      { kind: 'postback', accountId: ACCOUNT_ID, guestIgsid: GUEST_IGSID, mid: 'p1', title: null, referral: null },
+      { kind: 'postback', accountId: ACCOUNT_ID, guestIgsid: GUEST_IGSID, mid: 'p1', providerSentAt: null, title: null, referral: null },
     ])
   })
 

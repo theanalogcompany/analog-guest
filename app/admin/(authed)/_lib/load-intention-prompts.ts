@@ -70,6 +70,8 @@ interface JoinedGuestShape {
   last_name: string | null
   // TAC-467: null for an Instagram guest.
   phone_number: string | null
+  // TAC-479: the guest's Instagram handle, null until fetched.
+  instagram_username: string | null
 }
 
 interface JoinedVenueShape {
@@ -88,7 +90,7 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
   let query = supabase
     .from('guest_intention_prompts')
     .select(
-      'id, intention_key, prompted_at, message_id, prompt_source, guest:guests!inner(first_name, last_name, phone_number), venue:venues!inner(name)',
+      'id, intention_key, prompted_at, message_id, prompt_source, guest:guests!inner(first_name, last_name, phone_number, instagram_username), venue:venues!inner(name)',
     )
     // TAC-380 trap 5. Since migration 040 this table also holds ELIGIBILITY
     // rows (prompted_at null), which were never raised. Without this filter
@@ -125,6 +127,7 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
             firstName: guest.first_name,
             lastName: guest.last_name,
             phoneNumber: guest.phone_number,
+            instagramUsername: guest.instagram_username,
           })
         : '(unknown guest)',
       venueName: venue?.name ?? '(unknown venue)',
