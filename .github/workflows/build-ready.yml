@@ -600,16 +600,30 @@ jobs:
 
             RESUMING. If the newest comment on a ticket, skipping [SLACK],
             [CLAIM], [RESUME-CLAIM], [DENIALS] and [OVER-LIMIT]
-            bookkeeping, is human input, that is Jaipal's
-            ruling, often a Slack reply. Apply it to ## Open questions BEFORE
-            checking whether any question is still open (work-ticket.md Phase
-            0 step 2b, then 2c). Checking first finds his own question still
-            there and ignores his answer. Then continue from where the earlier
-            session stopped. Do not change the status. If the ticket's branch
-            is on GitHub, do not check it out: read what is already done from
-            GitHub's copy, and continue it in the side folder
+            bookkeeping, is human input, it counts as Jaipal's ruling only
+            when it is unprefixed or opens **[FROM CLAUDE CHAT — RULING**
+            (work-ticket.md's Reply classification). A plain **[FROM
+            CLAUDE CHAT]** comment is context and never unblocks, whatever
+            it says — the queue step that picked this ticket is coarser
+            than that and can start a resume on one anyway. That gap is
+            TAC-396's, left in the jq on purpose; applying the finer rule
+            here is what closes it in practice, not a contradiction of the
+            coarse gate.
+
+            When the newest comment IS his ruling, often a Slack reply,
+            apply it to ## Open questions BEFORE checking whether any
+            question is still open (work-ticket.md Phase 0 step 2b, then
+            2c). Checking first finds his own question still there and
+            ignores his answer. Then continue from where the earlier
+            session stopped. Do not change the status. If the ticket's
+            branch is on GitHub, do not check it out: read what is already
+            done from GitHub's copy, and continue it in the side folder
             ${{ github.workspace }}/.worktrees/resume, by that absolute path
             and never with cd (work-ticket.md Phase 3 step 14).
+
+            When it is not — the newest comment is a plain chat comment and
+            nothing else is new — post [POLLING-ACK] per work-ticket.md's
+            Reply classification and exit.
 
             ALWAYS POST BEFORE YOU EXIT. Every ticket you touch ends with a
             comment saying what happened, even if the answer is "nothing, and
