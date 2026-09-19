@@ -23,6 +23,7 @@ import {
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
+import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { groupIntoResponses } from './group-responses'
 import {
@@ -161,7 +162,9 @@ export async function buildRuntimeContext(input: {
       .single(),
     supabase
       .from('guests')
-      .select('id, phone_number, first_name, created_at, created_via, is_demo, context, last_visit_at')
+      .select(
+        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, is_demo, context, last_visit_at',
+      )
       .eq('id', input.guestId)
       .single(),
     computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
@@ -255,10 +258,54 @@ export async function buildRuntimeContext(input: {
     )
   }
 
+  const guestRow = guestResult.data
+
+  // TAC-495: the conversation's channel, for choosing prompt copy. Read from
+  // the guest's identifiers and the inbound message, never a venue setting;
+  // the rule and its table are in conversation-channel.ts. The Instagram ID is
+  // only tested for presence and never enters the context. `typeof`, not
+  // `!== null`: a column dropped from the select arrives undefined, and reading
+  // that as "has a phone number" would hand an Instagram guest the SMS copy.
+  const hasPhone = typeof guestRow.phone_number === 'string'
+  const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'
+  // `?? null`: a message whose channel is missing (an InboundMessage built
+  // through a cast) resolves as unparseable, never as "no inbound message",
+  // which would hand a guest with both identifiers the SMS copy.
+  const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined
+  const channelResolution = resolveConversationChannel({
+    inboundChannel,
+    hasPhone,
+    hasInstagramId,
+  })
+  if (channelResolution.channel === null) {
+    console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {
+      agentRunId: input.agentRunId,
+      venueId: input.venueId,
+      guestId: input.guestId,
+      inboundMessageId: input.currentMessage?.id ?? null,
+      inboundChannel,
+      hasPhone,
+      hasInstagramId,
+      reason: channelResolution.unresolvedReason,
+    })
+  }
+
+  // TAC-495: a venue's messaging phone number is required only when the
+  // conversation isn't on Instagram. Le Mil's number is to be deleted once
+  // Instagram works, making it the first Instagram-only venue, and before this
+  // every Instagram guest there would have failed here, with an error naming
+  // the number rather than the deletion that caused it. Nothing reads
+  // VenueContext.sendblueNumber (every send looks the number up again in
+  // lib/messaging/venue-lookup.ts and fails closed there), so relaxing this
+  // changes no send path. An unknown channel (null) still requires it, as
+  // before: that is a data problem, and failing loudly is the better outcome.
   const venueRow = venueResult.data
-  if (!venueRow.messaging_phone_number) {
+  if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {
     throw new Error(
-      `buildRuntimeContext: venue ${input.venueId} has no messaging_phone_number`,
+      `buildRuntimeContext: venue ${input.venueId} has no messaging_phone_number` +
+        (channelResolution.channel === null
+          ? ` (and this conversation's channel is unresolved: ${channelResolution.unresolvedReason})`
+          : ''),
     )
   }
 
@@ -299,6 +346,8 @@ export async function buildRuntimeContext(input: {
     brandPersona: brandPersonaParsed.data,
     venueInfo,
     timezone: venueRow.timezone,
+    // TAC-495: null only for an Instagram conversation at a venue with no
+    // number (see the check above). Nothing reads this field.
     sendblueNumber: venueRow.messaging_phone_number,
     // TAC-XXX: NOT NULL DEFAULT false at the column level, so this is always
     // a real boolean. `=== true` guards against a hand-patched-types drift.
@@ -310,7 +359,6 @@ export async function buildRuntimeContext(input: {
     approvalPolicy: parseApprovalPolicy(config.approval_policy),
   }
 
-  const guestRow = guestResult.data
   // TAC-296: parse guests.context JSONB at the boundary. fail-OPEN on
   // malformed payload — log + treat as empty context. The agent already
   // tolerates missing context (the ## Guest context block is omitted when
@@ -551,6 +599,7 @@ export async function buildRuntimeContext(input: {
     guest,
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
+    conversationChannel: channelResolution.channel,
     recentMessages,
     recognition,
     mechanics,
