@@ -173,3 +173,106 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
     expect(call).not.toMatch(lastVisit)
   })
 })
+
+// TAC-495: the conversation's channel, which picks the prompt copy. Source-level
+// for the same reason as the blocks above. The rule itself is tested in
+// conversation-channel.test.ts; these check this file feeds it the right
+// inputs and returns its answer, which no behavioural test can reach.
+describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const callStart = src.indexOf('resolveConversationChannel({')
+  const call = src.slice(callStart, src.indexOf('})', callStart))
+
+  // Without the column, every guest would read as having no Instagram ID and
+  // an Instagram guest with no inbound message would resolve as unknown.
+  it('selects instagram_scoped_id with the guest', () => {
+    const guestQuery = src.slice(src.indexOf(".from('guests')"))
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(/\binstagram_scoped_id\b/)
+  })
+
+  it('resolves from the inbound message and the guest identifiers', () => {
+    expect(callStart).toBeGreaterThan(-1)
+    // A message whose channel is missing resolves as unparseable (null),
+    // never as "no inbound message" (undefined).
+    expect(src).toContain(
+      'const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined',
+    )
+    expect(call).toContain('inboundChannel,')
+    expect(call).toContain('hasPhone,')
+    expect(call).toContain('hasInstagramId,')
+    // typeof, never `!== null`: an undefined (a column dropped from the
+    // select) must read as absent, not as a phone number.
+    expect(src).toContain("const hasPhone = typeof guestRow.phone_number === 'string'")
+    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
+  })
+
+  it('returns the resolved channel on the context', () => {
+    expect(src).toContain('conversationChannel: channelResolution.channel,')
+  })
+
+  // An Instagram-only venue has no messaging number, and Le Mil's becomes one
+  // when its number is deleted. The precondition must use the channel, so the
+  // channel has to be resolved before it runs.
+  it('requires the venue messaging number only when the channel needs it, after resolving the channel', () => {
+    expect(src).toContain(
+      'if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {',
+    )
+    expect(src.indexOf('resolveConversationChannel({')).toBeLessThan(
+      src.indexOf('venueMessagingNumberRequired(channelResolution.channel)'),
+    )
+    // No other check on the number may remain that would throw regardless.
+    expect(src.match(/!venueRow\.messaging_phone_number\b/g)).toHaveLength(1)
+  })
+
+  // The Instagram ID is only tested for presence. It must not ride on the
+  // context, a log line or anything else, where it would reach prompts, traces
+  // and Vercel logs. So the column is named twice in this file (the select and
+  // the presence check) and read once, whatever a leak would be spelled.
+  it('keeps the Instagram ID itself out of the context and the logs', () => {
+    expect(src).not.toMatch(/instagramScopedId\s*:/)
+    expect(src.match(/guestRow\.instagram_scoped_id\b/g)).toHaveLength(1)
+    expect(src.match(/\binstagram_scoped_id\b/g)).toHaveLength(2)
+    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
+  })
+
+  // The warning is the only place an unresolved channel shows up, and its main
+  // cause is migration 048's 'text' default on an Instagram row.
+  it('warns, with the reason, whenever the channel is unresolved', () => {
+    const start = src.indexOf('if (channelResolution.channel === null) {\n    console.warn(')
+    expect(start).toBeGreaterThan(-1)
+    const warn = src.slice(start, src.indexOf('})', start))
+    expect(warn).toContain('conversation channel unresolved')
+    expect(warn).toContain('reason: channelResolution.unresolvedReason,')
+    // Not the row itself, which would log the Instagram ID and the phone
+    // number without naming either column.
+    expect(warn).not.toMatch(/\bguestRow\b(?!\.)/)
+    expect(warn).not.toMatch(/\bguestRow\./)
+    // And not under any other name or shape either: every line of the call is
+    // pinned, so a new key, a quoted key, a spread (...guestResult.data logs
+    // the whole row) or an extra argument before the object fails here.
+    const call = warn.slice(warn.indexOf('console.warn('))
+    const lines = call
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+    expect(lines).toEqual([
+      "console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {",
+      'agentRunId: input.agentRunId,',
+      'venueId: input.venueId,',
+      'guestId: input.guestId,',
+      'inboundMessageId: input.currentMessage?.id ?? null,',
+      'inboundChannel,',
+      'hasPhone,',
+      'hasInstagramId,',
+      'reason: channelResolution.unresolvedReason,',
+    ])
+  })
+
+  // A number-less venue with an unresolvable conversation must not blame the
+  // number alone.
+  it('names an unresolved channel in the missing-number error', () => {
+    expect(src).toContain(
+      "? ` (and this conversation's channel is unresolved: ${channelResolution.unresolvedReason})`",
+    )
+  })
+})

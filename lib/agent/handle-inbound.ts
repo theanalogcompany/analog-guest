@@ -18,6 +18,7 @@ import {
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
+import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
@@ -68,7 +69,7 @@ async function loadInbound(messageId: string): Promise<{
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('messages')
-    .select('id, body, provider_message_id, created_at, venue_id, guest_id, direction')
+    .select('id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel')
     .eq('id', messageId)
     .single()
   if (error || !data) {
@@ -90,6 +91,8 @@ async function loadInbound(messageId: string): Promise<{
       providerMessageId: data.provider_message_id,
       body: data.body,
       receivedAt: new Date(data.created_at),
+      // TAC-495: picks the prompt copy, through resolveConversationChannel.
+      channel: parseMessageChannel(data.channel),
     },
     guestId: data.guest_id,
     venueId: data.venue_id,

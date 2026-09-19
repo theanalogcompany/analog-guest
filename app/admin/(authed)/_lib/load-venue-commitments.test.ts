@@ -150,6 +150,22 @@ describe('loadVenueCommitments', () => {
     expect(open[0].guestLabel).toBe('+15555550142')
   })
 
+  // TAC-479: an Instagram guest with no name shows their handle, once fetched.
+  it('shows the Instagram handle for a guest with no name and no phone', async () => {
+    mockQueries([
+      {
+        data: [
+          dbRow({ guest: { first_name: null, last_name: null, phone_number: null, instagram_username: 'maya.oakland' } }),
+        ],
+        error: null,
+      },
+      { data: [], error: null },
+    ])
+
+    const { open } = await loadVenueCommitments(VENUE_ID)
+    expect(open[0].guestLabel).toBe('@maya.oakland')
+  })
+
   // The mock ignores its arguments, so behaviour alone cannot pin the query.
   // Asserted directly — the same technique TAC-377 used to kill a dropped-
   // column mutant. A dropped status filter would quietly drag months of
@@ -176,7 +192,7 @@ describe('loadVenueCommitments', () => {
     // No cap on the open set: an uncapped obligation is the whole point.
     expect(openCalls.some((c) => c.method === 'limit')).toBe(false)
     const select = openCalls.find((c) => c.method === 'select')?.args[0] as string
-    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number)')
+    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number, instagram_username)')
     expect(select).toContain('escalated_at')
   })
 

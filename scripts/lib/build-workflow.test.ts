@@ -497,6 +497,38 @@ describe('bookkeeping markers agree across the workflow', () => {
   })
 })
 
+// TAC-456: the RESUMING paragraph used to say any human comment "is Jaipal's
+// ruling" — contradicting work-ticket.md's Reply classification, which only
+// an unprefixed reply or one opening **[FROM CLAUDE CHAT — RULING** can be.
+describe('build-ready.yml resume paragraph matches the ruled rule (TAC-456)', () => {
+  const RESUMING = between(PROMPT, 'RESUMING.', 'ALWAYS POST BEFORE YOU EXIT.')
+
+  it('no longer calls every human comment a ruling', () => {
+    expect(RESUMING).not.toContain("is human input, that is Jaipal's")
+  })
+
+  it('states the finer rule: unprefixed or **[FROM CLAUDE CHAT — RULING** only', () => {
+    expect(RESUMING).toContain('**[FROM CLAUDE CHAT — RULING**')
+    expect(RESUMING).toContain(
+      '(work-ticket.md\'s Reply classification). A plain **[FROM\n' +
+        '            CLAUDE CHAT]** comment is context and never unblocks, whatever\n' +
+        '            it says'
+    )
+  })
+
+  it('names the coarse jq gate as TAC-396\'s known gap rather than a contradiction', () => {
+    expect(RESUMING).toContain("TAC-396's, left in the jq on purpose")
+    expect(RESUMING).toContain('not a contradiction of the\n            coarse gate.')
+  })
+
+  it('tells the session what to do on a plain-chat, non-ruling newest comment', () => {
+    expect(RESUMING).toContain(
+      'the newest comment is a plain chat comment and\n' +
+        '            nothing else is new — post [POLLING-ACK]'
+    )
+  })
+})
+
 describe('work-ticket.md', () => {
   const doc = read('.claude/commands/work-ticket.md')
   const line = (start: string) => {

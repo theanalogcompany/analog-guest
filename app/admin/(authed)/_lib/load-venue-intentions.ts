@@ -177,7 +177,7 @@ async function _loadVenueOpenIntentions(
   const [guestsResult, txResult] = await Promise.all([
     supabase
       .from('guests')
-      .select('id, first_name, last_name, phone_number, created_at, context')
+      .select('id, first_name, last_name, phone_number, instagram_username, created_at, context')
       .eq('venue_id', venueId)
       .in('id', guestIds),
     supabase
@@ -245,6 +245,7 @@ async function _loadVenueOpenIntentions(
         firstName: guest.first_name,
         lastName: guest.last_name,
         phoneNumber: guest.phone_number,
+        instagramUsername: guest.instagram_username,
       }),
       guestCreatedAt: guest.created_at,
       openKeys: open.map((o) => o.key),

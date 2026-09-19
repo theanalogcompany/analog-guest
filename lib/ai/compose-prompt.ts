@@ -1,4 +1,4 @@
-import { getCategoryInstructions } from './prompts/categories'
+import { categoryInstructionsFor } from './prompts/categories'
 import {
   knowledgeChunksToProse,
   personaToProse,
@@ -6,7 +6,7 @@ import {
   runtimeToProse,
   venueInfoToProse,
 } from './prompts/serializers'
-import { SYSTEM_TEMPLATE } from './prompts/system-template'
+import { systemTemplateFor } from './prompts/system-template'
 import type { GenerateMessageInput } from './types'
 
 /**
@@ -24,9 +24,11 @@ export function composePrompt(input: GenerateMessageInput): {
 } {
   const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } = input
 
+  // TAC-495: the channel picks the channel copy in both prompts. The system
+  // template's variant for 'text' is SYSTEM_TEMPLATE itself, unedited.
   const sections: string[] = [
-    SYSTEM_TEMPLATE,
-    personaToProse(persona),
+    systemTemplateFor(input.channel),
+    personaToProse(persona, input.channel),
     venueInfoToProse(venueInfo),
   ]
 
@@ -42,10 +44,10 @@ export function composePrompt(input: GenerateMessageInput): {
     sections.push(knowledgeChunksToProse(knowledgeChunks))
   }
 
-  sections.push(`## Category-specific instructions: ${category}\n${getCategoryInstructions(category)}`)
+  sections.push(`## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel)}`)
 
   return {
     systemPrompt: sections.join('\n\n'),
-    userPrompt: runtimeToProse(runtime, category),
+    userPrompt: runtimeToProse(runtime, category, undefined, input.channel),
   }
 }

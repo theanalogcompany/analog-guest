@@ -93,6 +93,31 @@ function escapeRegExp(s) {
 }
 
 /**
+ * Uncommitted work in each side folder: every worktree but the checkout
+ * itself, which is the first `git worktree list` names. A resume edits its
+ * branch in one (TAC-471), and the checkout's own `git status` cannot see
+ * inside it: `.worktrees/` is gitignored. Each is read with
+ * `git -C <path> status --porcelain`. null for the list, or for one folder's
+ * changes, means git could not answer: unknown, which is not the same as none.
+ */
+function readSideFolders(git) {
+  const out = git(['worktree', 'list', '--porcelain']);
+  if (out === null) return null;
+  const blocks = out.split(/\n[ \t]*\n/).map(lines).filter((block) => block.length > 0);
+  return blocks
+    .slice(1)
+    .map((block) => ({
+      path: block.find((l) => l.startsWith('worktree '))?.slice('worktree '.length) ?? null,
+      branch: block.find((l) => l.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) ?? null,
+    }))
+    .filter((folder) => folder.path !== null)
+    .map((folder) => {
+      const status = git(['-C', folder.path, 'status', '--porcelain']);
+      return { ...folder, uncommitted: status === null ? null : lines(status) };
+    });
+}
+
+/**
  * The ticket's branches, and what is on each, from the runner's git.
  * `git(args)` returns stdout, or null when the command fails.
  *
@@ -139,6 +164,7 @@ export function readGitState(git, ticket) {
       const out = git(['status', '--porcelain']);
       return out === null ? null : lines(out);
     })(),
+    sideFolders: readSideFolders(git),
     // A session must never commit to main. If one did, say so rather than
     // letting it vanish with the runner. Unreadable here means no local main.
     onLocalMain: log('refs/remotes/origin/main..refs/heads/main') ?? [],
@@ -192,6 +218,16 @@ export function renderGitReport(state) {
 
   out.push(`Changed on the runner but never committed, and lost${state.head ? ` (on ${state.head})` : ''}:`);
   out.push(fenced(state.uncommitted ?? [UNKNOWN]));
+
+  if (state.sideFolders === null) {
+    out.push('Changed in a side folder but never committed, and lost:');
+    out.push(fenced([UNKNOWN]));
+  } else {
+    for (const folder of state.sideFolders ?? []) {
+      out.push(`Changed in the side folder ${folder.path} but never committed, and lost${folder.branch ? ` (on ${folder.branch})` : ''}:`);
+      out.push(fenced(folder.uncommitted ?? [UNKNOWN]));
+    }
+  }
 
   if (state.onLocalMain.length > 0) {
     out.push('Committed to main on the runner, which a session must never do. Never pushed, and lost:');

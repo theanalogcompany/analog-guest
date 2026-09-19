@@ -5,6 +5,7 @@ import {
   CommitmentEmissionSchema,
 } from '@/lib/schemas/guest-commitment'
 import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
+import { isMessageChannel } from '@/lib/schemas/message-channel'
 import { captureGenerationTruncated } from '@/lib/analytics/posthog'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
@@ -209,7 +210,11 @@ export async function generateMessage(
     input.venueInfo === null ||
     !Array.isArray(input.ragChunks) ||
     typeof input.runtime !== 'object' ||
-    input.runtime === null
+    input.runtime === null ||
+    // TAC-495: null is a real answer (unknown channel). Anything else that is
+    // not a channel, such as an undefined smuggled past the type by a cast,
+    // fails here as a value rather than silently becoming the SMS copy.
+    (input.channel !== null && !isMessageChannel(input.channel))
   ) {
     return { ok: false, error: 'invalid_input' }
   }
