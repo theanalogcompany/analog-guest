@@ -1686,3 +1686,49 @@ export async function captureCommitmentExpired(
 ): Promise<void> {
   await capturePostHogEvent('commitment_expired', props.guestId, { ...props })
 }
+
+// ---------------------------------------------------------------------------
+// TAC-469: a conversation whose channel could not be resolved
+// ---------------------------------------------------------------------------
+
+export interface ConversationChannelUnresolvedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  inboundMessageId: string | null
+  /** The inbound message's channel; undefined when the run had no inbound message. */
+  inboundChannel: string | null | undefined
+  hasPhone: boolean
+  hasInstagramId: boolean
+  reason: string | null
+}
+
+/**
+ * Fires from buildRuntimeContext when resolveConversationChannel returns null.
+ *
+ * SLACK-RELAYED. Before TAC-469 this was a console.warn and only picked the
+ * prompt copy; now that sends route on the channel, an unresolved channel is a
+ * guest whose reply cannot be routed at all, because nothing routes on null.
+ * Its main cause is migration 048's 'text' default on an Instagram row, the
+ * same hazard that would blind the webhook-silence alarm. Carries only
+ * presence flags: never the phone number or the Instagram ID.
+ */
+export async function captureConversationChannelUnresolved(
+  props: ConversationChannelUnresolvedProps,
+): Promise<void> {
+  const inboundChannel = props.inboundChannel === undefined ? 'none' : (props.inboundChannel ?? 'unparseable')
+  await capturePostHogEvent('conversation_channel_unresolved', props.guestId, { ...props, inboundChannel })
+  await postToSlack(
+    [
+      "*Conversation channel unresolved*: this guest's reply can't be routed",
+      `reason: \`${props.reason ?? 'unknown'}\` · inbound channel: \`${inboundChannel}\``,
+      `has phone: \`${props.hasPhone}\` · has Instagram ID: \`${props.hasInstagramId}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `run: \`${props.agentRunId}\``,
+      props.inboundMessageId ? `inbound message: \`${props.inboundMessageId}\`` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
+}

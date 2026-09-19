@@ -23,6 +23,7 @@ vi.mock('posthog-node', () => ({
 
 import {
   captureClassificationLowConfidence,
+  captureConversationChannelUnresolved,
   captureDemoBypassedApprovalGate,
   captureDraftDropped,
   capturePendingSlotInvariantBroken,
@@ -260,5 +261,42 @@ describe('capturePendingSlotInvariantBroken: the indexes-are-gone signal (TAC-39
     const text = postToSlackMock.mock.calls[0][0] as string
     expect(text).toContain('two pending cards in one slot')
     expect(text).toContain('`card-b`')
+  })
+})
+
+describe('captureConversationChannelUnresolved: a reply that cannot be routed (TAC-469)', () => {
+  const base = {
+    agentRunId: 'run-1',
+    venueId: 'venue-1',
+    guestId: 'guest-1',
+    inboundMessageId: 'msg-1',
+    inboundChannel: 'text' as const,
+    hasPhone: false,
+    hasInstagramId: true,
+    reason: 'inbound_channel_without_identifier',
+  }
+
+  it('captures to PostHog AND relays to Slack, with the reason', async () => {
+    await captureConversationChannelUnresolved(base)
+    expect(captureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'conversation_channel_unresolved',
+        distinctId: 'guest-1',
+        properties: expect.objectContaining({ reason: 'inbound_channel_without_identifier', inboundChannel: 'text' }),
+      }),
+    )
+    expect(postToSlackMock).toHaveBeenCalledTimes(1)
+    const text = postToSlackMock.mock.calls[0]![0] as string
+    expect(text).toContain('inbound_channel_without_identifier')
+    expect(text).toContain("can't be routed")
+  })
+
+  it('names a run with no inbound message and an unparseable channel apart', async () => {
+    await captureConversationChannelUnresolved({ ...base, inboundMessageId: null, inboundChannel: undefined })
+    await captureConversationChannelUnresolved({ ...base, inboundChannel: null })
+    const channels = captureMock.mock.calls.map(
+      (c) => (c[0] as { properties: { inboundChannel: string } }).properties.inboundChannel,
+    )
+    expect(channels).toEqual(['none', 'unparseable'])
   })
 })
