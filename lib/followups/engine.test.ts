@@ -78,13 +78,18 @@ interface VenueLoadShape {
 // production reads `undefined` and silently degrades to always-permissive.
 let capturedGuestSelect: string | null = null
 let capturedGuestOrFilter: string | null = null
+// TAC-476: every rpc() call, so a test can assert the engine asks
+// venue_guest_activity for the venue it is scanning. Same reasoning as
+// capturedGuestSelect above — the mock answers regardless of its arguments, so
+// without this a mutant that passes the wrong venue id (or stops calling the
+// RPC at all and reads the dead column again) passes every behavioural test.
+let capturedRpcCalls: Array<{ fn: string; args: unknown }> = []
 
 function makeSupabaseMock(opts: {
   venues: VenueLoadShape[]
   guests: Array<{
     id: string
     opted_out_at: string | null
-    last_inbound_at: string | null
     last_visit_at: string | null
     // TAC-377. Present in the shape because the engine SELECTs it and the
     // post-visit detector gates on it — omitting it made every test read
@@ -100,6 +105,23 @@ function makeSupabaseMock(opts: {
     phone_number: string | null
     instagram_scoped_id: string | null
   }>
+  // TAC-476: what venue_guest_activity returns for this venue — the
+  // recent-conversation gate's only input now that guests.last_inbound_at is
+  // dead. REQUIRED, for the reason the two fields above carry: a fixture that
+  // omitted it would hand the engine an empty activity set, every guest would
+  // read as never having messaged, and the gate would be unreachable while the
+  // whole suite stayed green. That is the exact defect this ticket fixes, so
+  // the fixture type is what stops the test reproducing it.
+  activity: Array<{
+    guest_id: string
+    // null is real: a guest with only outbound rows. db/types.ts types these
+    // non-null, so only the runtime handles it — see the engine's own comment.
+    last_inbound_at: string | null
+    last_outbound_at: string | null
+    last_interaction_at: string
+  }>
+  // TAC-476: force the activity RPC to fail, for the fail-the-scan test.
+  activityError?: string
 }) {
   const builders: Record<string, unknown> = {
     venues: {
@@ -140,12 +162,20 @@ function makeSupabaseMock(opts: {
   }
   return {
     from: (table: string) => builders[table],
+    rpc: (fn: string, args: unknown) => {
+      capturedRpcCalls.push({ fn, args })
+      if (opts.activityError !== undefined) {
+        return Promise.resolve({ data: null, error: { message: opts.activityError } })
+      }
+      return Promise.resolve({ data: opts.activity, error: null })
+    },
   }
 }
 
 beforeEach(() => {
   capturedGuestSelect = null
   capturedGuestOrFilter = null
+  capturedRpcCalls = []
   vi.mocked(createAdminClient).mockReset()
   vi.mocked(computeGuestState).mockReset()
   vi.mocked(handleFollowup).mockReset()
@@ -176,13 +206,15 @@ beforeEach(() => {
           {
             id: GUEST_ID,
             opted_out_at: null,
-            last_inbound_at: null,
             // 7 days ago → post_visit_day_7 detector fires.
             last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
             phone_number: '+15551230000',
             instagram_scoped_id: null,
           },
         ],
+        // No messages at all, so the recent-conversation gate has nothing to
+        // suppress on — the happy path these defaults exist to serve.
+        activity: [],
       }) as unknown as ReturnType<typeof createAdminClient>,
   )
   vi.mocked(loadFollowupSnapshotsForVenue).mockResolvedValue({
@@ -259,7 +291,6 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
       {
         id: GUEST_ID,
         opted_out_at: null,
-        last_inbound_at: null,
         // 7 days ago — post_visit_day_7 is due on elapsed time alone, so
         // precision is the only thing that can stop it.
         last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -268,6 +299,7 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
         instagram_scoped_id: null,
       },
     ],
+    activity: [],
   })
 
   it('does not dispatch a post-visit followup off an approximate visit', async () => {
@@ -299,6 +331,174 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
   it('actually SELECTs last_visit_precision (the gate is inert without it)', async () => {
     await processDueFollowups(NOW)
     expect(capturedGuestSelect).toContain('last_visit_precision')
+  })
+
+  // --------------------------------------------------------------------------
+  // TAC-476: the recent-conversation gate reads DERIVED activity
+  // --------------------------------------------------------------------------
+  //
+  // The whole point of the ticket. Every test below fixes the guest's stored
+  // columns at their real production shape — absent entirely — and varies only
+  // what venue_guest_activity returns, because that is now the only input.
+
+  /** The default venue + guest, with an explicit activity set. */
+  const withActivity = (
+    activity: Array<{
+      guest_id: string
+      last_inbound_at: string | null
+      last_outbound_at: string | null
+      last_interaction_at: string
+    }>,
+    activityError?: string,
+  ) => ({
+    venues: [
+      {
+        id: VENUE_ID,
+        timezone: 'America/Los_Angeles',
+        venue_configs: {
+          // → FOLLOWUP_RULES_DEFAULT, recent_conversation_hours = 48. Typed
+          // `unknown` rather than inferred, so a test can override it.
+          followup_rules: null as unknown,
+          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+        },
+      },
+    ] as VenueLoadShape[],
+    guests: [
+      {
+        id: GUEST_ID,
+        opted_out_at: null,
+        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        phone_number: '+15551230000',
+        instagram_scoped_id: null,
+      },
+    ],
+    activity,
+    activityError,
+  })
+
+  const useActivity = (...args: Parameters<typeof withActivity>) => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () => makeSupabaseMock(withActivity(...args)) as unknown as ReturnType<typeof createAdminClient>,
+    )
+  }
+
+  // AC 1. This is the ticket: an OLD guest — enrolled long ago, so the stored
+  // last_inbound_at would read far outside the window — who texted two hours
+  // ago. Production dispatched to exactly this shape three times (1.7h, 4.5h
+  // and 6.4h after the guest's real previous inbound).
+  it('holds back a guest enrolled long ago who texted inside the window', async () => {
+    const twoHoursAgo = new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString()
+    useActivity([
+      {
+        guest_id: GUEST_ID,
+        last_inbound_at: twoHoursAgo,
+        last_outbound_at: null,
+        last_interaction_at: twoHoursAgo,
+      },
+    ])
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    expect(result.suppressedBy.recent_conversation).toBe(1)
+  })
+
+  // The NULL half of the defect, and the larger one: 20 of 35 scannable guests
+  // carry a null last_inbound_at, where `if (guest.lastInboundAt !== null)`
+  // short-circuits and rule 3 never runs at all. One of them has 122 inbound
+  // messages. Derived, the column's nullness is irrelevant.
+  it('suppresses a guest whose stored column is null but who has recent messages', async () => {
+    const oneHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString()
+    useActivity([
+      {
+        guest_id: GUEST_ID,
+        last_inbound_at: oneHourAgo,
+        last_outbound_at: oneHourAgo,
+        last_interaction_at: oneHourAgo,
+      },
+    ])
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(result.suppressedBy.recent_conversation).toBe(1)
+  })
+
+  it('dispatches when the last inbound is outside the window', async () => {
+    const fiveDaysAgo = new Date(NOW.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString()
+    useActivity([
+      {
+        guest_id: GUEST_ID,
+        last_inbound_at: fiveDaysAgo,
+        last_outbound_at: null,
+        last_interaction_at: fiveDaysAgo,
+      },
+    ])
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(result.guestsDispatched).toBe(1)
+  })
+
+  // A guest with only OUTBOUND rows: the aggregate returns null for
+  // last_inbound_at even though the row exists. db/types.ts types that column
+  // non-null, so the engine's runtime guard is the only thing stopping
+  // `new Date(null)` — which is the epoch, not "never".
+  //
+  // THE WINDOW IS ABSURD ON PURPOSE. At any sane window both readings
+  // dispatch: null skips rule 3 entirely, and 1970 is far outside 48 hours, so
+  // the guard is behaviourally invisible and a test asserting the dispatch
+  // proves nothing about it — the first version of this test asserted exactly
+  // that and the mutant survived it. A window wider than the epoch is the one
+  // configuration where the two diverge: null still skips the rule, while
+  // 1970-as-a-date falls INSIDE the window and suppresses. Nothing would
+  // configure 114 years; the point is that the value is a date at all.
+  it('treats a guest with outbound rows but no inbound as never having messaged', async () => {
+    const oneHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString()
+    const fixture = withActivity([
+      {
+        guest_id: GUEST_ID,
+        last_inbound_at: null,
+        last_outbound_at: oneHourAgo,
+        last_interaction_at: oneHourAgo,
+      },
+    ])
+    fixture.venues[0]!.venue_configs!.followup_rules = {
+      recent_conversation_hours: 1_000_000,
+    }
+    vi.mocked(createAdminClient).mockImplementation(
+      () => makeSupabaseMock(fixture) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+    expect(result.guestsDispatched).toBe(1)
+    expect(result.suppressedBy.recent_conversation).toBe(0)
+  })
+
+  // Non-behavioural, and necessary: the mock answers rpc() whatever it is
+  // asked, so a mutant that calls the wrong function or passes the wrong venue
+  // id passes every assertion above.
+  it('asks venue_guest_activity for the venue it is scanning', async () => {
+    await processDueFollowups(NOW)
+    expect(capturedRpcCalls).toEqual([
+      { fn: 'venue_guest_activity', args: { p_venue_id: VENUE_ID } },
+    ])
+  })
+
+  // The dead column must not come back. A mutant that re-adds it to the SELECT
+  // and reads it would pass every behavioural test in this file, because the
+  // fixtures no longer set it and it would read `undefined` → null → permissive.
+  it('no longer SELECTs the dead last_inbound_at column', async () => {
+    await processDueFollowups(NOW)
+    expect(capturedGuestSelect).not.toContain('last_inbound_at')
+  })
+
+  // Fails the venue's scan rather than degrading. Degrading would mean every
+  // guest reads as never having messaged — the failed-open behaviour this
+  // ticket replaced, restored silently.
+  it('sends nothing for the venue when the activity load fails', async () => {
+    useActivity([], 'connection reset')
+    const result = await processDueFollowups(NOW)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    expect(result.guestsEvaluated).toBe(0)
+    expect(result.guestsDispatched).toBe(0)
   })
 
   it('dispatches when precision was never recorded (null is permissive)', async () => {
@@ -351,12 +551,12 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
             {
               id: GUEST_ID,
               opted_out_at: null,
-              last_inbound_at: null,
               last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
               phone_number: '+15551230000',
               instagram_scoped_id: null,
             },
           ],
+          activity: [],
         }) as unknown as ReturnType<typeof createAdminClient>,
     )
     // Single eligible mechanic, not in announcedMechanicIds → perk_unlock detector fires.
@@ -478,12 +678,12 @@ describe('processDueFollowups — gate suppression', () => {
             {
               id: GUEST_ID,
               opted_out_at: '2026-01-01T00:00:00Z',
-              last_inbound_at: null,
               last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
               phone_number: '+15551230000',
               instagram_scoped_id: null,
             },
           ],
+          activity: [],
         }) as unknown as ReturnType<typeof createAdminClient>,
     )
     const result = await processDueFollowups(NOW)
@@ -530,13 +730,13 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
       {
         id: GUEST_ID,
         opted_out_at: null,
-        last_inbound_at: null,
         last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
         phone_number: null,
         instagram_scoped_id: '17841400000000001',
         ...overrides,
       },
     ],
+    activity: [],
   })
 
   const useGuest = (shape: ReturnType<typeof instagramGuest>) => {
