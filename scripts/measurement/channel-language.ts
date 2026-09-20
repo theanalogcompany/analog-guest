@@ -59,6 +59,13 @@ const PATTERNS: readonly Pattern[] = [
     kind: 'phone_claim',
     re: /\btext(?:s|ed|ing)?\s+(?:me|us|them|him|her|back|again|the\s+\w+|a\s+\w+|us\s+\w+)\b/gi,
   },
+  // "texting" is never innocent: unlike the noun "text" there is no
+  // non-SMS reading of it. MISSED BY THE FIRST RUN — "first time texting
+  // in?" went unflagged in the control arm, which under-counted the very
+  // number the control bar is read against.
+  { kind: 'phone_claim', re: /\btext(?:ing|ed)\b/gi },
+  // "text in", "texted in".
+  { kind: 'phone_claim', re: /\btext(?:s|ed|ing)?\s+in\b/gi },
   // "shoot/send us a text", "give us a text".
   { kind: 'phone_claim', re: /\b(?:send|shoot|drop|give)\s+(?:me|us|them)?\s*a\s+text\b/gi },
   // The number itself: "this number", "our number", "save the number".

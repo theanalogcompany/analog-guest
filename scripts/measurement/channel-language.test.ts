@@ -15,6 +15,12 @@ describe('phone claims, which are FALSE on Instagram', () => {
     ['we will send you an SMS', 'sms'],
     ['reply to this text message', 'text message'],
     ['give us a call before 3', 'give us a call'],
+    // Missed by the first real run: "first time texting in?" went unflagged
+    // in the control arm, under-counting the number the control bar is read
+    // against. There is no non-SMS reading of "texting".
+    ['hey, welcome. first time texting in?', 'texting'],
+    ['thanks for texting', 'texting'],
+    ['you texted us last week', 'texted'],
   ])('catches %j', (body, expected) => {
     expect(claimsPhoneChannel(body)).toBe(true)
     expect(phrases(body)).toContain(expected)

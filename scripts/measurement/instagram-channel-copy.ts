@@ -45,54 +45,73 @@ import { createRunLog } from './run-log'
 import { findChannelLanguage } from './channel-language'
 
 /**
- * Inbounds chosen to PULL FOR channel language rather than sample typical
- * traffic. A measurement that mostly asks about opening hours would report a
- * clean run and prove very little: the copy only matters on a turn where the
- * model has some reason to mention how the guest reaches the venue.
+ * REBUILT after the 2026-09-19 run came back inconclusive: the control arm
+ * produced ONE phone claim in 24 generations against a bar of 8, so a clean
+ * Instagram arm proved nothing. The diagnosis is in what the one scenario that
+ * did fire was doing that the other seven were not.
  *
- * Each carries why it is here, so a later reader can tell a deliberate probe
- * from a scenario someone liked the sound of.
+ * `reach-you` ("what's the best way to reach you?") makes THE CHANNEL THE
+ * ANSWER. It cannot be answered without referring to how the guest and the
+ * venue communicate. The other seven were all answerable in terms of policy
+ * ("we don't take orders ahead, counter only"), physical presence ("just come
+ * by") or content ("those were test messages") — so the model never had a
+ * reason to name a channel, in either arm, and the run was measuring turns
+ * where the copy under test does not render as anything observable.
+ *
+ * But "the channel is the answer" is not sufficient on its own, which is the
+ * second half of the finding: even `reach-you` fired only 1 time in 3, because
+ * the model's preferred answer is "right here works" — channel-NEUTRAL, and
+ * correct on both arms. A scenario that lets "right here" be a complete answer
+ * lets the model avoid the copy entirely.
+ *
+ * So every scenario below satisfies BOTH:
+ *   1. the channel is the answer, not an aside; and
+ *   2. "right here" is not a sufficient answer.
+ *
+ * The levers that defeat "right here" are a third party who is not in this
+ * conversation, a named alternative the model must accept or refuse, a
+ * concrete artefact to be saved or sent, and a promise to make contact later.
  */
 const SCENARIOS: ReadonlyArray<{ id: string; body: string; why: string }> = [
   {
-    id: 'reach-you',
-    body: "what's the best way to reach you if i have a question?",
-    why: 'Asks directly for a channel. The most likely single turn to produce "text us".',
+    id: 'friend-asks',
+    body: 'my friend wants to ask about buying beans for her office, how does she get in touch with you?',
+    why: 'A THIRD PARTY who is not in this conversation, so "right here" cannot answer it. The model has to name a route someone else can use. The sharpest lever found.',
   },
   {
-    id: 'order-ahead',
-    body: 'can i order ahead for tomorrow morning?',
-    why: 'R34 says defer to how the venue takes orders; the deferral is where a channel gets named.',
-  },
-  {
-    id: 'heads-up',
-    body: "i'll come by around 8, anything you need from me?",
-    why: 'The heads-up examples in # Commitments carry "message me" on Instagram and "text me" on SMS.',
-  },
-  {
-    id: 'hold-request',
-    body: 'can you hold a croissant for me till 9?',
-    why: 'A hold is refused at Le Mil\'s, and the refusal often offers another way to arrange it.',
-  },
-  {
-    id: 'greeting',
-    body: 'hi!',
-    why: 'The first-touch opener renders here; its Instagram variant drops "on this number".',
+    id: 'call-instead',
+    body: 'can i just call you instead?',
+    why: 'Names the alternative outright, forcing an accept or refuse about the phone specifically. "Right here" is a deflection, not an answer.',
   },
   {
     id: 'save-contact',
-    body: 'should i save you in my contacts?',
-    why: 'R32 territory. On SMS "save this number" is right; on Instagram there is no number to save.',
+    body: 'should i save you in my contacts? what do i save you as?',
+    why: 'Forces a CONCRETE ARTEFACT: a number on SMS, a profile on Instagram. The first run\'s version stopped at "should i save you" and got "yeah, save it" — channel-neutral. The second clause is what defeats that.',
   },
   {
-    id: 'missed-reply',
-    body: "sorry, missed your last message. what did you say?",
-    why: 'Invites the model to describe the medium it is speaking on.',
+    id: 'not-on-phone',
+    body: "if i'm away from my phone how else can i reach you?",
+    why: 'Puts the current channel out of reach by premise, so "right here" is excluded by the question itself.',
   },
   {
-    id: 'complaint',
-    body: 'the cortado i got this morning was cold',
-    why: 'comp_complaint suppresses the intentions block and takes a different category path.',
+    id: 'let-me-know',
+    body: 'can you let me know when the new panama lot lands?',
+    why: 'A promise to make contact LATER. The model has to say how it will reach them, and the medium is the whole content of that promise.',
+  },
+  {
+    id: 'send-photo',
+    body: 'can i send you a photo of the receipt?',
+    why: 'An artefact moving the other way. Whether a photo can be sent, and how, differs by channel.',
+  },
+  {
+    id: 'heads-up-how',
+    body: "how do i let you know when i'm on my way?",
+    why: 'Targets the heads-up examples in # Commitments, which carry an explicit channel variant ("text me a heads-up" vs "send me a heads-up"). The first run\'s complaint scenario produced "give me a heads up" with no channel verb; asking HOW forces one.',
+  },
+  {
+    id: 'right-place',
+    body: 'is this the right place to ask about wholesale, or is there somewhere better?',
+    why: 'Asks the model to evaluate the channel against alternatives, which is exactly R5 territory (each arm names the OTHER channel in its list).',
   },
 ]
 
@@ -192,6 +211,13 @@ async function main(): Promise<void> {
           status: generated.status,
           body,
           voiceFidelity: generated.status === 'success' ? generated.result.voiceFidelity : null,
+          // The first run could not say why `regeneration_triggered` fired so
+          // often, because it recorded neither of these. attempts > 1 IS that
+          // event; attemptScores shows whether the first draft was under the
+          // 0.7 regen floor or whether something else (a dash, self-talk)
+          // forced the retry.
+          attempts: generated.status === 'success' ? generated.result.attempts : null,
+          attemptScores: generated.status === 'success' ? generated.result.attemptScores : null,
           phoneClaims: matches.filter((m) => m.kind === 'phone_claim'),
           instagramIdioms: matches.filter((m) => m.kind === 'instagram_idiom'),
         })
