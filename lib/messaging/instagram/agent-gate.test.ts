@@ -33,14 +33,24 @@ const notSaved: Array<[string, InstagramEventOutcome]> = [
 ]
 
 describe('the Instagram agent gate', () => {
-  // TAC-469 flips this, and this assertion with it.
-  it('is shut until Instagram outbound exists (TAC-469)', () => {
-    expect(INSTAGRAM_AGENT_REPLIES_ENABLED).toBe(false)
+  // Flipped by TAC-469's PR C, together with this assertion. Pinned rather
+  // than left implicit so turning replies back off is a deliberate edit to a
+  // test that says so, not a silent constant change.
+  it('is OPEN: the agent replies to Instagram guests (TAC-469)', () => {
+    expect(INSTAGRAM_AGENT_REPLIES_ENABLED).toBe(true)
   })
 
-  it('hands nothing to the agent while shut, not even a new guest message', () => {
-    expect(agentMessageIdFor(saved('message'))).toBeNull()
-    expect(agentMessageIdFor(saved('postback'))).toBeNull()
+  it('hands a newly saved guest message or postback to the agent by default', () => {
+    expect(agentMessageIdFor(saved('message'))).toBe('msg-message')
+    expect(agentMessageIdFor(saved('postback'))).toBe('msg-postback')
+  })
+
+  // The shut behaviour keeps its own coverage, driven by the parameter rather
+  // than the constant: this is what a rollback restores, and it is also what
+  // every caller gets if the constant is ever made per-venue.
+  it('hands nothing to the agent when shut, not even a new guest message', () => {
+    expect(agentMessageIdFor(saved('message'), false)).toBeNull()
+    expect(agentMessageIdFor(saved('postback'), false)).toBeNull()
   })
 
   it('hands a newly saved guest message or postback to the agent once open', () => {

@@ -32,19 +32,22 @@ vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
 })
 
 // The real gate, except that a test can open it. That is the one thing
-// TAC-469 changes, so the route's own hand-off gets tested as it will run
-// then, while every other test runs with the gate as it ships. Two details
-// keep this mock from hiding a bypass: an `enabled` the ROUTE passes is
-// honoured, so a route that forced the gate open fails the shut-gate tests;
-// and with no test opening it, the real constant decides, so flipping that
-// constant fails them too.
-const gate = vi.hoisted(() => ({ open: false }))
+// The gate is OPEN as it ships (TAC-469 PR C), so most tests run with it open
+// and a few force it shut to cover what a rollback restores. THREE properties
+// keep this mock from hiding a bypass, and the third already earned its keep:
+// an `enabled` the ROUTE passes is honoured, so a route that forced the gate
+// open would still fail the shut-gate tests; `null` means "use the real
+// constant", so flipping that constant changes what these tests see; and it is
+// tri-state rather than a boolean OR, because `false || CONSTANT` could not
+// express "shut" once the constant went true and would have silently dropped
+// the shut-gate coverage at exactly the moment it started mattering.
+const gate = vi.hoisted(() => ({ open: null as boolean | null }))
 vi.mock('@/lib/messaging/instagram/agent-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/messaging/instagram/agent-gate')>()
   return {
     ...actual,
     agentMessageIdFor: (outcome: Parameters<typeof actual.agentMessageIdFor>[0], enabled?: boolean) =>
-      actual.agentMessageIdFor(outcome, enabled ?? (gate.open || actual.INSTAGRAM_AGENT_REPLIES_ENABLED)),
+      actual.agentMessageIdFor(outcome, enabled ?? gate.open ?? actual.INSTAGRAM_AGENT_REPLIES_ENABLED),
   }
 })
 
@@ -153,7 +156,7 @@ beforeEach(() => {
   mocks.waitUntil.mockReset()
   mocks.refreshInstagramProfile.mockReset()
   mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
-  gate.open = false
+  gate.open = null
   useDb()
 })
 
@@ -581,11 +584,14 @@ describe('POST /api/webhooks/instagram saving events', () => {
     return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
   }
 
-  // The gate. Lifting it (TAC-469) makes both of these hand the new row to
-  // the agent, and this test has to change with it.
+  // The gate, forced SHUT. This is what a rollback restores, so it keeps its
+  // coverage after the flip: saving still works, and nothing reaches the agent.
+  // Before PR C these ran on the shipped constant and were what failed when it
+  // was flipped, which is how the flip proved it reached the route at all.
   it.each(['message', 'postback-referral'])(
-    'saves the recorded %s as an Instagram row and does not run the agent',
+    'saves the recorded %s as an Instagram row and does not run the agent when the gate is shut',
     async (name) => {
+      gate.open = false
       useDb({ venues: [FIXTURE_VENUE] })
       const refresh = Promise.resolve({ status: 'not_due' })
       mocks.refreshInstagramProfile.mockReturnValue(refresh)
@@ -601,6 +607,26 @@ describe('POST /api/webhooks/instagram saving events', () => {
       expect(mocks.waitUntil).toHaveBeenCalledWith(refresh)
     },
   )
+
+  // Runs on the SHIPPED constant — `gate.open` is left null — so this is the
+  // one route test that fails if the constant is flipped back. Without it,
+  // every route test forces the gate explicitly and the route could stop
+  // consulting the constant at all with nothing to show for it. That property
+  // is what caught PR C's flip reaching the route in the first place, and
+  // making the shut-gate tests explicit would otherwise have thrown it away.
+  it('runs the agent on a new guest message with the gate as it ships', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    const agentRun = Promise.resolve()
+    mocks.handleInbound.mockReturnValue(agentRun)
+
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    const [saved] = db.tables.messages
+    expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+    expect(mocks.handleInbound).toHaveBeenCalledWith(saved?.id)
+    expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
+  })
 
   it('logs an unhandled field and acknowledges it', async () => {
     const body = JSON.stringify({
