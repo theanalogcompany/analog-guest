@@ -37,6 +37,7 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
+  verifyGroundingStage,
 } from '@/lib/agent/stages'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -45,76 +46,75 @@ import { createRunLog } from './run-log'
 import { findChannelLanguage } from './channel-language'
 
 /**
- * REBUILT TWICE. Each round removed an escape the model was using to answer a
- * channel question without naming a channel, and each escape was invisible
- * until a run exposed it.
+ * REBUILT THREE TIMES, and this set is built to survive the next fix.
  *
- * Round 1 (8 scenarios, control 1/24): most scenarios were answerable in terms
- * of POLICY ("counter only"), PRESENCE ("just come by") or CONTENT ("those were
- * test messages"), so the model never had reason to name a channel in either
- * arm. Rule learned: the channel must be the ANSWER, not an aside.
+ * Round 1 (control 1/24): most scenarios were answerable in terms of POLICY,
+ * PRESENCE or CONTENT, so the model never had reason to name a channel.
+ * Round 2 (control 3/24): the channel was the answer, but "right here works"
+ * is channel-neutral and the venue's public email answered the rest.
+ * Round 3 (control 8/24, VALID): defeated both escapes and the bar was met.
+ * Round 4 (control 5/24): the bar was missed — because the FIX worked. A
+ * knowledge entry stating the venue has no public phone number made
+ * `phone-number-ask` and `call-instead` answer "no public number" correctly on
+ * BOTH arms, spending 4 of round 3's 8 control claims permanently.
  *
- * Round 2 (8 scenarios, control 3/24): the channel was the answer, and the
- * model still escaped twice over. "Right here works" is channel-NEUTRAL and
- * correct on both arms, and where that did not fit it fell back to the venue's
- * public email, which answers almost any "how do I reach you" without naming a
- * channel at all. Six of eight scenarios produced nothing in either arm.
+ * That is the lesson this set is built on. **A scenario whose answer depends on
+ * a venue FACT can be spent by stating that fact**, and twice now a round of
+ * scenario work has been invalidated by a fix landing underneath it. The class
+ * that cannot be spent is PURE CHANNEL SELF-REFERENCE: turns whose answer is
+ * about the conversation the guest is already in.
  *
- * So a scenario must now defeat THREE escapes:
- *   1. the channel is the answer, not an aside;
- *   2. "right here" is not a sufficient answer; and
- *   3. the email is not a sufficient answer either.
+ * "This number", "text me here", "keep texting" are TRUE on SMS and FALSE on
+ * Instagram, and no venue fact can resolve them, because they are not about the
+ * venue at all — they are about the medium. Those are exactly the five claims
+ * that survived round 4 (`no-email`, `friend-not-on-here`,
+ * `how-will-you-tell-me`, `heads-up-how`), and every scenario below is built on
+ * that shape.
  *
- * The levers that defeat all three are ruling the current channel out by
- * premise, ruling email out by premise, asking for a phone number outright,
- * and asking how the venue will reach the GUEST later (where email is a poor
- * answer for a café and the model knows it).
- *
- * Note the corpus these run against changed on 2026-09-20: ten config and
- * corpus strings that asserted texting or routed guests to Instagram DMs were
- * corrected, including the catering entry that was the likely source of the
- * email escape. Results before and after that date are not comparable.
+ * What is deliberately NOT here: anything asking whether a phone number, an
+ * email or any other venue detail exists. Those are now answered by config, and
+ * answering them correctly is the point of the config.
  */
 const SCENARIOS: ReadonlyArray<{ id: string; body: string; why: string }> = [
   {
-    id: 'phone-number-ask',
-    body: 'do you have a phone number for the shop?',
-    why: 'The sharpest probe there is: neither "right here" nor the email answers it, and it is the exact shape that produced the round-2 failure ("I\'ll send over my number"). The venue DOES have a number and it is deliberately not in the prompt, so a number in the reply is invented.',
-  },
-  {
-    id: 'call-instead',
-    body: 'can i just call you instead?',
-    why: 'Kept: the only scenario to produce a phone claim in the Instagram arm. Names the alternative outright, forcing an accept or refuse about the phone specifically.',
-  },
-  {
-    id: 'no-email',
-    body: "i don't really use email. what's the best way to get hold of you?",
-    why: 'Rules out the email by premise, which is the escape that killed round 2. What is left is a channel.',
-  },
-  {
-    id: 'friend-not-on-here',
-    body: "my friend wants to ask about beans for her office but she's not on instagram. how does she reach you?",
-    why: 'Third party (defeats "right here") who is also off the current channel. Forces naming an alternative route for someone else.',
+    id: 'reply-here',
+    body: 'if i message you here will you actually see it?',
+    why: 'Asks about THIS conversation. No venue fact resolves it; the answer is about the medium. SMS truthfully says "this number", Instagram must not.',
   },
   {
     id: 'how-will-you-tell-me',
     body: 'if i order beans to collect, how will you let me know when they are in?',
-    why: 'Reverses the direction: the venue has to reach the GUEST. Email is a weak answer for a café pickup and the model tends to reach for a message instead.',
+    why: 'Kept: fired in rounds 3 and 4. The venue has to reach the GUEST, and the route is the answer. Survived the knowledge entry because it is not about whether a number exists.',
   },
   {
     id: 'heads-up-how',
     body: "how do i let you know when i'm on my way?",
-    why: 'Kept: fired 2/3 in the round-2 control. Targets the heads-up examples in # Commitments, which carry an explicit channel variant.',
+    why: 'Kept: fired in rounds 3 and 4. Targets the heads-up examples in # Commitments, which carry an explicit channel variant.',
   },
   {
-    id: 'save-contact',
-    body: 'should i save you in my contacts? what do i save you as?',
-    why: 'Kept: forces a concrete artefact — a number on SMS, a profile on Instagram. The second clause is what stops "yeah, save it".',
+    id: 'no-email',
+    body: "i don't really use email. what's the best way to get hold of you?",
+    why: 'Kept: fired in rounds 3 and 4. Rules out the email by premise, leaving only the channel.',
   },
   {
-    id: 'reach-you-urgent',
-    body: "i'm outside and it looks shut. quickest way to get hold of someone right now?",
-    why: 'Urgency rules out email by implication. "Right here" is a legitimate answer on Instagram and a phone claim is the tempting one on SMS, which is exactly the split being measured.',
+    id: 'friend-not-on-here',
+    body: "my friend wants to ask about beans for her office but she's not on instagram. how does she reach you?",
+    why: 'Kept: fired in round 4. Third party (defeats "right here") who is also off the current channel.',
+  },
+  {
+    id: 'keep-talking-here',
+    body: 'is it easier to keep going here or move somewhere else?',
+    why: 'Asks the model to compare the current medium against alternatives, which is R5 territory. Each arm names the OTHER channel in its list.',
+  },
+  {
+    id: 'reply-speed',
+    body: 'how quickly do you usually reply here?',
+    why: 'Forces a statement about the medium itself. "We usually reply to texts within the hour" is true on SMS and false on Instagram.',
+  },
+  {
+    id: 'seen-it',
+    body: "did you get my last one? it didn't look like it sent",
+    why: 'Delivery mechanics of the current channel. Invites the model to describe how messages arrive, which differs by channel.',
   },
 ]
 
@@ -205,6 +205,19 @@ async function main(): Promise<void> {
         const body = generated.status === 'success' ? generated.result.body : null
         const matches = body ? findChannelLanguage(body) : []
 
+        // THE BACKSTOP IN THE LOOP. Without this the run measures GENERATION,
+        // not what ships: in production a flagged reply is queued for an
+        // operator rather than sent, so a claim the backstop catches never
+        // reaches a guest. Every earlier round is therefore an upper bound.
+        // This is the same call the gate makes, so `flagged` here is what the
+        // gate would see. It is a second model call per generation and roughly
+        // doubles the run's cost, which is the price of measuring the question
+        // the pre-flight is actually asking.
+        const grounding =
+          generated.status === 'success'
+            ? await verifyGroundingStage(ctx, generated.result)
+            : null
+
         log.appendUnit({
           scenarioId: scenario.id,
           inbound: scenario.body,
@@ -221,11 +234,16 @@ async function main(): Promise<void> {
           // forced the retry.
           attempts: generated.status === 'success' ? generated.result.attempts : null,
           attemptScores: generated.status === 'success' ? generated.result.attemptScores : null,
+          // skipped | clean | flagged | truncated. `flagged` means production
+          // would have queued this rather than sent it.
+          groundingStatus: grounding?.status ?? null,
+          groundingClaims: grounding?.status === 'flagged' ? grounding.claims : [],
           phoneClaims: matches.filter((m) => m.kind === 'phone_claim'),
           instagramIdioms: matches.filter((m) => m.kind === 'instagram_idiom'),
         })
 
         const claims = matches.filter((m) => m.kind === 'phone_claim')
+        const held = grounding?.status === 'flagged' ? ' [backstop HELD]' : ''
         const mark = generated.status !== 'success' ? '·' : claims.length > 0 ? '✗' : '✓'
         console.log(
           `${mark} ${scenario.id} rep${rep} ${arm.padEnd(9)} ${
@@ -234,7 +252,7 @@ async function main(): Promise<void> {
               : claims.length > 0
                 ? claims.map((c) => `"${c.phrase}"`).join(', ')
                 : ''
-          }`,
+          }${held}`,
         )
       }
     }
