@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createRunLog, readRunLog } from './run-log'
+import { createRunLog, readRunLog, RUN_LOG_DIR } from './run-log'
 
 // Real filesystem, real temp dir — not a mocked `fs`. A fake answers only
 // the arguments it was written for (same reasoning CLAUDE.md gives for
@@ -19,6 +19,47 @@ afterEach(() => {
 })
 
 describe('createRunLog default path', () => {
+  // These call createRunLog with NO outputPath, so they write to the default
+  // location, which is resolved relative to the working directory. Without
+  // chdir they land in whatever checkout the suite was started from — which is
+  // what they did until 2026-09-20, quietly dropping probe-*.jsonl into the
+  // repo. Each test gets its own temp cwd, restored afterwards.
+  let originalCwd: string
+  beforeEach(() => {
+    originalCwd = process.cwd()
+    process.chdir(freshDir())
+  })
+  afterEach(() => {
+    process.chdir(originalCwd)
+  })
+
+  // Until 2026-09-20 a default-path run wrote to the working directory, so a
+  // run started from the repo root dropped its JSONL beside package.json, and
+  // several did before anyone noticed. A run log is evidence for a ticket, not
+  // source, and it belongs somewhere findable and out of the way.
+  it('writes into the run-log directory, never the working directory', () => {
+    const log = createRunLog({ name: 'probe', meta: { arm: 'a' }, gitSha: null })
+    expect(log.path.startsWith(`${RUN_LOG_DIR}/`)).toBe(true)
+    expect(existsSync(log.path)).toBe(true)
+    // The thing that regressed: nothing named `probe-*.jsonl` at the top level.
+    expect(readdirSync('.').filter((f) => f.endsWith('.jsonl'))).toEqual([])
+  })
+
+  it('creates the run-log directory when it does not exist', () => {
+    expect(existsSync(RUN_LOG_DIR)).toBe(false)
+    const log = createRunLog({ name: 'probe', meta: { arm: 'a' }, gitSha: null })
+    expect(existsSync(RUN_LOG_DIR)).toBe(true)
+    expect(existsSync(log.path)).toBe(true)
+  })
+
+  // An explicit path is still honoured verbatim, so a caller that wants the
+  // file somewhere specific is not silently redirected.
+  it('leaves an explicit outputPath exactly where the caller put it', () => {
+    const log = createRunLog({ name: 'probe', outputPath: 'chosen.jsonl', meta: { arm: 'a' }, gitSha: null })
+    expect(log.path).toBe('chosen.jsonl')
+    expect(existsSync('chosen.jsonl')).toBe(true)
+  })
+
   it('two runs with no explicit path both survive', () => {
     const cwd = freshDir()
     const tick = new Date('2026-09-18T10:00:00.000Z')
