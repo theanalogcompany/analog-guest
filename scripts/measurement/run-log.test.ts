@@ -7,32 +7,29 @@ import { createRunLog, readRunLog, RUN_LOG_DIR } from './run-log'
 // Real filesystem, real temp dir — not a mocked `fs`. A fake answers only
 // the arguments it was written for (same reasoning CLAUDE.md gives for
 // run-report.mjs's real-git-repo test and claims.test.ts's real fixtures).
+//
+// EVERY test runs with the working directory inside its own temp dir, because
+// the default path is resolved relative to it. Until 2026-09-20 these tests
+// instead passed an ABSOLUTE PATH as the run's `name` to steer the old
+// CWD-relative default into a temp dir — a trick that silently stopped working
+// when the default moved into RUN_LOG_DIR (`join('measurement-runs', '/var/…')`
+// rebuilt a `/var/folders/…` tree inside the checkout). `name` is a name now,
+// and a path there is refused; where the file goes is `outputPath`'s job.
 let dir: string
 
-function freshDir(): string {
+beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'run-log-test-'))
-  return dir
-}
+  process.chdir(dir)
+})
 
 afterEach(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true })
+  // Back out before removing, or the process is left in a deleted directory
+  // and every later test's relative path resolves against nothing.
+  process.chdir(tmpdir())
+  rmSync(dir, { recursive: true, force: true })
 })
 
 describe('createRunLog default path', () => {
-  // These call createRunLog with NO outputPath, so they write to the default
-  // location, which is resolved relative to the working directory. Without
-  // chdir they land in whatever checkout the suite was started from — which is
-  // what they did until 2026-09-20, quietly dropping probe-*.jsonl into the
-  // repo. Each test gets its own temp cwd, restored afterwards.
-  let originalCwd: string
-  beforeEach(() => {
-    originalCwd = process.cwd()
-    process.chdir(freshDir())
-  })
-  afterEach(() => {
-    process.chdir(originalCwd)
-  })
-
   // Until 2026-09-20 a default-path run wrote to the working directory, so a
   // run started from the repo root dropped its JSONL beside package.json, and
   // several did before anyone noticed. A run log is evidence for a ticket, not
@@ -52,21 +49,41 @@ describe('createRunLog default path', () => {
     expect(existsSync(log.path)).toBe(true)
   })
 
+  // A name carrying a separator would escape the directory the default exists
+  // to keep runs inside — and not to the absolute path the caller meant, but
+  // to a mirrored tree under the working directory. This repo's own tests did
+  // that for months, so the rejection is the guard that keeps RUN_LOG_DIR true.
+  it.each(['/tmp/harness', 'nested/harness', '../harness'])(
+    'refuses a name that is a path (%j) and names outputPath instead',
+    (name) => {
+      expect(() => createRunLog({ name, meta: { arm: 'a' }, gitSha: null })).toThrow(
+        /name must be a run name, not a path/,
+      )
+      expect(() => createRunLog({ name, meta: { arm: 'a' }, gitSha: null })).toThrow(/outputPath/)
+      // And nothing was created on the way to the throw.
+      expect(existsSync(RUN_LOG_DIR)).toBe(false)
+    },
+  )
+
   // An explicit path is still honoured verbatim, so a caller that wants the
   // file somewhere specific is not silently redirected.
   it('leaves an explicit outputPath exactly where the caller put it', () => {
-    const log = createRunLog({ name: 'probe', outputPath: 'chosen.jsonl', meta: { arm: 'a' }, gitSha: null })
+    const log = createRunLog({
+      name: 'probe',
+      outputPath: 'chosen.jsonl',
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     expect(log.path).toBe('chosen.jsonl')
     expect(existsSync('chosen.jsonl')).toBe(true)
   })
 
   it('two runs with no explicit path both survive', () => {
-    const cwd = freshDir()
     const tick = new Date('2026-09-18T10:00:00.000Z')
     const now = () => tick
 
     const first = createRunLog({
-      name: join(cwd, 'harness'),
+      name: 'harness',
       meta: { arm: 'old_prompt' },
       now,
       gitSha: 'sha-1',
@@ -76,7 +93,7 @@ describe('createRunLog default path', () => {
     // Same millisecond as the first call — the numeric-suffix path must
     // still avoid collision without any caller action.
     const second = createRunLog({
-      name: join(cwd, 'harness'),
+      name: 'harness',
       meta: { arm: 'new_prompt' },
       now,
       gitSha: 'sha-2',
@@ -96,13 +113,12 @@ describe('createRunLog default path', () => {
   })
 
   it('advances the timestamp between calls to produce distinct default names', () => {
-    const cwd = freshDir()
     const times = [new Date('2026-09-18T10:00:00.000Z'), new Date('2026-09-18T10:05:00.000Z')]
     let i = 0
     const now = () => times[i++]
 
-    const first = createRunLog({ name: join(cwd, 'harness'), meta: { arm: 'a' }, now, gitSha: null })
-    const second = createRunLog({ name: join(cwd, 'harness'), meta: { arm: 'b' }, now, gitSha: null })
+    const first = createRunLog({ name: 'harness', meta: { arm: 'a' }, now, gitSha: null })
+    const second = createRunLog({ name: 'harness', meta: { arm: 'b' }, now, gitSha: null })
 
     expect(first.path).toContain('2026-09-18T10-00-00')
     expect(second.path).toContain('2026-09-18T10-05-00')
@@ -111,9 +127,8 @@ describe('createRunLog default path', () => {
 
 describe('checkpoint as you go', () => {
   it('a run killed mid-way leaves every completed unit intact and readable', () => {
-    const cwd = freshDir()
     const log = createRunLog({
-      name: join(cwd, 'harness'),
+      name: 'harness',
       meta: { arm: 'old_prompt', promptVersion: 'v1.3.0' },
       now: () => new Date('2026-09-18T10:00:00.000Z'),
       gitSha: 'deadbeef',
@@ -143,9 +158,8 @@ describe('checkpoint as you go', () => {
   })
 
   it('a header-only file (crash before any unit) is still valid and readable', () => {
-    const cwd = freshDir()
     const log = createRunLog({
-      name: join(cwd, 'harness'),
+      name: 'harness',
       meta: { arm: 'x' },
       now: () => new Date('2026-09-18T10:00:00.000Z'),
       gitSha: null,
@@ -160,15 +174,14 @@ describe('checkpoint as you go', () => {
 
 describe('explicit path collision', () => {
   it('refuses to overwrite an explicit existing path without force', () => {
-    const cwd = freshDir()
-    const path = join(cwd, 'explicit-results.jsonl')
+    const path = join(process.cwd(), 'explicit-results.jsonl')
 
     const log = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
     log.appendUnit({ i: 1 })
 
-    expect(() => createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'b' }, gitSha: null })).toThrow(
-      /already exists/,
-    )
+    expect(() =>
+      createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'b' }, gitSha: null }),
+    ).toThrow(/already exists/)
 
     // The refused attempt must not have touched the existing file.
     const contents = readRunLog(path)
@@ -177,8 +190,7 @@ describe('explicit path collision', () => {
   })
 
   it('overwrites an explicit existing path when force is true', () => {
-    const cwd = freshDir()
-    const path = join(cwd, 'explicit-results.jsonl')
+    const path = join(process.cwd(), 'explicit-results.jsonl')
 
     const first = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
     first.appendUnit({ i: 1 })
@@ -200,9 +212,8 @@ describe('explicit path collision', () => {
 
 describe('header round-trip', () => {
   it('meta, git sha and generatedAt all come back without the writer script', () => {
-    const cwd = freshDir()
     const log = createRunLog({
-      name: join(cwd, 'harness'),
+      name: 'harness',
       meta: { arm: 'new_prompt', promptVersion: 'v1.4.0', sampleSize: 39 },
       now: () => new Date('2026-09-18T10:00:00.000Z'),
       gitSha: 'cafef00d',
@@ -222,8 +233,7 @@ describe('header round-trip', () => {
 
 describe('directory auto-creation', () => {
   it('creates a not-yet-existing subdirectory named by outputPath', () => {
-    const cwd = freshDir()
-    const path = join(cwd, 'results', 'nested', 'run.jsonl')
+    const path = join(process.cwd(), 'results', 'nested', 'run.jsonl')
 
     const log = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
     log.appendUnit({ i: 1 })
@@ -234,8 +244,7 @@ describe('directory auto-creation', () => {
 
 describe('real git sha default', () => {
   it('resolves a string or null when gitSha is not injected', () => {
-    const cwd = freshDir()
-    const log = createRunLog({ name: join(cwd, 'harness'), meta: { arm: 'a' } })
+    const log = createRunLog({ name: 'harness', meta: { arm: 'a' } })
     const contents = readRunLog(log.path)
     expect(typeof contents.header.gitSha === 'string' || contents.header.gitSha === null).toBe(true)
   })

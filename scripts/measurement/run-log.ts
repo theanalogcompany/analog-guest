@@ -132,6 +132,18 @@ function isoForFilename(date: Date): string {
  * collide, full stop.
  */
 function resolveDefaultPath(name: string, date: Date): string {
+  // A `name` carrying a separator would escape RUN_LOG_DIR, which is the one
+  // thing the directory exists to prevent — `join('measurement-runs', '/tmp/x')`
+  // is `measurement-runs/tmp/x`, a mirrored tree under the checkout rather than
+  // the absolute path the caller plainly meant. This repo's own tests did
+  // exactly that (they used an absolute `name` to steer the old CWD default
+  // into a temp dir) and quietly rebuilt a `/var/folders/...` tree inside the
+  // working directory. Refuse it and name the field that does the job.
+  if (name.includes('/') || name.includes('\\')) {
+    throw new Error(
+      `createRunLog: name must be a run name, not a path (got ${JSON.stringify(name)}). Pass outputPath to choose where the file goes.`,
+    )
+  }
   mkdirSync(RUN_LOG_DIR, { recursive: true })
   const base = join(RUN_LOG_DIR, `${name}-${isoForFilename(date)}`)
   let path = `${base}.jsonl`
