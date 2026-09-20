@@ -103,7 +103,7 @@ begin;
 -- 1. the function
 -- ----------------------------------------------------------------------------
 
-create or replace function venue_guest_activity(p_venue_id uuid)
+create or replace function public.venue_guest_activity(p_venue_id uuid)
 returns table (
   guest_id uuid,
   last_inbound_at timestamptz,
@@ -123,7 +123,7 @@ as $$
   group by m.guest_id;
 $$;
 
-comment on function venue_guest_activity(uuid) is
+comment on function public.venue_guest_activity(uuid) is
   'TAC-476: each guest''s last inbound, last outbound and last activity at this '
   'venue, derived from messages.created_at. Replaces guests.last_inbound_at / '
   'last_outbound_at / last_interaction_at, which only ever recorded first '
@@ -138,17 +138,17 @@ comment on function venue_guest_activity(uuid) is
 comment on column guests.last_inbound_at is
   'DO NOT READ. Written once at guest creation and never updated, so it holds '
   'first contact, not last inbound. Read by nothing as of TAC-476; use '
-  'venue_guest_activity(venue_id). Removal: TAC-503.';
+  'venue_guest_activity(p_venue_id). Removal: TAC-503.';
 
 comment on column guests.last_outbound_at is
   'DO NOT READ. Never written by anything, since migration 001. Read by '
-  'nothing; use venue_guest_activity(venue_id). Removal: TAC-503.';
+  'nothing; use venue_guest_activity(p_venue_id). Removal: TAC-503.';
 
 comment on column guests.last_interaction_at is
   'DO NOT READ. Written once at guest creation and never updated, so it holds '
   'first contact, not last interaction — it equals first_contacted_at on every '
   'row but one. Read by nothing as of TAC-476; use '
-  'venue_guest_activity(venue_id). Removal: TAC-503.';
+  'venue_guest_activity(p_venue_id). Removal: TAC-503.';
 
 commit;
 
@@ -180,6 +180,20 @@ commit;
 --        and column_name in
 --          ('last_inbound_at', 'last_outbound_at', 'last_interaction_at');
 --
+-- 4. POSTGREST CAN SEE IT. The three checks above are SQL-level and all pass
+--    against a stale PostgREST schema cache, which answers the APP with
+--    PGRST202 ("could not find the function"). The two callers fail
+--    differently on that, so it is worth one explicit check: the engine gets
+--    `activityResult.error` and refuses to scan the venue (loud, no sends),
+--    while the conversations dropdown silently falls back to an arbitrary
+--    order that looks like a working list. Either reload the cache
+--    (`notify pgrst, 'reload schema';`) or hit it once:
+--
+--      curl -s -X POST "$SUPABASE_URL/rest/v1/rpc/venue_guest_activity" \
+--        -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+--        -H 'Content-Type: application/json' \
+--        -d '{"p_venue_id":"<venue-uuid>"}'
+--
 -- ----------------------------------------------------------------------------
 -- ROLLBACK
 -- ----------------------------------------------------------------------------
@@ -187,7 +201,7 @@ commit;
 -- live. Afterwards the engine's venue scan fails for every venue, which means
 -- no follow-ups are sent — the safe direction, but not a state to sit in.
 --
---   drop function if exists venue_guest_activity(uuid);
+--   drop function if exists public.venue_guest_activity(uuid);
 --   comment on column guests.last_inbound_at is null;
 --   comment on column guests.last_outbound_at is null;
 --   comment on column guests.last_interaction_at is null;

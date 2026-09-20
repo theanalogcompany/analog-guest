@@ -41,7 +41,14 @@ export interface FollowupLogSnapshot {
 export interface FollowupGuestSnapshot {
   /** guests.opted_out_at — non-null = total suppression. */
   optedOutAt: Date | null
-  /** guests.last_inbound_at — recent-conversation suppression. */
+  /**
+   * The guest's newest inbound message at this venue — recent-conversation
+   * suppression.
+   *
+   * TAC-476: DERIVED, via the `venue_guest_activity` RPC. NOT
+   * `guests.last_inbound_at`, which is written once at guest creation, never
+   * updated, and read by nothing.
+   */
   lastInboundAt: Date | null
   /** guests.last_visit_at — used by cold_lapsed dedup keying. */
   lastVisitAt: Date | null

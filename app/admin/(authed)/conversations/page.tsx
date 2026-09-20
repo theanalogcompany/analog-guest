@@ -11,8 +11,8 @@ import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
 import type { RecentActivityRow } from './_components/recent-activity'
+import { loadVenueGuestsByActivity } from '../_lib/load-venue-guests'
 import { computeMessageStats } from './lib/compute-message-stats'
-import { activityIndex, orderGuestsByActivity } from './lib/order-guests-by-activity'
 import { type ConversationMessageRow, projectThread, wasDispatched } from './lib/project-thread'
 
 // Server orchestrator. Fetches everything the client needs in one render path
@@ -89,18 +89,12 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   // by guests.last_interaction_at, which is written once at guest creation and
   // so held enrollment date. See order-guests-by-activity.ts for why the
   // ordering is load-bearing rather than cosmetic.
-  const [{ data: guestsRaw }, { data: activityRaw }] = await Promise.all([
-    supabase
-      .from('guests')
-      .select('id, first_name, last_name, phone_number, instagram_username')
-      .eq('venue_id', venueId),
-    supabase.rpc('venue_guest_activity', { p_venue_id: venueId }),
-  ])
-  const guests = orderGuestsByActivity(
-    guestsRaw ?? [],
-    activityIndex(activityRaw ?? []),
+  const { rows: guestRows } = await loadVenueGuestsByActivity(
+    supabase,
+    venueId,
     RECENT_GUESTS_LIMIT,
-  ).map((g) => ({
+  )
+  const guests = guestRows.map((g) => ({
     id: g.id,
     firstName: g.first_name,
     lastName: g.last_name,

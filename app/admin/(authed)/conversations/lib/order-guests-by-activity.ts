@@ -34,6 +34,16 @@ export interface GuestActivityRow {
 
 export interface GuestLike {
   id: string
+  /**
+   * Secondary sort key, for guests the activity index cannot separate.
+   *
+   * Without it the whole no-activity tail falls to the id tiebreak, which is
+   * UUID order — and at a freshly seeded venue EVERY guest is in that tail, so
+   * the entire dropdown would be UUID-ordered where it used to be ordered by
+   * enrollment. Optional because the sort must not require it; absent, the
+   * behaviour is exactly that UUID fallback.
+   */
+  first_contacted_at?: string | null
 }
 
 /**
@@ -66,9 +76,10 @@ export function activityIndex(rows: readonly GuestActivityRow[]): Map<string, nu
  * their row being created and their first message landing, and dropping them
  * would make them unselectable in exactly that window.
  *
- * Ties break on guest id, so the order is total: two guests sharing a
- * millisecond (a seeded venue, or a split response) would otherwise sort
- * unstably across renders and make the dropdown jump between page loads.
+ * Ties break on `first_contacted_at` (newest first), then on guest id. Both
+ * levels earn their place: enrollment keeps the no-activity tail in the order
+ * this list used to have, and id makes the result TOTAL, so two guests sharing
+ * both keys cannot sort unstably and make the dropdown jump between renders.
  */
 export function orderGuestsByActivity<T extends GuestLike>(
   guests: readonly T[],
@@ -77,8 +88,13 @@ export function orderGuestsByActivity<T extends GuestLike>(
 ): T[] {
   return [...guests]
     .sort((a, b) => {
-      const delta = (activity.get(b.id) ?? NO_ACTIVITY) - (activity.get(a.id) ?? NO_ACTIVITY)
-      return delta !== 0 ? delta : a.id.localeCompare(b.id)
+      const byActivity =
+        (activity.get(b.id) ?? NO_ACTIVITY) - (activity.get(a.id) ?? NO_ACTIVITY)
+      if (byActivity !== 0) return byActivity
+      const byEnrollment =
+        parseActivityTime(b.first_contacted_at ?? '') - parseActivityTime(a.first_contacted_at ?? '')
+      if (byEnrollment !== 0) return byEnrollment
+      return a.id.localeCompare(b.id)
     })
     .slice(0, limit)
 }

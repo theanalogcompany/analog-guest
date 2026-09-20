@@ -94,6 +94,49 @@ describe('orderGuestsByActivity', () => {
     ])
   })
 
+  // The no-activity tail. Without the enrollment tiebreak this falls to UUID
+  // order — and at a freshly seeded venue EVERY guest is in this tail, so the
+  // whole dropdown would be UUID-ordered where it used to be by enrollment.
+  //
+  // THE IDS SORT AGAINST ENROLLMENT ON PURPOSE. With ids that happen to agree
+  // with enrollment order, deleting the tiebreak leaves the id fallback
+  // producing the same answer and the test passes against the mutant — which
+  // is exactly what the first version of this test did.
+  it('orders guests with no activity by enrollment, newest first', () => {
+    const guestsByEnrollment = [
+      { id: 'aaa-oldest', first_contacted_at: '2026-01-01T00:00:00Z' },
+      { id: 'zzz-newest', first_contacted_at: '2026-09-01T00:00:00Z' },
+    ]
+    expect(orderGuestsByActivity(guestsByEnrollment, new Map(), 10).map((g) => g.id)).toEqual([
+      'zzz-newest',
+      'aaa-oldest',
+    ])
+  })
+
+  // Enrollment is the SECOND key, never the first: a long-enrolled guest who
+  // messaged today still outranks a guest who enrolled today and never wrote.
+  it('ranks activity above enrollment', () => {
+    const index = activityIndex([
+      { guest_id: 'old-but-active', last_interaction_at: '2026-09-20T10:00:00Z' },
+    ])
+    const ordered = orderGuestsByActivity(
+      [
+        { id: 'new-and-silent', first_contacted_at: '2026-09-19T00:00:00Z' },
+        { id: 'old-but-active', first_contacted_at: '2026-01-01T00:00:00Z' },
+      ],
+      index,
+      10,
+    )
+    expect(ordered.map((g) => g.id)).toEqual(['old-but-active', 'new-and-silent'])
+  })
+
+  it('falls back to id when enrollment is absent on both', () => {
+    expect(orderGuestsByActivity([{ id: 'b' }, { id: 'a' }], new Map(), 10).map((g) => g.id)).toEqual([
+      'a',
+      'b',
+    ])
+  })
+
   it('returns everything when the list is under the cap', () => {
     expect(orderGuestsByActivity(guests, new Map(), 10)).toHaveLength(3)
   })

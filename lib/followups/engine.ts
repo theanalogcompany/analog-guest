@@ -412,15 +412,25 @@ async function scanVenue(
   // absent from the map has never sent one, which is the same "no recent
   // conversation" reading canSendFollowup gives a null.
   //
-  // DO NOT TIDY THE NULL CHECK AWAY. `db/types.ts` types every RPC return
-  // column as non-null, which is a lie the generator tells about every
-  // function in this schema — `last_inbound_at` is a filtered aggregate and is
-  // genuinely null for a guest with only outbound rows (one such guest is on
-  // file). `tsc` cannot catch that, so the runtime guard is the only guard.
+  // DO NOT TIDY THE TYPE CHECK AWAY, AND DO NOT NARROW IT TO `!== null`.
+  // `db/types.ts` types every RPC return column as non-null, which is a lie
+  // the generator tells about every function in this schema — `last_inbound_at`
+  // is a filtered aggregate and is genuinely null for a guest with only
+  // outbound rows (one such guest is on file). `tsc` cannot catch that, and
+  // `db/types.ts` is hand-patched here, so nothing binds the SQL column names
+  // to this code: the runtime guard is the only guard.
+  //
+  // It tests `typeof === 'string'` rather than `!== null` because the two
+  // differ on exactly the input this is defending against. A row arriving
+  // without the key at all — a renamed SQL alias, a PostgREST shape change —
+  // gives `undefined`, which passes `!== null`, and `new Date(undefined)` is an
+  // Invalid Date whose `getTime()` is NaN. `NaN < windowMs` is FALSE, so rule 3
+  // would silently stop suppressing: the original defect, restored, invisibly.
+  // Same one-line shape `hasPhone` uses below, for the same reason.
   const lastInboundByGuest = new Map<string, Date>()
   for (const row of activityResult.data) {
     const lastInbound: string | null = row.last_inbound_at
-    if (lastInbound !== null) {
+    if (typeof lastInbound === 'string') {
       lastInboundByGuest.set(row.guest_id, new Date(lastInbound))
     }
   }

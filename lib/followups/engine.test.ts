@@ -11,6 +11,7 @@
 // Mocks every external touchpoint at the module boundary so this test can
 // run without a DB. The engine itself is the System Under Test.
 
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/db/admin', () => ({
@@ -402,11 +403,17 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
     expect(result.suppressedBy.recent_conversation).toBe(1)
   })
 
-  // The NULL half of the defect, and the larger one: 20 of 35 scannable guests
-  // carry a null last_inbound_at, where `if (guest.lastInboundAt !== null)`
-  // short-circuits and rule 3 never runs at all. One of them has 122 inbound
-  // messages. Derived, the column's nullness is irrelevant.
-  it('suppresses a guest whose stored column is null but who has recent messages', async () => {
+  // A two-way exchange inside the window: the guest wrote and the venue
+  // replied, both an hour ago. Distinct from the case above only in having a
+  // recent OUTBOUND as well, which must not change the verdict — suppression
+  // keys on the inbound alone.
+  //
+  // It does NOT prove anything about the dead column, despite what an earlier
+  // version of this comment claimed: no fixture in this file sets a stored
+  // column at all any more (the guest fixture type has no such field), so
+  // "stored column is null" is trivially true of every test here and
+  // distinguishes nothing.
+  it('suppresses a guest mid-exchange when both directions are recent', async () => {
     const oneHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString()
     useActivity([
       {
@@ -469,6 +476,28 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
     expect(handleFollowup).toHaveBeenCalledOnce()
     expect(result.guestsDispatched).toBe(1)
     expect(result.suppressedBy.recent_conversation).toBe(0)
+  })
+
+  // A row arriving WITHOUT the key at all — a renamed SQL alias, a PostgREST
+  // shape change; `db/types.ts` is hand-patched here, so nothing binds the two.
+  // It must not become an Invalid Date.
+  //
+  // SOURCE-LEVEL, AND IT HAS TO BE. `undefined` and a correct `null` produce
+  // the SAME dispatch decision — `new Date(undefined)` is an Invalid Date,
+  // every comparison against NaN is false, so rule 3 declines to suppress
+  // exactly as it does for a null. Unlike the epoch case above, no window
+  // separates them, because NaN is not merely out of range, it is unordered.
+  // So a behavioural test here would pass against a guard narrowed back to
+  // `!== null` — the first version of this test did precisely that.
+  //
+  // What the guard buys is therefore not today's behaviour but the honesty of
+  // the value: `null` says "no inbound recorded", an Invalid Date says "an
+  // inbound, at a time that is not a time", and the next reader of
+  // `lastInboundAt` inherits whichever one we stored.
+  it('guards the activity row with a type check, not a bare null check', () => {
+    const source = readFileSync(new URL('./engine.ts', import.meta.url), 'utf8')
+    expect(source).toContain("typeof lastInbound === 'string'")
+    expect(source).not.toMatch(/if\s*\(\s*lastInbound\s*!==\s*null\s*\)/)
   })
 
   // Non-behavioural, and necessary: the mock answers rpc() whatever it is
