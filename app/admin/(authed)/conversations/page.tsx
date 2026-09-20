@@ -11,6 +11,7 @@ import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
 import type { RecentActivityRow } from './_components/recent-activity'
+import { loadVenueGuestsByActivity } from '../_lib/load-venue-guests'
 import { computeMessageStats } from './lib/compute-message-stats'
 import { type ConversationMessageRow, projectThread, wasDispatched } from './lib/project-thread'
 
@@ -83,13 +84,17 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   }
 
   // Always need the venue's guest list at this point for the dropdown.
-  const { data: guestsRaw } = await supabase
-    .from('guests')
-    .select('id, first_name, last_name, phone_number, instagram_username, last_interaction_at')
-    .eq('venue_id', venueId)
-    .order('last_interaction_at', { ascending: false, nullsFirst: false })
-    .limit(RECENT_GUESTS_LIMIT)
-  const guests = (guestsRaw ?? []).map((g) => ({
+  //
+  // TAC-476: ordered by DERIVED activity (the venue_guest_activity RPC), not
+  // by guests.last_interaction_at, which is written once at guest creation and
+  // so held enrollment date. See order-guests-by-activity.ts for why the
+  // ordering is load-bearing rather than cosmetic.
+  const { rows: guestRows } = await loadVenueGuestsByActivity(
+    supabase,
+    venueId,
+    RECENT_GUESTS_LIMIT,
+  )
+  const guests = guestRows.map((g) => ({
     id: g.id,
     firstName: g.first_name,
     lastName: g.last_name,

@@ -1771,6 +1771,15 @@ export type Database = {
           source_type: string
         }[]
       }
+      venue_guest_activity: {
+        Args: { p_venue_id: string }
+        Returns: {
+          guest_id: string
+          last_inbound_at: string
+          last_interaction_at: string
+          last_outbound_at: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
