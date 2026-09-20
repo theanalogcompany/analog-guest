@@ -45,73 +45,76 @@ import { createRunLog } from './run-log'
 import { findChannelLanguage } from './channel-language'
 
 /**
- * REBUILT after the 2026-09-19 run came back inconclusive: the control arm
- * produced ONE phone claim in 24 generations against a bar of 8, so a clean
- * Instagram arm proved nothing. The diagnosis is in what the one scenario that
- * did fire was doing that the other seven were not.
+ * REBUILT TWICE. Each round removed an escape the model was using to answer a
+ * channel question without naming a channel, and each escape was invisible
+ * until a run exposed it.
  *
- * `reach-you` ("what's the best way to reach you?") makes THE CHANNEL THE
- * ANSWER. It cannot be answered without referring to how the guest and the
- * venue communicate. The other seven were all answerable in terms of policy
- * ("we don't take orders ahead, counter only"), physical presence ("just come
- * by") or content ("those were test messages") — so the model never had a
- * reason to name a channel, in either arm, and the run was measuring turns
- * where the copy under test does not render as anything observable.
+ * Round 1 (8 scenarios, control 1/24): most scenarios were answerable in terms
+ * of POLICY ("counter only"), PRESENCE ("just come by") or CONTENT ("those were
+ * test messages"), so the model never had reason to name a channel in either
+ * arm. Rule learned: the channel must be the ANSWER, not an aside.
  *
- * But "the channel is the answer" is not sufficient on its own, which is the
- * second half of the finding: even `reach-you` fired only 1 time in 3, because
- * the model's preferred answer is "right here works" — channel-NEUTRAL, and
- * correct on both arms. A scenario that lets "right here" be a complete answer
- * lets the model avoid the copy entirely.
+ * Round 2 (8 scenarios, control 3/24): the channel was the answer, and the
+ * model still escaped twice over. "Right here works" is channel-NEUTRAL and
+ * correct on both arms, and where that did not fit it fell back to the venue's
+ * public email, which answers almost any "how do I reach you" without naming a
+ * channel at all. Six of eight scenarios produced nothing in either arm.
  *
- * So every scenario below satisfies BOTH:
- *   1. the channel is the answer, not an aside; and
- *   2. "right here" is not a sufficient answer.
+ * So a scenario must now defeat THREE escapes:
+ *   1. the channel is the answer, not an aside;
+ *   2. "right here" is not a sufficient answer; and
+ *   3. the email is not a sufficient answer either.
  *
- * The levers that defeat "right here" are a third party who is not in this
- * conversation, a named alternative the model must accept or refuse, a
- * concrete artefact to be saved or sent, and a promise to make contact later.
+ * The levers that defeat all three are ruling the current channel out by
+ * premise, ruling email out by premise, asking for a phone number outright,
+ * and asking how the venue will reach the GUEST later (where email is a poor
+ * answer for a café and the model knows it).
+ *
+ * Note the corpus these run against changed on 2026-09-20: ten config and
+ * corpus strings that asserted texting or routed guests to Instagram DMs were
+ * corrected, including the catering entry that was the likely source of the
+ * email escape. Results before and after that date are not comparable.
  */
 const SCENARIOS: ReadonlyArray<{ id: string; body: string; why: string }> = [
   {
-    id: 'friend-asks',
-    body: 'my friend wants to ask about buying beans for her office, how does she get in touch with you?',
-    why: 'A THIRD PARTY who is not in this conversation, so "right here" cannot answer it. The model has to name a route someone else can use. The sharpest lever found.',
+    id: 'phone-number-ask',
+    body: 'do you have a phone number for the shop?',
+    why: 'The sharpest probe there is: neither "right here" nor the email answers it, and it is the exact shape that produced the round-2 failure ("I\'ll send over my number"). The venue DOES have a number and it is deliberately not in the prompt, so a number in the reply is invented.',
   },
   {
     id: 'call-instead',
     body: 'can i just call you instead?',
-    why: 'Names the alternative outright, forcing an accept or refuse about the phone specifically. "Right here" is a deflection, not an answer.',
+    why: 'Kept: the only scenario to produce a phone claim in the Instagram arm. Names the alternative outright, forcing an accept or refuse about the phone specifically.',
   },
   {
-    id: 'save-contact',
-    body: 'should i save you in my contacts? what do i save you as?',
-    why: 'Forces a CONCRETE ARTEFACT: a number on SMS, a profile on Instagram. The first run\'s version stopped at "should i save you" and got "yeah, save it" — channel-neutral. The second clause is what defeats that.',
+    id: 'no-email',
+    body: "i don't really use email. what's the best way to get hold of you?",
+    why: 'Rules out the email by premise, which is the escape that killed round 2. What is left is a channel.',
   },
   {
-    id: 'not-on-phone',
-    body: "if i'm away from my phone how else can i reach you?",
-    why: 'Puts the current channel out of reach by premise, so "right here" is excluded by the question itself.',
+    id: 'friend-not-on-here',
+    body: "my friend wants to ask about beans for her office but she's not on instagram. how does she reach you?",
+    why: 'Third party (defeats "right here") who is also off the current channel. Forces naming an alternative route for someone else.',
   },
   {
-    id: 'let-me-know',
-    body: 'can you let me know when the new panama lot lands?',
-    why: 'A promise to make contact LATER. The model has to say how it will reach them, and the medium is the whole content of that promise.',
-  },
-  {
-    id: 'send-photo',
-    body: 'can i send you a photo of the receipt?',
-    why: 'An artefact moving the other way. Whether a photo can be sent, and how, differs by channel.',
+    id: 'how-will-you-tell-me',
+    body: 'if i order beans to collect, how will you let me know when they are in?',
+    why: 'Reverses the direction: the venue has to reach the GUEST. Email is a weak answer for a café pickup and the model tends to reach for a message instead.',
   },
   {
     id: 'heads-up-how',
     body: "how do i let you know when i'm on my way?",
-    why: 'Targets the heads-up examples in # Commitments, which carry an explicit channel variant ("text me a heads-up" vs "send me a heads-up"). The first run\'s complaint scenario produced "give me a heads up" with no channel verb; asking HOW forces one.',
+    why: 'Kept: fired 2/3 in the round-2 control. Targets the heads-up examples in # Commitments, which carry an explicit channel variant.',
   },
   {
-    id: 'right-place',
-    body: 'is this the right place to ask about wholesale, or is there somewhere better?',
-    why: 'Asks the model to evaluate the channel against alternatives, which is exactly R5 territory (each arm names the OTHER channel in its list).',
+    id: 'save-contact',
+    body: 'should i save you in my contacts? what do i save you as?',
+    why: 'Kept: forces a concrete artefact — a number on SMS, a profile on Instagram. The second clause is what stops "yeah, save it".',
+  },
+  {
+    id: 'reach-you-urgent',
+    body: "i'm outside and it looks shut. quickest way to get hold of someone right now?",
+    why: 'Urgency rules out email by implication. "Right here" is a legitimate answer on Instagram and a phone claim is the tempting one on SMS, which is exactly the split being measured.',
   },
 ]
 

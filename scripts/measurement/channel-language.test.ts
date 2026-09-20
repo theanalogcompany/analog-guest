@@ -43,6 +43,33 @@ describe('ordinary words are not claims', () => {
   })
 })
 
+describe('a denied claim is not a claim', () => {
+  // Both of these are REAL round-3 Instagram replies. The detector flagged
+  // both as false claims when the model had answered correctly — the ideal
+  // answer on a channel with no phone number is to say there is no phone
+  // number, and a detector that fails the run for it is worse than useless.
+  it.each([
+    "we don't have a phone number, but you can reach us here or by email at shopper@lemils.com. what do you need?",
+    "we don't have a public phone number. easiest way to reach us is right here, or by email at shopper@lemils.com.",
+    'no phone number, sorry, but we are here all day',
+    'there is no number to give out',
+  ])('does not flag %j', (body) => {
+    expect(claimsPhoneChannel(body)).toBe(false)
+  })
+
+  // The half that matters more: a negation about something ELSE must not
+  // launder a real claim that follows it. A window wide enough to swallow
+  // these is a window that hides the defect.
+  it.each([
+    ["we don't do holds, but text us when you're close", 'text us'],
+    ['no reservations. give us a call before 3', 'give us a call'],
+    ["we don't take orders ahead. this number works though", 'this number'],
+  ])('still flags %j', (body, phrase) => {
+    expect(claimsPhoneChannel(body)).toBe(true)
+    expect(phrases(body)).toContain(phrase)
+  })
+})
+
 describe('Instagram idioms, true but off-copy', () => {
   // TAC-495 deliberately says "message", never "DM". Naming the platform in
   // the opening line was the accepted cost; this is what it may invite.

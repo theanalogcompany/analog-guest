@@ -83,6 +83,33 @@ const PATTERNS: readonly Pattern[] = [
 const CONTEXT_CHARS = 40
 
 /**
+ * A claim that is DENIED is not a claim. "We don't have a phone number" is the
+ * correct answer on Instagram and the first version of this detector flagged it
+ * as a false claim — twice in one run, which would have read as a failure when
+ * the model had done exactly the right thing.
+ *
+ * Deliberately narrow: a negation must appear within this many characters
+ * BEFORE the match, in the same sentence. Widening it would start swallowing
+ * real claims that happen to follow an unrelated negative ("we don't do holds,
+ * but text us"), which is the failure that matters. The window is short enough
+ * that the two cases above are separated by their own commas and full stops.
+ */
+const NEGATION_WINDOW = 28
+const NEGATION = /\b(?:no|not|don'?t|doesn'?t|dont|never|without|haven'?t|hasn'?t)\b/i
+
+function isDenied(body: string, matchIndex: number): boolean {
+  const from = Math.max(0, matchIndex - NEGATION_WINDOW)
+  const before = body.slice(from, matchIndex)
+  // Only the current clause counts. A full stop resets the scope, and so does
+  // a contrastive conjunction: in "we don't do holds, but text us when you're
+  // close" the negation governs the holds, not the texting, and suppressing
+  // that would hide a real claim behind an unrelated negative. Found by the
+  // test written for exactly that case.
+  const clause = before.split(/[.!?]|\b(?:but|though|however|otherwise)\b/i).pop() ?? before
+  return NEGATION.test(clause)
+}
+
+/**
  * Every channel-language match in a generated body, in the order they appear.
  * Overlapping patterns can both match the same span; that is deliberate, since
  * each is reported with its own phrase and a human reads the line once.
@@ -94,6 +121,11 @@ export function findChannelLanguage(body: string): ChannelLanguageMatch[] {
     re.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = re.exec(body)) !== null) {
+      // A denied claim is not a claim — see isDenied.
+      if (kind === 'phone_claim' && isDenied(body, m.index)) {
+        if (m[0].length === 0) re.lastIndex += 1
+        continue
+      }
       const start = Math.max(0, m.index - CONTEXT_CHARS)
       const end = Math.min(body.length, m.index + m[0].length + CONTEXT_CHARS)
       matches.push({
