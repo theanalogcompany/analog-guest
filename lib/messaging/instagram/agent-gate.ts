@@ -1,15 +1,38 @@
-// TAC-468: agent replies are OFF for Instagram guests until outbound exists.
+// The agent REPLIES to Instagram guests. Flipped by TAC-469's PR C on
+// 2026-09-20, alone and last, so a rollback is a one-line revert of this
+// constant and nothing else.
 //
-// TAC-469 built outbound (lib/agent/dispatch-reply.ts routes a reply by the
-// conversation's channel; lib/agent/dispatch-instagram-reply.ts sends it) and
-// deliberately leaves this gate SHUT. Flipping INSTAGRAM_AGENT_REPLIES_ENABLED
-// to true is its own change, made last and alone so rolling it back is a
-// one-line revert, after the TAC-492 device pass (on a fresh Instagram account:
-// reopening a deleted thread reuses the guest) and the pre-flight below. The
-// constant and the `enabled` parameter are deleted in a later cleanup, once
-// replies have run for a while. The call site is already in place in
-// app/api/webhooks/instagram/route.ts; agent-gate.test.ts pins the constant at
-// false and changes with it.
+// TAC-468 added the handler with replies OFF; TAC-469 built outbound
+// (lib/agent/dispatch-reply.ts routes a reply by the conversation's channel,
+// lib/agent/dispatch-instagram-reply.ts sends it) and deliberately left the
+// gate shut so the flip could be its own change. The constant and the
+// `enabled` parameter are deleted in a later cleanup, once replies have run
+// for a while; until then agent-gate.test.ts pins the constant at true AND
+// keeps the shut behaviour covered through the parameter, because that is what
+// a rollback restores.
+//
+// ROLLING BACK: set this to false. Nothing else has to move. In-flight drafts
+// are unaffected — a queued Instagram card stays queued and an operator can
+// still send it while the window is open — and no guest gets a partial
+// conversation, because the gate decides whether the agent RUNS, not whether a
+// send succeeds.
+//
+// The pre-flight this waited on, as closed (TAC-469):
+//   - Ice-breaker titles vs the menu: live config read from Meta. One title,
+//     "Hi Le Mil's!", greeting-shaped, no menu collision. RE-CHECK after the
+//     Phase 3 OAuth connect: titles do not carry across accounts and nothing
+//     automates setting them.
+//   - "text" / "number" / "DM" in Instagram replies: measured, 0 phone claims
+//     in 24 Instagram generations across two configurations, the second with
+//     the grounding backstop in the loop. The control was recorded as SPENT
+//     rather than passed — every fix that cleaned the Instagram arm also
+//     removed a control provocation. Not proof; enough for a one-venue pilot
+//     behind an operator queue.
+//   - STOPs received while the gate was shut: all 5 Instagram inbound rows
+//     read, 3 guests, no opt-out language of any kind. A STOP sent as a voice
+//     note or sticker would be invisible (those are logged, not saved), which
+//     the read cannot exclude.
+//   - TAC-492 device pass on a fresh Instagram account.
 //
 // What the shut gate was hiding, and where each stands (TAC-469):
 //   - A postback saved with no title (body '', no media). HANDLED: the agent is
@@ -20,9 +43,11 @@
 //     message instead. Meta has always sent a title in what was captured.
 //   - A message the guest unsent is only logged (message_deleted), so it stays
 //     in the thread and in the agent's history. ACCEPTED, not fixed.
-//   - A STOP received while the gate was shut was never classified. MANUAL,
-//     before the flip: read the Instagram inbound rows for one. Opt-out is not
-//     recorded on any channel yet (TAC-475) either way.
+//   - A STOP received while the gate was shut was never classified. DONE
+//     2026-09-20: every Instagram inbound row read, none is an opt-out. Opt-out
+//     is still not recorded on any channel (TAC-475), so an Instagram guest who
+//     says STOP from here on is handled only by the classifier inside the agent
+//     run this flip turns on, and PR B still records a follow-up task for them.
 //   - The icebreaker titles (TAC-492). A QR guest's first message is the title
 //     of the icebreaker they tapped, which lives in Meta's settings and nowhere
 //     in this repo. RULED 2026-09-19: keep every title a greeting. A question-
@@ -47,11 +72,10 @@
 //     than a false claim, and it reaches only guests just created (the opener
 //     still needs qr_scan, no prior rows, creation within 7 days). Revisit
 //     before a second venue.
-//   - Measure it: generate Instagram replies on first-visit and ordinary turns
-//     and look for a phone number, texting, and Instagram idioms ("DM", "check
-//     our stories"). MANUAL, before the flip; post the bar and the arms first.
-//     If the Instagram voice reads more formal than Sendblue's, look first at
-//     the casual formality line ("message a friend"; see serializers.ts).
+//   - Measure it. DONE: see the pre-flight above. The formality watch-item
+//     stands — if the Instagram voice reads more formal than Sendblue's, look
+//     first at the casual formality line ("message a friend"; serializers.ts),
+//     which the measurement did not test for.
 //   - Surface an unresolved channel. DONE: buildRuntimeContext raises
 //     conversation_channel_unresolved (PostHog and Slack), and nothing routes
 //     a send on a null channel.
@@ -75,7 +99,7 @@
 
 import type { InstagramEventOutcome } from './handle-events'
 
-export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = false
+export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = true
 
 /**
  * The message row to hand to the agent for this outcome, or null. Only a
