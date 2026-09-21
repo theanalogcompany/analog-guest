@@ -446,6 +446,13 @@ export function venueInfoToProse(venueInfo: VenueInfo): string {
  * and what gives it the labels it needs to pick the link that answers the
  * question actually asked.
  *
+ * "including the https:// at the start" is from the device UAT (2026-09-21):
+ * the agent wrote the right page as `lemils.com/products/le-mils-budan-bold`,
+ * the way anyone writes a link in a DM, and the draft was held. The detector
+ * now supplies a missing scheme so that case matches anyway, but a link the
+ * model writes in full is one the guest can tap in every client, so the
+ * instruction says to copy the scheme rather than leaving it to the check.
+ *
  * The empty state's last sentence is load-bearing. The venue's own knowledge
  * entries say "on lemils.com", the detector never fires on a bare domain, and
  * without that sentence a blanket "no web addresses" would quietly suppress
@@ -466,7 +473,7 @@ export function formatVenueLinks(rawLinks: unknown): string {
     'These are the only links you may share:',
     listed,
     '',
-    'Copy a link exactly as it appears here, character for character. Share one only when it answers what the guest actually asked. Never share a link that is not on this list, and never build one from a pattern.',
+    'Copy a link exactly as it appears here, character for character, including the https:// at the start. Share one only when it answers what the guest actually asked. Never share a link that is not on this list, and never build one from a pattern.',
   ].join('\n')
 }
 

@@ -2818,9 +2818,26 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
     expect(out).toContain('These are the only links you may share:')
     expect(out).toContain(`- ${A.label}: ${A.url}`)
     expect(out).toContain(`- ${B.label}: ${B.url}`)
-    expect(out).toContain('Copy a link exactly as it appears here, character for character.')
+    expect(out).toContain(
+      'Copy a link exactly as it appears here, character for character, including the https:// at the start.',
+    )
     expect(out).toContain('never build one from a pattern.')
     expect(out).not.toContain('There are no links you may share.')
+  })
+
+  it('names the scheme in the copy instruction, in one contiguous clause', () => {
+    // The device UAT failure was a link written without its scheme. The
+    // clause is pinned WHOLE rather than as two substrings: disjoint
+    // assertions let the sentence carrying the meaning be reversed while
+    // every fragment survives, which is the trap TAC-409's prompt-content
+    // tests were rewritten to close.
+    const out = venueInfoToProse(makeVenueInfo({ links: [A] }))
+    expect(out).toContain('character for character, including the https:// at the start')
+  })
+
+  it('does not put the scheme instruction in the empty state, which has nothing to copy', () => {
+    const out = venueInfoToProse(makeVenueInfo())
+    expect(out).not.toContain('https://')
   })
 
   it('renders only the usable entries, and falls to the empty state if none are', () => {

@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.55.0 (TAC-509: the curated link allowlist section)', () => {
-    expect(PROMPT_VERSION).toBe('v1.55.0')
+  it('is v1.56.0 (TAC-509 follow-up: the Links copy names the scheme)', () => {
+    expect(PROMPT_VERSION).toBe('v1.56.0')
   })
 })
 

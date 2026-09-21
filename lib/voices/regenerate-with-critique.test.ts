@@ -257,7 +257,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         classifierConfidence: 0.8,
         reasoning: 'r',
         crisisSafety: true,
-        promptVersion: 'v1.55.0',
+        promptVersion: 'v1.56.0',
       },
     })
   })
