@@ -136,3 +136,79 @@ describe('findUnverifiedUrls — a single trailing slash is insignificant', () =
     expect(findUnverifiedUrls(`see ${LISTED}`, [`  ${LISTED}  `])).toEqual([])
   })
 })
+
+describe('findUnverifiedUrls — a missing scheme is https', () => {
+  // The device UAT failure, 2026-09-21: asked where to buy the beans, the
+  // agent wrote the RIGHT page without its scheme and the draft was held.
+  it('matches the schemeless form of a listed https url', () => {
+    expect(
+      findUnverifiedUrls(
+        'grab them at lemils.com/products/le-mils-budan-bold',
+        [LISTED],
+      ),
+    ).toEqual([])
+  })
+
+  it('matches the schemeless form in the other direction too', () => {
+    // Symmetric, because the scheme is canonicalized on both sides rather
+    // than special-cased on one. A hand-typed list entry with no scheme is
+    // the same destination as the https:// link the model writes.
+    expect(
+      findUnverifiedUrls(`see ${LISTED}`, ['lemils.com/products/le-mils-budan-bold']),
+    ).toEqual([])
+  })
+
+  it('reconciles the missing scheme and the trailing slash together', () => {
+    expect(
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold/', [LISTED]),
+    ).toEqual([])
+    expect(
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold', [`${LISTED}/`]),
+    ).toEqual([])
+  })
+
+  it('does NOT read http:// as a missing scheme', () => {
+    // The mutant this kills: canonicalizing an EXPLICIT http:// up to https,
+    // or stripping the scheme from both sides before comparing. http is a
+    // different destination, not an omission, and only an ABSENT scheme is
+    // supplied.
+    expect(findUnverifiedUrls('see http://lemils.com/products/le-mils-budan-bold', [LISTED])).toEqual(
+      ['http://lemils.com/products/le-mils-budan-bold'],
+    )
+    expect(
+      findUnverifiedUrls(`see ${LISTED}`, ['http://lemils.com/products/le-mils-budan-bold']),
+    ).toEqual([LISTED])
+  })
+
+  it('still holds a schemeless link whose path, case or query differs', () => {
+    // Supplying the scheme must not loosen anything else.
+    expect(findUnverifiedUrls('see lemils.com/products/budan', [LISTED])).toEqual([
+      'lemils.com/products/budan',
+    ])
+    expect(findUnverifiedUrls('see lemils.com/Products/Le-Mils-Budan-Bold', [LISTED])).toEqual([
+      'lemils.com/Products/Le-Mils-Budan-Bold',
+    ])
+    expect(
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold?v=1', [LISTED]),
+    ).toEqual(['lemils.com/products/le-mils-budan-bold?v=1'])
+  })
+
+  it('still reports the schemeless link verbatim, not canonicalized', () => {
+    // The regen feedback and the PostHog event quote what the model wrote.
+    // Reporting "https://lemils.com/products/budan" for a body that said
+    // "lemils.com/products/budan" would send the model looking for a
+    // difference that is not there.
+    expect(findUnverifiedUrls('see lemils.com/products/budan', [])).toEqual([
+      'lemils.com/products/budan',
+    ])
+  })
+
+  it('leaves a bare domain alone even when the list holds its https form', () => {
+    // Supplying the scheme happens at COMPARISON time. Extraction is
+    // unchanged, so "lemils.com" is still prose and never reaches the
+    // comparison at all.
+    expect(findUnverifiedUrls('order on lemils.com whenever', ['https://lemils.com'])).toEqual([])
+    expect(findUnverifiedUrls('order on lemils.com/ whenever', ['https://lemils.com'])).toEqual([])
+    expect(extractUrls('order on lemils.com whenever')).toEqual([])
+  })
+})
