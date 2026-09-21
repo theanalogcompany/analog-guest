@@ -180,7 +180,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.56.0',
+    promptVersion: 'v1.57.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -351,10 +351,16 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
-  // AC2 ("the fail-open/closed posture is explicit and tested in both
-  // directions") exercised at the orchestrator boundary — a degraded call
-  // must never queue on its own, a truncated one always must.
-  it('a degraded grounding call does not queue on its own (fail-open reaches send)', async () => {
+  // TAC-424 RENAMES this test to what it actually asserts. It was called "a
+  // degraded grounding call does not queue on its own (fail-open reaches
+  // send)" while mocking `{ status: 'clean' }` — so it described a posture
+  // through a fixture that could never exercise it, and after TAC-424 made a
+  // degraded call queue, it would have gone on passing while certifying the
+  // opposite of the shipped behaviour. That is this repo's catalogued pair (a
+  // test name is not evidence of what the test checks; a mocked flag that
+  // contradicts production certifies the bug), and the real degraded case is
+  // the test directly below.
+  it('a clean grounding call reaches send', async () => {
     verifyGroundingStageMock.mockResolvedValueOnce({ status: 'clean' })
     verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
@@ -369,6 +375,45 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     expect(groundingArg).toEqual({ status: 'clean' })
     expect(result.status).toBe('sent')
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+  })
+
+  // TAC-424: the posture both directions, at the orchestrator boundary. A
+  // degraded result must reach the gate as `degraded` — not be flattened to
+  // `clean` on the way — and must queue.
+  it('a degraded grounding call queues (fail-closed since TAC-424)', async () => {
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'degraded' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['grounding_check_failed', 'grounding_check_degraded'],
+      primaryTrigger: 'grounding_check_failed',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-degraded-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_1', triggeredAt: new Date() },
+    })
+
+    // The verdict reaches the gate as `degraded`, not flattened to `clean` on
+    // the way. That flattening IS the defect this ticket closed, so asserting
+    // the queue alone would not distinguish the fix from a gate mock that
+    // queues whatever it is handed.
+    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingArg).toEqual({ status: 'degraded' })
+    expect(result.status).toBe('queued')
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
   it('a truncated grounding call queues (fail-closed)', async () => {

@@ -2007,6 +2007,157 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(out).toContain('status: pending_ack')
   })
 
+  // ---- TAC-389: the decline-turn intro ----
+  //
+  // Both directions are asserted on every claim. An intro test that only ever
+  // renders one branch cannot tell "the decline copy is present" from "the
+  // decline copy is present on every turn", and the ordinary branch is the one
+  // the other ~thousand turns a day read.
+
+  const ARRIVAL_ASK_SENTENCES = [
+    "include the arrival ask in the same breath",
+    "you MAY weave the ask in naturally",
+  ]
+
+  it('drops the arrival-ask sentences on a decline turn', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).toContain('## Active commitments')
+    for (const sentence of ARRIVAL_ASK_SENTENCES) {
+      expect(out).not.toContain(sentence)
+    }
+  })
+
+  it('keeps the arrival-ask sentences on every other turn', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
+    for (const sentence of ARRIVAL_ASK_SENTENCES) {
+      expect(out).toContain(sentence)
+    }
+  })
+
+  // The intro is line 2 of the block: ['## Active commitments', intro, lines].
+  function introLineOf(out: string): string {
+    return out.slice(out.indexOf('## Active commitments')).split('\n')[1]
+  }
+
+  it('renders the decline intro exactly, and nothing else', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    // EXACT equality, not `toContain` on fragments. Three mutants survived the
+    // fragment version: an extra arrival invitation APPENDED to the intro, a
+    // REWORDED one ("you may still ask when they're coming in"), and the two
+    // sentences SWAPPED. None of them can survive this. Fragments also cannot
+    // express "and nothing else", which is the whole claim being made.
+    expect(introLineOf(out)).toBe(
+      'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +
+        'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it. ' +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
+    )
+  })
+
+  it('renders the ordinary intro exactly, unchanged from before TAC-389', () => {
+    // Transcribed from v1.56.0, not read back out of the source. The ordinary
+    // branch is what the other ~thousand turns a day see; "byte for byte
+    // unchanged" is a claim, and this is what makes it one that can fail.
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    expect(introLineOf(out)).toBe(
+      'Open promises this venue has made to this guest. ' +
+        "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
+        "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally \u2014 but never force it, never pester. " +
+        "Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
+    )
+  })
+
+  it('never shows the decline intro on an ordinary turn', () => {
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    expect(out).not.toContain('The promise this message is declining')
+    expect(out).not.toContain('This message cancels the promise')
+    expect(out).toContain('Open promises this venue has made to this guest.')
+  })
+
+  it('does not claim to be declining anything when the flag is absent on a manual turn', () => {
+    // The ordinary Command Center Follow Up button (THE-232) also renders
+    // category 'manual'. The category must not be what switches the intro.
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'manual', NOW)
+    expect(out).not.toContain('The promise this message is declining')
+    expect(out).toContain('Open promises this venue has made to this guest.')
+  })
+
+  it('keeps the uuid prohibition on the decline turn (TAC-302)', () => {
+    // The id segment still renders on this branch, so the only thing between a
+    // rendered uuid and a guest reading one aloud has to render with it.
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).toContain('id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    expect(out).toContain(
+      'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
+    )
+  })
+
+  it('renders the line identically on both branches', () => {
+    // Ruling 2 changed the intro and nothing else. A per-line difference would
+    // be a second, unruled change hiding behind this one.
+    const row = commitment({ status: 'pending_ack' })
+    const declineOut = runtimeToProse(
+      { activeCommitments: [row], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    const ordinaryOut = runtimeToProse({ activeCommitments: [row] }, 'manual', NOW)
+    const lineOf = (out: string) =>
+      out.split('\n').find((l) => l.startsWith('- [comp] oat latte'))
+    expect(lineOf(declineOut)).toBeDefined()
+    expect(lineOf(declineOut)).toBe(lineOf(ordinaryOut))
+  })
+
+  it('omits the block on a decline turn when the declined row is gone', () => {
+    // handle-operator-decline.ts filters to the declined id and leaves an empty
+    // result alone. An intro with no rows under it would be a header claiming a
+    // promise that is not shown.
+    const out = runtimeToProse(
+      { activeCommitments: [], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).not.toContain('## Active commitments')
+    expect(out).not.toContain('The promise this message is declining')
+  })
+
+  it('carries no em dash in the sentences written for the decline turn', () => {
+    // buildDeclineHint avoids them on this same path for this same reason:
+    // Sonnet echoes the punctuation it is shown and R3 forbids one in the
+    // output, so an echoed dash costs a regen attempt. The retained id sentence
+    // has one and is excluded by name, not by loosening the check.
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    const block = out
+      .slice(out.indexOf('## Active commitments'))
+      .split('\n\n')[0]
+    const introOnly = block
+      .split('Each line carries an internal')[0]
+      .replace('## Active commitments', '')
+    expect(introOnly).not.toContain('\u2014')
+  })
+
   it('renders between Guest context and Recent conversation when both present', () => {
     const out = runtimeToProse(
       {
@@ -2652,6 +2803,33 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
       expect(runtimeToProse({ emojiDirective: directive }, 'comp_complaint', NOW)).not.toContain(
         '## Emoji for this message',
       )
+    }
+  })
+
+  // TAC-389. Not a category: a decline renders as 'manual', which ordinary
+  // Command Center follow-ups (THE-232) also use and which keeps the
+  // directive. Only the per-turn flag separates them, which is why the gate
+  // takes it rather than gaining a third entry in the category list.
+  it('never renders on a decline turn, on either branch', () => {
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(
+        runtimeToProse(
+          { emojiDirective: directive, isOperatorDecline: true },
+          'manual',
+          NOW,
+        ),
+      ).not.toContain('## Emoji for this message')
+    }
+  })
+
+  it('still renders on an ordinary manual follow-up, unchanged', () => {
+    // The other half of the same claim. A gate keyed on the category would
+    // pass the test above and silently strip the directive from every
+    // Command Center follow-up too.
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(
+        runtimeToProse({ emojiDirective: directive }, 'manual', NOW),
+      ).toContain('## Emoji for this message')
     }
   })
 

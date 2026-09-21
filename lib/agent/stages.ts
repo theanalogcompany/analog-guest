@@ -364,15 +364,20 @@ export const APPROVAL_TRIGGERS = {
   PROSE_PROMISE_BACKSTOP: 'prose_promise_backstop',
   // TAC-401: the prose-promise check produced no readable verdict.
   //
-  // FAILS CLOSED, and unlike GROUNDING_CHECK_FAILED that is true of EVERY
-  // failure mode here, not only truncation. The grounding check fails open on
-  // a transient fault because it degrades to a defensible prior — the model's
-  // own knowledgeGap self-report, which that check is a second opinion on.
-  // This check has no prior to degrade to: the self-flag caught 0 of 220 and
-  // the ruling forbids depending on it, so failing open returns to nothing at
-  // all. A transient fault is retried once first (ruled 2026-09-21), which is
-  // what pays for the closed posture: the flood case narrows from "any
-  // hiccup" to "a fault that survives two immediate attempts".
+  // FAILS CLOSED on every failure mode, after one retry on a transient fault
+  // (ruled 2026-09-21). TAC-424 gave GROUNDING_CHECK_FAILED the same shape, so
+  // the contrast this comment used to draw — that grounding fails open on a
+  // transient fault while this one does not — is gone, and the sentence
+  // asserting it was corrected there and here.
+  //
+  // What has NOT changed is why this one must never be loosened, even if
+  // grounding's posture is revisited again: grounding at least degrades to a
+  // defensible prior, the model's own knowledgeGap self-report, which it is a
+  // second opinion on. This check has no prior to degrade to — the self-flag
+  // caught 0 of 220 and the ruling forbids depending on it — so failing open
+  // here returns to nothing at all. The retry is what pays for the closed
+  // posture on a check this broad: the flood case narrows from "any hiccup" to
+  // "a fault that survives two immediate attempts".
   //
   // A DISTINCT trigger rather than folding into PROSE_PROMISE_BACKSTOP, for
   // the reason TAC-367 split GROUNDING_CHECK_FAILED out: telling an operator
@@ -1007,6 +1012,45 @@ export type GroundingBackstopResult =
   | { status: 'degraded' }
 
 /**
+ * TAC-364, made TOTAL by TAC-424. What each grounding state records on
+ * messages.ungrounded_claims.
+ *
+ * This was a ternary chain (`flagged ? claims : clean ? [] : null`) and the
+ * comment above it claimed a sixth state would have to "decide what it
+ * records". It would not have: a sixth member of the union fell through to the
+ * `null` default, fired no trigger, and SENT — with tsc clean and every test
+ * passing. That was caught in code review, by someone adding the state and
+ * running the tree rather than reading the sentence, and it is this repo's
+ * signature defect class committed inside the ticket that exists to close an
+ * instance of it (CLAUDE.md, Common gotchas).
+ *
+ * `satisfies Record<GroundingBackstopResult['status'], …>` is what makes the
+ * claim true. A sixth state now fails to compile here until someone says what
+ * it writes to the row. Keyed on `status` rather than written as a switch
+ * because the map is also the thing to read when answering "what does this
+ * column mean" — the three-state contract migration 039 documents, plus the
+ * two no-verdict states, in five lines.
+ */
+const UNGROUNDED_CLAIMS_BY_STATUS = {
+  // The check ran and flagged these. Verbatim, so the operator can see which
+  // sentence is the suspect one.
+  flagged: (g) => (g.status === 'flagged' ? g.claims : null),
+  // The check RAN and found nothing. Distinct from null, and that distinction
+  // is the whole reason the column is nullable.
+  clean: () => [],
+  // It ran but the cap cut the verdict off, so we have no claim information.
+  truncated: () => null,
+  // Two attempts both faulted, so likewise none. TAC-424: this used to be
+  // `[]`, byte-identical to a clean pass, which was the defect.
+  degraded: () => null,
+  // The check did not run at all (demo guest, or the model self-reported).
+  skipped: () => null,
+} as const satisfies Record<
+  GroundingBackstopResult['status'],
+  (grounding: GroundingBackstopResult) => string[] | null
+>
+
+/**
  * TAC-350: independent grounding backstop. Runs a second, deterministic-in-
  * spirit check (lib/ai/verify-grounding.ts) against a reply the model has
  * ALREADY self-certified as grounded (`knowledgeGap === false`) — the exact
@@ -1052,7 +1096,11 @@ export type GroundingBackstopResult =
  * open here bought no availability at all; it only left the one path where an
  * invented fact could reach a guest unchecked. The retry is what pays for the
  * closed posture: the flood case narrows from a single Haiku blip to a fault
- * that survives two immediate attempts, which is an outage rather than a hiccup.
+ * that survives two immediate attempts OF OURS, which is an outage rather than
+ * a hiccup — and rather more than two in provider terms, since this call does
+ * not set `maxRetries` and the AI SDK's own default applies inside each one.
+ * That strengthens the affordability argument; it just means "one retry"
+ * should not be read as two round trips.
  *
  * TAC-367's truncation carve-out is unchanged in effect and no longer a
  * carve-out: the model produced a verdict and the cap made it unreadable, and
@@ -1078,7 +1126,12 @@ export async function verifyGroundingStage(
 
   const isProactive = ctx.currentMessage === null
 
-  let r = await verifyGrounding({
+  // TAC-424: built once and passed twice. The retry below used to restate
+  // this literal, which doubled the conflict surface inside the one function
+  // TAC-502 is going to edit — and TAC-502's whole subject is what the
+  // verifier is given, so a duplicated input object is the worst place for it
+  // to land. One site to change, and the parity test catches a divergence.
+  const verifyInput = {
     inboundBody: ctx.currentMessage?.body ?? '',
     replyBody: generation.body,
     venueInfo: ctx.venue.venueInfo,
@@ -1094,22 +1147,30 @@ export async function verifyGroundingStage(
     // that against Le Mil's live config. (## Operator instruction renders on
     // the followup path too, since TAC-376, so it can now appear here.)
     runtimeContext: generation.userPrompt,
-  })
+  }
+
+  let r = await verifyGrounding(verifyInput)
   // TAC-424: one immediate retry, transient faults only. Truncation is
   // excluded by errorCode rather than by message text, which is
   // provider-formatted and not a contract. Same guard verifyProsePromiseStage
   // uses, and it must stay keyed on the code for the same reason.
+  //
+  // `invalid_input` carries NO errorCode, so it lands on the transient side
+  // and is retried: one wasted call on a deterministic failure, and it now
+  // holds the draft where it used to pass through. Unreachable today
+  // (GeneratedMessageSchema.body is z.string().min(1)), and "no code means
+  // transient" is the deliberate default direction — the same one the
+  // unrecognized-errorCode test pins — so this is recorded rather than
+  // special-cased.
+  //
+  // "One retry" counts OUR attempts. The AI SDK applies its own default
+  // maxRetries inside each call, so a degraded verdict means roughly six
+  // provider attempts with backoff, not two. That makes the affordability
+  // argument stronger, not weaker, but the figure should not be misread.
   let retried = false
   if (!r.ok && r.errorCode !== VERIFY_GROUNDING_TRUNCATED_ERROR_CODE) {
     retried = true
-    r = await verifyGrounding({
-      inboundBody: ctx.currentMessage?.body ?? '',
-      replyBody: generation.body,
-      venueInfo: ctx.venue.venueInfo,
-      knowledgeChunks: ctx.knowledgeCorpus ?? undefined,
-      isProactive,
-      runtimeContext: generation.userPrompt,
-    })
+    r = await verifyGrounding(verifyInput)
   }
   if (!r.ok) {
     // TAC-367: truncation and transient faults both land here and are NOT
@@ -2082,12 +2143,7 @@ export async function applyApprovalPolicyStage(
     // question migration 039 built it to answer. `degraded` is its own state
     // now and maps to NULL with the other two no-verdict outcomes. Folding it
     // back into `[]` is what the mapping test exists to fail on.
-    ungroundedClaims:
-      grounding.status === 'flagged'
-        ? grounding.claims
-        : grounding.status === 'clean'
-          ? []
-          : null,
+    ungroundedClaims: UNGROUNDED_CLAIMS_BY_STATUS[grounding.status](grounding),
     // TAC-401: the carrier the prose-promise check produced, threaded to the
     // persist layer so an operator approving the card creates a real
     // guest_commitments row. Null whenever the check supplied nothing, and
@@ -2533,6 +2589,11 @@ export function buildAiRuntime(
     // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
     openIntentions: renderedIntentionLines(ctx),
     firstTouchAfterQrScan,
+    // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
+    // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
+    // ordinary Command Center manual follow-up) leaves it false, so the
+    // `## Active commitments` intro is unchanged everywhere else.
+    isOperatorDecline: ctx.followupTrigger?.isOperatorDecline === true,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

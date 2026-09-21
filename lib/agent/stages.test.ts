@@ -519,7 +519,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.56.0',
+        promptVersion: 'v1.57.0',
         crisisSafety: true,
       },
     })
@@ -537,7 +537,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.56.0',
+        promptVersion: 'v1.57.0',
         crisisSafety: false,
       },
     })
@@ -1665,6 +1665,48 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
   })
 })
 
+describe('buildAiRuntime — operator decline wiring (TAC-389)', () => {
+  function declineCtx(
+    trigger: Partial<NonNullable<RuntimeContext['followupTrigger']>> | null,
+  ): RuntimeContext {
+    return makeCtx({
+      currentMessage: null,
+      followupTrigger: trigger
+        ? ({
+            reason: 'manual',
+            triggeredAt: new Date(),
+            ...trigger,
+          } as RuntimeContext['followupTrigger'])
+        : null,
+    })
+  }
+
+  it('is true when the decline orchestrator set the flag', () => {
+    const aiRuntime = buildAiRuntime(declineCtx({ isOperatorDecline: true }))
+    expect(aiRuntime.isOperatorDecline).toBe(true)
+  })
+
+  it('is false for an ordinary manual follow-up, which shares reason=manual', () => {
+    // The Command Center Follow Up button (THE-232) builds the same
+    // reason='manual' trigger. If the reason alone drove the intro, every one
+    // of those would silently lose the arrival ask.
+    const aiRuntime = buildAiRuntime(
+      declineCtx({ metadata: { hint: 'tell her about the new Panama lot' } }),
+    )
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+
+  it('is false on a cron follow-up', () => {
+    const aiRuntime = buildAiRuntime(declineCtx({ reason: 'day_3' }))
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+
+  it('is false on the inbound path, where there is no trigger at all', () => {
+    const aiRuntime = buildAiRuntime(declineCtx(null))
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+})
+
 describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
   const FRESH = new Date() // "now" for createdAt, well inside every window
   const STALE = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 days ago
@@ -2322,7 +2364,11 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         makeGenerationResult({ knowledgeGap: status === 'skipped', voiceFidelity: 0.5 }),
         { status },
       )
-      if (decision.action !== 'queue') continue
+      // `expect(...).toBe('queue')` rather than `continue`, matching every
+      // sibling in this block: a `continue` would run zero assertions and stay
+      // green if the gate ever stopped queueing these cases.
+      expect(decision.action).toBe('queue')
+      if (decision.action !== 'queue') return
       expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
     }
   })
@@ -3879,9 +3925,16 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
 
   // TAC-424 acceptance criterion 5, stated as one assertion rather than left
   // to be inferred from the per-state tests above: the five grounding states
-  // must not collapse. Written as a table so a sixth state has to decide what
-  // it records, and so that folding `degraded` back into the pass value fails
+  // must not collapse, and folding `degraded` back into the pass value fails
   // HERE, by name, rather than as a confusing mismatch in a neighbouring test.
+  //
+  // What this test does NOT do, contrary to what an earlier version of this
+  // comment claimed, is force a SIXTH state to decide what it records — a
+  // table of five literal calls cannot see a sixth union member. Code review
+  // demonstrated exactly that: adding one compiled clean and passed every
+  // test, mapping to null and sending. That guarantee now lives where it can
+  // be real, on UNGROUNDED_CLAIMS_BY_STATUS's `satisfies` clause in stages.ts,
+  // which fails tsc instead.
   it('maps every grounding state to a distinct record, and degraded is not a pass', async () => {
     const mapped = async (
       grounding: Parameters<typeof applyApprovalPolicyStage>[2],
@@ -4334,6 +4387,21 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
       checkDidNotComplete: false,
     })
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED])).toEqual({
+      isGapTurn: false,
+      checkDidNotComplete: true,
+    })
+    // TAC-424: the pair the gate actually emits on a degraded turn, and the
+    // marker alone. The pair is what recovery sees in production; the marker
+    // alone is unreachable today and is asserted so that making it reachable
+    // (by pushing only the more specific code) does not silently turn race
+    // recovery into a draft-destroyer while the gate spares the same turn.
+    expect(
+      gapFlagsFromTriggers([
+        APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
+      ]),
+    ).toEqual({ isGapTurn: false, checkDidNotComplete: true })
+    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED])).toEqual({
       isGapTurn: false,
       checkDidNotComplete: true,
     })

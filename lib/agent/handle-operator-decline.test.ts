@@ -65,6 +65,15 @@ describe('handle-operator-decline structural invariants (TAC-299)', () => {
 
 // ---- behavior tests ----
 
+// The end-to-end binding test below importActual's ./stages for the real
+// buildAiRuntime. stages.ts reaches Voyage at module load, whose ESM build
+// trips vitest's directory-import resolver — the documented trap. Mock the SDK
+// leaf only, exactly as lib/tunables/manifest.test.ts does; buildAiRuntime is
+// pure and never touches it.
+vi.mock('voyageai', () => ({
+  VoyageAIClient: class {},
+}))
+
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
 const generateStageMock = vi.fn()
@@ -149,11 +158,16 @@ const GUEST_ID = '11111111-1111-4111-8111-111111111111'
 const COMMITMENT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const MESSAGE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const EXISTING_PENDING_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+// TAC-389 ruling 4: a sibling the guest also has open. The production shape,
+// and the one the old `activeCommitments: []` fixture could not reach: this
+// path always has at least the declined row, because the route loaded it by id
+// to get here.
+const SIBLING_COMMITMENT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
 function makeCtx() {
   return {
     agentRunId: 'agent-run-1',
-    venue: { id: VENUE_ID, slug: 'v', brandPersona: {}, venueInfo: {}, timezone: 'UTC', sendblueNumber: '+1', holdAllOutbound: false },
+    venue: { id: VENUE_ID, slug: 'v', brandPersona: {}, venueInfo: { hours: {} }, timezone: 'UTC', sendblueNumber: '+1', holdAllOutbound: false },
     guest: {
       id: GUEST_ID,
       phoneNumber: '+1',
@@ -164,7 +178,7 @@ function makeCtx() {
       context: {},
     },
     currentMessage: null,
-    followupTrigger: null,
+    followupTrigger: null as unknown,
     recentMessages: [],
     recognition: {
       score: 0.5,
@@ -174,7 +188,35 @@ function makeCtx() {
     },
     mechanics: [],
     recentVisits: [],
-    activeCommitments: [],
+    // TAC-389 ruling 4: production-shaped. The declined row is ALWAYS
+    // 'pending_ack' at generation time (the route cancels it only after this
+    // run returns), and it is rendered SECOND here on purpose: the incident's
+    // own Langfuse prompt had the sibling first and the declined comp second,
+    // and findActiveCommitmentsForGuest orders oldest-first, so a filter that
+    // kept the head of the list would pass a fixture that put the declined row
+    // first.
+    activeCommitments: [
+      {
+        id: SIBLING_COMMITMENT_ID,
+        type: 'recommendation',
+        description: 'the Pink Panther',
+        code: null,
+        status: 'open',
+        expected_arrival: null,
+        arrival_signal: null,
+        created_at: '2026-09-14T08:00:00.000Z',
+      },
+      {
+        id: COMMITMENT_ID,
+        type: 'comp',
+        description: 'cortado replacement',
+        code: '7K2P',
+        status: 'pending_ack',
+        expected_arrival: null,
+        arrival_signal: 'imminent',
+        created_at: '2026-09-14T08:30:00.000Z',
+      },
+    ],
     openIntentions: [],
     intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
@@ -208,6 +250,32 @@ function makeGenerationResult() {
   }
 }
 
+// TAC-389: what generateStage was actually handed, captured AT CALL TIME.
+//
+// The mock's recorded argument is a REFERENCE to the same ctx the orchestrator
+// mutates, so reading `generateStageMock.mock.calls[0][0].activeCommitments`
+// after the run reports the array as it is at assertion time, not as the
+// generation saw it. Moving the filter to the line AFTER `generateStage` —
+// which is the live defect this ticket exists to fix, the writer seeing every
+// sibling — passed all 24 tests that way. Snapshotting inside the mock is what
+// makes the ORDERING assertable, and no arrangement of the fixture can.
+let commitmentIdsSeenByGenerate: string[] | null = null
+let ctxSeenByGenerate: Record<string, unknown> | null = null
+
+function generateSucceedsCapturingCtx() {
+  generateStageMock.mockImplementationOnce(async (ctx: unknown) => {
+    const live = ctx as { activeCommitments: { id: string }[] }
+    commitmentIdsSeenByGenerate = live.activeCommitments.map((c) => c.id)
+    // The array is copied, not aliased, for the same reason the ids are: the
+    // orchestrator keeps mutating the object after this returns.
+    ctxSeenByGenerate = {
+      ...(ctx as Record<string, unknown>),
+      activeCommitments: [...live.activeCommitments],
+    }
+    return { status: 'success', result: makeGenerationResult() }
+  })
+}
+
 // TAC-394: a pending row as loadPendingRowsBySlot returns it.
 function pendingRow(id: string, body: string, pendingCommitment: unknown = null) {
   return {
@@ -222,10 +290,23 @@ function pendingRow(id: string, body: string, pendingCommitment: unknown = null)
 
 beforeEach(() => {
   buildRuntimeContextMock.mockReset()
-  buildRuntimeContextMock.mockImplementation(async () => makeCtx())
+  // TAC-389: mirror production. build-runtime-context.ts puts the trigger it
+  // was handed straight onto the ctx it returns (`input.followupTrigger ?? null`),
+  // so a fixture that returns `followupTrigger: null` on a path that always has
+  // one cannot assert that the flag reaches the generation at all. That is this
+  // repo's documented "a mocked behaviour flag must contradict production at
+  // your peril" trap.
+  buildRuntimeContextMock.mockImplementation(async (input: unknown) => {
+    const ctx = makeCtx()
+    ctx.followupTrigger =
+      (input as { followupTrigger?: unknown }).followupTrigger ?? null
+    return ctx
+  })
   retrieveCorpusStageMock.mockReset()
   retrieveCorpusStageMock.mockResolvedValue([])
   generateStageMock.mockReset()
+  commitmentIdsSeenByGenerate = null
+  ctxSeenByGenerate = null
   loadPendingRowsBySlotMock.mockReset()
   loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
   captureDraftDroppedMock.mockReset()
@@ -299,6 +380,151 @@ describe('handleOperatorDecline', () => {
     expect(ctxArg.followupTrigger?.reason).toBe('manual')
     expect(ctxArg.followupTrigger?.metadata?.hint).toContain('orange polenta cake')
     expect(ctxArg.followupTrigger?.metadata?.hint).toContain("can't fulfill")
+  })
+
+  // ---- TAC-389: the structural anchor ----
+
+  it('hands generateStage ONLY the commitment being declined', async () => {
+    generateSucceedsCapturingCtx()
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    expect(generateStageMock).toHaveBeenCalledOnce()
+    // The set, not just its head: a filter that kept the first row would make
+    // a length assertion alone pass on a differently-ordered fixture. And
+    // captured at call time, so the FILTER RUNNING LATE fails here.
+    expect(commitmentIdsSeenByGenerate).toEqual([COMMITMENT_ID])
+  })
+
+  it('drops the sibling the 2026-09-14 incident draft named instead', async () => {
+    generateSucceedsCapturingCtx()
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    expect(commitmentIdsSeenByGenerate).not.toContain(SIBLING_COMMITMENT_ID)
+  })
+
+  it('leaves the block empty when the declined row is no longer active', async () => {
+    // A race: cancelled or acknowledged between the route's load and this run,
+    // or findActiveCommitmentsForGuest failed and buildRuntimeContext fell back
+    // to []. The filter yields nothing, and nothing invents a row to stand in.
+    buildRuntimeContextMock.mockImplementationOnce(async () => {
+      const ctx = makeCtx()
+      ctx.activeCommitments = ctx.activeCommitments.filter(
+        (c) => c.id !== COMMITMENT_ID,
+      )
+      return ctx
+    })
+    generateSucceedsCapturingCtx()
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    expect(commitmentIdsSeenByGenerate).toEqual([])
+    expect(result.status).toBe('queued')
+  })
+
+  it('marks the trigger isOperatorDecline so the prompt gets the decline intro', async () => {
+    generateSucceedsCapturingCtx()
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as {
+      followupTrigger?: { reason: string; isOperatorDecline?: boolean }
+    }
+    // reason='manual' is shared with ordinary Command Center follow-ups, so it
+    // cannot carry this on its own.
+    expect(ctxArg.followupTrigger?.reason).toBe('manual')
+    expect(ctxArg.followupTrigger?.isOperatorDecline).toBe(true)
+    // And it survives the round trip onto the ctx the generation reads it from.
+    const generatedWith = generateStageMock.mock.calls[0][0] as {
+      followupTrigger?: { isOperatorDecline?: boolean }
+    }
+    expect(generatedWith.followupTrigger?.isOperatorDecline).toBe(true)
+  })
+
+  it('renders one commitment under the decline intro, end to end', async () => {
+    // The intro claims "it is the only promise listed here". That claim is
+    // true because a DIFFERENT module filtered, so nothing in the serializer
+    // can make it true on its own and nothing in the orchestrator can see that
+    // it was said. This is the only test that holds both halves at once: it
+    // takes the ctx the generation was really handed and runs the REAL
+    // buildAiRuntime and runtimeToProse over it.
+    generateSucceedsCapturingCtx()
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    const { buildAiRuntime } =
+      await vi.importActual<typeof import('./stages')>('./stages')
+    const { runtimeToProse } = await vi.importActual<
+      typeof import('@/lib/ai/prompts/serializers')
+    >('@/lib/ai/prompts/serializers')
+
+    // The SNAPSHOT, not the live ctx: this test is sensitive to the filter
+    // running late as well as to it filtering wrongly.
+    const prose = runtimeToProse(
+      buildAiRuntime(ctxSeenByGenerate as unknown as Parameters<typeof buildAiRuntime>[0]),
+      'manual',
+      new Date(),
+    )
+
+    const block = prose
+      .slice(prose.indexOf('## Active commitments'))
+      .split('\n\n')[0]
+    expect(block).toContain('The promise this message is declining.')
+    const rows = block.split('\n').filter((l) => l.startsWith('- ['))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toContain('cortado replacement')
+    expect(rows[0]).not.toContain('Pink Panther')
   })
 
   it('passes existingPendingDraftId through to persistOrRegenQueuedDraft when found', async () => {

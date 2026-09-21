@@ -833,6 +833,34 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.57.0 (TAC-389): on an operator-initiated decline turn, `## Active
+// commitments` carries only the promise being declined, and its intro says so
+// and drops the arrival ask. Every other turn renders byte for byte as before.
+//
+// The block rendered every open commitment the guest had, undifferentiated and
+// oldest first, while the operator instruction named the declined one in prose.
+// Nothing said which row was which, so the writer had to match a name in a
+// sentence to a row in a list. The only tie-break in the prompt points the
+// wrong way: the arrivalCapture rule below prefers status='open', and the
+// declined row is always 'pending_ack' here, because the route cancels it only
+// after the generation returns. On 2026-09-14 at Le Mil's a decline drafted for
+// a comp named a recommendation on the same guest instead.
+//
+// The filter is structural and lives in handle-operator-decline.ts, not here:
+// a prompt instruction to pick the right row is the thing that was already
+// failing. The intro is what stops the one remaining row inviting the guest
+// over for a promise the same message withdraws.
+//
+// The same version also suppresses `## Emoji for this message` on a decline
+// turn. Found while building this one and ruled in before it shipped, so it
+// rides the same bump rather than taking its own. A decline renders as
+// category 'manual', shared with ordinary Command Center follow-ups, so the
+// category gate could not tell them apart and the suppression keys on the
+// per-turn flag this version introduces. The argument is `comp_complaint`'s,
+// unmodified: permission is the wrong thing to hand the model on an apology
+// turn. At a `frequent` venue the block was reaching roughly three decline
+// drafts in four, as the last instruction before the generate line.
+//
 // v1.56.0 (TAC-509 follow-up): the `## Links` copy instruction now names the
 // scheme. "Copy a link exactly as it appears here, character for character"
 // became "...character for character, including the https:// at the start."
@@ -1085,7 +1113,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.56.0'
+export const PROMPT_VERSION = 'v1.57.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

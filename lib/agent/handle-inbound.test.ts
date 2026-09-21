@@ -760,7 +760,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.56.0',
+    promptVersion: 'v1.57.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1408,6 +1408,34 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     expect(groundingBackstopArg).toEqual({ status: 'truncated' })
   })
 
+  // TAC-424: the same threading assertion for the state this ticket added.
+  // `degraded` is the one whose whole point is that it USED to arrive as
+  // `clean`, so a hop that flattened it would restore the exact defect and
+  // look correct everywhere — the gate would queue nothing and the row would
+  // record a pass.
+  it('threads the degraded state through to applyApprovalPolicyStage', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'degraded' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [
+        APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
+      ],
+      primaryTrigger: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , groundingBackstopArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(groundingBackstopArg).toEqual({ status: 'degraded' })
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
   // TAC-367: an unexpected throw is OUR bug, not evidence about the reply.
   // It must degrade to 'skipped', never to the fail-closed 'truncated' —
   // otherwise any future defect in this stage becomes a fleet-wide queue
@@ -1473,9 +1501,16 @@ describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
   // the COMPOSITION itself degrades safely if that invariant were ever
   // violated: allSettled means one stage rejecting does not discard the
   // other stage's real finding, and each one's rejection degrades to
-  // exactly what that stage's own internal catch already returns for a
-  // degraded call (null for grounding, check_failed for mechanic-offer) —
-  // never a silent pass-through to send.
+  // the orchestrator's own documented degradation for that stage.
+  //
+  // TAC-424 corrects this comment, which was wrong in both halves and named a
+  // return value ('null') that stage has not produced since TAC-367. The
+  // degradations are 'skipped' for grounding and 'check_failed' for
+  // mechanic-offer, and they are NOT symmetric: the mechanic-offer one queues,
+  // while grounding's 'skipped' is a pass-through to send. That asymmetry is
+  // deliberate — a throw in our own code is not evidence about the reply — but
+  // it is the one path left where an unchecked reply reaches a guest, so do
+  // not read these two tests as proving nothing can.
   it('does not lose the mechanic-offer finding if verifyGroundingStage unexpectedly throws', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
     verifyGroundingStageMock.mockRejectedValueOnce(new Error('unexpected throw'))

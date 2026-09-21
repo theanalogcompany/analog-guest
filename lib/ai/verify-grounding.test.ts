@@ -195,8 +195,10 @@ describe('verifyGrounding', () => {
 
   // The negative half: a NoObjectGeneratedError that did NOT truncate (the
   // model emitted prose, or stopped normally with unparseable output) is not
-  // a truncation. Mistaking it for one would fail closed on a case the
-  // fail-open rationale still covers.
+  // a truncation. Since TAC-424 both causes fail closed, so the CONSEQUENCE
+  // is now the same either way — but the distinction still has to hold,
+  // because it decides whether the call is RETRIED (transient faults are,
+  // truncation is not) and which sub-cause the row records.
   it('does NOT report truncation when the parse failed but finishReason is stop', async () => {
     generateObjectMock.mockRejectedValue(
       new NoObjectGeneratedError({
@@ -231,7 +233,8 @@ describe('verifyGrounding', () => {
   })
 
   // A plain transport error carries no finishReason at all and must stay on
-  // the fail-open code.
+  // the ordinary failure code, which is what makes it retryable (TAC-424).
+  // Reporting it as truncation would skip the retry.
   it('does NOT report truncation for an ordinary thrown Error', async () => {
     generateObjectMock.mockRejectedValue(new Error('socket hang up'))
     const result = await verifyGrounding({

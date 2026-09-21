@@ -526,8 +526,19 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
     // the gate's own computation in stages.ts — this is what 23505 race
     // recovery decides with, so a divergence means the gate spares a draft and
     // recovery destroys it.
+    //
+    // TAC-424: `grounding_check_degraded` is listed too, as defence in depth
+    // rather than because it is reachable alone. The gate always co-pushes
+    // `grounding_check_failed` with it, so today the first clause already
+    // covers every degraded turn — but the invariant making that safe lives in
+    // another file, and "the marker is more specific, push only that" is a
+    // plausible future tidy. If anyone made it, this function would stop
+    // exempting the turn and recovery would DESTROY a draft the gate spared,
+    // which is the exact divergence the comment above warns about.
     checkDidNotComplete:
-      set.includes('grounding_check_failed') || set.includes('prose_promise_check_failed'),
+      set.includes('grounding_check_failed') ||
+      set.includes('grounding_check_degraded') ||
+      set.includes('prose_promise_check_failed'),
   }
 }
 

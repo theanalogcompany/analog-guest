@@ -483,7 +483,14 @@ export interface GroundingVerifierUnavailableProps {
   venueId: string
   guestId: string
   outcome: 'truncated' | 'degraded'
-  /** True when the draft was queued as a result; false when it proceeded. */
+  /**
+   * True when the draft did not send as a result.
+   *
+   * Hardcoded `true` by the only producer since TAC-424, so `false` selects
+   * exactly the rows written before it. Deliberately not "queued": on the
+   * holding-message path a failed check produces a FALLBACK send rather than a
+   * queued card, and the field still reads correctly there.
+   */
   failedClosed: boolean
   /** TAC-424: true when a second, immediate attempt was made and also failed. */
   retried: boolean
@@ -504,6 +511,11 @@ function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableP
   // ungated", which stopped being true the moment that outcome started
   // queueing — a Slack line that misstates what the system just did is worse
   // than none, because it is the line someone reads mid-incident.
+  // The `false` branch is unreachable from the current producer (TAC-424
+  // hardcodes `true`). Kept rather than deleted because the field is kept:
+  // if the posture is ever revisited, the headline must not have to be
+  // rediscovered, and a formatter that cannot express "it proceeded" is how
+  // the pre-TAC-424 line came to say the wrong thing for a whole ticket.
   const headline = props.failedClosed
     ? '*Grounding check did not complete* — no verdict, draft queued for review'
     : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
