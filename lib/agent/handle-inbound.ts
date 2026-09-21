@@ -1122,9 +1122,12 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         claimCount: groundingBackstop.claims.length,
       })
     }
-    if (groundingBackstop.status === 'truncated') {
-      console.warn('[agent] inbound grounding backstop truncated — queuing (fail closed)', {
+    // TAC-424: both no-verdict outcomes queue, and the log says which, because
+    // the operator card cannot (one trigger, one label).
+    if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
+      console.warn('[agent] inbound grounding backstop did not complete — queuing (fail closed)', {
         agentRunId,
+        outcome: groundingBackstop.status,
       })
     }
     if (mechanicOfferBackstop.status === 'flagged' || mechanicOfferBackstop.status === 'check_failed') {

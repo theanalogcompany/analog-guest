@@ -2197,9 +2197,13 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   })
 
-  // TAC-367: 'clean' is what a transient fault degrades to, so it must be
-  // indistinguishable from a verdict that ran and found nothing. If this ever
-  // starts queueing, the fail-open line has moved without anyone saying so.
+  // TAC-367, corrected by TAC-424. This comment used to read "'clean' is what
+  // a transient fault degrades to" — true then, false now, and the kind of
+  // stale claim that gets believed because it sits beside a passing test. A
+  // transient fault returns `degraded` and queues; `clean` means the verifier
+  // genuinely ran and found nothing, and only that. The assertion is unchanged
+  // and still the one that catches the fail-open line moving by accident: two
+  // of the five states let a draft through, and these are they.
   it('sends on a clean grounding result, exactly as when the stage was skipped', async () => {
     const clean = await applyApprovalPolicyStage(
       inboundCtx(),
@@ -2213,6 +2217,75 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(clean.action).toBe('send')
     expect(skipped.action).toBe('send')
+  })
+
+  // TAC-424 acceptance criterion 3, the holding half. Stated against `clean`
+  // rather than alone, because "degraded queues" is only meaningful next to
+  // the state it used to be confused with.
+  it('HOLDS on a degraded grounding result, where a clean one sends', async () => {
+    const degraded = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'degraded' as const },
+    )
+    const clean = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'clean' as const },
+    )
+    expect(degraded.action).toBe('queue')
+    expect(clean.action).toBe('send')
+    if (degraded.action !== 'queue') return
+    expect(degraded.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  })
+
+  // TAC-424: same consequences the truncated case is exempt from. A degraded
+  // check reports nothing ABOUT the reply, so it must not arm a clock in front
+  // of a guest or destroy a body nobody found anything wrong with.
+  it('does NOT arm the clock, blank the body, or claim a gap on a degraded check', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'degraded' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.pendingUntil).toBeUndefined()
+    expect(decision.blankBody).toBe(false)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+  })
+
+  // TAC-424 REGRESSION GUARD, and the load-bearing test of this ticket.
+  //
+  // The same shape TAC-367 had to guard for truncation, arriving by a new
+  // route. Adding a trigger for a degraded check makes triggers.length > 0,
+  // which cancels the protected-card carve-out and lands the turn on the
+  // TAC-308 drop — so a guest already waiting on a knowledge-gap card would
+  // get SILENCE because a Haiku call faulted twice. Before this ticket that
+  // same turn fired no trigger at all and SENT.
+  //
+  // Mutation target: removing `grounding.status === 'degraded'` from
+  // checkDidNotComplete must fail THIS test, by name.
+  it('queues rather than DROPPING when a gap card is pending and this turn degraded', async () => {
+    const gapCard = {
+      id: 'gap-card-1',
+      body: '',
+      pending_until: new Date(Date.now() + 60_000).toISOString(),
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+    }
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'degraded' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    // Regen in place over the card, and the card's own clock is untouched.
+    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    expect(decision.pendingUntil).toBeUndefined()
+    expect(decision.blankBody).toBe(false)
   })
 
   // The asymmetry is the whole point of the change, so pin both sides of it
@@ -2437,37 +2510,100 @@ describe('verifyGroundingStage (TAC-350)', () => {
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
 
-  // TAC-367: the fail-OPEN half. A transient fault must still return a
-  // non-queueing state — this is the line the truncation carve-out is
-  // deliberately NOT allowed to cross, because grounding runs on every
-  // inbound and queuing every provider hiccup would be a fleet-wide flood.
-  it('returns clean and logs a warning when the model call degrades (fail-open)', async () => {
+  // TAC-424 REVERSES the test that used to sit here. It asserted
+  // `{ status: 'clean' }` on a transient fault — the fail-OPEN half of
+  // TAC-367 — which is precisely the behaviour this ticket removes: a fault
+  // that returned `clean` was recorded on the row as `[]`, byte-identical to
+  // a genuine pass. The verdict is its own state now, and it queues.
+  //
+  // Two mock responses because the stage retries once. A single
+  // mockResolvedValueOnce leaves the retry reading `undefined`, which is how
+  // the retry announced itself when this test was first run against it.
+  it('returns degraded after retrying once, and logs that it failed closed', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'model unavailable',
-      errorCode: 'ai_verify_grounding_failed',
-    })
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'model unavailable',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'model unavailable',
+        errorCode: 'ai_verify_grounding_failed',
+      })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'clean' })
+    expect(result).toEqual({ status: 'degraded' })
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
     expect(warnSpy).toHaveBeenCalled()
   })
 
-  // TAC-367: a degraded call ships a guest-facing reply with the only
-  // fabrication check skipped. It must EMIT — silence on this path is the
-  // exact property that let the truncation hole survive unobserved.
-  it('emits grounding_verifier_unavailable with failedClosed=false when it degrades', async () => {
+  // TAC-424: the retry is the whole reason the closed posture is affordable,
+  // so "one blip does not hold a reply" needs its own assertion. Mutation
+  // target: deleting the retry makes this return `degraded`.
+  it('retries once and returns the retry verdict when the second call succeeds', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'socket hang up',
-      errorCode: 'ai_verify_grounding_failed',
-    })
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ status: 'clean' })
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
+    // A recovered call is not a failure: nothing is emitted, because nothing
+    // went unchecked.
+    expect(captureGroundingVerifierUnavailableMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-424: the retry sends the SAME inputs. A retry that quietly dropped
+  // the runtime context would still return a verdict, and that verdict would
+  // be measured against different source material than the generator had —
+  // the TAC-301 part 1.5 defect, reintroduced one layer down.
+  it('sends identical arguments on the retry', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      })
+    await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
+    expect(verifyGroundingMock.mock.calls[1][0]).toEqual(verifyGroundingMock.mock.calls[0][0])
+  })
+
+  // TAC-424: a degraded turn now HOLDS the reply, so the event must say so.
+  // The assertion is on failedClosed rather than only on outcome because
+  // `outcome` alone never told anyone what happened to the draft.
+  it('emits grounding_verifier_unavailable with failedClosed=true and retried=true when it degrades', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
     await verifyGroundingStage(inboundCtx(), makeGen())
     expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
     const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
     expect(call.outcome).toBe('degraded')
-    expect(call.failedClosed).toBe(false)
+    expect(call.failedClosed).toBe(true)
+    expect(call.retried).toBe(true)
   })
 
   // TAC-367: the fail-CLOSED half. Truncation is a verdict the model produced
@@ -2483,7 +2619,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
     expect(result).toEqual({ status: 'truncated' })
   })
 
-  it('emits grounding_verifier_unavailable with failedClosed=true on truncation', async () => {
+  it('emits grounding_verifier_unavailable with failedClosed=true and retried=false on truncation', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     verifyGroundingMock.mockResolvedValueOnce({
       ok: false,
@@ -2495,6 +2631,24 @@ describe('verifyGroundingStage (TAC-350)', () => {
     const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
     expect(call.outcome).toBe('truncated')
     expect(call.failedClosed).toBe(true)
+    expect(call.retried).toBe(false)
+  })
+
+  // TAC-424: truncation is NOT retried. Retrying a cap that was already hit
+  // spends a second call to hit it again, and the fix is the cap. The call
+  // count is the assertion; the verdict alone cannot tell the two apart,
+  // because a retried truncation would truncate again and return the same
+  // status.
+  it('does NOT retry a truncated call', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'No object generated: could not parse the response.',
+      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
+    })
+    const result = await verifyGroundingStage(inboundCtx(), makeGen())
+    expect(result).toEqual({ status: 'truncated' })
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
   })
 
   // TAC-367. Pins the DEFAULT DIRECTION: an errorCode this stage doesn't
@@ -2506,13 +2660,23 @@ describe('verifyGroundingStage (TAC-350)', () => {
   // list of tests whose stated rationale was never true.)
   it('treats an unrecognized errorCode as degraded, not truncated', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'something else entirely',
-      errorCode: 'some_other_code',
-    })
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'something else entirely',
+        errorCode: 'some_other_code',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'something else entirely',
+        errorCode: 'some_other_code',
+      })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'clean' })
+    expect(result).toEqual({ status: 'degraded' })
+    // TAC-424: and it IS retried, which is the other half of the default
+    // direction — an unrecognized code is a transient fault until proven
+    // otherwise, so it gets the second attempt truncation does not.
+    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
   })
 
   it('returns clean and does NOT fire the PostHog event when nothing is found', async () => {
@@ -3630,11 +3794,6 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.ungroundedClaims).not.toBeNull()
   })
 
-  // The one that is easy to get backwards. A truncated check means the verdict
-  // could not be READ — an absence of information about the reply, not a
-  // finding against it. It queues (GROUNDING_CHECK_FAILED, fail-closed), but
-  // there is no claim to show, and pairing "I couldn't finish checking this
-  // one" with a list of flagged claims would be incoherent.
   // The one that is easy to get backwards. A truncated check RAN but produced
   // no readable verdict, so there is no claim information — which is NULL, not
   // `[]`. `[]` would assert it found nothing, and the paired review_reason
@@ -3652,6 +3811,21 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.ungroundedClaims).toBeNull()
   })
 
+  // TAC-424. The defect this ticket was opened on: a transient fault returned
+  // `clean` and landed here as `[]`, byte-identical to a genuine pass, so the
+  // column could not answer the one question migration 039 built it to answer.
+  it('is null on a degraded check — two attempts, no verdict', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(),
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'degraded' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.ungroundedClaims).toBeNull()
+  })
+
   it('is null when the check never ran at all', async () => {
     // knowledgeGap=true means the model self-reported, so verifyGroundingStage
     // skips — the exact "didn't run" case the null exists to record.
@@ -3662,6 +3836,48 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.ungroundedClaims).toBeNull()
+  })
+
+  // TAC-424 acceptance criterion 5, stated as one assertion rather than left
+  // to be inferred from the per-state tests above: the five grounding states
+  // must not collapse. Written as a table so a sixth state has to decide what
+  // it records, and so that folding `degraded` back into the pass value fails
+  // HERE, by name, rather than as a confusing mismatch in a neighbouring test.
+  it('maps every grounding state to a distinct record, and degraded is not a pass', async () => {
+    const mapped = async (
+      grounding: Parameters<typeof applyApprovalPolicyStage>[2],
+      knowledgeGap = false,
+    ) => {
+      const decision = await applyApprovalPolicyStage(
+        inboundCtx(),
+        makeGenerationResult({ knowledgeGap, voiceFidelity: 0.5 }),
+        grounding,
+      )
+      if (decision.action !== 'queue') throw new Error('expected queue')
+      return {
+        ungroundedClaims: decision.ungroundedClaims,
+        held: decision.triggers.includes(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED),
+      }
+    }
+
+    const claims = ['states a wifi password that appears nowhere in venue knowledge']
+    expect(await mapped({ status: 'flagged', claims })).toEqual({
+      ungroundedClaims: claims,
+      held: false,
+    })
+    expect(await mapped({ status: 'clean' })).toEqual({ ungroundedClaims: [], held: false })
+    expect(await mapped({ status: 'truncated' })).toEqual({ ungroundedClaims: null, held: true })
+    expect(await mapped({ status: 'degraded' })).toEqual({ ungroundedClaims: null, held: true })
+    expect(await mapped({ status: 'skipped' }, true)).toEqual({
+      ungroundedClaims: null,
+      held: false,
+    })
+
+    // The pair the ticket is named for, asserted directly. A degraded check
+    // and a clean pass must not produce the same row.
+    const degraded = await mapped({ status: 'degraded' })
+    const clean = await mapped({ status: 'clean' })
+    expect(degraded).not.toEqual(clean)
   })
 
   it('distinguishes ran-and-found-nothing from never-ran', async () => {

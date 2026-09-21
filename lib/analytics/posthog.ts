@@ -85,15 +85,17 @@
  *                   voiceFidelity, generatedBody }
  *
  * - grounding_verifier_unavailable
- *     TAC-367. Fires from verifyGroundingStage (lib/agent/stages.ts) when the
- *     grounding backstop returned no verdict — `outcome: 'truncated'` (output
- *     cap hit mid-JSON; fails CLOSED, draft queued) or `outcome: 'degraded'`
- *     (transient fault; fails OPEN, reply proceeds). Slack-relays both: the
+ *     TAC-367, widened by TAC-424. Fires from verifyGroundingStage
+ *     (lib/agent/stages.ts) when the grounding backstop returned no verdict —
+ *     `outcome: 'truncated'` (output cap hit mid-JSON, never retried) or
+ *     `outcome: 'degraded'` (transient fault that survived one retry). BOTH
+ *     fail CLOSED and queue the draft since TAC-424; `degraded` used to fail
+ *     open, which is the defect that ticket closed. Slack-relays both: the
  *     property that let the truncation hole survive was that nothing was
- *     emitted at all. Query `failedClosed=false` for turns that shipped with
- *     no grounding verdict.
+ *     emitted at all. `failedClosed=false` now selects only rows written
+ *     before TAC-424, i.e. the turns that shipped with no grounding verdict.
  *     Properties: { agentRunId, venueId, guestId, outcome, failedClosed,
- *                   error, errorCode }
+ *                   retried, error, errorCode }
  *
  * - webhook_silence
  *     Daily cron event. Fires when no inbound webhook has landed in 24+
@@ -449,18 +451,27 @@ export async function captureUngroundedClaimCaught(
  * union the next person has to know to write.
  *
  *   - `truncated`  — the model produced a verdict and the output cap cut it
- *                    off mid-JSON. Fails CLOSED: the draft is queued.
- *   - `degraded`   — a transient fault (network, provider error, timeout).
- *                    Fails OPEN: the draft proceeds through the rest of the
- *                    gate exactly as it did before TAC-350.
+ *                    off mid-JSON. Never retried: the cap would be hit again.
+ *   - `degraded`   — a transient fault (network, provider error, timeout)
+ *                    that survived one immediate retry.
  *
- * `failedClosed` carries that consequence explicitly rather than leaving it
- * to be re-derived from `outcome`, so a query for "turns that sent without a
- * grounding verdict" is a single boolean filter.
+ * TAC-424: BOTH fail CLOSED now. `degraded` used to fail open, so the draft
+ * proceeded and the row recorded it as a clean pass; that was the defect.
+ *
+ * `failedClosed` is therefore `true` on both outcomes today, and it stays as
+ * its own field rather than being dropped or re-derived from `outcome`: a
+ * query for "turns that sent without a grounding verdict" should keep working
+ * across old rows (where it is false) and new ones, and the day a third
+ * outcome lands its consequence has to be stated rather than inferred.
+ *
+ * `retried` says whether the second attempt happened. It is false for every
+ * truncation by construction, and true for every degraded outcome — which
+ * makes it the field that distinguishes "one call faulted" from "two did"
+ * if the retry is ever made conditional.
  *
  * BOTH Slack-relay. The degraded case is the one worth arguing about, and it
- * relays because fail-open means a guest-facing message shipped with a safety
- * check skipped — the same class as captureUngroundedClaimCaught, and the
+ * relays because a held reply during an outage is a thing an operator needs to
+ * know is happening — the same class as captureUngroundedClaimCaught, and the
  * precise property that let the truncation bug survive unnoticed was that
  * nothing was emitted at all. Known cost: a sustained provider outage will
  * relay once per inbound. That is noisy by design — the alternative is a
@@ -474,6 +485,8 @@ export interface GroundingVerifierUnavailableProps {
   outcome: 'truncated' | 'degraded'
   /** True when the draft was queued as a result; false when it proceeded. */
   failedClosed: boolean
+  /** TAC-424: true when a second, immediate attempt was made and also failed. */
+  retried: boolean
   /** Provider/SDK error text. Never contains guest or venue content. */
   error: string
   errorCode?: string
@@ -487,15 +500,20 @@ export async function captureGroundingVerifierUnavailable(
 }
 
 function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableProps): string {
+  // TAC-424, under SR-2. The degraded branch used to read "reply proceeded
+  // ungated", which stopped being true the moment that outcome started
+  // queueing — a Slack line that misstates what the system just did is worse
+  // than none, because it is the line someone reads mid-incident.
   const headline = props.failedClosed
-    ? '*Grounding check truncated* — no verdict, draft queued for review'
-    : '*Grounding check unavailable* — no verdict, reply proceeded ungated'
+    ? '*Grounding check did not complete* — no verdict, draft queued for review'
+    : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
   return [
     headline,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
     `outcome: ${props.outcome}${props.errorCode ? ` (${props.errorCode})` : ''}`,
+    `retried: ${props.retried ? 'yes, once' : 'no'}`,
     `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,
   ].join('\n')
 }
