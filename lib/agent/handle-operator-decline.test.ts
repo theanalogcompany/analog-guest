@@ -149,6 +149,11 @@ const GUEST_ID = '11111111-1111-4111-8111-111111111111'
 const COMMITMENT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const MESSAGE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const EXISTING_PENDING_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+// TAC-389 ruling 4: a sibling the guest also has open. The production shape,
+// and the one the old `activeCommitments: []` fixture could not reach: this
+// path always has at least the declined row, because the route loaded it by id
+// to get here.
+const SIBLING_COMMITMENT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
 function makeCtx() {
   return {
@@ -174,7 +179,35 @@ function makeCtx() {
     },
     mechanics: [],
     recentVisits: [],
-    activeCommitments: [],
+    // TAC-389 ruling 4: production-shaped. The declined row is ALWAYS
+    // 'pending_ack' at generation time (the route cancels it only after this
+    // run returns), and it is rendered SECOND here on purpose: the incident's
+    // own Langfuse prompt had the sibling first and the declined comp second,
+    // and findActiveCommitmentsForGuest orders oldest-first, so a filter that
+    // kept the head of the list would pass a fixture that put the declined row
+    // first.
+    activeCommitments: [
+      {
+        id: SIBLING_COMMITMENT_ID,
+        type: 'recommendation',
+        description: 'the Pink Panther',
+        code: null,
+        status: 'open',
+        expected_arrival: null,
+        arrival_signal: null,
+        created_at: '2026-09-14T08:00:00.000Z',
+      },
+      {
+        id: COMMITMENT_ID,
+        type: 'comp',
+        description: 'cortado replacement',
+        code: '7K2P',
+        status: 'pending_ack',
+        expected_arrival: null,
+        arrival_signal: 'imminent',
+        created_at: '2026-09-14T08:30:00.000Z',
+      },
+    ],
     openIntentions: [],
     intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
@@ -299,6 +332,127 @@ describe('handleOperatorDecline', () => {
     expect(ctxArg.followupTrigger?.reason).toBe('manual')
     expect(ctxArg.followupTrigger?.metadata?.hint).toContain('orange polenta cake')
     expect(ctxArg.followupTrigger?.metadata?.hint).toContain("can't fulfill")
+  })
+
+  // ---- TAC-389: the structural anchor ----
+
+  it('hands generateStage ONLY the commitment being declined', async () => {
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    expect(generateStageMock).toHaveBeenCalledOnce()
+    const ctxArg = generateStageMock.mock.calls[0][0] as {
+      activeCommitments: { id: string; description: string }[]
+    }
+    // The set, not just its head: a filter that kept the first row would make
+    // a length assertion alone pass on a differently-ordered fixture.
+    expect(ctxArg.activeCommitments.map((c) => c.id)).toEqual([COMMITMENT_ID])
+    expect(ctxArg.activeCommitments[0].description).toBe('cortado replacement')
+  })
+
+  it('drops the sibling the 2026-09-14 incident draft named instead', async () => {
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    const ctxArg = generateStageMock.mock.calls[0][0] as {
+      activeCommitments: { id: string; description: string }[]
+    }
+    expect(ctxArg.activeCommitments.map((c) => c.id)).not.toContain(
+      SIBLING_COMMITMENT_ID,
+    )
+    expect(
+      ctxArg.activeCommitments.some((c) => c.description === 'the Pink Panther'),
+    ).toBe(false)
+  })
+
+  it('leaves the block empty when the declined row is no longer active', async () => {
+    // A race: cancelled or acknowledged between the route's load and this run,
+    // or findActiveCommitmentsForGuest failed and buildRuntimeContext fell back
+    // to []. The filter yields nothing, and nothing invents a row to stand in.
+    buildRuntimeContextMock.mockImplementationOnce(async () => {
+      const ctx = makeCtx()
+      ctx.activeCommitments = ctx.activeCommitments.filter(
+        (c) => c.id !== COMMITMENT_ID,
+      )
+      return ctx
+    })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    const ctxArg = generateStageMock.mock.calls[0][0] as {
+      activeCommitments: unknown[]
+    }
+    expect(ctxArg.activeCommitments).toEqual([])
+    expect(result.status).toBe('queued')
+  })
+
+  it('marks the trigger isOperatorDecline so the prompt gets the decline intro', async () => {
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      commitmentId: COMMITMENT_ID,
+      commitmentDescription: 'cortado replacement',
+    })
+
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as {
+      followupTrigger?: { reason: string; isOperatorDecline?: boolean }
+    }
+    // reason='manual' is shared with ordinary Command Center follow-ups, so it
+    // cannot carry this on its own.
+    expect(ctxArg.followupTrigger?.reason).toBe('manual')
+    expect(ctxArg.followupTrigger?.isOperatorDecline).toBe(true)
   })
 
   it('passes existingPendingDraftId through to persistOrRegenQueuedDraft when found', async () => {

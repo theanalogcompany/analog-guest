@@ -2420,6 +2420,11 @@ export function buildAiRuntime(
     // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
     openIntentions: renderedIntentionLines(ctx),
     firstTouchAfterQrScan,
+    // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
+    // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
+    // ordinary Command Center manual follow-up) leaves it false, so the
+    // `## Active commitments` intro is unchanged everywhere else.
+    isOperatorDecline: ctx.followupTrigger?.isOperatorDecline === true,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

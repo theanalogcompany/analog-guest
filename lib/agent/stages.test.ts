@@ -1665,6 +1665,48 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
   })
 })
 
+describe('buildAiRuntime — operator decline wiring (TAC-389)', () => {
+  function declineCtx(
+    trigger: Partial<NonNullable<RuntimeContext['followupTrigger']>> | null,
+  ): RuntimeContext {
+    return makeCtx({
+      currentMessage: null,
+      followupTrigger: trigger
+        ? ({
+            reason: 'manual',
+            triggeredAt: new Date(),
+            ...trigger,
+          } as RuntimeContext['followupTrigger'])
+        : null,
+    })
+  }
+
+  it('is true when the decline orchestrator set the flag', () => {
+    const aiRuntime = buildAiRuntime(declineCtx({ isOperatorDecline: true }))
+    expect(aiRuntime.isOperatorDecline).toBe(true)
+  })
+
+  it('is false for an ordinary manual follow-up, which shares reason=manual', () => {
+    // The Command Center Follow Up button (THE-232) builds the same
+    // reason='manual' trigger. If the reason alone drove the intro, every one
+    // of those would silently lose the arrival ask.
+    const aiRuntime = buildAiRuntime(
+      declineCtx({ metadata: { hint: 'tell her about the new Panama lot' } }),
+    )
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+
+  it('is false on a cron follow-up', () => {
+    const aiRuntime = buildAiRuntime(declineCtx({ reason: 'day_3' }))
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+
+  it('is false on the inbound path, where there is no trigger at all', () => {
+    const aiRuntime = buildAiRuntime(declineCtx(null))
+    expect(aiRuntime.isOperatorDecline).toBe(false)
+  })
+})
+
 describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
   const FRESH = new Date() // "now" for createdAt, well inside every window
   const STALE = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 days ago
