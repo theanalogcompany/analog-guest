@@ -19,6 +19,7 @@ import { captureCommitmentEscalated } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingCommitment } from '@/lib/schemas/guest-commitment'
 import {
+  cancelCommitmentForGuest,
   commitmentDedupKey,
   createCommitmentFromPending,
   findActiveCommitmentsForGuest,
@@ -1709,5 +1710,163 @@ describe('markExpired', () => {
     )
     const r = await markExpired({ commitmentId: COMMITMENT_ID, now: NOW })
     expect(r.ok && r.data.transitioned).toBe(false)
+  })
+})
+
+// TAC-513. The incident: a comp that was `open` (never pending_ack, no arrival
+// signal) was declared cancelled to the guest and stayed open. markCancelled
+// could not have touched it, so these tests are largely about the CAS
+// predicate: which states it accepts, and that it is scoped to one guest.
+describe('cancelCommitmentForGuest (TAC-513)', () => {
+  it('flips an OPEN commitment to cancelled', async () => {
+    // The incident state exactly. If this ever stops passing the ticket is
+    // unfixed.
+    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.transitioned).toBe(true)
+      expect(r.data.row?.status).toBe('cancelled')
+    }
+    expect(state.updatePayload).toMatchObject({ status: 'cancelled' })
+  })
+
+  it('accepts BOTH open and pending_ack, and nothing else', async () => {
+    // Asserted on the filter rather than a returned row: the mock ignores
+    // filters, so a returned row proves nothing about the predicate. Dropping
+    // 'open' here is the mutant that un-fixes the ticket.
+    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(state.updateInCalls).toContainEqual({
+      field: 'status',
+      values: ['open', 'pending_ack'],
+    })
+  })
+
+  it('scopes the update to the commitment, the venue AND the guest', async () => {
+    // The cross-guest guard, in Postgres rather than in application code.
+    // Dropping guest_id lets a hallucinated id cancel another guest's comp.
+    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(state.updateEqCalls).toContainEqual({ field: 'id', value: COMMITMENT_ID })
+    expect(state.updateEqCalls).toContainEqual({ field: 'venue_id', value: VENUE_ID })
+    expect(state.updateEqCalls).toContainEqual({ field: 'guest_id', value: GUEST_ID })
+  })
+
+  it('reports transitioned=false when the CAS matches nothing', async () => {
+    // Already acknowledged, redeemed, expired, cancelled, or another guest's.
+    // The caller logs this and does not fail the dispatch.
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.data.transitioned).toBe(false)
+      expect(r.data.row).toBeNull()
+    }
+  })
+
+  it('writes status and updated_at, and no audit columns', async () => {
+    // No cancelled_at / cancelled_by exist. Pinned with an exact key set so
+    // adding one silently is a failure rather than a surprise in Studio.
+    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(Object.keys(state.updatePayload ?? {}).sort()).toEqual([
+      'status',
+      'updated_at',
+    ])
+    expect(state.updatePayload).toEqual({
+      status: 'cancelled',
+      updated_at: NOW.toISOString(),
+    })
+  })
+
+  it('returns an error value on a DB failure, never throws', async () => {
+    const state = newState({ updateError: { message: 'boom' } })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errorCode).toBe('db_write_failed')
+  })
+
+  it('returns an error value when the returned row is malformed', async () => {
+    const state = newState({ updateReturn: [{ id: COMMITMENT_ID }] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await cancelCommitmentForGuest({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      now: NOW,
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errorCode).toBe('db_write_invalid_shape')
+  })
+
+  it('leaves markCancelled untouched: it still gates on pending_ack alone', async () => {
+    // TAC-389 owns the decline path. This is the guard that the new helper was
+    // added BESIDE markCancelled rather than by widening it.
+    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await markCancelled({
+      commitmentId: COMMITMENT_ID,
+      operatorId: OPERATOR_ID,
+      allowedVenueIds: [VENUE_ID],
+      now: NOW,
+    })
+    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })
+    expect(state.updateInCalls).not.toContainEqual({
+      field: 'status',
+      values: ['open', 'pending_ack'],
+    })
   })
 })
