@@ -340,6 +340,13 @@ export type RuntimeContext = {
   // anywhere else. Computed inline in buildAiRuntime; never true on the
   // followup path (no currentMessage there).
   firstTouchAfterQrScan?: boolean
+  // TAC-389: true only on an operator-initiated decline turn. Computed in
+  // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
+  // reads it to render the decline-specific `## Active commitments` intro,
+  // which drops the arrival-ask invitation. The model has no other way to know
+  // this message CANCELS the promise it is being shown, and inviting the guest
+  // over for something the same message withdraws is the failure it prevents.
+  isOperatorDecline?: boolean
 }
 
 /**

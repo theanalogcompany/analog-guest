@@ -169,6 +169,11 @@ export async function handleOperatorDecline(input: {
           reason: 'manual',
           triggeredAt: new Date(),
           metadata: { hint },
+          // TAC-389: reaches buildAiRuntime (via ctx.followupTrigger) and
+          // switches `## Active commitments` to its decline intro, which drops
+          // the arrival ask. A typed field rather than another `metadata` key,
+          // matching perkMechanic: it drives rendering.
+          isOperatorDecline: true,
         },
         trace,
       })
@@ -251,6 +256,40 @@ export async function handleOperatorDecline(input: {
     // still right, and for a better reason than the one recorded here: being
     // told there is no venue knowledge beats being told nothing.)
     ctx.knowledgeCorpus = []
+
+    // TAC-389 ruling 1: the writer sees ONLY the commitment being declined.
+    //
+    // buildRuntimeContext re-fetches EVERY active commitment for this guest
+    // (findActiveCommitmentsForGuest, open + pending_ack, oldest first) and
+    // the serializer rendered them undifferentiated, so nothing in the prompt
+    // said which row the operator swiped. The model had to match a name in the
+    // `## Operator instruction` prose to a row in a list, by reading. Worse,
+    // the only tie-break in the prompt points the wrong way: the universal
+    // arrivalCapture rule prefers status='open' over 'pending_ack', and the
+    // declined row is ALWAYS 'pending_ack' here because the route cancels it
+    // only after this run returns.
+    //
+    // This is a structural filter, not a prompt instruction to pick the right
+    // row. Same idiom as the two mutations above: narrow the mutable ctx that
+    // buildRuntimeContext returned, before generateStage sees it.
+    //
+    // The compare is case-sensitive and that is safe only because BOTH sides
+    // are the database's own canonical form: the route passes `row.id` from
+    // the row it just SELECTed, never the path param (which its UUID_RE
+    // accepts in either case), and findActiveCommitmentsForGuest returns ids
+    // straight from Postgres. Thread the param through here instead and every
+    // mixed-case request silently filters to nothing, which renders as the
+    // legitimate empty case below and so is invisible.
+    //
+    // An empty result is legitimate and left alone: the row can have been
+    // cancelled or acknowledged between the route's load and this run, or the
+    // commitments load can have failed and fallen back to []. The block is
+    // then omitted entirely (formatActiveCommitments returns null on an empty
+    // array) and `## Operator instruction` still carries the description in
+    // prose, which is the pre-existing no-commitments behaviour.
+    ctx.activeCommitments = ctx.activeCommitments.filter(
+      (c) => c.id === input.commitmentId,
+    )
 
     // Generate
     const generateSpan = trace.span('generate', { category })

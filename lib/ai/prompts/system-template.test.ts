@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.56.0 (TAC-509 follow-up: the Links copy names the scheme)', () => {
-    expect(PROMPT_VERSION).toBe('v1.56.0')
+  it('is v1.57.0 (TAC-389: the decline turn gets its own Active commitments intro)', () => {
+    expect(PROMPT_VERSION).toBe('v1.57.0')
   })
 })
 

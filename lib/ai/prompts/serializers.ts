@@ -941,9 +941,33 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
 // through v1.17.0, so arrivalCapture.referencesCommitmentId had no value to
 // reference — every arrival capture no-op'd and no commitment ever reached
 // pending_ack. Added in v1.18.0.
+//
+// TAC-389: the intro varies on an operator-initiated decline turn, and only
+// the intro — the per-line shape above is identical on both branches, because
+// the id / code / status segments are what let the writer name the right
+// promise whichever turn this is.
+//
+// Ruling 2 (2026-09-17) drops the two arrival-ask sentences on that branch.
+// They are correct everywhere else and wrong here: this message is the one
+// that CANCELS the promise, so inviting the guest over for it, or asking when
+// they are coming in, contradicts the message being written. The ordinary
+// branch keeps them byte for byte.
+//
+// The last sentence is retained VERBATIM on both branches. Its second half is
+// the only thing standing between a rendered uuid and a guest reading one
+// aloud in a text (TAC-302), and its first half is conditioned on a guest
+// arrival signal, which a decline turn does not have — there is no inbound on
+// this path at all, so the condition simply never fires.
+//
+// The two new sentences carry no em dash. The decline path already goes out of
+// its way to avoid them (buildDeclineHint, handle-operator-decline.ts: Sonnet
+// echoes the punctuation it is shown, and R3 forbids one in the output, so an
+// echoed dash costs a regen attempt). The retained sentence's dash is
+// pre-existing and renders on this path today.
 function formatActiveCommitments(
   commitments: readonly ActiveCommitment[],
   now: Date,
+  isOperatorDecline: boolean,
 ): string | null {
   if (commitments.length === 0) return null
 
@@ -955,11 +979,18 @@ function formatActiveCommitments(
     return `- [${c.type}] ${c.description} (${segments.join(', ')}) — promised ${delta}`
   })
 
-  const intro =
-    'Open promises this venue has made to this guest. ' +
-    "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
-    "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+  // Retained verbatim on both branches — see the header note.
+  const idSentence =
     'Each line carries an internal `id:` — copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. The id is system-internal: never read it aloud, never include it in your reply to the guest.'
+
+  const intro = isOperatorDecline
+    ? 'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +
+      'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it. ' +
+      idSentence
+    : 'Open promises this venue has made to this guest. ' +
+      "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
+      "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+      idSentence
 
   return ['## Active commitments', intro, lines.join('\n')].join('\n')
 }
@@ -1265,9 +1296,29 @@ function formatOpenIntentions(
  * these two — so this can only reduce emoji, never add them. Scope is
  * otherwise unaudited: this is not a claim that these are the only two
  * categories that should suppress the block.
+ *
+ * TAC-389 adds a third suppression, and it is NOT a category, which is the
+ * whole reason it needed the flag rather than another entry in the list
+ * above. An operator-initiated decline renders as category 'manual', shared
+ * with ordinary Command Center follow-ups (THE-232), which keep the directive.
+ * The two are only distinguishable per turn, by `isOperatorDecline`.
+ *
+ * Same argument as `comp_complaint`, unmodified: permission is the wrong
+ * thing to hand the model on an apology turn, and a decline is an apology for
+ * cancelling something the venue promised. The block renders LAST in the user
+ * prompt, so on proximity it beats anything the operator instruction says. At
+ * a `frequent` venue it was reaching roughly three decline drafts in four.
+ * Narrower again, so it can still only reduce emoji.
  */
-function shouldRenderEmojiDirective(category: MessageCategory): boolean {
-  return category !== 'opt_out' && category !== 'comp_complaint'
+function shouldRenderEmojiDirective(
+  category: MessageCategory,
+  isOperatorDecline: boolean,
+): boolean {
+  return (
+    category !== 'opt_out' &&
+    category !== 'comp_complaint' &&
+    !isOperatorDecline
+  )
 }
 
 /**
@@ -1397,7 +1448,11 @@ export function runtimeToProse(
   // them as a person → what we've promised → what was recently said.
   // Empty / undefined = block omitted entirely.
   if (runtime.activeCommitments && runtime.activeCommitments.length > 0) {
-    const block = formatActiveCommitments(runtime.activeCommitments, now)
+    const block = formatActiveCommitments(
+      runtime.activeCommitments,
+      now,
+      runtime.isOperatorDecline === true,
+    )
     if (block) blocks.push(block)
   }
   // TAC-308: ## Unanswered question sits immediately BEFORE ## Recent
@@ -1418,7 +1473,10 @@ export function runtimeToProse(
   // the persona's standing `## Emojis` statement governing the turn — see
   // the field comment on RuntimeContext.emojiDirective for why absence is
   // the safe direction rather than a gap.
-  if (runtime.emojiDirective && shouldRenderEmojiDirective(category)) {
+  if (
+    runtime.emojiDirective &&
+    shouldRenderEmojiDirective(category, runtime.isOperatorDecline === true)
+  ) {
     blocks.push(formatEmojiDirective(runtime.emojiDirective))
   }
 

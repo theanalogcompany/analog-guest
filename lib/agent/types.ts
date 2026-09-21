@@ -153,6 +153,15 @@ export interface FollowupTrigger {
   // `perkBeingUnlocked`. Typed channel (not metadata) so the schema is
   // structural.
   perkMechanic?: EligibleMechanic
+  // TAC-389: set only by handle-operator-decline.ts, on the trigger it hands
+  // to buildRuntimeContext. buildAiRuntime reads it and the serializer renders
+  // the decline-specific `## Active commitments` intro. Typed channel (not
+  // metadata) for the same reason perkMechanic is: it drives rendering, so the
+  // schema is structural rather than free-form context.
+  //
+  // `reason: 'manual'` cannot carry this on its own. Ordinary Command Center
+  // follow-ups (THE-232) use the same reason and must keep the ordinary intro.
+  isOperatorDecline?: boolean
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
