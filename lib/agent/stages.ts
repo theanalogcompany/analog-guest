@@ -320,6 +320,27 @@ export const APPROVAL_TRIGGERS = {
   //
   // Deliberately NOT part of `isGapTurn`: see its definition below.
   GROUNDING_CHECK_FAILED: 'grounding_check_failed',
+  // TAC-424: which of GROUNDING_CHECK_FAILED's two causes it was. Ruling 2 B
+  // (2026-09-21) requires a degraded check, a truncated check and a clean pass
+  // to be three-way distinguishable by SQL alone, and ruling 1 C forbids both
+  // a migration on `messages` and touching `ungrounded_claims` — which leaves
+  // review_triggers, the one existing per-message field that already means
+  // "everything that fired". So this rides ALONGSIDE GROUNDING_CHECK_FAILED on
+  // a degraded turn rather than replacing it.
+  //
+  // It is a SUB-CAUSE marker, not a second reason to hold, and two things
+  // follow from that. It NEVER fires alone — GROUNDING_CHECK_FAILED is always
+  // pushed with it, which is what keeps the hold and the operator's primary
+  // copy exactly as they were. And it is ranked directly BELOW its partner in
+  // PRIMARY_TRIGGER_PRIORITY so it can never win the review_reason label off a
+  // trigger it always co-fires with; a test pins that.
+  //
+  // Why not two distinct primary triggers, which is what this file's own
+  // GROUNDING_CHECK_FAILED comment argues for elsewhere: the operator's
+  // decision is identical either way (nothing was checked, read it yourself),
+  // and the ruling named the trigger the draft is held under. The cause is a
+  // thing SQL asks later, not a thing the card should say twice.
+  GROUNDING_CHECK_DEGRADED: 'grounding_check_degraded',
   // TAC-401: independent post-generation check for a promise made in PROSE
   // with no structured commitment behind it. THE PRIMARY CONTROL for that
   // failure (ruled 2026-09-15, question 1, option c), not a secondary layer.
@@ -495,6 +516,15 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // the more useful operator label. It still outranks the policy triggers
   // because it is at least specific to this message.
   APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+  // TAC-424: directly below its partner, and the order is load-bearing rather
+  // than cosmetic. This code only ever appears alongside
+  // GROUNDING_CHECK_FAILED, so ranking it above would silently take over
+  // review_reason on every degraded turn and change what the operator card
+  // says — the copy would become a sub-cause note standing in for a reason.
+  // Below, it can never win, which is what makes it a record rather than a
+  // label. It sits above the two venue-wide policy signals for the same reason
+  // its partner does: it is at least specific to this message.
+  APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
   // TAC-401: beside GROUNDING_CHECK_FAILED and for the identical reason. It
   // reports an ABSENCE of information about the reply, so any trigger naming
   // something concrete is the more useful operator label, and it still ranks
@@ -1754,6 +1784,12 @@ export async function applyApprovalPolicyStage(
     grounding.status === 'truncated' || grounding.status === 'degraded'
   if (groundingCheckIncomplete) {
     triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  }
+  // TAC-424: the sub-cause, recorded on the row beside the trigger that held
+  // the draft. Pushed second so `triggers` reads in the order the checks
+  // decided, and ranked below its partner so it never wins the label.
+  if (grounding.status === 'degraded') {
+    triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
   }
 
   // Trigger 10 (TAC-355): deterministic self-talk backstop. Unconditional —

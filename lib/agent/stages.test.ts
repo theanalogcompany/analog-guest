@@ -2288,6 +2288,45 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.blankBody).toBe(false)
   })
 
+  // TAC-424: the sub-cause marker is a RECORD, not a label, and this is the
+  // assertion that keeps it one.
+  //
+  // hold_all_outbound co-fires deliberately, and it is what gives the test
+  // teeth. Trigger enumeration order puts it at triggers[0], so
+  // pickPrimaryTrigger's fallback would answer `hold_all_outbound` — meaning
+  // this fails if GROUNDING_CHECK_FAILED is dropped from
+  // PRIMARY_TRIGGER_PRIORITY, and it fails if GROUNDING_CHECK_DEGRADED is
+  // ranked above its partner. Without the co-firing trigger it would pass
+  // against both mutants, which is the trap CLAUDE.md records from TAC-367.
+  it('records the degraded sub-cause without letting it win the operator label', async () => {
+    const ctx = inboundCtx()
+    const decision = await applyApprovalPolicyStage(
+      { ...ctx, venue: { ...ctx.venue, holdAllOutbound: true } } as RuntimeContext,
+      makeGenerationResult({ knowledgeGap: false }),
+      { status: 'degraded' as const },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  })
+
+  // TAC-424: the marker never fires alone. If it ever did, a card would be
+  // held under a reason whose copy is written to sit UNDER another line, and
+  // the operator would read a sub-cause as the whole explanation.
+  it('never fires the degraded marker without the trigger that holds the draft', async () => {
+    for (const status of ['clean', 'truncated', 'skipped'] as const) {
+      const decision = await applyApprovalPolicyStage(
+        inboundCtx(),
+        makeGenerationResult({ knowledgeGap: status === 'skipped', voiceFidelity: 0.5 }),
+        { status },
+      )
+      if (decision.action !== 'queue') continue
+      expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
+    }
+  })
+
   // The asymmetry is the whole point of the change, so pin both sides of it
   // in one place: identical gate call, only the SOURCE of the gap differs.
   it('blanks a self-reported gap but not a backstop catch, on otherwise identical input', async () => {
@@ -3857,6 +3896,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
       return {
         ungroundedClaims: decision.ungroundedClaims,
         held: decision.triggers.includes(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED),
+        degradedMarker: decision.triggers.includes(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED),
       }
     }
 
@@ -3864,20 +3904,39 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     expect(await mapped({ status: 'flagged', claims })).toEqual({
       ungroundedClaims: claims,
       held: false,
+      degradedMarker: false,
     })
-    expect(await mapped({ status: 'clean' })).toEqual({ ungroundedClaims: [], held: false })
-    expect(await mapped({ status: 'truncated' })).toEqual({ ungroundedClaims: null, held: true })
-    expect(await mapped({ status: 'degraded' })).toEqual({ ungroundedClaims: null, held: true })
+    expect(await mapped({ status: 'clean' })).toEqual({
+      ungroundedClaims: [],
+      held: false,
+      degradedMarker: false,
+    })
+    expect(await mapped({ status: 'truncated' })).toEqual({
+      ungroundedClaims: null,
+      held: true,
+      degradedMarker: false,
+    })
+    expect(await mapped({ status: 'degraded' })).toEqual({
+      ungroundedClaims: null,
+      held: true,
+      degradedMarker: true,
+    })
     expect(await mapped({ status: 'skipped' }, true)).toEqual({
       ungroundedClaims: null,
       held: false,
+      degradedMarker: false,
     })
 
-    // The pair the ticket is named for, asserted directly. A degraded check
-    // and a clean pass must not produce the same row.
+    // The two pairs the rulings name, asserted directly rather than left to be
+    // read off the table above.
+    //
+    // Ruling 1 C: a degraded check and a clean pass must not produce the same
+    // row. Ruling 2 B: a degraded check and a truncated one must not either —
+    // they hold the draft under the same trigger, and the sub-cause marker is
+    // the only thing between them.
     const degraded = await mapped({ status: 'degraded' })
-    const clean = await mapped({ status: 'clean' })
-    expect(degraded).not.toEqual(clean)
+    expect(degraded).not.toEqual(await mapped({ status: 'clean' }))
+    expect(degraded).not.toEqual(await mapped({ status: 'truncated' }))
   })
 
   it('distinguishes ran-and-found-nothing from never-ran', async () => {
