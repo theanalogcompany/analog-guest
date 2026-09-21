@@ -1296,9 +1296,29 @@ function formatOpenIntentions(
  * these two — so this can only reduce emoji, never add them. Scope is
  * otherwise unaudited: this is not a claim that these are the only two
  * categories that should suppress the block.
+ *
+ * TAC-389 adds a third suppression, and it is NOT a category, which is the
+ * whole reason it needed the flag rather than another entry in the list
+ * above. An operator-initiated decline renders as category 'manual', shared
+ * with ordinary Command Center follow-ups (THE-232), which keep the directive.
+ * The two are only distinguishable per turn, by `isOperatorDecline`.
+ *
+ * Same argument as `comp_complaint`, unmodified: permission is the wrong
+ * thing to hand the model on an apology turn, and a decline is an apology for
+ * cancelling something the venue promised. The block renders LAST in the user
+ * prompt, so on proximity it beats anything the operator instruction says. At
+ * a `frequent` venue it was reaching roughly three decline drafts in four.
+ * Narrower again, so it can still only reduce emoji.
  */
-function shouldRenderEmojiDirective(category: MessageCategory): boolean {
-  return category !== 'opt_out' && category !== 'comp_complaint'
+function shouldRenderEmojiDirective(
+  category: MessageCategory,
+  isOperatorDecline: boolean,
+): boolean {
+  return (
+    category !== 'opt_out' &&
+    category !== 'comp_complaint' &&
+    !isOperatorDecline
+  )
 }
 
 /**
@@ -1453,7 +1473,10 @@ export function runtimeToProse(
   // the persona's standing `## Emojis` statement governing the turn — see
   // the field comment on RuntimeContext.emojiDirective for why absence is
   // the safe direction rather than a gap.
-  if (runtime.emojiDirective && shouldRenderEmojiDirective(category)) {
+  if (
+    runtime.emojiDirective &&
+    shouldRenderEmojiDirective(category, runtime.isOperatorDecline === true)
+  ) {
     blocks.push(formatEmojiDirective(runtime.emojiDirective))
   }
 

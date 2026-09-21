@@ -2806,6 +2806,33 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
     }
   })
 
+  // TAC-389. Not a category: a decline renders as 'manual', which ordinary
+  // Command Center follow-ups (THE-232) also use and which keeps the
+  // directive. Only the per-turn flag separates them, which is why the gate
+  // takes it rather than gaining a third entry in the category list.
+  it('never renders on a decline turn, on either branch', () => {
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(
+        runtimeToProse(
+          { emojiDirective: directive, isOperatorDecline: true },
+          'manual',
+          NOW,
+        ),
+      ).not.toContain('## Emoji for this message')
+    }
+  })
+
+  it('still renders on an ordinary manual follow-up, unchanged', () => {
+    // The other half of the same claim. A gate keyed on the category would
+    // pass the test above and silently strip the directive from every
+    // Command Center follow-up too.
+    for (const directive of ['none', 'allowed'] as const) {
+      expect(
+        runtimeToProse({ emojiDirective: directive }, 'manual', NOW),
+      ).toContain('## Emoji for this message')
+    }
+  })
+
   // The gate has to be narrow, not a silent kill switch — a version that
   // suppressed everywhere would pass both assertions above and remove the
   // whole feature.

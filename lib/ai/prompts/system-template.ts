@@ -848,8 +848,18 @@ import {
 //
 // The filter is structural and lives in handle-operator-decline.ts, not here:
 // a prompt instruction to pick the right row is the thing that was already
-// failing. This version covers the intro alone, which stops the one remaining
-// row inviting the guest over for a promise the same message withdraws.
+// failing. The intro is what stops the one remaining row inviting the guest
+// over for a promise the same message withdraws.
+//
+// The same version also suppresses `## Emoji for this message` on a decline
+// turn. Found while building this one and ruled in before it shipped, so it
+// rides the same bump rather than taking its own. A decline renders as
+// category 'manual', shared with ordinary Command Center follow-ups, so the
+// category gate could not tell them apart and the suppression keys on the
+// per-turn flag this version introduces. The argument is `comp_complaint`'s,
+// unmodified: permission is the wrong thing to hand the model on an apology
+// turn. At a `frequent` venue the block was reaching roughly three decline
+// drafts in four, as the last instruction before the generate line.
 //
 // v1.56.0 (TAC-509 follow-up): the `## Links` copy instruction now names the
 // scheme. "Copy a link exactly as it appears here, character for character"
