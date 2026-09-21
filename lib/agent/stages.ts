@@ -67,6 +67,7 @@ import { canAutoSendComplaintTurn } from './complaint-routing'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
+import { looksLikeQuestion } from './looks-like-question'
 import {
   commitmentIdentityOf,
   type CommitmentIdentity,
@@ -240,12 +241,19 @@ export const APPROVAL_TRIGGERS = {
   // so analytics can separate "the model was honest about not knowing" from
   // "the model was caught stating something it shouldn't have." The two are
   // mutually exclusive on any single turn (this trigger only runs when
-  // knowledgeGap is false). Clock arming, the protected-card carve-out and
-  // the SEND_FIDELITY_FLOOR exemption treat both triggers identically. BODY
-  // BLANKING NO LONGER DOES (TAC-301 part 1.5): a self-reported gap blanks,
+  // knowledgeGap is false). The protected-card carve-out and the
+  // SEND_FIDELITY_FLOOR exemption treat both triggers identically. CLOCK
+  // ARMING NO LONGER DOES (TAC-484): a caught fabrication means "do not send
+  // this," not "we owe them an answer" — the model never admitted to a gap,
+  // so there is no question to hold on. Arming the same pending_until clock
+  // off a backstop catch produced a holding message ("sorry for the wait")
+  // asserting a wait that didn't exist, which the guest's next three replies
+  // were then built on top of (the 2026-09-18 Le Mil's incident). BODY
+  // BLANKING ALSO DOESN'T (TAC-301 part 1.5): a self-reported gap blanks,
   // a backstop catch KEEPS its body, because on this path the model never
   // admitted to guessing and the flag can be wrong. See the blankBody
-  // rationale at the queue return below. See also isKnowledgeGapCard and
+  // rationale at the queue return below, and the pendingUntil computation
+  // further down for the clock. See also isKnowledgeGapCard and
   // knowledgeGapWillQueue's sibling logic.
   KNOWLEDGE_GAP_BACKSTOP: 'knowledge_gap_backstop',
   // TAC-355: deterministic backstop. Fires unconditionally when
@@ -2203,27 +2211,37 @@ export async function applyApprovalPolicyStage(
 
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
   // covering EITHER the self-reported trigger or the independent backstop.
-  // Clock arming and the protected-card drop key on this, so a
+  // The protected-card carve-out and the drop logic key on this, so a
   // caught-but-unflagged fabrication is never sent and always queued, exactly
   // like an honest self-report.
   //
-  // BODY BLANKING IS THE EXCEPTION and no longer keys on this (TAC-301 part
+  // TAC-484: CLOCK ARMING NO LONGER KEYS ON THIS. A backstop catch queuing
+  // and protecting its slot is still correct — an operator has to look at
+  // it — but starting the "still owed an answer" clock off it is what
+  // produced a holding message with nothing to hold. Only a self-reported
+  // gap on an inbound that actually reads as a question may start the clock
+  // now; see the narrower pendingUntil computation below.
+  //
+  // BODY BLANKING IS ALSO AN EXCEPTION and does not key on this (TAC-301 part
   // 1.5) — see the blankBody rationale at the return below.
   //
   // TAC-367: GROUNDING_CHECK_FAILED is deliberately NOT part of this, and
   // TAC-424 keeps it out for BOTH of its causes. An incomplete check is an
   // absence of information about the reply, not a finding against it, and
-  // everything keyed on isGapTurn has a guest-facing consequence that would be
-  // wrong to trigger on that basis:
-  //   - it arms messages.pending_until, so a missing verdict would put a
-  //     "still looking into it" holding message in front of a guest whose
-  //     reply was most likely fine, for a question they may not have asked;
-  //   - it grants the protected-card carve-out, which silently DROPS the
-  //     guest's next turn if that turn queues for any other reason.
-  // An incomplete check queues the draft for a human to glance at. That is the
-  // whole intended consequence, and it needs none of the above. What it DOES
-  // need is the drop exemption, which is `checkDidNotComplete` below and is a
-  // separate thing from this flag.
+  // what isGapTurn still grants would be wrong to grant on that basis: the
+  // protected-card carve-out, which silently DROPS the guest's next turn if
+  // that turn queues for any other reason. An incomplete check queues the
+  // draft for a human to glance at. That is the whole intended consequence,
+  // and it needs none of the above. What it DOES need is the drop exemption,
+  // which is `checkDidNotComplete` below and is a separate thing from this
+  // flag.
+  //
+  // The clock used to be the other half of that argument: an unread verdict
+  // would have put a "still looking into it" holding message in front of a
+  // guest whose reply was most likely fine, for a question they may not have
+  // asked. TAC-484 makes that structural rather than a consequence of this
+  // exclusion — pendingUntil no longer reads isGapTurn at all, so no trigger
+  // added to this flag can reach the clock by being added to it.
   const isGapTurn = knowledgeGapFired || backstopFired
 
   // ---- Pending-row resolution (TAC-308, TAC-394) ----
@@ -2421,11 +2439,27 @@ export async function applyApprovalPolicyStage(
   //     A self-reported gap card and a backstop-flagged comp are the realistic
   //     pair. anyKnowledgeGapCard covers the same-slot cases above as well.
   //
-  // TAC-350: keyed on isGapTurn, not knowledgeGapFired alone — a fresh
-  // backstop catch arms the clock exactly like a fresh self-reported gap;
-  // both are "the guest asked something and got no grounded answer."
+  // TAC-484 narrows all of the above to a subset of isGapTurn, on the
+  // 2026-09-18 incident's ruling: a caught fabrication (backstopFired) never
+  // arms the clock, and a self-report (knowledgeGapFired) arms it only when
+  // the inbound it replies to actually READS as a question
+  // (looksLikeQuestion, ./looks-like-question.ts). The holding message text
+  // is "still tracking that down, sorry for the wait" — a wait that does not
+  // exist when nothing was asked, or when the "gap" was the backstop catching
+  // an unprompted claim rather than the model admitting it couldn't answer
+  // something. `knowledgeGapFired` already implies `ctx.currentMessage !==
+  // null` (see knowledgeGapWillQueue), but TypeScript can't narrow through
+  // that boolean, so the check is repeated here to read `.body` safely.
+  //
+  // Deliberately unchanged: everything else `isGapTurn` still drives (the
+  // protected-card carve-out, the drop logic, blankBody) stays keyed on the
+  // umbrella signal, because a caught fabrication still needs a human to look
+  // at it even though it no longer tells the guest one is coming.
   const pendingUntil =
-    isGapTurn && !anyKnowledgeGapCard(pendingRows)
+    knowledgeGapFired &&
+    ctx.currentMessage !== null &&
+    looksLikeQuestion(ctx.currentMessage.body) &&
+    !anyKnowledgeGapCard(pendingRows)
       ? new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)
       : undefined
 
@@ -2506,10 +2540,11 @@ export async function applyApprovalPolicyStage(
     // Both are judged better than destroying a correct reply, which is what
     // the previous behavior did twice in production within two minutes.
     //
-    // pendingUntil above stays keyed on isGapTurn. Deliberate even though the
-    // card now holds a viable answer: nothing has been SENT, so from the
-    // guest's side they are still waiting, and the holding message ("still on
-    // it") stays accurate about their experience rather than about the card.
+    // pendingUntil above is NO LONGER keyed on isGapTurn (TAC-484) — a
+    // backstop catch never arms it, whatever the body says, because the model
+    // never admitted to a gap and there is no question to hold on. A
+    // self-reported gap still arms it, and only when the inbound it replies
+    // to reads as a question — see the pendingUntil computation above.
     blankBody,
   }
 }
