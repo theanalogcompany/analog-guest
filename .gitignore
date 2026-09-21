@@ -50,6 +50,12 @@ next-env.d.ts
 # local scratch dir for one-off experiments — not committed; pre-commit
 # tsc would otherwise scan WIP files that haven't been wired to deps yet.
 /scripts/sandbox
+
+# TAC knowledge-load: venue knowledge proposals and dedup reports. Both hold
+# owner-document content (farm detail, named staff, founder history) for a
+# real venue and this repo is public, so neither is committed.
+/scripts/data
+/scripts/output
 .worktrees/
 .claude/scheduled_tasks.lock
 supabase/.temp/
