@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CommitmentEmissionSchema,
+  PendingCancellationSchema,
+  resolveCancellation,
   GuestCommitmentRowSchema,
   PendingCommitmentSchema,
   generateCommitmentCode,
@@ -278,5 +280,117 @@ describe('GuestCommitmentRowSchema', () => {
     const parsed = GuestCommitmentRowSchema.safeParse(row)
     expect(parsed.success).toBe(true)
     if (parsed.success) expect(parsed.data).toEqual(row)
+  })
+})
+
+// TAC-513: resolving the model's cancelsCommitmentId emission.
+//
+// The incident these guard: on 2026-09-21 the agent told a guest a comp was
+// cancelled and nothing cancelled it. The fix only works if a claimed id is
+// checked against the guest's OWN open commitments before anything is written,
+// so these cover every way that check can be wrong rather than only the happy
+// path.
+describe('resolveCancellation (TAC-513)', () => {
+  const cortado = {
+    // The real ids from the 2026-09-21 incident. Hex WITH LETTERS, deliberately:
+    // an all-digit uuid uppercases to itself, which made the case assertion
+    // below vacuous on the first version of this fixture.
+    id: 'c0ab42af-b645-4e01-b20e-0b7578abc520',
+    type: 'comp' as const,
+    description: 'replacement cortado',
+    code: '5Q22',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:48:05.646Z',
+  }
+  const tonic = {
+    ...cortado,
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+  }
+
+  it('resolves an id that is on this guest\'s list', () => {
+    const r = resolveCancellation(tonic.id, [cortado, tonic])
+    expect(r).toEqual({
+      status: 'resolved',
+      cancellation: { commitmentId: tonic.id },
+      commitment: tonic,
+    })
+  })
+
+  it('carries ONLY the commitment id, never the code or description', () => {
+    // A copy of either could disagree with the row by the time an operator
+    // approves the card. The id is the whole carrier.
+    const r = resolveCancellation(tonic.id, [tonic])
+    expect(r.status).toBe('resolved')
+    if (r.status !== 'resolved') return
+    expect(Object.keys(r.cancellation)).toEqual(['commitmentId'])
+  })
+
+  it('reports an id that is NOT on the list as unresolved, never as none', () => {
+    // The load-bearing distinction: the reply still says a promise is
+    // cancelled, so this has to reach the unbacked-claim backstop rather than
+    // pass as a turn that carried nothing.
+    const r = resolveCancellation('deadbeef-0000-4000-8000-000000000000', [cortado])
+    expect(r).toEqual({
+      status: 'unresolved',
+      claimedId: 'deadbeef-0000-4000-8000-000000000000',
+    })
+  })
+
+  it('reports another guest\'s commitment id as unresolved', () => {
+    // activeCommitments is always one guest's own set, so an id from another
+    // guest is simply absent from it. This is the whole cross-guest guard.
+    expect(resolveCancellation(tonic.id, [cortado]).status).toBe('unresolved')
+  })
+
+  it('treats an empty list as unresolved, which is the degraded-load case', () => {
+    // buildRuntimeContext fails OPEN to [] when the commitments load fails, so
+    // a degraded turn must hold rather than cancel against a list it could not
+    // read.
+    expect(resolveCancellation(tonic.id, []).status).toBe('unresolved')
+  })
+
+  it('reports an empty or whitespace-only emission as none', () => {
+    expect(resolveCancellation('', [tonic]).status).toBe('none')
+    expect(resolveCancellation('   ', [tonic]).status).toBe('none')
+  })
+
+  it('reports a missing emission as none', () => {
+    expect(resolveCancellation(undefined, [tonic]).status).toBe('none')
+    expect(resolveCancellation(null, [tonic]).status).toBe('none')
+  })
+
+  it('trims surrounding whitespace before matching', () => {
+    expect(resolveCancellation(`  ${tonic.id}  `, [tonic]).status).toBe('resolved')
+  })
+
+  it('matches the id exactly, never by prefix or case', () => {
+    expect(resolveCancellation(tonic.id.slice(0, 8), [tonic]).status).toBe('unresolved')
+    expect(resolveCancellation(tonic.id.toUpperCase(), [tonic]).status).toBe('unresolved')
+  })
+
+  it('never matches on the verification code', () => {
+    // TAC-302 is the recorded failure of code-keyed references: the model
+    // reached for the 4-char code when no id was rendered, and every arrival
+    // capture no-op'd. A code must not resolve here.
+    expect(resolveCancellation('GWPZ', [tonic]).status).toBe('unresolved')
+  })
+})
+
+describe('PendingCancellationSchema (TAC-513)', () => {
+  it('accepts the carrier shape', () => {
+    const parsed = PendingCancellationSchema.safeParse({ commitmentId: 'abc' })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('rejects an empty commitmentId', () => {
+    expect(PendingCancellationSchema.safeParse({ commitmentId: '' }).success).toBe(false)
+  })
+
+  it('rejects a missing commitmentId', () => {
+    expect(PendingCancellationSchema.safeParse({}).success).toBe(false)
   })
 })
