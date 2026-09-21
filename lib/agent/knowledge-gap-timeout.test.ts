@@ -6,7 +6,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // testability". Must precede the import below.
 vi.mock('voyageai', () => ({ VoyageAIClient: class {} }))
 
-import { processDueKnowledgeGaps } from './knowledge-gap-timeout'
+import {
+  KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED,
+  processDueKnowledgeGaps,
+} from './knowledge-gap-timeout'
+
+// TAC-484: the mechanism is disabled by default (KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED
+// = false), so every test below that exercises the scan/claim/send path
+// passes `true` explicitly — same shape as agent-gate.test.ts pinning
+// INSTAGRAM_AGENT_REPLIES_ENABLED and exercising its shut behaviour through
+// the parameter. The "disabled by default" describe block near the bottom of
+// this file is what actually pins the production default.
 
 // The processor is the piece that decides WHICH cards fire and WHETHER a
 // second run can fire them again. Everything downstream of the claim
@@ -54,10 +64,13 @@ const db = {
   claimError: false,
 }
 
+// A vi.fn() wrapper so the "disabled by default" tests below can assert NO
+// DB call was ever attempted, not merely that the summary came back empty.
+const createAdminClientMock = vi.fn(() => ({
+  from: () => makeQuery(),
+}))
 vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: () => ({
-    from: () => makeQuery(),
-  }),
+  createAdminClient: () => createAdminClientMock(),
 }))
 
 /**
@@ -131,6 +144,7 @@ beforeEach(() => {
   db.claimable = new Set()
   db.claimedIds = []
   db.claimError = false
+  createAdminClientMock.mockClear()
   handleHoldingMessageMock.mockReset()
   handleHoldingMessageMock.mockResolvedValue({
     status: 'sent',
@@ -142,7 +156,7 @@ beforeEach(() => {
 describe('processDueKnowledgeGaps (TAC-308)', () => {
   it('claims a due card and sends one holding message', async () => {
     seedCard('card-1', 'inbound-1')
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.scanned).toBe(1)
     expect(summary.claimed).toBe(1)
     expect(summary.sent).toBe(1)
@@ -151,7 +165,7 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
 
   it('passes the guest question through to the holding-message generation', async () => {
     seedCard('card-1', 'inbound-1')
-    await processDueKnowledgeGaps(new Date())
+    await processDueKnowledgeGaps(new Date(), true)
     expect(handleHoldingMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         venueId: 'venue-1',
@@ -168,13 +182,13 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   // run's conditional UPDATE matches nothing.
   it('is a no-op on a second run — the holding message cannot double-fire', async () => {
     seedCard('card-1', 'inbound-1')
-    await processDueKnowledgeGaps(new Date())
+    await processDueKnowledgeGaps(new Date(), true)
     expect(handleHoldingMessageMock).toHaveBeenCalledTimes(1)
 
     // Second tick: the row is still returned by a stale scan, but the CAS
     // now loses because the clock was cleared by the first run.
     handleHoldingMessageMock.mockClear()
-    const second = await processDueKnowledgeGaps(new Date())
+    const second = await processDueKnowledgeGaps(new Date(), true)
     expect(second.casLost).toBe(1)
     expect(second.claimed).toBe(0)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
@@ -185,8 +199,8 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   it('lets exactly one of two concurrent runs win the claim', async () => {
     seedCard('card-1', 'inbound-1')
     const [a, b] = await Promise.all([
-      processDueKnowledgeGaps(new Date()),
-      processDueKnowledgeGaps(new Date()),
+      processDueKnowledgeGaps(new Date(), true),
+      processDueKnowledgeGaps(new Date(), true),
     ])
     expect(a.claimed + b.claimed).toBe(1)
     expect(a.casLost + b.casLost).toBe(1)
@@ -201,7 +215,7 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   it('does not send when an operator acted between the scan and the claim', async () => {
     seedCard('card-1', 'inbound-1')
     db.claimable.delete('card-1')
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.casLost).toBe(1)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
   })
@@ -210,14 +224,14 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   // scan predicate itself, not by a carve-out — they simply never appear in
   // dueRows because the query filters `pending_until IS NOT NULL`.
   it('never touches cards the scan does not return', async () => {
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.scanned).toBe(0)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
   })
 
   it('clears the clock and skips a card with no linked inbound', async () => {
     seedCard('card-1', null)
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.invalid).toBe(1)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
     // Clock cleared, so it won't be rescanned every five minutes forever.
@@ -227,7 +241,7 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   it('clears the clock and skips a card whose inbound is unreadable', async () => {
     seedCard('card-1', 'missing-inbound')
     db.questions.delete('missing-inbound')
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.invalid).toBe(1)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
   })
@@ -239,7 +253,7 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
       outboundMessageId: 'out-1',
       usedFallback: true,
     })
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.fallbackSent).toBe(1)
     expect(summary.sent).toBe(0)
   })
@@ -256,7 +270,7 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
     handleHoldingMessageMock
       .mockResolvedValueOnce({ status: 'failed', stage: 'send', error: 'sendblue down' })
       .mockResolvedValueOnce({ status: 'sent', outboundMessageId: 'out-2', usedFallback: false })
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.errored).toBe(1)
     expect(summary.sent).toBe(1)
   })
@@ -265,15 +279,52 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
   // so there was no body left to keep in sync.
   it('sends without attempting any card regeneration', async () => {
     seedCard('card-1', 'inbound-1')
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.sent).toBe(1)
   })
 
   it('counts a claim DB error without sending', async () => {
     seedCard('card-1', 'inbound-1')
     db.claimError = true
-    const summary = await processDueKnowledgeGaps(new Date())
+    const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.errored).toBe(1)
     expect(handleHoldingMessageMock).not.toHaveBeenCalled()
+  })
+})
+
+// TAC-484: the holding message is disabled. This is what actually pins the
+// production default — every test above exercises the mechanism through the
+// explicit `enabled: true` override, same as agent-gate.test.ts's shut-gate
+// tests do for INSTAGRAM_AGENT_REPLIES_ENABLED.
+describe('processDueKnowledgeGaps — disabled by default (TAC-484)', () => {
+  it('is disabled', () => {
+    expect(KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED).toBe(false)
+  })
+
+  it('returns the all-zero summary and touches nothing, with no arguments', async () => {
+    seedCard('card-1', 'inbound-1')
+    const summary = await processDueKnowledgeGaps(new Date())
+    expect(summary).toEqual({
+      scanned: 0,
+      claimed: 0,
+      casLost: 0,
+      sent: 0,
+      fallbackSent: 0,
+      suppressed: 0,
+      errored: 0,
+      invalid: 0,
+    })
+    expect(handleHoldingMessageMock).not.toHaveBeenCalled()
+    // Not just "sent nothing" — never even reached the database. A due card
+    // sitting in the fake DB is proof the scan itself never ran.
+    expect(createAdminClientMock).not.toHaveBeenCalled()
+    expect(db.claimedIds).toEqual([])
+  })
+
+  it('returns the same all-zero summary when explicitly passed false', async () => {
+    seedCard('card-1', 'inbound-1')
+    const summary = await processDueKnowledgeGaps(new Date(), false)
+    expect(summary.scanned).toBe(0)
+    expect(createAdminClientMock).not.toHaveBeenCalled()
   })
 })

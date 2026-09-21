@@ -35,10 +35,34 @@
 // (lib/followups/engine.ts). The shared "find eligible → claim → side effect"
 // seam still isn't extracted; three instances now agree on the shape, so the
 // next person to touch all three has a real basis for pulling it out.
+//
+// DISABLED as of TAC-484 — see KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED below.
+// The code stays; nothing in this file was deleted. The 2026-09-18 incident
+// (Le Mil's) was a holding message that fired with nothing to hold — the
+// draft it was covering for had already been caught by the grounding
+// backstop, so there was no gap the guest was actually owed an answer to, and
+// "still tracking that down, sorry for the wait" asserted a wait that never
+// existed. Firing on every held card costs more than it returns; the
+// mechanism returns in a dynamic form under its own ticket, where naming what
+// it's holding is part of the gate.
 
 import { createAdminClient } from '@/lib/db/admin'
 import { handleHoldingMessage } from './handle-holding-message'
 import { loadInboundQuestion } from './pending-question'
+
+/**
+ * Whether the timeout processor actually sends holding messages.
+ *
+ * OFF as of TAC-484 (see the module header). Rolling this back is a one-line
+ * flip: nothing else has to move, because everything below this point was
+ * already the mechanism — arming the clock (stages.ts), claiming a card, and
+ * generating the message. Mirrors
+ * lib/messaging/instagram/agent-gate.ts's INSTAGRAM_AGENT_REPLIES_ENABLED
+ * shape: a named constant plus an `enabled` parameter on the function it
+ * gates, so tests can still exercise the send path explicitly without
+ * flipping the default for production.
+ */
+export const KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED: boolean = false
 
 /**
  * Cap on cards processed per tick. Generation + send is a few seconds per
@@ -89,9 +113,17 @@ interface PendingQuestionRow {
  * Never throws — every error is caught, logged, and counted. The caller (the
  * cron route) maps the summary into a 200 so a single bad row can't fail the
  * whole tick.
+ *
+ * `enabled` defaults to KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED (TAC-484,
+ * currently false). When disabled, this returns the all-zero summary
+ * immediately — no scan, no claim, no clock clearing, no DB access at all.
+ * `/api/cron/pending-timeout` calls this with no second argument and needs no
+ * change; a test that wants to exercise the send path passes `true`
+ * explicitly.
  */
 export async function processDueKnowledgeGaps(
   now: Date,
+  enabled: boolean = KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED,
 ): Promise<ProcessDueKnowledgeGapsResult> {
   const summary: ProcessDueKnowledgeGapsResult = {
     scanned: 0,
@@ -103,6 +135,8 @@ export async function processDueKnowledgeGaps(
     errored: 0,
     invalid: 0,
   }
+
+  if (!enabled) return summary
 
   const due = await findDueCards(now)
   if (due === null) return summary
