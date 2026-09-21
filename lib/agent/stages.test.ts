@@ -2508,6 +2508,87 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
   })
 })
 
+// ---------------------------------------------------------------------------
+// TAC-501: the agent invented a phone number and gave it to a guest.
+//
+// Le Mil's config has no phone number anywhere — venue_info.contact carries
+// only a website and publicEmail. Asked "can i just call you instead?", the
+// model answered confidently (knowledgeGap: false — it never admitted to
+// guessing) and invented a plausible-looking 415 number. Two consecutive
+// generations of the identical prompt produced two DIFFERENT numbers, which
+// is what rules out a real number surfacing from somewhere in context: the
+// model was filling a gap, not recalling a fact.
+//
+// Ruled 2026-09-21 (question 1: B): the regen loop that produced the
+// fabrication (see generate-message.test.ts's sibling describe block) stays
+// as it is. The grounding backstop on the FINAL body is the single
+// enforcement point this ticket adds coverage for. These tests pin the two
+// halves of that: the backstop queues rather than sends when it catches an
+// invented contact detail (the AC2 bar, already the shipped mechanism per
+// the TAC-501 audit), and — the reason AC1's measured catch-rate matters —
+// nothing else stops the send when the backstop does not fire.
+// ---------------------------------------------------------------------------
+describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const callInsteadCtx = () =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body: 'can i just call you instead?',
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+        channel: 'text',
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'asks for a phone number',
+        crisisSafety: false,
+      },
+    })
+
+  const invented =
+    "yeah, here's the number: 415-735-5428. though I'll be honest, I don't always catch calls right away. what's on your mind?"
+
+  it('never auto-sends a generation whose body invents a phone number, when the backstop catches it', async () => {
+    const decision = await applyApprovalPolicyStage(
+      callInsteadCtx(),
+      makeGenerationResult({ body: invented, knowledgeGap: false }),
+      {
+        status: 'flagged' as const,
+        claims: ['gives out a phone number that is not in the venue config'],
+      },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    // TAC-301 part 1.5: the backstop path keeps the body — the operator needs
+    // to see the invented number to know what to strike, not an empty card.
+    expect(decision.blankBody).toBe(false)
+  })
+
+  // The exposure AC1 is about, pinned rather than left implicit: the
+  // self-report and the backstop are the ONLY two chances to catch this, and
+  // this file's `knowledge_gap trigger (TAC-308)` describe block already
+  // covers the self-report miss. This is the other one. When neither fires —
+  // the model didn't flag its own gap and the backstop verdict is 'clean' —
+  // there is nothing left in the pipeline to hold the send. This is not a
+  // defect in the gate; it is what makes AC1's measured catch rate the thing
+  // that decides whether AC2's bar actually holds in production.
+  it('auto-sends the invented number when neither the self-report nor the backstop catch it', async () => {
+    const decision = await applyApprovalPolicyStage(
+      callInsteadCtx(),
+      makeGenerationResult({ body: invented, knowledgeGap: false }),
+      { status: 'clean' as const },
+    )
+    expect(decision.action).toBe('send')
+  })
+})
+
 describe('verifyGroundingStage (TAC-350)', () => {
   beforeEach(() => {
     verifyGroundingMock.mockReset()
