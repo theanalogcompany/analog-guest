@@ -833,6 +833,21 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.56.0 (TAC-509 follow-up): the `## Links` copy instruction now names the
+// scheme. "Copy a link exactly as it appears here, character for character"
+// became "...character for character, including the https:// at the start."
+//
+// From the device UAT the day v1.55.0 shipped. Asked where to buy the beans,
+// the agent wrote the RIGHT page as `lemils.com/products/le-mils-budan-bold`,
+// the way anyone writes a link in a DM, and the draft was held because that
+// string does not match the listed `https://` entry. The detector now supplies
+// a missing scheme, so this prose is no longer what decides whether the draft
+// ships. It stays because a link written in full is one the guest can tap in
+// every client, and because the instruction it replaces read as satisfied by
+// what the model actually did.
+//
+// Same rendering site as v1.55.0, so it moves for every venue again.
+//
 // v1.55.0 (TAC-509): a `## Links` section renders the venue's curated link
 // allowlist, and its empty state is what makes it universal. Nothing in
 // generation handled URLs before this: the grounding verifier is a semantic
@@ -1070,7 +1085,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.55.0'
+export const PROMPT_VERSION = 'v1.56.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

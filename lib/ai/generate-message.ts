@@ -68,8 +68,8 @@ export const AI_ERROR_TRUNCATED = 'ai_generation_truncated'
 // fidelity passes. Sonnet still occasionally emits dashes despite the rule
 // text; this is the deterministic backstop.
 const DASH_REGEX = /[—–]/
-const DASH_REGEN_FEEDBACK =
-  'Your previous attempt contained a dash character (— or –). Rewrite without it, using a period or comma instead.'
+const DASH_CONSTRAINT =
+  'Constraint: do not use a dash character (— or –) anywhere in your reply. Use a period or a comma instead.'
 
 // TAC-355: deterministic backstop for reasoning/self-correction leaking into
 // a guest-facing body ("...dandelion root — actually wait, no dashes."). Runs
@@ -81,8 +81,8 @@ const DASH_REGEN_FEEDBACK =
 // persists through every attempt must NOT ship — see
 // GenerateMessageResult.selfTalkViolationPersisted and
 // lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
-const SELF_TALK_REGEN_FEEDBACK =
-  'Your previous attempt included a self-correction or a reference to your own instructions, rules, or nature as an AI (e.g. "actually wait, no dashes" or "as an AI"). Rewrite it as a normal reply with no visible reasoning and no reference to yourself as an AI or to your own rules.'
+const SELF_TALK_CONSTRAINT =
+  'Constraint: do not include a self-correction, any visible reasoning, or any reference to your own instructions, rules, or nature as an AI (for example "actually wait, no dashes" or "as an AI"). Write it as a normal reply.'
 
 // TAC-509: deterministic backstop for a link nobody curated. Runs in the SAME
 // per-attempt loop as the dash and self-talk checks, sharing their attempt
@@ -90,11 +90,17 @@ const SELF_TALK_REGEN_FEEDBACK =
 // every attempt must NOT ship — see unverifiedUrlsPersisted below and
 // lib/agent/stages.ts's UNVERIFIED_URL trigger.
 //
-// The feedback quotes the offending links back. The model cannot fix a link it
+// The constraint names the offending links. The model cannot fix a link it
 // cannot see it got wrong, and the usual miss is one character in a slug.
-function unverifiedUrlFeedback(urls: readonly string[]): string {
+//
+// Phrased as a standing fact about those links rather than as a report on the
+// previous attempt, so it stays TRUE on every later attempt it is carried
+// into: a link that is not on the list is not on the list whether or not the
+// attempt just completed used it.
+function unverifiedUrlConstraint(urls: readonly string[]): string {
   const quoted = urls.map((u) => `"${u}"`).join(', ')
-  return `Your previous attempt contained ${urls.length === 1 ? 'a link that is not' : 'links that are not'} on the venue's approved list: ${quoted}. Rewrite it using only a link from the "## Links" section, copied exactly as written there, or no link at all. Do not guess a web address and do not build one from a pattern.`
+  const isAre = urls.length === 1 ? 'is not a link' : 'are not links'
+  return `Constraint: ${quoted} ${isAre} the venue has approved, and must not appear in your reply. Use only a link from the "## Links" section, copied exactly as written there, or no link at all. Do not guess a web address and do not build one from a pattern.`
 }
 
 // THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
@@ -269,12 +275,38 @@ export async function generateMessage(
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
-    // THE-225: when the previous attempt tripped the dash regex, append a
-    // rewrite directive to the next attempt's user prompt. Reset to null when
-    // the previous attempt was clean (so a fidelity-only retry doesn't carry
-    // stale dash feedback). null on the first attempt — parent userPrompt is
-    // sent verbatim.
+    // THE-225, made STICKY by the TAC-509 follow-up (ruled 2026-09-21).
+    //
+    // Once a check has fired on ANY attempt of this call, its constraint stays
+    // in every later attempt's prompt. It used to be rebuilt from scratch each
+    // iteration out of only the just-completed attempt's violations, so a
+    // directive was dropped the moment its own check passed even when the loop
+    // carried on for a different reason.
+    //
+    // That drop was safe BY CONSTRUCTION while the dash was the only
+    // non-fidelity check: a dash-clean attempt that also passed fidelity broke
+    // the loop, so nothing came after it to reintroduce a dash. TAC-355
+    // (self-talk) and TAC-509 (unverified links) each added a reason to keep
+    // looping past a dash-clean body, and the loop returns the LAST attempt
+    // rather than the best one, so the dropped directive started costing
+    // real drafts. The live case, Le Mil's 2026-09-21: attempt 1 had a dash
+    // and an unlisted link, attempt 2 fixed the dash and kept the link so the
+    // dash constraint left the prompt, attempt 3 worked on the link and put a
+    // dash back. That body is what was held.
+    //
+    // Every constraint is therefore worded as a STANDING RULE rather than as
+    // feedback about the previous attempt ("do not use a dash character",
+    // never "your previous attempt contained a dash"). A sticky directive
+    // phrased as a report becomes a false statement the moment it outlives the
+    // attempt it describes.
+    //
+    // null on the first attempt — the parent userPrompt is sent verbatim.
     let regenFeedback: string | null = null
+    let dashConstraintActive = false
+    let selfTalkConstraintActive = false
+    // Order-preserving and deduped, so a link flagged on attempt 1 is still
+    // named on attempt 3 alongside anything new attempt 2 invented.
+    const unverifiedUrlsSeen: string[] = []
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
@@ -309,14 +341,22 @@ export async function generateMessage(
       const badUrls = findUnverifiedUrls(object.body, allowedUrls)
       const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
       if (fidelityPass && !hasDash && !hasSelfTalk && badUrls.length === 0) break
-      // Set feedback for the next iteration. Dash and self-talk feedback
-      // compose (a body can trip both at once — the motivating incident did)
-      // rather than one winning over the other. When neither applies, clear
-      // so a stale directive doesn't carry forward into a fidelity-only retry.
+      // Accumulate, never reset. All three compose (a body can trip more than
+      // one at once — the motivating incident tripped two) rather than one
+      // winning over the other, and each stays set for the rest of the call.
+      if (hasDash) dashConstraintActive = true
+      if (hasSelfTalk) selfTalkConstraintActive = true
+      for (const url of badUrls) {
+        if (!unverifiedUrlsSeen.includes(url)) unverifiedUrlsSeen.push(url)
+      }
       const feedbackParts: string[] = []
-      if (hasDash) feedbackParts.push(DASH_REGEN_FEEDBACK)
-      if (hasSelfTalk) feedbackParts.push(SELF_TALK_REGEN_FEEDBACK)
-      if (badUrls.length > 0) feedbackParts.push(unverifiedUrlFeedback(badUrls))
+      if (dashConstraintActive) feedbackParts.push(DASH_CONSTRAINT)
+      if (selfTalkConstraintActive) feedbackParts.push(SELF_TALK_CONSTRAINT)
+      if (unverifiedUrlsSeen.length > 0) {
+        feedbackParts.push(unverifiedUrlConstraint(unverifiedUrlsSeen))
+      }
+      // feedbackParts is non-empty here whenever any check has ever fired, so
+      // this only stays null while every failure so far has been fidelity.
       regenFeedback = feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
 
