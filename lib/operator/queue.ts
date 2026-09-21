@@ -210,6 +210,10 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // reply talked about the agent instead of to the guest. The card renders the
   // full body, so this tells the operator what to look for.
   self_talk_detected: 'I was talking about myself instead of to the guest.',
+  // TAC-509, copy approved verbatim (2026-09-21). "Check it" rather than
+  // naming the list: the operator's job on this card is to look at the link,
+  // not to learn where the allowlist lives.
+  unverified_url: "Has a link we couldn't verify. Check it before sending.",
   // "like you" — the venue's voice is the thing being matched, and the
   // operator is the one who knows what it sounds like. Never "low fidelity
   // score", which is our vocabulary, not theirs.

@@ -84,6 +84,10 @@ const CONTEXT_BY_TRIGGER = {
   // are also unlabelled here — pre-existing, deliberately left alone rather
   // than swept into this PR.)
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
+  // TAC-509. Labelled for the same reason as the line above: the operator has
+  // to look at one specific thing in the draft, and an unlabelled "Reply to
+  // Sam" gives them no idea what. "link" is the whole job of this card.
+  [APPROVAL_TRIGGERS.UNVERIFIED_URL]: 'link needs checking',
   // TAC-364. Not an ApprovalTrigger — the gate can't fire it, a crash never
   // produced the GenerateMessageResult the gate takes — which is why the
   // satisfies clause below is widened rather than this key being added to

@@ -385,6 +385,41 @@ function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThreshol
 // model already self-certified as grounded. Slack relay yes — this is the
 // exact failure (a guest nearly receiving an invented fact) TAC-350 exists
 // to surface, same posture as captureDraftQueued.
+/**
+ * TAC-509: a reply carried a link that is not on the venue's curated
+ * `venue_info.links` allowlist, and it survived every regen attempt. The draft
+ * is queued, never sent.
+ *
+ * Slack-relays. A gate whose true-positive history cannot be produced on
+ * demand is an unproven gate (CLAUDE.md, Common gotchas — `comp_regex_backstop`
+ * read as a working comp backstop for two months on a single hit that was a
+ * false positive). This one is expected to be quiet, which is exactly why each
+ * firing should be visible rather than sitting in a PostHog count nobody
+ * queries.
+ *
+ * `allowedUrlCount` is what tells a reader whether a hold means "the model
+ * invented a link" or "this venue has no list yet" — the two look identical on
+ * the card and have completely different fixes.
+ */
+export interface UnverifiedUrlHeldProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string | null
+  // The links that were not on the list, verbatim as the model wrote them.
+  unverifiedUrls: string[]
+  // How many links the venue actually has curated. 0 means nothing was
+  // sendable on this turn whatever the model wrote.
+  allowedUrlCount: number
+  // Never sent to the guest — the gate queues this draft.
+  generatedBody: string
+}
+
+export async function captureUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): Promise<void> {
+  await capturePostHogEvent('unverified_url_held', props.guestId, { ...props })
+  await postToSlack(formatUnverifiedUrlHeld(props))
+}
+
 export interface UngroundedClaimCaughtProps {
   agentRunId: string
   venueId: string
@@ -591,6 +626,23 @@ function formatIntentionPromptRecordingFailed(props: IntentionPromptRecordingFai
     `keys: ${props.keys.join(', ')}${props.source ? ` (${props.source})` : ''}`,
     `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,
   ].join('\n')
+}
+
+function formatUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): string {
+  const urlList = props.unverifiedUrls
+    .map((u) => `\`${truncate(u, SLACK_FIELD_TRUNCATE_CHARS)}\``)
+    .join(', ')
+  const lines = [
+    `*Unverified link held* — reply never sent, queued for review`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: ${props.category ?? 'unknown'}`,
+    `link(s) not on the venue list: ${urlList}`,
+    `venue has ${props.allowedUrlCount} approved link(s)`,
+    `held reply: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
+  return lines.join('\n')
 }
 
 function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {

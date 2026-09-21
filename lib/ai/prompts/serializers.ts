@@ -5,6 +5,7 @@ import {
   isEmptyGuestContext,
   type MenuItem,
   type ParsedGuestContext,
+  parseVenueLinks,
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
@@ -426,7 +427,47 @@ export function venueInfoToProse(venueInfo: VenueInfo): string {
     result = `${result}\n\n${contextSection}`
   }
 
+  // TAC-509. ALWAYS rendered, including the empty state: the empty state is
+  // what answers the threat this exists for, which is the model building a
+  // plausible lemils.com/products/... out of what it knows about Shopify with
+  // no link ever having appeared in its source material.
+  result = `${result}\n\n${formatVenueLinks(venueInfo.links)}`
+
   return result
+}
+
+/**
+ * The `## Links` section: the curated allowlist, plus the instruction that it
+ * is exhaustive (TAC-509).
+ *
+ * The hard enforcement is lib/ai/url-detector.ts inside the regen loop, not
+ * this prose — a draft carrying an unlisted link is held whatever the model
+ * read here. This section is what makes the model get it right the first time,
+ * and what gives it the labels it needs to pick the link that answers the
+ * question actually asked.
+ *
+ * The empty state's last sentence is load-bearing. The venue's own knowledge
+ * entries say "on lemils.com", the detector never fires on a bare domain, and
+ * without that sentence a blanket "no web addresses" would quietly suppress
+ * phrasing the venue actually uses.
+ */
+export function formatVenueLinks(rawLinks: unknown): string {
+  const links = parseVenueLinks(rawLinks)
+  if (links.length === 0) {
+    return [
+      '## Links',
+      'There are no links you may share. Do not put a web address in your reply.',
+      'Naming the site the way the venue knowledge already does is fine.',
+    ].join('\n')
+  }
+  const listed = links.map((l) => `- ${l.label}: ${l.url}`).join('\n')
+  return [
+    '## Links',
+    'These are the only links you may share:',
+    listed,
+    '',
+    'Copy a link exactly as it appears here, character for character. Share one only when it answers what the guest actually asked. Never share a link that is not on this list, and never build one from a pattern.',
+  ].join('\n')
 }
 
 export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {

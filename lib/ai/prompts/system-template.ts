@@ -833,6 +833,29 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.55.0 (TAC-509): a `## Links` section renders the venue's curated link
+// allowlist, and its empty state is what makes it universal. Nothing in
+// generation handled URLs before this: the grounding verifier is a semantic
+// judge that would accept a link differing by one path segment, and the regen
+// loop had no groundedness term at all. A wrong link is worse than a wrong
+// phone number because it looks right — lemils.com/products/* resolves to a
+// live Shopify store, so a fabricated slug is a 404 in the guest's hand.
+//
+// SYSTEM_TEMPLATE itself is NOT edited. The section is rendered by
+// venueInfoToProse (serializers.ts) from venue_info.links, so it carries the
+// venue's own data, and the rule travels with it rather than becoming a
+// universal rule: a universal rule would be append-only numbering plus
+// UNIVERSAL_RULES_DISPLAY lockstep plus the completeness guard, for a
+// constraint whose hard enforcement is a deterministic detector rather than
+// prose. The prose is what makes the model get it right first time;
+// lib/ai/url-detector.ts in the regen loop is what makes a miss unsendable.
+//
+// The version moves for EVERY venue because the section renders on every turn,
+// empty list included. That empty state is the point: with no links anywhere
+// in its source material the model can still invent one from what it knows
+// about Shopify, and "there are no links you may share" is the only thing that
+// speaks to that turn.
+//
 // v1.54.0 (TAC-495): Instagram gets its own channel copy; the SMS copy is
 // byte-identical. TAC-492 turned the first-visit opener on for Instagram guests,
 // and the copy it turned on told them they had texted "this number". So did R1,
@@ -1047,7 +1070,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.54.0'
+export const PROMPT_VERSION = 'v1.55.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

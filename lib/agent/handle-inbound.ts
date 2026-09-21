@@ -289,6 +289,10 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     body: '(generation failed)',
     voiceFidelity: 0,
     reasoning: 'TAC-309: generation failed twice; carded for operator answer',
+    // TAC-509: the card is blank, so there is no body to hold a link. Empty
+    // also keeps UNVERIFIED_URL out of the crash card's trigger set, which is
+    // right: nothing was checked because nothing was generated.
+    unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none',

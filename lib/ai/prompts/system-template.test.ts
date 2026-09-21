@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.54.0 (TAC-495: Instagram gets its own channel copy)', () => {
-    expect(PROMPT_VERSION).toBe('v1.54.0')
+  it('is v1.55.0 (TAC-509: the curated link allowlist section)', () => {
+    expect(PROMPT_VERSION).toBe('v1.55.0')
   })
 })
 

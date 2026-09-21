@@ -8,6 +8,7 @@ import {
   captureMechanicOfferBackstopCaught,
   captureRegenerationTriggered,
   captureUngroundedClaimCaught,
+  captureUnverifiedUrlHeld,
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
@@ -36,6 +37,7 @@ import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
 import { resolveOpenState } from '@/lib/schemas'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
+import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
@@ -234,6 +236,22 @@ export const APPROVAL_TRIGGERS = {
   // guest reading agent self-talk learns they're texting a bot, which is
   // categorical harm regardless of rate.
   SELF_TALK_DETECTED: 'self_talk_detected',
+  // TAC-509: deterministic backstop for a link nobody curated. Fires
+  // unconditionally when GenerateMessageResult.unverifiedUrls is non-empty —
+  // the reply still carries a link that is not on the venue's
+  // `venue_info.links` allowlist after every regen attempt inside
+  // generateMessage's loop (lib/ai/url-detector.ts).
+  //
+  // Never a send, for the same reason SELF_TALK_DETECTED is not: a wrong link
+  // looks right. lemils.com/products/* resolves to a live Shopify store, so a
+  // fabricated slug is a 404 in the guest's hand rather than an obvious error,
+  // and the guest acts on it before anyone here knows.
+  //
+  // The allowlist is CURATED, never derived — not from retrieved knowledge,
+  // not from the composed prompt, not from venue_info.contact. So this trigger
+  // firing means "a human never approved this link", which is a different and
+  // stronger claim than "we could not ground it".
+  UNVERIFIED_URL: 'unverified_url',
   // TAC-355: independent verification-call backstop for the mechanic-
   // approval gate. `requiresOperatorApproval` self-flag and the structural
   // COMMITMENT_TYPE_GATED trigger both missed a real approval-gated mechanic
@@ -373,6 +391,13 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // full draft body regardless of which trigger wins the primary label, so
   // this ranking only affects the displayed reason string, never visibility
   // of the actual self-talk text.
+  // TAC-509: ranked directly above SELF_TALK_DETECTED. Both are deterministic
+  // loop backstops that mean "the text is confirmed broken", and neither is a
+  // money exposure, so both sit below every resource-commitment trigger. This
+  // one outranks self-talk because the guest ACTS on a wrong link: self-talk
+  // tells them they are texting a bot, a bad link sends them to a 404. Label
+  // only, like every entry in this array.
+  APPROVAL_TRIGGERS.UNVERIFIED_URL,
   APPROVAL_TRIGGERS.SELF_TALK_DETECTED,
   // v1.23.0: below MODEL_FLAGGED so a self-flagged or structurally-typed
   // commitment keeps the more specific operator label; ABOVE
@@ -1440,6 +1465,23 @@ export async function applyApprovalPolicyStage(
   // no category scoping, no demo-guest exemption beyond the bypass below.
   if (generation.selfTalkViolationPersisted) {
     triggers.push(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+  }
+
+  // Trigger 10b (TAC-509): a link that is not on the venue's curated
+  // allowlist survived every regen attempt. Unconditional, no category
+  // scoping — a wrong link is wrong on every category — and the demo-guest
+  // bypass below is the only thing that lets one through.
+  if (generation.unverifiedUrls.length > 0) {
+    triggers.push(APPROVAL_TRIGGERS.UNVERIFIED_URL)
+    await captureUnverifiedUrlHeld({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category: ctx.classification?.category ?? null,
+      unverifiedUrls: generation.unverifiedUrls,
+      allowedUrlCount: parseVenueLinks(ctx.venue.venueInfo.links).length,
+      generatedBody: generation.body,
+    })
   }
 
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.

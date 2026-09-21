@@ -526,6 +526,9 @@ function buildFallbackGeneration(): GenerateMessageResult {
     body: FALLBACK_HOLDING_BODY,
     voiceFidelity: 0,
     reasoning: 'TAC-308 plain fallback: generation attempts did not clear the gates',
+    // TAC-509: FALLBACK_HOLDING_BODY is a fixed constant that asserts nothing
+    // and carries no link.
+    unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none',

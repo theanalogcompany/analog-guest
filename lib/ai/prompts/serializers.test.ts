@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` path alias by default
 // without a vitest.config.ts. Other tests in this repo use relative imports too.
 import type { EligibleMechanic } from '../../recognition/eligibility'
@@ -2786,5 +2786,57 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
     expect(personaToProse({ ...named, speakerName: undefined }, 'text')).toContain(
       'You are [name missing], staff at the venue, texting as yourself.',
     )
+  })
+})
+
+describe('venueInfoToProse — ## Links (TAC-509)', () => {
+  const A = { label: 'Budan beans', url: 'https://lemils.com/products/budan' }
+  const B = { label: 'Shipping policy', url: 'https://lemils.com/policies/shipping-policy' }
+
+  it('renders the empty state when the venue has no links key', () => {
+    const out = venueInfoToProse(makeVenueInfo())
+    expect(out).toContain('## Links')
+    expect(out).toContain('There are no links you may share.')
+    expect(out).toContain('Do not put a web address in your reply.')
+  })
+
+  it('renders the empty state for an empty list too', () => {
+    const out = venueInfoToProse(makeVenueInfo({ links: [] }))
+    expect(out).toContain('There are no links you may share.')
+  })
+
+  it('keeps bare-domain phrasing legal in the empty state', () => {
+    // The detector never fires on a bare domain and the venue's own knowledge
+    // says "on lemils.com". Without this sentence the empty state would
+    // suppress phrasing the venue actually uses.
+    const out = venueInfoToProse(makeVenueInfo())
+    expect(out).toContain('Naming the site the way the venue knowledge already does is fine.')
+  })
+
+  it('lists each link with its label and states the list is exhaustive', () => {
+    const out = venueInfoToProse(makeVenueInfo({ links: [A, B] }))
+    expect(out).toContain('These are the only links you may share:')
+    expect(out).toContain(`- ${A.label}: ${A.url}`)
+    expect(out).toContain(`- ${B.label}: ${B.url}`)
+    expect(out).toContain('Copy a link exactly as it appears here, character for character.')
+    expect(out).toContain('never build one from a pattern.')
+    expect(out).not.toContain('There are no links you may share.')
+  })
+
+  it('renders only the usable entries, and falls to the empty state if none are', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mixed = venueInfoToProse(makeVenueInfo({ links: [A, { label: 'Broken' }] }))
+    expect(mixed).toContain(`- ${A.label}: ${A.url}`)
+    expect(mixed).not.toContain('Broken')
+
+    const allBad = venueInfoToProse(makeVenueInfo({ links: ['nope', { url: 'x' }] }))
+    expect(allBad).toContain('There are no links you may share.')
+    warn.mockRestore()
+  })
+
+  it('always renders the section, whatever else the venue has', () => {
+    // Every venue's prompt gains this block, which is why PROMPT_VERSION moved.
+    expect(venueInfoToProse(makeVenueInfo())).toContain('## Links')
+    expect(venueInfoToProse(makeVenueInfo({ links: [A] }))).toContain('## Links')
   })
 })
