@@ -746,3 +746,27 @@ export type VerifyMechanicOfferResult = {
   mechanicId: string
   promptVersion: string
 }
+
+// TAC-401: independent post-generation check for a promise made in PROSE with
+// no structured commitment behind it. Deliberately takes the reply body and
+// NOTHING else — see lib/ai/verify-prose-promise.ts for why the narrow input
+// is what makes the check replayable against fixed bodies and robust to venue
+// persona.
+export type VerifyProsePromiseInput = {
+  replyBody: string
+}
+
+export type VerifyProsePromiseResult = {
+  /** True when the reply commits the venue to giving this guest something of value. */
+  promisesSomething: boolean
+  /**
+   * What is owed, when the check could name it. NULL in two different-looking
+   * but identically-handled cases: promisesSomething is false, or it is true
+   * and the model could not resolve a usable type/description pair. Both mean
+   * "no carrier", and the caller never mints one from a null.
+   */
+  commitmentType: 'comp' | 'hold' | 'discount' | null
+  /** A short noun phrase naming what the venue owes. NULL whenever commitmentType is. */
+  commitmentDescription: string | null
+  promptVersion: string
+}
