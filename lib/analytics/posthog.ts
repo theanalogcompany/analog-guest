@@ -681,13 +681,16 @@ export interface ProsePromiseCaughtProps {
   commitmentType: string | null
   commitmentDescription: string | null
   /**
-   * True when the draft already carried a recommendation from generation, so
-   * the check's carrier was NOT written (ruling 3, 2026-09-21). Recorded
-   * because the card then queues with a commitment that is not the one the
-   * check flagged, and a reader of this event needs to know that without
-   * opening the row.
+   * True when generation had emitted a RECOMMENDATION and this check's
+   * obligation replaced it on the card (ruling 3 as narrowed, 2026-09-21).
+   *
+   * Recorded because it is the one case where the row ends up carrying
+   * something the generating model did not emit, and because it is worth being
+   * able to count: a recommendation and a prose comp in the same reply is the
+   * shape where the old behaviour recorded a drink suggestion for a comp the
+   * venue owed.
    */
-  keptExistingCommitment: boolean
+  replacedRecommendation: boolean
   // The reply text that was caught. Queued, never sent, and not blanked, so
   // it is safe to log here on the same basis as the mechanic-offer event.
   replyBody: string
@@ -710,8 +713,8 @@ function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
     `run: \`${props.agentRunId}\``,
     `category: \`${props.category ?? 'proactive'}\``,
     `owed: ${owed}`,
-    props.keptExistingCommitment
-      ? `carrier: kept the recommendation the model emitted`
+    props.replacedRecommendation
+      ? `carrier: from this check, replacing a recommendation the model emitted`
       : `carrier: from this check`,
     `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
   ]

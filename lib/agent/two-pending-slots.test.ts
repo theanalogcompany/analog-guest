@@ -764,10 +764,16 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
     expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(2)
   })
 
-  // RULING 3, end to end. The model emitted a recommendation and the check
-  // flagged a comp in the prose. The card queues, and the carrier stays the
-  // recommendation.
-  it('041: a recommendation the model emitted is never replaced by the check carrier', async () => {
+  // RULING 3 AS NARROWED (2026-09-21), end to end, and this assertion is the
+  // REVERSE of what it was: the model emitted a recommendation, the check
+  // found a comp in the prose, and the COMP is what the row carries.
+  //
+  // A recommendation is an intention, not an obligation (TAC-380) — it costs
+  // the venue nothing and carries no code — so it must never be the reason a
+  // comp goes untracked. Under the old behaviour this card queued, an operator
+  // approved it, and the guest_commitments row created was a drink suggestion
+  // for a comp the venue owed.
+  it('041: an obligation the check finds replaces a recommendation on the row', async () => {
     const fake = useFake('041')
     const gen = generation({
       body: PROSE_PROMISE_REPLY,
@@ -778,12 +784,38 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
     const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
-    const carrier = row?.pending_commitment as { type: string; description: string } | null
-    expect(carrier?.type).toBe('recommendation')
-    expect(carrier?.description).toBe('the Blossom Tonic')
-    // And it therefore stays in the conversation slot.
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    })
+    // And it therefore moves to the obligation slot, which is what it is.
     if (turn.decision.action !== 'queue') return
-    expect(turn.decision.slot).toBe('conversation')
+    expect(turn.decision.slot).toBe('obligation')
+  })
+
+  // The half of the ruling that did not move, end to end. In production the
+  // stage skips entirely on isCommitmentTypeGated, so the check never runs
+  // here — this pins that a comp reaching the gate alongside a flagged verdict
+  // still writes the model's own comp, unchanged, code and all.
+  it('041: a comp generation emitted is written unchanged, never a second one', async () => {
+    const fake = useFake('041')
+    const gen = generation({
+      body: PROSE_PROMISE_REPLY,
+      commitment: { type: 'comp', description: 'the oat latte', code: 'Z9Y8' },
+    })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'the oat latte',
+      code: 'Z9Y8',
+      expiresAt: null,
+    })
   })
 
   it('041: a failed check queues the draft with no carrier at all', async () => {

@@ -1326,11 +1326,13 @@ export async function verifyProsePromiseStage(
         })
       : null
 
-  // Ruling 3: a recommendation the model emitted keeps the carrier. Recorded
-  // on the event because the card then queues with a commitment that is not
-  // the one this check flagged, and a reader needs to know that without
-  // opening the row.
-  const keptExistingCommitment = !isEmptyCommitmentEmission(generation.commitment)
+  // Ruling 3 as narrowed (2026-09-21): an obligation this check finds replaces
+  // a recommendation generation emitted. The stage skips on
+  // isCommitmentTypeGated, so a non-empty emission reaching this line is
+  // necessarily a recommendation — and it is only displaced when this check
+  // actually named something to displace it with.
+  const replacedRecommendation =
+    commitment !== null && !isEmptyCommitmentEmission(generation.commitment)
 
   await captureProsePromiseCaught({
     agentRunId: ctx.agentRunId,
@@ -1339,7 +1341,7 @@ export async function verifyProsePromiseStage(
     category: ctx.classification?.category ?? null,
     commitmentType: r.data.commitmentType,
     commitmentDescription: r.data.commitmentDescription,
-    keptExistingCommitment,
+    replacedRecommendation,
     replyBody: generation.body,
   })
 

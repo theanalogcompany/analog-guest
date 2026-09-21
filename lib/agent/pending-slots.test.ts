@@ -818,26 +818,46 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
     })
   })
 
-  // RULING 3 (2026-09-21). The check never mints a second commitment alongside
-  // one the model already made. A recommendation is the case that separates
-  // the two readings: it is actionable but not an obligation, so the check
-  // RUNS, and its carrier must still lose.
-  it('keeps the model recommendation and never replaces it with the check carrier', () => {
+  // RULING 3 AS NARROWED (2026-09-21). This test asserted the OPPOSITE until
+  // that narrowing and is reversed rather than deleted, because the old
+  // behaviour is exactly what the ruling overturned: a recommendation is an
+  // INTENTION, not an obligation (TAC-380), so it must never be the reason a
+  // comp the venue now owes goes untracked. Keeping it caught the promise and
+  // then recorded a drink suggestion for it.
+  it('replaces a recommendation generation carried with the obligation the check found', () => {
     const emission = { type: 'recommendation' as const, description: 'the cortado' }
 
     const carrier = resolveDraftCarrier(emission, promised, false)
-    expect(carrier?.type).toBe('recommendation')
-    expect(carrier?.description).toBe('the cortado')
+    expect(carrier?.type).toBe('comp')
+    expect(carrier?.description).toBe('a replacement cortado')
 
     const identity = resolveDraftCarrierIdentity(emission, promised, false)
-    expect(identity?.type).toBe('recommendation')
-    expect(identity?.description).toBe('the cortado')
+    expect(identity?.type).toBe('comp')
+    expect(identity?.description).toBe('a replacement cortado')
   })
 
-  it('keeps an obligation the model emitted', () => {
+  // The half of the ruling that did NOT move. The model's own structured comp
+  // is a better record of what it promised than a second reading of its prose,
+  // and in production the stage skips on isCommitmentTypeGated so `promised`
+  // is null here anyway — this pins the function itself, where both are
+  // supplied.
+  it('never mints a second obligation when generation already carried one', () => {
     const emission = { type: 'comp' as const, description: 'oat latte' }
-    expect(resolveDraftCarrier(emission, promised, false)?.description).toBe('oat latte')
+    const carrier = resolveDraftCarrier(emission, promised, false)
+    expect(carrier?.type).toBe('comp')
+    expect(carrier?.description).toBe('oat latte')
     expect(resolveDraftCarrierIdentity(emission, promised, false)?.description).toBe('oat latte')
+
+    const hold = { type: 'hold' as const, description: 'a bag of the Budan' }
+    expect(resolveDraftCarrier(hold, promised, false)?.description).toBe('a bag of the Budan')
+  })
+
+  // A recommendation with nothing to replace it stays. Dropping it would lose
+  // a record for no gain.
+  it('keeps a recommendation when the check named nothing usable', () => {
+    const emission = { type: 'recommendation' as const, description: 'the cortado' }
+    expect(resolveDraftCarrier(emission, null, false)?.type).toBe('recommendation')
+    expect(resolveDraftCarrierIdentity(emission, null, false)?.type).toBe('recommendation')
   })
 
   // TAC-309 unchanged: a blank card carries no commitment, and a promise the

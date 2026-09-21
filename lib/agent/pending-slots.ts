@@ -34,10 +34,11 @@
 
 import { capturePendingSlotInvariantBroken } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import { OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
+import { isObligationType, OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
 import { commitmentDedupKey } from '@/lib/guests/commitments'
 import {
   type CommitmentEmission,
+  type CommitmentType,
   type PendingCommitment,
   isEmptyCommitmentEmission,
   pendingFromEmission,
@@ -157,23 +158,32 @@ export function draftCommitmentIdentity(
  * TAC-401: the carrier a queued draft persists, once the prose-promise check
  * can supply one the model never emitted.
  *
- * THE PRECEDENCE IS THE RULING (2026-09-21, ruling 3): an actionable emission
- * from generation ALWAYS wins, and `promised` is used only where generation
- * emitted nothing actionable. The check never mints a second commitment
- * alongside one the model already made.
+ * THE PRECEDENCE IS THE RULING, as narrowed on 2026-09-21: an OBLIGATION the
+ * check finds replaces a recommendation carried by generation, and the check
+ * never mints a second obligation when generation already carried one.
  *
- * Two cases sit behind that one line, and they are not the same:
+ * The narrowing is the TAC-380 distinction. A recommendation is an INTENTION,
+ * not an obligation: it costs the venue nothing, never gates, and carries no
+ * verification code. So it must never be the reason a comp the venue now owes
+ * goes untracked. An earlier version of this function kept the recommendation
+ * in that case, which caught the promise and then recorded the wrong thing —
+ * the operator approved a card for a comp and a `guest_commitments` row was
+ * created for a drink suggestion.
  *
- *   - The emission is an OBLIGATION (comp/hold/discount). The check never ran
- *     at all — verifyProsePromiseStage skips on isCommitmentTypeGated — so
- *     `promised` is null here by construction and the `??` is belt-and-braces
- *     rather than the thing doing the work.
- *   - The emission is a RECOMMENDATION. The check DID run, because a
- *     recommendation is not an obligation and the same reply can still promise
- *     a comp in prose, which is exactly this ticket's failure. The trigger
- *     fires and the draft queues, but the carrier stays the recommendation the
- *     model emitted. Overwriting it would silently convert one promise into a
- *     different one on a card an operator is about to approve.
+ * Three cases, and they are not the same:
+ *
+ *   - The emission is an OBLIGATION (comp/hold/discount). It wins, and the
+ *     check never ran at all — verifyProsePromiseStage skips on
+ *     isCommitmentTypeGated — so `promised` is null here by construction. This
+ *     is "never mints a second obligation", and it is the half of the original
+ *     ruling that did not move: the model's own structured comp is a better
+ *     record of what it promised than a second reading of its prose.
+ *   - The emission is a RECOMMENDATION and the check named an obligation. The
+ *     obligation REPLACES it. The draft therefore moves to the obligation slot,
+ *     which is correct: it is one.
+ *   - The emission is a RECOMMENDATION and the check named nothing usable. The
+ *     recommendation stays — there is nothing to replace it with, and dropping
+ *     it would lose a record for no gain.
  *
  * `bodyBlanked` nulls everything, for TAC-309's reason unchanged: a blank
  * knowledge-gap card carries no commitment, and a promise the operator cannot
@@ -189,7 +199,9 @@ export function resolveDraftCarrier(
   bodyBlanked: boolean,
 ): PendingCommitment | null {
   if (bodyBlanked) return null
-  return pendingFromEmission(emission) ?? promised
+  const own = pendingFromEmission(emission)
+  if (own !== null && isObligationType(own.type)) return own
+  return promised ?? own
 }
 
 /**
@@ -213,7 +225,9 @@ export function resolveDraftCarrierIdentity(
   bodyBlanked: boolean,
 ): CommitmentIdentity | null {
   if (bodyBlanked) return null
-  return draftCommitmentIdentity(emission, false) ?? commitmentIdentityOf(promised)
+  const own = draftCommitmentIdentity(emission, false)
+  if (own !== null && isObligationType(own.type as CommitmentType)) return own
+  return commitmentIdentityOf(promised) ?? own
 }
 
 /**

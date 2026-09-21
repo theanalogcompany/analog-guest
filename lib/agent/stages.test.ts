@@ -4179,7 +4179,7 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(result).toEqual({ status: 'flagged', commitment: null })
   })
 
-  it('emits the caught event with what is owed and whether the model had its own carrier', async () => {
+  it('emits the caught event with what is owed and whether it displaced a recommendation', async () => {
     verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
     await verifyProsePromiseStage(
       makeCtx({}),
@@ -4189,7 +4189,7 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     const props = captureProsePromiseCaughtMock.mock.calls[0]?.[0]
     expect(props.commitmentType).toBe('comp')
     expect(props.commitmentDescription).toBe('a replacement cortado')
-    expect(props.keptExistingCommitment).toBe(true)
+    expect(props.replacedRecommendation).toBe(true)
   })
 
   // ---- Failure posture (ruled 2026-09-21, ruling 1) ----
@@ -4316,9 +4316,10 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     expect(decision.slot).toBe('obligation')
   })
 
-  // Ruling 3, at the gate: the model's own emission wins, so the draft keeps
-  // the recommendation and stays in the conversation slot.
-  it('keeps the model recommendation as the carrier and leaves the slot alone', async () => {
+  // Ruling 3 as narrowed, at the gate: the obligation replaces the
+  // recommendation, so the draft MOVES to the obligation slot. Reversed from
+  // the original assertion, which expected the conversation slot.
+  it('moves to the obligation slot when its carrier displaces a recommendation', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
@@ -4330,7 +4331,8 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.slot).toBe('conversation')
+    expect(decision.slot).toBe('obligation')
+    expect(decision.promisedCommitment).toEqual(promisedComp)
   })
 
   // PRIMARY_TRIGGER_PRIORITY: this outranks the two signals it replaces as the
