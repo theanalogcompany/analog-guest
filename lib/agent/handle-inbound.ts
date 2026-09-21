@@ -302,6 +302,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 2,
     attemptScores: [],
     attemptHistory: [],

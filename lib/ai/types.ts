@@ -457,6 +457,10 @@ export type GenerateMessageAttempt = {
   // becomes the GenerateMessageResult.contextUpdate consumed by the
   // orchestrator's context-write step.
   contextUpdate: GenerateMessageContextUpdate
+  // TAC-513: per-attempt cancellation emission. Final attempt's value becomes
+  // GenerateMessageResult.cancelsCommitmentId. '' means this reply cancels
+  // nothing.
+  cancelsCommitmentId: string
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -513,6 +517,21 @@ export type GenerateMessageResult = {
   // approval-gate outcome (TAC-296 precedent). Empty `{}` is the no-op shape;
   // isEmptyArrivalCapture short-circuits before any DB hit.
   arrivalCapture: GenerateMessageArrivalCapture
+  // TAC-513: final-attempt cancellation emission, the id of the commitment
+  // this reply withdraws. '' means it withdraws nothing, which is almost every
+  // turn.
+  //
+  // REQUIRED rather than optional, deliberately, and it is why every
+  // construction site of this type had to decide a value when it landed. An
+  // optional field would let all of them default to "cancels nothing" in
+  // silence, which is exactly the fixture trap this repo keeps paying for:
+  // the paths that genuinely cancel nothing (crisis safety, the holding
+  // fallback, the crash card) should SAY so rather than omit it.
+  //
+  // RAW, not resolved. The gate runs resolveCancellation against the guest's
+  // own active commitments; nothing downstream may treat this string as a
+  // commitment that exists.
+  cancelsCommitmentId: string
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so

@@ -602,6 +602,7 @@ function buildFallbackGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

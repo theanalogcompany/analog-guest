@@ -204,6 +204,24 @@ export const GeneratedMessageSchema = z.object({
   // immediate transitionToPendingAck + push; signal='scheduled' stores
   // expected_arrival for the hourly cron to fire.
   arrivalCapture: ArrivalCaptureEmissionSchema,
+  // TAC-513: the commitment this reply WITHDRAWS, by id, copied verbatim from
+  // the `id:` on a line of the ## Active commitments block. Empty string when
+  // the reply cancels nothing, which is almost every turn.
+  //
+  // A BARE REQUIRED STRING rather than a nested optional object, for the reason
+  // knowledgeGap is a bare required boolean: Anthropic counts only optionals
+  // against the 24-property cap, this schema sits at exactly 20 against a repo
+  // budget of 22 (lib/ai/schema-budget.test.ts), and a nested
+  // `{ commitmentId?: string }` would cost 2 and land on the budget line.
+  // The sentinel is '' and the schema does not police it; resolveCancellation
+  // does, against the guest's own rendered list.
+  //
+  // BY ID, NOT BY CODE. The 4-char verification code is not unique (31-char
+  // alphabet, no constraint) and is NULL on every recommendation, so it cannot
+  // address half the rows it would need to. TAC-302 is the recorded failure:
+  // through v1.17.0 the id was missing from the block, the model reached for
+  // the code instead, and every arrival capture no-op'd.
+  cancelsCommitmentId: z.string(),
 })
 
 /**
@@ -272,6 +290,7 @@ export async function generateMessage(
       }
       commitment: z.infer<typeof CommitmentEmissionSchema>
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
+      cancelsCommitmentId: string
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -333,6 +352,7 @@ export async function generateMessage(
         contextUpdate: object.contextUpdate,
         commitment: object.commitment,
         arrivalCapture: object.arrivalCapture,
+        cancelsCommitmentId: object.cancelsCommitmentId,
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
@@ -395,6 +415,7 @@ export async function generateMessage(
         // UNDERSTOOD from the inbound is independent of what the agent
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
+        cancelsCommitmentId: lastResult.cancelsCommitmentId,
         attempts,
         attemptScores,
         attemptHistory,

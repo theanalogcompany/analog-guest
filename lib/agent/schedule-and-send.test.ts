@@ -208,6 +208,7 @@ function makeGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],

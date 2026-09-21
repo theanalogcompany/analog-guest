@@ -77,6 +77,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0],
     attemptHistory: [
@@ -91,6 +92,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         contextUpdate: {},
         commitment: {},
         arrivalCapture: {},
+    cancelsCommitmentId: '',
       },
     ],
     systemPrompt: '',

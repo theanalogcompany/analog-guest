@@ -95,6 +95,7 @@ function generation(body: string, overrides: Partial<GenerateMessageResult> = {}
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.8],
     attemptHistory: [],
