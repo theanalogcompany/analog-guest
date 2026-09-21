@@ -35,6 +35,10 @@ const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' }
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
 const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+// TAC-513: default CLEAN, not undefined. The './stages' factory below is an
+// explicit allow-list, so a stage missing from it arrives `undefined` and
+// throws inside the allSettled argument list before the gate is reached.
+const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
@@ -115,6 +119,7 @@ vi.mock('./stages', async () => {
     // that is a TypeError swallowed into a rejected settlement — the check
     // would read as permanently degraded with every test here still green.
     verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({

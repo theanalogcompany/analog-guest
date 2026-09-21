@@ -28,9 +28,11 @@ import {
   retrieveCorpusStage,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
+  type CancellationBackstopResult,
   type ProsePromiseBackstopResult,
   verifyGroundingStage,
   verifyMechanicOfferStage,
+  verifyCancellationClaimStage,
   verifyProsePromiseStage,
 } from './stages'
 import {
@@ -552,10 +554,11 @@ export async function handleFollowup(input: {
     // One of the four genuine uncarried promises in the measurement was on
     // this path (A4 #34, an engine day_3 followup, "we still owe you a good
     // cortado"), and under the fleet default it sends.
-    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled] = await Promise.allSettled([
+    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
       verifyProsePromiseStage(ctx, gen.result),
+      verifyCancellationClaimStage(ctx, gen.result),
     ])
     if (groundingSettled.status === 'rejected') {
       console.warn('[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)', {
@@ -575,6 +578,18 @@ export async function handleFollowup(input: {
             prosePromiseSettled.reason instanceof Error
               ? prosePromiseSettled.reason.message
               : String(prosePromiseSettled.reason),
+        },
+      )
+    }
+    if (cancellationSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyCancellationClaimStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            cancellationSettled.reason instanceof Error
+              ? cancellationSettled.reason.message
+              : String(cancellationSettled.reason),
         },
       )
     }
@@ -600,6 +615,17 @@ export async function handleFollowup(input: {
       prosePromiseSettled.status === 'fulfilled'
         ? prosePromiseSettled.value
         : { status: 'check_failed' }
+    // TAC-513: an unexpected THROW degrades to check_failed with an unresolved
+    // resolution, matching the two fail-closed stages above. Deliberately NOT
+    // to `{ status: 'none' }`: the resolution is pure and cannot throw, so
+    // reaching here means something structurally unexpected happened, and
+    // "this reply cancels nothing" is the one thing we must not assume on the
+    // path whose whole subject is a reply saying it does.
+    const cancellationBackstop: CancellationBackstopResult =
+      cancellationSettled.status === 'fulfilled'
+        ? cancellationSettled.value
+        : { resolution: { status: 'none' }, claim: 'check_failed' }
+
     if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] followup grounding backstop caught an unverified claim', {
         agentRunId,
@@ -635,6 +661,7 @@ export async function handleFollowup(input: {
       groundingBackstop,
       mechanicOfferBackstop,
       prosePromiseBackstop,
+      cancellationBackstop,
     )
     console.log('[agent] followup approval decision', {
       agentRunId,
@@ -681,6 +708,9 @@ export async function handleFollowup(input: {
             // path too: one of the four genuine uncarried promises in the
             // measurement was an engine followup.
             promisedCommitment: approval.promisedCommitment,
+            // TAC-513: the cancellation this card carries, applied when an
+            // operator approves or edits it.
+            pendingCancellation: approval.pendingCancellation,
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: input.trigger.reason === 'manual' ? 'never_regen' : 'regen',

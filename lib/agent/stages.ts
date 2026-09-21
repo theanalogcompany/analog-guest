@@ -51,6 +51,7 @@ import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-
 import { resolveOpenState } from '@/lib/schemas'
 import {
   type CancellationResolution,
+  type PendingCancellation,
   isEmptyCommitmentEmission,
   type PendingCommitment,
   pendingFromEmission,
@@ -363,6 +364,44 @@ export const APPROVAL_TRIGGERS = {
   // alternative is inventing a description, which would land in
   // guest_commitments.description and render as a fact nobody wrote.
   PROSE_PROMISE_CHECK_FAILED: 'prose_promise_check_failed',
+  // TAC-513: the draft carries a structured cancellation, resolved against
+  // this guest's own open commitments. ALWAYS queues, whatever else is true:
+  // taking back something a guest was promised is an operator decision, and
+  // there is no auto-send path for one.
+  //
+  // The mirror of COMMITMENT_TYPE_GATED, and ranked directly below it. On a
+  // reply that both offers and cancels, the label the operator reads should be
+  // the one about money going OUT, which is the exposure this repo has bled on
+  // twice.
+  //
+  // The one path where a cancellation is not queued is the TAC-284 demo
+  // bypass, which overrides every trigger by design. schedule-and-send applies
+  // the cancellation inline there, so a demo guest's ledger still follows
+  // their words.
+  COMMITMENT_CANCELLATION_GATED: 'commitment_cancellation_gated',
+  // TAC-513: the reply TELLS the guest a promise is cancelled and nothing
+  // carries it. The 2026-09-21 incident exactly: comp GWPZ stayed `open` while
+  // the guest was told it was gone.
+  //
+  // Fires on two shapes, deliberately folded into one trigger because the
+  // operator's decision is identical and the copy is true of both: the
+  // independent check read a cancellation in the body with no carrier, OR the
+  // model emitted an id that did not resolve against this guest's own
+  // commitments. The PostHog event carries the unresolved id and the open
+  // count, which is where the two are told apart.
+  //
+  // NEVER SENDS. Unlike PROSE_PROMISE_BACKSTOP it carries no carrier and never
+  // mints one: minting an obligation from a second reading of prose is
+  // protective, minting a cancellation is destructive.
+  PROSE_CANCELLATION_BACKSTOP: 'prose_cancellation_backstop',
+  // TAC-513: the cancellation-claim check produced no readable verdict.
+  //
+  // FAILS CLOSED on every failure mode, like PROSE_PROMISE_CHECK_FAILED and
+  // for the same reason: there is no prior to degrade to. A DISTINCT trigger
+  // rather than folding into the line above, per TAC-367 and TAC-364: telling
+  // an operator a cancellation was caught on a turn where nothing was caught
+  // is the wrong-reason-copy problem.
+  PROSE_CANCELLATION_CHECK_FAILED: 'prose_cancellation_check_failed',
 } as const
 
 /**
@@ -420,6 +459,11 @@ export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
  */
 export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+  // TAC-513: directly below the offer, and the ordering is a judgement. On a
+  // reply that both offers and cancels, the operator should read the label
+  // about money going OUT first: an unnoticed new comp costs the venue, where
+  // an unnoticed cancellation costs a card they were going to read anyway.
+  APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
   // TAC-355: ranked directly after COMMITMENT_TYPE_GATED — parity with it,
   // not below it. This backstop is the PRIMARY defense for the mechanic-
   // grant failure mode (see its own comment on APPROVAL_TRIGGERS above), so
@@ -443,6 +487,10 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // MECHANIC_OFFER_BACKSTOP to leave TAC-355's parity with the structural gate
   // undisturbed.
   APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+  // TAC-513: beside its sibling. A reply that lies to the guest about what
+  // they are owed outranks the softer signals below, and ranks under the
+  // promise backstop for the same money-first reason as the pair above.
+  APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
   // TAC-308: second, deliberately not first. The ticket asked for "top of
   // priority," but that request was reasoning about the TIMER — and the timer
   // anchors on messages.pending_until, not on review_reason, so rank decides
@@ -500,6 +548,10 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // above the two venue-wide policy signals because it is at least specific to
   // this message.
   APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
+  // TAC-513: beside its sibling, and low for the same reason
+  // GROUNDING_CHECK_FAILED is: it reports an ABSENCE of signal, so any
+  // concrete co-firing finding is the more useful operator label.
+  APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
   // v1.24.0: category routing is a POLICY signal, not a claim about this
   // draft. Every trigger above names a concrete risk in the specific message
   // and should carry the operator-facing label instead. Ranked above
@@ -1552,6 +1604,19 @@ export type ApprovalDecision =
       // which the persist layer applies through the same resolveDraftCarrier
       // the gate used for the slot decision.
       promisedCommitment: PendingCommitment | null
+      // TAC-513: the cancellation this draft carries, or null. Non-null ONLY
+      // when the model emitted an id that RESOLVED against this guest's own
+      // open + pending_ack list.
+      //
+      // It reaches messages.pending_cancellation through the persist layer, so
+      // an operator approving the card cancels the commitment at the moment
+      // the guest is told it is cancelled. Skip writes nothing, because a
+      // skipped draft never reaches the dispatch path.
+      //
+      // Never supplied by the backstop check, unlike promisedCommitment above.
+      // That asymmetry is the ticket's safety property: recording an
+      // obligation nobody carried is protective, removing one is not.
+      pendingCancellation: PendingCancellation | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
       // (regenerate) instead of INSERTing a new pending row. TAC-394: it is the
@@ -1635,6 +1700,19 @@ export async function applyApprovalPolicyStage(
   // 'check_failed' fires PROSE_PROMISE_CHECK_FAILED. Both of those queue —
   // this check fails closed on every failure, not only on truncation.
   prosePromiseBackstop: ProsePromiseBackstopResult = { status: 'skipped' },
+  // TAC-513: result of verifyCancellationClaimStage, run by the orchestrator
+  // alongside the three checks above. Two independent facts: `resolution` is
+  // the model's own emission resolved against this guest's live commitments,
+  // `claim` is an independent read of the body.
+  //
+  // A resolved resolution fires COMMITMENT_CANCELLATION_GATED and carries the
+  // cancellation onto the draft. A flagged claim, or an emission that did not
+  // resolve, fires PROSE_CANCELLATION_BACKSTOP and carries nothing.
+  // 'check_failed' fires PROSE_CANCELLATION_CHECK_FAILED. All of them queue.
+  cancellationBackstop: CancellationBackstopResult = {
+    resolution: { status: 'none' },
+    claim: 'skipped',
+  },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -1859,6 +1937,43 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
   }
 
+  // Trigger 13 (TAC-513): the draft carries a real cancellation, resolved
+  // against this guest's own open commitments. ALWAYS queues.
+  //
+  // Unconditional by design: there is no auto-send path for taking back
+  // something a guest was promised, and no fidelity score or venue policy that
+  // makes one. The single exception is the TAC-284 demo bypass, which
+  // short-circuits this whole function and is handled in schedule-and-send.
+  if (cancellationBackstop.resolution.status === 'resolved') {
+    triggers.push(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+  }
+
+  // Trigger 14 (TAC-513): the reply says a promise is cancelled and nothing
+  // carries it. The 2026-09-21 incident.
+  //
+  // TWO SHAPES, one trigger, because the operator's decision is the same and
+  // the copy is true of both: the independent check read a cancellation in the
+  // body with no carrier, OR the model emitted an id that did not resolve
+  // against this guest's commitments. The second is included even when the
+  // body reads clean: an emission pointing at a commitment that is not there
+  // is the model reaching for something, and the safe reading of that is a
+  // card rather than a send.
+  //
+  // This trigger NEVER carries a carrier. Minting a cancellation from a second
+  // reading of prose is destructive where TAC-401's minting is protective.
+  if (
+    cancellationBackstop.claim === 'flagged' ||
+    cancellationBackstop.resolution.status === 'unresolved'
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  }
+
+  // Trigger 15 (TAC-513): the cancellation-claim check produced no readable
+  // verdict. Fails CLOSED on every failure mode, like its TAC-401 sibling.
+  if (cancellationBackstop.claim === 'check_failed') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
+  }
+
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
   // covering EITHER the self-reported trigger or the independent backstop.
   // Clock arming and the protected-card drop key on this, so a
@@ -1922,6 +2037,17 @@ export async function applyApprovalPolicyStage(
   // treats them identically.
   const promisedCommitment: PendingCommitment | null =
     prosePromiseBackstop.status === 'flagged' ? prosePromiseBackstop.commitment : null
+  // TAC-513: the cancellation carrier, from the model's own resolved emission
+  // and nothing else.
+  //
+  // `blankBody` nulls it for TAC-309's reason unchanged: a blank knowledge-gap
+  // card's dispatched text is operator-authored, so the model's emission is
+  // not a claim about it, and an operator approving a card they cannot read
+  // must not thereby cancel a guest's comp.
+  const pendingCancellation: PendingCancellation | null =
+    !blankBody && cancellationBackstop.resolution.status === 'resolved'
+      ? cancellationBackstop.resolution.cancellation
+      : null
   // TAC-401: the model's own actionable emission still wins (ruling 3). This
   // differs from the pre-TAC-401 call only when generation emitted nothing
   // actionable AND the check named something, so a draft carrying a
@@ -2096,6 +2222,11 @@ export async function applyApprovalPolicyStage(
     // resolveDraftCarrier in the persist layer applies the same precedence the
     // gate used above — the model's own emission wins.
     promisedCommitment,
+    // TAC-513: the cancellation carrier, threaded to the persist layer so an
+    // operator approving the card cancels the commitment at the same moment
+    // the guest is told it is cancelled. Null unless the model's own emission
+    // resolved against this guest's list.
+    pendingCancellation,
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
     slot,

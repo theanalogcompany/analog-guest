@@ -71,7 +71,11 @@ vi.mock('@/lib/analytics/posthog', () => ({
 import { findPendingQuestion } from './pending-question'
 import type { SlotCallerPolicy } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import { applyApprovalPolicyStage, type ProsePromiseBackstopResult } from './stages'
+import {
+  applyApprovalPolicyStage,
+  type CancellationBackstopResult,
+  type ProsePromiseBackstopResult,
+} from './stages'
 
 const VENUE = '00000000-0000-4000-8000-0000000000aa'
 const GUEST = '18694d6a-6a80-470e-b334-acea7be1ed95'
@@ -162,6 +166,12 @@ async function runTurn(
   // TAC-401: what verifyProsePromiseStage found. Defaults to the pre-TAC-401
   // behaviour, so every existing test in this file reads unchanged.
   prosePromise: ProsePromiseBackstopResult = { status: 'skipped' },
+  // TAC-513: what verifyCancellationClaimStage found. Defaults to the
+  // pre-TAC-513 behaviour, so every existing test in this file reads unchanged.
+  cancellation: CancellationBackstopResult = {
+    resolution: { status: 'none' },
+    claim: 'skipped',
+  },
 ) {
   const decision = await applyApprovalPolicyStage(
     ctx,
@@ -169,6 +179,7 @@ async function runTurn(
     { status: 'clean' },
     { status: 'skipped' },
     prosePromise,
+    cancellation,
   )
   if (decision.action !== 'queue') return { decision, persisted: null }
   const persisted = await persistOrRegenQueuedDraft(
@@ -186,6 +197,9 @@ async function runTurn(
       // assertion in the repo would stay green without it, because a mock
       // returns its fixture whatever it is handed.
       promisedCommitment: decision.promisedCommitment,
+      // TAC-513: same reasoning as the line above. Dropping it is the mutant
+      // the end-to-end test below kills, and no per-mock assertion would.
+      pendingCancellation: decision.pendingCancellation,
       callerPolicy,
     },
   )
@@ -954,5 +968,52 @@ describe('a failed prose-promise check never costs the guest a reply (TAC-401)',
     if (turn.decision.action !== 'drop') return
     expect(turn.decision.reason).toBe('knowledge_gap_card_protected')
     expect(turn.persisted).toBeNull()
+  })
+})
+
+// TAC-513, end to end through the real gate and the real persist layer: the
+// carrier has to reach the ROW, not just the decision. A per-mock assertion
+// cannot show this, because a mock returns its fixture whatever it is handed.
+describe('a cancellation reaches messages.pending_cancellation (TAC-513)', () => {
+  const TONIC = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
+
+  it('writes the carrier onto the inserted row', async () => {
+    const fake = useFake('041')
+    const ctx = ctxFor({ category: 'reply' })
+    const { decision, persisted } = await runTurn(
+      ctx,
+      generation({ body: "got it, just the cortado then. that one's off." }),
+      'regen',
+      { status: 'skipped' },
+      {
+        resolution: {
+          status: 'resolved',
+          cancellation: { commitmentId: TONIC.id },
+          commitment: TONIC,
+        },
+        claim: 'skipped',
+      },
+    )
+    expect(decision.action).toBe('queue')
+    expect(persisted?.action).toBe('inserted')
+    const row = fake.rows.at(-1)
+    expect(row?.pending_cancellation).toEqual({ commitmentId: TONIC.id })
+  })
+
+  it('leaves the column null on an ordinary queued draft', async () => {
+    const fake = useFake('041')
+    const ctx = ctxFor({ category: 'comp_complaint' })
+    await runTurn(ctx, COMP_TURN)
+    const row = fake.rows.at(-1)
+    expect(row?.pending_cancellation ?? null).toBeNull()
   })
 })

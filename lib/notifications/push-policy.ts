@@ -73,6 +73,19 @@ const PUSH_POLICY = {
   // push on, and the one the original allow-list silently dropped.
   [APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]: 'push',
 
+  // TAC-513. A cancellation is a decision about something the guest was
+  // already promised, ranked directly below the offer above, and the card
+  // carries no timer of its own so nothing else would surface it.
+  [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED]: 'push',
+
+  // TAC-513. The reply says a promise is cancelled and nothing cancels it.
+  // It never sends, so the push is the only thing that brings anyone to the
+  // card at all.
+  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP]: 'push',
+
+  // TAC-513. Fails closed, so a card exists and somebody has to look at it.
+  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]: 'push',
+
   // #95 (0c1515c). Venue-wide "hold everything" flag.
   // Product call: a venue that opted into flagging EVERYTHING wants eyes on
   // everything — silently queuing without notifying defeats the flag's whole

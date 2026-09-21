@@ -156,6 +156,26 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // Says what is at stake (something free) and whose call it is, rather than
   // naming the gate.
   commitment_type_gated: 'This offers something free. Your call.',
+  // TAC-513, copy approved verbatim (2026-09-21). The mirror of the line
+  // above, and it closes the same way because it is the same kind of decision
+  // in the opposite direction: something the guest was promised is being taken
+  // back, and that is the operator's to authorise.
+  commitment_cancellation_gated: 'This cancels something already promised. Your call.',
+  // TAC-513, copy approved verbatim (2026-09-21), and the stronger of the two
+  // options put to Jaipal. It says what the text claims AND that the system has
+  // not done it, then tells the operator what to do about it.
+  //
+  // Deliberately not "check before sending": approving this card SENDS the
+  // false sentence, so the useful instruction is to change it, not to check it.
+  // That is also why this one is a full instruction where its neighbours are
+  // observations.
+  prose_cancellation_backstop:
+    "This tells the guest a promise is cancelled. Nothing here cancels it, so don't send it as written.",
+  // TAC-513. Deliberately NOT folded under the line above: nothing was caught
+  // here, the check just did not complete. Mirrors prose_promise_check_failed
+  // and grounding_check_failed, and claims nothing was found, which is the
+  // wrong-reason-copy rule TAC-364 exists for.
+  prose_cancellation_check_failed: "I couldn't check this one for a cancellation.",
   // Hedged because it is a regex on prose, not a structured emission: it can
   // be wrong, and the copy should not assert more confidence than the check
   // has. (Its only production hit to date matched the word "refund" inside the

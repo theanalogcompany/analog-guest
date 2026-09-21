@@ -4640,3 +4640,181 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     expect(verifyCancellationClaimMock).toHaveBeenCalledWith({ replyBody: 'hello there' })
   })
 })
+
+// TAC-513: the gate's side. Three triggers, and the carrier that reaches the
+// persist layer.
+describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const TONIC = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
+  const RESOLVED = {
+    resolution: {
+      status: 'resolved' as const,
+      cancellation: { commitmentId: TONIC.id },
+      commitment: TONIC,
+    },
+    claim: 'skipped' as const,
+  }
+  const NO_CANCELLATION = { resolution: { status: 'none' as const }, claim: 'clean' as const }
+
+  async function gate(
+    cancellation: Parameters<typeof applyApprovalPolicyStage>[5],
+    generationOverrides: Parameters<typeof makeGenerationResult>[0] = {},
+  ) {
+    return applyApprovalPolicyStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ body: "that one's off then", ...generationOverrides }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'skipped' },
+      cancellation,
+    )
+  }
+
+  it('ALWAYS queues a carried cancellation, and carries it to the persist layer', async () => {
+    const decision = await gate(RESOLVED)
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+    expect(decision.pendingCancellation).toEqual({ commitmentId: TONIC.id })
+  })
+
+  it('queues a carried cancellation even on a perfect-fidelity, otherwise clean draft', async () => {
+    // "whatever else is true": there is no fidelity score and no venue policy
+    // that makes taking something back auto-sendable.
+    const decision = await gate(RESOLVED, { voiceFidelity: 0.99 })
+    expect(decision.action).toBe('queue')
+  })
+
+  it('queues a claimed cancellation nothing carries, with NO carrier', async () => {
+    // The incident. Never mints one: cancelling from a second reading of prose
+    // is destructive where TAC-401's minting is protective.
+    const decision = await gate({
+      resolution: { status: 'none' },
+      claim: 'flagged',
+    })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.pendingCancellation).toBeNull()
+  })
+
+  it('queues an UNRESOLVED id under the same trigger, even when the body reads clean', async () => {
+    // An emission pointing at a commitment that is not there is the model
+    // reaching for something. The safe reading of that is a card, not a send.
+    const decision = await gate({
+      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      claim: 'clean',
+    })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.pendingCancellation).toBeNull()
+  })
+
+  it('queues a failed check under its OWN trigger', async () => {
+    const decision = await gate({ resolution: { status: 'none' }, claim: 'check_failed' })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  })
+
+  it('does not fire any cancellation trigger on an ordinary reply', async () => {
+    const decision = await gate(NO_CANCELLATION)
+    expect(decision.action).toBe('send')
+  })
+
+  it('defaults to no cancellation when the caller passes nothing', async () => {
+    // Callers that never ran the stage (and every pre-TAC-513 test) must be
+    // unaffected.
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'skipped' },
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  it('ranks the carried cancellation SECOND, below the offer, when both fire', async () => {
+    // The co-firing test. Both priority tests in this repo have historically
+    // passed via PRIMARY_TRIGGER_PRIORITY's `triggers[0]` fallback, so a new
+    // entry needs a case where the fallback would give the WRONG answer:
+    // here the cancellation is pushed after commitment_type_gated in
+    // enumeration order, so only real ranking puts the offer first.
+    const decision = await gate(RESOLVED, {
+      commitment: { type: 'comp', description: 'a pastry' },
+    })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+
+  it('ranks a carried cancellation ABOVE every softer co-firing signal', async () => {
+    const decision = await gate(RESOLVED, { voiceFidelity: 0.5 })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+  })
+
+  it('ranks the unbacked claim above fidelity, below the promise backstop', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ body: 'the comp is off', voiceFidelity: 0.5 }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'flagged', commitment: null },
+      { resolution: { status: 'none' }, claim: 'flagged' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  })
+
+  it('nulls the carrier on a blank knowledge-gap card', async () => {
+    // TAC-309's rule, unchanged: a blank card's dispatched text is
+    // operator-authored, so approving a card nobody can read must not cancel
+    // a guest's comp.
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({
+        activeCommitments: [TONIC],
+        // knowledge_gap is inbound-only, so the blanking branch is
+        // unreachable without a current message.
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'is the tonic comp still on?',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        },
+      }),
+      makeGenerationResult({ knowledgeGap: true, body: "that one's off" }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'skipped' },
+      RESOLVED,
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.blankBody).toBe(true)
+    expect(decision.pendingCancellation).toBeNull()
+  })
+})
