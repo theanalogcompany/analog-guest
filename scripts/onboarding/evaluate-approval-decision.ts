@@ -2,6 +2,7 @@ import {
   applyApprovalPolicyStage,
   type ApprovalDecision,
   type GroundingBackstopResult,
+  type ProsePromiseBackstopResult,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
 import type { GenerateMessageResult } from '@/lib/ai'
@@ -30,6 +31,16 @@ export async function evaluateApprovalDecision(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   groundingBackstop?: GroundingBackstopResult | null,
+  // TAC-401: the harness grades the SHIPPED mechanism, so the prose-promise
+  // check has to reach the gate here too. Optional with a 'skipped' default
+  // so a caller that has not run the stage behaves exactly as before.
+  prosePromiseBackstop?: ProsePromiseBackstopResult,
 ): Promise<ApprovalDecision> {
-  return applyApprovalPolicyStage(ctx, generation, groundingBackstop)
+  return applyApprovalPolicyStage(
+    ctx,
+    generation,
+    groundingBackstop,
+    { status: 'skipped' },
+    prosePromiseBackstop ?? { status: 'skipped' },
+  )
 }

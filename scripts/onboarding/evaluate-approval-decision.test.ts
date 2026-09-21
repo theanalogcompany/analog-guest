@@ -74,6 +74,7 @@ describe('evaluate-approval-decision structural invariants (TAC-347)', () => {
         'applyApprovalPolicyStage',
         'ApprovalDecision',
         'GroundingBackstopResult',
+        'ProsePromiseBackstopResult',
         'RuntimeContext',
         'GenerateMessageResult',
       ]),

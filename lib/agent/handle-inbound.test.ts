@@ -32,6 +32,9 @@ const applyApprovalPolicyStageMock = vi.fn()
 // every test in this file that doesn't care about it — `clearAllMocks()`
 // (used below) clears call history but not this default implementation.
 const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+// TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
+// in this file behaves exactly as it did before the check existed.
+const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
@@ -107,6 +110,11 @@ vi.mock('./stages', async () => {
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
+    // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
+    // arrives `undefined` at the call site, and inside an allSettled array
+    // that is a TypeError swallowed into a rejected settlement — the check
+    // would read as permanently degraded with every test here still green.
+    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({

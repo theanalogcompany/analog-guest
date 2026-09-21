@@ -40,7 +40,10 @@ import {
   applyApprovalPolicyStage,
   generateStage,
   retrieveCorpusStage,
+  type GroundingBackstopResult,
+  type ProsePromiseBackstopResult,
   verifyGroundingStage,
+  verifyProsePromiseStage,
 } from './stages'
 import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
@@ -389,17 +392,63 @@ async function tryGenerateHolding(
   // inbound-only (verifyGroundingStage returned 'skipped' unconditionally
   // when ctx.currentMessage was null, which it always is on this path) — per
   // the 2026-09-17 ruling it now runs here too, same verifier, same
-  // triggers, same failure posture as inbound. No Promise.allSettled needed:
-  // unlike the two orchestrators, this path has never run
-  // verifyMechanicOfferStage — a holding message doesn't offer mechanics —
-  // so grounding is the only backstop call, and there is nothing else to
-  // race against its throw.
+  // triggers, same failure posture as inbound. This path still never runs
+  // verifyMechanicOfferStage — a holding message doesn't offer mechanics.
   //
   // A 'flagged' or 'truncated' result makes applyApprovalPolicyStage return
   // something other than 'send' below, which this function already treats
   // as "this attempt failed, try again or fall back" — no new branch, same
   // ladder the gate already drove before this ticket.
-  const groundingBackstop = await verifyGroundingStage(ctx, gen.result)
+  //
+  // TAC-401: the prose-promise check runs here too, CONCURRENTLY with
+  // grounding (ruled 2026-09-21, ruling 2), which is why this call went from a
+  // bare await to an allSettled pair. A holding message is content-free by
+  // construction — it asserts nothing and commits to nothing — so this check
+  // should never fire on it; if it does, that construction has broken, and the
+  // right outcome is the one the ladder already produces. A flagged or failed
+  // check makes the gate return something other than 'send', this attempt
+  // fails, and the guest gets FALLBACK_HOLDING_BODY, which cannot promise
+  // anything because it is a fixed string.
+  //
+  // allSettled, not Promise.all, for the reason both orchestrators give: a
+  // hypothetical future throw in one stage must not discard the other's
+  // finding on a check required to fail closed.
+  const [groundingSettled, prosePromiseSettled] = await Promise.allSettled([
+    verifyGroundingStage(ctx, gen.result),
+    verifyProsePromiseStage(ctx, gen.result),
+  ])
+  if (groundingSettled.status === 'rejected') {
+    console.warn(
+      '[agent] holding message verifyGroundingStage threw unexpectedly (degrading to skipped)',
+      {
+        agentRunId,
+        attempt,
+        error:
+          groundingSettled.reason instanceof Error
+            ? groundingSettled.reason.message
+            : String(groundingSettled.reason),
+      },
+    )
+  }
+  if (prosePromiseSettled.status === 'rejected') {
+    console.warn(
+      '[agent] holding message verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
+      {
+        agentRunId,
+        attempt,
+        error:
+          prosePromiseSettled.reason instanceof Error
+            ? prosePromiseSettled.reason.message
+            : String(prosePromiseSettled.reason),
+      },
+    )
+  }
+  const groundingBackstop: GroundingBackstopResult =
+    groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
+  const prosePromiseBackstop: ProsePromiseBackstopResult =
+    prosePromiseSettled.status === 'fulfilled'
+      ? prosePromiseSettled.value
+      : { status: 'check_failed' }
   if (groundingBackstop.status === 'flagged') {
     console.warn('[agent] holding message grounding backstop caught an unverified claim', {
       agentRunId,
@@ -414,7 +463,24 @@ async function tryGenerateHolding(
     })
   }
 
-  const approval = await applyApprovalPolicyStage(ctx, gen.result, groundingBackstop)
+  if (
+    prosePromiseBackstop.status === 'flagged' ||
+    prosePromiseBackstop.status === 'check_failed'
+  ) {
+    console.warn('[agent] holding message prose-promise backstop fired', {
+      agentRunId,
+      attempt,
+      status: prosePromiseBackstop.status,
+    })
+  }
+
+  const approval = await applyApprovalPolicyStage(
+    ctx,
+    gen.result,
+    groundingBackstop,
+    { status: 'skipped' },
+    prosePromiseBackstop,
+  )
   if (approval.action !== 'send') {
     console.warn(
       `[agent] holding message attempt ${attempt} blocked by approval gate (${approval.action}) for guest=${ctx.guest.id}`,

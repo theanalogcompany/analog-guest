@@ -28,8 +28,10 @@ import {
   retrieveCorpusStage,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
+  type ProsePromiseBackstopResult,
   verifyGroundingStage,
   verifyMechanicOfferStage,
+  verifyProsePromiseStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -540,9 +542,20 @@ export async function handleFollowup(input: {
     // would let a hypothetical future throw in one silently discard the
     // other's finding — a fail-open by accident on a gate that has to fail
     // closed on truncation.
-    const [groundingSettled, mechanicOfferSettled] = await Promise.allSettled([
+    // TAC-401: the prose-promise check joins this array, concurrently rather
+    // than in sequence (ruled 2026-09-21, ruling 2). THIS IS THE FOLLOWUP
+    // COVERAGE ruling 4 requires — "whatever mechanism questions 1 and 2
+    // produce must cover followups by design". It reuses the seam TAC-376
+    // already built here rather than adding a parallel one, which is also why
+    // manual followups are covered without touching their own rules.
+    //
+    // One of the four genuine uncarried promises in the measurement was on
+    // this path (A4 #34, an engine day_3 followup, "we still owe you a good
+    // cortado"), and under the fleet default it sends.
+    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
+      verifyProsePromiseStage(ctx, gen.result),
     ])
     if (groundingSettled.status === 'rejected') {
       console.warn('[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)', {
@@ -552,6 +565,18 @@ export async function handleFollowup(input: {
             ? groundingSettled.reason.message
             : String(groundingSettled.reason),
       })
+    }
+    if (prosePromiseSettled.status === 'rejected') {
+      console.warn(
+        '[agent] followup verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            prosePromiseSettled.reason instanceof Error
+              ? prosePromiseSettled.reason.message
+              : String(prosePromiseSettled.reason),
+        },
+      )
     }
     if (mechanicOfferSettled.status === 'rejected') {
       console.warn(
@@ -570,6 +595,10 @@ export async function handleFollowup(input: {
     const mechanicOfferBackstop: MechanicOfferBackstopResult =
       mechanicOfferSettled.status === 'fulfilled'
         ? mechanicOfferSettled.value
+        : { status: 'check_failed' }
+    const prosePromiseBackstop: ProsePromiseBackstopResult =
+      prosePromiseSettled.status === 'fulfilled'
+        ? prosePromiseSettled.value
         : { status: 'check_failed' }
     if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] followup grounding backstop caught an unverified claim', {
@@ -591,11 +620,21 @@ export async function handleFollowup(input: {
         status: mechanicOfferBackstop.status,
       })
     }
+    if (
+      prosePromiseBackstop.status === 'flagged' ||
+      prosePromiseBackstop.status === 'check_failed'
+    ) {
+      console.warn('[agent] followup prose-promise backstop fired', {
+        agentRunId,
+        status: prosePromiseBackstop.status,
+      })
+    }
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
       groundingBackstop,
       mechanicOfferBackstop,
+      prosePromiseBackstop,
     )
     console.log('[agent] followup approval decision', {
       agentRunId,

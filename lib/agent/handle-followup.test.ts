@@ -30,6 +30,7 @@ const retrieveKnowledgeStageMock = vi.fn<(...a: unknown[]) => Promise<unknown[]>
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyGroundingStageMock = vi.fn()
+const verifyProsePromiseStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
@@ -76,6 +77,11 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
+    // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
+    // arrives `undefined` at the call site, which in an allSettled array is a
+    // TypeError swallowed into a rejected settlement — the check would read as
+    // permanently degraded and every test here would stay green.
+    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
   }
 })
@@ -188,6 +194,7 @@ beforeEach(() => {
   generateStageMock.mockReset()
   applyApprovalPolicyStageMock.mockReset()
   verifyGroundingStageMock.mockReset()
+  verifyProsePromiseStageMock.mockReset()
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
@@ -204,6 +211,9 @@ beforeEach(() => {
   // (a followup with no gap-shaped finding). Tests that need a real verdict
   // override with mockResolvedValueOnce.
   verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
+  // TAC-401: 'skipped' by default, so every pre-existing test in this file
+  // behaves exactly as it did before the check existed.
+  verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
   scheduleAndSendMock.mockResolvedValue({
     outboundMessageId: 'sent-1',
     providerMessageId: 'p1',

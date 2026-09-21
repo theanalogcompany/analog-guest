@@ -51,6 +51,9 @@ describe('POST /admin/voices/api/regenerate', () => {
       emojiDirectiveViolated: false,
         offersGatedMechanic: false,
         offeredMechanicId: null,
+      promisesSomething: false,
+      promisedCommitmentType: null,
+      promisedCommitmentDescription: null,
       },
     })
 
@@ -97,6 +100,9 @@ describe('POST /admin/voices/api/regenerate', () => {
       emojiDirectiveViolated: false,
         offersGatedMechanic: false,
         offeredMechanicId: null,
+      promisesSomething: false,
+      promisedCommitmentType: null,
+      promisedCommitmentDescription: null,
       },
     })
 
@@ -129,6 +135,9 @@ describe('POST /admin/voices/api/regenerate', () => {
       emojiDirectiveViolated: false,
         offersGatedMechanic: true,
         offeredMechanicId: 'mech-1',
+      promisesSomething: false,
+      promisedCommitmentType: null,
+      promisedCommitmentDescription: null,
       },
     })
 
