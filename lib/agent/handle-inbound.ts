@@ -184,7 +184,7 @@ async function persistGenerationFailureCard(
       rows: pendingRows,
       draftCommitment: null,
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
       callerPolicy: 'regen_gap_card_only',
     })
     if (slotDecision.action === 'drop') {
@@ -1284,6 +1284,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: 'regen',
+            // TAC-401: the commitment the prose-promise check named, so the
+            // card an operator approves creates a real guest_commitments row.
+            // Without this line the check catches the promise and the promise
+            // still goes untracked, which is the entire ticket.
+            promisedCommitment: approval.promisedCommitment,
             // TAC-385 PR 1: carry the rendered set onto the card so
             // dispatchOperatorOutbound can record the ask if an operator
             // approves or edits it. Nulled by the persist layer under

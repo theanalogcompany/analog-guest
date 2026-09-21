@@ -738,7 +738,14 @@ export interface ProsePromiseCheckUnavailableProps {
    * 'errored' — a transient fault that survived one immediate retry.
    */
   outcome: 'truncated' | 'errored'
-  /** True when a retry was spent before giving up. False on truncation. */
+  /**
+   * Whether a SECOND call was made, not which outcome produced the result.
+   *
+   * A first-call truncation is false, because truncation is never retried. But
+   * a transient fault whose retry then truncated is `true` alongside
+   * `outcome: 'truncated'` — the pair is not redundant and neither field
+   * implies the other.
+   */
   retried: boolean
   error: string
   errorCode?: string

@@ -1296,6 +1296,79 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     })
   })
 
+  // TAC-401. The orchestrator hop for the prose-promise check, and it is the
+  // assertion whose absence let the carrier never reach the card at all: the
+  // check ran, fired its event and its Slack relay, and the promise auto-sent,
+  // with the whole suite green. Mutant: pass `{ status: 'skipped' }` to
+  // applyApprovalPolicyStage instead of the stage's result.
+  it('threads the prose-promise verdict through to applyApprovalPolicyStage', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      commitment: {
+        type: 'comp',
+        description: 'a replacement cortado',
+        code: 'A1B2',
+        expiresAt: null,
+      },
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-p', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(prosePromiseArg).toEqual({
+      status: 'flagged',
+      commitment: {
+        type: 'comp',
+        description: 'a replacement cortado',
+        code: 'A1B2',
+        expiresAt: null,
+      },
+    })
+  })
+
+  // TAC-401. THE acceptance criterion: the commitment the check named has to
+  // reach the row, or the promise is caught and still untracked. Asserted on
+  // the persist call's options rather than on a returned value, because the
+  // persist layer is mocked here and a mock returns its fixture whatever it is
+  // handed — the TAC-385 mutant, which is exactly how this shipped broken the
+  // first time.
+  it('passes the named commitment into the persist options', async () => {
+    const commitment = {
+      type: 'comp' as const,
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    }
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['prose_promise_backstop'],
+      primaryTrigger: 'prose_promise_backstop',
+      ungroundedClaims: [],
+      compMatchedPattern: null,
+      existingPendingDraftId: null,
+      slot: 'obligation',
+      otherSlotOccupied: false,
+      blankBody: false,
+      promisedCommitment: commitment,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledTimes(1)
+    const [, , , , options] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(options.promisedCommitment).toEqual(commitment)
+  })
+
   it('passes the skipped state through when the backstop finds nothing', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })

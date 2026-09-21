@@ -528,6 +528,14 @@ export async function regenerateWithCritique(
   // exists for — a promise in prose with no carrier — is exactly the kind of
   // draft an operator iterating in this playground would otherwise commit to
   // the voice corpus as a good exemplar.
+  //
+  // DELIBERATE EXCEPTION to ruling 2's "concurrently on every path where both
+  // run". This path runs its three checks in sequence, as it already did for
+  // the two above. The ruling's reason is latency on a turn a GUEST is waiting
+  // on; here an operator is waiting, one regen at a time, and the existing
+  // shape of this function is sequential throughout. Making just this one
+  // concurrent would buy one Haiku call of an operator's time at the cost of
+  // the only part of this file that does not read like its neighbours.
   let promisesSomething = false
   let promisedCommitmentType: string | null = null
   let promisedCommitmentDescription: string | null = null

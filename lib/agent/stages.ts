@@ -1884,12 +1884,26 @@ export async function applyApprovalPolicyStage(
   // another item, or another gated type). The existing card wins and this
   // draft is dropped with an alert naming both commitments. And a manual
   // followup that would queue into any occupied slot is refused.
-  const truncatedOnly = grounding.status === 'truncated'
+  // TAC-401 widened this from grounding's truncation alone, and the rename
+  // came with it: the flag was never "truncation was the only trigger", it is
+  // "a check on this turn did not complete".
+  //
+  // The exemption is the one TAC-367 spells out twenty lines above, and
+  // prose_promise_check_failed has the identical property: it reports an
+  // ABSENCE of information about the reply, not a finding against it, and it
+  // is deliberately excluded from isGapTurn. Without the exemption the trigger
+  // it pushes makes triggers.length > 0, which cancels the protected-card
+  // carve-out and DROPS a turn that fired no trigger at all before this ticket
+  // and SENT. A guest already waiting on a knowledge-gap card would get
+  // silence because a Haiku call failed twice — the one outcome worse than
+  // either failing open or failing closed.
+  const checkDidNotComplete =
+    grounding.status === 'truncated' || prosePromiseBackstop.status === 'check_failed'
   const slotDecision = decideSlotAction({
     rows: pendingRows,
     draftCommitment,
     isGapTurn,
-    truncatedOnly,
+    checkDidNotComplete,
     callerPolicy: isManualFollowup ? 'never_regen' : 'regen',
   })
   if (slotDecision.action === 'drop') {

@@ -677,6 +677,10 @@ export async function handleFollowup(input: {
           // a 23505 reveals that the gate never saw ('never_regen').
           {
             pendingUntil: approval.pendingUntil,
+            // TAC-401: the commitment the prose-promise check named. Real on this
+            // path too: one of the four genuine uncarried promises in the
+            // measurement was an engine followup.
+            promisedCommitment: approval.promisedCommitment,
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: input.trigger.reason === 'manual' ? 'never_regen' : 'regen',

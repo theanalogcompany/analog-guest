@@ -735,3 +735,69 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     expect(result.status).not.toBe('refused')
   })
 })
+
+// TAC-401: the followup half of ruling 3, "covers followups by design". One of
+// the four genuine uncarried promises in the measurement was an engine
+// followup, and before these two tests the whole path had the mechanism wired
+// and nothing asserting it — both mutants below survived the full suite.
+describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
+  beforeEach(() => {
+    // The file's own beforeEach resets this one without defaulting it, so a
+    // bare vi.fn() resolves `undefined`, which Promise.allSettled reports as
+    // FULFILLED — the orchestrator then reads `undefined.status` and the turn
+    // fails before it ever reaches the gate.
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+  })
+
+  const commitment = {
+    type: 'comp' as const,
+    description: 'a replacement cortado',
+    code: 'A1B2',
+    expiresAt: null,
+  }
+
+  it('threads the prose-promise verdict through to applyApprovalPolicyStage', async () => {
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_3', triggeredAt: new Date() },
+    })
+
+    expect(verifyProsePromiseStageMock).toHaveBeenCalledTimes(1)
+    const [, , , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(prosePromiseArg).toEqual({ status: 'flagged', commitment })
+  })
+
+  it('passes the named commitment into the persist options', async () => {
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['prose_promise_backstop'],
+      primaryTrigger: 'prose_promise_backstop',
+      compMatchedPattern: null,
+      ungroundedClaims: [],
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'obligation',
+      otherSlotOccupied: false,
+      promisedCommitment: commitment,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-promise-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_3', triggeredAt: new Date() },
+    })
+
+    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistOpts.promisedCommitment).toEqual(commitment)
+  })
+})

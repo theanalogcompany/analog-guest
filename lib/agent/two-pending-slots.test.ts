@@ -802,3 +802,124 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
     expect(row?.review_reason).toBe('prose_promise_check_failed')
   })
 })
+
+
+// TAC-401, and this is the regression the code review caught: a failed
+// prose-promise check must NOT cost the guest a reply.
+//
+// The mechanism is TAC-367's, twelve lines above its own definition in
+// stages.ts. A check that could not complete reports an ABSENCE of information
+// about the reply, not a finding against it, so it is excluded from isGapTurn.
+// That is right FORWARD (no clock, no protected card) and wrong BACKWARD: the
+// trigger it pushes makes triggers.length > 0, which cancels the protected-card
+// carve-out, and a turn that fired no trigger at all before this ticket — and
+// therefore SENT — is destroyed instead. A guest already waiting on a
+// knowledge-gap card would get silence because a Haiku call failed twice, which
+// is worse than either failing open or failing closed.
+describe('a failed prose-promise check never costs the guest a reply (TAC-401)', () => {
+  function seedGapCard(fake: ReturnType<typeof useFake>) {
+    fake.seed({
+      id: 'gap-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      body: '',
+    })
+  }
+
+  it('041: regenerates beside a protected knowledge-gap card instead of dropping', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7 tomorrow' }),
+      'regen',
+      { status: 'check_failed' },
+    )
+
+    expect(turn.decision.action).toBe('queue')
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.triggers).toContain('prose_promise_check_failed')
+    expect(turn.persisted).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+    // The card keeps its own clock, exactly as a truncated grounding check does.
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+  })
+
+  // The race-recovery mirror. gapFlagsFromTriggers is what 23505 recovery
+  // decides with, and it reads the trigger STRINGS off the row rather than the
+  // gate's own flags — so the two computations have to be widened together or
+  // the gate spares a draft and recovery destroys it.
+  it('041: recovery reaching the same card decides it the same way', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    // existingPendingDraftId null: the gate never saw the card, so the INSERT
+    // takes a 23505 and recovery has to decide it from the trigger set alone.
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7 tomorrow' }),
+      'prose_promise_check_failed',
+      null,
+      {
+        reviewTriggers: ['prose_promise_check_failed'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+  })
+
+  // The negative half. A check failure is an absence; a caught promise is a
+  // finding, and a finding beside a protected card still drops, exactly as
+  // every other non-gap trigger does.
+  it('041: a FLAGGED promise beside a protected gap card still drops', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: "sorry about that, next one's on us" }),
+      'regen',
+      {
+        status: 'flagged',
+        commitment: {
+          type: 'comp',
+          description: 'a replacement cortado',
+          code: 'A1B2',
+          expiresAt: null,
+        },
+      },
+    )
+
+    // It lands in the OBLIGATION slot, which the gap card does not hold, so it
+    // queues as a second card rather than dropping. The drop case is the one
+    // below, where the carrier is null and both land in the conversation slot.
+    expect(turn.decision.action).toBe('queue')
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.slot).toBe('obligation')
+  })
+
+  it('041: a flagged promise the check could not NAME drops, like any other finding', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: "we'll sort you out next time" }),
+      'regen',
+      { status: 'flagged', commitment: null },
+    )
+
+    expect(turn.decision.action).toBe('drop')
+    if (turn.decision.action !== 'drop') return
+    expect(turn.decision.reason).toBe('knowledge_gap_card_protected')
+    expect(turn.persisted).toBeNull()
+  })
+})

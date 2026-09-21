@@ -212,11 +212,17 @@ describe('verifyProsePromise', () => {
     await verifyProsePromise({ replyBody: "next one's on us" })
 
     const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
-    expect(call.prompt).toContain("next one's on us")
-    // The narrow input is what makes the replay harness possible and keeps
-    // the check robust to venue persona. If this ever needs widening it is a
-    // decision, not a detail.
-    expect(call.prompt).not.toContain('## ')
+    // Pinned EXACTLY, not by substring. `VerifyProsePromiseInput` has one
+    // field today, so a `not.toContain('## ')` assertion has no venue context
+    // in scope to catch and cannot fail for any implementation of the current
+    // signature — it would describe a guard it does not provide. Pinning the
+    // whole string means widening the input has to change this line, which is
+    // the point: the narrow input is what makes the replay harness possible
+    // and keeps the check robust to venue persona, so widening it is a
+    // decision rather than a detail.
+    expect(call.prompt).toBe(
+      'Assistant\'s reply, about to be sent: "next one\'s on us"\n\nDoes this reply commit the venue to giving this guest something of value?',
+    )
   })
 
   it('pins the output cap', async () => {

@@ -348,7 +348,7 @@ describe('decideSlotAction', () => {
     review_reason: 'knowledge_gap',
     pending_until: '2026-09-14T16:36:34.000Z',
   })
-  const base = { isGapTurn: false, truncatedOnly: false, callerPolicy: 'regen' as const }
+  const base = { isGapTurn: false, checkDidNotComplete: false, callerPolicy: 'regen' as const }
 
   // THE RULING'S TEST (TAC-394 plan v2 §6, test 2). It fails under the
   // same-type reading of "preserves the obligation", which would regenerate
@@ -441,7 +441,7 @@ describe('decideSlotAction', () => {
 
     it('TAC-367: regenerates a knowledge-gap card when only the grounding check truncated', () => {
       expect(
-        decideSlotAction({ ...base, truncatedOnly: true, rows: rowsOf(gapCard), draftCommitment: null }),
+        decideSlotAction({ ...base, checkDidNotComplete: true, rows: rowsOf(gapCard), draftCommitment: null }),
       ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
     })
 

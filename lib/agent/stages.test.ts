@@ -4052,23 +4052,23 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
   it("gapFlagsFromTriggers reads the gate's own trigger codes", () => {
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP])).toEqual({
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
     })
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP])).toEqual({
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
     })
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED])).toEqual({
       isGapTurn: false,
-      truncatedOnly: true,
+      checkDidNotComplete: true,
     })
     expect(
       gapFlagsFromTriggers([
         APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
         APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
       ]),
-    ).toEqual({ isGapTurn: false, truncatedOnly: false })
-    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, truncatedOnly: false })
+    ).toEqual({ isGapTurn: false, checkDidNotComplete: false })
+    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, checkDidNotComplete: false })
   })
 })
 

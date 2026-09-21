@@ -400,7 +400,7 @@ export interface SlotDecisionInput {
   /** A knowledge-gap turn: the self-reported or backstop trigger fired. */
   isGapTurn: boolean
   /** The grounding check truncated (TAC-367). Exempt from gap-card protection. */
-  truncatedOnly: boolean
+  checkDidNotComplete: boolean
   callerPolicy: SlotCallerPolicy
 }
 
@@ -458,7 +458,7 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
         ? { action: 'regen', slot, draftId: occupant.id }
         : drop('slot_occupied')
     case 'regen':
-      if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.truncatedOnly) {
+      if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.checkDidNotComplete) {
         return drop('knowledge_gap_card_protected')
       }
       return { action: 'regen', slot, draftId: occupant.id }
@@ -503,12 +503,17 @@ export function otherSlotOccupant(
  */
 export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
   isGapTurn: boolean
-  truncatedOnly: boolean
+  checkDidNotComplete: boolean
 } {
   const set = triggers ?? []
   return {
     isGapTurn: set.includes('knowledge_gap') || set.includes('knowledge_gap_backstop'),
-    truncatedOnly: set.includes('grounding_check_failed'),
+    // Both absence-of-information triggers, and they must stay in step with
+    // the gate's own computation in stages.ts — this is what 23505 race
+    // recovery decides with, so a divergence means the gate spares a draft and
+    // recovery destroys it.
+    checkDidNotComplete:
+      set.includes('grounding_check_failed') || set.includes('prose_promise_check_failed'),
   }
 }
 
