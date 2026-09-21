@@ -6,6 +6,8 @@ import {
   captureEmojiDirectiveViolated,
   captureGroundingVerifierUnavailable,
   captureMechanicOfferBackstopCaught,
+  captureProsePromiseCaught,
+  captureProsePromiseCheckUnavailable,
   captureRegenerationTriggered,
   captureUngroundedClaimCaught,
   captureUnverifiedUrlHeld,
@@ -26,6 +28,7 @@ import {
   type RuntimeContext as AiRuntimeContext,
   verifyGrounding,
   verifyMechanicOffer,
+  verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
@@ -35,7 +38,17 @@ import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
 // every test that exercises it. Same reasoning as emoji-cadence.ts's
 // deliberate exclusion from the barrel (TAC-362).
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
+// TAC-401: imported BY PATH for the same reason as the line above — this
+// file's tests `vi.mock` the '@/lib/ai' barrel, and a bare constant arriving
+// `undefined` would make the no-retry branch silently unreachable in every
+// one of them.
+import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 import { resolveOpenState } from '@/lib/schemas'
+import {
+  isEmptyCommitmentEmission,
+  type PendingCommitment,
+  pendingFromEmission,
+} from '@/lib/schemas/guest-commitment'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
@@ -51,12 +64,12 @@ import {
   type CommitmentIdentity,
   anyKnowledgeGapCard,
   decideSlotAction,
-  draftCommitmentIdentity,
   EMPTY_PENDING_ROWS,
   isKnowledgeGapCard,
   loadPendingRowsBySlot,
   otherSlotOccupant,
   type PendingSlot,
+  resolveDraftCarrierIdentity,
   pendingSlotOf,
   type SlotDropReason,
 } from './pending-slots'
@@ -299,6 +312,50 @@ export const APPROVAL_TRIGGERS = {
   //
   // Deliberately NOT part of `isGapTurn`: see its definition below.
   GROUNDING_CHECK_FAILED: 'grounding_check_failed',
+  // TAC-401: independent post-generation check for a promise made in PROSE
+  // with no structured commitment behind it. THE PRIMARY CONTROL for that
+  // failure (ruled 2026-09-15, question 1, option c), not a secondary layer.
+  //
+  // Both controls that were supposed to cover it measured near zero on the
+  // same 220 replies: the model's own `requiresOperatorApproval` self-flag
+  // fired 0 times and caught 0 of the 4 genuine uncarried promises, and the
+  // comp regex fired 5 times and caught 0 of them (3 apology idioms, 1
+  // fabricated comp). What held the promises that were held was the grounding
+  // check and the mechanic-offer check — neither a commitment control, both
+  // firing for unrelated reasons, and both fail-open on paths this one covers.
+  // Nothing may depend on the self-flag; it stays only as a secondary signal.
+  //
+  // Unlike every other backstop here, this one can PRODUCE the carrier: the
+  // check names the commitment type and description, which ride the queue
+  // decision onto messages.pending_commitment so an operator approving the
+  // card creates a real guest_commitments row through the path that already
+  // exists. That is what makes the promise tracked — expiry, heads-up
+  // surfacing and dedup all apply from that point — rather than an obligation
+  // no system in the product knows about.
+  PROSE_PROMISE_BACKSTOP: 'prose_promise_backstop',
+  // TAC-401: the prose-promise check produced no readable verdict.
+  //
+  // FAILS CLOSED, and unlike GROUNDING_CHECK_FAILED that is true of EVERY
+  // failure mode here, not only truncation. The grounding check fails open on
+  // a transient fault because it degrades to a defensible prior — the model's
+  // own knowledgeGap self-report, which that check is a second opinion on.
+  // This check has no prior to degrade to: the self-flag caught 0 of 220 and
+  // the ruling forbids depending on it, so failing open returns to nothing at
+  // all. A transient fault is retried once first (ruled 2026-09-21), which is
+  // what pays for the closed posture: the flood case narrows from "any
+  // hiccup" to "a fault that survives two immediate attempts".
+  //
+  // A DISTINCT trigger rather than folding into PROSE_PROMISE_BACKSTOP, for
+  // the reason TAC-367 split GROUNDING_CHECK_FAILED out: telling an operator
+  // a promise was caught on a turn where nothing was caught is the
+  // wrong-reason-copy problem TAC-364 exists for. It also means a sustained
+  // outage is countable in SQL separately from a wave of real catches.
+  //
+  // Deliberately carries NO carrier: we do not know what was promised, so
+  // nothing is recorded and approving that card creates no commitment. The
+  // alternative is inventing a description, which would land in
+  // guest_commitments.description and render as a fact nobody wrote.
+  PROSE_PROMISE_CHECK_FAILED: 'prose_promise_check_failed',
 } as const
 
 /**
@@ -362,6 +419,23 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // an unauthorized-perk signal should carry the same operator-facing
   // priority as an unauthorized comp/hold/discount.
   APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+  // TAC-401: third, in the same obligation group as the two above and ABOVE
+  // every grounding, regex and self-report trigger below.
+  //
+  // It is the primary control for the uncarried-promise failure, and it is the
+  // only trigger in the group that can arrive carrying the commitment itself —
+  // so on a co-firing turn its label is the one that tells the operator what
+  // decision they are actually making. It deliberately outranks
+  // COMP_REGEX_BACKSTOP and MODEL_FLAGGED, the two signals this check replaces
+  // as the control (both measured at 0 catches on the 4 genuine promises), and
+  // COMPLAINT_COMMITMENT_FLOOR, whose copy names the complaint rather than the
+  // promise.
+  //
+  // Below COMMITMENT_TYPE_GATED because that one is a structured emission and
+  // this one is a model judgement on prose, and below
+  // MECHANIC_OFFER_BACKSTOP to leave TAC-355's parity with the structural gate
+  // undisturbed.
+  APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
   // TAC-308: second, deliberately not first. The ticket asked for "top of
   // priority," but that request was reasoning about the TIMER — and the timer
   // anchors on messages.pending_until, not on review_reason, so rank decides
@@ -413,6 +487,12 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // the more useful operator label. It still outranks the policy triggers
   // because it is at least specific to this message.
   APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+  // TAC-401: beside GROUNDING_CHECK_FAILED and for the identical reason. It
+  // reports an ABSENCE of information about the reply, so any trigger naming
+  // something concrete is the more useful operator label, and it still ranks
+  // above the two venue-wide policy signals because it is at least specific to
+  // this message.
+  APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
   // v1.24.0: category routing is a POLICY signal, not a claim about this
   // draft. Every trigger above names a concrete risk in the specific message
   // and should carry the operator-facing label instead. Ranked above
@@ -1137,6 +1217,138 @@ export async function verifyMechanicOfferStage(
 }
 
 /**
+ * TAC-401: what verifyProsePromiseStage found, when it ran.
+ *
+ * Four states, the same shape both sibling backstops settled on. `flagged`
+ * carries the commitment the check named — ALREADY MINTED, with its
+ * verification code, so the code that reaches the card is the code that was
+ * decided here rather than one regenerated at each persist site.
+ *
+ * `commitment: null` on a `flagged` result is a real outcome, not a missing
+ * value: the check is certain the reply promises something and could not name
+ * a usable type and description for it. The draft still queues; it just
+ * carries no carrier, so approving it creates no guest_commitments row.
+ */
+export type ProsePromiseBackstopResult =
+  | { status: 'skipped' }
+  | { status: 'clean' }
+  | { status: 'flagged'; commitment: PendingCommitment | null }
+  | { status: 'check_failed' }
+
+/**
+ * TAC-401: the primary control for a promise made in prose with no structured
+ * commitment behind it.
+ *
+ * Third sibling to verifyGroundingStage and verifyMechanicOfferStage, and the
+ * ruling (2026-09-15, question 2) picked this shape deliberately: option (b),
+ * changing generation so a promise cannot be written without a carrier, has
+ * effectively been tried. `# Commitments` (system-template.ts) already tells
+ * the model that "I'll make it right" must be recorded as a comp, and 0 of 220
+ * replies recorded one. Asking harder is not a plan.
+ *
+ * Skips (returns 'skipped' without calling the model) when:
+ *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
+ *     trigger, so the call buys nothing.
+ *   - isCommitmentTypeGated is already true — the draft carries an actionable
+ *     OBLIGATION carrier, so the card is already correct and
+ *     commitment_type_gated already queues it. This is the one skip that makes
+ *     the check provably redundant, and it is what ruling 3's "never mints a
+ *     second one" means at the call boundary.
+ *   - the body is empty — nothing to read.
+ *
+ * It deliberately does NOT skip on isModelFlagged. Ruling 1: nothing may
+ * depend on the self-flag. A model-flagged draft queues but still carries no
+ * carrier, so skipping there would leave the obligation untracked on approval,
+ * which is the whole ticket.
+ *
+ * A RECOMMENDATION emission does not skip either. A recommendation is not an
+ * obligation and the same reply can still promise a comp in prose; the trigger
+ * fires, and resolveDraftCarrier keeps the model's own carrier (ruling 3).
+ *
+ * FAILS CLOSED on every failure, after ONE immediate retry on a transient
+ * fault (ruled 2026-09-21). Truncation is not retried — retrying a cap that
+ * was already hit spends a second call to hit it again, and the fix is the
+ * cap. The retry is what pays for the closed posture on a check this broad:
+ * without it a single Haiku hiccup queues a reply, and with it the flood case
+ * narrows to a fault that survives two immediate attempts, which is an outage
+ * rather than a blip.
+ *
+ * The divergence from verifyGroundingStage's fail-OPEN posture is deliberate
+ * and is the one thing to understand before changing it: grounding degrades to
+ * a defensible prior, the model's own self-report, which it is a second
+ * opinion on. This check has no prior — the self-flag caught 0 of 220 and the
+ * ruling forbids depending on it — so failing open returns to nothing at all.
+ */
+export async function verifyProsePromiseStage(
+  ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'classification'>,
+  generation: Pick<GenerateMessageResult, 'body' | 'commitment'>,
+): Promise<ProsePromiseBackstopResult> {
+  if (ctx.guest.isDemo === true) return { status: 'skipped' }
+  if (isCommitmentTypeGated(generation)) return { status: 'skipped' }
+  if (generation.body.trim().length === 0) return { status: 'skipped' }
+
+  let r = await verifyProsePromise({ replyBody: generation.body })
+  let retried = false
+  // One immediate retry, transient faults only. Truncation is excluded by
+  // errorCode rather than by message text, which is provider-formatted and
+  // not a contract.
+  if (!r.ok && r.errorCode !== VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE) {
+    retried = true
+    r = await verifyProsePromise({ replyBody: generation.body })
+  }
+
+  if (!r.ok) {
+    const truncated = r.errorCode === VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE
+    console.warn(
+      `[agent] prose-promise check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    await captureProsePromiseCheckUnavailable({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      outcome: truncated ? 'truncated' : 'errored',
+      retried,
+      error: r.error,
+      errorCode: r.errorCode,
+    })
+    return { status: 'check_failed' }
+  }
+
+  if (!r.data.promisesSomething) return { status: 'clean' }
+
+  // Minted ONCE, here. Every downstream site reads this value rather than
+  // rebuilding it, so the code on the card is the code in the alert.
+  const commitment =
+    r.data.commitmentType !== null && r.data.commitmentDescription !== null
+      ? pendingFromEmission({
+          type: r.data.commitmentType,
+          description: r.data.commitmentDescription,
+        })
+      : null
+
+  // Ruling 3 as narrowed (2026-09-21): an obligation this check finds replaces
+  // a recommendation generation emitted. The stage skips on
+  // isCommitmentTypeGated, so a non-empty emission reaching this line is
+  // necessarily a recommendation — and it is only displaced when this check
+  // actually named something to displace it with.
+  const replacedRecommendation =
+    commitment !== null && !isEmptyCommitmentEmission(generation.commitment)
+
+  await captureProsePromiseCaught({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    category: ctx.classification?.category ?? null,
+    commitmentType: r.data.commitmentType,
+    commitmentDescription: r.data.commitmentDescription,
+    replacedRecommendation,
+    replyBody: generation.body,
+  })
+
+  return { status: 'flagged', commitment }
+}
+
+/**
  * TAC-212 approval-policy gate. Runs after generateStage returns success;
  * decides whether to dispatch via Sendblue (action='send') or persist as a
  * pending draft for operator review (action='queue').
@@ -1210,6 +1422,21 @@ export type ApprovalDecision =
       // The WIRE still collapses both to `[]` — see QueueDraft in
       // lib/operator/queue.ts for why the client doesn't get this distinction.
       ungroundedClaims: string[] | null
+      // TAC-401: the commitment the prose-promise check named, already minted
+      // with its verification code. Non-null ONLY when that check flagged a
+      // promise AND could name a usable type and description for it.
+      //
+      // It reaches messages.pending_commitment through the persist layer, so
+      // an operator approving the card creates a real guest_commitments row
+      // and the promise enters the lifecycle — expiry, heads-up surfacing,
+      // dedup. That is the difference between a caught promise and a tracked
+      // one, and it is the whole reason the check names the commitment rather
+      // than only flagging the reply.
+      //
+      // The model's own emission still wins wherever it made one (ruling 3),
+      // which the persist layer applies through the same resolveDraftCarrier
+      // the gate used for the slot decision.
+      promisedCommitment: PendingCommitment | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
       // (regenerate) instead of INSERTing a new pending row. TAC-394: it is the
@@ -1286,6 +1513,13 @@ export async function applyApprovalPolicyStage(
   // 'flagged' | 'check_failed' both do — the fail-closed branch is
   // deliberate, see MECHANIC_OFFER_BACKSTOP's own comment above.
   mechanicOfferBackstop: MechanicOfferBackstopResult = { status: 'skipped' },
+  // TAC-401: result of verifyProsePromiseStage, run by the orchestrator
+  // CONCURRENTLY with the two checks above (ruled 2026-09-21, ruling 2) rather
+  // than in sequence. 'skipped' | 'clean' never fire a trigger; 'flagged'
+  // fires PROSE_PROMISE_BACKSTOP and carries the commitment the check named;
+  // 'check_failed' fires PROSE_PROMISE_CHECK_FAILED. Both of those queue —
+  // this check fails closed on every failure, not only on truncation.
+  prosePromiseBackstop: ProsePromiseBackstopResult = { status: 'skipped' },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -1496,6 +1730,20 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
   }
 
+  // Trigger 12 (TAC-401): the independent prose-promise check. 'flagged' means
+  // the reply commits the venue to something of value with no structured
+  // commitment behind it; 'check_failed' means we could not find out.
+  //
+  // The two are separate triggers on purpose — see PROSE_PROMISE_CHECK_FAILED
+  // on APPROVAL_TRIGGERS. Both queue: this check fails CLOSED on every failure
+  // mode, the deliberate divergence from the grounding backstop above.
+  if (prosePromiseBackstop.status === 'flagged') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+  }
+  if (prosePromiseBackstop.status === 'check_failed') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
+  }
+
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
   // covering EITHER the self-reported trigger or the independent backstop.
   // Clock arming and the protected-card drop key on this, so a
@@ -1553,7 +1801,22 @@ export async function applyApprovalPolicyStage(
   //
   // Every other pending row keeps the pre-TAC-308 behavior exactly.
   const blankBody = knowledgeGapFired
-  const draftCommitment = draftCommitmentIdentity(generation.commitment, blankBody)
+  // TAC-401: the carrier this check supplied, when it supplied one. Null on
+  // every other status, and null when the check flagged a promise it could not
+  // name — both mean "no carrier from here", and resolveDraftCarrierIdentity
+  // treats them identically.
+  const promisedCommitment: PendingCommitment | null =
+    prosePromiseBackstop.status === 'flagged' ? prosePromiseBackstop.commitment : null
+  // TAC-401: the model's own actionable emission still wins (ruling 3). This
+  // differs from the pre-TAC-401 call only when generation emitted nothing
+  // actionable AND the check named something, so a draft carrying a
+  // recommendation keeps it and lands in the conversation slot exactly as
+  // before.
+  const draftCommitment = resolveDraftCarrierIdentity(
+    generation.commitment,
+    promisedCommitment,
+    blankBody,
+  )
   const slot: PendingSlot = pendingSlotOf(draftCommitment)
   const slotOccupant = pendingRows[slot]
   const existingIsKnowledgeGapCard = slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
@@ -1623,12 +1886,26 @@ export async function applyApprovalPolicyStage(
   // another item, or another gated type). The existing card wins and this
   // draft is dropped with an alert naming both commitments. And a manual
   // followup that would queue into any occupied slot is refused.
-  const truncatedOnly = grounding.status === 'truncated'
+  // TAC-401 widened this from grounding's truncation alone, and the rename
+  // came with it: the flag was never "truncation was the only trigger", it is
+  // "a check on this turn did not complete".
+  //
+  // The exemption is the one TAC-367 spells out twenty lines above, and
+  // prose_promise_check_failed has the identical property: it reports an
+  // ABSENCE of information about the reply, not a finding against it, and it
+  // is deliberately excluded from isGapTurn. Without the exemption the trigger
+  // it pushes makes triggers.length > 0, which cancels the protected-card
+  // carve-out and DROPS a turn that fired no trigger at all before this ticket
+  // and SENT. A guest already waiting on a knowledge-gap card would get
+  // silence because a Haiku call failed twice — the one outcome worse than
+  // either failing open or failing closed.
+  const checkDidNotComplete =
+    grounding.status === 'truncated' || prosePromiseBackstop.status === 'check_failed'
   const slotDecision = decideSlotAction({
     rows: pendingRows,
     draftCommitment,
     isGapTurn,
-    truncatedOnly,
+    checkDidNotComplete,
     callerPolicy: isManualFollowup ? 'never_regen' : 'regen',
   })
   if (slotDecision.action === 'drop') {
@@ -1698,6 +1975,12 @@ export async function applyApprovalPolicyStage(
         : grounding.status === 'clean'
           ? []
           : null,
+    // TAC-401: the carrier the prose-promise check produced, threaded to the
+    // persist layer so an operator approving the card creates a real
+    // guest_commitments row. Null whenever the check supplied nothing, and
+    // resolveDraftCarrier in the persist layer applies the same precedence the
+    // gate used above — the model's own emission wins.
+    promisedCommitment,
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
     slot,

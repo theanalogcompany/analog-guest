@@ -113,6 +113,20 @@ const PUSH_POLICY = {
   // ships broken unless an operator edits it — no reason to hold the push.
   [APPROVAL_TRIGGERS.SELF_TALK_DETECTED]: 'push',
 
+  // TAC-401. The primary control for an uncarried promise. The card carries no
+  // timer, so as with UNVERIFIED_URL the push is the only thing that surfaces
+  // it, and the guest is waiting on a reply that will not send itself.
+  [APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP]: 'push',
+
+  // TAC-401, ruled 2026-09-21. Pushes like its sibling above rather than
+  // staying quiet, and the reasoning is the opposite of the usual "don't be
+  // noisy": this check FAILS CLOSED, so a sustained provider outage queues
+  // nearly every reply, and the push volume is what makes that legible as an
+  // outage WHILE IT IS HAPPENING rather than after someone reads a dashboard.
+  // A quiet version of this trigger would turn the one failure mode the
+  // fail-closed posture buys into a silent one.
+  [APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]: 'push',
+
   // TAC-509. A link nobody curated survived every regen attempt, so the reply
   // cannot go out as written and the guest is waiting on an answer that will
   // not send itself. Like SELF_TALK_DETECTED and unlike KNOWLEDGE_GAP it

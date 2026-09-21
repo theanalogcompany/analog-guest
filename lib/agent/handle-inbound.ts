@@ -45,11 +45,13 @@ import {
   KNOWLEDGE_GAP_WINDOW_MS,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
+  type ProsePromiseBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
   verifyMechanicOfferStage,
+  verifyProsePromiseStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -182,7 +184,7 @@ async function persistGenerationFailureCard(
       rows: pendingRows,
       draftCommitment: null,
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
       callerPolicy: 'regen_gap_card_only',
     })
     if (slotDecision.action === 'drop') {
@@ -1015,10 +1017,25 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     const verifySpan = trace.span('verify_grounding', { knowledgeGap: gen.result.knowledgeGap })
     const gatedMechanicCount = ctx.mechanics.filter((m) => m.requiresOperatorApproval).length
     const mechanicSpan = trace.span('verify_mechanic_offer', { gatedMechanicCount })
-    const [groundingSettled, mechanicOfferSettled] = await Promise.allSettled([
+    // TAC-401: the prose-promise check joins this array rather than running
+    // after it (ruled 2026-09-21, ruling 2). It is a third independent Haiku
+    // call with no dependency on either sibling, and a guest is waiting on
+    // this turn, so running it in sequence would add its full latency to every
+    // inbound reply instead of overlapping it with calls already in flight.
+    // No input attributes, deliberately. The span's own `status` output
+    // already says whether the check ran and what it found, and every
+    // candidate attribute here either needs a helper from './stages' (which
+    // this file's tests mock with an explicit allow-list) or reads a
+    // GenerateMessageResult field the fixtures cast partially. Both turn a
+    // span label into a throw on the reply path.
+    const prosePromiseSpan = trace.span('verify_prose_promise', {})
+    const verifyStartedAt = Date.now()
+    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
+      verifyProsePromiseStage(ctx, gen.result),
     ])
+    const verifyElapsedMs = Date.now() - verifyStartedAt
     if (groundingSettled.status === 'rejected') {
       console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to skipped)', {
         agentRunId,
@@ -1027,6 +1044,18 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             ? groundingSettled.reason.message
             : String(groundingSettled.reason),
       })
+    }
+    if (prosePromiseSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            prosePromiseSettled.reason instanceof Error
+              ? prosePromiseSettled.reason.message
+              : String(prosePromiseSettled.reason),
+        },
+      )
     }
     if (mechanicOfferSettled.status === 'rejected') {
       console.warn(
@@ -1052,6 +1081,14 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       mechanicOfferSettled.status === 'fulfilled'
         ? mechanicOfferSettled.value
         : { status: 'check_failed' }
+    // TAC-401: an unexpected THROW degrades to 'check_failed', matching the
+    // mechanic-offer stage above rather than grounding's 'skipped'. This check
+    // fails closed on every failure, and a throw in our own code is not a
+    // reason to make it the one exception.
+    const prosePromiseBackstop: ProsePromiseBackstopResult =
+      prosePromiseSettled.status === 'fulfilled'
+        ? prosePromiseSettled.value
+        : { status: 'check_failed' }
     const groundingClaims =
       groundingBackstop.status === 'flagged' ? groundingBackstop.claims : []
     verifySpan.end({
@@ -1068,6 +1105,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       content: trace.captureContent ? { ungroundedClaims: groundingClaims } : undefined,
     })
     mechanicSpan.end({ output: { status: mechanicOfferBackstop.status } })
+    // TAC-401: `verifyElapsedMs` is the wall clock for all three checks
+    // together, which is what the added latency of this one actually costs on
+    // the inbound path — it overlaps the two that were already running.
+    prosePromiseSpan.end({
+      output: {
+        status: prosePromiseBackstop.status,
+        namedCommitment:
+          prosePromiseBackstop.status === 'flagged' && prosePromiseBackstop.commitment !== null,
+        allChecksElapsedMs: verifyElapsedMs,
+      },
+    })
     if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] inbound grounding backstop caught an unverified claim', {
         agentRunId,
@@ -1083,6 +1131,16 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       console.warn('[agent] inbound mechanic-offer backstop fired', {
         agentRunId,
         status: mechanicOfferBackstop.status,
+      })
+    }
+    if (
+      prosePromiseBackstop.status === 'flagged' ||
+      prosePromiseBackstop.status === 'check_failed'
+    ) {
+      console.warn('[agent] inbound prose-promise backstop fired', {
+        agentRunId,
+        status: prosePromiseBackstop.status,
+        allChecksElapsedMs: verifyElapsedMs,
       })
     }
 
@@ -1101,6 +1159,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       gen.result,
       groundingBackstop,
       mechanicOfferBackstop,
+      prosePromiseBackstop,
     )
     console.log('[agent] inbound approval decision', {
       agentRunId,
@@ -1225,6 +1284,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: 'regen',
+            // TAC-401: the commitment the prose-promise check named, so the
+            // card an operator approves creates a real guest_commitments row.
+            // Without this line the check catches the promise and the promise
+            // still goes untracked, which is the entire ticket.
+            promisedCommitment: approval.promisedCommitment,
             // TAC-385 PR 1: carry the rendered set onto the card so
             // dispatchOperatorOutbound can record the ask if an operator
             // approves or edits it. Nulled by the persist layer under

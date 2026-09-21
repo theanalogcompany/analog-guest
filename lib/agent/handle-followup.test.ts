@@ -30,6 +30,7 @@ const retrieveKnowledgeStageMock = vi.fn<(...a: unknown[]) => Promise<unknown[]>
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyGroundingStageMock = vi.fn()
+const verifyProsePromiseStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
@@ -76,6 +77,11 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
+    // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
+    // arrives `undefined` at the call site, which in an allSettled array is a
+    // TypeError swallowed into a rejected settlement — the check would read as
+    // permanently degraded and every test here would stay green.
+    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
   }
 })
@@ -188,6 +194,7 @@ beforeEach(() => {
   generateStageMock.mockReset()
   applyApprovalPolicyStageMock.mockReset()
   verifyGroundingStageMock.mockReset()
+  verifyProsePromiseStageMock.mockReset()
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
@@ -204,6 +211,9 @@ beforeEach(() => {
   // (a followup with no gap-shaped finding). Tests that need a real verdict
   // override with mockResolvedValueOnce.
   verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
+  // TAC-401: 'skipped' by default, so every pre-existing test in this file
+  // behaves exactly as it did before the check existed.
+  verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
   scheduleAndSendMock.mockResolvedValue({
     outboundMessageId: 'sent-1',
     providerMessageId: 'p1',
@@ -723,5 +733,71 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(result.status).not.toBe('refused')
+  })
+})
+
+// TAC-401: the followup half of ruling 3, "covers followups by design". One of
+// the four genuine uncarried promises in the measurement was an engine
+// followup, and before these two tests the whole path had the mechanism wired
+// and nothing asserting it — both mutants below survived the full suite.
+describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
+  beforeEach(() => {
+    // The file's own beforeEach resets this one without defaulting it, so a
+    // bare vi.fn() resolves `undefined`, which Promise.allSettled reports as
+    // FULFILLED — the orchestrator then reads `undefined.status` and the turn
+    // fails before it ever reaches the gate.
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+  })
+
+  const commitment = {
+    type: 'comp' as const,
+    description: 'a replacement cortado',
+    code: 'A1B2',
+    expiresAt: null,
+  }
+
+  it('threads the prose-promise verdict through to applyApprovalPolicyStage', async () => {
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_3', triggeredAt: new Date() },
+    })
+
+    expect(verifyProsePromiseStageMock).toHaveBeenCalledTimes(1)
+    const [, , , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(prosePromiseArg).toEqual({ status: 'flagged', commitment })
+  })
+
+  it('passes the named commitment into the persist options', async () => {
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['prose_promise_backstop'],
+      primaryTrigger: 'prose_promise_backstop',
+      compMatchedPattern: null,
+      ungroundedClaims: [],
+      existingPendingDraftId: null,
+      blankBody: false,
+      slot: 'obligation',
+      otherSlotOccupied: false,
+      promisedCommitment: commitment,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'queued-promise-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_3', triggeredAt: new Date() },
+    })
+
+    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistOpts.promisedCommitment).toEqual(commitment)
   })
 })

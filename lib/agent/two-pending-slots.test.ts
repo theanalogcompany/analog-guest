@@ -40,6 +40,7 @@ vi.mock('@/lib/ai', () => ({
   generateMessage: vi.fn(),
   verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
+  verifyProsePromise: vi.fn(),
 }))
 vi.mock('@/lib/messaging', () => ({
   markAsRead: vi.fn(),
@@ -70,7 +71,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
 import { findPendingQuestion } from './pending-question'
 import type { SlotCallerPolicy } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import { applyApprovalPolicyStage } from './stages'
+import { applyApprovalPolicyStage, type ProsePromiseBackstopResult } from './stages'
 
 const VENUE = '00000000-0000-4000-8000-0000000000aa'
 const GUEST = '18694d6a-6a80-470e-b334-acea7be1ed95'
@@ -157,8 +158,17 @@ async function runTurn(
   ctx: RuntimeContext,
   gen: GenerateMessageResult,
   callerPolicy: SlotCallerPolicy = 'regen',
+  // TAC-401: what verifyProsePromiseStage found. Defaults to the pre-TAC-401
+  // behaviour, so every existing test in this file reads unchanged.
+  prosePromise: ProsePromiseBackstopResult = { status: 'skipped' },
 ) {
-  const decision = await applyApprovalPolicyStage(ctx, gen, { status: 'clean' })
+  const decision = await applyApprovalPolicyStage(
+    ctx,
+    gen,
+    { status: 'clean' },
+    { status: 'skipped' },
+    prosePromise,
+  )
   if (decision.action !== 'queue') return { decision, persisted: null }
   const persisted = await persistOrRegenQueuedDraft(
     ctx,
@@ -170,6 +180,11 @@ async function runTurn(
       blankBody: decision.blankBody,
       reviewTriggers: decision.triggers,
       ungroundedClaims: decision.ungroundedClaims,
+      // TAC-401: the carrier the gate resolved. Dropping this line is the
+      // mutant the end-to-end tests below exist to kill — every per-mock
+      // assertion in the repo would stay green without it, because a mock
+      // returns its fixture whatever it is handed.
+      promisedCommitment: decision.promisedCommitment,
       callerPolicy,
     },
   )
@@ -684,5 +699,259 @@ describe('findPendingQuestion with a knowledge-gap card in each slot (TAC-394)',
 
     expect(loaded?.draftId).toBe('gap-conv')
     expect(loaded?.question.question).toBe('is there parking nearby?')
+  })
+})
+
+
+describe('a prose promise becomes a tracked commitment on the card (TAC-401)', () => {
+  // The reply that measured as the live leak: A2 #40, eligible-perks arm. No
+  // carrier, clean grounding, no self-flag, no regex, and it auto-sends at
+  // Le Mil's today.
+  const PROSE_PROMISE_REPLY =
+    '7am every day. and sorry again about the cortado this morning, I want to make that right for you'
+
+  const FLAGGED: ProsePromiseBackstopResult = {
+    status: 'flagged',
+    commitment: {
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    },
+  }
+
+  it('041: the carrier the check named reaches messages.pending_commitment', async () => {
+    const fake = useFake('041')
+    const gen = generation({ body: PROSE_PROMISE_REPLY })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    // This is the acceptance criterion: the promise is no longer an obligation
+    // nothing tracks. dispatchOperatorOutbound reads this column on approval
+    // and materializes a guest_commitments row from it.
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    })
+    expect(row?.review_reason).toBe('prose_promise_backstop')
+  })
+
+  it('041: the draft lands in the obligation slot, beside a conversation card', async () => {
+    const fake = useFake('041')
+
+    // A plain held reply takes the conversation slot first.
+    const conversationTurn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7', voiceFidelity: 0.5 }),
+    )
+    expect(conversationTurn.persisted).toMatchObject({ action: 'inserted' })
+
+    // The promise takes the obligation slot rather than regenerating over it.
+    const promiseTurn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: PROSE_PROMISE_REPLY }),
+      'regen',
+      FLAGGED,
+    )
+    expect(promiseTurn.persisted).toMatchObject({ action: 'inserted' })
+    expect(promiseTurn.decision.action).toBe('queue')
+    if (promiseTurn.decision.action !== 'queue') return
+    expect(promiseTurn.decision.slot).toBe('obligation')
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(2)
+  })
+
+  // RULING 3 AS NARROWED (2026-09-21), end to end, and this assertion is the
+  // REVERSE of what it was: the model emitted a recommendation, the check
+  // found a comp in the prose, and the COMP is what the row carries.
+  //
+  // A recommendation is an intention, not an obligation (TAC-380) — it costs
+  // the venue nothing and carries no code — so it must never be the reason a
+  // comp goes untracked. Under the old behaviour this card queued, an operator
+  // approved it, and the guest_commitments row created was a drink suggestion
+  // for a comp the venue owed.
+  it('041: an obligation the check finds replaces a recommendation on the row', async () => {
+    const fake = useFake('041')
+    const gen = generation({
+      body: PROSE_PROMISE_REPLY,
+      commitment: { type: 'recommendation', description: 'the Blossom Tonic' },
+    })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    })
+    // And it therefore moves to the obligation slot, which is what it is.
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.slot).toBe('obligation')
+  })
+
+  // The half of the ruling that did not move, end to end. In production the
+  // stage skips entirely on isCommitmentTypeGated, so the check never runs
+  // here — this pins that a comp reaching the gate alongside a flagged verdict
+  // still writes the model's own comp, unchanged, code and all.
+  it('041: a comp generation emitted is written unchanged, never a second one', async () => {
+    const fake = useFake('041')
+    const gen = generation({
+      body: PROSE_PROMISE_REPLY,
+      commitment: { type: 'comp', description: 'the oat latte', code: 'Z9Y8' },
+    })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'the oat latte',
+      code: 'Z9Y8',
+      expiresAt: null,
+    })
+  })
+
+  it('041: a failed check queues the draft with no carrier at all', async () => {
+    const fake = useFake('041')
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: PROSE_PROMISE_REPLY }),
+      'regen',
+      { status: 'check_failed' },
+    )
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toBeNull()
+    expect(row?.review_reason).toBe('prose_promise_check_failed')
+  })
+})
+
+
+// TAC-401, and this is the regression the code review caught: a failed
+// prose-promise check must NOT cost the guest a reply.
+//
+// The mechanism is TAC-367's, twelve lines above its own definition in
+// stages.ts. A check that could not complete reports an ABSENCE of information
+// about the reply, not a finding against it, so it is excluded from isGapTurn.
+// That is right FORWARD (no clock, no protected card) and wrong BACKWARD: the
+// trigger it pushes makes triggers.length > 0, which cancels the protected-card
+// carve-out, and a turn that fired no trigger at all before this ticket — and
+// therefore SENT — is destroyed instead. A guest already waiting on a
+// knowledge-gap card would get silence because a Haiku call failed twice, which
+// is worse than either failing open or failing closed.
+describe('a failed prose-promise check never costs the guest a reply (TAC-401)', () => {
+  function seedGapCard(fake: ReturnType<typeof useFake>) {
+    fake.seed({
+      id: 'gap-conv',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      review_reason: 'knowledge_gap',
+      pending_until: '2026-09-14T16:30:00.000Z',
+      body: '',
+    })
+  }
+
+  it('041: regenerates beside a protected knowledge-gap card instead of dropping', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7 tomorrow' }),
+      'regen',
+      { status: 'check_failed' },
+    )
+
+    expect(turn.decision.action).toBe('queue')
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.triggers).toContain('prose_promise_check_failed')
+    expect(turn.persisted).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+    // The card keeps its own clock, exactly as a truncated grounding check does.
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+  })
+
+  // The race-recovery mirror. gapFlagsFromTriggers is what 23505 recovery
+  // decides with, and it reads the trigger STRINGS off the row rather than the
+  // gate's own flags — so the two computations have to be widened together or
+  // the gate spares a draft and recovery destroys it.
+  it('041: recovery reaching the same card decides it the same way', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    // existingPendingDraftId null: the gate never saw the card, so the INSERT
+    // takes a 23505 and recovery has to decide it from the trigger set alone.
+    const result = await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7 tomorrow' }),
+      'prose_promise_check_failed',
+      null,
+      {
+        reviewTriggers: ['prose_promise_check_failed'],
+        callerPolicy: 'regen',
+      },
+    )
+
+    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+  })
+
+  // The negative half. A check failure is an absence; a caught promise is a
+  // finding, and a finding beside a protected card still drops, exactly as
+  // every other non-gap trigger does.
+  it('041: a FLAGGED promise beside a protected gap card still drops', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: "sorry about that, next one's on us" }),
+      'regen',
+      {
+        status: 'flagged',
+        commitment: {
+          type: 'comp',
+          description: 'a replacement cortado',
+          code: 'A1B2',
+          expiresAt: null,
+        },
+      },
+    )
+
+    // It lands in the OBLIGATION slot, which the gap card does not hold, so it
+    // queues as a second card rather than dropping. The drop case is the one
+    // below, where the carrier is null and both land in the conversation slot.
+    expect(turn.decision.action).toBe('queue')
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.slot).toBe('obligation')
+  })
+
+  it('041: a flagged promise the check could not NAME drops, like any other finding', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = useFake('041')
+    seedGapCard(fake)
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: "we'll sort you out next time" }),
+      'regen',
+      { status: 'flagged', commitment: null },
+    )
+
+    expect(turn.decision.action).toBe('drop')
+    if (turn.decision.action !== 'drop') return
+    expect(turn.decision.reason).toBe('knowledge_gap_card_protected')
+    expect(turn.persisted).toBeNull()
   })
 })

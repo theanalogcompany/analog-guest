@@ -18,6 +18,7 @@ import {
   shouldRetrieveKnowledge,
   verifyGroundingStage,
   verifyMechanicOfferStage,
+  verifyProsePromiseStage,
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
@@ -48,6 +49,10 @@ const captureGroundingVerifierUnavailableMock = vi.fn()
 // model call; captureMechanicOfferBackstopCaught (posthog) fires when it
 // catches something.
 const verifyMechanicOfferMock = vi.fn()
+// TAC-401: the prose-promise check's model call.
+const verifyProsePromiseMock = vi.fn()
+const captureProsePromiseCaughtMock = vi.fn()
+const captureProsePromiseCheckUnavailableMock = vi.fn()
 const captureMechanicOfferBackstopCaughtMock = vi.fn()
 // TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
 // when a demo guest's bypass overrides a would-have-queued decision. Mocked
@@ -102,6 +107,11 @@ vi.mock('@/lib/ai', () => ({
   verifyGrounding: (...args: unknown[]) => verifyGroundingMock(...args),
   // TAC-355: the mechanic-offer backstop's model call.
   verifyMechanicOffer: (...args: unknown[]) => verifyMechanicOfferMock(...args),
+  // TAC-401: the prose-promise backstop's model call. This factory is an
+  // explicit ALLOW-LIST — a name missing here arrives `undefined` at the call
+  // site and the branch that uses it is silently unreachable in every test in
+  // this file, which is the trap CLAUDE.md documents on this exact mock.
+  verifyProsePromise: (...args: unknown[]) => verifyProsePromiseMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -121,6 +131,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
     captureGroundingVerifierUnavailableMock(...args),
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
+  captureProsePromiseCaught: (...args: unknown[]) => captureProsePromiseCaughtMock(...args),
+  captureProsePromiseCheckUnavailable: (...args: unknown[]) =>
+    captureProsePromiseCheckUnavailableMock(...args),
   captureVoiceFidelityLow: vi.fn(),
   // TAC-301: the invalid-timezone test reaches fireRedAlert (lib/agent/alerts.ts),
   // which calls this directly. Without the stub it throws as an UNHANDLED
@@ -4039,22 +4052,324 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
   it("gapFlagsFromTriggers reads the gate's own trigger codes", () => {
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP])).toEqual({
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
     })
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP])).toEqual({
       isGapTurn: true,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
     })
     expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED])).toEqual({
       isGapTurn: false,
-      truncatedOnly: true,
+      checkDidNotComplete: true,
     })
     expect(
       gapFlagsFromTriggers([
         APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
         APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
       ]),
-    ).toEqual({ isGapTurn: false, truncatedOnly: false })
-    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, truncatedOnly: false })
+    ).toEqual({ isGapTurn: false, checkDidNotComplete: false })
+    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, checkDidNotComplete: false })
+  })
+})
+
+
+describe('verifyProsePromiseStage (TAC-401)', () => {
+  beforeEach(() => {
+    verifyProsePromiseMock.mockReset()
+    captureProsePromiseCaughtMock.mockReset()
+    captureProsePromiseCheckUnavailableMock.mockReset()
+  })
+
+  function flagged(type: string | null, description: string | null) {
+    return {
+      ok: true,
+      data: {
+        promisesSomething: true,
+        commitmentType: type,
+        commitmentDescription: description,
+        promptVersion: 'v1.0.0',
+      },
+    }
+  }
+
+  const clean = {
+    ok: true,
+    data: {
+      promisesSomething: false,
+      commitmentType: null,
+      commitmentDescription: null,
+      promptVersion: 'v1.0.0',
+    },
+  }
+
+  it('skips without calling the model for a demo guest', async () => {
+    const ctx = makeCtx({
+      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+    })
+    const result = await verifyProsePromiseStage(ctx, makeGenerationResult({}))
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyProsePromiseMock).not.toHaveBeenCalled()
+  })
+
+  // Ruling 3 at the call boundary: an obligation already on the draft means
+  // the card already carries a carrier, so the check would buy nothing.
+  it('skips without calling the model when the draft already carries an obligation', async () => {
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+    )
+    expect(result).toEqual({ status: 'skipped' })
+    expect(verifyProsePromiseMock).not.toHaveBeenCalled()
+  })
+
+  // The other half of ruling 3, and the one a "tidy" would break: a
+  // recommendation is NOT an obligation, so the check still has to run. The
+  // carrier is protected downstream by resolveDraftCarrier, not by skipping.
+  it('DOES run when the draft carries only a recommendation', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(clean)
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ commitment: { type: 'recommendation', description: 'the cortado' } }),
+    )
+    expect(result).toEqual({ status: 'clean' })
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
+  })
+
+  // Ruling 1 forbids depending on the self-flag, so a model-flagged draft is
+  // NOT a reason to skip: it queues, but with no carrier, which is the ticket.
+  it('DOES run when the model self-flagged, because nothing may depend on that flag', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(clean)
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ requiresOperatorApproval: true }),
+    )
+    expect(result).toEqual({ status: 'clean' })
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns "clean" when the check finds no promise', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(clean)
+    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    expect(result).toEqual({ status: 'clean' })
+    expect(captureProsePromiseCaughtMock).not.toHaveBeenCalled()
+  })
+
+  it('mints the carrier ONCE, with a verification code, on a flagged promise', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ body: "sorry about that, next one's on us" }),
+    )
+    expect(result.status).toBe('flagged')
+    if (result.status !== 'flagged') return
+    expect(result.commitment).not.toBeNull()
+    expect(result.commitment?.type).toBe('comp')
+    expect(result.commitment?.description).toBe('a replacement cortado')
+    // A comp needs a code, and it is minted here rather than at each persist
+    // site so the code on the card is the code in the alert.
+    expect(result.commitment?.code).toMatch(/^[A-Z0-9]{4}$/)
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
+  })
+
+  // The ambiguous shape survives as flagged-with-no-carrier. Downgrading it to
+  // 'clean' is the false negative the fail-closed posture exists to prevent.
+  it('stays flagged with a null carrier when the check cannot name the commitment', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged(null, null))
+    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    expect(result).toEqual({ status: 'flagged', commitment: null })
+  })
+
+  it('emits the caught event with what is owed and whether it displaced a recommendation', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ commitment: { type: 'recommendation', description: 'the cortado' } }),
+    )
+    expect(captureProsePromiseCaughtMock).toHaveBeenCalledTimes(1)
+    const props = captureProsePromiseCaughtMock.mock.calls[0]?.[0]
+    expect(props.commitmentType).toBe('comp')
+    expect(props.commitmentDescription).toBe('a replacement cortado')
+    expect(props.replacedRecommendation).toBe(true)
+  })
+
+  // ---- Failure posture (ruled 2026-09-21, ruling 1) ----
+
+  it('retries ONCE on a transient fault and uses the retry verdict', async () => {
+    verifyProsePromiseMock
+      .mockResolvedValueOnce({ ok: false, error: 'fetch failed', errorCode: 'ai_verify_prose_promise_failed' })
+      .mockResolvedValueOnce(clean)
+    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    expect(result).toEqual({ status: 'clean' })
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
+    expect(captureProsePromiseCheckUnavailableMock).not.toHaveBeenCalled()
+  })
+
+  // THE MUTANT THIS WHOLE TICKET TURNS ON. Returning 'clean' here instead of
+  // 'check_failed' is the fail-open revert: a promise sends because the check
+  // could not run.
+  it('FAILS CLOSED when the retry also fails', async () => {
+    verifyProsePromiseMock
+      .mockResolvedValueOnce({ ok: false, error: 'fetch failed', errorCode: 'ai_verify_prose_promise_failed' })
+      .mockResolvedValueOnce({ ok: false, error: 'fetch failed again', errorCode: 'ai_verify_prose_promise_failed' })
+    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    expect(result).toEqual({ status: 'check_failed' })
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
+    const props = captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0]
+    expect(props.outcome).toBe('errored')
+    expect(props.retried).toBe(true)
+  })
+
+  // Truncation is NOT retried: the cap was already hit, so a second call hits
+  // it again. Spending the retry here would be pure latency on every
+  // truncated turn.
+  it('does NOT retry on truncation, and fails closed at once', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'no object generated',
+      errorCode: 'ai_verify_prose_promise_truncated',
+    })
+    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    expect(result).toEqual({ status: 'check_failed' })
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
+    const props = captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0]
+    expect(props.outcome).toBe('truncated')
+    expect(props.retried).toBe(false)
+  })
+})
+
+describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => {
+  beforeEach(() => {
+    // Both slots empty. Without this the gate reads whatever the previous
+    // describe left on the shared mock and every decision here comes back
+    // 'drop', which looks like a wiring bug and is a fixture one.
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const promisedComp = {
+    type: 'comp' as const,
+    description: 'a replacement cortado',
+    code: 'A1B2',
+    expiresAt: null,
+  }
+
+  it('queues on a flagged promise and threads the carrier to the persist layer', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ body: "next one's on us" }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'flagged', commitment: promisedComp },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.promisedCommitment).toEqual(promisedComp)
+  })
+
+  it('queues on a failed check under its OWN trigger, carrying no commitment', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'check_failed' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED])
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.promisedCommitment).toBeNull()
+  })
+
+  it('sends when the check is clean and nothing else fires', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'clean' },
+    )
+    expect(decision.action).toBe('send')
+  })
+
+  // The default keeps every caller that predates this parameter behaving
+  // exactly as before — the harness and the Voices path both omit it.
+  it('defaults to skipped when the caller omits the parameter', async () => {
+    const decision = await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({}))
+    expect(decision.action).toBe('send')
+  })
+
+  // A flagged promise routes the draft into the OBLIGATION slot, because the
+  // carrier it supplies is a comp. That is what makes it compete with a real
+  // comp card rather than with the conversation card.
+  it('routes a flagged promise into the obligation slot', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'flagged', commitment: promisedComp },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('obligation')
+  })
+
+  // Ruling 3 as narrowed, at the gate: the obligation replaces the
+  // recommendation, so the draft MOVES to the obligation slot. Reversed from
+  // the original assertion, which expected the conversation slot.
+  it('moves to the obligation slot when its carrier displaces a recommendation', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        commitment: { type: 'recommendation', description: 'the cortado' },
+      }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'flagged', commitment: promisedComp },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('obligation')
+    expect(decision.promisedCommitment).toEqual(promisedComp)
+  })
+
+  // PRIMARY_TRIGGER_PRIORITY: this outranks the two signals it replaces as the
+  // control, both of which measured 0 catches on the 4 genuine promises.
+  it('wins the operator label over comp_regex_backstop and model_flagged', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        // "on us" trips the comp regex; requiresOperatorApproval trips the
+        // self-flag. Both co-fire with the prose-promise catch here.
+        body: "sorry about that one, the next one's on us",
+        requiresOperatorApproval: true,
+      }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'flagged', commitment: promisedComp },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+  })
+
+  // The failed-check trigger is the opposite: it reports an absence, so any
+  // concrete co-firing trigger is the more useful label.
+  it('lets a concrete trigger win the label over a failed check', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+      { status: 'skipped' },
+      { status: 'skipped' },
+      { status: 'check_failed' },
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
   })
 })

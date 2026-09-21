@@ -33,6 +33,7 @@ const retrieveKnowledgeStageMock = vi.fn(async () => [
 ])
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyGroundingStageMock = vi.fn()
+const verifyProsePromiseStageMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn().mockResolvedValue(undefined)
 const capturePostHogEventMock = vi.fn().mockResolvedValue(undefined)
@@ -59,6 +60,11 @@ vi.mock('./stages', () => ({
   generateStage: (...a: unknown[]) => generateStageMock(...a),
   applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
   verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
+  // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
+  // arrives `undefined` at the call site, which in an allSettled array is a
+  // TypeError swallowed into a rejected settlement — the check would read as
+  // permanently degraded and every test here would stay green.
+  verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
   retrieveCorpusStage: vi.fn(async () => []),
   retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
   shouldRetrieveKnowledge: () => true,
@@ -161,6 +167,8 @@ beforeEach(() => {
   // holding message with no gap-shaped finding). Tests that need a real
   // verdict override with mockResolvedValueOnce.
   verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
+  // TAC-401: 'skipped' by default, matching its sibling above.
+  verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
   optedOutMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
 })
 

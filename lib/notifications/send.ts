@@ -88,6 +88,15 @@ const CONTEXT_BY_TRIGGER = {
   // to look at one specific thing in the draft, and an unlabelled "Reply to
   // Sam" gives them no idea what. "link" is the whole job of this card.
   [APPROVAL_TRIGGERS.UNVERIFIED_URL]: 'link needs checking',
+  // TAC-401. One word, matching the register of 'commitment' and 'comp
+  // request'. The operator is being told the venue may now owe this guest
+  // something, which is the whole job of the card. Categorical, like every
+  // value here — the promise itself never goes in the payload.
+  [APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP]: 'promise',
+  // TAC-401. Mirrors GROUNDING_CHECK_FAILED's label above, for the same
+  // reason: the operator has to be told that NOTHING was found and the draft
+  // is queued on an absence of information.
+  [APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]: 'unchecked, needs a look',
   // TAC-364. Not an ApprovalTrigger — the gate can't fire it, a crash never
   // produced the GenerateMessageResult the gate takes — which is why the
   // satisfies clause below is widened rather than this key being added to

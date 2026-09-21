@@ -47,6 +47,8 @@ import {
   otherSlotOccupant,
   partitionPendingRows,
   pendingSlotOf,
+  resolveDraftCarrier,
+  resolveDraftCarrierIdentity,
   type PendingRowsBySlot,
   type PendingSlotRow,
 } from './pending-slots'
@@ -346,7 +348,7 @@ describe('decideSlotAction', () => {
     review_reason: 'knowledge_gap',
     pending_until: '2026-09-14T16:36:34.000Z',
   })
-  const base = { isGapTurn: false, truncatedOnly: false, callerPolicy: 'regen' as const }
+  const base = { isGapTurn: false, checkDidNotComplete: false, callerPolicy: 'regen' as const }
 
   // THE RULING'S TEST (TAC-394 plan v2 §6, test 2). It fails under the
   // same-type reading of "preserves the obligation", which would regenerate
@@ -439,7 +441,7 @@ describe('decideSlotAction', () => {
 
     it('TAC-367: regenerates a knowledge-gap card when only the grounding check truncated', () => {
       expect(
-        decideSlotAction({ ...base, truncatedOnly: true, rows: rowsOf(gapCard), draftCommitment: null }),
+        decideSlotAction({ ...base, checkDidNotComplete: true, rows: rowsOf(gapCard), draftCommitment: null }),
       ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
     })
 
@@ -795,5 +797,126 @@ describe('source guard: every per-guest single-row pending read names its order 
     ],
   ])('ignores %s', (_label, source) => {
     expect(perGuestSingleRowPendingReads(source)).toEqual([])
+  })
+})
+
+
+describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
+  const promised = {
+    type: 'comp' as const,
+    description: 'a replacement cortado',
+    code: 'A1B2',
+    expiresAt: null,
+  }
+
+  it('uses the check carrier when generation emitted nothing actionable', () => {
+    expect(resolveDraftCarrier({}, promised, false)).toEqual(promised)
+    expect(resolveDraftCarrierIdentity({}, promised, false)).toEqual({
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+    })
+  })
+
+  // RULING 3 AS NARROWED (2026-09-21). This test asserted the OPPOSITE until
+  // that narrowing and is reversed rather than deleted, because the old
+  // behaviour is exactly what the ruling overturned: a recommendation is an
+  // INTENTION, not an obligation (TAC-380), so it must never be the reason a
+  // comp the venue now owes goes untracked. Keeping it caught the promise and
+  // then recorded a drink suggestion for it.
+  it('replaces a recommendation generation carried with the obligation the check found', () => {
+    const emission = { type: 'recommendation' as const, description: 'the cortado' }
+
+    const carrier = resolveDraftCarrier(emission, promised, false)
+    expect(carrier?.type).toBe('comp')
+    expect(carrier?.description).toBe('a replacement cortado')
+
+    const identity = resolveDraftCarrierIdentity(emission, promised, false)
+    expect(identity?.type).toBe('comp')
+    expect(identity?.description).toBe('a replacement cortado')
+  })
+
+  // The half of the ruling that did NOT move. The model's own structured comp
+  // is a better record of what it promised than a second reading of its prose,
+  // and in production the stage skips on isCommitmentTypeGated so `promised`
+  // is null here anyway — this pins the function itself, where both are
+  // supplied.
+  it('never mints a second obligation when generation already carried one', () => {
+    const emission = { type: 'comp' as const, description: 'oat latte' }
+    const carrier = resolveDraftCarrier(emission, promised, false)
+    expect(carrier?.type).toBe('comp')
+    expect(carrier?.description).toBe('oat latte')
+    expect(resolveDraftCarrierIdentity(emission, promised, false)?.description).toBe('oat latte')
+
+    const hold = { type: 'hold' as const, description: 'a bag of the Budan' }
+    expect(resolveDraftCarrier(hold, promised, false)?.description).toBe('a bag of the Budan')
+  })
+
+  // A recommendation with nothing to replace it stays. Dropping it would lose
+  // a record for no gain.
+  it('keeps a recommendation when the check named nothing usable', () => {
+    const emission = { type: 'recommendation' as const, description: 'the cortado' }
+    expect(resolveDraftCarrier(emission, null, false)?.type).toBe('recommendation')
+    expect(resolveDraftCarrierIdentity(emission, null, false)?.type).toBe('recommendation')
+  })
+
+  // TAC-309 unchanged: a blank card carries no commitment, and a promise the
+  // operator cannot see must not be bindable by approving.
+  it('nulls everything when the body is blanked, check carrier included', () => {
+    expect(resolveDraftCarrier({}, promised, true)).toBeNull()
+    expect(resolveDraftCarrierIdentity({}, promised, true)).toBeNull()
+    expect(
+      resolveDraftCarrier({ type: 'comp', description: 'oat latte' }, promised, true),
+    ).toBeNull()
+  })
+
+  it('is null when neither side supplies a commitment', () => {
+    expect(resolveDraftCarrier({}, null, false)).toBeNull()
+    expect(resolveDraftCarrierIdentity({}, null, false)).toBeNull()
+  })
+
+  // The anti-drift guard. The two functions apply the same precedence and are
+  // edited separately; nothing but this notices when one of them stops
+  // agreeing with the other.
+  it('the identity always describes the carrier the same inputs produce', () => {
+    const cases: Array<[Parameters<typeof resolveDraftCarrier>[0], typeof promised | null, boolean]> = [
+      [{}, promised, false],
+      [{}, null, false],
+      [{ type: 'recommendation', description: 'the cortado' }, promised, false],
+      [{ type: 'comp', description: 'oat latte' }, promised, false],
+      [{ type: 'comp', description: 'oat latte' }, null, false],
+      [{}, promised, true],
+      [{ type: 'hold', description: 'a bag of the Budan' }, promised, false],
+      // A partial emission is not actionable, so the check carrier wins.
+      [{ type: 'comp' }, promised, false],
+      [{ description: 'oat latte' }, promised, false],
+    ]
+    for (const [emission, p, blank] of cases) {
+      const carrier = resolveDraftCarrier(emission, p, blank)
+      const identity = resolveDraftCarrierIdentity(emission, p, blank)
+      if (carrier === null) {
+        expect(identity).toBeNull()
+        continue
+      }
+      expect(identity).not.toBeNull()
+      expect(identity?.type).toBe(carrier.type)
+      expect(identity?.description).toBe(carrier.description)
+    }
+  })
+
+  // The identity must NOT mint a code: a minted one never reaches the database
+  // and would show up in the drop alert as if the guest had been given it.
+  it('mints no verification code in the identity path', () => {
+    const emission = { type: 'comp' as const, description: 'oat latte' }
+    expect(resolveDraftCarrierIdentity(emission, null, false)?.code).toBeNull()
+    // The carrier path DOES mint one, which is the asymmetry the two
+    // functions exist to keep.
+    expect(resolveDraftCarrier(emission, null, false)?.code).toMatch(/^[A-Z0-9]{4}$/)
+  })
+
+  // A promised carrier already carries its code, minted once in the stage.
+  it('reads the promised code rather than regenerating it', () => {
+    expect(resolveDraftCarrier({}, promised, false)?.code).toBe('A1B2')
+    expect(resolveDraftCarrierIdentity({}, promised, false)?.code).toBe('A1B2')
   })
 })

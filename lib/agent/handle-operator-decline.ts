@@ -366,7 +366,7 @@ export async function handleOperatorDecline(input: {
         rows: pendingRows,
         draftCommitment,
         isGapTurn: false,
-        truncatedOnly: false,
+        checkDidNotComplete: false,
         callerPolicy: 'regen_always',
       })
       const liveCtx = ctx

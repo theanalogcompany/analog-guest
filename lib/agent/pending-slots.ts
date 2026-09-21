@@ -34,11 +34,14 @@
 
 import { capturePendingSlotInvariantBroken } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import { OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
+import { isObligationType, OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
 import { commitmentDedupKey } from '@/lib/guests/commitments'
 import {
   type CommitmentEmission,
+  type CommitmentType,
+  type PendingCommitment,
   isEmptyCommitmentEmission,
+  pendingFromEmission,
 } from '@/lib/schemas/guest-commitment'
 
 // ===== The slot =====
@@ -149,6 +152,82 @@ export function draftCommitmentIdentity(
     description: (emission.description as string).trim(),
     code: emission.code?.trim() || null,
   }
+}
+
+/**
+ * TAC-401: the carrier a queued draft persists, once the prose-promise check
+ * can supply one the model never emitted.
+ *
+ * THE PRECEDENCE IS THE RULING, as narrowed on 2026-09-21: an OBLIGATION the
+ * check finds replaces a recommendation carried by generation, and the check
+ * never mints a second obligation when generation already carried one.
+ *
+ * The narrowing is the TAC-380 distinction. A recommendation is an INTENTION,
+ * not an obligation: it costs the venue nothing, never gates, and carries no
+ * verification code. So it must never be the reason a comp the venue now owes
+ * goes untracked. An earlier version of this function kept the recommendation
+ * in that case, which caught the promise and then recorded the wrong thing —
+ * the operator approved a card for a comp and a `guest_commitments` row was
+ * created for a drink suggestion.
+ *
+ * Three cases, and they are not the same:
+ *
+ *   - The emission is an OBLIGATION (comp/hold/discount). It wins, and the
+ *     check never ran at all — verifyProsePromiseStage skips on
+ *     isCommitmentTypeGated — so `promised` is null here by construction. This
+ *     is "never mints a second obligation", and it is the half of the original
+ *     ruling that did not move: the model's own structured comp is a better
+ *     record of what it promised than a second reading of its prose.
+ *   - The emission is a RECOMMENDATION and the check named an obligation. The
+ *     obligation REPLACES it. The draft therefore moves to the obligation slot,
+ *     which is correct: it is one.
+ *   - The emission is a RECOMMENDATION and the check named nothing usable. The
+ *     recommendation stays — there is nothing to replace it with, and dropping
+ *     it would lose a record for no gain.
+ *
+ * `bodyBlanked` nulls everything, for TAC-309's reason unchanged: a blank
+ * knowledge-gap card carries no commitment, and a promise the operator cannot
+ * see is one they must not be able to bind by approving.
+ *
+ * Paired with resolveDraftCarrierIdentity below. The two must apply the same
+ * precedence, and a test pins that they do rather than leaving it to whoever
+ * edits one of them next.
+ */
+export function resolveDraftCarrier(
+  emission: CommitmentEmission,
+  promised: PendingCommitment | null,
+  bodyBlanked: boolean,
+): PendingCommitment | null {
+  if (bodyBlanked) return null
+  const own = pendingFromEmission(emission)
+  if (own !== null && isObligationType(own.type)) return own
+  return promised ?? own
+}
+
+/**
+ * TAC-401: the same resolution reduced to its slot identity, with NO
+ * verification code minted.
+ *
+ * Separate from resolveDraftCarrier above for the reason draftCommitmentIdentity
+ * is separate from pendingFromEmission: that function mints a fresh code on
+ * every call, and the gate needs an identity, not a carrier. A minted code
+ * here would be a value that never reaches the database, and it would reach
+ * the drop alert — which someone may be reading mid-incident — as if it were
+ * a code the guest had been given.
+ *
+ * `promised` already carries its minted code, because verifyProsePromiseStage
+ * mints it once. So the identity of a promised carrier is read off it rather
+ * than regenerated.
+ */
+export function resolveDraftCarrierIdentity(
+  emission: CommitmentEmission,
+  promised: PendingCommitment | null,
+  bodyBlanked: boolean,
+): CommitmentIdentity | null {
+  if (bodyBlanked) return null
+  const own = draftCommitmentIdentity(emission, false)
+  if (own !== null && isObligationType(own.type as CommitmentType)) return own
+  return commitmentIdentityOf(promised) ?? own
 }
 
 /**
@@ -335,7 +414,7 @@ export interface SlotDecisionInput {
   /** A knowledge-gap turn: the self-reported or backstop trigger fired. */
   isGapTurn: boolean
   /** The grounding check truncated (TAC-367). Exempt from gap-card protection. */
-  truncatedOnly: boolean
+  checkDidNotComplete: boolean
   callerPolicy: SlotCallerPolicy
 }
 
@@ -393,7 +472,7 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
         ? { action: 'regen', slot, draftId: occupant.id }
         : drop('slot_occupied')
     case 'regen':
-      if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.truncatedOnly) {
+      if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.checkDidNotComplete) {
         return drop('knowledge_gap_card_protected')
       }
       return { action: 'regen', slot, draftId: occupant.id }
@@ -438,12 +517,17 @@ export function otherSlotOccupant(
  */
 export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
   isGapTurn: boolean
-  truncatedOnly: boolean
+  checkDidNotComplete: boolean
 } {
   const set = triggers ?? []
   return {
     isGapTurn: set.includes('knowledge_gap') || set.includes('knowledge_gap_backstop'),
-    truncatedOnly: set.includes('grounding_check_failed'),
+    // Both absence-of-information triggers, and they must stay in step with
+    // the gate's own computation in stages.ts — this is what 23505 race
+    // recovery decides with, so a divergence means the gate spares a draft and
+    // recovery destroys it.
+    checkDidNotComplete:
+      set.includes('grounding_check_failed') || set.includes('prose_promise_check_failed'),
   }
 }
 

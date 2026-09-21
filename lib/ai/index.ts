@@ -4,6 +4,7 @@ export { extractReportedOrder } from './extract-reported-order'
 export { classifyIntentionPrompts } from './classify-intention-prompts'
 export { verifyGrounding } from './verify-grounding'
 export { verifyMechanicOffer } from './verify-mechanic-offer'
+export { verifyProsePromise } from './verify-prose-promise'
 
 export type {
   AIResult,
@@ -30,5 +31,7 @@ export type {
   VerifyMechanicOfferGatedMechanic,
   VerifyMechanicOfferInput,
   VerifyMechanicOfferResult,
+  VerifyProsePromiseInput,
+  VerifyProsePromiseResult,
   VoiceCorpusChunk,
 } from './types'

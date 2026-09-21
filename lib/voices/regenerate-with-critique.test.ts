@@ -40,6 +40,8 @@ vi.mock('@/lib/ai', () => ({
   generateMessage: vi.fn(),
   verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
+  // TAC-401: the advisory prose-promise check this path mirrors.
+  verifyProsePromise: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
   retrieveContext: vi.fn(),
@@ -51,7 +53,13 @@ vi.mock('@/lib/observability', () => ({
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import { buildAiRuntime } from '@/lib/agent/stages'
-import { classifyMessage, generateMessage, verifyGrounding, verifyMechanicOffer } from '@/lib/ai'
+import {
+  classifyMessage,
+  generateMessage,
+  verifyGrounding,
+  verifyMechanicOffer,
+  verifyProsePromise,
+} from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
@@ -174,6 +182,18 @@ beforeEach(() => {
   vi.mocked(retrieveKnowledgeContext).mockReset()
   vi.mocked(verifyGrounding).mockReset()
   vi.mocked(verifyMechanicOffer).mockReset()
+  vi.mocked(verifyProsePromise).mockReset()
+  // Advisory and fail-open on this path: a check that returns nothing leaves
+  // promisesSomething false, which is what every pre-TAC-401 test expects.
+  vi.mocked(verifyProsePromise).mockResolvedValue({
+    ok: true,
+    data: {
+      promisesSomething: false,
+      commitmentType: null,
+      commitmentDescription: null,
+      promptVersion: 'v1.0.0',
+    },
+  })
 })
 
 afterEach(() => {

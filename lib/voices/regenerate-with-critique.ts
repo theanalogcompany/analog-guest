@@ -29,6 +29,7 @@ import {
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   verifyGrounding,
   verifyMechanicOffer,
+  verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
@@ -116,6 +117,25 @@ export interface RegenerateWithCritiqueResult {
   // ran and found nothing.
   offersGatedMechanic: boolean
   offeredMechanicId: string | null
+  // TAC-401: independent prose-promise check, same underlying call
+  // (lib/ai/verify-prose-promise.ts) as lib/agent/stages.ts's
+  // verifyProsePromiseStage, ADVISORY here like its two neighbours above.
+  //
+  // NARROWER skip condition than the production stage, and deliberately so:
+  // this path skips only on a demo guest and an empty body. It does NOT skip
+  // when the draft already carries an obligation, because regen has no other
+  // surface showing the operator what the check would have said, and the
+  // production skip exists to save a call on a draft that is already queuing
+  // — there is nothing to queue here.
+  //
+  // FAILS OPEN here, which is the opposite of the production posture and is
+  // correct for the same reason the rest of this block is advisory: there is
+  // no send decision on the regen path to protect. A degraded check surfaces
+  // as promisesSomething=false, indistinguishable from a clean verdict, and
+  // the operator is reading the raw attempt anyway.
+  promisesSomething: boolean
+  promisedCommitmentType: string | null
+  promisedCommitmentDescription: string | null
 }
 
 export type RegenerateWithCritiqueOutcome =
@@ -503,6 +523,35 @@ export async function regenerateWithCritique(
     }
   }
 
+  // TAC-401: the prose-promise check, advisory. This file's standing
+  // obligation is to mirror stages.ts's wiring, and the failure this check
+  // exists for — a promise in prose with no carrier — is exactly the kind of
+  // draft an operator iterating in this playground would otherwise commit to
+  // the voice corpus as a good exemplar.
+  //
+  // DELIBERATE EXCEPTION to ruling 2's "concurrently on every path where both
+  // run". This path runs its three checks in sequence, as it already did for
+  // the two above. The ruling's reason is latency on a turn a GUEST is waiting
+  // on; here an operator is waiting, one regen at a time, and the existing
+  // shape of this function is sequential throughout. Making just this one
+  // concurrent would buy one Haiku call of an operator's time at the cost of
+  // the only part of this file that does not read like its neighbours.
+  let promisesSomething = false
+  let promisedCommitmentType: string | null = null
+  let promisedCommitmentDescription: string | null = null
+  if (ctx.guest.isDemo !== true && gen.data.body.trim().length > 0) {
+    const promiseCheck = await verifyProsePromise({ replyBody: gen.data.body })
+    if (promiseCheck.ok) {
+      promisesSomething = promiseCheck.data.promisesSomething
+      promisedCommitmentType = promiseCheck.data.commitmentType
+      promisedCommitmentDescription = promiseCheck.data.commitmentDescription
+    } else {
+      console.warn(
+        `[voices/regen] prose-promise check degraded for venue=${input.venueId}: ${promiseCheck.error}`,
+      )
+    }
+  }
+
   return {
     ok: true,
     data: {
@@ -519,6 +568,9 @@ export async function regenerateWithCritique(
       emojiDirectiveViolated: gen.data.emojiDirectiveViolated,
       offersGatedMechanic,
       offeredMechanicId,
+      promisesSomething,
+      promisedCommitmentType,
+      promisedCommitmentDescription,
     },
   }
 }

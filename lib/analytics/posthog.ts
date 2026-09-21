@@ -659,6 +659,121 @@ function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string 
   return lines.join('\n')
 }
 
+// TAC-401: the independent prose-promise check caught a reply committing the
+// venue to something of value with no structured commitment behind it.
+//
+// Slack-relayed, like both sibling backstops. The rate this fires at is the
+// thing nobody could answer before the check existed: the model's own
+// self-flag fired 0 times in 220 replies and the comp regex caught 0 of the 4
+// genuine promises, so "how often does the agent promise in prose" had no
+// observable answer at all.
+export interface ProsePromiseCaughtProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** null on a proactive turn (followup, holding message). */
+  category: string | null
+  /**
+   * What the check said is owed. NULL when it flagged a promise but could not
+   * name a usable type or description — a real and separate outcome, because
+   * that card carries no carrier and approving it creates no commitment.
+   */
+  commitmentType: string | null
+  commitmentDescription: string | null
+  /**
+   * True when generation had emitted a RECOMMENDATION and this check's
+   * obligation replaced it on the card (ruling 3 as narrowed, 2026-09-21).
+   *
+   * Recorded because it is the one case where the row ends up carrying
+   * something the generating model did not emit, and because it is worth being
+   * able to count: a recommendation and a prose comp in the same reply is the
+   * shape where the old behaviour recorded a drink suggestion for a comp the
+   * venue owed.
+   */
+  replacedRecommendation: boolean
+  // The reply text that was caught. Queued, never sent, and not blanked, so
+  // it is safe to log here on the same basis as the mechanic-offer event.
+  replyBody: string
+}
+
+export async function captureProsePromiseCaught(props: ProsePromiseCaughtProps): Promise<void> {
+  await capturePostHogEvent('prose_promise_caught', props.guestId, { ...props })
+  await postToSlack(formatProsePromiseCaught(props))
+}
+
+function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
+  const owed =
+    props.commitmentType === null
+      ? 'not named by the check'
+      : `${props.commitmentType}: ${props.commitmentDescription}`
+  const lines = [
+    `*Promise caught with no commitment behind it* — queued for review`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category ?? 'proactive'}\``,
+    `owed: ${owed}`,
+    props.replacedRecommendation
+      ? `carrier: from this check, replacing a recommendation the model emitted`
+      : `carrier: from this check`,
+    `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
+  return lines.join('\n')
+}
+
+// TAC-401: the prose-promise check did not produce a readable verdict, so the
+// draft was queued on an absence of information rather than a finding.
+//
+// Emitted for the reason TAC-367 gives for captureGroundingVerifierUnavailable:
+// a failure path with no signal is how a hole survives unobserved. This one
+// matters more than that one, because the check FAILS CLOSED — a sustained
+// provider outage queues nearly every reply, and this event plus the operator
+// push are what make that legible as an outage while it is happening rather
+// than as a wave of caught promises.
+export interface ProsePromiseCheckUnavailableProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /**
+   * 'truncated' — the model produced a verdict and the output cap cut it off.
+   *   Not retried: retrying a cap that was already hit spends a second call to
+   *   hit it again.
+   * 'errored' — a transient fault that survived one immediate retry.
+   */
+  outcome: 'truncated' | 'errored'
+  /**
+   * Whether a SECOND call was made, not which outcome produced the result.
+   *
+   * A first-call truncation is false, because truncation is never retried. But
+   * a transient fault whose retry then truncated is `true` alongside
+   * `outcome: 'truncated'` — the pair is not redundant and neither field
+   * implies the other.
+   */
+  retried: boolean
+  error: string
+  errorCode?: string
+}
+
+export async function captureProsePromiseCheckUnavailable(
+  props: ProsePromiseCheckUnavailableProps,
+): Promise<void> {
+  await capturePostHogEvent('prose_promise_check_unavailable', props.guestId, { ...props })
+  await postToSlack(formatProsePromiseCheckUnavailable(props))
+}
+
+function formatProsePromiseCheckUnavailable(props: ProsePromiseCheckUnavailableProps): string {
+  const lines = [
+    `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `outcome: \`${props.outcome}\``,
+    `retried: ${props.retried ? 'yes, once' : 'no'}`,
+    `error: ${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}${props.errorCode ? ` (${props.errorCode})` : ''}`,
+  ]
+  return lines.join('\n')
+}
+
 // TAC-355: independent mechanic-offer verification backstop caught a reply
 // promising an approval-gated mechanic the model didn't self-flag via either
 // existing signal (requiresOperatorApproval or commitment.type). Mirrors

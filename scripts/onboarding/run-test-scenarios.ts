@@ -8,6 +8,7 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   verifyGroundingStage,
+  verifyProsePromiseStage,
 } from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability'
@@ -530,11 +531,30 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     // that trips the backstop is graded against the actual gate the shipped
     // pipeline would apply, not against a knowledgeGap-only decision the
     // real pipeline no longer makes on its own.
-    const groundingBackstop = await verifyGroundingStage(ctx, outcome.result)
+    // TAC-401: concurrently with grounding, mirroring the production
+    // orchestrators (ruled 2026-09-21, ruling 2). The harness grades the
+    // shipped mechanism, so a scenario whose reply promises something with no
+    // carrier must route here exactly as it would in production.
+    //
+    // Promise.all here, where the three orchestrators use allSettled. The
+    // difference is deliberate: their rationale is that a throw in one stage
+    // must not discard the other's finding on a check required to fail closed,
+    // which protects a guest-facing decision. This is a grading harness with
+    // no guest and no send, and a scenario that throws should fail loudly and
+    // be re-run rather than be graded on half its evidence.
+    const [groundingBackstop, prosePromiseBackstop] = await Promise.all([
+      verifyGroundingStage(ctx, outcome.result),
+      verifyProsePromiseStage(ctx, outcome.result),
+    ])
 
     // status === 'success' — evaluate the approval decision. Decision only:
     // this never persists a draft, dispatches to Sendblue, or fires a push.
-    const decision = await evaluateApprovalDecision(ctx, outcome.result, groundingBackstop)
+    const decision = await evaluateApprovalDecision(
+      ctx,
+      outcome.result,
+      groundingBackstop,
+      prosePromiseBackstop,
+    )
     const generated = outcome.result
 
     if (decision.action === 'send') {

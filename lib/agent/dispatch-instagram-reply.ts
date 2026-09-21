@@ -234,7 +234,7 @@ export async function writeInstagramSendFailureCard(input: {
       rows,
       draftCommitment: draftCommitmentIdentity(generation.commitment, false),
       isGapTurn: false,
-      truncatedOnly: false,
+      checkDidNotComplete: false,
       callerPolicy: 'never_regen',
     })
     if (decision.action === 'drop') return { ok: false, skipped: 'slot_occupied' }
