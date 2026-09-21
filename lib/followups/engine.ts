@@ -167,6 +167,17 @@ interface VenueScanContext {
 interface EnrolledGuestRow {
   id: string
   optedOutAt: Date | null
+  /**
+   * TAC-476: DERIVED from `messages`, via the `venue_guest_activity` RPC —
+   * NOT `guests.last_inbound_at`, which is written once at guest creation and
+   * never updated, so it holds first contact. Reading it is what let the
+   * recent-conversation gate dispatch 1.7, 4.5 and 6.4 hours after a guest's
+   * real previous inbound, and left the gate blind entirely for the twenty of
+   * thirty-five scannable guests whose column is NULL.
+   *
+   * null here means "this guest has no inbound message at this venue", which
+   * is the only reading `canSendFollowup` has ever given it.
+   */
   lastInboundAt: Date | null
   lastVisitAt: Date | null
   // TAC-377: precision of the visit lastVisitAt points at. null means no
@@ -329,11 +340,11 @@ async function scanVenue(
 
   const supabase = createAdminClient()
 
-  const [guestsResult, mechanicsResult, redemptionsResult] = await Promise.all([
+  const [guestsResult, activityResult, mechanicsResult, redemptionsResult] = await Promise.all([
     supabase
       .from('guests')
       .select(
-        'id, opted_out_at, last_inbound_at, last_visit_at, last_visit_precision, phone_number, instagram_scoped_id',
+        'id, opted_out_at, last_visit_at, last_visit_precision, phone_number, instagram_scoped_id',
       )
       .eq('venue_id', ctx.id)
       // A guest reachable on EITHER channel. Instagram guests were excluded
@@ -343,6 +354,11 @@ async function scanVenue(
       .or('phone_number.not.is.null,instagram_scoped_id.not.is.null')
       .is('opted_out_at', null)
       .in('status', ['new', 'active']),
+    // TAC-476: the recent-conversation gate's input, derived from `messages`
+    // rather than read off `guests.last_inbound_at`. One round trip for the
+    // whole venue, alongside the three queries already here — deliberately not
+    // a per-guest read, which would be an N+1 inside the guest loop below.
+    supabase.rpc('venue_guest_activity', { p_venue_id: ctx.id }),
     supabase
       .from('mechanics')
       .select(
@@ -365,6 +381,18 @@ async function scanVenue(
     })
     return breakdown
   }
+  // TAC-476: fails the venue's scan rather than degrading, matching the guests
+  // and mechanics loads above. Degrading would mean treating every guest as
+  // having no recent inbound, which is precisely the failed-open behaviour this
+  // replaced — and it would do so silently. No scan means no sends, which is
+  // the safe direction for a suppression input.
+  if (activityResult.error || !activityResult.data) {
+    console.error('[followup-engine] guest activity load failed', {
+      venueId: ctx.id,
+      error: activityResult.error?.message ?? 'no rows returned',
+    })
+    return breakdown
+  }
   if (mechanicsResult.error) {
     console.error('[followup-engine] mechanics load failed', {
       venueId: ctx.id,
@@ -380,10 +408,37 @@ async function scanVenue(
     return breakdown
   }
 
+  // TAC-476: guest id -> that guest's newest inbound at this venue. A guest
+  // absent from the map has never sent one, which is the same "no recent
+  // conversation" reading canSendFollowup gives a null.
+  //
+  // DO NOT TIDY THE TYPE CHECK AWAY, AND DO NOT NARROW IT TO `!== null`.
+  // `db/types.ts` types every RPC return column as non-null, which is a lie
+  // the generator tells about every function in this schema — `last_inbound_at`
+  // is a filtered aggregate and is genuinely null for a guest with only
+  // outbound rows (one such guest is on file). `tsc` cannot catch that, and
+  // `db/types.ts` is hand-patched here, so nothing binds the SQL column names
+  // to this code: the runtime guard is the only guard.
+  //
+  // It tests `typeof === 'string'` rather than `!== null` because the two
+  // differ on exactly the input this is defending against. A row arriving
+  // without the key at all — a renamed SQL alias, a PostgREST shape change —
+  // gives `undefined`, which passes `!== null`, and `new Date(undefined)` is an
+  // Invalid Date whose `getTime()` is NaN. `NaN < windowMs` is FALSE, so rule 3
+  // would silently stop suppressing: the original defect, restored, invisibly.
+  // Same one-line shape `hasPhone` uses below, for the same reason.
+  const lastInboundByGuest = new Map<string, Date>()
+  for (const row of activityResult.data) {
+    const lastInbound: string | null = row.last_inbound_at
+    if (typeof lastInbound === 'string') {
+      lastInboundByGuest.set(row.guest_id, new Date(lastInbound))
+    }
+  }
+
   const enrolledGuests: EnrolledGuestRow[] = guestsResult.data.map((g) => ({
     id: g.id,
     optedOutAt: g.opted_out_at ? new Date(g.opted_out_at) : null,
-    lastInboundAt: g.last_inbound_at ? new Date(g.last_inbound_at) : null,
+    lastInboundAt: lastInboundByGuest.get(g.id) ?? null,
     lastVisitAt: g.last_visit_at ? new Date(g.last_visit_at) : null,
     lastVisitPrecision: parseVisitPrecision(g.last_visit_precision),
     hasPhone: typeof g.phone_number === 'string' && g.phone_number.trim() !== '',
