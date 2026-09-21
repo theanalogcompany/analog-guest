@@ -53,3 +53,11 @@ next-env.d.ts
 .worktrees/
 .claude/scheduled_tasks.lock
 supabase/.temp/
+
+# Measurement run logs (scripts/measurement). createRunLog writes them to
+# measurement-runs/ by default; the bare *.jsonl line covers the ones earlier
+# runs dropped at the repo root, and any a caller points elsewhere. They are
+# evidence for a ticket, not source: quote the findings and the filename on the
+# ticket rather than committing the file.
+measurement-runs/
+*.jsonl

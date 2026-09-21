@@ -41,7 +41,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 
 export interface RunLogMeta {
   // Which arm/variant of the thing under test produced this run — e.g.
@@ -92,6 +92,20 @@ export interface RunLogContents {
   units: Record<string, unknown>[]
 }
 
+/**
+ * Where a default-path run log goes.
+ *
+ * Deliberately NOT the working directory, which is what this wrote to until
+ * 2026-09-20: a run started from the repo root dropped its JSONL beside
+ * package.json, and several did before anyone noticed. A run log is evidence
+ * for a ticket, not source — it wants somewhere findable, out of the way, and
+ * gitignored, and a caller that wants it elsewhere still passes `outputPath`.
+ *
+ * Relative, so it lands under whatever checkout or worktree the run was
+ * started from rather than following the process around.
+ */
+export const RUN_LOG_DIR = 'measurement-runs'
+
 function defaultGitSha(): string | null {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
@@ -118,7 +132,20 @@ function isoForFilename(date: Date): string {
  * collide, full stop.
  */
 function resolveDefaultPath(name: string, date: Date): string {
-  const base = `${name}-${isoForFilename(date)}`
+  // A `name` carrying a separator would escape RUN_LOG_DIR, which is the one
+  // thing the directory exists to prevent — `join('measurement-runs', '/tmp/x')`
+  // is `measurement-runs/tmp/x`, a mirrored tree under the checkout rather than
+  // the absolute path the caller plainly meant. This repo's own tests did
+  // exactly that (they used an absolute `name` to steer the old CWD default
+  // into a temp dir) and quietly rebuilt a `/var/folders/...` tree inside the
+  // working directory. Refuse it and name the field that does the job.
+  if (name.includes('/') || name.includes('\\')) {
+    throw new Error(
+      `createRunLog: name must be a run name, not a path (got ${JSON.stringify(name)}). Pass outputPath to choose where the file goes.`,
+    )
+  }
+  mkdirSync(RUN_LOG_DIR, { recursive: true })
+  const base = join(RUN_LOG_DIR, `${name}-${isoForFilename(date)}`)
   let path = `${base}.jsonl`
   let n = 2
   while (existsSync(path)) {
