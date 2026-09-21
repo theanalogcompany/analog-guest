@@ -141,7 +141,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     // appended to the parent userPrompt.
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
     expect(secondCallPrompt).toContain(
-      'Your previous attempt contained a dash character (— or –)',
+      'do not use a dash character (— or –)',
     )
 
     // The override should be recorded on attempt 2 only.
@@ -196,7 +196,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     // directive carried forward) — assert by checking the directive is
     // absent and that no override was recorded on the second attempt.
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
-    expect(secondCallPrompt).not.toContain('Your previous attempt contained a dash character')
+    expect(secondCallPrompt).not.toContain('do not use a dash character')
     expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
   })
 
@@ -222,19 +222,27 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.attemptHistory).toHaveLength(3)
     expect(r.data.attemptHistory[0].userPromptOverride).toBeUndefined()
     expect(r.data.attemptHistory[1].userPromptOverride).toContain(
-      'Your previous attempt contained a dash character',
+      'do not use a dash character',
     )
     expect(r.data.attemptHistory[2].userPromptOverride).toContain(
-      'Your previous attempt contained a dash character',
+      'do not use a dash character',
     )
   })
 
-  it('clears dash feedback after a clean attempt (no stale carry-forward)', async () => {
+  it('KEEPS the dash constraint after a clean attempt, for the rest of the call', async () => {
+    // REVERSAL of 'clears dash feedback after a clean attempt', which pinned
+    // the pre-TAC-509-follow-up behaviour. Ruled 2026-09-21: the constraint is
+    // sticky for the whole generateMessage call.
+    //
     // Attempt 1: dash, low fidelity.
-    // Attempt 2: clean, low fidelity — dash regex passes but fidelity fails.
-    //            Loop continues; the dash feedback should NOT be re-appended
-    //            for attempt 3 because attempt 2's body is clean.
+    // Attempt 2: dash-clean, low fidelity — the loop continues for FIDELITY.
     // Attempt 3: clean, high fidelity.
+    //
+    // The old behaviour dropped the dash constraint for attempt 3 the moment
+    // attempt 2 came back clean. That was safe only while a dash-clean,
+    // fidelity-passing attempt necessarily ENDED the loop; it does not hold on
+    // a fidelity retry, and TAC-355 and TAC-509 added two more reasons to keep
+    // looping past a clean body.
     queueResponses(
       { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
       { body: 'a b', voiceFidelity: 0.5, reasoning: '2' },
@@ -248,13 +256,30 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.attempts).toBe(3)
     expect(r.data.dashViolationPersisted).toBe(false)
 
-    // Attempt 2 should have the dash directive (because attempt 1 had a dash).
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
-    expect(secondCallPrompt).toContain('Your previous attempt contained a dash character')
-    // Attempt 3 should NOT have the dash directive (attempt 2 was clean).
+    expect(secondCallPrompt).toContain('do not use a dash character')
     const thirdCallPrompt = generateObjectMock.mock.calls[2][0].prompt as string
-    expect(thirdCallPrompt).not.toContain('Your previous attempt contained a dash character')
-    expect(r.data.attemptHistory[2].userPromptOverride).toBeUndefined()
+    expect(thirdCallPrompt).toContain('do not use a dash character')
+    expect(r.data.attemptHistory[2].userPromptOverride).toContain('do not use a dash character')
+  })
+
+  it('states every retained constraint as a standing rule, never as a report on the last attempt', async () => {
+    // A sticky directive worded as feedback ("your previous attempt contained
+    // a dash") becomes a FALSE STATEMENT the moment it outlives the attempt it
+    // describes — which, once sticky, is every attempt after the first one it
+    // appears in. So the wording is part of the mechanism, not presentation.
+    queueResponses(
+      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
+      { body: 'a b', voiceFidelity: 0.5, reasoning: '2' },
+      { body: 'a, b', voiceFidelity: 0.85, reasoning: '3' },
+    )
+    await generateMessage(makeInput())
+    for (const call of generateObjectMock.mock.calls) {
+      const prompt = (call[0] as { prompt: string }).prompt
+      expect(prompt).not.toContain('Your previous attempt')
+      expect(prompt).not.toContain('previous attempt contained')
+      expect(prompt).not.toContain('Rewrite')
+    }
   })
 })
 
@@ -307,7 +332,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
 
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
     expect(secondCallPrompt).toContain(
-      'a self-correction or a reference to your own instructions',
+      'any reference to your own instructions',
     )
   })
 
@@ -323,7 +348,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
 
     expect(r.data.selfTalkViolationPersisted).toBe(false)
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
-    expect(secondCallPrompt).not.toContain('a self-correction or a reference')
+    expect(secondCallPrompt).not.toContain('any reference to your own instructions')
   })
 
   it('MUST NOT ship silently — persists selfTalkViolationPersisted=true when MAX_ATTEMPTS exhausted', async () => {
@@ -369,8 +394,8 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.selfTalkViolationPersisted).toBe(false)
 
     const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
-    expect(secondCallPrompt).toContain('Your previous attempt contained a dash character')
-    expect(secondCallPrompt).toContain('a self-correction or a reference to your own instructions')
+    expect(secondCallPrompt).toContain('do not use a dash character')
+    expect(secondCallPrompt).toContain('any reference to your own instructions')
   })
 })
 
@@ -678,6 +703,58 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     if (!r.ok) return
     expect(r.data.attempts).toBe(1)
     expect(r.data.unverifiedUrls).toEqual([])
+  })
+
+  it('keeps the dash constraint on attempt 3 when only the link kept the loop going', async () => {
+    // THE DEVICE FAILURE, 2026-09-21. Le Mil's draft 6a047b0c was held with
+    // `unverified_url` AND shipped an em dash in the same body.
+    //
+    // Attempt 1: dash + an unlisted link.
+    // Attempt 2: dash fixed, link still wrong — the loop continues for the
+    //            LINK, and the old code dropped the dash directive here
+    //            because the body it had just seen was dash-clean.
+    // Attempt 3: generated with no dash constraint, put a dash back, and that
+    //            body is what the loop returns.
+    //
+    // The assertion that matters is on attempt 3's prompt. Dropping stickiness
+    // fails it.
+    const off = 'https://lemils.com/products/invented'
+    queueResponses(
+      { body: `Try ${off} — it is great.`, voiceFidelity: 0.9, reasoning: '1' },
+      { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '2' },
+      { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '3' },
+    )
+    const r = await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(3)
+
+    const prompts = generateObjectMock.mock.calls.map(
+      (c: unknown[]) => (c[0] as { prompt: string }).prompt,
+    )
+    // Attempt 2 carries both, as it always did.
+    expect(prompts[1]).toContain('do not use a dash character')
+    expect(prompts[1]).toContain(off)
+    // Attempt 3 carries the dash constraint even though attempt 2 was
+    // dash-clean, because the loop is still running.
+    expect(prompts[2]).toContain('do not use a dash character')
+    expect(prompts[2]).toContain(off)
+  })
+
+  it('names a link flagged on an earlier attempt alongside one invented later', async () => {
+    // The URL constraint accumulates rather than replacing, so a model that
+    // swaps one wrong link for another is told both are unapproved.
+    const first = 'https://lemils.com/products/invented-one'
+    const second = 'https://lemils.com/products/invented-two'
+    queueResponses(
+      { body: `Try ${first}`, voiceFidelity: 0.9, reasoning: '1' },
+      { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '2' },
+      { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '3' },
+    )
+    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    const thirdPrompt = generateObjectMock.mock.calls[2][0].prompt as string
+    expect(thirdPrompt).toContain(first)
+    expect(thirdPrompt).toContain(second)
   })
 
   it('composes URL feedback alongside dash and self-talk on one attempt', async () => {
