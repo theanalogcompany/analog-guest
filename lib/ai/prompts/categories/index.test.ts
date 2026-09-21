@@ -676,3 +676,43 @@ describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
     }
   })
 })
+
+// TAC-513: the bounding paragraph. Pinned as CONTIGUOUS clauses, per TAC-409.
+describe('comp_complaint — a report with no negative signal (TAC-513)', () => {
+  it('tells the model it does not know the other item was wrong', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'If their message names another item but does not say anything was wrong with it, you do not know that anything was. Ask how it was. Do not apologise for it and do not offer anything on it until they tell you.',
+    )
+  })
+
+  it('sits immediately after the opening assertion it qualifies', () => {
+    // Three paragraphs later the model has already been told to say sorry and
+    // make it up to them, so the qualification has to be next to the premise.
+    const opening = 'The guest is telling you something went wrong.'
+    const bound = 'If their message names another item but does not say anything was wrong'
+    const understand = 'First, understand what actually happened.'
+    expect(COMP_COMPLAINT_INSTRUCTIONS.indexOf(bound)).toBeGreaterThan(
+      COMP_COMPLAINT_INSTRUCTIONS.indexOf(opening),
+    )
+    expect(COMP_COMPLAINT_INSTRUCTIONS.indexOf(bound)).toBeLessThan(
+      COMP_COMPLAINT_INSTRUCTIONS.indexOf(understand),
+    )
+  })
+
+  it('leaves the opening assertion itself intact', () => {
+    // It is correct for a turn that really does report a problem, and it is
+    // what gives this block its warmth. TAC-513 bounds it, never replaces it.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'The guest is telling you something went wrong.',
+    )
+  })
+
+  it('leaves the make-it-right remedy intact', () => {
+    // AC 5: a genuine second complaint still gets an apology and, where
+    // appropriate, a comp. The bound is scoped to a report with no negative
+    // signal and must not have narrowed the remedy for a real one.
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'Once you understand it, say sorry for it, once, and mean it. Then find a way to make it up to them.',
+    )
+  })
+})
