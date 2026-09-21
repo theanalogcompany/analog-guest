@@ -406,12 +406,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.ok).toBe(true)
   })
 
-  it('exposes promptVersion v1.54.0 on a successful result', async () => {
+  it('exposes promptVersion v1.55.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.54.0')
+    expect(r.data.promptVersion).toBe('v1.55.0')
   })
 })
 
@@ -561,5 +561,146 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
       expect(p).not.toContain('An emoji is welcome')
     }
     expect(r.data.emojiDirectiveViolated).toBe(true)
+  })
+})
+
+describe('generateMessage — unverified URL check (TAC-509)', () => {
+  const LISTED = 'https://lemils.com/products/le-mils-budan-bold'
+
+  function inputWithLinks(links: unknown): GenerateMessageInput {
+    return { ...makeInput(), venueInfo: makeVenueInfo({ links } as Partial<VenueInfo>) }
+  }
+
+  it('sends a listed link unchanged, in one attempt', async () => {
+    queueResponses({ body: `Grab it at ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' })
+    const r = await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(1)
+    expect(r.data.body).toBe(`Grab it at ${LISTED}`)
+    expect(r.data.unverifiedUrls).toEqual([])
+  })
+
+  it('regenerates on a one-character variant and clears when the retry is right', async () => {
+    const off = 'https://lemils.com/products/le-mils-budan-bolds'
+    queueResponses(
+      { body: `Grab it at ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Grab it at ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+    )
+    const r = await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(2)
+    expect(r.data.unverifiedUrls).toEqual([])
+  })
+
+  it('quotes the offending link back in the regen feedback', async () => {
+    const off = 'https://lemils.com/products/nope'
+    queueResponses(
+      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
+    )
+    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    const secondPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondPrompt).toContain(off)
+    expect(secondPrompt).toContain('## Links')
+  })
+
+  it('MUST NOT ship silently — persists unverifiedUrls when MAX_ATTEMPTS is exhausted', async () => {
+    const off = 'https://lemils.com/products/invented'
+    queueResponses(
+      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+    )
+    const r = await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(3)
+    expect(r.data.unverifiedUrls).toEqual([off])
+  })
+
+  it('holds a link that is present in retrieved knowledge but not on the list', async () => {
+    // The allowlist is curated, never derived. A chunk mentioning a link
+    // earns it nothing.
+    const fromKnowledge = 'https://lemils.com/blogs/blog/so-whats-chicory'
+    queueResponses(
+      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
+    )
+    const input: GenerateMessageInput = {
+      ...inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+      knowledgeChunks: [
+        {
+          id: 'k1',
+          text: `Our chicory explainer lives at ${fromKnowledge}`,
+          sourceType: 'synthesized',
+          primaryTags: ['history'],
+          secondaryTags: [],
+        },
+      ],
+    }
+    const r = await generateMessage(input)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.unverifiedUrls).toEqual([fromKnowledge])
+  })
+
+  it('holds any link when the list is empty, and when it is missing entirely', async () => {
+    for (const links of [[], undefined]) {
+      queueResponses(
+        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+      )
+      const r = await generateMessage(inputWithLinks(links))
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.data.unverifiedUrls).toEqual([LISTED])
+    }
+  })
+
+  it('never fires on a bare domain, even with no list', async () => {
+    queueResponses({
+      body: 'You can order on lemils.com any time.',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
+    const r = await generateMessage(inputWithLinks(undefined))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(1)
+    expect(r.data.unverifiedUrls).toEqual([])
+  })
+
+  it('composes URL feedback alongside dash and self-talk on one attempt', async () => {
+    const off = 'https://lemils.com/products/nope'
+    queueResponses(
+      { body: `Try ${off} — actually wait, no dashes.`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
+    )
+    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    const secondPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondPrompt).toContain('dash character')
+    expect(secondPrompt).toContain('self-correction')
+    expect(secondPrompt).toContain(off)
+  })
+
+  it('reconciles a single trailing slash against the stored list', async () => {
+    queueResponses({ body: 'see https://lemils.com', voiceFidelity: 0.9, reasoning: 'r' })
+    const r = await generateMessage(
+      inputWithLinks([{ label: 'Homepage', url: 'https://lemils.com/' }]),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(1)
+    expect(r.data.unverifiedUrls).toEqual([])
   })
 })

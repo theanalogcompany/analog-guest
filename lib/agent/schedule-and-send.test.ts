@@ -200,6 +200,7 @@ function makeGeneration(): GenerateMessageResult {
     body: 'regenerated draft body',
     voiceFidelity: 0.78,
     reasoning: 'matches venue voice',
+    unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
   complaintIntent: 'none' as const,

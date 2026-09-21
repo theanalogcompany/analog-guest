@@ -538,6 +538,13 @@ export type GenerateMessageResult = {
   // dashViolationPersisted, this must never ship — lib/agent/stages.ts's
   // SELF_TALK_DETECTED trigger queues the draft instead of sending it.
   selfTalkViolationPersisted: boolean
+  // TAC-509: links in the final body that are not on the venue's curated
+  // `venue_info.links` allowlist. Empty on the overwhelmingly common path (no
+  // link at all, or a listed one). Non-empty means the draft must NOT ship:
+  // lib/agent/stages.ts turns it into the UNVERIFIED_URL trigger, which
+  // queues. Carries the offending links rather than a bare boolean so the
+  // PostHog event can name them.
+  unverifiedUrls: string[]
   // TAC-362: true when this turn's emoji directive was 'none' and the final
   // shipped body carries an emoji anyway. Same recompute-on-final-body shape
   // as dashViolationPersisted above, and the same posture: it SHIPS. The

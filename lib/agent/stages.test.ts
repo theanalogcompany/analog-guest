@@ -42,6 +42,7 @@ const generateMessageMock = vi.fn()
 // captureUngroundedClaimCaught (posthog) fires when it catches something.
 const verifyGroundingMock = vi.fn()
 const captureUngroundedClaimCaughtMock = vi.fn()
+const captureUnverifiedUrlHeldMock = vi.fn()
 const captureGroundingVerifierUnavailableMock = vi.fn()
 // TAC-355: verifyMechanicOffer (lib/ai) is the mechanic-offer backstop's
 // model call; captureMechanicOfferBackstopCaught (posthog) fires when it
@@ -115,6 +116,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
   captureUngroundedClaimCaught: (...args: unknown[]) => captureUngroundedClaimCaughtMock(...args),
+  captureUnverifiedUrlHeld: (...args: unknown[]) => captureUnverifiedUrlHeldMock(...args),
   captureGroundingVerifierUnavailable: (...args: unknown[]) =>
     captureGroundingVerifierUnavailableMock(...args),
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
@@ -504,7 +506,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.54.0',
+        promptVersion: 'v1.55.0',
         crisisSafety: true,
       },
     })
@@ -522,7 +524,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.54.0',
+        promptVersion: 'v1.55.0',
         crisisSafety: false,
       },
     })
@@ -756,6 +758,8 @@ function makeGenerationResult(
     body: 'yeah, oat and almond.',
     voiceFidelity: 0.85,
     reasoning: 'matches the venue voice',
+    // TAC-509: the clean default. A test that needs the trigger overrides it.
+    unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none' as const,
@@ -2626,6 +2630,73 @@ describe('applyApprovalPolicyStage — self_talk_detected trigger (TAC-355)', ()
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+})
+
+describe('applyApprovalPolicyStage — unverified_url trigger (TAC-509)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+    captureUnverifiedUrlHeldMock.mockReset()
+  })
+
+  it('queues with unverified_url when a link survived every attempt', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ unverifiedUrls: ['https://lemils.com/products/invented'] }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNVERIFIED_URL)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNVERIFIED_URL)
+  })
+
+  it('sends when there is no unverified link', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ unverifiedUrls: [] }),
+    )
+    expect(decision.action).toBe('send')
+    expect(captureUnverifiedUrlHeldMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the links and the size of the venue list', async () => {
+    // allowedUrlCount is what separates "the model invented a link" from
+    // "this venue has no list yet". The two look identical on the card.
+    const urls = ['https://lemils.com/products/invented']
+    await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({ unverifiedUrls: urls }))
+    expect(captureUnverifiedUrlHeldMock).toHaveBeenCalledTimes(1)
+    const props = captureUnverifiedUrlHeldMock.mock.calls[0][0]
+    expect(props.unverifiedUrls).toEqual(urls)
+    expect(props.allowedUrlCount).toBe(0)
+  })
+
+  it('outranks self_talk_detected for the operator label', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        unverifiedUrls: ['https://lemils.com/products/invented'],
+        selfTalkViolationPersisted: true,
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNVERIFIED_URL)
+  })
+
+  it('ranks below a commitment for the operator label', async () => {
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({
+        unverifiedUrls: ['https://lemils.com/products/invented'],
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNVERIFIED_URL)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
   })
 })

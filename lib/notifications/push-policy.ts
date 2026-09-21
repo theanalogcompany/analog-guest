@@ -113,6 +113,13 @@ const PUSH_POLICY = {
   // ships broken unless an operator edits it — no reason to hold the push.
   [APPROVAL_TRIGGERS.SELF_TALK_DETECTED]: 'push',
 
+  // TAC-509. A link nobody curated survived every regen attempt, so the reply
+  // cannot go out as written and the guest is waiting on an answer that will
+  // not send itself. Like SELF_TALK_DETECTED and unlike KNOWLEDGE_GAP it
+  // carries no timer, so there is no cron that eventually surfaces the card —
+  // the push is the only thing that does.
+  [APPROVAL_TRIGGERS.UNVERIFIED_URL]: 'push',
+
   // TAC-355. Independent mechanic-offer backstop — the primary mechanism for
   // this failure mode (see the trigger's own comment in stages.ts), so it
   // gets the same urgency as the other primary/structural triggers above.

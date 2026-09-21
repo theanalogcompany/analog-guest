@@ -2,9 +2,21 @@
 // duplicates or contradictions.
 //
 // DRY RUN IS THE DEFAULT. It reads, embeds the proposals, and writes a
-// markdown report. It writes nothing to the database. `--apply` is the
-// Phase 3 write path and is not built yet — the flag is accepted and refused
-// so the contract is visible.
+// markdown report. It writes nothing to the database.
+//
+// `--apply` WRITES TO THE PRODUCTION DATABASE. It inserts new
+// `knowledge_corpus` rows and updates existing ones for the named venue, then
+// embeds each one into `knowledge_embeddings` — the same rows the agent
+// retrieves from on a live guest turn. There is no staging environment and no
+// confirmation prompt. Run the dry run first and read its report.
+//
+// It is idempotent by `metadata.proposalRowId`: a proposal whose row already
+// exists and is processed is SKIPPED, so a re-run is a no-op rather than a
+// duplicate load. The corollary is the trap — re-using a row_id that has
+// already been loaded writes NOTHING and still reports a clean plan. A
+// proposal meant to change an existing row needs a NEW row_id plus
+// `action: "replace"` and a `replaces_id`. An update preserves the prior text
+// in `metadata.replacedContent`, which is the only rollback there is.
 //
 // Thin orchestrator per CLAUDE.md § Scripts. Decision logic is in
 // ./load-venue-knowledge-pure (unit-tested), rendering in

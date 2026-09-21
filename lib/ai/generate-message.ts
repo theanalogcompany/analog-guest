@@ -6,12 +6,14 @@ import {
 } from '@/lib/schemas/guest-commitment'
 import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { isMessageChannel } from '@/lib/schemas/message-channel'
+import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { captureGenerationTruncated } from '@/lib/analytics/posthog'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
+import { findUnverifiedUrls } from './url-detector'
 import type {
   AIResult,
   GenerateMessageAttempt,
@@ -81,6 +83,19 @@ const DASH_REGEN_FEEDBACK =
 // lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
 const SELF_TALK_REGEN_FEEDBACK =
   'Your previous attempt included a self-correction or a reference to your own instructions, rules, or nature as an AI (e.g. "actually wait, no dashes" or "as an AI"). Rewrite it as a normal reply with no visible reasoning and no reference to yourself as an AI or to your own rules.'
+
+// TAC-509: deterministic backstop for a link nobody curated. Runs in the SAME
+// per-attempt loop as the dash and self-talk checks, sharing their attempt
+// budget. Like self-talk and unlike the dash regex, a violation that survives
+// every attempt must NOT ship — see unverifiedUrlsPersisted below and
+// lib/agent/stages.ts's UNVERIFIED_URL trigger.
+//
+// The feedback quotes the offending links back. The model cannot fix a link it
+// cannot see it got wrong, and the usual miss is one character in a slug.
+function unverifiedUrlFeedback(urls: readonly string[]): string {
+  const quoted = urls.map((u) => `"${u}"`).join(', ')
+  return `Your previous attempt contained ${urls.length === 1 ? 'a link that is not' : 'links that are not'} on the venue's approved list: ${quoted}. Rewrite it using only a link from the "## Links" section, copied exactly as written there, or no link at all. Do not guess a web address and do not build one from a pattern.`
+}
 
 // THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
 // schema uses .refine() (per THE-157) so .min/.max don't get serialized into
@@ -219,6 +234,16 @@ export async function generateMessage(
     return { ok: false, error: 'invalid_input' }
   }
 
+  // TAC-509: the curated link allowlist for this venue. Computed ONCE, above
+  // the loop, so every attempt is judged against the same list.
+  //
+  // `venue_info.links` and nothing else. Deliberately NOT derived from the
+  // retrieved knowledge chunks, the composed prompt or `venue_info.contact`:
+  // a link is sendable because a human put it on a list, not because it turned
+  // up somewhere in context. An empty list is a normal state and means no link
+  // may be sent at all.
+  const allowedUrls = parseVenueLinks(input.venueInfo.links).map((l) => l.url)
+
   const { systemPrompt, userPrompt } = composePrompt(input)
   const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
 
@@ -281,8 +306,9 @@ export async function generateMessage(
       })
       const hasDash = DASH_REGEX.test(object.body)
       const hasSelfTalk = matchSelfTalk(object.body).matched
+      const badUrls = findUnverifiedUrls(object.body, allowedUrls)
       const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
-      if (fidelityPass && !hasDash && !hasSelfTalk) break
+      if (fidelityPass && !hasDash && !hasSelfTalk && badUrls.length === 0) break
       // Set feedback for the next iteration. Dash and self-talk feedback
       // compose (a body can trip both at once — the motivating incident did)
       // rather than one winning over the other. When neither applies, clear
@@ -290,6 +316,7 @@ export async function generateMessage(
       const feedbackParts: string[] = []
       if (hasDash) feedbackParts.push(DASH_REGEN_FEEDBACK)
       if (hasSelfTalk) feedbackParts.push(SELF_TALK_REGEN_FEEDBACK)
+      if (badUrls.length > 0) feedbackParts.push(unverifiedUrlFeedback(badUrls))
       regenFeedback = feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
 
@@ -344,6 +371,13 @@ export async function generateMessage(
         // Unlike the dash case, a true here means the draft must NOT ship —
         // see lib/agent/stages.ts's SELF_TALK_DETECTED trigger.
         selfTalkViolationPersisted: matchSelfTalk(lastResult.body).matched,
+        // TAC-509: same recompute-on-final-body pattern. Like self-talk and
+        // unlike a dash, a true here must NOT ship — lib/agent/stages.ts's
+        // UNVERIFIED_URL trigger queues the draft. The links themselves ride
+        // along so the operator event can say which ones were wrong; a gate
+        // whose true-positive history cannot be produced on demand is an
+        // unproven gate (CLAUDE.md, Common gotchas).
+        unverifiedUrls: findUnverifiedUrls(lastResult.body, allowedUrls),
         // TAC-362: same recompute-on-final-body pattern as the two above.
         // Only meaningful when this turn's directive was 'none' — 'allowed'
         // and absent have nothing to violate. Ships either way (the measured

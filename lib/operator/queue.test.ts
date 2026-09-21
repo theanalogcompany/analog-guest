@@ -292,6 +292,7 @@ describe('listPendingQueue', () => {
       // --- The draft came out wrong ---
       ['model_flagged', 'Something felt off about this one.'],
       ['self_talk_detected', 'I was talking about myself instead of to the guest.'],
+      ['unverified_url', "Has a link we couldn't verify. Check it before sending."],
       ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
       // TAC-364, new: the crash card's own reason. Until now it borrowed
       // knowledge_gap's, which claimed the guest had asked something

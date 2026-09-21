@@ -87,6 +87,7 @@ function generation(body: string, overrides: Partial<GenerateMessageResult> = {}
     body,
     voiceFidelity: 0.8,
     reasoning: 'r',
+    unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none',

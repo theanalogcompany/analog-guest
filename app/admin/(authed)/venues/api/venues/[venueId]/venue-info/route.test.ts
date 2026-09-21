@@ -206,3 +206,61 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — happy path', (
     expect(state.updateCalls).toEqual([])
   })
 })
+
+describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — links round-trip (TAC-509)', () => {
+  beforeEach(() => {
+    vi.mocked(requireVenueAdmin).mockResolvedValue({
+      ok: true,
+      operatorId: OPERATOR_ID,
+      venueId: VENUE_ID,
+    })
+  })
+
+  // The route merges a partial body over the stored object, re-parses the
+  // WHOLE thing and writes `validated.data`. So the stored link list is only
+  // safe if venue_info.links is inert in the schema. A strict or transforming
+  // shape there would make this edit delete links nobody mentioned, and the
+  // operator would have no way to know.
+  it('leaves links untouched when the body does not mention them', async () => {
+    const storedLinks = [
+      { label: 'Budan beans', url: 'https://lemils.com/products/budan' },
+      { label: 'Shipping policy', url: 'https://lemils.com/policies/shipping-policy' },
+    ]
+    const state = newAdminState({
+      venueInfo: { ...validVenueInfo, links: storedLinks },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+
+    const res = await PATCH(
+      buildRequest({ hours: { monday: '8am-4pm' } }),
+      buildParams(VENUE_ID),
+    )
+
+    expect(res.status).toBe(200)
+    expect(state.updateCalls).toHaveLength(1)
+    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    expect(written.links).toEqual(storedLinks)
+    expect((written.hours as Record<string, unknown>).monday).toBe('8am-4pm')
+  })
+
+  it('writes a malformed stored entry back unchanged rather than dropping it', async () => {
+    const storedLinks = [{ label: 'Typed wrong' }, 'not-an-object']
+    const state = newAdminState({
+      venueInfo: { ...validVenueInfo, links: storedLinks },
+    })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+
+    const res = await PATCH(
+      buildRequest({ staff: ['Rayan'] }),
+      buildParams(VENUE_ID),
+    )
+
+    expect(res.status).toBe(200)
+    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    expect(written.links).toEqual(storedLinks)
+  })
+})
