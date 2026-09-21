@@ -26,7 +26,9 @@ export {
   VenueHoursSchema,
   VenueInfoSchema,
   type VenueInfo,
+  type VenueLink,
   VenueMenuSchema,
+  parseVenueLinks,
   type VenueServices,
   VenueServicesSchema,
 } from './venue-info'

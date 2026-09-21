@@ -3,8 +3,7 @@ import {
   classifyContextEntry,
   filterActiveContext,
   type VenueContextNote,
-  VenueInfoSchema,
-} from './venue-info'
+  VenueInfoSchema, parseVenueLinks} from './venue-info'
 
 const NOW = new Date('2026-04-29T12:00:00Z')
 
@@ -156,5 +155,91 @@ describe('VenueInfoSchema — services', () => {
       expect(r.data.services).toBeUndefined()
       expect(r.data.hours.monday).toBe('7:00 AM – 3:00 PM')
     }
+  })
+})
+
+describe('VenueInfoSchema — links (TAC-509)', () => {
+  function base(): Record<string, unknown> {
+    return {
+      address: { line1: '1 Main St', city: 'Someville', region: 'CA', postalCode: '00000' },
+    }
+  }
+
+  it('parses a venue with no links key at all', () => {
+    const r = VenueInfoSchema.safeParse(base())
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.links).toBeUndefined()
+  })
+
+  it('stores entries untouched, so the admin write path round-trips them', () => {
+    const stored = [{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }]
+    const r = VenueInfoSchema.safeParse({ ...base(), links: stored })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.links).toEqual(stored)
+  })
+
+  it('keeps a malformed entry in STORAGE rather than stripping it on write', () => {
+    // The admin PATCH route writes back `validated.data`. If the schema
+    // dropped a bad entry here, an admin editing an unrelated field would
+    // silently delete what Jaipal typed. Validation belongs at the read
+    // boundary instead - see parseVenueLinks.
+    const stored = [{ label: 'Broken' }, 'not-an-object']
+    const r = VenueInfoSchema.safeParse({ ...base(), links: stored })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.links).toEqual(stored)
+  })
+
+  it('never fails the whole venue on a malformed links value', () => {
+    const r = VenueInfoSchema.safeParse({ ...base(), links: 'not-an-array' })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.links).toBeUndefined()
+      expect(r.data.address.line1).toBe('1 Main St')
+    }
+  })
+})
+
+describe('parseVenueLinks (TAC-509)', () => {
+  it('returns [] for undefined, a non-array, and an empty array', () => {
+    expect(parseVenueLinks(undefined)).toEqual([])
+    expect(parseVenueLinks('nope')).toEqual([])
+    expect(parseVenueLinks([])).toEqual([])
+  })
+
+  it('keeps a well-formed entry', () => {
+    expect(
+      parseVenueLinks([{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }]),
+    ).toEqual([{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }])
+  })
+
+  it('drops a bad entry and KEEPS its siblings', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const out = parseVenueLinks([
+      { label: 'Good', url: 'https://lemils.com/a' },
+      { label: '', url: 'https://lemils.com/b' },
+      { label: 'No url' },
+      { label: 'Bad url', url: 'not a url' },
+      'not-an-object',
+      null,
+      { label: 'Also good', url: 'https://lemils.com/c' },
+    ])
+    expect(out).toEqual([
+      { label: 'Good', url: 'https://lemils.com/a' },
+      { label: 'Also good', url: 'https://lemils.com/c' },
+    ])
+    expect(warn).toHaveBeenCalledTimes(5)
+    warn.mockRestore()
+  })
+
+  it('trims whitespace around a stored url but normalizes nothing else', () => {
+    expect(
+      parseVenueLinks([{ label: 'X', url: '  https://lemils.com/Products/Budan?v=1  ' }]),
+    ).toEqual([{ label: 'X', url: 'https://lemils.com/Products/Budan?v=1' }])
+  })
+
+  it('does not mutate the caller\'s stored array', () => {
+    const stored = [{ label: 'X', url: '  https://lemils.com/a  ' }]
+    parseVenueLinks(stored)
+    expect(stored[0].url).toBe('  https://lemils.com/a  ')
   })
 })

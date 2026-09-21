@@ -210,6 +210,96 @@ export const VenueInfoSchema = z.object({
   // never-seen phone number. Must match the printed sign character-for-
   // character — that's an operator/print-process concern, not validated here.
   qrEnrollmentMessage: z.string().optional(),
+  // TAC-509: the ONLY links the agent may put in a reply. Curated by hand per
+  // venue; nothing derives it from knowledge, the composed prompt, or
+  // `contact.website`. Read it through `parseVenueLinks` below, never directly.
+  //
+  // Typed `z.array(z.unknown())` on purpose, and this is load-bearing rather
+  // than laziness. The admin venue-info PATCH route merges a partial body over
+  // the stored object, re-parses the whole thing, and writes `validated.data`
+  // back — so ANY strictness here is a write-path hazard for a field only
+  // Jaipal hand-edits:
+  //
+  //   - A strict entry shape would make an admin editing hours silently DELETE
+  //     a malformed link, because the stripped value is what gets written.
+  //   - A throwing shape would take down `buildRuntimeContext` for the whole
+  //     venue on every turn, which is exactly the hazard `services` above is
+  //     `.catch(undefined)` for.
+  //
+  // So the schema cannot throw, cannot transform and round-trips whatever is
+  // stored. Validation happens at the READ boundary in `parseVenueLinks`,
+  // per entry, the way `filterActiveContext` handles a malformed `expiresAt`.
+  // A dropped entry SHRINKS the allowlist, so a typo fails toward holding the
+  // draft, never toward sending an unverified link.
+  //
+  // `.optional()` rather than `.default([])`: "missing is valid", and a
+  // default would also give every venue an empty row in the admin page's
+  // Unclaimed catch-all.
+  links: z.array(z.unknown()).optional().catch(undefined),
 })
 
 export type VenueInfo = z.infer<typeof VenueInfoSchema>
+
+// ── TAC-509: the curated link allowlist ─────────────────────────────────────
+
+/**
+ * One entry of `venue_info.links`: a link the agent is allowed to send, and a
+ * label saying what it is for.
+ *
+ * The label is not decoration. It is what the model reads to decide whether a
+ * link answers what the guest actually asked, so it should be phrased the way
+ * a guest would ask for the thing ("Budan beans", "Shipping policy").
+ */
+export interface VenueLink {
+  label: string
+  url: string
+}
+
+/**
+ * The strict shape ONE stored entry must meet to be usable. Deliberately not
+ * part of `VenueInfoSchema` — see the `links` comment there for why the stored
+ * field stays inert and validation lives here instead.
+ */
+const VenueLinkEntrySchema = z.object({
+  label: z.string().trim().min(1),
+  url: z.url(),
+})
+
+/**
+ * Validate the stored link list at the read boundary.
+ *
+ * Per entry, keeping siblings: one unusable entry is dropped on its own rather
+ * than emptying the list, mirroring `filterActiveContext`'s treatment of a
+ * malformed `expiresAt`. Dropping SHRINKS the allowlist, so every failure mode
+ * here holds a draft rather than sending an unverified link.
+ *
+ * Whitespace around a stored URL is trimmed — a trailing newline or space in a
+ * hand-typed Studio value is a typo, not a different destination. Nothing else
+ * is normalized: scheme, case, query string and path are all significant, and
+ * a single trailing "/" is reconciled later, at match time
+ * (`lib/ai/url-detector.ts`), not here, so the list keeps exactly what was
+ * typed.
+ */
+export function parseVenueLinks(raw: unknown): VenueLink[] {
+  if (!Array.isArray(raw)) return []
+  const out: VenueLink[] = []
+  for (const entry of raw) {
+    const candidate =
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+        ? { ...(entry as Record<string, unknown>) }
+        : entry
+    if (candidate !== null && typeof candidate === 'object' && 'url' in candidate) {
+      const u = (candidate as { url: unknown }).url
+      if (typeof u === 'string') (candidate as { url: unknown }).url = u.trim()
+    }
+    const parsed = VenueLinkEntrySchema.safeParse(candidate)
+    if (!parsed.success) {
+      console.warn('[venue-info] dropping unusable venue_info.links entry', {
+        reason: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.code}`),
+      })
+      continue
+    }
+    out.push({ label: parsed.data.label, url: parsed.data.url })
+  }
+  return out
+}
