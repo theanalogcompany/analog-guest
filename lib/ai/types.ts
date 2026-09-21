@@ -773,6 +773,29 @@ export type VerifyMechanicOfferResult = {
   promptVersion: string
 }
 
+// TAC-513: independent post-generation check for a cancellation CLAIMED in
+// prose with no structured carrier behind it. Takes the reply body and NOTHING
+// else, matching its TAC-401 sibling — see lib/ai/verify-cancellation-claim.ts
+// for why it is a separate check rather than a second question on that one.
+export type VerifyCancellationClaimInput = {
+  replyBody: string
+}
+
+export type VerifyCancellationClaimResult = {
+  /**
+   * True when the reply tells the guest that something the venue already
+   * promised is no longer happening.
+   *
+   * A BOOLEAN AND NOTHING ELSE, deliberately. This check never names which
+   * commitment, because naming one would invite minting a cancellation from a
+   * second reading of prose, and cancelling is destructive where TAC-401's
+   * minting is protective. The carrier only ever comes from the model's own id
+   * emission, resolved against the guest's live list.
+   */
+  claimsCancellation: boolean
+  promptVersion: string
+}
+
 // TAC-401: independent post-generation check for a promise made in PROSE with
 // no structured commitment behind it. Deliberately takes the reply body and
 // NOTHING else — see lib/ai/verify-prose-promise.ts for why the narrow input

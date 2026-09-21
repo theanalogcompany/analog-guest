@@ -19,12 +19,15 @@ import {
   verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyProsePromiseStage,
+  verifyCancellationClaimStage,
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 // TAC-367: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
 // source under test imports it the same way for the same reason.
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
+// TAC-513: by path, for the same reason as the line above.
+import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
 import { BrandPersonaSchema } from '@/lib/schemas'
 import { gapFlagsFromTriggers } from './pending-slots'
 
@@ -51,6 +54,10 @@ const captureGroundingVerifierUnavailableMock = vi.fn()
 const verifyMechanicOfferMock = vi.fn()
 // TAC-401: the prose-promise check's model call.
 const verifyProsePromiseMock = vi.fn()
+// TAC-513: the cancellation-claim check's model call.
+const verifyCancellationClaimMock = vi.fn()
+const captureCancellationClaimUnbackedMock = vi.fn()
+const captureCancellationCheckUnavailableMock = vi.fn()
 const captureProsePromiseCaughtMock = vi.fn()
 const captureProsePromiseCheckUnavailableMock = vi.fn()
 const captureMechanicOfferBackstopCaughtMock = vi.fn()
@@ -112,6 +119,7 @@ vi.mock('@/lib/ai', () => ({
   // site and the branch that uses it is silently unreachable in every test in
   // this file, which is the trap CLAUDE.md documents on this exact mock.
   verifyProsePromise: (...args: unknown[]) => verifyProsePromiseMock(...args),
+  verifyCancellationClaim: (...args: unknown[]) => verifyCancellationClaimMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -132,6 +140,10 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
   captureProsePromiseCaught: (...args: unknown[]) => captureProsePromiseCaughtMock(...args),
+  captureCancellationClaimUnbacked: (...args: unknown[]) =>
+    captureCancellationClaimUnbackedMock(...args),
+  captureCancellationCheckUnavailable: (...args: unknown[]) =>
+    captureCancellationCheckUnavailableMock(...args),
   captureProsePromiseCheckUnavailable: (...args: unknown[]) =>
     captureProsePromiseCheckUnavailableMock(...args),
   captureVoiceFidelityLow: vi.fn(),
@@ -4414,5 +4426,217 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+  })
+})
+
+// TAC-513. The stage owns two independent facts: what the model's own emission
+// resolved to, and what an independent read of the body says. The gate composes
+// them; these tests keep the two from being collapsed.
+describe('verifyCancellationClaimStage (TAC-513)', () => {
+  beforeEach(() => {
+    verifyCancellationClaimMock.mockReset()
+    captureCancellationClaimUnbackedMock.mockReset()
+    captureCancellationCheckUnavailableMock.mockReset()
+  })
+
+  const TONIC = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
+
+  const claims = {
+    ok: true,
+    data: { claimsCancellation: true, promptVersion: 'v1.0.0' },
+  }
+  const clean = {
+    ok: true,
+    data: { claimsCancellation: false, promptVersion: 'v1.0.0' },
+  }
+
+  it('resolves a carried cancellation and skips the model call', async () => {
+    // Already queued by commitment_cancellation_gated, so the body cannot be
+    // claiming something the system has not done.
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ cancelsCommitmentId: TONIC.id }),
+    )
+    expect(result).toEqual({
+      resolution: {
+        status: 'resolved',
+        cancellation: { commitmentId: TONIC.id },
+        commitment: TONIC,
+      },
+      claim: 'skipped',
+    })
+    expect(verifyCancellationClaimMock).not.toHaveBeenCalled()
+  })
+
+  it('still resolves for a demo guest, and skips only the model call', async () => {
+    // TAC-284's bypass ships regardless of any trigger, so the call buys
+    // nothing. The RESOLUTION still has to run: schedule-and-send applies the
+    // cancellation inline on that path, so a demo guest's ledger follows their
+    // words like anyone else's.
+    const result = await verifyCancellationClaimStage(
+      makeCtx({
+        activeCommitments: [TONIC],
+        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      }),
+      makeGenerationResult({ cancelsCommitmentId: TONIC.id }),
+    )
+    expect(result.resolution.status).toBe('resolved')
+    expect(result.claim).toBe('skipped')
+    expect(verifyCancellationClaimMock).not.toHaveBeenCalled()
+  })
+
+  it('flags a reply that claims a cancellation with an empty field', async () => {
+    // The incident, exactly.
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({
+        body: 'got it, just the cortado then. the comp for the blossom tonic is cancelled.',
+        cancelsCommitmentId: '',
+      }),
+    )
+    expect(result).toEqual({ resolution: { status: 'none' }, claim: 'flagged' })
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the check even when the guest has NO active commitments', async () => {
+    // Deliberately not gated on a non-empty list. A reply telling a guest a
+    // promise is cancelled when no promise exists is just as wrong, and gating
+    // would make the check blind to exactly that.
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [] }),
+      makeGenerationResult({ body: "that one's off then", cancelsCommitmentId: '' }),
+    )
+    expect(result.claim).toBe('flagged')
+    expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an id that does not resolve, and still runs the check', async () => {
+    // Two independent facts, both wrong in different ways. The gate needs the
+    // unresolved id for the operator event and the claim for the trigger.
+    verifyCancellationClaimMock.mockResolvedValueOnce(clean)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ cancelsCommitmentId: 'deadbeef-0000-4000-8000-000000000000' }),
+    )
+    expect(result.resolution).toEqual({
+      status: 'unresolved',
+      claimedId: 'deadbeef-0000-4000-8000-000000000000',
+    })
+    expect(result.claim).toBe('clean')
+    expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes a clean reply through', async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(clean)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ cancelsCommitmentId: '' }),
+    )
+    expect(result).toEqual({ resolution: { status: 'none' }, claim: 'clean' })
+    expect(captureCancellationClaimUnbackedMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the unresolved id and the open-commitment count on the event', async () => {
+    // Separates "the model invented a cancellation" from "the block was empty
+    // and it invented one anyway", which have different fixes.
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({
+        body: 'the comp is off',
+        cancelsCommitmentId: 'deadbeef-0000-4000-8000-000000000000',
+      }),
+    )
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unresolvedCommitmentId: 'deadbeef-0000-4000-8000-000000000000',
+        activeCommitmentCount: 1,
+      }),
+    )
+  })
+
+  it('records a null unresolved id when the model emitted nothing', async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ body: 'the comp is off', cancelsCommitmentId: '' }),
+    )
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ unresolvedCommitmentId: null }),
+    )
+  })
+
+  it('retries once on a transient fault, then fails CLOSED', async () => {
+    verifyCancellationClaimMock
+      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
+      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
+    const result = await verifyCancellationClaimStage(
+      makeCtx({}),
+      makeGenerationResult({ cancelsCommitmentId: '' }),
+    )
+    expect(result.claim).toBe('check_failed')
+    expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(2)
+    expect(captureCancellationCheckUnavailableMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'errored', retried: true }),
+    )
+  })
+
+  it('recovers when the retry succeeds', async () => {
+    verifyCancellationClaimMock
+      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
+      .mockResolvedValueOnce(clean)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({}),
+      makeGenerationResult({ cancelsCommitmentId: '' }),
+    )
+    expect(result.claim).toBe('clean')
+    expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does NOT retry a truncation, and fails closed', async () => {
+    // Retrying a cap that was already hit spends a second call to hit it again.
+    verifyCancellationClaimMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'truncated',
+      errorCode: VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE,
+    })
+    const result = await verifyCancellationClaimStage(
+      makeCtx({}),
+      makeGenerationResult({ cancelsCommitmentId: '' }),
+    )
+    expect(result.claim).toBe('check_failed')
+    expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(1)
+    expect(captureCancellationCheckUnavailableMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'truncated', retried: false }),
+    )
+  })
+
+  it('skips the model call on an empty body', async () => {
+    const result = await verifyCancellationClaimStage(
+      makeCtx({}),
+      makeGenerationResult({ body: '   ', cancelsCommitmentId: '' }),
+    )
+    expect(result.claim).toBe('skipped')
+    expect(verifyCancellationClaimMock).not.toHaveBeenCalled()
+  })
+
+  it('sends only the body to the check, never the commitments', async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(clean)
+    await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ body: 'hello there', cancelsCommitmentId: '' }),
+    )
+    expect(verifyCancellationClaimMock).toHaveBeenCalledWith({ replyBody: 'hello there' })
   })
 })

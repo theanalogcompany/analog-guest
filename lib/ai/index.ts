@@ -4,6 +4,7 @@ export { extractReportedOrder } from './extract-reported-order'
 export { classifyIntentionPrompts } from './classify-intention-prompts'
 export { verifyGrounding } from './verify-grounding'
 export { verifyMechanicOffer } from './verify-mechanic-offer'
+export { verifyCancellationClaim } from './verify-cancellation-claim'
 export { verifyProsePromise } from './verify-prose-promise'
 
 export type {

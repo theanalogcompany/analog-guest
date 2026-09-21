@@ -1,4 +1,6 @@
 import {
+  captureCancellationCheckUnavailable,
+  captureCancellationClaimUnbacked,
   captureClassificationLowConfidence,
   captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
@@ -26,6 +28,7 @@ import {
   type GenerateMessageResult,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
+  verifyCancellationClaim,
   verifyGrounding,
   verifyMechanicOffer,
   verifyProsePromise,
@@ -43,11 +46,15 @@ import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding
 // `undefined` would make the no-retry branch silently unreachable in every
 // one of them.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
+// TAC-513: imported BY PATH for the same reason as the two lines above.
+import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
 import { resolveOpenState } from '@/lib/schemas'
 import {
+  type CancellationResolution,
   isEmptyCommitmentEmission,
   type PendingCommitment,
   pendingFromEmission,
+  resolveCancellation,
 } from '@/lib/schemas/guest-commitment'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
@@ -1346,6 +1353,114 @@ export async function verifyProsePromiseStage(
   })
 
   return { status: 'flagged', commitment }
+}
+
+/**
+ * TAC-513: what this turn said about cancelling, from two independent angles.
+ *
+ * `resolution` is the model's OWN structured emission, resolved against the
+ * guest's live open + pending_ack list. `claim` is a second, independent read
+ * of the drafted body that knows nothing about the emission.
+ *
+ * Two fields rather than one verdict because they answer different questions
+ * and the gate needs both: a reply can carry a cancellation and be fine, claim
+ * one and carry nothing (the incident), or carry an id for a commitment that is
+ * not this guest's. Collapsing them would lose the distinction the operator
+ * copy depends on.
+ */
+export type CancellationBackstopResult = {
+  resolution: CancellationResolution
+  claim: 'skipped' | 'clean' | 'flagged' | 'check_failed'
+}
+
+/**
+ * TAC-513: resolve the model's cancellation emission, and independently read
+ * the body for a cancellation it claims but did not carry.
+ *
+ * Fourth sibling to verifyGroundingStage, verifyMechanicOfferStage and
+ * verifyProsePromiseStage. See lib/ai/verify-cancellation-claim.ts for why this
+ * is a separate check rather than a second question on TAC-401's.
+ *
+ * Skips the model call (never the resolution, which is pure and always runs)
+ * when:
+ *   - the guest is a demo guest. TAC-284's bypass ships regardless of any
+ *     trigger, so the call buys nothing. The resolution still runs, because
+ *     schedule-and-send applies the cancellation inline on that path and the
+ *     demo guest's ledger still has to match their words.
+ *   - the emission RESOLVED. The draft already carries a real cancellation and
+ *     commitment_cancellation_gated already queues it, so the body cannot be
+ *     claiming something the system has not done.
+ *   - the body is empty. Nothing to read.
+ *
+ * It deliberately does NOT skip when the guest has no active commitments. A
+ * reply that tells a guest a promise is cancelled when no promise exists is
+ * just as wrong as one that names the wrong promise, and gating on a non-empty
+ * list would make the check blind to exactly that case.
+ *
+ * FAILS CLOSED on every failure, after ONE immediate retry on a transient
+ * fault, matching verifyProsePromiseStage. Truncation is not retried: retrying
+ * a cap that was already hit spends a second call to hit it again. The closed
+ * posture is easier to justify here than anywhere else in this file, because
+ * the cost of failing open is a reply that lies to a guest about what they are
+ * owed, and the cost of failing closed is one operator glance.
+ */
+export async function verifyCancellationClaimStage(
+  ctx: Pick<
+    RuntimeContext,
+    'agentRunId' | 'guest' | 'venue' | 'classification' | 'activeCommitments'
+  >,
+  generation: Pick<GenerateMessageResult, 'body' | 'cancelsCommitmentId'>,
+): Promise<CancellationBackstopResult> {
+  const resolution = resolveCancellation(
+    generation.cancelsCommitmentId,
+    ctx.activeCommitments,
+  )
+
+  if (ctx.guest.isDemo === true) return { resolution, claim: 'skipped' }
+  if (resolution.status === 'resolved') return { resolution, claim: 'skipped' }
+  if (generation.body.trim().length === 0) return { resolution, claim: 'skipped' }
+
+  let r = await verifyCancellationClaim({ replyBody: generation.body })
+  let retried = false
+  // One immediate retry, transient faults only. Truncation is excluded by
+  // errorCode rather than by message text, which is provider-formatted and not
+  // a contract.
+  if (!r.ok && r.errorCode !== VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE) {
+    retried = true
+    r = await verifyCancellationClaim({ replyBody: generation.body })
+  }
+
+  if (!r.ok) {
+    const truncated = r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
+    console.warn(
+      `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    await captureCancellationCheckUnavailable({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      outcome: truncated ? 'truncated' : 'errored',
+      retried,
+      error: r.error,
+      errorCode: r.errorCode,
+    })
+    return { resolution, claim: 'check_failed' }
+  }
+
+  if (!r.data.claimsCancellation) return { resolution, claim: 'clean' }
+
+  await captureCancellationClaimUnbacked({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    category: ctx.classification?.category ?? null,
+    unresolvedCommitmentId:
+      resolution.status === 'unresolved' ? resolution.claimedId : null,
+    activeCommitmentCount: ctx.activeCommitments.length,
+    replyBody: generation.body,
+  })
+
+  return { resolution, claim: 'flagged' }
 }
 
 /**

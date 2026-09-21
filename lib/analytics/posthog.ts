@@ -774,6 +774,131 @@ function formatProsePromiseCheckUnavailable(props: ProsePromiseCheckUnavailableP
   return lines.join('\n')
 }
 
+// TAC-513: the reply told the guest a promise was cancelled and carried no
+// cancellation. Draft held, never sent.
+//
+// Slack-relayed at pilot volume for the reason captureProsePromiseCaught is:
+// the question this exists to answer is "does the agent still say things the
+// ledger does not do", and at this rate the relay IS the answer.
+export interface CancellationClaimUnbackedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string | null
+  /**
+   * The id the model emitted, when it emitted one that did not resolve against
+   * this guest's own open commitments. NULL when it emitted nothing at all.
+   * The two are worth telling apart: an unresolved id is the model reaching
+   * for a commitment that is not there, where an empty field is it not
+   * reaching at all.
+   */
+  unresolvedCommitmentId: string | null
+  /**
+   * How many commitments the guest actually had open this turn. Separates "the
+   * model invented a cancellation" from "the block was empty and it invented
+   * one anyway", which have different fixes.
+   */
+  activeCommitmentCount: number
+  // The held reply. Never sent, so safe to log here.
+  replyBody: string
+}
+
+export async function captureCancellationClaimUnbacked(
+  props: CancellationClaimUnbackedProps,
+): Promise<void> {
+  await capturePostHogEvent('cancellation_claim_unbacked', props.guestId, { ...props })
+  await postToSlack(formatCancellationClaimUnbacked(props))
+}
+
+function formatCancellationClaimUnbacked(props: CancellationClaimUnbackedProps): string {
+  const lines = [
+    `*Reply claimed a cancellation nothing carries* — held, not sent`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `category: \`${props.category ?? 'none'}\``,
+    `emitted id: ${props.unresolvedCommitmentId === null ? 'none' : `\`${props.unresolvedCommitmentId}\` (did not resolve)`}`,
+    `guest had ${props.activeCommitmentCount} open commitment(s)`,
+    `held reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
+  return lines.join('\n')
+}
+
+// TAC-513: a commitment was cancelled because an approved reply said so.
+//
+// The audit trail for the cancellation, standing in for the cancelled_at /
+// cancelled_by columns this ticket deliberately did not add (TAC-299 declined
+// them first and nothing since has needed them enough).
+export interface CommitmentCancelledProps {
+  venueId: string
+  guestId: string
+  commitmentId: string
+  commitmentType: string
+  /** The message whose dispatch carried the cancellation. */
+  sourceMessageId: string
+  /** 'operator_approve' | 'operator_edit' | 'auto_send'. */
+  via: string
+  /**
+   * False when the CAS matched nothing: the row had already left
+   * open/pending_ack, or never existed. The guest has been told it is
+   * cancelled either way, which is why this is relayed rather than logged.
+   */
+  transitioned: boolean
+}
+
+export async function captureCommitmentCancelled(
+  props: CommitmentCancelledProps,
+): Promise<void> {
+  await capturePostHogEvent('commitment_cancelled', props.guestId, { ...props })
+  await postToSlack(formatCommitmentCancelled(props))
+}
+
+function formatCommitmentCancelled(props: CommitmentCancelledProps): string {
+  const lines = [
+    props.transitioned
+      ? `*Commitment cancelled* — the reply said so and the ledger followed`
+      : `*Commitment NOT cancelled* — the guest was told it was`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `commitment: \`${props.commitmentId}\` (${props.commitmentType})`,
+    `message: \`${props.sourceMessageId}\``,
+    `via: \`${props.via}\``,
+  ]
+  return lines.join('\n')
+}
+
+// TAC-513: the cancellation-claim check produced no readable verdict. Fails
+// CLOSED, so the draft is queued. Mirrors captureProsePromiseCheckUnavailable.
+export interface CancellationCheckUnavailableProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  outcome: 'truncated' | 'errored'
+  retried: boolean
+  error: string
+  errorCode?: string
+}
+
+export async function captureCancellationCheckUnavailable(
+  props: CancellationCheckUnavailableProps,
+): Promise<void> {
+  await capturePostHogEvent('cancellation_check_unavailable', props.guestId, { ...props })
+  await postToSlack(formatCancellationCheckUnavailable(props))
+}
+
+function formatCancellationCheckUnavailable(props: CancellationCheckUnavailableProps): string {
+  const lines = [
+    `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `outcome: \`${props.outcome}\``,
+    `retried: ${props.retried ? 'yes, once' : 'no'}`,
+    `error: ${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}${props.errorCode ? ` (${props.errorCode})` : ''}`,
+  ]
+  return lines.join('\n')
+}
+
 // TAC-355: independent mechanic-offer verification backstop caught a reply
 // promising an approval-gated mechanic the model didn't self-flag via either
 // existing signal (requiresOperatorApproval or commitment.type). Mirrors
