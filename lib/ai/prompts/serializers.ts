@@ -941,9 +941,33 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
 // through v1.17.0, so arrivalCapture.referencesCommitmentId had no value to
 // reference — every arrival capture no-op'd and no commitment ever reached
 // pending_ack. Added in v1.18.0.
+//
+// TAC-389: the intro varies on an operator-initiated decline turn, and only
+// the intro — the per-line shape above is identical on both branches, because
+// the id / code / status segments are what let the writer name the right
+// promise whichever turn this is.
+//
+// Ruling 2 (2026-09-17) drops the two arrival-ask sentences on that branch.
+// They are correct everywhere else and wrong here: this message is the one
+// that CANCELS the promise, so inviting the guest over for it, or asking when
+// they are coming in, contradicts the message being written. The ordinary
+// branch keeps them byte for byte.
+//
+// The last sentence is retained VERBATIM on both branches. Its second half is
+// the only thing standing between a rendered uuid and a guest reading one
+// aloud in a text (TAC-302), and its first half is conditioned on a guest
+// arrival signal, which a decline turn does not have — there is no inbound on
+// this path at all, so the condition simply never fires.
+//
+// The two new sentences carry no em dash. The decline path already goes out of
+// its way to avoid them (buildDeclineHint, handle-operator-decline.ts: Sonnet
+// echoes the punctuation it is shown, and R3 forbids one in the output, so an
+// echoed dash costs a regen attempt). The retained sentence's dash is
+// pre-existing and renders on this path today.
 function formatActiveCommitments(
   commitments: readonly ActiveCommitment[],
   now: Date,
+  isOperatorDecline: boolean,
 ): string | null {
   if (commitments.length === 0) return null
 
@@ -955,11 +979,18 @@ function formatActiveCommitments(
     return `- [${c.type}] ${c.description} (${segments.join(', ')}) — promised ${delta}`
   })
 
-  const intro =
-    'Open promises this venue has made to this guest. ' +
-    "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
-    "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+  // Retained verbatim on both branches — see the header note.
+  const idSentence =
     'Each line carries an internal `id:` — copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. The id is system-internal: never read it aloud, never include it in your reply to the guest.'
+
+  const intro = isOperatorDecline
+    ? 'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +
+      'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it. ' +
+      idSentence
+    : 'Open promises this venue has made to this guest. ' +
+      "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
+      "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally — but never force it, never pester. Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+      idSentence
 
   return ['## Active commitments', intro, lines.join('\n')].join('\n')
 }
@@ -1397,7 +1428,11 @@ export function runtimeToProse(
   // them as a person → what we've promised → what was recently said.
   // Empty / undefined = block omitted entirely.
   if (runtime.activeCommitments && runtime.activeCommitments.length > 0) {
-    const block = formatActiveCommitments(runtime.activeCommitments, now)
+    const block = formatActiveCommitments(
+      runtime.activeCommitments,
+      now,
+      runtime.isOperatorDecline === true,
+    )
     if (block) blocks.push(block)
   }
   // TAC-308: ## Unanswered question sits immediately BEFORE ## Recent

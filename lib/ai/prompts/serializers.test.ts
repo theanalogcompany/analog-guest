@@ -2007,6 +2007,134 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(out).toContain('status: pending_ack')
   })
 
+  // ---- TAC-389: the decline-turn intro ----
+  //
+  // Both directions are asserted on every claim. An intro test that only ever
+  // renders one branch cannot tell "the decline copy is present" from "the
+  // decline copy is present on every turn", and the ordinary branch is the one
+  // the other ~thousand turns a day read.
+
+  const ARRIVAL_ASK_SENTENCES = [
+    "include the arrival ask in the same breath",
+    "you MAY weave the ask in naturally",
+  ]
+
+  it('drops the arrival-ask sentences on a decline turn', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).toContain('## Active commitments')
+    for (const sentence of ARRIVAL_ASK_SENTENCES) {
+      expect(out).not.toContain(sentence)
+    }
+  })
+
+  it('keeps the arrival-ask sentences on every other turn', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
+    for (const sentence of ARRIVAL_ASK_SENTENCES) {
+      expect(out).toContain(sentence)
+    }
+  })
+
+  it('tells the decline turn this is the promise being cancelled, and the one to name', () => {
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    // Contiguous clauses, not disjoint fragments: a sentence can be reversed
+    // while every fragment of it survives (the TAC-409 lesson).
+    expect(out).toContain(
+      'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name.',
+    )
+    expect(out).toContain(
+      'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it.',
+    )
+  })
+
+  it('never shows the decline intro on an ordinary turn', () => {
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    expect(out).not.toContain('The promise this message is declining')
+    expect(out).not.toContain('This message cancels the promise')
+    expect(out).toContain('Open promises this venue has made to this guest.')
+  })
+
+  it('does not claim to be declining anything when the flag is absent on a manual turn', () => {
+    // The ordinary Command Center Follow Up button (THE-232) also renders
+    // category 'manual'. The category must not be what switches the intro.
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'manual', NOW)
+    expect(out).not.toContain('The promise this message is declining')
+    expect(out).toContain('Open promises this venue has made to this guest.')
+  })
+
+  it('keeps the uuid prohibition on the decline turn (TAC-302)', () => {
+    // The id segment still renders on this branch, so the only thing between a
+    // rendered uuid and a guest reading one aloud has to render with it.
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).toContain('id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    expect(out).toContain(
+      'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
+    )
+  })
+
+  it('renders the line identically on both branches', () => {
+    // Ruling 2 changed the intro and nothing else. A per-line difference would
+    // be a second, unruled change hiding behind this one.
+    const row = commitment({ status: 'pending_ack' })
+    const declineOut = runtimeToProse(
+      { activeCommitments: [row], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    const ordinaryOut = runtimeToProse({ activeCommitments: [row] }, 'manual', NOW)
+    const lineOf = (out: string) =>
+      out.split('\n').find((l) => l.startsWith('- [comp] oat latte'))
+    expect(lineOf(declineOut)).toBeDefined()
+    expect(lineOf(declineOut)).toBe(lineOf(ordinaryOut))
+  })
+
+  it('omits the block on a decline turn when the declined row is gone', () => {
+    // handle-operator-decline.ts filters to the declined id and leaves an empty
+    // result alone. An intro with no rows under it would be a header claiming a
+    // promise that is not shown.
+    const out = runtimeToProse(
+      { activeCommitments: [], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    expect(out).not.toContain('## Active commitments')
+    expect(out).not.toContain('The promise this message is declining')
+  })
+
+  it('carries no em dash in the sentences written for the decline turn', () => {
+    // buildDeclineHint avoids them on this same path for this same reason:
+    // Sonnet echoes the punctuation it is shown and R3 forbids one in the
+    // output, so an echoed dash costs a regen attempt. The retained id sentence
+    // has one and is excluded by name, not by loosening the check.
+    const out = runtimeToProse(
+      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      'manual',
+      NOW,
+    )
+    const block = out
+      .slice(out.indexOf('## Active commitments'))
+      .split('\n\n')[0]
+    const introOnly = block
+      .split('Each line carries an internal')[0]
+      .replace('## Active commitments', '')
+    expect(introOnly).not.toContain('\u2014')
+  })
+
   it('renders between Guest context and Recent conversation when both present', () => {
     const out = runtimeToProse(
       {

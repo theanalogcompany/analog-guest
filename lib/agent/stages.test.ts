@@ -519,7 +519,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.56.0',
+        promptVersion: 'v1.57.0',
         crisisSafety: true,
       },
     })
@@ -537,7 +537,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.56.0',
+        promptVersion: 'v1.57.0',
         crisisSafety: false,
       },
     })
