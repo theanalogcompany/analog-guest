@@ -84,7 +84,7 @@ vi.mock('@/lib/db/admin', () => ({
   }),
 }))
 
-import { findPendingQuestion } from './pending-question'
+import { findPendingQuestion, loadInboundQuestion } from './pending-question'
 import { KNOWLEDGE_GAP_CARD_REVIEW_REASONS } from './stages'
 
 const VENUE = '00000000-0000-0000-0000-0000000000aa'
@@ -163,6 +163,92 @@ describe('findPendingQuestion — fail-open (TAC-308)', () => {
       error: null,
     })
     await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+})
+
+// TAC-484: before this, ANY non-empty inbound body qualified as "the
+// question" a card holds, so a card replying to a plain statement still
+// rendered "the venue still owes them an answer" as settled fact. The
+// 2026-09-18 incident's inbound is the fixture below.
+describe('findPendingQuestion — the linked inbound must read as a question (TAC-484)', () => {
+  it('returns null when the linked inbound is a statement, not a question', async () => {
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'card-1',
+        reply_to_message_id: 'inbound-1',
+        pending_until: '2026-09-18T15:47:37Z',
+        review_reason: 'knowledge_gap_backstop',
+      },
+      error: null,
+    })
+    inboundMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'inbound-1',
+        // The literal TAC-484 incident body.
+        body: 'oh and i got the pink panther yesterday',
+        created_at: '2026-09-18T15:40:00Z',
+        provider_message_id: 'p1',
+      },
+      error: null,
+    })
+    await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
+  })
+
+  it('still returns the question when the linked inbound reads as one', async () => {
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'card-1',
+        reply_to_message_id: 'inbound-1',
+        pending_until: '2026-09-18T15:47:37Z',
+        review_reason: 'knowledge_gap',
+      },
+      error: null,
+    })
+    inboundMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'inbound-1',
+        body: 'what grade is the matcha?',
+        created_at: '2026-09-18T15:40:00Z',
+        provider_message_id: 'p1',
+      },
+      error: null,
+    })
+    const result = await findPendingQuestion(VENUE, GUEST)
+    expect(result?.question.question).toBe('what grade is the matcha?')
+  })
+})
+
+// `loadInboundQuestion` is called on its own here, with no preceding `.or()`
+// call — the shared mock's card/inbound routing keys on whether `.or()` has
+// been reached yet (see the mock setup above), so with a fresh, reset orMock
+// a standalone call routes to the card chain. Its `.select().eq().maybeSingle()`
+// shape is identical either way, so `cardMaybeSingle` is what to seed here.
+describe('loadInboundQuestion — question gate (TAC-484)', () => {
+  it('returns null for a non-empty body that does not read as a question', async () => {
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'inbound-1',
+        body: 'oh and i got the pink panther yesterday',
+        created_at: '2026-09-18T15:40:00Z',
+        provider_message_id: 'p1',
+      },
+      error: null,
+    })
+    await expect(loadInboundQuestion('inbound-1')).resolves.toBeNull()
+  })
+
+  it('returns the question for a body that reads as one', async () => {
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'inbound-1',
+        body: 'do you have oat milk?',
+        created_at: '2026-09-18T15:40:00Z',
+        provider_message_id: 'p1',
+      },
+      error: null,
+    })
+    const result = await loadInboundQuestion('inbound-1')
+    expect(result?.question).toBe('do you have oat milk?')
   })
 })
 

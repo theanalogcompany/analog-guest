@@ -19,9 +19,17 @@
 // and its clock are untouched, and the universal no-promise rules in
 // SYSTEM_TEMPLATE still apply. Failing the agent run instead would be a far
 // larger outage for a context block that is a nudge, not a guardrail.
+//
+// TAC-484: `loadInboundQuestion` also requires the linked inbound to READ as
+// a question (looksLikeQuestion) before it counts as "the question" a card is
+// holding. Before this, ANY non-empty inbound body qualified, so a card
+// replying to a plain statement still rendered "the venue still owes them an
+// answer" as settled fact. Same fail-toward-missing-the-nudge posture as the
+// empty-body guard it sits beside.
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingQuestion } from '@/lib/ai'
+import { looksLikeQuestion } from './looks-like-question'
 import { KNOWLEDGE_GAP_CARD_REVIEW_REASONS, isKnowledgeGapCard } from './stages'
 
 export interface LoadedPendingQuestion {
@@ -35,7 +43,8 @@ export interface LoadedPendingQuestion {
  * Find the outstanding knowledge-gap question for a (venue, guest) pair.
  *
  * Returns null when nothing is outstanding, when the card has no linked
- * inbound, when the linked inbound has an empty body, or on any DB error.
+ * inbound, when the linked inbound has an empty body or doesn't read as a
+ * question (TAC-484, looksLikeQuestion), or on any DB error.
  *
  * Mode is derived from whether the clock is still running:
  *   pending_until non-null → 'outstanding'  (guest has been told nothing)
@@ -142,7 +151,15 @@ export interface InboundQuestion {
  * written against, so a disagreement about "is this question readable" would
  * show up as two different guest experiences.
  *
- * Returns null on error or on an empty body. Never throws.
+ * Returns null on error, on an empty body, or when the body doesn't read as a
+ * question (TAC-484, looksLikeQuestion). Without that last check any
+ * non-empty inbound — including a plain statement — became "the question"
+ * this card is holding, and `formatPendingQuestion` then asserted, as settled
+ * fact, that "the venue still owes them an answer" on every turn the card
+ * stayed pending. The 2026-09-18 incident's inbound ("oh and i got the pink
+ * panther yesterday") was exactly this: a self-reported order, not a
+ * question, that the block told the model was an outstanding question. Never
+ * throws.
  */
 export async function loadInboundQuestion(
   inboundMessageId: string,
@@ -161,6 +178,7 @@ export async function loadInboundQuestion(
       return null
     }
     if (!data || data.body.trim().length === 0) return null
+    if (!looksLikeQuestion(data.body)) return null
     return {
       id: data.id,
       question: data.body,
