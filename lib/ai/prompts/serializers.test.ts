@@ -2042,19 +2042,42 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     }
   })
 
-  it('tells the decline turn this is the promise being cancelled, and the one to name', () => {
+  // The intro is line 2 of the block: ['## Active commitments', intro, lines].
+  function introLineOf(out: string): string {
+    return out.slice(out.indexOf('## Active commitments')).split('\n')[1]
+  }
+
+  it('renders the decline intro exactly, and nothing else', () => {
     const out = runtimeToProse(
       { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
       'manual',
       NOW,
     )
-    // Contiguous clauses, not disjoint fragments: a sentence can be reversed
-    // while every fragment of it survives (the TAC-409 lesson).
-    expect(out).toContain(
-      'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name.',
+    // EXACT equality, not `toContain` on fragments. Three mutants survived the
+    // fragment version: an extra arrival invitation APPENDED to the intro, a
+    // REWORDED one ("you may still ask when they're coming in"), and the two
+    // sentences SWAPPED. None of them can survive this. Fragments also cannot
+    // express "and nothing else", which is the whole claim being made.
+    expect(introLineOf(out)).toBe(
+      'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +
+        'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it. ' +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )
-    expect(out).toContain(
-      'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it.',
+  })
+
+  it('renders the ordinary intro exactly, unchanged from before TAC-389', () => {
+    // Transcribed from v1.56.0, not read back out of the source. The ordinary
+    // branch is what the other ~thousand turns a day see; "byte for byte
+    // unchanged" is a claim, and this is what makes it one that can fail.
+    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    expect(introLineOf(out)).toBe(
+      'Open promises this venue has made to this guest. ' +
+        "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
+        "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally \u2014 but never force it, never pester. " +
+        "Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )
   })
 

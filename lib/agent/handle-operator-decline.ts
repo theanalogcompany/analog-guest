@@ -273,6 +273,14 @@ export async function handleOperatorDecline(input: {
     // row. Same idiom as the two mutations above: narrow the mutable ctx that
     // buildRuntimeContext returned, before generateStage sees it.
     //
+    // The compare is case-sensitive and that is safe only because BOTH sides
+    // are the database's own canonical form: the route passes `row.id` from
+    // the row it just SELECTed, never the path param (which its UUID_RE
+    // accepts in either case), and findActiveCommitmentsForGuest returns ids
+    // straight from Postgres. Thread the param through here instead and every
+    // mixed-case request silently filters to nothing, which renders as the
+    // legitimate empty case below and so is invisible.
+    //
     // An empty result is legitimate and left alone: the row can have been
     // cancelled or acknowledged between the route's load and this run, or the
     // commitments load can have failed and fallen back to []. The block is
