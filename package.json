@@ -17,6 +17,7 @@
     "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
     "measure-order-attribution": "tsx --env-file=.env.local scripts/measure-order-attribution.ts",
     "instagram-smoke": "tsx --env-file=.env.local scripts/instagram-send-smoke.ts",
+    "load-venue-knowledge": "tsx --env-file=.env.local scripts/load-venue-knowledge.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky",
