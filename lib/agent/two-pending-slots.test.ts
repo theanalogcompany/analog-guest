@@ -40,6 +40,7 @@ vi.mock('@/lib/ai', () => ({
   generateMessage: vi.fn(),
   verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
+  verifyProsePromise: vi.fn(),
 }))
 vi.mock('@/lib/messaging', () => ({
   markAsRead: vi.fn(),
@@ -70,7 +71,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
 import { findPendingQuestion } from './pending-question'
 import type { SlotCallerPolicy } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import { applyApprovalPolicyStage } from './stages'
+import { applyApprovalPolicyStage, type ProsePromiseBackstopResult } from './stages'
 
 const VENUE = '00000000-0000-4000-8000-0000000000aa'
 const GUEST = '18694d6a-6a80-470e-b334-acea7be1ed95'
@@ -157,8 +158,17 @@ async function runTurn(
   ctx: RuntimeContext,
   gen: GenerateMessageResult,
   callerPolicy: SlotCallerPolicy = 'regen',
+  // TAC-401: what verifyProsePromiseStage found. Defaults to the pre-TAC-401
+  // behaviour, so every existing test in this file reads unchanged.
+  prosePromise: ProsePromiseBackstopResult = { status: 'skipped' },
 ) {
-  const decision = await applyApprovalPolicyStage(ctx, gen, { status: 'clean' })
+  const decision = await applyApprovalPolicyStage(
+    ctx,
+    gen,
+    { status: 'clean' },
+    { status: 'skipped' },
+    prosePromise,
+  )
   if (decision.action !== 'queue') return { decision, persisted: null }
   const persisted = await persistOrRegenQueuedDraft(
     ctx,
@@ -170,6 +180,11 @@ async function runTurn(
       blankBody: decision.blankBody,
       reviewTriggers: decision.triggers,
       ungroundedClaims: decision.ungroundedClaims,
+      // TAC-401: the carrier the gate resolved. Dropping this line is the
+      // mutant the end-to-end tests below exist to kill — every per-mock
+      // assertion in the repo would stay green without it, because a mock
+      // returns its fixture whatever it is handed.
+      promisedCommitment: decision.promisedCommitment,
       callerPolicy,
     },
   )
@@ -684,5 +699,106 @@ describe('findPendingQuestion with a knowledge-gap card in each slot (TAC-394)',
 
     expect(loaded?.draftId).toBe('gap-conv')
     expect(loaded?.question.question).toBe('is there parking nearby?')
+  })
+})
+
+
+describe('a prose promise becomes a tracked commitment on the card (TAC-401)', () => {
+  // The reply that measured as the live leak: A2 #40, eligible-perks arm. No
+  // carrier, clean grounding, no self-flag, no regex, and it auto-sends at
+  // Le Mil's today.
+  const PROSE_PROMISE_REPLY =
+    '7am every day. and sorry again about the cortado this morning, I want to make that right for you'
+
+  const FLAGGED: ProsePromiseBackstopResult = {
+    status: 'flagged',
+    commitment: {
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    },
+  }
+
+  it('041: the carrier the check named reaches messages.pending_commitment', async () => {
+    const fake = useFake('041')
+    const gen = generation({ body: PROSE_PROMISE_REPLY })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    // This is the acceptance criterion: the promise is no longer an obligation
+    // nothing tracks. dispatchOperatorOutbound reads this column on approval
+    // and materializes a guest_commitments row from it.
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement cortado',
+      code: 'A1B2',
+      expiresAt: null,
+    })
+    expect(row?.review_reason).toBe('prose_promise_backstop')
+  })
+
+  it('041: the draft lands in the obligation slot, beside a conversation card', async () => {
+    const fake = useFake('041')
+
+    // A plain held reply takes the conversation slot first.
+    const conversationTurn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: 'we open at 7', voiceFidelity: 0.5 }),
+    )
+    expect(conversationTurn.persisted).toMatchObject({ action: 'inserted' })
+
+    // The promise takes the obligation slot rather than regenerating over it.
+    const promiseTurn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: PROSE_PROMISE_REPLY }),
+      'regen',
+      FLAGGED,
+    )
+    expect(promiseTurn.persisted).toMatchObject({ action: 'inserted' })
+    expect(promiseTurn.decision.action).toBe('queue')
+    if (promiseTurn.decision.action !== 'queue') return
+    expect(promiseTurn.decision.slot).toBe('obligation')
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(2)
+  })
+
+  // RULING 3, end to end. The model emitted a recommendation and the check
+  // flagged a comp in the prose. The card queues, and the carrier stays the
+  // recommendation.
+  it('041: a recommendation the model emitted is never replaced by the check carrier', async () => {
+    const fake = useFake('041')
+    const gen = generation({
+      body: PROSE_PROMISE_REPLY,
+      commitment: { type: 'recommendation', description: 'the Blossom Tonic' },
+    })
+
+    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const carrier = row?.pending_commitment as { type: string; description: string } | null
+    expect(carrier?.type).toBe('recommendation')
+    expect(carrier?.description).toBe('the Blossom Tonic')
+    // And it therefore stays in the conversation slot.
+    if (turn.decision.action !== 'queue') return
+    expect(turn.decision.slot).toBe('conversation')
+  })
+
+  it('041: a failed check queues the draft with no carrier at all', async () => {
+    const fake = useFake('041')
+
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      generation({ body: PROSE_PROMISE_REPLY }),
+      'regen',
+      { status: 'check_failed' },
+    )
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toBeNull()
+    expect(row?.review_reason).toBe('prose_promise_check_failed')
   })
 })

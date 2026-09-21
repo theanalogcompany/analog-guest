@@ -266,7 +266,7 @@ describe('listPendingQueue', () => {
     // that the map equals itself, which is exactly how TAC-310 certified a
     // live defect on every green run.
     //
-    // All fifteen reachable values are here, and that completeness is the
+    // All seventeen reachable values are here, and that completeness is the
     // acceptance criterion "every trigger in the copy table renders its own
     // sentence". `demo_bypass` and `crisis_safety_reply` are deliberately
     // absent: both land on review_state='auto_sent' and the RPC filters
@@ -280,10 +280,17 @@ describe('listPendingQueue', () => {
         'Someone complained and this promises to make it right.',
       ],
       ['mechanic_offer_backstop', "This may be offering a perk that isn't on."],
+      // TAC-401: transcribed from the approved plan on the ticket ([PLAN],
+      // section 5) and the ruling comment that confirmed it, never read back
+      // out of REVIEW_REASON_LABELS.
+      ['prose_promise_backstop', 'This sounds like a promise to the guest. Your call.'],
       // --- Something outside the draft needs you ---
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
       ['knowledge_gap_backstop', "I wasn't sure this was true, so I didn't send it."],
       ['grounding_check_failed', "I couldn't finish checking this one."],
+      // TAC-401: the sibling of the line above, and deliberately a separate
+      // sentence from prose_promise_backstop's — nothing was caught here.
+      ['prose_promise_check_failed', "I couldn't check this one for a promise."],
       ['hold_all_outbound', "You're holding everything here right now."],
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a

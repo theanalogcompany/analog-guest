@@ -168,6 +168,19 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // running. Deliberately doesn't name the mechanic — that would need the
   // identified id persisted on the row, which is out of scope here.
   mechanic_offer_backstop: "This may be offering a perk that isn't on.",
+  // TAC-401, copy approved verbatim (2026-09-21). Hedged with "sounds like"
+  // for the reason comp_regex_backstop's copy is hedged: this is a model
+  // judgement on prose and it can be wrong, so the sentence should not claim
+  // more confidence than the check has. "Your call" is the same closing
+  // commitment_type_gated uses, because it is the same decision — the
+  // difference is only that the agent did not record this one as an offer,
+  // which is a provenance fact the operator does not need on a phone.
+  prose_promise_backstop: 'This sounds like a promise to the guest. Your call.',
+  // TAC-401. Deliberately NOT folded under the line above: nothing was caught
+  // here, the check just did not complete. Mirrors grounding_check_failed's
+  // copy and claims nothing was found, which is the wrong-reason-copy rule
+  // TAC-364 exists for.
+  prose_promise_check_failed: "I couldn't check this one for a promise.",
 
   // --- Something outside the draft needs you --------------------------------
   // TAC-308. The one card with a clock: if nobody answers inside the window a

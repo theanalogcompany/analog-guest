@@ -38,7 +38,9 @@ import { OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
 import { commitmentDedupKey } from '@/lib/guests/commitments'
 import {
   type CommitmentEmission,
+  type PendingCommitment,
   isEmptyCommitmentEmission,
+  pendingFromEmission,
 } from '@/lib/schemas/guest-commitment'
 
 // ===== The slot =====
@@ -149,6 +151,69 @@ export function draftCommitmentIdentity(
     description: (emission.description as string).trim(),
     code: emission.code?.trim() || null,
   }
+}
+
+/**
+ * TAC-401: the carrier a queued draft persists, once the prose-promise check
+ * can supply one the model never emitted.
+ *
+ * THE PRECEDENCE IS THE RULING (2026-09-21, ruling 3): an actionable emission
+ * from generation ALWAYS wins, and `promised` is used only where generation
+ * emitted nothing actionable. The check never mints a second commitment
+ * alongside one the model already made.
+ *
+ * Two cases sit behind that one line, and they are not the same:
+ *
+ *   - The emission is an OBLIGATION (comp/hold/discount). The check never ran
+ *     at all — verifyProsePromiseStage skips on isCommitmentTypeGated — so
+ *     `promised` is null here by construction and the `??` is belt-and-braces
+ *     rather than the thing doing the work.
+ *   - The emission is a RECOMMENDATION. The check DID run, because a
+ *     recommendation is not an obligation and the same reply can still promise
+ *     a comp in prose, which is exactly this ticket's failure. The trigger
+ *     fires and the draft queues, but the carrier stays the recommendation the
+ *     model emitted. Overwriting it would silently convert one promise into a
+ *     different one on a card an operator is about to approve.
+ *
+ * `bodyBlanked` nulls everything, for TAC-309's reason unchanged: a blank
+ * knowledge-gap card carries no commitment, and a promise the operator cannot
+ * see is one they must not be able to bind by approving.
+ *
+ * Paired with resolveDraftCarrierIdentity below. The two must apply the same
+ * precedence, and a test pins that they do rather than leaving it to whoever
+ * edits one of them next.
+ */
+export function resolveDraftCarrier(
+  emission: CommitmentEmission,
+  promised: PendingCommitment | null,
+  bodyBlanked: boolean,
+): PendingCommitment | null {
+  if (bodyBlanked) return null
+  return pendingFromEmission(emission) ?? promised
+}
+
+/**
+ * TAC-401: the same resolution reduced to its slot identity, with NO
+ * verification code minted.
+ *
+ * Separate from resolveDraftCarrier above for the reason draftCommitmentIdentity
+ * is separate from pendingFromEmission: that function mints a fresh code on
+ * every call, and the gate needs an identity, not a carrier. A minted code
+ * here would be a value that never reaches the database, and it would reach
+ * the drop alert — which someone may be reading mid-incident — as if it were
+ * a code the guest had been given.
+ *
+ * `promised` already carries its minted code, because verifyProsePromiseStage
+ * mints it once. So the identity of a promised carrier is read off it rather
+ * than regenerated.
+ */
+export function resolveDraftCarrierIdentity(
+  emission: CommitmentEmission,
+  promised: PendingCommitment | null,
+  bodyBlanked: boolean,
+): CommitmentIdentity | null {
+  if (bodyBlanked) return null
+  return draftCommitmentIdentity(emission, false) ?? commitmentIdentityOf(promised)
 }
 
 /**

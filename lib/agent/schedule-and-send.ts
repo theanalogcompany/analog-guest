@@ -14,7 +14,8 @@ import {
   commitmentIdentityOf,
   anyKnowledgeGapCard,
   decideSlotAction,
-  draftCommitmentIdentity,
+  resolveDraftCarrier,
+  resolveDraftCarrierIdentity,
   gapFlagsFromTriggers,
   loadPendingRowsBySlot,
   type SlotCallerPolicy,
@@ -185,6 +186,22 @@ export interface PersistQueuedDraftOptions {
    * NULL here.
    */
   renderedIntentions?: readonly OpenIntention[]
+  /**
+   * TAC-401: the commitment the prose-promise check named for this draft,
+   * already minted with its verification code by verifyProsePromiseStage.
+   *
+   * Set only when that check flagged a promise the model made in prose with no
+   * structured commitment behind it, AND could name a usable type and
+   * description. It lands on `messages.pending_commitment` so an operator
+   * approving the card creates a real guest_commitments row through
+   * createCommitmentFromPending, the path that already exists.
+   *
+   * It NEVER displaces a commitment generation emitted (ruled 2026-09-21,
+   * ruling 3). resolveDraftCarrier applies that precedence, and it is the same
+   * function the gate used to pick this draft's slot, so the carrier written
+   * here and the slot it was routed to cannot disagree.
+   */
+  promisedCommitment?: PendingCommitment | null
 }
 
 /**
@@ -765,8 +782,9 @@ export async function persistOrRegenQueuedDraft(
   const supabase = createAdminClient()
   let existingId: string | null = initialExistingPendingDraftId
   // TAC-394: what race recovery needs to decide a card the gate never saw.
-  const draftCommitment = draftCommitmentIdentity(
+  const draftCommitment = resolveDraftCarrierIdentity(
     generation.commitment,
+    options.promisedCommitment ?? null,
     options.blankBody === true,
   )
   const callerPolicy: SlotCallerPolicy = options.callerPolicy ?? 'regen'
@@ -970,7 +988,14 @@ async function tryQueueInsert(
     // queue via the pending_commitment jsonb carrier (migration 027).
     // Null when the emission isn't actionable (no-op `{}` or recommendation
     // type that already materialized inline on the auto-send path).
-    const pendingCommitment = pendingFromEmission(generation.commitment)
+    // TAC-401: `?? pendingFromEmission(...)` lives inside resolveDraftCarrier
+    // rather than here, so this site, the regen UPDATE below and the gate's
+    // own slot decision cannot drift on which carrier wins.
+    const pendingCommitment = resolveDraftCarrier(
+      generation.commitment,
+      options.promisedCommitment ?? null,
+      options.blankBody === true,
+    )
     const { data, error } = await supabase
       .from('messages')
       .insert(
@@ -1102,7 +1127,11 @@ async function tryRegenUpdate(
     // wholesale — stale intent from the prior draft is replaced or nulled
     // when the new regen has no commitment. The carrier always reflects
     // the current draft's intent.
-    const pendingCommitment = pendingFromEmission(generation.commitment)
+    const pendingCommitment = resolveDraftCarrier(
+      generation.commitment,
+      options.promisedCommitment ?? null,
+      options.blankBody === true,
+    )
     // TAC-309: same discard on the regen path. A second unanswerable question
     // refreshes the card in place and must leave it just as blank as the
     // first one did.
