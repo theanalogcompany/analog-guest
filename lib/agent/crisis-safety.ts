@@ -92,7 +92,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         contextUpdate: {},
         commitment: {},
         arrivalCapture: {},
-    cancelsCommitmentId: '',
+        cancelsCommitmentId: '',
       },
     ],
     systemPrompt: '',
