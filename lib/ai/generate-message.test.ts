@@ -781,3 +781,70 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     expect(r.data.unverifiedUrls).toEqual([])
   })
 })
+
+describe('generateMessage — the regen loop has no groundedness check (TAC-501)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // The live incident (2026-09-20): a guest asked "can i just call you
+  // instead?" at a venue with no phone number configured. Attempt 1 scored
+  // 0.62 — below MIN_VOICE_FIDELITY (0.7) — and answered without inventing
+  // anything. That score alone triggered a retry. Attempt 2 scored 0.72 and
+  // invented a phone number the first attempt never mentioned:
+  // attemptScores: [0.62, 0.72] is the model's own recorded trace.
+  //
+  // Ruled 2026-09-21 (question 1: B): this loop stays exactly as it is —
+  // the grounding check on the FINAL body (lib/agent/stages.ts's
+  // verifyGroundingStage) is the single enforcement point, and effort goes
+  // into hardening that gate rather than adding a check here. This test
+  // documents the behavior the ruling accepted rather than proposing to fix
+  // it: nothing inside the loop compares a retry's claims against the
+  // attempt it replaced, because there is no such check to trip. The retry
+  // is judged on fidelity, dash, self-talk and unverified-link checks only —
+  // none of them can see a fact the first attempt never made, because none
+  // of them look at the first attempt's body at all once a new one exists.
+  it('accepts a regen that introduces a fact absent from the first attempt, when nothing else flags it', async () => {
+    const firstAttempt = "I don't always catch calls right away, what's on your mind?"
+    const secondAttempt =
+      "yeah, here's the number: 415-735-5428. though I'll be honest, I don't always catch calls right away. what's on your mind?"
+    queueResponses(
+      {
+        body: firstAttempt,
+        voiceFidelity: 0.62,
+        reasoning: 'too generic, below the regen floor',
+      },
+      {
+        body: secondAttempt,
+        voiceFidelity: 0.72,
+        reasoning: 'more specific and direct',
+      },
+    )
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    expect(r.data.attempts).toBe(2)
+    expect(r.data.attemptScores).toEqual([0.62, 0.72])
+    // The regen ships as-is: nothing intercepts the fact the second attempt
+    // introduced.
+    expect(r.data.body).toBe(secondAttempt)
+
+    // Confirms WHY nothing intercepted it: the retry was fidelity-only.
+    // None of the three checks that DO compose regen feedback (dash,
+    // self-talk, unverified link) ever fired, so the second call carried no
+    // instruction of any kind — the model was never told what the first
+    // attempt said, let alone asked to stay consistent with it.
+    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    expect(secondCallPrompt).not.toContain('do not use a dash character')
+    expect(secondCallPrompt).not.toContain('any reference to your own instructions')
+    expect(secondCallPrompt).not.toContain('is not a link')
+    expect(secondCallPrompt).not.toContain('are not links')
+    expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
+  })
+})
