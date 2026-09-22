@@ -956,41 +956,72 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // logged but no push. Never throws.
     const arrival = await dispatchArrivalCapture({
       arrivalCapture: gen.result.arrivalCapture,
-      venueId: ctx.venue.id,
+      venue: ctx.venue,
       guestId: ctx.guest.id,
+      // TAC-363: the model's referencesCommitmentId no longer selects the row.
+      // Every open obligation this guest holds is swept, so a guest owed two
+      // things has both surfaced when they walk in.
+      activeCommitments: ctx.activeCommitments,
       now: ctx.recognition.computedAt,
     })
     if (arrival.kind === 'imminent_won') {
-      const commitmentRow = arrival.commitmentRow
+      // TAC-363: one push per obligation that actually transitioned. This loop
+      // IS the "every open obligation is surfaced" acceptance criterion — a
+      // guest owed two comps who walks in produces two heads-up cards, because
+      // staff need to hand over both. Batching them into one push would be a
+      // cross-repo Contract change: the payload carries a single commitmentId
+      // and the operator app routes the tap on it.
       console.log('[agent] inbound arrival imminent — transitioned to pending_ack', {
         agentRunId,
-        commitmentId: commitmentRow.id,
+        commitmentIds: arrival.commitmentRows.map((r) => r.id),
+        failedCount: arrival.failedCount,
       })
-      waitUntil(
-        sendCommitmentArrivalPush({
-          commitmentId: commitmentRow.id,
-          venueId: commitmentRow.venue_id,
-          guestId: commitmentRow.guest_id,
-          guestFirstName: ctx.guest.firstName,
-          type: commitmentRow.type,
-          code: commitmentRow.code,
-          expectedArrival: commitmentRow.expected_arrival,
-          arrivalSignal: 'imminent',
-          venueTimezone: ctx.venue.timezone,
-          agentRunId,
-        }).catch((e) => {
-          console.error('apns: sendCommitmentArrivalPush threw unexpectedly', {
-            agentRunId,
+      for (const commitmentRow of arrival.commitmentRows) {
+        waitUntil(
+          sendCommitmentArrivalPush({
             commitmentId: commitmentRow.id,
-            error: e instanceof Error ? e.message : String(e),
-          })
-        }),
-      )
+            venueId: commitmentRow.venue_id,
+            guestId: commitmentRow.guest_id,
+            guestFirstName: ctx.guest.firstName,
+            type: commitmentRow.type,
+            code: commitmentRow.code,
+            expectedArrival: commitmentRow.expected_arrival,
+            arrivalSignal: 'imminent',
+            venueTimezone: ctx.venue.timezone,
+            agentRunId,
+          }).catch((e) => {
+            console.error('apns: sendCommitmentArrivalPush threw unexpectedly', {
+              agentRunId,
+              commitmentId: commitmentRow.id,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }),
+        )
+      }
+      if (arrival.failedCount > 0) {
+        // Some of this guest's obligations did not move. They stay `open`, so
+        // nothing is lost, but staff will not see them on this arrival.
+        console.warn('[agent] inbound arrival: some obligations failed to transition', {
+          agentRunId,
+          failedCount: arrival.failedCount,
+          transitionedCount: arrival.commitmentRows.length,
+        })
+      }
     } else if (arrival.kind === 'scheduled_recorded') {
       console.log('[agent] inbound arrival scheduled — cron will fire at expected_arrival', {
         agentRunId,
-        commitmentId: arrival.commitmentRow.id,
-        expectedArrival: arrival.commitmentRow.expected_arrival,
+        commitmentIds: arrival.commitmentRows.map((r) => r.id),
+        expectedArrival: arrival.commitmentRows[0]?.expected_arrival ?? null,
+        failedCount: arrival.failedCount,
+      })
+    } else if (arrival.kind === 'closed_venue_skipped') {
+      // TAC-363 ruling 1(a). The guest said they are heading over while the
+      // venue is shut. Nothing is recorded and no operator is woken; the reply
+      // is what tells them when the venue opens.
+      console.log('[agent] inbound arrival ignored — venue closed', { agentRunId })
+    } else if (arrival.kind === 'no_open_obligations') {
+      console.log('[agent] inbound arrival with nothing owed to record it against', {
+        agentRunId,
       })
     } else if (arrival.kind === 'imminent_lost' || arrival.kind === 'scheduled_lost') {
       console.log('[agent] inbound arrival CAS lost (commitment already transitioned)', {
