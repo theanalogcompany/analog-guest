@@ -263,7 +263,9 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // naming the list: the operator's job on this card is to look at the link,
   // not to learn where the allowlist lives.
   unverified_url: "Has a link we couldn't verify. Check it before sending.",
-  // TAC-363. Both name the venue being shut FIRST, because that is the fact
+  // TAC-363, copy approved verbatim (2026-09-22).
+  //
+  // Both name the venue being shut FIRST, because that is the fact
   // the operator checks the reply against and they may be reading this at 1am
   // without it being obvious. Neither says "arrival capture" or "trigger":
   // their vocabulary, not ours.
@@ -274,12 +276,12 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // instruction is to change it rather than to check it. Same reasoning
   // prose_cancellation_backstop's full instruction carries.
   closed_venue_arrival_emitted:
-    "You're closed and this confirms they're coming over. Send them your opening time instead.",
+    "You're closed and this confirms they're coming in. Send them your opening time instead.",
   // The backstop one hedges, because it is a model judgement on prose and can
   // be wrong. "May read as" rather than "confirms" is the difference between
   // the two cards, and it is honest about which one this is.
   closed_venue_arrival_backstop:
-    "You're closed and this may read as come on over. Check it before sending.",
+    "You're closed and this may read as 'come on over'. Check it before sending.",
   // "like you" — the venue's voice is the thing being matched, and the
   // operator is the one who knows what it sounds like. Never "low fidelity
   // score", which is our vocabulary, not theirs.
