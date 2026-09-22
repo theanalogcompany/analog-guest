@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.58.0 (TAC-513: a reply can withdraw a commitment it already made)', () => {
-    expect(PROMPT_VERSION).toBe('v1.58.0')
+  it('is v1.59.0 (TAC-484: correct a challenged message, do not invent a reason for it)', () => {
+    expect(PROMPT_VERSION).toBe('v1.59.0')
   })
 })
 
@@ -65,17 +65,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
     // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
     // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
+    // TAC-484 appends R35 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31', 'R32', 'R33', 'R34',
+      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35',
     ])
   })
 
-  it('curates 26 rules ending at R34 (TAC-359)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(26)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R34')
+  it('curates 27 rules ending at R35 (TAC-484)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(27)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R35')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -211,6 +212,20 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // could silently keep asserting holding is universally available.
     expect(r34?.summary).toContain('where the venue facts say')
     expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
+  })
+
+  // TAC-484: both BRANCHES are anchored, not just the rule's opening. A
+  // display summary that carried only "say so and stop" would describe a rule
+  // that assumes the agent was wrong, which is the reading the 2026-09-21
+  // ruling rejected.
+  it('shares the R35 anchor phrases across both sources, including the it-was-right branch (TAC-484)', () => {
+    const r35 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R35')
+    expect(r35).toBeDefined()
+    expect(r35?.summary).toContain('say plainly what is actually true')
+    expect(r35?.summary).toContain('If it was right, restate the fact plainly')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When a guest questions or pushes back on something you said',
+    )
   })
 
   it('shares the R8-strengthened anchor phrase across both sources (TAC-348)', () => {
@@ -979,18 +994,18 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // TAC-348 appended R23-R28 after R22, so R22 is no longer the LAST bullet
   // in the block — it's now immediately followed by the six new rules, then
   // the section break. Rewritten to pin that adjacency instead of asserting
-  // R22 is terminal. TAC-356 appended R29-R31 after that, and TAC-359
-  // appended R32-R34 after that, so the count grows again each time (still
-  // the same adjacency shape, just more lines).
-  it('is immediately followed by exactly R23-R34, then # Voice imperative', () => {
+  // R22 is terminal. TAC-356 appended R29-R31 after that, TAC-359
+  // appended R32-R34 after that, and TAC-484 appended R35, so the count grows
+  // again each time (still the same adjacency shape, just more lines).
+  it('is immediately followed by exactly R23-R35, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
-    // R22 itself, plus R23-R34 — exactly thirteen bullet lines, then nothing
+    // R22 itself, plus R23-R35 — exactly fourteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(13)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(14)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1150,16 +1165,16 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // in the block. Rewritten to pin adjacency to the new rules instead of
   // asserting R28 is terminal — same treatment R22's own test got in
   // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
-  // that, so the count grows again.
-  it('is immediately followed by exactly R29-R34, then # Voice imperative (TAC-359)', () => {
+  // that, and TAC-484 appended R35, so the count grows again.
+  it('is immediately followed by exactly R29-R35, then # Voice imperative (TAC-484)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
-    // R28 itself, plus R29-R34 — exactly seven bullet lines, then nothing
+    // R28 itself, plus R29-R35 — exactly eight bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(8)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1266,15 +1281,15 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
   // landed after them.
-  it('is immediately followed by exactly R32, R33, R34, then # Voice imperative (TAC-359)', () => {
+  it('is immediately followed by exactly R32-R35, then # Voice imperative (TAC-484)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r31Idx)
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
-    // R31 itself, plus R32-R34 — exactly four bullet lines, then nothing but
-    // whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
+    // R31 itself, plus R32-R35 — exactly five bullet lines, then nothing but
+    // whitespace before the heading. TAC-484 appended R35.
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1402,28 +1417,116 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
 
   it('is free of venue-specific product names and ingredients from the motivating case', () => {
     const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
-    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const end = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
     for (const term of ['sofi', 'masala jaggery', 'jaggery', 'pink panther', 'khari', 'nankhatai']) {
       expect(body).not.toContain(term)
     }
   })
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-484 appended R35, so R34 is no longer terminal. Rewritten to pin the
+  // adjacency rather than deleted: the thing worth guarding was never "R34 is
+  // last" but "exactly one bullet sits between R34 and the section break,"
+  // which is what catches a rule being appended without being classified.
+  it('is immediately followed by exactly R35, then # Voice imperative', () => {
     const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const end = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+// R35 (TAC-484). The 2026-09-18 Le Mil's incident: a holding message fired
+// with nothing to hold, and the guest's three challenges to it each produced
+// an invented justification rather than a correction, ending in "ignore me,
+// we're good."
+//
+// Every assertion here pins a CONTIGUOUS clause rather than a set of separate
+// fragments. The TAC-409 lesson: a sentence can be reversed while every one of
+// its fragments survives, so `toContain('say so and stop')` next to
+// `toContain('restate the fact')` would pass against a rule that swapped which
+// branch got which treatment.
+describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a reason for it (TAC-484)', () => {
+  it('names the trigger, including a wordless challenge', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "When a guest questions or pushes back on something you said, like 'what did i ask,' 'that's not right,' or plain confusion about an earlier message, say plainly what is actually true.",
+    )
+  })
+
+  it('handles the it-was-WRONG branch: say so and stop', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "If the earlier message was wrong, say so and stop: 'sorry, that was my mistake. nothing pending on your end' is the shape.",
+    )
+  })
+
+  // The 2026-09-21 ruling: a guest can push back on something true, and a rule
+  // that read every challenge as an error would teach the model to apologise
+  // for correct facts and withdraw them. Without this assertion the rule could
+  // lose its second branch entirely and every other test here would pass.
+  it('handles the it-was-RIGHT branch: restate the fact, do not defend it', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If it was right, restate the fact plainly, without defending it or elaborating on it.',
+    )
+  })
+
+  // The two prohibitions are the incident verbatim: turns 2 and 3 invented a
+  // reason, turn 4 told the guest to disregard the exchange. Pinned as one
+  // clause so dropping either half fails.
+  it('bans inventing a reason and bans waving the exchange away, in one clause', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine.',
+    )
+  })
+
+  it('says a challenge is a request to be straight, not a beat to smooth over', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A guest questioning a message is asking you to be straight with them, not to smooth it over.',
+    )
+  })
+
+  // Scoped like R23 scopes itself against R15: in prose, inside the rule,
+  // rather than left for a reader to infer. R1 is about an action the guest
+  // did not take; this is about the agent's own prior sentence.
+  it('scopes itself to the agent own prior message, against R1', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take.",
+    )
+  })
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r35Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
+    const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+
+  it('is free of venue-specific product names from the motivating incident', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
+    for (const term of ['pink panther', 'le mil', 'himanshu']) {
+      expect(body).not.toContain(term)
+    }
   })
 })
 
