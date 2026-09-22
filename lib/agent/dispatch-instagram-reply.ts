@@ -60,9 +60,15 @@ import { fireRedAlert } from './alerts'
 import type { OpenIntention } from './intentions/derive'
 import { buildRenderedIntentionsPayload } from './intentions/rendered'
 import { decideSlotAction, draftCommitmentIdentity, EMPTY_PENDING_ROWS, loadPendingRowsBySlot } from './pending-slots'
-import { buildOutboundInsert, materializeInlineCommitment, persistOrRegenQueuedDraft } from './schedule-and-send'
+import {
+  applyInlineCancellation,
+  buildOutboundInsert,
+  materializeInlineCommitment,
+  persistOrRegenQueuedDraft,
+} from './schedule-and-send'
 import { resolveDispatchBubbles, splitIntoSentences } from './sentence-split'
 import { collapseToSingleMessage, INTER_BUBBLE_GAP_MS, MAX_BUBBLES_PER_RESPONSE } from './split-message'
+import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import type { RuntimeContext } from './types'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
@@ -229,6 +235,14 @@ export async function writeInstagramSendFailureCard(input: {
     const generation: GenerateMessageResult = input.carrier
       ? input.generation
       : { ...input.generation, commitment: {} }
+    // TAC-513: the cancellation rides the card on exactly the terms the
+    // commitment does. A card whose text says a comp is off and whose row
+    // carries nothing is the 2026-09-21 incident with an operator's approval
+    // on it, so the remainder card, which does not carry the commitment, must
+    // not carry this either.
+    const cancellation = input.carrier
+      ? resolveCancellation(input.generation.cancelsCommitmentId, ctx.activeCommitments)
+      : { status: 'none' as const }
     const rows = (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
     const decision = decideSlotAction({
       rows,
@@ -242,6 +256,7 @@ export async function writeInstagramSendFailureCard(input: {
     const persisted = await persistOrRegenQueuedDraft(ctx, generation, INSTAGRAM_SEND_FAILED_REVIEW_REASON, null, {
       callerPolicy: 'never_regen',
       renderedIntentions: input.carrier ? input.renderedIntentions : undefined,
+      pendingCancellation: cancellation.status === 'resolved' ? cancellation.cancellation : null,
     })
     if (persisted.action === 'dropped') return { ok: false, skipped: 'slot_occupied' }
     return { ok: true, cardId: persisted.outboundMessageId }
@@ -314,6 +329,7 @@ export interface InstagramDispatchDeps {
   saveMessage: (payload: MessageInsert) => Promise<{ ok: true; id: string; reconciled: boolean } | { ok: false; error: string }>
   writeCard: typeof writeInstagramSendFailureCard
   materializeCommitment: typeof materializeInlineCommitment
+  applyCancellation: typeof applyInlineCancellation
   now: () => Date
   sleep: (ms: number) => Promise<void>
 }
@@ -331,6 +347,7 @@ function defaultDeps(): InstagramDispatchDeps {
     saveMessage: (payload) => insertOrReconcileEcho(supabase(), payload),
     writeCard: writeInstagramSendFailureCard,
     materializeCommitment: materializeInlineCommitment,
+    applyCancellation: applyInlineCancellation,
     now: () => new Date(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
@@ -523,7 +540,19 @@ export async function dispatchInstagramReply(
 
   if (sentCount === 0) return wholeReplyFailed(stopped ?? failure('unknown'), bubbles.length)
 
-  if (persistedIds.length > 0) await deps.materializeCommitment(ctx, generation, persistedIds[0]!)
+  if (persistedIds.length > 0) {
+    // Both, and in this order, exactly as the text arm does. TAC-513:
+    // materializeInlineCommitment's own docstring says creating the row is the
+    // same act whichever channel carried the message, and cancelling one is no
+    // different, so it rides both transports or the ledger follows the words on
+    // one channel and not the other. Reachable here only for a demo guest,
+    // since a carried cancellation otherwise always queues (trigger 13) and
+    // never reaches a dispatch. That is precisely the case the TAC-284 bypass
+    // creates, and the ruling was to honour the cancellation on the send path
+    // rather than carve the bypass.
+    await deps.materializeCommitment(ctx, generation, persistedIds[0]!)
+    await deps.applyCancellation(ctx, generation, persistedIds[0]!)
+  }
 
   const remainder = bubbles.slice(sentCount)
   let undelivered: { reason: string; cardId: string | null } | null = null

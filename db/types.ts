@@ -770,6 +770,7 @@ export type Database = {
           last_operator_action_at: string | null
           last_operator_id: string | null
           media_urls: string[]
+          pending_cancellation: Json | null
           pending_commitment: Json | null
           pending_until: string | null
           previous_review_state: string | null
@@ -811,6 +812,7 @@ export type Database = {
           last_operator_action_at?: string | null
           last_operator_id?: string | null
           media_urls?: string[]
+          pending_cancellation?: Json | null
           pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null
@@ -852,6 +854,7 @@ export type Database = {
           last_operator_action_at?: string | null
           last_operator_id?: string | null
           media_urls?: string[]
+          pending_cancellation?: Json | null
           pending_commitment?: Json | null
           pending_until?: string | null
           previous_review_state?: string | null

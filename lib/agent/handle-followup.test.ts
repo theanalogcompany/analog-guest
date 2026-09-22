@@ -31,6 +31,10 @@ const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 const verifyGroundingStageMock = vi.fn()
 const verifyProsePromiseStageMock = vi.fn()
+// TAC-513: default CLEAN, not undefined. The './stages' factory below is an
+// explicit allow-list, so a stage missing from it arrives `undefined` and
+// throws inside the allSettled argument list before the gate is reached.
+const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
@@ -82,6 +86,7 @@ vi.mock('./stages', async () => {
     // TypeError swallowed into a rejected settlement — the check would read as
     // permanently degraded and every test here would stay green.
     verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
   }
 })
@@ -132,6 +137,7 @@ vi.mock('./trace-content', () => ({
 }))
 
 import { handleFollowup } from './handle-followup'
+import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { RuntimeContext } from './types'
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
@@ -175,12 +181,16 @@ function successResult() {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    // TAC-513: REQUIRED on GenerateMessageResult. A fixture omitting it reads
+    // `undefined` everywhere, which resolves as "cancels nothing" and hides
+    // the carrier path from every test in this file.
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.57.0',
+    promptVersion: 'v1.58.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -195,6 +205,7 @@ beforeEach(() => {
   applyApprovalPolicyStageMock.mockReset()
   verifyGroundingStageMock.mockReset()
   verifyProsePromiseStageMock.mockReset()
+  verifyCancellationClaimStageMock.mockReset()
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
@@ -214,6 +225,7 @@ beforeEach(() => {
   // TAC-401: 'skipped' by default, so every pre-existing test in this file
   // behaves exactly as it did before the check existed.
   verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
+  verifyCancellationClaimStageMock.mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
   scheduleAndSendMock.mockResolvedValue({
     outboundMessageId: 'sent-1',
     providerMessageId: 'p1',
@@ -844,5 +856,124 @@ describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
 
     const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistOpts.promisedCommitment).toEqual(commitment)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-513: the cancellation reaches the persist layer on this path too
+// ---------------------------------------------------------------------------
+//
+// A followup can cancel a commitment as easily as a reply can ("we can't do
+// the comp after all"), and the threading here is a second, independent copy
+// of the inbound one. A mutant that dropped it from BOTH orchestrators left
+// the whole suite green, so each needs its own assertion.
+describe('handleFollowup — cancellation carrier (TAC-513)', () => {
+  const TONIC: ActiveCommitment = {
+    id: '9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f',
+    type: 'comp',
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open',
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: new Date().toISOString(),
+  }
+
+  // This file sets no beforeEach default for the mechanic-offer mock, so a
+  // test that reaches the gate has to supply one or the orchestrator reads
+  // `.status` off undefined and fails at context_build.
+  beforeEach(() => {
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+  })
+
+  it('calls verifyCancellationClaimStage once per followup', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_7', triggeredAt: new Date() },
+    })
+
+    expect(verifyCancellationClaimStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes the resolved cancellation into the persist options', async () => {
+    const pendingCancellation = { commitmentId: TONIC.id }
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), cancelsCommitmentId: TONIC.id },
+    })
+    verifyCancellationClaimStageMock.mockResolvedValueOnce({
+      resolution: { status: 'resolved', cancellation: pendingCancellation, commitment: TONIC },
+      claim: 'skipped',
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['commitment_cancellation_gated'],
+      primaryTrigger: 'commitment_cancellation_gated',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+      pendingCancellation,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-f1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_7', triggeredAt: new Date() },
+    })
+
+    expect(result.status).toBe('queued')
+    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(persistOpts.pendingCancellation).toEqual(pendingCancellation)
+  })
+
+  // See handle-inbound.test.ts for why the degrade RECOMPUTES rather than
+  // assuming. Pinned here too because this is a separate expression.
+  it('recomputes a RESOLVED resolution when the stage unexpectedly throws', async () => {
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        activeCommitments: [TONIC],
+      }),
+    )
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), cancelsCommitmentId: TONIC.id },
+    })
+    verifyCancellationClaimStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['prose_cancellation_check_failed'],
+      primaryTrigger: 'prose_cancellation_check_failed',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-f2',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: { reason: 'day_7', triggeredAt: new Date() },
+    })
+
+    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(cancellationArg).toEqual({
+      resolution: { status: 'resolved', cancellation: { commitmentId: TONIC.id }, commitment: TONIC },
+      claim: 'check_failed',
+    })
   })
 })

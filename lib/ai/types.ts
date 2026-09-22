@@ -457,6 +457,10 @@ export type GenerateMessageAttempt = {
   // becomes the GenerateMessageResult.contextUpdate consumed by the
   // orchestrator's context-write step.
   contextUpdate: GenerateMessageContextUpdate
+  // TAC-513: per-attempt cancellation emission. Final attempt's value becomes
+  // GenerateMessageResult.cancelsCommitmentId. '' means this reply cancels
+  // nothing.
+  cancelsCommitmentId: string
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -513,6 +517,21 @@ export type GenerateMessageResult = {
   // approval-gate outcome (TAC-296 precedent). Empty `{}` is the no-op shape;
   // isEmptyArrivalCapture short-circuits before any DB hit.
   arrivalCapture: GenerateMessageArrivalCapture
+  // TAC-513: final-attempt cancellation emission, the id of the commitment
+  // this reply withdraws. '' means it withdraws nothing, which is almost every
+  // turn.
+  //
+  // REQUIRED rather than optional, deliberately, and it is why every
+  // construction site of this type had to decide a value when it landed. An
+  // optional field would let all of them default to "cancels nothing" in
+  // silence, which is exactly the fixture trap this repo keeps paying for:
+  // the paths that genuinely cancel nothing (crisis safety, the holding
+  // fallback, the crash card) should SAY so rather than omit it.
+  //
+  // RAW, not resolved. The gate runs resolveCancellation against the guest's
+  // own active commitments; nothing downstream may treat this string as a
+  // commitment that exists.
+  cancelsCommitmentId: string
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
@@ -751,6 +770,29 @@ export type VerifyMechanicOfferResult = {
   offersGatedMechanic: boolean
   /** The id of the offered mechanic, or 'none' when offersGatedMechanic is false. */
   mechanicId: string
+  promptVersion: string
+}
+
+// TAC-513: independent post-generation check for a cancellation CLAIMED in
+// prose with no structured carrier behind it. Takes the reply body and NOTHING
+// else, matching its TAC-401 sibling — see lib/ai/verify-cancellation-claim.ts
+// for why it is a separate check rather than a second question on that one.
+export type VerifyCancellationClaimInput = {
+  replyBody: string
+}
+
+export type VerifyCancellationClaimResult = {
+  /**
+   * True when the reply tells the guest that something the venue already
+   * promised is no longer happening.
+   *
+   * A BOOLEAN AND NOTHING ELSE, deliberately. This check never names which
+   * commitment, because naming one would invite minting a cancellation from a
+   * second reading of prose, and cancelling is destructive where TAC-401's
+   * minting is protective. The carrier only ever comes from the model's own id
+   * emission, resolved against the guest's live list.
+   */
+  claimsCancellation: boolean
   promptVersion: string
 }
 

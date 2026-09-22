@@ -676,3 +676,29 @@ describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
     }
   })
 })
+
+// TAC-513: the paragraph that was tried here and reverted (ruled 2026-09-22).
+//
+// A CANARY, not a style rule. The wording is written out in the ticket and in
+// this file's own header, so it is the single most likely thing for a future
+// reader to paste back in, and it was measured over 325 generations: it closes
+// the defect (item-B comp 29/100 to 0/100) and breaks AC 5 with it (control
+// 26/50 to 7/50), with a second wording scoring identically. If it comes back,
+// it should come back with new measurement behind it rather than from ticket
+// archaeology, and this failing test is where that conversation starts.
+describe('comp_complaint — the TAC-513 paragraph stays out (TAC-514)', () => {
+  it('does not tell the model to ask whenever another item is named', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain(
+      'does not say anything was wrong with it, you do not know that anything was',
+    )
+  })
+
+  it('keeps the opening assertion and the make-it-right remedy, which never moved', () => {
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'The guest is telling you something went wrong.',
+    )
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'Once you understand it, say sorry for it, once, and mean it. Then find a way to make it up to them.',
+    )
+  })
+})

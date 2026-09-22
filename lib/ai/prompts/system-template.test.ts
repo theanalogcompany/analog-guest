@@ -26,8 +26,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.57.0 (TAC-389: the decline turn gets its own Active commitments intro)', () => {
-    expect(PROMPT_VERSION).toBe('v1.57.0')
+  it('is v1.58.0 (TAC-513: a reply can withdraw a commitment it already made)', () => {
+    expect(PROMPT_VERSION).toBe('v1.58.0')
   })
 })
 
@@ -1666,5 +1666,95 @@ describe('UNIVERSAL_RULES_DISPLAY — channel variants are named on the rail (TA
   it('exactly R1, R5 and R32 mention their Instagram wording', () => {
     const ids = UNIVERSAL_RULES_DISPLAY.filter((r) => /\bon instagram\b/i.test(r.summary)).map((r) => r.id)
     expect(ids).toEqual(['R1', 'R5', 'R32'])
+  })
+})
+
+// TAC-513 (v1.58.0). The `# Cancellations` block.
+//
+// Every assertion here pins a CONTIGUOUS clause, never disjoint fragments.
+// TAC-409 is the recorded reason: its first version of an equivalent test
+// pinned separated substrings, and three mutants that inverted the sentence
+// carrying the meaning passed it while every fragment survived.
+describe('# Cancellations (TAC-513)', () => {
+  it('renders the block, beside # Commitments', () => {
+    expect(SYSTEM_TEMPLATE).toContain('\n# Cancellations\n')
+    // Its mirror. If these ever separate, the "one gives, one takes back"
+    // framing the block opens with stops being visible to the model.
+    const commitments = SYSTEM_TEMPLATE.indexOf('\n# Commitments\n')
+    const cancellations = SYSTEM_TEMPLATE.indexOf('\n# Cancellations\n')
+    const arrival = SYSTEM_TEMPLATE.indexOf('\n# Arrival capture\n')
+    expect(commitments).toBeGreaterThan(-1)
+    expect(cancellations).toBeGreaterThan(commitments)
+    expect(arrival).toBeGreaterThan(cancellations)
+  })
+
+  it('names the field and frames it as the mirror of commitment', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The output field "cancelsCommitmentId" records that your reply is TAKING BACK a promise the venue already made. It is the mirror of "commitment": that field records what you are giving, this one records what you are withdrawing.',
+    )
+  })
+
+  it('says to copy the id verbatim out of the ## Active commitments block', () => {
+    // TAC-302: when the id was not rendered the model reached for the 4-char
+    // code and every arrival capture no-op'd. The same failure is available
+    // here, so the instruction names where the value comes from.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Copy the value verbatim from the "id:" on that commitment\'s line in the "## Active commitments" block. Cancel nothing and the field is an empty string "", which is almost every turn.',
+    )
+  })
+
+  it('forbids inventing an id AND forbids claiming the cancellation anyway', () => {
+    // The load-bearing clause, and the one a reasonable-looking edit is most
+    // likely to break: dropping the second half leaves the model free to say
+    // "that's cancelled" with an empty field, which is the incident.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not invent an id, and do not tell the guest it is cancelled either',
+    )
+  })
+
+  it('scopes cancellable commitments to the ones actually rendered', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Only a commitment listed in "## Active commitments" can be cancelled.',
+    )
+  })
+
+  it('keeps the id out of the guest-facing reply', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'NEVER write the id into your reply. It is system-internal, exactly like the id you copy for arrivalCapture.',
+    )
+  })
+
+  it('tells the model the reply is held when the words and the field disagree', () => {
+    // Stating the consequence is deliberate: the alternative is the model
+    // discovering the hold by having its reply held.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If your reply says a promise is cancelled and this field is empty, the reply does not go out at all. The two have to agree.',
+    )
+  })
+
+  it('does not hedge the wording for the approval delay', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not hedge the wording to cover the delay: by the time the guest reads your reply the promise is genuinely off',
+    )
+  })
+
+  it('uses no em or en dash anywhere in the block', () => {
+    // R3 bans them in output, so the prompt should not model them. The rest of
+    // SYSTEM_TEMPLATE predates that discipline; this block does not.
+    const start = SYSTEM_TEMPLATE.indexOf('\n# Cancellations\n')
+    const end = SYSTEM_TEMPLATE.indexOf('\n# Arrival capture\n')
+    const block = SYSTEM_TEMPLATE.slice(start, end)
+    expect(block).not.toMatch(/[—–]/)
+  })
+
+  it('makes no claim about the channel, so both channel variants carry it', () => {
+    // TAC-495: compose-prompt scans every Instagram prompt for channel claims.
+    // A new block mentioning texting or a number would fail that scan far from
+    // here, so it is asserted at the source.
+    const start = SYSTEM_TEMPLATE.indexOf('\n# Cancellations\n')
+    const end = SYSTEM_TEMPLATE.indexOf('\n# Arrival capture\n')
+    const block = SYSTEM_TEMPLATE.slice(start, end)
+    expect(block).not.toMatch(/\btext|\bSMS\b|iMessage|this number/i)
+    expect(systemTemplateFor('instagram')).toContain('\n# Cancellations\n')
   })
 })

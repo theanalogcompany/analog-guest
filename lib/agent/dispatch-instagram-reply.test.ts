@@ -95,6 +95,7 @@ function generation(body: string, overrides: Partial<GenerateMessageResult> = {}
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.8],
     attemptHistory: [],
@@ -121,6 +122,7 @@ function deps(overrides: Partial<InstagramDispatchDeps> = {}): InstagramDispatch
     saveMessage: vi.fn(async () => ({ ok: true as const, id: `row-${++row}`, reconciled: false })),
     writeCard: vi.fn(async () => ({ ok: true as const, cardId: 'card-1' })),
     materializeCommitment: vi.fn(async () => {}),
+    applyCancellation: vi.fn(async () => {}),
     now: vi.fn(() => NOW),
     sleep: vi.fn(async () => {}),
   }
@@ -631,7 +633,7 @@ describe('writeInstagramSendFailureCard', () => {
       gen,
       INSTAGRAM_SEND_FAILED_REVIEW_REASON,
       null,
-      { callerPolicy: 'never_regen', renderedIntentions: RENDERED },
+      { callerPolicy: 'never_regen', renderedIntentions: RENDERED, pendingCancellation: null },
     )
   })
 
@@ -639,7 +641,65 @@ describe('writeInstagramSendFailureCard', () => {
     await writeInstagramSendFailureCard({ ctx: makeCtx(), generation: gen, carrier: false, renderedIntentions: RENDERED })
     const [, cardGen, , , options] = persistOrRegenMock.mock.calls[0]!
     expect((cardGen as GenerateMessageResult).commitment).toEqual({})
-    expect(options).toEqual({ callerPolicy: 'never_regen', renderedIntentions: undefined })
+    expect(options).toEqual({
+      callerPolicy: 'never_regen',
+      renderedIntentions: undefined,
+      pendingCancellation: null,
+    })
+  })
+
+  // TAC-513: the card an operator later approves is what says the comp is off,
+  // so it has to carry the cancellation. Without it, approving the card sends
+  // the sentence and cancels nothing — the 2026-09-21 incident with a human's
+  // approval on it. Pinned with the resolved value, not merely with null,
+  // because null is what a fixture produces by accident.
+  it('carries a resolved cancellation onto the whole-reply card', async () => {
+    const TONIC = {
+      id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+      type: 'comp' as const,
+      description: 'replacement blossom tonic',
+      code: 'GWPZ',
+      status: 'open' as const,
+      expected_arrival: null,
+      arrival_signal: null,
+      created_at: '2026-09-21T22:49:02.075Z',
+    }
+    const cancelling = generation("that one's off then", { cancelsCommitmentId: TONIC.id })
+    const ctx = { ...makeCtx(), activeCommitments: [TONIC] }
+
+    await writeInstagramSendFailureCard({ ctx, generation: cancelling, carrier: true })
+
+    const [, , , , options] = persistOrRegenMock.mock.calls[0]!
+    expect((options as { pendingCancellation: unknown }).pendingCancellation).toEqual({
+      commitmentId: TONIC.id,
+    })
+  })
+
+  // The remainder card is text the whole-reply card already accounted for, so
+  // it must not cancel a second time.
+  it('does NOT carry the cancellation onto a remainder card', async () => {
+    const TONIC_ID = 'cfa37ed7-1041-4679-a258-92062726f4c2'
+    const cancelling = generation("that one's off then", { cancelsCommitmentId: TONIC_ID })
+    const ctx = {
+      ...makeCtx(),
+      activeCommitments: [
+        {
+          id: TONIC_ID,
+          type: 'comp' as const,
+          description: 'replacement blossom tonic',
+          code: 'GWPZ',
+          status: 'open' as const,
+          expected_arrival: null,
+          arrival_signal: null,
+          created_at: '2026-09-21T22:49:02.075Z',
+        },
+      ],
+    }
+
+    await writeInstagramSendFailureCard({ ctx, generation: cancelling, carrier: false })
+
+    const [, , , , options] = persistOrRegenMock.mock.calls[0]!
+    expect((options as { pendingCancellation: unknown }).pendingCancellation).toBeNull()
   })
 
   it('writes no card for a guest who opted out', async () => {
@@ -678,5 +738,42 @@ describe('writeInstagramSendFailureCard', () => {
       skipped: 'write_failed',
       error: 'db down',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-513: the cancellation rides BOTH transports
+// ---------------------------------------------------------------------------
+//
+// materializeInlineCommitment's own docstring says creating the row "is the
+// same act whichever channel carried the message", which is exactly as true of
+// cancelling one. It was applied on the text arm and not here, so a demo guest
+// on Instagram — the channel Le Mil's is moving to — could be told a comp was
+// off while nothing cancelled it. That is this ticket's own incident, on the
+// one path the fix had not reached.
+describe('dispatchInstagramReply — cancellation (TAC-513)', () => {
+  it('applies the cancellation beside the commitment, anchored to the first row', async () => {
+    const d = deps()
+    const gen = generation("that one's off then", {
+      cancelsCommitmentId: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    })
+
+    await dispatchInstagramReply(makeCtx(), gen, INBOUND_REPLY, d)
+
+    expect(d.materializeCommitment).toHaveBeenCalledWith(expect.anything(), gen, 'row-1')
+    expect(d.applyCancellation).toHaveBeenCalledWith(expect.anything(), gen, 'row-1')
+  })
+
+  it('does not cancel when nothing was sent', async () => {
+    const d = deps({
+      sendText: vi.fn(async () => ({ ok: false as const, kind: 'rate_limited' as const, failure: null })),
+    })
+    const gen = generation("that one's off then", {
+      cancelsCommitmentId: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    })
+
+    await dispatchInstagramReply(makeCtx(), gen, INBOUND_REPLY, d)
+
+    expect(d.applyCancellation).not.toHaveBeenCalled()
   })
 })

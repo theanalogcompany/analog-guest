@@ -833,6 +833,27 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.58.0 (TAC-513): a new `# Cancellations` block, and `## Active
+// commitments` now says its id is also what a cancellation copies.
+//
+// On 2026-09-21 at Le Mil's the agent wrote "the comp for the blossom tonic is
+// cancelled" and nothing cancelled it. Comp GWPZ stayed `open` while the guest
+// believed it was gone. There was no field that could have carried the
+// cancellation, so the reply could not have been right: the only way to say
+// that sentence was to say it falsely.
+//
+// The block is the mirror of `# Commitments` and is written as one: that field
+// records what you are giving, this one what you are taking back. The id comes
+// from the same place arrivalCapture's does, and for the same reason (TAC-302:
+// when the id was absent the model reached for the 4-char code and every
+// capture no-op'd).
+//
+// The last line is the part that is not decoration. It tells the model that a
+// reply claiming a cancellation with an empty field does not go out at all,
+// which is true: an independent check reads the drafted body and the gate
+// holds the draft. Saying so makes the two halves agree rather than leaving
+// the model to discover the hold by having its reply held.
+
 // v1.57.0 (TAC-389): on an operator-initiated decline turn, `## Active
 // commitments` carries only the promise being declined, and its intro says so
 // and drops the arrival ask. Every other turn renders byte for byte as before.
@@ -1113,7 +1134,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.57.0'
+export const PROMPT_VERSION = 'v1.58.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1178,6 +1199,19 @@ The schema is required on every emission; the no-op shape is the empty object {}
 Comp, hold, and discount commitments route through operator review BEFORE the guest is told. You do not need to set requiresOperatorApproval=true separately for those types — the structured commitment.type IS the gate. You DO still need requiresOperatorApproval for non-commitment cases (e.g. resource commitments without an explicit type).
 
 When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue's voice. Examples: "comped you an oat latte, give me a heads up when you're heading over" / "next one's on us. text me when you're close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are — text me a heads-up if you want it tonight").
+
+# Cancellations
+The output field "cancelsCommitmentId" records that your reply is TAKING BACK a promise the venue already made. It is the mirror of "commitment": that field records what you are giving, this one records what you are withdrawing.
+
+Populate it whenever your reply tells the guest that an open promise is cancelled, off, withdrawn, no longer standing, or words to that effect. Copy the value verbatim from the "id:" on that commitment's line in the "## Active commitments" block. Cancel nothing and the field is an empty string "", which is almost every turn.
+
+Only a commitment listed in "## Active commitments" can be cancelled. If the guest's correction means a promise should come off and you cannot find it in that block, do not invent an id, and do not tell the guest it is cancelled either. Say what you do know and let the venue sort the rest.
+
+NEVER write the id into your reply. It is system-internal, exactly like the id you copy for arrivalCapture. The guest sees the item, not the identifier.
+
+Cancelling always goes to a person before it reaches the guest, so do not hedge the wording to cover the delay: by the time the guest reads your reply the promise is genuinely off.
+
+If your reply says a promise is cancelled and this field is empty, the reply does not go out at all. The two have to agree.
 
 # Arrival capture
 The output field "arrivalCapture" records when the guest signals they're arriving in response to an active commitment surfaced in the "## Active commitments" block. THIS IS DETECTION, NOT COMMUNICATION. It exists to update the system's record of when the guest will arrive — entirely separate from any conversational ask about timing in your reply text.

@@ -238,6 +238,69 @@ export function toActiveCommitment(
   }
 }
 
+// ===== Cancellation carrier (TAC-513) =====
+
+// The shape persisted on messages.pending_cancellation. One field: the
+// commitment this draft withdraws.
+//
+// camelCase inside the payload, matching pending_commitment's own `expiresAt`
+// and rendered_intentions' `eligibleAt`, even though the columns these mirror
+// are snake_case.
+//
+// Deliberately carries NOTHING ELSE. Not the type, not the description, not
+// the code. Every one of those already lives on the row this id points at, and
+// a copy here could disagree with it by the time an operator approves the card.
+// The id is the whole carrier.
+export const PendingCancellationSchema = z.object({
+  commitmentId: z.string().min(1),
+})
+export type PendingCancellation = z.infer<typeof PendingCancellationSchema>
+
+/**
+ * TAC-513: what the model's `cancelsCommitmentId` emission resolved to.
+ *
+ * THREE states, and the third is why this is a discriminated union rather than
+ * `PendingCancellation | null`. "The model named a commitment that is not this
+ * guest's to cancel" is not the same as "the model named nothing", and
+ * collapsing them would silently turn a hallucinated id into a clean turn: the
+ * reply still SAYS a promise is cancelled, so it has to reach the
+ * unbacked-claim backstop rather than pass as carrying nothing.
+ */
+export type CancellationResolution =
+  | { status: 'none' }
+  | { status: 'resolved'; cancellation: PendingCancellation; commitment: ActiveCommitment }
+  | { status: 'unresolved'; claimedId: string }
+
+/**
+ * TAC-513: resolve the emitted id against the commitments actually rendered to
+ * the model this turn. Pure.
+ *
+ * `activeCommitments` is the guest's own open + pending_ack set, loaded by
+ * build-runtime-context for the ## Active commitments block. Resolving against
+ * that list — rather than trusting the string, or looking the id up in the
+ * table — is what makes a cross-guest or invented id structurally unable to
+ * cancel anything: the write path never sees an id that was not on this guest's
+ * own list.
+ *
+ * NOTE the degraded case, which is deliberate and safe. When the commitments
+ * load fails, build-runtime-context logs and continues with an EMPTY list
+ * (fail-open, so a hiccup does not take down the reply). Every id then resolves
+ * 'unresolved', so a degraded turn HOLDS the draft instead of cancelling
+ * against a list it could not read. Holding is the safe direction, and it is
+ * why this reads the context rather than the database.
+ */
+export function resolveCancellation(
+  cancelsCommitmentId: string | null | undefined,
+  activeCommitments: readonly ActiveCommitment[],
+): CancellationResolution {
+  if (typeof cancelsCommitmentId !== 'string') return { status: 'none' }
+  const claimedId = cancelsCommitmentId.trim()
+  if (claimedId.length === 0) return { status: 'none' }
+  const commitment = activeCommitments.find((c) => c.id === claimedId)
+  if (commitment === undefined) return { status: 'unresolved', claimedId }
+  return { status: 'resolved', cancellation: { commitmentId: commitment.id }, commitment }
+}
+
 // ===== Operator-API payload shape =====
 
 // The Contract-locked shape consumed by analog-operator (TAC-298) via
