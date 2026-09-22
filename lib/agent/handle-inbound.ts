@@ -956,6 +956,8 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // logged but no push. Never throws.
     const arrival = await dispatchArrivalCapture({
       arrivalCapture: gen.result.arrivalCapture,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
       now: ctx.recognition.computedAt,
     })
     if (arrival.kind === 'imminent_won') {

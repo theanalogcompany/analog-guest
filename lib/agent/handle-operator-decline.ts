@@ -368,6 +368,8 @@ export async function handleOperatorDecline(input: {
     }
     const arrival = await dispatchArrivalCapture({
       arrivalCapture: gen.result.arrivalCapture,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
       now: ctx.recognition.computedAt,
     })
     if (arrival.kind !== 'noop') {

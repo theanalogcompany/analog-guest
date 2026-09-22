@@ -206,6 +206,11 @@ export async function processDueCommitments(
     // or past (catch-up). CAS-transition + push.
     const transition = await transitionToPendingAck({
       commitmentId: row.id,
+      // TAC-363: the CAS is venue- and guest-scoped now. This caller reads
+      // both off the row it already loaded, so the predicate can only ever
+      // match the row this iteration is about.
+      venueId: row.venue_id,
+      guestId: row.guest_id,
       expectedArrival,
       arrivalSignal: 'scheduled',
       now,

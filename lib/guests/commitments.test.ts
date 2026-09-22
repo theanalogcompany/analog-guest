@@ -917,6 +917,8 @@ describe('transitionToPendingAck', () => {
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
       expectedArrival: NOW,
       arrivalSignal: 'imminent',
       now: NOW,
@@ -938,6 +940,8 @@ describe('transitionToPendingAck', () => {
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
       expectedArrival: NOW,
       arrivalSignal: 'imminent',
       now: NOW,
@@ -959,12 +963,122 @@ describe('transitionToPendingAck', () => {
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
       expectedArrival: NOW,
       arrivalSignal: 'imminent',
       now: NOW,
     })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.errorCode).toBe('db_write_failed')
+  })
+})
+
+// TAC-363: the CAS is venue- and guest-scoped, so a commitment id that belongs
+// to someone else cannot be transitioned by passing it in.
+//
+// These assert by APPLYING the predicate the code built to a small row set,
+// not by checking that the query mentions the right column names. The
+// difference matters: `.eq('guest_id', guestId)` with the wrong value, or with
+// the columns transposed, names every expected column and still reaches the
+// wrong row. `rowsMatching` is the honest half of the mock — the supabase
+// double records filters without applying them, so nothing else in this file
+// can tell a scoped query from an unscoped one.
+function rowsMatching(
+  eqCalls: Array<{ field: string; value: unknown }>,
+  rows: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return rows.filter((row) => eqCalls.every((c) => row[c.field] === c.value))
+}
+
+describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
+  const OTHER_GUEST_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+  const OTHER_VENUE_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+
+  // The row the caller means, plus three it must never reach: the same
+  // commitment id under another guest, under another venue, and a row that is
+  // no longer open.
+  const WORLD = [
+    makeRow(),
+    makeRow({ guest_id: OTHER_GUEST_ID }),
+    makeRow({ venue_id: OTHER_VENUE_ID }),
+    makeRow({ status: 'acknowledged' }),
+  ]
+
+  it('transitionToPendingAck reaches only the caller\u2019s own open row', async () => {
+    const state = newState({ updateReturn: [makeRow({ status: 'pending_ack' })] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await transitionToPendingAck({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      expectedArrival: NOW,
+      arrivalSignal: 'imminent',
+      now: NOW,
+    })
+    const matched = rowsMatching(state.updateEqCalls, WORLD)
+    expect(matched).toHaveLength(1)
+    expect(matched[0]).toMatchObject({
+      id: COMMITMENT_ID,
+      venue_id: VENUE_ID,
+      guest_id: GUEST_ID,
+      status: 'open',
+    })
+  })
+
+  it('an id belonging to ANOTHER GUEST does not transition', async () => {
+    // The shape of the live hole: the model copies a uuid out of the prompt
+    // block and it is not this guest's. Before TAC-363 the predicate was id +
+    // status, so this row moved and the caller got a clean CAS win back.
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await transitionToPendingAck({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      expectedArrival: NOW,
+      arrivalSignal: 'imminent',
+      now: NOW,
+    })
+    const otherGuestsRow = makeRow({ guest_id: OTHER_GUEST_ID })
+    expect(rowsMatching(state.updateEqCalls, [otherGuestsRow])).toEqual([])
+  })
+
+  it('an id belonging to ANOTHER VENUE does not transition', async () => {
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await transitionToPendingAck({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      expectedArrival: NOW,
+      arrivalSignal: 'imminent',
+      now: NOW,
+    })
+    expect(rowsMatching(state.updateEqCalls, [makeRow({ venue_id: OTHER_VENUE_ID })])).toEqual([])
+  })
+
+  it('scheduleArrival is scoped the same way', async () => {
+    const state = newState({ updateReturn: [] })
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    await scheduleArrival({
+      commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      expectedArrival: NOW,
+      arrivalSignal: 'scheduled',
+      now: NOW,
+    })
+    expect(rowsMatching(state.updateEqCalls, WORLD)).toHaveLength(1)
+    expect(rowsMatching(state.updateEqCalls, [makeRow({ guest_id: OTHER_GUEST_ID })])).toEqual([])
   })
 })
 
@@ -985,6 +1099,8 @@ describe('scheduleArrival', () => {
     )
     const r = await scheduleArrival({
       commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
       expectedArrival: future,
       arrivalSignal: 'scheduled',
       now: NOW,
@@ -1005,6 +1121,8 @@ describe('scheduleArrival', () => {
     )
     const r = await scheduleArrival({
       commitmentId: COMMITMENT_ID,
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
       expectedArrival: NOW,
       arrivalSignal: 'scheduled',
       now: NOW,

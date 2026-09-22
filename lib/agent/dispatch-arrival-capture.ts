@@ -45,9 +45,11 @@ export type ArrivalCaptureDispatchResult =
  */
 export async function dispatchArrivalCapture(opts: {
   arrivalCapture: ArrivalCaptureEmission
+  venueId: string
+  guestId: string
   now: Date
 }): Promise<ArrivalCaptureDispatchResult> {
-  const { arrivalCapture, now } = opts
+  const { arrivalCapture, venueId, guestId, now } = opts
 
   if (isEmptyArrivalCapture(arrivalCapture)) {
     return { kind: 'noop' }
@@ -66,6 +68,8 @@ export async function dispatchArrivalCapture(opts: {
     const validExpected = Number.isNaN(expectedArrival.getTime()) ? now : expectedArrival
     const r = await transitionToPendingAck({
       commitmentId,
+      venueId,
+      guestId,
       expectedArrival: validExpected,
       arrivalSignal: 'imminent',
       now,
@@ -95,6 +99,8 @@ export async function dispatchArrivalCapture(opts: {
     }
     const r = await scheduleArrival({
       commitmentId,
+      venueId,
+      guestId,
       expectedArrival,
       arrivalSignal: 'scheduled',
       now,
