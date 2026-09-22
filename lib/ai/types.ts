@@ -726,6 +726,38 @@ export type VerifyGroundingInput = {
   // Record<ApprovalTrigger, ...>` total maps). Both production callers already
   // pass it; making it required costs nothing and fails `tsc` on the next one.
   runtimeContext: string
+  // TAC-502: the channel this conversation is happening on, exactly as
+  // `RuntimeContext.conversationChannel` holds it. NEVER re-resolved here —
+  // the same identity rule runtimeContext above is chosen for.
+  //
+  // Without it the verifier checks a reply like "just text here, this is the
+  // number" against `venue_info.contact`, finds no phone listed, and flags a
+  // statement that is true as the guest reads it. Le Mil's has no PUBLIC
+  // phone number, correctly, so the static contact list can never support a
+  // claim about the medium the guest is already using; the conversation is
+  // the evidence, and it was the one thing the verifier never saw. Measured
+  // 5 of 6 suspect bodies flagging even with the venue's own "no public phone
+  // number" knowledge entry removed from the source material entirely, so the
+  // entry was not the cause.
+  //
+  // `null` means the channel could not be resolved (a data-integrity edge
+  // case — see lib/agent/conversation-channel.ts) and gets NO exemption: the
+  // section simply does not render, and a channel claim is checked exactly as
+  // it was before this field existed. Generation already renders
+  // channel-neutral copy on an unresolved channel, so there is no
+  // channel-specific claim for an exemption to protect there, and "still
+  // checked" is the conservative direction.
+  //
+  // REQUIRED, same convention as runtimeContext and isProactive above: every
+  // call site decides rather than silently inheriting one channel's answer.
+  // The stages.ts <-> lib/voices/regenerate-with-critique.ts seam has drifted
+  // once on record: TAC-350 shipped the retrieval relevance floor to
+  // stages.ts and the regen path kept the old semantics until TAC-366 made
+  // the two share one helper. A required field is what turns the next one
+  // into a `tsc` failure rather than a prose reminder someone has to
+  // remember. TAC-350's VERIFIER half was mirrored correctly at the time —
+  // it is the seam that has the history, not this particular check.
+  conversationChannel: MessageChannel | null
   // TAC-376: true when there is no guest message this turn — a followup or
   // the knowledge-gap holding message, both generated with no inbound to
   // answer. REQUIRED, same convention as runtimeContext above: every call

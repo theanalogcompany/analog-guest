@@ -2548,7 +2548,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the outbound (followup) path with isProactive: true and an empty inboundBody', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
@@ -2567,7 +2567,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model for a holding-message-shaped ctx (manual trigger, no inbound) with isProactive: true', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'manual', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
@@ -2583,7 +2583,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the inbound path with isProactive: false and the real inbound body', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -2649,7 +2649,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
       })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -2673,7 +2673,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
       })
     await verifyGroundingStage(inboundCtx(), makeGen())
     expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
@@ -2820,6 +2820,46 @@ describe('verifyGroundingStage (TAC-350)', () => {
     const call = captureUngroundedClaimCaughtMock.mock.calls[0][0]
     expect(call.ungroundedClaims).toEqual(['invents a wifi network name and password'])
     expect(call.replyBody).toBe('Le Mils Guest')
+  })
+
+  // TAC-502. The stage's job here is to hand over `ctx.conversationChannel`
+  // unchanged, so the verifier can tell that a reply naming the medium the
+  // guest is on describes the live conversation rather than claiming a contact
+  // method the venue does not list. Mutation-verified triple, the same shape
+  // as the isProactive pair above: a hardcoded channel, or a dropped field,
+  // must fail one of these three.
+  it('passes the conversation channel through to the verifier', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx(), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBe('text')
+  })
+
+  it('passes an instagram conversation through as instagram, not the default', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx({ conversationChannel: 'instagram' }), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBe('instagram')
+  })
+
+  // An unresolved channel is handed over AS null rather than substituted.
+  // Deciding what null means is the verifier's (it renders no section and
+  // checks the claim as before); a stage that guessed 'text' here would
+  // manufacture the exemption on a turn nobody could place.
+  it('passes an unresolved channel through as null rather than substituting one', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx({ conversationChannel: null }), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBeNull()
   })
 
   it('passes ctx.knowledgeCorpus through to the verifier as knowledgeChunks', async () => {
