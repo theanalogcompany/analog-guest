@@ -46,9 +46,11 @@ export interface LoadedPendingQuestion {
  * inbound, when the linked inbound has an empty body or doesn't read as a
  * question (TAC-484, looksLikeQuestion), or on any DB error.
  *
- * Mode is derived from whether the clock is still running:
- *   pending_until non-null → 'outstanding'  (guest has been told nothing)
- *   pending_until null     → 'acknowledged' (the holding message has fired)
+ * Mode is always 'outstanding' (TAC-484). It used to be derived from whether
+ * the clock was still running, which was a proxy for "has a holding message
+ * gone out" and stopped being one; nothing sends a holding message now, so
+ * there is one true state. `pending_until` is still SELECTed because
+ * isKnowledgeGapCard reads it and the filter above keys on it.
  *
  * The timer path overrides the result to 'writing_holding' when it is
  * generating the holding message itself.
@@ -120,7 +122,16 @@ export async function findPendingQuestion(
       question: {
         question: inbound.question,
         askedAt: inbound.askedAt,
-        mode: card.pending_until !== null ? 'outstanding' : 'acknowledged',
+        // TAC-484: no longer derived. It was `pending_until !== null ?
+        // 'outstanding' : 'acknowledged'`, which read as "was a holding
+        // message sent" and stopped being that the moment a backstop catch
+        // could no longer arm the clock — every backstop card then claimed the
+        // guest had been told something nobody had said. Nothing sends a
+        // holding message now, so there is exactly one true state and no
+        // derivation to make. See formatPendingQuestion's header for what
+        // TAC-491 has to key this on when it brings the message back, and why
+        // it is not pending_until.
+        mode: 'outstanding',
       },
     }
   } catch (e) {

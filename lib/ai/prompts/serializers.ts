@@ -1000,18 +1000,40 @@ function formatActiveCommitments(
 // — it is the most recent unresolved state in the thread, and it sits next to
 // the history the model would otherwise mine for a promise to imitate.
 //
-// The three modes render three DIFFERENT and mutually non-contradictory
-// instructions. That is the point of the discriminator: an earlier
-// two-boolean shape had the block telling the model not to say it was
-// checking on the very turn whose entire job is to say exactly that.
+// The modes render DIFFERENT and mutually non-contradictory instructions.
+// That is the point of the discriminator: an earlier two-boolean shape had the
+// block telling the model not to say it was checking on the very turn whose
+// entire job is to say exactly that.
 //
-//   outstanding     — guest has heard nothing. Reply to the new message; do
-//                     not promise, do not date, do not claim to be checking.
-//   acknowledged    — guest already got the holding message. Same, except
-//                     don't repeat that we're looking into it.
+//   outstanding     — guest has heard nothing and will hear nothing
+//                     automatically. Reply to the new message; do not promise,
+//                     do not date, do not claim to be checking.
 //   writing_holding — THIS generation is the holding message. Say we're on
 //                     it, in the venue's voice, with no time attached and no
 //                     attempt at the answer.
+//
+// TAC-484 DELETED a third, 'acknowledged' ("the guest already got the holding
+// message"), and rewrote what's left of 'outstanding'. Both had become false.
+// `mode` was derived from `pending_until !== null`, a proxy for "a holding
+// message was sent" that stopped tracking it the moment a backstop catch could
+// no longer arm the clock: every backstop card read as 'acknowledged' and told
+// the model the guest had been told something nobody had said. 'outstanding'
+// was no better, since "the system is handling that separately" is false for
+// every card while the holding message is disabled.
+//
+// The honest signal is whether a holding message was actually SENT, and there
+// isn't one to read. The only candidate is an outbound row with
+// category='manual' and a reply_to_message_id pointing at the question, and
+// category='manual' is shared with manual followups (triggerToCategory), which
+// only fail to collide because they leave reply_to_message_id null. That is an
+// undocumented coincidence, it costs a third round trip on a per-turn path,
+// and it would feed a branch that is unreachable today. So the mode collapses
+// to one text instead (ruled 2026-09-22).
+//
+// TAC-491, when it brings the holding message back for a subset of cards:
+// re-add 'acknowledged' with its old text, and key it on a REAL marker that
+// the send writes, not on pending_until. `tsc` will make the switch below tell
+// you where to put it.
 //
 // The question text is rendered verbatim so the holding message can be
 // specific about WHAT is outstanding without the model re-deriving it from
@@ -1030,18 +1052,14 @@ function formatPendingQuestion(pending: PendingQuestion, now: Date): string {
         "Say that you're still on it, in the venue's voice, the way a person would if they'd been asked something and hadn't chased it down yet. Keep it short.",
         'Do not attempt the answer. Do not say when the answer will come, do not name a time or a day, and do not say "soon" or "shortly" or anything else that implies a deadline. Do not apologize more than once. Do not offer anything to make up for the wait.',
       ].join('\n\n')
-    case 'acknowledged':
-      return [
-        header,
-        asked,
-        "The guest has already been told the venue is looking into it, so don't tell them again and don't add a time. Reply to whatever their newest message actually asks, and leave the outstanding question alone.",
-        'If their newest message is asking about this same outstanding thing, set knowledgeGap=true again rather than attempting the answer. Nothing has changed since they asked.',
-      ].join('\n\n')
     case 'outstanding':
       return [
         header,
         asked,
-        "The guest has not been told anything about it yet, and the system is handling that separately. Don't promise an answer, don't say when one is coming, and don't say you're checking on it. Reply to whatever their newest message actually asks.",
+        // The ruled text, minus its opening sentence ("An earlier question
+        // from this guest is still waiting on the venue"), which the `asked`
+        // line directly above already says.
+        "Nothing has been sent to them about it, and nothing will be sent automatically. Don't tell them it's being looked into, don't give a time, and don't attempt the answer yourself. Reply to whatever their newest message actually asks.",
         'If their newest message is asking about this same outstanding thing, set knowledgeGap=true again rather than attempting the answer. Nothing has changed since they asked.',
       ].join('\n\n')
   }

@@ -2403,7 +2403,16 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
   // The three modes must not contradict each other. An earlier two-boolean
   // shape had the block forbidding "I'm checking on it" on the very turn
   // whose job was to say exactly that.
-  it('outstanding: forbids promising, dating, or claiming to be checking', () => {
+  // TAC-484 rewrote this text and deleted the 'acknowledged' sibling that used
+  // to sit below. Both asserted something that had become false: the old
+  // 'outstanding' said "the system is handling that separately" when nothing
+  // is, and 'acknowledged' said the guest "has already been told the venue is
+  // looking into it" on every backstop card, when nothing had been sent.
+  //
+  // Pinned as CONTIGUOUS clauses. The whole sentence is the claim; a
+  // fragment-style assertion would survive a mutant that reinstates the
+  // "we're on it" framing around the surviving words.
+  it('outstanding: says nothing was sent and nothing will be, and bans the three claims', () => {
     const out = runtimeToProse(
       {
         pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
@@ -2411,20 +2420,41 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
       'reply',
       NOW_308,
     )
-    expect(out).toContain('has not been told anything about it yet')
-    expect(out).toContain("don't say you're checking on it")
+    expect(out).toContain(
+      "Nothing has been sent to them about it, and nothing will be sent automatically.",
+    )
+    expect(out).toContain(
+      "Don't tell them it's being looked into, don't give a time, and don't attempt the answer yourself.",
+    )
   })
 
-  it('acknowledged: stops the agent repeating that we are looking into it', () => {
+  // The half that made suppressing the whole block the wrong fix: it is what
+  // stops the model re-attempting the question it could not answer.
+  it('outstanding: keeps the re-ask instruction', () => {
     const out = runtimeToProse(
       {
-        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'acknowledged' },
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
       },
       'reply',
       NOW_308,
     )
-    expect(out).toContain('already been told the venue is looking into it')
-    expect(out).toContain("don't add a time")
+    expect(out).toContain(
+      'If their newest message is asking about this same outstanding thing, set knowledgeGap=true again rather than attempting the answer.',
+    )
+  })
+
+  // The two sentences TAC-484 removed, as a canary. Either coming back means
+  // the block is telling the model something nobody said.
+  it('outstanding: never claims the guest was told, or that anything is handling it', () => {
+    const out = runtimeToProse(
+      {
+        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
+      },
+      'reply',
+      NOW_308,
+    )
+    expect(out).not.toContain('already been told')
+    expect(out).not.toContain('the system is handling that separately')
   })
 
   it('writing_holding: asks for the holding note and bans a deadline or an answer', () => {
@@ -2459,7 +2489,7 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
   })
 
   it('renders no em or en dashes (R3 self-consistency)', () => {
-    for (const mode of ['outstanding', 'acknowledged', 'writing_holding'] as const) {
+    for (const mode of ['outstanding', 'writing_holding'] as const) {
       const out = runtimeToProse(
         { pendingQuestion: { question: 'q', askedAt: ASKED, mode } },
         'reply',

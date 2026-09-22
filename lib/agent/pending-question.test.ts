@@ -271,3 +271,62 @@ describe('findPendingQuestion — two knowledge-gap cards (TAC-394)', () => {
     ])
   })
 })
+
+// TAC-484. `mode` had NO assertion anywhere in the repo before this block,
+// which is how it came to assert something false without anything noticing.
+//
+// It used to be `pending_until !== null ? 'outstanding' : 'acknowledged'` — a
+// proxy for "has a holding message gone out", because the timer's CAS claim
+// cleared the column as it sent one. Commit 3 stopped a backstop catch arming
+// the clock at all, so that column went null-from-birth on those cards and the
+// proxy inverted: the block told the model "the guest has already been told the
+// venue is looking into it" on a card where nothing had been sent.
+//
+// These pin the derivation by its INPUTS rather than by the rendered text, so
+// they fail if anyone reintroduces a conditional here, whatever it renders.
+describe('findPendingQuestion — mode no longer keys on the clock (TAC-484)', () => {
+  function cardWith(pendingUntil: string | null, reviewReason: string) {
+    cardMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'card-1',
+        reply_to_message_id: 'inbound-1',
+        pending_until: pendingUntil,
+        review_reason: reviewReason,
+      },
+      error: null,
+    })
+    inboundMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'inbound-1',
+        body: 'what grade is the matcha?',
+        created_at: '2026-09-18T15:40:00Z',
+        provider_message_id: 'p1',
+      },
+      error: null,
+    })
+  }
+
+  // The regression this ticket introduced and then closed. A backstop card on a
+  // genuine question: clock null, because it can never arm one now.
+  it("a backstop card with no clock is 'outstanding', never 'acknowledged'", async () => {
+    cardWith(null, 'knowledge_gap_backstop')
+    const loaded = await findPendingQuestion(VENUE, GUEST)
+    expect(loaded?.question.mode).toBe('outstanding')
+  })
+
+  // The other half: the same answer whatever the column says. Without this, a
+  // conditional keyed the other way round would pass the test above.
+  it("a self-reported card WITH a running clock is also 'outstanding'", async () => {
+    cardWith('2026-09-18T15:46:00Z', 'knowledge_gap')
+    const loaded = await findPendingQuestion(VENUE, GUEST)
+    expect(loaded?.question.mode).toBe('outstanding')
+  })
+
+  it('never emits the retired acknowledged mode, on either clock state', async () => {
+    for (const clock of [null, '2026-09-18T15:46:00Z']) {
+      cardWith(clock, 'knowledge_gap')
+      const loaded = await findPendingQuestion(VENUE, GUEST)
+      expect(loaded?.question.mode).not.toBe('acknowledged')
+    }
+  })
+})

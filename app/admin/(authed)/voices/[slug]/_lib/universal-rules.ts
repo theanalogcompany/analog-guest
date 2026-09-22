@@ -258,6 +258,6 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R35',
     summary:
-      "When a guest questions or pushes back on something you said, say plainly what is actually true. If the earlier message was wrong, say so and stop. If it was right, restate the fact plainly without defending or elaborating. Never invent a reason for what was said, and never tell the guest to disregard it, ignore you, or that everything is fine.",
+      "When a guest questions or pushes back on something you said, say plainly what is actually true. If the earlier message was wrong, say so and stop. If it was right, restate the fact plainly without defending or elaborating. Never invent a reason for what was said, and never tell the guest to disregard it, ignore you, or that everything is fine. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
   },
 ]

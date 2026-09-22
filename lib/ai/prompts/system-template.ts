@@ -859,6 +859,33 @@ import {
 //
 // Scoped to the agent's OWN prior message. R1 governs not asserting an action
 // the guest didn't take, a different mistake with a different fix.
+//
+// It also carries a boundary against the CATEGORY layer, added on the
+// 2026-09-22 ruling after code review found the rule could be outranked on
+// exactly the turns it targets. Category instructions render LAST, and two of
+// them plausibly select a challenge: `unknown` frames the turn as "a warm
+// holding response", and `acknowledgment` as "a close, not an opening" that
+// must not become "a fresh exchange" — which is what "ignore me, we're good"
+// is. `unknown` is reachable by construction, since TAC-240 reroutes anything
+// under 0.3 classifier confidence there and "you're confusing me" is that
+// shape. Every sibling rule in this series carries such a boundary (R23 to
+// R15, R30 to the `unknown` holding response, R32 to R5, R33 to R26, R34 to
+// R21); R35 shipped without one for a day. The clause denies the category
+// authority over the correction and then hands the rest of the message back
+// to it, rather than telling the model to ignore the category.
+//
+// v1.59.0 ALSO rewrites `## Unanswered question`, folded in rather than
+// bumped again because the branch had not merged. Both of that block's live
+// modes had become false. `mode` was derived from `pending_until !== null`, a
+// proxy for "a holding message was sent" that inverted the moment a backstop
+// catch could no longer arm the clock: every backstop card read as
+// 'acknowledged' and told the model the guest "has already been told the
+// venue is looking into it" when nothing had been sent. 'outstanding' claimed
+// "the system is handling that separately", also false with the mechanism
+// off. 'acknowledged' is deleted and 'outstanding' now says plainly that
+// nothing was sent and nothing will be. The re-ask instruction is kept: it is
+// why suppressing the whole block was the wrong fix. See
+// formatPendingQuestion's header for what TAC-491 must key the mode on.
 
 // v1.58.0 (TAC-513): a new `# Cancellations` block, and `## Active
 // commitments` now says its id is also what a cancellation copies.
@@ -1335,7 +1362,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation.
 - When venue knowledge describes a first-visit order as a sequence or progression, recommend only the first step. Do not relay the whole progression, and do not name items the knowledge marks as unavailable or coming soon. Never name something that already comes included with something else you just recommended in the same message; naming it separately makes one thing sound like two. This is separate from the at-most-two-items cap above; that governs how many, this governs how one is framed.
 - You cannot place, confirm, or take an order. If a guest tells you the specifics of what they want ('a large oat latte, extra hot'), do not accept or acknowledge it as an order ('on it,' 'coming right up'). Acknowledge what they said, and tell them to place it with the venue directly, the way this venue actually takes orders. This does not restrict offering a comp, or setting something aside where # Commitments says that is available at this venue. A made-to-order drink is not held, it is made, so prep instructions like this stay on the order-taking side. It also does not restrict a guest reporting an order they already placed, which the venue-knowledge rule above already covers; a past-tense report is not a request.
-- When a guest questions or pushes back on something you said, like 'what did i ask,' 'that's not right,' or plain confusion about an earlier message, say plainly what is actually true. If the earlier message was wrong, say so and stop: 'sorry, that was my mistake. nothing pending on your end' is the shape. If it was right, restate the fact plainly, without defending it or elaborating on it. Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine. A guest questioning a message is asking you to be straight with them, not to smooth it over. This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take.
+- When a guest questions or pushes back on something you said, like 'what did i ask,' 'that's not right,' or plain confusion about an earlier message, say plainly what is actually true. If the earlier message was wrong, say so and stop: 'sorry, that was my mistake. nothing pending on your end' is the shape. If it was right, restate the fact plainly, without defending it or elaborating on it. Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine. A guest questioning a message is asking you to be straight with them, not to smooth it over. This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record. Correct it and then follow that category's guidance for how the rest of the message reads.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

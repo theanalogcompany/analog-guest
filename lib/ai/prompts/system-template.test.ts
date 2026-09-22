@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 // Relative import: vitest doesn't pick up Next's `@/*` alias without a
 // vitest.config.ts. Other tests in this repo use relative imports too.
+import { ACKNOWLEDGMENT_INSTRUCTIONS } from './categories/acknowledgment'
+import { UNKNOWN_INSTRUCTIONS } from './categories/unknown'
 import { PROMPT_VERSION, SYSTEM_TEMPLATE, systemTemplateFor } from './system-template'
 import {
   UNIVERSAL_RULES_DISPLAY,
@@ -224,6 +226,10 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(r35?.summary).toContain('say plainly what is actually true')
     expect(r35?.summary).toContain('If the earlier message was wrong, say so and stop')
     expect(r35?.summary).toContain('If it was right, restate the fact plainly')
+    // The boundary clause moves in lockstep with the rule body (2026-09-22).
+    expect(r35?.summary).toContain(
+      "A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
+    )
     expect(SYSTEM_TEMPLATE).toContain(
       'When a guest questions or pushes back on something you said',
     )
@@ -1502,6 +1508,33 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
     expect(SYSTEM_TEMPLATE).toContain(
       "This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take.",
     )
+  })
+
+  // Added on the 2026-09-22 ruling, after code review found R35 had no
+  // boundary against the layer that renders AFTER it. Category instructions
+  // are last in the system prompt, and two of them plausibly select a
+  // challenge turn: `unknown` frames it as "a warm holding response", and
+  // `acknowledgment` as "a close, not an opening" that must not become "a
+  // fresh exchange" — which is what "ignore me, we're good" is. Every sibling
+  // rule in this series carries such a boundary (R23 to R15, R30 to the
+  // `unknown` holding response, R32 to R5, R33 to R26, R34 to R21).
+  //
+  // Contiguous, because the two halves do different jobs: the first denies the
+  // category authority, the second says what to do instead. Keeping only the
+  // first would read as "ignore the category", which is not the ruling.
+  it('denies the category layer authority over correcting the record', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record. Correct it and then follow that category's guidance for how the rest of the message reads.",
+    )
+  })
+
+  // The clause only bites if it names the shapes those two blocks actually
+  // use. If either category is reworded away from "close"/"holding response",
+  // this fails and the clause needs rewording with it.
+  it('names the two shapes the conflicting category blocks actually use', () => {
+    expect(SYSTEM_TEMPLATE).toContain('whether it frames the turn as a close or as a holding response')
+    expect(UNKNOWN_INSTRUCTIONS).toContain('holding response')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('This is a close, not an opening')
   })
 
   it('is the last bullet in the universal block, immediately before # Voice imperative', () => {

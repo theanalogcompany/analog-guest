@@ -519,3 +519,74 @@ describe('composePrompt — R1 exception and the first-touch signal line move to
     }
   })
 })
+
+// TAC-484, ruled 2026-09-22. R35 tells the model to correct a message the
+// guest has challenged. The hazard is structural rather than semantic:
+// `## Category-specific instructions` renders LAST in the system prompt, and
+// this repo has a documented history of a later block winning on proximity
+// (TAC-314/327/329/330/338). Two category blocks plausibly select a challenge
+// turn and point the other way:
+//
+//   unknown        — "a warm holding response ... will be followed up on".
+//                    Reachable BY CONSTRUCTION here: TAC-240 rewrites any
+//                    classification below 0.3 confidence to `unknown`, and
+//                    "you're confusing me" is exactly that shape.
+//   acknowledgment — "This is a close, not an opening ... do not turn the
+//                    closer into a fresh exchange." Which is what the
+//                    incident's "ignore me, we're good" is.
+//
+// WHAT THESE TESTS DO AND DO NOT SHOW. They show the rule and its boundary
+// clause are PRESENT on those turns, that the category block genuinely renders
+// after R35 (so the conflict is real, not hypothetical), and that the clause
+// names the shapes those blocks actually use. They cannot show the model obeys
+// R35 over the category block. Nothing in CI can: that needs a real
+// generation, and it is the QA: Device half of this ticket.
+describe('composePrompt — R35 governs a challenge turn whatever category it lands in (TAC-484)', () => {
+  const CHALLENGE_CATEGORIES = ['unknown', 'acknowledgment'] as const
+
+  it.each(CHALLENGE_CATEGORIES)('R35 renders for %s', (category) => {
+    expect(systemPromptFor(category)).toContain(
+      'When a guest questions or pushes back on something you said',
+    )
+  })
+
+  it.each(CHALLENGE_CATEGORIES)('the boundary clause renders for %s', (category) => {
+    expect(systemPromptFor(category)).toContain(
+      "A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
+    )
+  })
+
+  it.each(CHALLENGE_CATEGORIES)(
+    'the two prohibitions render for %s, so "ignore me, we are good" is banned on this turn',
+    (category) => {
+      expect(systemPromptFor(category)).toContain(
+        'Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine.',
+      )
+    },
+  )
+
+  // The conflict has to be REAL for the clause to be worth anything: both
+  // blocks present, category second. If the category block ever stops
+  // rendering after the template, the clause is solving a problem that no
+  // longer exists and should be revisited rather than left as noise.
+  it.each(CHALLENGE_CATEGORIES)(
+    'the %s block really does render after R35, which is why the clause exists',
+    (category) => {
+      const prompt = systemPromptFor(category)
+      const r35 = prompt.indexOf('When a guest questions or pushes back on something you said')
+      const categoryBlock = prompt.indexOf('## Category-specific instructions')
+      expect(r35).toBeGreaterThan(-1)
+      expect(categoryBlock).toBeGreaterThan(r35)
+    },
+  )
+
+  it('unknown still carries its own holding-response framing, unchanged', () => {
+    // R35 does not delete the category's guidance, it subordinates it on one
+    // question. If this stops rendering, the clause is arguing with nothing.
+    expect(systemPromptFor('unknown')).toContain('warm holding response')
+  })
+
+  it('acknowledgment still carries its own close framing, unchanged', () => {
+    expect(systemPromptFor('acknowledgment')).toContain('This is a close, not an opening')
+  })
+})
