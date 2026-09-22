@@ -799,6 +799,19 @@ export interface CancellationClaimUnbackedProps {
    * one anyway", which have different fixes.
    */
   activeCommitmentCount: number
+  /**
+   * TRUE when the prose check read the body as claiming a cancellation. FALSE
+   * when it did not and the hold came from an emitted id that resolved to
+   * nothing.
+   *
+   * Both queue under the same trigger, and without this they are
+   * indistinguishable in the data while having completely different fixes: one
+   * is the model writing a cancellation it cannot carry, the other is it
+   * reaching for a commitment id on a turn whose text says nothing of the
+   * kind. The second case is also the one where the card's own copy is wrong
+   * about what the reply says, so it is worth being able to count.
+   */
+  bodyClaimedIt: boolean
   // The held reply. Never sent, so safe to log here.
   replyBody: string
 }
@@ -812,7 +825,9 @@ export async function captureCancellationClaimUnbacked(
 
 function formatCancellationClaimUnbacked(props: CancellationClaimUnbackedProps): string {
   const lines = [
-    `*Reply claimed a cancellation nothing carries* — held, not sent`,
+    props.bodyClaimedIt
+      ? `*Reply claimed a cancellation nothing carries* — held, not sent`
+      : `*Reply emitted a cancellation id that resolves to nothing* — held, not sent. The body does not read as claiming one.`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,

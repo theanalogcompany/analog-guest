@@ -1499,7 +1499,27 @@ export async function verifyCancellationClaimStage(
     return { resolution, claim: 'check_failed' }
   }
 
-  if (!r.data.claimsCancellation) return { resolution, claim: 'clean' }
+  if (!r.data.claimsCancellation) {
+    // The body reads clean, but an id the model emitted resolved to nothing,
+    // and the gate holds on that alone (trigger 14). Without this the hold
+    // fires with no event anywhere, which is the one shape of this trigger
+    // that was invisible. Note the card's copy is written for the other shape
+    // and overstates this one; that is on the ticket as a copy decision, not
+    // something to fix by suppressing the hold.
+    if (resolution.status === 'unresolved') {
+      await captureCancellationClaimUnbacked({
+        agentRunId: ctx.agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        category: ctx.classification?.category ?? null,
+        unresolvedCommitmentId: resolution.claimedId,
+        activeCommitmentCount: ctx.activeCommitments.length,
+        replyBody: generation.body,
+        bodyClaimedIt: false,
+      })
+    }
+    return { resolution, claim: 'clean' }
+  }
 
   await captureCancellationClaimUnbacked({
     agentRunId: ctx.agentRunId,
@@ -1510,6 +1530,7 @@ export async function verifyCancellationClaimStage(
       resolution.status === 'unresolved' ? resolution.claimedId : null,
     activeCommitmentCount: ctx.activeCommitments.length,
     replyBody: generation.body,
+    bodyClaimedIt: true,
   })
 
   return { resolution, claim: 'flagged' }

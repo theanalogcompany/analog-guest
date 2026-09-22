@@ -4577,6 +4577,45 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     )
   })
 
+  // The hold on an unresolved id fires whether or not the body claims
+  // anything, so both shapes have to be observable. Until this, the
+  // clean-body one queued with no PostHog event and no Slack line anywhere,
+  // which is the one shape of trigger 14 nothing could count.
+  it('reports an unresolved id even when the body reads CLEAN, flagged as such', async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(clean)
+    const result = await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({
+        body: 'sure, see you at 8',
+        cancelsCommitmentId: 'deadbeef-0000-4000-8000-000000000000',
+      }),
+    )
+    // The verdict is unchanged: clean body, unresolved id, and the gate holds
+    // on the resolution alone.
+    expect(result.claim).toBe('clean')
+    expect(result.resolution.status).toBe('unresolved')
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledTimes(1)
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unresolvedCommitmentId: 'deadbeef-0000-4000-8000-000000000000',
+        activeCommitmentCount: 1,
+        bodyClaimedIt: false,
+      }),
+    )
+  })
+
+  // The discriminator's other side. Without it the two shapes are one number.
+  it('flags bodyClaimedIt TRUE when the prose check found the claim', async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({ body: 'the comp is off', cancelsCommitmentId: '' }),
+    )
+    expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bodyClaimedIt: true }),
+    )
+  })
+
   it('retries once on a transient fault, then fails CLOSED', async () => {
     verifyCancellationClaimMock
       .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
@@ -4751,11 +4790,18 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   })
 
   it('ranks the carried cancellation SECOND, below the offer, when both fire', async () => {
-    // The co-firing test. Both priority tests in this repo have historically
-    // passed via PRIMARY_TRIGGER_PRIORITY's `triggers[0]` fallback, so a new
-    // entry needs a case where the fallback would give the WRONG answer:
-    // here the cancellation is pushed after commitment_type_gated in
-    // enumeration order, so only real ranking puts the offer first.
+    // A reply that both offers and cancels shows the operator the label about
+    // money going OUT, because that is the exposure this repo has bled on.
+    //
+    // Read this test for what it checks, not for more. A first version of this
+    // comment claimed only real ranking could produce this answer; a mutant
+    // deleting COMMITMENT_CANCELLATION_GATED from PRIMARY_TRIGGER_PRIORITY
+    // showed otherwise. commitment_type_gated is pushed at trigger 5 and the
+    // cancellation at trigger 13, so `pickPrimaryTrigger`'s `triggers[0]`
+    // fallback happens to give the same answer and this test survives. The
+    // ranking IS pinned, by the fidelity co-fire below, where the fallback
+    // would give the wrong one. Both tests are needed and neither is
+    // redundant; only the claim about this one was wrong.
     const decision = await gate(RESOLVED, {
       commitment: { type: 'comp', description: 'a pastry' },
     })
