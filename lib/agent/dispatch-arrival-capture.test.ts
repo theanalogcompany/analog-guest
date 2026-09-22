@@ -243,25 +243,106 @@ describe('every open obligation is swept, not just the one the model named', () 
     expect(vi.mocked(transitionToPendingAck).mock.calls[0][0].commitmentId).toBe(COMP_B)
   })
 
-  it('scopes every write to this venue and guest', async () => {
-    vi.mocked(transitionToPendingAck).mockResolvedValue(won(COMP_A))
-    await call()
-    expect(vi.mocked(transitionToPendingAck).mock.calls[0][0]).toMatchObject({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-    })
-  })
-
-  it('gives every swept row the SAME arrival time', async () => {
+  it('gives every swept row the SAME arrival time, and it is `now`', async () => {
     // One guest walking in is one arrival event. Two rows stamped a few
     // milliseconds apart would read as two visits to anything that later
     // groups on the timestamp.
+    //
+    // The VALUE is asserted, not just the equality between the two. Comparing
+    // the calls to each other alone is satisfied by any constant — a mutant
+    // stamping every row with the epoch passed it — and `expected_arrival` is
+    // what the morning-of cron fires on and what the push body renders. "An
+    // arrival stamped for 1am" is half the incident this ticket is about.
     vi.mocked(transitionToPendingAck).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
     await call({
       activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
     })
     const calls = vi.mocked(transitionToPendingAck).mock.calls
-    expect(calls[0][0].expectedArrival.getTime()).toBe(calls[1][0].expectedArrival.getTime())
+    expect(calls[0][0].expectedArrival.toISOString()).toBe(DURING_SERVICE.toISOString())
+    expect(calls[1][0].expectedArrival.toISOString()).toBe(DURING_SERVICE.toISOString())
+  })
+
+  it('scopes EVERY write to this venue and guest, not just the first', async () => {
+    vi.mocked(transitionToPendingAck).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    await call({
+      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+    })
+    for (const c of vi.mocked(transitionToPendingAck).mock.calls) {
+      expect(c[0]).toMatchObject({ venueId: VENUE_ID, guestId: GUEST_ID })
+    }
+  })
+
+  it('sweeps every open obligation on a SCHEDULED signal too', async () => {
+    // Ruling 5 is not scoped to `imminent`. A mutant slicing the scheduled
+    // target list to one passed every other test in this file.
+    vi.mocked(scheduleArrival).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    const r = await call({
+      arrivalCapture: {
+        signal: 'scheduled',
+        expectedArrival: '2026-09-23T15:00:00Z',
+        referencesCommitmentId: COMP_A,
+      },
+      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+    })
+    expect(scheduleArrival).toHaveBeenCalledTimes(2)
+    expect(r.kind).toBe('scheduled_recorded')
+    if (r.kind !== 'scheduled_recorded') return
+    expect(r.commitmentRows.map((x) => x.id)).toEqual([COMP_A, COMP_B])
+    expect(r.failedCount).toBe(0)
+  })
+})
+
+describe('the arrival time written to each row', () => {
+  it('uses the emitted time on a scheduled signal', async () => {
+    vi.mocked(scheduleArrival).mockResolvedValue(won(COMP_A))
+    await call({
+      arrivalCapture: {
+        signal: 'scheduled',
+        expectedArrival: '2026-09-23T15:00:00Z',
+        referencesCommitmentId: COMP_A,
+      },
+    })
+    expect(vi.mocked(scheduleArrival).mock.calls[0][0].expectedArrival.toISOString()).toBe(
+      new Date('2026-09-23T15:00:00Z').toISOString(),
+    )
+  })
+
+  it('uses `now` on an imminent signal that carried no time', async () => {
+    vi.mocked(transitionToPendingAck).mockResolvedValue(won(COMP_A))
+    await call()
+    expect(
+      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+    ).toBe(DURING_SERVICE.toISOString())
+  })
+
+  it('uses the emitted time on an imminent signal that carried one', async () => {
+    vi.mocked(transitionToPendingAck).mockResolvedValue(won(COMP_A))
+    await call({
+      arrivalCapture: {
+        signal: 'imminent',
+        expectedArrival: '2026-09-22T17:20:00Z',
+        referencesCommitmentId: COMP_A,
+      },
+    })
+    expect(
+      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+    ).toBe(new Date('2026-09-22T17:20:00Z').toISOString())
+  })
+
+  it('falls back to `now` when an imminent time is unparseable', async () => {
+    // A malformed timestamp from the model must not fail the dispatch, and
+    // must not land an Invalid Date in expected_arrival.
+    vi.mocked(transitionToPendingAck).mockResolvedValue(won(COMP_A))
+    await call({
+      arrivalCapture: {
+        signal: 'imminent',
+        expectedArrival: 'sometime-ish',
+        referencesCommitmentId: COMP_A,
+      },
+    })
+    expect(
+      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+    ).toBe(DURING_SERVICE.toISOString())
   })
 })
 

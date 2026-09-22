@@ -21,6 +21,18 @@
 // this seam (TAC-350 shipped the relevance floor to stages.ts and left
 // this path on pre-TAC-350 semantics for months). The two paths share
 // pure helpers and constants, never each other's telemetry.
+//
+// TAC-363 DELIBERATELY NOT MIRRORED, recorded here rather than left for the
+// next reader to notice as a gap. The closed-venue arrival check is the
+// fourth backstop and the first one this path does not carry. Two reasons.
+// It is not gating logic: the trigger it feeds holds a draft for an operator,
+// and this path has no queue — the operator is already reading the output.
+// And its whole question is "would a guest set off for the venue on the
+// strength of this text", which needs a guest about to receive it; regen
+// replays an old turn against today's clock (see the reconstruction gotcha in
+// CLAUDE.md), so a reply that was correct when sent at 10am would flag when
+// replayed at midnight. Mirroring it would manufacture a warning about a
+// message nobody is sending. Revisit if the playground ever sends.
 
 import { randomUUID } from 'node:crypto'
 import {

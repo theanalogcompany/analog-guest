@@ -1690,7 +1690,9 @@ export type ClosedVenueArrivalBackstopResult =
  * TAC-363: independent text check for a reply that confirms an arrival while
  * the venue is closed.
  *
- * WHEN IT RUNS. Three skips, and the first is the one that makes this cheap:
+ * WHEN IT RUNS. Four skips. Listed with the cheap one first rather than in
+ * code order — `isDemo` and an empty body are checked before it — because the
+ * venue-state skip is the one that decides what this costs:
  *
  *   1. The venue is not positively CLOSED. During service, and at any venue
  *      whose hours or timezone cannot be read, there is no question to ask —
@@ -1701,6 +1703,13 @@ export type ClosedVenueArrivalBackstopResult =
  *      an imminent arrivalCapture, so the draft is queueing either way and a
  *      Haiku call would only prove it twice.
  *   3. Demo guest, matching every sibling backstop.
+ *   4. An empty body, which there is nothing to judge.
+ *
+ * THE COST, stated because the skip list reads like there isn't one: at a
+ * venue whose hours ARE filled in, every out-of-hours inbound now makes an
+ * extra Haiku call. Le Mil's is open 7am to 3pm, so that is 16 hours of the
+ * day. It is concurrent with the other four checks and adds no sequential
+ * latency, but it is not free.
  *
  * FAILS CLOSED on every failure mode, with one immediate retry on a transient
  * fault and none on truncation — a cap already hit is hit again. This is the
@@ -2327,7 +2336,7 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
   }
 
-  // Trigger 14 (TAC-363): the venue is CLOSED and this reply may send the
+  // Trigger 17 (TAC-363): the venue is CLOSED and this reply may send the
   // guest over anyway.
   //
   // The structural half is deterministic and reads nothing but the emission

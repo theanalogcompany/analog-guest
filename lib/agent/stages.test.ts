@@ -5608,6 +5608,33 @@ describe('closed-venue arrival (TAC-363)', () => {
       expect(d.primaryTrigger).toBe('closed_venue_arrival_emitted')
     })
 
+    it('the BACKSTOP alone outranks a co-firing lower trigger', async () => {
+      // Co-fired deliberately. The two tests above both fire the STRUCTURAL
+      // trigger, which wins regardless, so deleting the backstop's own line
+      // from PRIMARY_TRIGGER_PRIORITY survived the entire suite: the array has
+      // no `satisfies` clause and pickPrimaryTrigger falls back to
+      // triggers[0]. In production that would label the card with the wrong
+      // reason, which is TAC-364's exact defect class.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ voiceFidelity: 0.45 }),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'flagged' },
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toEqual(
+        expect.arrayContaining([
+          'closed_venue_arrival_backstop',
+          'fidelity_below_auto_send_floor',
+        ]),
+      )
+      expect(d.primaryTrigger).toBe('closed_venue_arrival_backstop')
+    })
+
     it('the structural trigger outranks the backstop when both somehow fire', async () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),

@@ -8,6 +8,7 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   verifyGroundingStage,
+  verifyClosedVenueArrivalStage,
   verifyProsePromiseStage,
 } from '@/lib/agent/stages'
 import { createAdminClient } from '@/lib/db/admin'
@@ -542,10 +543,17 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     // which protects a guest-facing decision. This is a grading harness with
     // no guest and no send, and a scenario that throws should fail loudly and
     // be re-run rather than be graded on half its evidence.
-    const [groundingBackstop, prosePromiseBackstop] = await Promise.all([
-      verifyGroundingStage(ctx, outcome.result),
-      verifyProsePromiseStage(ctx, outcome.result),
-    ])
+    const [groundingBackstop, prosePromiseBackstop, closedVenueArrivalBackstop] =
+      await Promise.all([
+        verifyGroundingStage(ctx, outcome.result),
+        verifyProsePromiseStage(ctx, outcome.result),
+        // TAC-363. Note this makes a run's routing grades depend on the venue
+        // clock in a second way: CLAUDE.md already says to run the harness
+        // during the venue's open hours because `## Right now` renders a
+        // status line, and now an arrival scenario run after close also
+        // queues where the same scenario would send at 10am.
+        verifyClosedVenueArrivalStage(ctx, outcome.result),
+      ])
 
     // status === 'success' — evaluate the approval decision. Decision only:
     // this never persists a draft, dispatches to Sendblue, or fires a push.
@@ -554,6 +562,7 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
       outcome.result,
       groundingBackstop,
       prosePromiseBackstop,
+      closedVenueArrivalBackstop,
     )
     const generated = outcome.result
 

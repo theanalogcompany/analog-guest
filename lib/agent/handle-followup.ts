@@ -493,9 +493,20 @@ export async function handleFollowup(input: {
     // followup path there's no inbound, so arrivalCapture is expected to be
     // ~always empty here — kept for consistency. Empty short-circuits.
     // Skipping the push fanout entirely on this path since followups are
-    // operator/cron-triggered, not guest-arrival-triggered (the agent's
-    // arrivalCapture would only fire on misread context, which is a no-op
-    // here anyway via isEmptyArrivalCapture).
+    // operator/cron-triggered, not guest-arrival-triggered.
+    //
+    // TAC-363 widened what a misread context costs here, so the old claim
+    // that it "would only fire on misread context, which is a no-op anyway"
+    // is now only half true. A misread context on a followup flips EVERY open
+    // obligation the guest holds to `pending_ack`, where before it flipped at
+    // most the one the model named. Those rows then leave migration 037's
+    // open-dedup index and TAC-341's `status='open'` expiry scan, with no
+    // push and only a console.warn. They do still surface in
+    // `listHeadsUpQueue`, so they are not invisible, and the new closed-venue
+    // check narrows the window further. Left as a sweep rather than given an
+    // empty target list because a followup that genuinely reads an arrival is
+    // a real signal and silently discarding it is its own defect; if this
+    // ever fires in practice, that is the decision to revisit.
     const arrival = await dispatchArrivalCapture({
       arrivalCapture: gen.result.arrivalCapture,
       venue: ctx.venue,

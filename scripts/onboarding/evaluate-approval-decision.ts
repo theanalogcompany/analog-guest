@@ -2,6 +2,7 @@ import {
   applyApprovalPolicyStage,
   type ApprovalDecision,
   type GroundingBackstopResult,
+  type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
@@ -35,6 +36,12 @@ export async function evaluateApprovalDecision(
   // check has to reach the gate here too. Optional with a 'skipped' default
   // so a caller that has not run the stage behaves exactly as before.
   prosePromiseBackstop?: ProsePromiseBackstopResult,
+  // TAC-363: same reason as the line above. Without it the structural half of
+  // the closed-venue pair still fires (it needs no parameter) while the TEXT
+  // backstop never runs, so a "see you soon" with no structured emission —
+  // the exact shape that check exists for — grades `sent` in a run and queues
+  // in production.
+  closedVenueArrivalBackstop?: ClosedVenueArrivalBackstopResult,
 ): Promise<ApprovalDecision> {
   return applyApprovalPolicyStage(
     ctx,
@@ -42,5 +49,7 @@ export async function evaluateApprovalDecision(
     groundingBackstop,
     { status: 'skipped' },
     prosePromiseBackstop ?? { status: 'skipped' },
+    { resolution: { status: 'none' }, claim: 'skipped' },
+    closedVenueArrivalBackstop ?? { status: 'skipped' },
   )
 }

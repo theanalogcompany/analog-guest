@@ -144,9 +144,11 @@ export async function dispatchArrivalCapture(opts: {
     }
   }
 
-  // Ruling 1(a). Ordered after the shape checks so a malformed scheduled
-  // emission still reports as malformed rather than being masked by the clock,
-  // and applied to `imminent` only — see note 1 in the header.
+  // Ruling 1(a), applied to `imminent` only — see note 1 in the header.
+  // (An earlier comment here claimed the position after the shape checks was
+  // load-bearing, so a malformed `scheduled` emission would not be masked by
+  // the clock. That was vacuous: this condition cannot fire on a `scheduled`
+  // signal at all. The order is simply readable.)
   if (signal === 'imminent' && isVenueClosed(venue, now)) {
     return { kind: 'closed_venue_skipped' }
   }
@@ -253,6 +255,11 @@ async function sweep(opts: {
     if (r.data.transitioned && r.data.row !== null) {
       rows.push(r.data.row)
     }
+    // A clean CAS loss is deliberately counted as NEITHER a row nor a
+    // failure: it means the row had already left `open`, usually because the
+    // morning cron reached it first, so nothing is owed a push and nothing
+    // went wrong. It is therefore invisible to the caller's `failedCount`
+    // warning, which is correct but worth saying out loud.
   }
 
   return { rows, failedCount, firstError }
