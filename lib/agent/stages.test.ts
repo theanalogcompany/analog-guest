@@ -2548,7 +2548,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the outbound (followup) path with isProactive: true and an empty inboundBody', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
@@ -2567,7 +2567,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model for a holding-message-shaped ctx (manual trigger, no inbound) with isProactive: true', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'manual', triggeredAt: new Date() } })
     const result = await verifyGroundingStage(ctx, makeGen())
@@ -2583,7 +2583,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the inbound path with isProactive: false and the real inbound body', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -2649,7 +2649,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
       })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -2673,7 +2673,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.5.0' },
+        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
       })
     await verifyGroundingStage(inboundCtx(), makeGen())
     expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
