@@ -40,7 +40,6 @@ import {
   applyApprovalPolicyStage,
   APPROVAL_TRIGGERS,
   classifyStage,
-  computeFirstTouchAfterQrScan,
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
@@ -1361,30 +1360,32 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // stores on messages.rendered_intentions and what an AUTO-SEND records are
     // the same value by construction rather than by two call sites agreeing.
     //
-    // NAMING, because the variable reads as more than it is: this is the
-    // RECORDABLE set, which is `renderableIntentions(...)` MINUS the opener
-    // turn. buildAiRuntime still RENDERS intentions on an opener turn — only
-    // recording is suppressed there. Consequence, unchanged from TAC-332 on the
-    // auto-send path and now inherited by dispatch: an opener draft that
-    // genuinely raises an intention and is then approved records nothing, and
-    // the intention is asked again. That fails in the annoying-not-invisible
-    // direction, which is the direction TAC-385 §4 chose.
+    // TAC-423 (ruled 2026-09-22): the opener turn records like every other
+    // turn. TAC-332 used to exclude it here, on the grounds that the opener
+    // scripted its own question about whether the guest was new, so the
+    // classifier could only return a correct negative or a false positive that
+    // would permanently close a one-shot goal. The September rewrite inverted
+    // that premise by pointing the opener's question at understand_order, and
+    // the rewrite in serializers.ts removes the scripted question altogether:
+    // what the opener turn now asks IS the first intention line, so refusing to
+    // record it was refusing to record the one ask this turn reliably makes.
     //
-    // TAC-332: never on the true opener turn either. The opener tells the model
-    // to greet and ask what they got (TAC-423) rather than raising a tracked
-    // intention line, so the classifier there can only return a correct
-    // negative or a destructive false positive. Reuses computeFirstTouchAfterQrScan, the
-    // flag that renders the opener, so "is this the opener turn" can't diverge
-    // between what renders it and what may record against it — and applying it
-    // HERE means a queued opener draft stores nothing, so the dispatch path
-    // inherits the guard without re-deriving it.
-    const renderedIntentions = computeFirstTouchAfterQrScan(ctx, ctx.recognition.computedAt)
-      ? []
-      : renderableIntentions(
-          ctx.openIntentions,
-          ctx.classification.category,
-          ctx.pendingQuestion !== null,
-        )
+    // Measured before the change, at Le Mil's: five guests enrolled by scanning,
+    // understand_order armed for every one of them and recorded as asked once.
+    //
+    // RESIDUAL, on the record rather than assumed away. learn_name is open on
+    // this turn too, and the opener asks the model to say who the guest has
+    // reached. Introducing yourself is not asking someone's name, and the
+    // classifier is told to omit anything it is unsure of, so this should not
+    // false-positive — but if it does, learn_name closes for that guest forever
+    // and silently, which is precisely what TAC-332 existed to prevent. The
+    // observable: a learn_name prompt recorded against an opener message whose
+    // text asks nothing about a name.
+    const renderedIntentions = renderableIntentions(
+      ctx.openIntentions,
+      ctx.classification.category,
+      ctx.pendingQuestion !== null,
+    )
 
     if (approval.action === 'queue') {
       const queueSpan = trace.span('queue', {

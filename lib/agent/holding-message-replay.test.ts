@@ -183,7 +183,7 @@ function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageR
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.59.0',
+    promptVersion: 'v1.60.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

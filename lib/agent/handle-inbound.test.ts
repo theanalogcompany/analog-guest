@@ -791,7 +791,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.59.0',
+    promptVersion: 'v1.60.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -884,23 +884,35 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
   })
 
-  // TAC-332: the opener turn (a true first message from a qr_scan guest) can
-  // never legitimately raise an intention — the opener block instructs the
-  // model to greet + ask newness — so recordIntentionPrompts must not even be
-  // CALLED there, regardless of what openIntentions holds.
-  it('never calls recordIntentionPrompts on the true opener turn, even with open intentions (TAC-332)', async () => {
+  // REVERSED by TAC-423, ruled 2026-09-22. This asserted the opposite until
+  // then: TAC-332 excluded the opener turn from recording because the opener
+  // scripted its own question about whether the guest was new, so the
+  // classifier could only return a correct negative or a false positive that
+  // closes a one-shot goal forever. The opener no longer scripts a question at
+  // all, and what that turn now asks IS the first intention line, so refusing
+  // to record it was refusing to record the one ask this turn reliably makes.
+  //
+  // Kept as an assertion rather than deleted, because the behaviour is
+  // deliberately changed and the next reader needs to see which way round it
+  // goes and why.
+  it('records on the true opener turn, like every other turn (TAC-423)', async () => {
     setUpSentPath()
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({ openIntentions: [UNDERSTAND], guest: qrScanGuest, recentMessages: [] }),
     )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent' })
-    expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
+    expect(recordIntentionPromptsMock).toHaveBeenCalled()
+    // The offered set is the rendered one, not ctx.openIntentions widened.
+    expect(recordIntentionPromptsMock.mock.calls[0][0]).toMatchObject({
+      openIntentions: [UNDERSTAND],
+    })
   })
 
-  // Same qr_scan guest, but NOT the opener turn (recentMessages non-empty) —
-  // confirms the gate is specific to the true first turn, not qr_scan
-  // guests generally.
+  // The same qr_scan guest past the opener turn. Both turns record now, so
+  // this no longer distinguishes the two; it stays because it is the case the
+  // suppression never covered, and losing it would leave nothing asserting
+  // that an ordinary qr_scan turn records.
   it('still calls recordIntentionPrompts for a qr_scan guest past the opener turn', async () => {
     setUpSentPath()
     buildRuntimeContextMock.mockResolvedValue(
@@ -1691,10 +1703,11 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
     expect(opts.renderedIntentions).toEqual([])
   })
 
-  // TAC-332's opener guard now applies at WRITE time. A queued opener draft
-  // stores nothing, so the dispatch path inherits the guard without having to
-  // re-derive "was this the opener" from a runtime context it does not hold.
-  it('stores nothing on the true opener turn of a qr_scan guest', async () => {
+  // REVERSED by TAC-423, the write-time half of the change above. A queued
+  // opener draft now STORES its rendered set, so an operator who approves it
+  // records the ask the auto-send path records. Both halves move together
+  // because both read one hoisted value in handle-inbound.ts.
+  it('stores the rendered set on the true opener turn of a qr_scan guest (TAC-423)', async () => {
     setUpQueue()
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
@@ -1716,7 +1729,7 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
     await handleInbound(INBOUND_ID)
 
     const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
-    expect(opts.renderedIntentions).toEqual([])
+    expect(opts.renderedIntentions).toEqual([UNDERSTAND])
   })
 })
 

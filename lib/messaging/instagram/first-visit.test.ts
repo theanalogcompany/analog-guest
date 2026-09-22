@@ -29,7 +29,7 @@
 //
 // TAC-495: the opener the gate turns on now has an Instagram variant, and this
 // file used to prove only that the gate fires, which meant an Instagram guest
-// got the SMS opener ("first message on this number ... who they're texting").
+// got the SMS opener ("first message on this number ...").
 // The last block below goes on from the same saved rows to the channel the
 // prompt copy is chosen by (resolveConversationChannel, fed exactly what
 // buildRuntimeContext feeds it) and the opener that channel renders. A
@@ -185,7 +185,7 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
     const channel = channelFor(guest, message)
     expect(channel).toBe('text')
     expect(openerRendered(channel)).toContain(
-      "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words.",
+      "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it.",
     )
   })
 })

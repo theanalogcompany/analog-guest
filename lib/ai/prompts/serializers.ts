@@ -1193,22 +1193,70 @@ function formatMechanicEligibility(
 // "take the one listed first", is what makes that order mean something to the
 // model. Without it the ranking ruled on the ticket (event-armed intentions
 // first, because they perish) would be decorative.
-// TAC-495: the first-visit opener, written out as the SMS copy (TAC-423's
-// wording, unchanged), with an Instagram variant made by swapping two phrases.
-// Only the channel claims move: "on this number" goes, and "texting" becomes
-// "messaging". Every presence phrase (scanned at pickup, already ordered, in
-// hand, coming in, what they got) is identical on both channels by ruling.
+// TAC-423 (2026-09-22 rewrite, approved). The opener states the SITUATION and
+// stops prescribing a question. What to ask is what the intention lines below
+// are for, and on this turn the first of them is understand_order, whose line
+// says exactly what the old opener's scripted question said. Two independently
+// authored instructions in one block with nothing reconciling them is the bug
+// this ticket is about; it had been fixed by pointing them at the same target
+// and is now fixed by there being one.
+//
+// Three things left with it, each ruled:
+//
+//   1. The thank-you is gone. Le Mil's caps replies at "one-liners or two
+//      sentences at most" and ## Length is the only authority on length, so a
+//      four-act prescription into a two-sentence budget means the model drops
+//      one, and the one it dropped was the warmth. Dropped here instead, so
+//      the reply is a hello and one question by design. Warmth is voice.
+//
+//   2. The identity clause is conditional on the guest's own message not
+//      naming a person, and says out loud that it beats the venue's voice
+//      setting. It has to: speakerFramingProse's `owner` branch renders "Do
+//      not name yourself unless the guest asks", this paragraph renders later
+//      in the user prompt, and it was already overriding that silently. Le
+//      Mil's prefill names the venue and not a person, so every ordinary scan
+//      takes the introduce branch.
+//
+//   3. Present tense. "have just ordered and collected it" replaces "have
+//      already ordered and have it in hand ... what it was". The recency sits
+//      on the ORDER, never on the guest's whereabouts, so R1's "without
+//      assuming they're still on-site" carve-out is untouched: that carve-out
+//      exists because the agent once told a guest who had left that the
+//      password was on the board. The tense matters beyond reading well.
+//      extract-reported-order.ts reads a report with no timing cue as one
+//      about today, dates it to venue-local noon and records it loosely, and
+//      a loose visit blocks the post-visit followup ladder outright. This
+//      wording invites an answer that carries a now-cue. It cannot guarantee
+//      one, which is why the same ticket also taught the extractor that a
+//      scan-day report is a receipt.
+//
+// Both clauses that used to sit after the question are gone, because the
+// paragraph rendered directly beneath now says both: "take the one listed
+// first, and only that one", and "Asking never changes what the reply is
+// about ... the question goes at the end, in one short line, or not at all."
+// The second of them was also the deadlock sentence TAC-436 deleted from that
+// paragraph, surviving here in different words and so invisible to the canary
+// guarding it. Consequence, ruled rather than inherited: a guest who scans AND
+// asks something now gets their answer plus one short question, where before
+// the opener held the question back. serializers.test.ts carries a canary on
+// this paragraph's own dropped wording, since the existing one could not see
+// it.
+//
+// TAC-495: the SMS copy is this string with no substitutions, so it is
+// byte-identical by construction; the Instagram variant swaps ONE phrase, down
+// from two. The old second swap existed only to turn "who they're texting"
+// into "who they're messaging", and "who they've reached" is true on both
+// channels, so it is deleted. Every presence phrase (scanned at pickup, just
+// ordered and collected) is identical on both channels by ruling.
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
-// at load, which is what makes TAC-423's pending rewrite of this paragraph
-// break loudly here instead of leaving the two channels out of step.
+// at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [
     { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
-    { from: "let them know who they're texting,", to: "let them know who they're messaging," },
   ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 

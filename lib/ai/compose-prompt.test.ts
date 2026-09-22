@@ -242,7 +242,7 @@ const SENDBLUE_R5 =
 const SENDBLUE_R32 =
   "- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation."
 const SENDBLUE_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back."
 const FIRST_TOUCH_SIGNAL =
   "This is the guest's first message, sent after they scanned your venue's QR sign."
 const SENDBLUE_NAMED_PERSON =
@@ -276,7 +276,7 @@ const SENDBLUE_CASUAL_FORMALITY =
 const INSTAGRAM_CASUAL_FORMALITY =
   'casual — Use contractions; lowercase starts are fine; write the way you would message a friend.'
 const INSTAGRAM_OPENER =
-  "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back."
 
 function firstTouchInput(overrides: Partial<GenerateMessageInput> = {}): GenerateMessageInput {
   return makeInput({

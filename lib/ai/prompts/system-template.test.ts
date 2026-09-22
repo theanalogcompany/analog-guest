@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.59.0 (TAC-484: correct a challenged message, do not invent a reason for it)', () => {
-    expect(PROMPT_VERSION).toBe('v1.59.0')
+  it('is v1.60.0 (TAC-423: the first-visit opener states the situation, and asks nothing itself)', () => {
+    expect(PROMPT_VERSION).toBe('v1.60.0')
   })
 })
 
@@ -1806,7 +1806,7 @@ describe('UNIVERSAL_RULES_DISPLAY — channel variants are named on the rail (TA
   })
 })
 
-// TAC-513 (v1.58.0). The `# Cancellations` block.
+// TAC-513 (v1.60.0). The `# Cancellations` block.
 //
 // Every assertion here pins a CONTIGUOUS clause, never disjoint fragments.
 // TAC-409 is the recorded reason: its first version of an equivalent test
