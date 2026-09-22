@@ -108,7 +108,7 @@ function unverifiedUrlConstraint(urls: readonly string[]): string {
 // JSON Schema; without this instruction Sonnet defaults to a 1–10 confidence
 // scale and returns e.g. 9 instead of 0.9, which then fails the [0,1] refine
 // check and rejects the entire structured-output response.
-const VOICE_FIDELITY_INSTRUCTION = `# Voice fidelity self-assessment (output field)
+export const VOICE_FIDELITY_INSTRUCTION = `# Voice fidelity self-assessment (output field)
 voiceFidelity: a DECIMAL number between 0.0 and 1.0 (NOT a 1-10 score).
   0.0 = does not match the venue's voice at all
   0.5 = generic but acceptable, lacks distinctive voice markers
