@@ -53,10 +53,14 @@ import { loadInboundQuestion } from './pending-question'
 /**
  * Whether the timeout processor actually sends holding messages.
  *
- * OFF as of TAC-484 (see the module header). Rolling this back is a one-line
- * flip: nothing else has to move, because everything below this point was
- * already the mechanism — arming the clock (stages.ts), claiming a card, and
- * generating the message. Mirrors
+ * OFF as of TAC-484 (see the module header). Flipping this constant
+ * re-enables the PROCESSOR, and that part is a one-line change. It does not
+ * restore the pre-TAC-484 behaviour, and the docstring used to claim it did:
+ * what may arm the clock changed in the same ticket (stages.ts now requires a
+ * self-reported gap on an inbound that reads as a question), so a guest
+ * holding a backstop-caught card can no longer get a clock at all, including
+ * for a later genuine gap, because anyKnowledgeGapCard suppresses the arm.
+ * Restoring the old behaviour means reverting that too. Mirrors
  * lib/messaging/instagram/agent-gate.ts's INSTAGRAM_AGENT_REPLIES_ENABLED
  * shape: a named constant plus an `enabled` parameter on the function it
  * gates, so tests can still exercise the send path explicitly without

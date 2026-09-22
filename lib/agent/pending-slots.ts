@@ -596,6 +596,14 @@ export const KNOWLEDGE_GAP_CARD_REVIEW_REASONS = [
  * degrades to pre-TAC-308 behavior rather than to something worse. Closing it
  * needs a column, which the ticket ruled out.
  *
+ * TAC-484 WIDENS that residual for a BACKSTOP-caught comp specifically. That
+ * card can no longer arm a clock at all, so it is unrecognized from creation
+ * rather than from the moment a clock fires. The consequences are the same two
+ * as before, just reached earlier: findPendingQuestion's filter matches
+ * neither leg, and anyKnowledgeGapCard reads false. Inert while the holding
+ * message is disabled; it is written down because the window widened, not
+ * because the behaviour changed.
+ *
  * TAC-350: the review_reason leg checks BOTH `knowledge_gap` (self-reported)
  * and `knowledge_gap_backstop` (independently caught) — a card protected by
  * the backstop trigger must get identical eviction protection to one the

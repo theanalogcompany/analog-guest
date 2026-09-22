@@ -176,7 +176,12 @@ describe('findPendingQuestion — the linked inbound must read as a question (TA
       data: {
         id: 'card-1',
         reply_to_message_id: 'inbound-1',
-        pending_until: '2026-09-18T15:47:37Z',
+        // NULL, because TAC-484 stopped a backstop catch arming the clock at
+        // all. This fixture carried a timestamp until code review: harmless to
+        // the assertion, but a row state the same ticket made unreachable, and
+        // a fixture modelling an impossible row is what migration 046's entry
+        // is about.
+        pending_until: null,
         review_reason: 'knowledge_gap_backstop',
       },
       error: null,

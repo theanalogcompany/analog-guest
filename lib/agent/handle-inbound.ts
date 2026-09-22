@@ -199,9 +199,21 @@ async function persistGenerationFailureCard(
     }
     const existingId = slotDecision.action === 'regen' ? slotDecision.draftId : null
 
-    // Same clock rule the gate applies: arm a new deadline only when no
-    // knowledge-gap card sits in EITHER slot, so a crash can't push out a
-    // deadline that's already running or start a second holding message.
+    // Arm a new deadline only when no knowledge-gap card sits in EITHER slot,
+    // so a crash can't push out a deadline that's already running or start a
+    // second holding message.
+    //
+    // TAC-484: this is NO LONGER the same rule the gate applies. The gate is
+    // now strictly narrower (knowledgeGapFired AND the inbound reads as a
+    // question AND no gap card in either slot); this site applies only the
+    // last of those three, so a crash on a STATEMENT inbound still arms a
+    // clock where the gate would not. Left alone deliberately rather than
+    // silently: the ruling is about the holding message, that mechanism is
+    // disabled, and if it is ever re-enabled loadInboundQuestion is a second
+    // gate that returns null for a statement, so the card counts `invalid`
+    // and the clock is cleared without a message going out. Narrowing this
+    // site to match belongs with whichever ticket re-enables the holding
+    // message, where the behaviour can actually be observed.
     const pendingUntil = anyKnowledgeGapCard(pendingRows)
       ? undefined
       : new Date(Date.now() + KNOWLEDGE_GAP_WINDOW_MS)

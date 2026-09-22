@@ -15,8 +15,12 @@ describe('looksLikeQuestion — positive (reads as a question)', () => {
     'any chance you have gluten free options',
     'Was that today or yesterday',
     'Were you open on Labor Day',
-    // A mid-sentence question mark is caught by the literal "?" check even
-    // with no recognized opener — confirms the two checks are OR'd.
+    // A genuinely MID-SENTENCE question mark, with no recognized opener.
+    // Code review found the fixture that used to sit here ('not sure, does it
+    // matter?') put the "?" at the END, so `includes` narrowed to `endsWith`
+    // survived while the comment claimed this exact property. The repo's own
+    // "test whose stated rationale was never true" pattern.
+    'the matcha, is it ceremonial? i will be in at 3',
     'not sure, does it matter?',
   ]
 
@@ -36,6 +40,11 @@ describe('looksLikeQuestion — negative (does not read as a question)', () => {
     'that was amazing',
     'see you tomorrow',
     'sounds good',
+    // The apostrophe in the first-word regex is load-bearing. Drop it and the
+    // first word here is "can", which IS in INTERROGATIVE_OPENERS, so a plain
+    // statement reads as a question. Found by a surviving mutant in review.
+    "can't wait to try it",
+    "won't be in till late",
     '',
     '   ',
   ]

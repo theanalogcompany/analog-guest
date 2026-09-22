@@ -222,6 +222,7 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r35 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R35')
     expect(r35).toBeDefined()
     expect(r35?.summary).toContain('say plainly what is actually true')
+    expect(r35?.summary).toContain('If the earlier message was wrong, say so and stop')
     expect(r35?.summary).toContain('If it was right, restate the fact plainly')
     expect(SYSTEM_TEMPLATE).toContain(
       'When a guest questions or pushes back on something you said',
