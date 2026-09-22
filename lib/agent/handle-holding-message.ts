@@ -50,6 +50,7 @@ import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult, PendingQuestion } from '@/lib/ai'
+import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import type { RuntimeContext } from './types'
 
 /**
@@ -487,9 +488,18 @@ async function tryGenerateHolding(
     groundingBackstop,
     { status: 'skipped' },
     prosePromiseBackstop,
+    // TAC-513: see handle-inbound.ts for why the resolution is RECOMPUTED on a
+    // throw rather than assumed to be 'none'. `resolveCancellation` is pure and
+    // cannot throw, so it answers the same here as it did inside the stage.
     cancellationSettled.status === 'fulfilled'
       ? cancellationSettled.value
-      : { resolution: { status: 'none' }, claim: 'check_failed' },
+      : {
+          resolution: resolveCancellation(
+            gen.result.cancelsCommitmentId,
+            ctx.activeCommitments,
+          ),
+          claim: 'check_failed',
+        },
   )
   if (approval.action !== 'send') {
     console.warn(

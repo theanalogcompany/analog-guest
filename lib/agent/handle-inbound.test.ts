@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 
 // ./stages pulls in @/lib/rag → voyageai, whose ESM build trips vitest's
 // directory-import resolver at module load. See CLAUDE.md "Module split for
@@ -760,6 +761,11 @@ function successResult() {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    // TAC-513: REQUIRED on GenerateMessageResult, so a fixture omitting it
+    // hands every test in this file `undefined` where production always has a
+    // string. `resolveCancellation` reads both as "cancels nothing", so the
+    // omission is invisible until a test means to exercise a real id.
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.9],
     attemptHistory: [],
@@ -1855,5 +1861,148 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
     expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'context_build' }))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-513: the cancellation reaches the persist layer
+// ---------------------------------------------------------------------------
+//
+// Every one of these is here because a mutant survived without it. The gate,
+// the resolver, the CAS helper and the dispatch step were all covered; the
+// WIRING between them was not, and a feature that is correct everywhere except
+// where its pieces are joined is a feature that does not work.
+//
+// This is the repo's own recorded failure twice over: TAC-476 ("nothing tested
+// the page's wiring INTO it") and TAC-385 ("the suite proved fixture-to-
+// recorder plumbing, not row-to-recorder").
+describe('handleInbound — cancellation carrier (TAC-513)', () => {
+  const TONIC: ActiveCommitment = {
+    id: '9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f',
+    type: 'comp',
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open',
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: new Date().toISOString(),
+  }
+
+  // Kills the mutant that replaces the stage call with an inline clean result.
+  // Both sibling backstops pin their own invocation this way; this one did not,
+  // so the check could be disconnected from the orchestrator entirely with the
+  // whole suite green.
+  it('calls verifyCancellationClaimStage once per inbound', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-c1', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(verifyCancellationClaimStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  // Kills the mutant that drops `pendingCancellation` from the persist options.
+  // Under it the gate resolves the cancellation correctly and the orchestrator
+  // throws it away: messages.pending_cancellation is NULL, the operator
+  // approves a card reading "that one's off", step 7b sees null, and the comp
+  // stays open while the guest has been told it is gone. That is the
+  // 2026-09-21 incident reproduced exactly, which is what this branch exists
+  // to stop.
+  it('passes the resolved cancellation into the persist options', async () => {
+    const pendingCancellation = { commitmentId: TONIC.id }
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), cancelsCommitmentId: TONIC.id },
+    })
+    verifyCancellationClaimStageMock.mockResolvedValueOnce({
+      resolution: { status: 'resolved', cancellation: pendingCancellation, commitment: TONIC },
+      claim: 'skipped',
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED],
+      primaryTrigger: APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+      pendingCancellation,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-c1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledTimes(1)
+    const [, , , , options] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    expect(options.pendingCancellation).toEqual(pendingCancellation)
+  })
+
+  // The degrade branch, and the reason it RECOMPUTES rather than assuming.
+  // `resolveCancellation` is pure, so on an unexpected throw the orchestrator
+  // can still answer the question correctly. Assuming `{ status: 'none' }`
+  // instead would discard a resolvable id and hand the operator a card saying
+  // the check did not run, with no carrier behind text that says a comp is off.
+  it('recomputes a RESOLVED resolution when the stage unexpectedly throws', async () => {
+    buildRuntimeContextMock.mockResolvedValue(makeCtx({ activeCommitments: [TONIC] }))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), cancelsCommitmentId: TONIC.id },
+    })
+    verifyCancellationClaimStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED],
+      primaryTrigger: APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-c2',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(cancellationArg).toEqual({
+      resolution: { status: 'resolved', cancellation: { commitmentId: TONIC.id }, commitment: TONIC },
+      claim: 'check_failed',
+    })
+  })
+
+  // The other direction, and it is why the degrade is not simply 'unresolved'.
+  // On the ordinary turn the field is '', so assuming unresolved would fire
+  // trigger 14 and hold a reply that says nothing about a cancellation, under
+  // copy telling the operator it cancels something.
+  it('recomputes NONE on a throw when the reply cancels nothing', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    verifyCancellationClaimStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED],
+      primaryTrigger: APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-c3',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(cancellationArg).toEqual({ resolution: { status: 'none' }, claim: 'check_failed' })
   })
 })

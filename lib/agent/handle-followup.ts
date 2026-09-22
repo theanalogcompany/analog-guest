@@ -48,6 +48,7 @@ import type {
   FollowupTrigger,
   RuntimeContext,
 } from './types'
+import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 
 /**
  * TAC-394: report a followup draft that had nowhere to go.
@@ -615,16 +616,26 @@ export async function handleFollowup(input: {
       prosePromiseSettled.status === 'fulfilled'
         ? prosePromiseSettled.value
         : { status: 'check_failed' }
-    // TAC-513: an unexpected THROW degrades to check_failed with an unresolved
-    // resolution, matching the two fail-closed stages above. Deliberately NOT
-    // to `{ status: 'none' }`: the resolution is pure and cannot throw, so
-    // reaching here means something structurally unexpected happened, and
-    // "this reply cancels nothing" is the one thing we must not assume on the
-    // path whose whole subject is a reply saying it does.
+    // TAC-513: an unexpected THROW degrades to check_failed, and the resolution
+    // is RECOMPUTED rather than assumed. `resolveCancellation` is pure, takes
+    // no I/O and cannot throw, so it gives the same answer here it gave inside
+    // the stage; assuming `{ status: 'none' }` instead would discard a
+    // resolvable id and hand the operator a card saying the check did not run,
+    // with no carrier behind text that tells the guest a comp is off. That is
+    // this ticket's own incident with an approval on it. Assuming `unresolved`
+    // is wrong in the other direction: on the common turn the field is '', and
+    // trigger 14 would then hold an ordinary reply under copy claiming it
+    // cancels something.
     const cancellationBackstop: CancellationBackstopResult =
       cancellationSettled.status === 'fulfilled'
         ? cancellationSettled.value
-        : { resolution: { status: 'none' }, claim: 'check_failed' }
+        : {
+            resolution: resolveCancellation(
+              gen.result.cancelsCommitmentId,
+              ctx.activeCommitments,
+            ),
+            claim: 'check_failed',
+          }
 
     if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] followup grounding backstop caught an unverified claim', {
