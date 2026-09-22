@@ -402,6 +402,38 @@ describe('regenerateWithCritique — happy path', () => {
     )
   })
 
+  // TAC-502: same standing obligation, one ticket later. The playground is
+  // where an operator decides what a good reply looks like, so a false
+  // "ungrounded claim" warning on a reply that correctly names the medium the
+  // guest is on teaches exactly the wrong lesson — and this file was left
+  // behind by TAC-350 and TAC-366 both, which is why the field is required on
+  // VerifyGroundingInput rather than optional.
+  it("forwards the context's conversation channel to the grounding check", async () => {
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'too eager',
+    })
+    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationChannel: 'text' }),
+    )
+  })
+
+  it("forwards an instagram conversation's channel to the grounding check", async () => {
+    vi.mocked(buildRuntimeContext).mockResolvedValue({
+      ...baseCtx,
+      conversationChannel: 'instagram',
+    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'too eager',
+    })
+    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationChannel: 'instagram' }),
+    )
+  })
+
   // TAC-495: this file mirrors generateStage, and the channel is part of what
   // it mirrors. Without these, the Voices playground would regenerate an
   // Instagram guest's reply with the SMS copy and nobody would see why.

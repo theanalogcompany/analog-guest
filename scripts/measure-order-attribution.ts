@@ -464,6 +464,9 @@ async function runOneAttempt(
     knowledgeChunks: [],
     runtimeContext: genResult.data.userPrompt,
     isProactive: false,
+    // TAC-502: the same channel the generation above was built for, so the
+    // oracle reads this fixture exactly as production would.
+    conversationChannel: CHANNEL,
   })
 
   if (!verifyResult.ok) {

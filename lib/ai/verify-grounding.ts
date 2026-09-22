@@ -2,6 +2,7 @@ import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
 import { knowledgeChunksToProse, venueInfoToProse } from './prompts/serializers'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './types'
 
 // TAC-350. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
@@ -56,7 +57,23 @@ import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './ty
 // rendered prompt is byte-for-byte what v1.4.0 produced — the version moves
 // because the function can now render a prompt it never could before, and the
 // two populations must stay distinguishable in analytics.
-export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.5.0'
+// v1.6.0 (TAC-502): the conversation's own channel is now part of the source
+// material (`## Conversation channel`, rendered from
+// VerifyGroundingInput.conversationChannel), and one bullet is added to
+// "Do not flag:" for it. A reply describing the medium the guest is using
+// RIGHT NOW — "just text here", "this is the number", "message me here" — was
+// being flagged as an unsupported claim about the venue, because the only
+// contact facts the verifier held were `venue_info.contact`'s static list and
+// Le Mil's has no PUBLIC phone number in it. The guest was mid-text-conversation
+// while the check ruled that texting is not a documented way to reach the venue.
+// Scoped to PRESENT-TENSE self-reference only (ruled 2026-09-21, question 1): a
+// promise to use the channel again later is a future commitment and stays
+// checked, and a number, account or channel named for any OTHER purpose — one
+// to call, one for a friend who is not in this conversation — stays an ordinary
+// claim. That second boundary is TAC-501's defect, which this must not make
+// permissible. Both exclusions are written into the bullet rather than left as
+// a boundary nobody wrote down.
+export const VERIFY_GROUNDING_PROMPT_VERSION = 'v1.6.0'
 
 /**
  * TAC-367. Was 500, which this verifier had quietly outgrown: measured
@@ -102,6 +119,9 @@ Do not flag:
 - A reply that draws only on what the source material actually states, even if phrased differently.
 - A reply that says LESS than the source does. Leaving out detail the source contains is not an unsupported claim: if every fact the reply states is supported, the reply is grounded no matter how much it omits. Note the direction, because it is the opposite of point 3 above — point 3 is about a reply asserting MORE than the source states, which you check; a shorter, partial, or selective description asserts less, and is fine so long as it contradicts nothing the source states. A reply naming three of a drink's five ingredients has stated nothing unsupported.
 - Who the assistant is. The name the assistant speaks under, and that it works at this venue, are configured, not claimed — never flag a reply for saying who is speaking, including when the guest asked. This exempts identity only, never the facts inside it: a specific job title, shift, or responsibility the assistant claims for itself is checked exactly like any other claim, as is anything else it says about itself or the venue.
+- How the guest is reaching the venue RIGHT NOW. When a "## Conversation channel" section is present below, it states the medium this very exchange is happening on, and it is grounding exactly as much as a fact from the venue's own material. A reply describing that medium in the present tense — "just text here", "this is the number", "message me here", "you can reach me on this" — is supported by it, and is never flagged for being absent from the venue's contact details. The venue's listed contact methods are not the test for this: a venue can have no public phone number listed and still be in a text conversation with this guest, which is the situation, not a contradiction. This exempts a description of the CURRENT exchange and nothing else, and both exclusions matter:
+  - A promise to use the channel again LATER ("I'll text you when I hear back", "I'll message you here once it's in") is a future commitment, not a description of what is happening now, and is checked like any other claim.
+  - A phone number, account, or channel named for any purpose OTHER than describing this exchange — a number to call, a number to pass to a friend who is not in this conversation, an account to follow — is an ordinary claim and stays fully checked. A specific phone number written out in the reply is a fact about the venue and needs support like any other; this bullet never licenses one.
 - General conversation with no specific venue fact in it.
 - A reply that draws on the runtime context for this turn, when that section is present. It states what the assistant legitimately knew about this guest and this moment: the current date and time, whether the venue is open right now, what this guest can be offered, what has already been promised to them, what they have ordered before, what is known about them, and what was said earlier in the conversation. A claim supported there is grounded, exactly as much as one supported by the venue facts. Two specifics, because they are the ones most often got wrong:
   - The status line in the runtime context is the authority on whether the venue is open AT THIS MOMENT and when it next opens. A reply that says the venue is closed right now, or that names the next opening day and time from that line, is grounded. Do not flag it for lacking support elsewhere; the weekly hours table is not the source for a claim about right now, that line is.
@@ -146,6 +166,27 @@ const PROACTIVE_ADDENDUM = `This reply was NOT written in response to anything t
 
 One rule applies only here: a claim about something the GUEST did — that they visited, ordered something, brought a friend in, referred someone, or similar — is a specific, checkable fact and must be checked exactly like any other, never waved through as friendly conversational warmth. On an inbound reply, the guest's own message is what licenses a line like that; here there is none, so the assistant is the one asserting it, and it must be supported by the source material (a recorded visit, order, or referral) or flagged. "So glad you brought a friend in" with nothing in the source material recording a referral is exactly the claim this rule exists to catch.`
 
+/**
+ * TAC-502. What the conversation's channel means, as a FACT the verifier can
+ * ground a reply against.
+ *
+ * A total map, `satisfies Record<MessageChannel, string>`, so a third channel
+ * fails `tsc` here rather than silently rendering nothing and quietly
+ * restoring the false positive on that channel. Same convention as
+ * PUSH_POLICY and the channel-variants tables.
+ *
+ * Wording deliberately covers the phrasings each channel's own copy uses: the
+ * SMS prompt says "text" and "this number" (SYSTEM_TEMPLATE's R32 and the
+ * first-visit opener), the Instagram variant says "message" and never "DM"
+ * (TAC-495). The verifier has to recognise a reply written in either, so both
+ * spellings are named rather than left to inference.
+ */
+const CONVERSATION_CHANNEL_FACT = {
+  text: 'The guest is texting the venue RIGHT NOW, over SMS or iMessage, to the venue\'s own messaging number. This exchange is that conversation. A reply that calls it texting, or refers to "here" or "this number" as where the guest has reached the venue, is describing this fact.',
+  instagram:
+    'The guest is messaging the venue RIGHT NOW, through Instagram, to the venue\'s own Instagram account. This exchange is that conversation. A reply that calls it messaging or DMing, or refers to "here" as where the guest has reached the venue, is describing this fact.',
+} as const satisfies Record<MessageChannel, string>
+
 function buildSystemPrompt(isProactive: boolean): string {
   return isProactive ? `${SYSTEM_PROMPT}\n\n${PROACTIVE_ADDENDUM}` : SYSTEM_PROMPT
 }
@@ -168,6 +209,18 @@ function buildSourceMaterial(input: VerifyGroundingInput): string {
   // appended one).
   if (input.runtimeContext !== undefined && input.runtimeContext.trim().length > 0) {
     sections.push(`## Runtime context for this turn\n${input.runtimeContext}`)
+  }
+  // TAC-502: the conversation itself is evidence. Rendered only when the
+  // channel resolved — `null` means nobody could say which channel this is,
+  // and an exemption built on a guess is worse than no exemption, so the
+  // section is simply absent and a channel claim is checked as it was before
+  // this existed. Placed last so it sits next to the reply being judged; it is
+  // one line and the SYSTEM_PROMPT bullet names the heading, so its position
+  // carries no other weight.
+  if (input.conversationChannel !== null) {
+    sections.push(
+      `## Conversation channel\n${CONVERSATION_CHANNEL_FACT[input.conversationChannel]}`,
+    )
   }
   return sections.join('\n\n')
 }

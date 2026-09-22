@@ -2809,6 +2809,46 @@ describe('verifyGroundingStage (TAC-350)', () => {
     expect(call.replyBody).toBe('Le Mils Guest')
   })
 
+  // TAC-502. The stage's job here is to hand over `ctx.conversationChannel`
+  // unchanged, so the verifier can tell that a reply naming the medium the
+  // guest is on describes the live conversation rather than claiming a contact
+  // method the venue does not list. Mutation-verified triple, the same shape
+  // as the isProactive pair above: a hardcoded channel, or a dropped field,
+  // must fail one of these three.
+  it('passes the conversation channel through to the verifier', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx(), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBe('text')
+  })
+
+  it('passes an instagram conversation through as instagram, not the default', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx({ conversationChannel: 'instagram' }), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBe('instagram')
+  })
+
+  // An unresolved channel is handed over AS null rather than substituted.
+  // Deciding what null means is the verifier's (it renders no section and
+  // checks the claim as before); a stage that guessed 'text' here would
+  // manufacture the exemption on a turn nobody could place.
+  it('passes an unresolved channel through as null rather than substituting one', async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+    })
+    await verifyGroundingStage(inboundCtx({ conversationChannel: null }), makeGen())
+    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    expect(args.conversationChannel).toBeNull()
+  })
+
   it('passes ctx.knowledgeCorpus through to the verifier as knowledgeChunks', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,

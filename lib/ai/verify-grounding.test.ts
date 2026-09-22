@@ -62,6 +62,7 @@ describe('verifyGrounding', () => {
       knowledgeChunks: [],
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     expect(result.ok).toBe(true)
@@ -90,6 +91,7 @@ describe('verifyGrounding', () => {
       knowledgeChunks: [],
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     expect(result.ok).toBe(true)
@@ -114,6 +116,7 @@ describe('verifyGrounding', () => {
       knowledgeChunks: [],
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     expect(result.ok).toBe(true)
@@ -130,6 +133,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(result).toEqual({ ok: false, error: 'invalid_input' })
     expect(generateObjectMock).not.toHaveBeenCalled()
@@ -147,6 +151,7 @@ describe('verifyGrounding', () => {
       // knowledgeChunks omitted entirely
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
@@ -187,6 +192,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -226,6 +232,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -243,6 +250,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue] Blossom Tonic, honestly',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -263,6 +271,7 @@ describe('verifyGrounding', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
     const args = generateObjectMock.mock.calls[0][0] as { maxOutputTokens: number }
     expect(args.maxOutputTokens).toBe(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS)
@@ -279,6 +288,7 @@ describe('verifyGrounding', () => {
       knowledgeChunks: [],
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     expect(result.ok).toBe(false)
@@ -300,6 +310,7 @@ describe('verifyGrounding', () => {
       knowledgeChunks: [],
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
@@ -333,6 +344,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext,
       isProactive: false,
+      conversationChannel: 'text',
     })
     // Verbatim containment is the contract. If a future change summarizes or
     // slices this, the exact string stops appearing and this fails.
@@ -350,6 +362,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '   \n  ',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(promptFromCall()).not.toContain('## Runtime context for this turn')
   })
@@ -381,6 +394,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext,
       isProactive: false,
+      conversationChannel: 'text',
     })
 
     const prompt = promptFromCall()
@@ -404,6 +418,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
+      conversationChannel: 'text',
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('runtime context for this turn')
@@ -429,6 +444,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Visit history\n- [3 days ago] cortado',
       isProactive: false,
+      conversationChannel: 'text',
     })
     const schema = (generateObjectMock.mock.calls[0][0] as { schema: { shape: object } }).schema
     const keys = Object.keys(schema.shape)
@@ -448,6 +464,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
+      conversationChannel: 'text',
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('QUALIFIES')
@@ -463,6 +480,7 @@ describe('runtime context in the source material', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Recent conversation\n[venue, 1 day ago] the wifi password is hunter2',
       isProactive: false,
+      conversationChannel: 'text',
     })
     const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
     expect(system).toContain('[venue, ...]')
@@ -487,6 +505,7 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
+      conversationChannel: 'text',
     })
     return (generateObjectMock.mock.calls[0][0] as { system: string }).system
   }
@@ -549,7 +568,7 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
   // it true and is out of this ticket's ruled scope. What the pin actually buys
   // is that a rule change cannot ship without moving the version.
   it('pins the prompt version, so a rule change cannot ship silently', () => {
-    expect(VERIFY_GROUNDING_PROMPT_VERSION).toBe('v1.5.0')
+    expect(VERIFY_GROUNDING_PROMPT_VERSION).toBe('v1.6.0')
   })
 })
 
@@ -584,6 +603,7 @@ describe('TAC-376: isProactive (no guest message)', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
     expect(promptFromCall()).toContain('Guest\'s message: "is the oat milk vegan"')
   })
@@ -596,6 +616,7 @@ describe('TAC-376: isProactive (no guest message)', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: true,
+      conversationChannel: 'text',
     })
     const prompt = promptFromCall()
     expect(prompt).not.toContain('Guest\'s message: ""')
@@ -613,6 +634,7 @@ describe('TAC-376: isProactive (no guest message)', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: false,
+      conversationChannel: 'text',
     })
     // Pinned against a fixed independent snapshot of the addendum-free
     // prompt's closing sentence, so this fails if the addendum is ever
@@ -628,6 +650,7 @@ describe('TAC-376: isProactive (no guest message)', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: true,
+      conversationChannel: 'text',
     })
     expect(systemFromCall()).toContain('This reply was NOT written in response to anything the guest said')
   })
@@ -643,9 +666,137 @@ describe('TAC-376: isProactive (no guest message)', () => {
       venueInfo: makeVenueInfo(),
       runtimeContext: '',
       isProactive: true,
+      conversationChannel: 'text',
     })
     const system = systemFromCall()
     expect(system).toContain('a claim about something the GUEST did')
     expect(system).toContain('brought a friend in')
+  })
+})
+
+// TAC-502. The conversation's own channel is evidence: a reply describing the
+// medium the guest is using RIGHT NOW is not an unsupported claim about the
+// venue. Before this, the verifier held only `venue_info.contact`'s static
+// list, and Le Mil's has no PUBLIC phone number in it — correctly — so "just
+// text here, this is the number" read as a claim about a contact method the
+// venue does not have, while the guest was mid-text-conversation.
+//
+// SAME CAVEAT AS THE TAC-409 AND TAC-376 BLOCKS ABOVE: generateObject is
+// mocked, so every assertion here is about PROMPT CONTENT. None of it proves
+// the model obeys the bullet. That is measured separately, against a live
+// model, by scripts/measurement/channel-self-reference-replay.ts.
+describe('TAC-502: the conversation channel is grounding', () => {
+  function mockClean() {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+    })
+  }
+
+  async function callWith(conversationChannel: 'text' | 'instagram' | null) {
+    mockClean()
+    await verifyGrounding({
+      inboundBody: "how do i let you know when i'm on my way?",
+      replyBody: 'just text here 😊 this is the number',
+      venueInfo: makeVenueInfo(),
+      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      isProactive: false,
+      conversationChannel,
+    })
+    const call = generateObjectMock.mock.calls[0][0] as { system: string; prompt: string }
+    return call
+  }
+
+  it('renders the channel section, saying the guest is texting, for text', async () => {
+    const { prompt } = await callWith('text')
+    expect(prompt).toContain('## Conversation channel')
+    expect(prompt).toContain('The guest is texting the venue RIGHT NOW')
+    expect(prompt).toContain('this number')
+    // The Instagram fact must not be what a text conversation renders. Without
+    // this the two keys of CONVERSATION_CHANNEL_FACT could be swapped and both
+    // channels would still "render a channel section".
+    expect(prompt).not.toContain('through Instagram')
+  })
+
+  it('renders the channel section, saying the guest is messaging, for instagram', async () => {
+    const { prompt } = await callWith('instagram')
+    expect(prompt).toContain('## Conversation channel')
+    expect(prompt).toContain('The guest is messaging the venue RIGHT NOW')
+    expect(prompt).toContain('through Instagram')
+    // TAC-495: the Instagram copy never says "texting" or "this number", so
+    // neither may the fact the verifier reads it against.
+    expect(prompt).not.toContain('texting the venue')
+    expect(prompt).not.toContain('this number')
+  })
+
+  // The null branch is the conservative default, and it is the one a
+  // future "tidy" is most likely to break by giving the field a channel
+  // default. An exemption built on a guessed channel is worse than none.
+  it('omits the section entirely when the channel could not be resolved', async () => {
+    const { prompt } = await callWith(null)
+    expect(prompt).not.toContain('## Conversation channel')
+    expect(prompt).not.toContain('RIGHT NOW')
+    // Everything else the verifier is given is unaffected — this is an
+    // absent section, not a different prompt.
+    expect(prompt).toContain('## Runtime context for this turn')
+  })
+
+  it('tells the verifier that the channel section is grounding, on a par with venue facts', async () => {
+    const { system } = await callWith('text')
+    expect(system).toContain(
+      'When a "## Conversation channel" section is present below, it states the medium this very exchange is happening on, and it is grounding exactly as much as a fact from the venue\'s own material.',
+    )
+    // The specific reasoning the verifier produced in production, closed by
+    // name: it checked "is texting a documented contact method" against the
+    // contact list and flagged because the list has no phone.
+    expect(system).toContain(
+      'The venue\'s listed contact methods are not the test for this: a venue can have no public phone number listed and still be in a text conversation with this guest, which is the situation, not a contradiction.',
+    )
+  })
+
+  // Ruled 2026-09-21, question 1: present tense only. Pinned as ONE contiguous
+  // clause rather than as separate fragments — the TAC-409 lesson, where the
+  // meaning of a sentence was reversed while every asserted fragment survived.
+  it('scopes the exemption to the present tense, leaving a later promise checked', async () => {
+    const { system } = await callWith('text')
+    expect(system).toContain(
+      'A promise to use the channel again LATER ("I\'ll text you when I hear back", "I\'ll message you here once it\'s in") is a future commitment, not a description of what is happening now, and is checked like any other claim.',
+    )
+  })
+
+  // AC3. TAC-501's fabricated number must not become permissible, and this is
+  // the sentence that stops it. Same contiguous-clause pinning.
+  it('keeps a number named for any other purpose fully checked', async () => {
+    const { system } = await callWith('text')
+    expect(system).toContain(
+      'A phone number, account, or channel named for any purpose OTHER than describing this exchange — a number to call, a number to pass to a friend who is not in this conversation, an account to follow — is an ordinary claim and stays fully checked.',
+    )
+    expect(system).toContain(
+      'A specific phone number written out in the reply is a fact about the venue and needs support like any other; this bullet never licenses one.',
+    )
+  })
+
+  // Same structural check the TAC-409 block runs on its two bullets: a rule
+  // that reads as an exemption but sits outside the exemption list is a rule
+  // the model is being asked to apply in the wrong place.
+  it('places the bullet inside the "Do not flag:" list', async () => {
+    const { system } = await callWith('text')
+    const listStart = system.indexOf('Do not flag:')
+    const listEnd = system.indexOf('The runtime context section, the venue facts')
+    expect(listStart).toBeGreaterThan(-1)
+    expect(listEnd).toBeGreaterThan(listStart)
+    const at = system.indexOf('How the guest is reaching the venue RIGHT NOW')
+    expect(at).toBeGreaterThan(listStart)
+    expect(at).toBeLessThan(listEnd)
+  })
+
+  // The bullet is written to be read against the venue's own copy on each
+  // channel: SMS says "text" and "this number", Instagram says "message" and
+  // never "DM" (TAC-495). A verifier told only one spelling cannot recognise a
+  // reply written in the other.
+  it('names the phrasings each channel\'s own copy actually uses', async () => {
+    const { system } = await callWith('text')
+    expect(system).toContain(
+      '"just text here", "this is the number", "message me here", "you can reach me on this"',
+    )
   })
 })

@@ -463,6 +463,13 @@ export async function regenerateWithCritique(
       // loop is where an operator decides what good looks like, so a
       // spurious warning actively teaches the wrong lesson.
       runtimeContext: gen.data.userPrompt,
+      // TAC-502: mirrored from verifyGroundingStage, same standing obligation
+      // this file's header carries. Without it the playground shows the
+      // operator a false "ungrounded claim" warning on any reply that names
+      // the medium the guest is on — and this is the one screen where an
+      // operator decides what good looks like, so a spurious warning here
+      // teaches the wrong lesson about a reply that was correct.
+      conversationChannel: ctx.conversationChannel,
     })
     // TAC-367 was deliberately NOT mirrored here, and that is a decision
     // rather than an oversight. The mirror obligation in this file's header

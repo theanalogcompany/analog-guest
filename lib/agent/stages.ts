@@ -1118,7 +1118,10 @@ const UNGROUNDED_CLAIMS_BY_STATUS = {
  * generator actually had."
  */
 export async function verifyGroundingStage(
-  ctx: Pick<RuntimeContext, 'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus'>,
+  ctx: Pick<
+    RuntimeContext,
+    'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus' | 'conversationChannel'
+  >,
   generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body' | 'userPrompt'>,
 ): Promise<GroundingBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
@@ -1147,6 +1150,13 @@ export async function verifyGroundingStage(
     // that against Le Mil's live config. (## Operator instruction renders on
     // the followup path too, since TAC-376, so it can now appear here.)
     runtimeContext: generation.userPrompt,
+    // TAC-502: the conversation's own channel, straight off the context.
+    // Without it the verifier holds only `venue_info.contact`'s static list
+    // and flags "just text here, this is the number" as an unsupported claim
+    // while the guest is mid-text-conversation. Not re-resolved here: the
+    // value the generator's copy was chosen from is the value the check must
+    // judge against, the same identity rule runtimeContext above carries.
+    conversationChannel: ctx.conversationChannel,
   }
 
   let r = await verifyGrounding(verifyInput)
