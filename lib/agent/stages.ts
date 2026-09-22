@@ -48,7 +48,7 @@ import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 // TAC-513: imported BY PATH for the same reason as the two lines above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
-import { resolveOpenState } from '@/lib/schemas'
+import { resolveVenueOpenState } from './venue-open-state'
 import {
   type CancellationResolution,
   type PendingCancellation,
@@ -2910,11 +2910,21 @@ export function buildAiRuntime(
     // hours (ctx.venue.venueInfo) and the validated timezone. `venueInfoToProse`
     // sees the hours but not the clock; `runtimeToProse` sees the clock but not
     // the hours. Leaving the join to the model is what produced the bug.
+    // TAC-363: the verdict itself now comes from resolveVenueOpenState, shared
+    // with arrival capture and the approval gate so the three cannot drift.
+    // `timezoneSubstituted` still guards the RENDER for the reason it always
+    // did — `computeToday` above is handed FALLBACK_TIMEZONE when the venue's
+    // own is unusable, and a verdict resolved against a zone the venue does not
+    // live in would be confidently wrong. The helper reaches the same answer on
+    // its own (the venue's real timezone makes `venueLocalNow` throw, which
+    // resolves to `unknown`), so this branch is belt and braces rather than the
+    // only thing standing between a bad zone and a wrong verdict; a test pins
+    // the equivalence.
     today: {
       ...computeToday(timezone, now),
       openState: timezoneSubstituted
         ? { state: 'unknown' }
-        : resolveOpenState(ctx.venue.venueInfo.hours, timezone, now),
+        : resolveVenueOpenState(ctx.venue, now),
     },
     recentMessages: ctx.recentMessages,
     mechanics: ctx.mechanics,
