@@ -6,6 +6,7 @@ export { verifyGrounding } from './verify-grounding'
 export { verifyMechanicOffer } from './verify-mechanic-offer'
 export { verifyCancellationClaim } from './verify-cancellation-claim'
 export { verifyProsePromise } from './verify-prose-promise'
+export { verifyClosedVenueArrival } from './verify-closed-venue-arrival'
 
 export type {
   AIResult,
@@ -34,5 +35,7 @@ export type {
   VerifyMechanicOfferResult,
   VerifyProsePromiseInput,
   VerifyProsePromiseResult,
+  VerifyClosedVenueArrivalInput,
+  VerifyClosedVenueArrivalResult,
   VoiceCorpusChunk,
 } from './types'

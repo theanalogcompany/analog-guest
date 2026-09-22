@@ -842,6 +842,26 @@ export type VerifyProsePromiseInput = {
   replyBody: string
 }
 
+/**
+ * TAC-363: the reply about to be sent, and nothing else. Whether the text
+ * confirms an arrival is answerable from the text alone; whether the venue is
+ * closed is the CALLER's question and is answered from the venue's hours
+ * before this is ever called.
+ */
+export type VerifyClosedVenueArrivalInput = {
+  replyBody: string
+}
+
+export type VerifyClosedVenueArrivalResult = {
+  /**
+   * True when a guest reading this reply would set off for the venue now.
+   * The caller only ever asks while the venue is closed, so true means the
+   * reply is sending someone to a locked door.
+   */
+  confirmsArrival: boolean
+  promptVersion: string
+}
+
 export type VerifyProsePromiseResult = {
   /** True when the reply commits the venue to giving this guest something of value. */
   promisesSomething: boolean
