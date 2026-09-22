@@ -531,7 +531,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.58.0',
+        promptVersion: 'v1.59.0',
         crisisSafety: true,
       },
     })
@@ -549,7 +549,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.58.0',
+        promptVersion: 'v1.59.0',
         crisisSafety: false,
       },
     })
@@ -2092,6 +2092,58 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
   })
 })
 
+// TAC-484: a self-reported gap only arms the clock when the inbound it
+// replies to actually reads as a question. The card still queues and is
+// still protected either way (isGapTurn is untouched) — only the "the venue
+// still owes them an answer" clock is gated. The 2026-09-18 incident's own
+// inbound is the fixture for the negative case.
+describe('applyApprovalPolicyStage — clock requires an actual question (TAC-484)', () => {
+  beforeEach(() => {
+    pendingDraftMaybeSingleMock.mockReset()
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+  })
+
+  const inboundCtx = (body: string) =>
+    makeCtx({
+      currentMessage: {
+        id: 'inbound-1',
+        body,
+        providerMessageId: 'p1',
+        receivedAt: new Date(),
+        channel: 'text',
+      },
+      classification: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'test',
+        crisisSafety: false,
+      },
+    })
+
+  it('still queues and blanks, but does not arm the clock, when the guest reported a gap against a statement', async () => {
+    const decision = await applyApprovalPolicyStage(
+      // The literal TAC-484 incident inbound.
+      inboundCtx('oh and i got the pink panther yesterday'),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
+    expect(decision.blankBody).toBe(true)
+    expect(decision.pendingUntil).toBeUndefined()
+  })
+
+  it('arms the clock when the same self-reported gap replies to an actual question', async () => {
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx('what grade is the matcha?'),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.pendingUntil).toBeInstanceOf(Date)
+  })
+})
+
 describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)', () => {
   beforeEach(() => {
     pendingDraftMaybeSingleMock.mockReset()
@@ -2115,13 +2167,20 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       },
     })
 
-  // TAC-301 part 1.5 REVERSED the blanking half of this, deliberately. The
-  // clock still arms (the guest is still owed an answer); the body now
-  // SURVIVES. On the backstop path the model never admitted to guessing —
-  // the flag is a second opinion, and on 2026-09-13 it was wrong twice in
-  // the first two minutes after deploy, on replies that were correct.
-  // Blanking destroyed a correct message and left the operator an empty card.
-  it('queues and arms the clock but KEEPS the body when the backstop catches a claim', async () => {
+  // TAC-301 part 1.5 REVERSED the blanking half of this, deliberately: the
+  // body SURVIVES on the backstop path, because the model never admitted to
+  // guessing and the flag is a second opinion that on 2026-09-13 was wrong
+  // twice in the first two minutes after deploy, on replies that were
+  // correct. Blanking destroyed a correct message and left the operator an
+  // empty card.
+  //
+  // TAC-484 REVERSED the clock half. A caught fabrication means "do not send
+  // this," not "we owe them an answer" — the model never admitted to a gap,
+  // so there is nothing to hold on. Arming the clock here produced exactly
+  // the 2026-09-18 incident: a holding message asserting a wait that didn't
+  // exist, defended with two invented reasons across the guest's next three
+  // replies.
+  it('queues and KEEPS the body, but does not arm the clock, when the backstop catches a claim', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -2131,7 +2190,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
-    expect(decision.pendingUntil).toBeInstanceOf(Date)
+    expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
   })
 
@@ -2388,7 +2447,13 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
 
   // The asymmetry is the whole point of the change, so pin both sides of it
   // in one place: identical gate call, only the SOURCE of the gap differs.
-  it('blanks a self-reported gap but not a backstop catch, on otherwise identical input', async () => {
+  // TAC-484 adds a second asymmetry on top: the clock now arms ONLY on the
+  // self-reported side, because a backstop catch means "do not send this,"
+  // not "we owe them an answer" — the inbound behind it (see inboundCtx
+  // above) is a real question either way, so this pins the SOURCE asymmetry
+  // specifically, not the question-detection gate (that's looks-like-
+  // question.test.ts and the replay test).
+  it('blanks and arms the clock only for a self-reported gap, never for a backstop catch, on otherwise identical input', async () => {
     const selfReported = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: true }),
@@ -2403,9 +2468,8 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     }
     expect(selfReported.blankBody).toBe(true)
     expect(backstop.blankBody).toBe(false)
-    // Both still arm the clock — a guest owed an answer is owed one either way.
     expect(selfReported.pendingUntil).toBeInstanceOf(Date)
-    expect(backstop.pendingUntil).toBeInstanceOf(Date)
+    expect(backstop.pendingUntil).toBeUndefined()
   })
 
   it('sends normally when there is no backstop finding (null)', async () => {
@@ -2430,7 +2494,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
   // the gate itself must not assume that — it should handle whatever it's
   // given. commitment_type_gated still outranks the backstop, same as it
   // outranks the self-reported trigger.
-  it('yields the operator label to commitment_type_gated when both fire', async () => {
+  it('yields the operator label to commitment_type_gated when both fire, and arms no clock (backstop source)', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({
@@ -2443,7 +2507,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
-    expect(decision.pendingUntil).toBeInstanceOf(Date)
+    // TAC-484: the label and the clock are independent, and this turn's gap
+    // came from the backstop, not a self-report, so no clock arms — the
+    // label winning to COMMITMENT_TYPE_GATED doesn't change that.
+    expect(decision.pendingUntil).toBeUndefined()
     // TAC-301 part 1.5: no longer blanked. pending_commitment now rides along
     // WITH a visible body, which is the safe combination — TAC-309's concern
     // was an invisible commitment on a blank card the operator would

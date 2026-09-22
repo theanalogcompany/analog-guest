@@ -553,8 +553,8 @@ export const TUNABLES = [
     category: 'timing',
     source: 'lib/agent/stages.ts',
     description:
-      'How long an operator has to answer a knowledge-gap card before the guest gets a holding message. A FLOOR, not an SLA: the timer is an external HTTP cron (cron-job.org) checking every minute, so the message lands within ~6 minutes of the floor. Never fires early.',
-    relatedTickets: ['TAC-308'],
+      'DORMANT as of TAC-484: no holding message is sent by anything, so this value currently has no guest-facing effect. It is still written to messages.pending_until by a self-reported gap on an inbound that reads as a question, and it still bounds nothing else. What it meant, and will mean again if the holding message returns: how long an operator has to answer a knowledge-gap card before the guest gets one. A FLOOR, not an SLA: the timer was an external HTTP cron (cron-job.org) checking every minute, so the message landed within ~6 minutes of the floor, and never early.',
+    relatedTickets: ['TAC-308', 'TAC-484'],
   },
   {
     name: 'max_output_tokens',

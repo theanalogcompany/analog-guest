@@ -367,16 +367,21 @@ export type PendingQuestion = {
   askedAt: Date
   /**
    * What this generation is doing relative to the outstanding question.
-   *   'outstanding'       — replying to something else; guest told nothing yet
-   *   'acknowledged'      — replying to something else; holding message sent
+   *   'outstanding'       — replying to something else; guest has been told
+   *                         nothing and will be told nothing automatically
    *   'writing_holding'   — THIS generation is the holding message
+   *
+   * TAC-484 removed 'acknowledged' ("holding message sent"). Nothing sends one
+   * now, so it was unreachable, and the boolean it was derived from
+   * (pending_until) had stopped meaning "a holding message was sent". TAC-491
+   * re-adds it with a marker the send actually writes.
    *
    * A fourth mode ('answering_after_holding') existed briefly for the
    * post-holding card regen; TAC-309 deleted that regen along with blank
    * cards, so the mode went with it rather than lingering as an unreachable
    * branch.
    */
-  mode: 'outstanding' | 'acknowledged' | 'writing_holding'
+  mode: 'outstanding' | 'writing_holding'
 }
 
 export type GenerateMessageInput = {

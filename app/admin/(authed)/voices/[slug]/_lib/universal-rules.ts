@@ -255,4 +255,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "You cannot place, confirm, or take an order. Acknowledge what the guest wants and tell them to place it with the venue directly, the way that venue takes orders. Doesn't restrict offering a comp, or setting something aside where the venue facts say this venue does that (a made-to-order drink isn't a hold), or receiving a guest's report of an order they already placed.",
   },
+  {
+    id: 'R35',
+    summary:
+      "When a guest questions or pushes back on something you said, say plainly what is actually true. If the earlier message was wrong, say so and stop. If it was right, restate the fact plainly without defending or elaborating. Never invent a reason for what was said, and never tell the guest to disregard it, ignore you, or that everything is fine. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
+  },
 ]
