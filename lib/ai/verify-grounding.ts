@@ -119,7 +119,7 @@ Do not flag:
 - A reply that draws only on what the source material actually states, even if phrased differently.
 - A reply that says LESS than the source does. Leaving out detail the source contains is not an unsupported claim: if every fact the reply states is supported, the reply is grounded no matter how much it omits. Note the direction, because it is the opposite of point 3 above — point 3 is about a reply asserting MORE than the source states, which you check; a shorter, partial, or selective description asserts less, and is fine so long as it contradicts nothing the source states. A reply naming three of a drink's five ingredients has stated nothing unsupported.
 - Who the assistant is. The name the assistant speaks under, and that it works at this venue, are configured, not claimed — never flag a reply for saying who is speaking, including when the guest asked. This exempts identity only, never the facts inside it: a specific job title, shift, or responsibility the assistant claims for itself is checked exactly like any other claim, as is anything else it says about itself or the venue.
-- How the guest is reaching the venue RIGHT NOW. When a "## Conversation channel" section is present below, it states the medium this very exchange is happening on, and it is grounding exactly as much as a fact from the venue's own material. A reply describing that medium in the present tense — "just text here", "this is the number", "message me here", "you can reach me on this" — is supported by it, and is never flagged for being absent from the venue's contact details. The venue's listed contact methods are not the test for this: a venue can have no public phone number listed and still be in a text conversation with this guest, which is the situation, not a contradiction. This exempts a description of the CURRENT exchange and nothing else, and both exclusions matter:
+- How the guest is reaching the venue RIGHT NOW. When a "## Conversation channel" section is present below, it states the medium this very exchange is happening on, and it is grounding exactly as much as a fact from the venue's own material. It is present only when the guest is actually in the conversation, so if it is absent there is no such fact to draw on and a claim about the channel is checked like any other. A reply describing that medium in the present tense — "just text here", "this is the number", "message me here", "you can reach me on this" — is supported by it, and is never flagged for being absent from the venue's contact details. The venue's listed contact methods are not the test for this: a venue can have no public phone number listed and still be in a text conversation with this guest, which is the situation, not a contradiction. This exempts a description of the CURRENT exchange and nothing else. It does not widen the identity rule above it: that rule covers who is speaking, this one covers how they are being reached, and neither licenses any other claim the assistant makes about itself. Both exclusions below matter:
   - A promise to use the channel again LATER ("I'll text you when I hear back", "I'll message you here once it's in") is a future commitment, not a description of what is happening now, and is checked like any other claim.
   - A phone number, account, or channel named for any purpose OTHER than describing this exchange — a number to call, a number to pass to a friend who is not in this conversation, an account to follow — is an ordinary claim and stays fully checked. A specific phone number written out in the reply is a fact about the venue and needs support like any other; this bullet never licenses one.
 - General conversation with no specific venue fact in it.
@@ -198,6 +198,45 @@ function buildSourceMaterial(input: VerifyGroundingInput): string {
   // here, rather than omitting the section, tells the verifier the assistant
   // had nothing beyond venue facts/menu to draw on for this turn.
   sections.push(knowledgeChunksToProse(input.knowledgeChunks ?? []))
+  // TAC-502: the conversation itself is evidence. Two conditions, and both
+  // are the conservative direction.
+  //
+  // `null` means nobody could say which channel this is, and an exemption
+  // built on a guess is worse than no exemption, so the section is simply
+  // absent and a channel claim is checked as it was before this existed.
+  //
+  // A PROACTIVE turn gets no section either, and this one is easy to miss:
+  // `verifyGroundingStage` has run on followups and the knowledge-gap holding
+  // message since TAC-376, and on those turns the guest is not messaging
+  // anyone — a cron fired. Rendering "the guest is texting the venue RIGHT
+  // NOW ... this exchange is that conversation" there would put a FALSE
+  // statement into the source material and label it a fact the reply may be
+  // grounded against, which is the one thing this section must never be. It
+  // would also cut against PROACTIVE_ADDENDUM's own rule, which keeps a claim
+  // about what the guest did in remit precisely because no guest message
+  // licenses it this turn.
+  //
+  // Nothing is lost by withholding it: the exemption exists for a guest
+  // mid-conversation, which is the inbound case the ticket is about, and a
+  // proactive reply naming the channel is either an instruction or a future
+  // reference — both of which the 2026-09-21 ruling keeps checked anyway. On
+  // this path the behaviour is identical to before this ticket.
+  //
+  // PLACED BEFORE the runtime context, deliberately. That block is the
+  // generator's whole user prompt appended verbatim — a stack of `##`
+  // headings with no terminator — so a section after it reads as though it
+  // were INSIDE it, and the system prompt says the runtime context also
+  // carries assistant-directed instructions that are "not your concern and
+  // not grounding rules". This section is a fact, so it must not sit
+  // anywhere it can be read as part of that. (An earlier version put it last
+  // and justified it as sitting next to the reply, which was simply wrong:
+  // `buildUserPrompt` puts the reply BEFORE the source material, so last is
+  // the position furthest from it.)
+  if (input.conversationChannel !== null && !input.isProactive) {
+    sections.push(
+      `## Conversation channel\n${CONVERSATION_CHANNEL_FACT[input.conversationChannel]}`,
+    )
+  }
   // TAC-301 part 1.5: appended VERBATIM, never summarized, sliced, or
   // re-serialized. The whole point is that this string is the one the
   // generating model actually received, so "what the verifier checks
@@ -209,18 +248,6 @@ function buildSourceMaterial(input: VerifyGroundingInput): string {
   // appended one).
   if (input.runtimeContext !== undefined && input.runtimeContext.trim().length > 0) {
     sections.push(`## Runtime context for this turn\n${input.runtimeContext}`)
-  }
-  // TAC-502: the conversation itself is evidence. Rendered only when the
-  // channel resolved — `null` means nobody could say which channel this is,
-  // and an exemption built on a guess is worse than no exemption, so the
-  // section is simply absent and a channel claim is checked as it was before
-  // this existed. Placed last so it sits next to the reply being judged; it is
-  // one line and the SYSTEM_PROMPT bullet names the heading, so its position
-  // carries no other weight.
-  if (input.conversationChannel !== null) {
-    sections.push(
-      `## Conversation channel\n${CONVERSATION_CHANNEL_FACT[input.conversationChannel]}`,
-    )
   }
   return sections.join('\n\n')
 }

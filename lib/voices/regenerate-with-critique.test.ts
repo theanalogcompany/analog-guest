@@ -405,8 +405,9 @@ describe('regenerateWithCritique — happy path', () => {
   // TAC-502: same standing obligation, one ticket later. The playground is
   // where an operator decides what a good reply looks like, so a false
   // "ungrounded claim" warning on a reply that correctly names the medium the
-  // guest is on teaches exactly the wrong lesson — and this file was left
-  // behind by TAC-350 and TAC-366 both, which is why the field is required on
+  // guest is on teaches exactly the wrong lesson. This seam has drifted once
+  // on record — TAC-350's retrieval relevance floor reached stages.ts and not
+  // here until TAC-366 — which is why the field is required on
   // VerifyGroundingInput rather than optional.
   it("forwards the context's conversation channel to the grounding check", async () => {
     await regenerateWithCritique({

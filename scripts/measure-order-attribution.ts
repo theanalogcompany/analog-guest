@@ -32,7 +32,7 @@ import { CORPUS_RETRIEVE_LIMIT, MIN_STRONG_MATCHES, STRONG_MATCH_SIMILARITY } fr
 import { generateMessage } from '@/lib/ai/generate-message'
 import { formatTimeDelta } from '@/lib/ai/prompts/serializers'
 import type { GenerateMessageInput, RecentMessage, Visit, VoiceCorpusChunk } from '@/lib/ai/types'
-import { verifyGrounding } from '@/lib/ai/verify-grounding'
+import { verifyGrounding, VERIFY_GROUNDING_PROMPT_VERSION } from '@/lib/ai/verify-grounding'
 import { embedText } from '@/lib/rag/embed'
 import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
 import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '@/lib/schemas'
@@ -593,7 +593,14 @@ async function main(): Promise<void> {
   const variants = VARIANTS.filter((v) => variantIds.includes(v.id))
 
   console.log('TAC-483 order-attribution measurement — ships no fix, measures the live prompt as-is.')
-  console.log(`N=${n} per variant. Variants: ${variantIds.join(', ')}. Channel copy: ${CHANNEL}`)
+  // TAC-502: the verifier's prompt version is printed because this script
+  // has no run log, so without it nothing records which verifier produced a
+  // run's numbers. It moved v1.5.0 -> v1.6.0 when the grounding check gained
+  // the `## Conversation channel` section, so runs either side of that are
+  // two populations and must not be compared as one.
+  console.log(
+    `N=${n} per variant. Variants: ${variantIds.join(', ')}. Channel copy: ${CHANNEL}. Verifier prompt: ${VERIFY_GROUNDING_PROMPT_VERSION}`,
+  )
   // The run states its own configuration, so a .txt of this output says what
   // produced it without the script beside it (the measurement-harness
   // convention under CLAUDE.md → Scripts).

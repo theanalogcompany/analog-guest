@@ -175,6 +175,18 @@ interface Fixture {
   body: string
   venueInfo: VenueInfo
   runtimeContext: string
+  /**
+   * For a `flag` fixture: a pattern at least one NAMED claim must match.
+   *
+   * Without it a cell can score 10/10 for the wrong reason and read as
+   * covered. `hold_promise_no_holds` is the case that makes this necessary:
+   * the reply contains both a hold promise AND a channel-adjacent line, so
+   * flagging only the channel line would be a FALSE POSITIVE scoring as a
+   * pass on the fixture that exists to prove the hold still flags. That is
+   * the `comp_regex_backstop` shape this repo documents — a gate whose green
+   * signal was never checked against what it actually fired on.
+   */
+  claimMustMatch?: RegExp
   /** Why this fixture is in the set, and what a miss would mean. */
   why: string
 }
@@ -210,6 +222,7 @@ const FIXTURES: readonly Fixture[] = [
     body: "give them a ring on (415) 555-0142 and they'll sort the pickup out.",
     venueInfo: leMilsShaped(),
     runtimeContext: runtimeContext([NO_PERKS]),
+    claimMustMatch: /555-0142|\(415\)/i,
     why: "AC3, on the channel where the exemption is most likely to leak: the section for 'text' talks about 'this number', and this reply names a DIFFERENT specific number for someone who is not in the conversation. TAC-501's exact shape. A clean verdict in the channel arm means the exemption became a licence.",
   },
   {
@@ -220,6 +233,7 @@ const FIXTURES: readonly Fixture[] = [
     body: 'sure, have them call (415) 555-0199 and we can get it started.',
     venueInfo: leMilsShaped(),
     runtimeContext: runtimeContext([NO_PERKS]),
+    claimMustMatch: /555-0199|\(415\)/i,
     why: 'The same boundary on Instagram, where a phone number is not even the medium of the exchange. The venue has no public phone number, so this is fabricated either way.',
   },
   {
@@ -253,6 +267,7 @@ const FIXTURES: readonly Fixture[] = [
       ].join('\n'),
       NO_PERKS,
     ]),
+    claimMustMatch: /pink panther|two days/i,
     why: "AC5 catch #1, a genuine production flag. The reply says the guest had the Pink Panther two days running; the visit history the live prompt carried held one blossom tonic and no Pink Panther at all. It must still flag, and nothing about the channel bears on it.",
   },
   {
@@ -272,7 +287,30 @@ const FIXTURES: readonly Fixture[] = [
       },
     }),
     runtimeContext: runtimeContext([NO_PERKS]),
+    claimMustMatch: /hold|set aside|waiting|fresh one/i,
     why: 'AC5 catch #2, a genuine production flag: a hold promised at a venue whose services say it does not hold items. It is also the sharpest leak test in the set, because the same reply ALSO contains a channel-adjacent line ("give me a heads up when you\'re on your way"). An exemption that over-applied could take the whole reply clean.',
+  },
+  {
+    id: 'self_referential_number_on_text',
+    expect: 'flag',
+    channel: 'text',
+    inboundBody: 'can you remind me what number this is so i can save it?',
+    body: "of course! you can reach me at (415) 555-0142, that's this number \u2014 save it and text any time.",
+    venueInfo: leMilsShaped(),
+    runtimeContext: runtimeContext([NO_PERKS]),
+    claimMustMatch: /555-0142|\(415\)/i,
+    why: "The shape the bullet's last sentence promises to keep checked, and the one neither other number fixture covers: a number WRITTEN OUT and presented as this very conversation's number. That is where the exemption's first half (describe the current exchange) and its second exclusion (a number is an ordinary claim) pull hardest against each other, and the verifier cannot check the digits \u2014 it never sees venues.messaging_phone_number. It is also the natural co-occurrence of TAC-501's fabrication with this exemption.",
+  },
+  {
+    id: 'cross_channel_future_promise_on_text',
+    expect: 'flag',
+    channel: 'text',
+    inboundBody: 'let me know when the ethiopia is back',
+    body: "no problem, i'll message you on instagram about it.",
+    venueInfo: leMilsShaped(),
+    runtimeContext: runtimeContext([NO_PERKS]),
+    claimMustMatch: /instagram/i,
+    why: "The Q1 boundary, built so it can actually be measured. A bare same-channel promise (\"I'll text you when I hear back\") is not independently an unsupported claim, so a clean verdict there would be ambiguous between 'the exemption held its scope' and 'there was nothing to flag' \u2014 which is why the plan declined to fixture it. Naming the OTHER channel makes it independently ungrounded: this is a text conversation, the channel section says so, and nothing supports reaching this guest on Instagram. If the exemption were widened to 'any way to reach the venue, at any time' \u2014 the mutant code review found passing 36/36 \u2014 this would go clean.",
   },
 ]
 
@@ -350,7 +388,45 @@ function hasVerdicts(cell: CellResult): boolean {
  */
 function channelArmMeets(fixture: Fixture, cell: CellResult, reps: number): boolean {
   if (!hasVerdicts(cell)) return false
-  return fixture.expect === 'flag' ? cell.flaggedCount === reps : cell.flaggedCount === 0
+  if (fixture.expect !== 'flag') return cell.flaggedCount === 0
+  return cell.flaggedCount === reps && namedTheRightClaim(fixture, cell)
+}
+
+/**
+ * Did a flag fixture flag for the REASON it exists, not merely flag?
+ *
+ * The script already collected every named claim and, until code review, read
+ * none of them. `hold_promise_no_holds` is what makes this load bearing: its
+ * reply carries a hold promise AND a channel-adjacent line, so flagging only
+ * the channel line is a FALSE POSITIVE that would still score 10/10 on the
+ * fixture whose whole job is proving the hold still flags. A gate whose green
+ * signal is never checked against what it actually fired on is the
+ * `comp_regex_backstop` shape this repo documents.
+ *
+ * A fixture with no pattern is unconstrained, so this can only tighten.
+ */
+function namedTheRightClaim(fixture: Fixture, cell: CellResult): boolean {
+  const pattern = fixture.claimMustMatch
+  if (pattern === undefined) return true
+  return cell.verdicts.every((v) => !v.flagged || v.claims.some((c) => pattern.test(c)))
+}
+
+/**
+ * How often the control must reproduce the defect before the comparison means
+ * anything: a third of the repeats, floored at one.
+ *
+ * Code review caught that the original criterion ("more often than the
+ * channel arm") collapses to "at least once" whenever the channel arm passes,
+ * because a passing channel arm is 0 by definition — so the prose described
+ * more than the code enforced, and at REPEATS=5 a single flag would have
+ * printed as "the defect reproduced and the comparison means something". A
+ * third is still lenient on purpose: this is a probabilistic verdict, and the
+ * ticket's own prior measurement counted a 1/5 cell as evidence. The
+ * arm-integrity line prints the rate either way, so a reader sees the number
+ * rather than only a verdict.
+ */
+function controlFloor(reps: number): number {
+  return Math.max(1, Math.ceil(reps / 3))
 }
 
 /**
@@ -366,19 +442,31 @@ function nullArmMeets(
   reps: number,
 ): boolean {
   if (!hasVerdicts(nullCell)) return false
-  if (fixture.expect === 'flag') return nullCell.flaggedCount === reps
-  return nullCell.flaggedCount > 0 && nullCell.flaggedCount > channelCell.flaggedCount
+  if (fixture.expect === 'flag') {
+    return nullCell.flaggedCount === reps && namedTheRightClaim(fixture, nullCell)
+  }
+  return (
+    nullCell.flaggedCount >= controlFloor(reps) &&
+    nullCell.flaggedCount > channelCell.flaggedCount
+  )
 }
 
 function nullArmExpectation(fixture: Fixture): string {
   return fixture.expect === 'flag'
     ? 'flag every repeat'
-    : 'reproduce the defect (flag more often than the channel arm)'
+    : `reproduce the defect (flag >= ${controlFloor(REPEATS)}/${REPEATS}, and more often than the channel arm)`
 }
 
 async function main(): Promise<void> {
   if (!Number.isInteger(REPEATS) || REPEATS < 1) {
     console.error(`REPEATS must be a positive integer, got ${process.env.REPEATS}`)
+    process.exit(2)
+  }
+  // Same guard, because the asymmetry was arbitrary: CONCURRENCY=0 makes
+  // `pooled` spawn no workers, leaves every cell undefined, and the run dies
+  // with an opaque TypeError after making zero model calls.
+  if (!Number.isInteger(CONCURRENCY) || CONCURRENCY < 1) {
+    console.error(`CONCURRENCY must be a positive integer, got ${process.env.CONCURRENCY}`)
     process.exit(2)
   }
 

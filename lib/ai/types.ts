@@ -731,10 +731,13 @@ export type VerifyGroundingInput = {
   //
   // REQUIRED, same convention as runtimeContext and isProactive above: every
   // call site decides rather than silently inheriting one channel's answer.
-  // This one has already been got wrong once in spirit — TAC-350 and TAC-366
-  // both shipped a verifier change to stages.ts and left
-  // lib/voices/regenerate-with-critique.ts behind — and a required field is
-  // what turns that into a `tsc` failure instead of a silent divergence.
+  // The stages.ts <-> lib/voices/regenerate-with-critique.ts seam has drifted
+  // once on record: TAC-350 shipped the retrieval relevance floor to
+  // stages.ts and the regen path kept the old semantics until TAC-366 made
+  // the two share one helper. A required field is what turns the next one
+  // into a `tsc` failure rather than a prose reminder someone has to
+  // remember. TAC-350's VERIFIER half was mirrored correctly at the time —
+  // it is the seam that has the history, not this particular check.
   conversationChannel: MessageChannel | null
   // TAC-376: true when there is no guest message this turn — a followup or
   // the knowledge-gap holding message, both generated with no inbound to
