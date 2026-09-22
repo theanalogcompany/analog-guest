@@ -221,6 +221,15 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // claim was caught when none was is the wrong-reason-copy problem TAC-364
   // exists for.
   grounding_check_failed: "I couldn't finish checking this one.",
+  // TAC-424, copy approved verbatim (2026-09-21). This is a SECONDARY chip: it
+  // only ever renders under grounding_check_failed's line above, never alone,
+  // because the two always co-fire and this one is ranked below.
+  //
+  // The approved wording replaced a draft reading "Nothing was found wrong",
+  // which reads as a clean result — exactly the confusion this ticket exists
+  // to remove. "Nothing in this draft was checked" says the same thing about
+  // the check without making a claim about the draft.
+  grounding_check_degraded: "Tried twice and couldn't run. Nothing in this draft was checked.",
   // Venue-wide policy, ranked last in PRIMARY_TRIGGER_PRIORITY, so this shows
   // only when nothing more specific co-fired. "right now" because the flag is
   // a switch someone threw and can throw back.

@@ -643,9 +643,11 @@ export async function handleFollowup(input: {
         claimCount: groundingBackstop.claims.length,
       })
     }
-    if (groundingBackstop.status === 'truncated') {
-      console.warn('[agent] followup grounding backstop truncated — queuing (fail closed)', {
+    // TAC-424: see handle-inbound.ts for why both outcomes log the same line.
+    if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
+      console.warn('[agent] followup grounding backstop did not complete — queuing (fail closed)', {
         agentRunId,
+        outcome: groundingBackstop.status,
       })
     }
     if (

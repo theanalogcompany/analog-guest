@@ -397,10 +397,11 @@ async function tryGenerateHolding(
   // triggers, same failure posture as inbound. This path still never runs
   // verifyMechanicOfferStage — a holding message doesn't offer mechanics.
   //
-  // A 'flagged' or 'truncated' result makes applyApprovalPolicyStage return
-  // something other than 'send' below, which this function already treats
-  // as "this attempt failed, try again or fall back" — no new branch, same
-  // ladder the gate already drove before this ticket.
+  // A 'flagged', 'truncated' or (TAC-424) 'degraded' result makes
+  // applyApprovalPolicyStage return something other than 'send' below, which
+  // this function already treats as "this attempt failed, try again or fall
+  // back" — no new branch, same ladder the gate already drove before this
+  // ticket.
   //
   // TAC-401: the prose-promise check runs here too, CONCURRENTLY with
   // grounding (ruled 2026-09-21, ruling 2), which is why this call went from a
@@ -464,11 +465,15 @@ async function tryGenerateHolding(
       claimCount: groundingBackstop.claims.length,
     })
   }
-  if (groundingBackstop.status === 'truncated') {
-    console.warn('[agent] holding message grounding backstop truncated — treating as unclean (fail closed)', {
-      agentRunId,
-      attempt,
-    })
+  // TAC-424: a degraded check now lands here too. On this path the ladder
+  // already treats any non-send gate verdict as "this attempt failed", so the
+  // consequence is a retry and then FALLBACK_HOLDING_BODY — a fixed string
+  // that asserts nothing. The guest is never left silent by it.
+  if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
+    console.warn(
+      '[agent] holding message grounding backstop did not complete — treating as unclean (fail closed)',
+      { agentRunId, attempt, outcome: groundingBackstop.status },
+    )
   }
 
   if (

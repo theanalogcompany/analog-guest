@@ -159,6 +159,20 @@ const PUSH_POLICY = {
   // that eventually surfaces it. Push.
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'push',
 
+  // TAC-424. INERT, and worth saying so rather than leaving the next reader to
+  // work it out: shouldSendDraftFlaggedPush reads the PRIMARY trigger only,
+  // this code always co-fires with GROUNDING_CHECK_FAILED, and it is ranked
+  // below that partner in PRIMARY_TRIGGER_PRIORITY — so it can never be the
+  // value this map is consulted for. The entry exists because the map is
+  // TOTAL, which is the mechanism doing its job (CLAUDE.md, "sets keyed on
+  // approval triggers must be TOTAL maps"): a new trigger has to be given a
+  // decision rather than silently dropped, as two were for two months.
+  //
+  // 'push' rather than 'skip' so that IF the ranking ever changes and this
+  // does reach the primary slot, the card still surfaces. Failing toward the
+  // loud side is the house rule here.
+  [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'push',
+
   // The ONLY skip. A pending draft already exists in this draft's slot, and
   // persistOrRegenQueuedDraft UPDATEs that row IN PLACE rather than inserting
   // a new one (TAC-264). Since TAC-394 a card in the OTHER slot never fires

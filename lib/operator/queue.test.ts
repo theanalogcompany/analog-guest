@@ -266,7 +266,7 @@ describe('listPendingQueue', () => {
     // that the map equals itself, which is exactly how TAC-310 certified a
     // live defect on every green run.
     //
-    // All seventeen reachable values are here, and that completeness is the
+    // All eighteen reachable values are here, and that completeness is the
     // acceptance criterion "every trigger in the copy table renders its own
     // sentence". `demo_bypass` and `crisis_safety_reply` are deliberately
     // absent: both land on review_state='auto_sent' and the RPC filters
@@ -299,6 +299,12 @@ describe('listPendingQueue', () => {
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
       ['knowledge_gap_backstop', "I wasn't sure this was true, so I didn't send it."],
       ['grounding_check_failed', "I couldn't finish checking this one."],
+      // TAC-424, transcribed from the 2026-09-21 ruling comment on the ticket,
+      // not read back out of REVIEW_REASON_LABELS.
+      [
+        'grounding_check_degraded',
+        "Tried twice and couldn't run. Nothing in this draft was checked.",
+      ],
       // TAC-401: the sibling of the line above, and deliberately a separate
       // sentence from prose_promise_backstop's — nothing was caught here.
       ['prose_promise_check_failed', "I couldn't check this one for a promise."],

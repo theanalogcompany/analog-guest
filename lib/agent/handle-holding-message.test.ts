@@ -429,14 +429,13 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
     expect(groundingArg).toEqual({ status: 'clean' })
   })
 
-  // AC2 ("the fail-open/closed posture is explicit and tested in both
-  // directions") exercised at this orchestrator boundary too — a degraded
-  // (fail-open) call must not by itself stop the attempt from sending; a
-  // flagged or truncated (fail-closed) one must, the same way a `queue`
-  // verdict from any other trigger already does on this path (decision #2
-  // in the module's own header: no slot to queue into, so a trip here is a
-  // failed attempt, not a route).
-  it('a degraded (clean) grounding call does not fail the attempt on its own (fail-open)', async () => {
+  // TAC-424 RENAMES this test for the reason its sibling in
+  // handle-followup.test.ts was renamed: it was called "a degraded (clean)
+  // grounding call does not fail the attempt on its own (fail-open)" while
+  // mocking `{ status: 'clean' }`, so the name described a posture the fixture
+  // could not reach, and it would have kept passing while certifying the
+  // opposite of shipped behaviour. The real degraded case is below.
+  it('a clean grounding call does not fail the attempt', async () => {
     verifyGroundingStageMock.mockResolvedValue({ status: 'clean' })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     const r = await handleHoldingMessage({
@@ -479,6 +478,46 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['grounding_check_failed'],
+      primaryTrigger: 'grounding_check_failed',
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+    })
+    const r = await handleHoldingMessage({
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      pendingQuestion: QUESTION,
+      questionMessageId: QUESTION_MESSAGE_ID,
+    })
+    expect(generateStageMock).toHaveBeenCalledTimes(2)
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
+    expect(r).toMatchObject({ status: 'sent', usedFallback: true })
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { body: string }
+    expect(sentGeneration.body).toBe(FALLBACK_HOLDING_BODY)
+  })
+
+  // TAC-424: the guest-facing consequence of this ticket on this path, which
+  // nothing tested before the code review asked for it.
+  //
+  // A degraded verifier now drives the same ladder truncation already drove:
+  // failed attempt, retry, then FALLBACK_HOLDING_BODY. So while the verifier
+  // is faulting, a waiting guest gets the fixed line instead of a generated
+  // holding message. That is the acceptable outcome — the fallback asserts
+  // nothing and commits to nothing, by construction — but it is a real change
+  // in what reaches a guest and it should fail a test if it ever changes
+  // again.
+  //
+  // Note what this path does NOT produce: any row-level record. sendFallback
+  // goes through scheduleAndSend, which writes neither review_triggers nor
+  // ungrounded_claims, so here the degraded outcome is visible only in
+  // PostHog and Slack. There is no queue slot to carry it (the guest's
+  // knowledge-gap card already holds their place), so this is the one path
+  // where ruling 2's "by SQL alone" does not reach.
+  it('a degraded grounding call on both attempts falls back to the plain line (fail-closed)', async () => {
+    verifyGroundingStageMock.mockResolvedValue({ status: 'degraded' })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['grounding_check_failed', 'grounding_check_degraded'],
       primaryTrigger: 'grounding_check_failed',
       compMatchedPattern: null,
       ungroundedClaims: null,

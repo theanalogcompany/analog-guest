@@ -285,28 +285,36 @@ export const APPROVAL_TRIGGERS = {
   // relationship to MODEL_FLAGGED) — see lib/ai/verify-mechanic-offer.ts and
   // verifyMechanicOfferStage below. FAILS CLOSED: an errored, timed-out, or
   // unparseable check queues rather than degrading to pre-check behavior —
-  // a deliberate divergence from verifyGroundingStage (TAC-350), which fails
-  // open. An unauthorized perk grant costs the owner money and control; a
-  // failed check costs one unnecessary review.
+  // a deliberate divergence from verifyGroundingStage (TAC-350), which used
+  // to fail open. An unauthorized perk grant costs the owner money and
+  // control; a failed check costs one unnecessary review. (TAC-424 closed that
+  // divergence: grounding fails closed too now. The sentence stays because the
+  // reasoning is this trigger's own, and it did not depend on the contrast.)
   MECHANIC_OFFER_BACKSTOP: 'mechanic_offer_backstop',
-  // TAC-367: the grounding backstop produced a verdict we could not READ —
-  // `finishReason: 'length'`, the output cap cut the JSON off mid-object.
-  // Fails CLOSED, which is a deliberate narrowing of verifyGroundingStage's
-  // otherwise fail-OPEN posture, scoped to this one cause:
+  // TAC-367, widened by TAC-424: the grounding backstop did not produce a
+  // readable verdict. Two causes, both fail CLOSED, one trigger:
   //
-  //   - Truncation is a verdict the model PRODUCED. Discarding it is
-  //     discarding evidence, not tolerating its absence. It is also load-
-  //     correlated rather than random — the verifier reasons longest on the
-  //     replies hardest to ground, which is exactly the population a
+  //   - TRUNCATION — `finishReason: 'length'`, the output cap cut the JSON off
+  //     mid-object. A verdict the model PRODUCED, so discarding it is
+  //     discarding evidence rather than tolerating its absence. It is also
+  //     load-correlated rather than random: the verifier reasons longest on
+  //     the replies hardest to ground, which is exactly the population a
   //     fabrication check exists for. Same correlation TAC-309 found on the
   //     generator, where the model reasoned longest on questions it could
   //     not answer cleanly and truncation preferentially killed the
   //     knowledge-gap path.
-  //   - Transient faults (network, provider 5xx, timeout) still fail OPEN.
-  //     That rationale is unchanged and still correct: grounding runs on
-  //     every inbound, so queuing every hiccup closed would convert a rare
-  //     provider blip into a fleet-wide queue flood — a worse failure than
-  //     the one being fixed.
+  //   - A TRANSIENT fault (network, provider 5xx, timeout) that survived one
+  //     immediate retry. **This used to fail OPEN and no longer does**
+  //     (TAC-424, ruled 2026-09-21). The old rationale was that grounding runs
+  //     on every inbound, so queuing every hiccup closed would convert a rare
+  //     provider blip into a fleet-wide queue flood. TAC-401's prose-promise
+  //     check now runs concurrently on nearly every generation and already
+  //     fails closed after one retry, so the reply is held during an outage
+  //     regardless — failing open here bought no availability and left the one
+  //     path where an invented fact could send unchecked.
+  //
+  // The two stay distinguishable on the ROW without being separate triggers:
+  // see GROUNDING_CHECK_DEGRADED below.
   //
   // DISTINCT trigger rather than folding into KNOWLEDGE_GAP_BACKSTOP, even
   // though MECHANIC_OFFER_BACKSTOP sets the opposite precedent by covering
@@ -320,6 +328,27 @@ export const APPROVAL_TRIGGERS = {
   //
   // Deliberately NOT part of `isGapTurn`: see its definition below.
   GROUNDING_CHECK_FAILED: 'grounding_check_failed',
+  // TAC-424: which of GROUNDING_CHECK_FAILED's two causes it was. Ruling 2 B
+  // (2026-09-21) requires a degraded check, a truncated check and a clean pass
+  // to be three-way distinguishable by SQL alone, and ruling 1 C forbids both
+  // a migration on `messages` and touching `ungrounded_claims` — which leaves
+  // review_triggers, the one existing per-message field that already means
+  // "everything that fired". So this rides ALONGSIDE GROUNDING_CHECK_FAILED on
+  // a degraded turn rather than replacing it.
+  //
+  // It is a SUB-CAUSE marker, not a second reason to hold, and two things
+  // follow from that. It NEVER fires alone — GROUNDING_CHECK_FAILED is always
+  // pushed with it, which is what keeps the hold and the operator's primary
+  // copy exactly as they were. And it is ranked directly BELOW its partner in
+  // PRIMARY_TRIGGER_PRIORITY so it can never win the review_reason label off a
+  // trigger it always co-fires with; a test pins that.
+  //
+  // Why not two distinct primary triggers, which is what this file's own
+  // GROUNDING_CHECK_FAILED comment argues for elsewhere: the operator's
+  // decision is identical either way (nothing was checked, read it yourself),
+  // and the ruling named the trigger the draft is held under. The cause is a
+  // thing SQL asks later, not a thing the card should say twice.
+  GROUNDING_CHECK_DEGRADED: 'grounding_check_degraded',
   // TAC-401: independent post-generation check for a promise made in PROSE
   // with no structured commitment behind it. THE PRIMARY CONTROL for that
   // failure (ruled 2026-09-15, question 1, option c), not a secondary layer.
@@ -343,15 +372,20 @@ export const APPROVAL_TRIGGERS = {
   PROSE_PROMISE_BACKSTOP: 'prose_promise_backstop',
   // TAC-401: the prose-promise check produced no readable verdict.
   //
-  // FAILS CLOSED, and unlike GROUNDING_CHECK_FAILED that is true of EVERY
-  // failure mode here, not only truncation. The grounding check fails open on
-  // a transient fault because it degrades to a defensible prior — the model's
-  // own knowledgeGap self-report, which that check is a second opinion on.
-  // This check has no prior to degrade to: the self-flag caught 0 of 220 and
-  // the ruling forbids depending on it, so failing open returns to nothing at
-  // all. A transient fault is retried once first (ruled 2026-09-21), which is
-  // what pays for the closed posture: the flood case narrows from "any
-  // hiccup" to "a fault that survives two immediate attempts".
+  // FAILS CLOSED on every failure mode, after one retry on a transient fault
+  // (ruled 2026-09-21). TAC-424 gave GROUNDING_CHECK_FAILED the same shape, so
+  // the contrast this comment used to draw — that grounding fails open on a
+  // transient fault while this one does not — is gone, and the sentence
+  // asserting it was corrected there and here.
+  //
+  // What has NOT changed is why this one must never be loosened, even if
+  // grounding's posture is revisited again: grounding at least degrades to a
+  // defensible prior, the model's own knowledgeGap self-report, which it is a
+  // second opinion on. This check has no prior to degrade to — the self-flag
+  // caught 0 of 220 and the ruling forbids depending on it — so failing open
+  // here returns to nothing at all. The retry is what pays for the closed
+  // posture on a check this broad: the flood case narrows from "any hiccup" to
+  // "a fault that survives two immediate attempts".
   //
   // A DISTINCT trigger rather than folding into PROSE_PROMISE_BACKSTOP, for
   // the reason TAC-367 split GROUNDING_CHECK_FAILED out: telling an operator
@@ -542,6 +576,15 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // the more useful operator label. It still outranks the policy triggers
   // because it is at least specific to this message.
   APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+  // TAC-424: directly below its partner, and the order is load-bearing rather
+  // than cosmetic. This code only ever appears alongside
+  // GROUNDING_CHECK_FAILED, so ranking it above would silently take over
+  // review_reason on every degraded turn and change what the operator card
+  // says — the copy would become a sub-cause note standing in for a reason.
+  // Below, it can never win, which is what makes it a record rather than a
+  // label. It sits above the two venue-wide policy signals for the same reason
+  // its partner does: it is at least specific to this message.
+  APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
   // TAC-401: beside GROUNDING_CHECK_FAILED and for the identical reason. It
   // reports an ABSENCE of information about the reply, so any trigger naming
   // something concrete is the more useful operator label, and it still ranks
@@ -1004,15 +1047,67 @@ export async function generateStage(
  * because a two-state shape has nowhere to put "we could not read the
  * verdict" that is distinguishable from "there was nothing to report."
  *
- * Four states now, mirroring TAC-355's MechanicOfferBackstopResult exactly
- * rather than inventing a second vocabulary for the same idea. `truncated` is
- * the only one that queues besides `flagged`; see GROUNDING_CHECK_FAILED.
+ * Four states at TAC-367, mirroring TAC-355's MechanicOfferBackstopResult
+ * exactly rather than inventing a second vocabulary for the same idea.
+ *
+ * TAC-424 adds a FIFTH, `degraded`, and the reason it has to be its own state
+ * rather than reusing `clean` is the whole ticket: a transient fault used to
+ * return `clean`, which the gate then recorded on messages.ungrounded_claims
+ * as `[]` — byte-identical to what a genuine pass writes. After the fact "the
+ * check passed this draft" and "the check never completed" were the same row.
+ * That is this repo's signature defect class (see CLAUDE.md's Common gotchas:
+ * comp_regex_backstop, the push `future-add safety` test, is_test_synthetic),
+ * and a distinct state is what makes the gate's mapping a total switch instead
+ * of a ternary chain with a silent default.
+ *
+ * `flagged`, `truncated` and `degraded` all queue now; `skipped` and `clean`
+ * are the only two that let a draft through. See GROUNDING_CHECK_FAILED.
  */
 export type GroundingBackstopResult =
   | { status: 'skipped' }
   | { status: 'clean' }
   | { status: 'flagged'; claims: string[] }
   | { status: 'truncated' }
+  | { status: 'degraded' }
+
+/**
+ * TAC-364, made TOTAL by TAC-424. What each grounding state records on
+ * messages.ungrounded_claims.
+ *
+ * This was a ternary chain (`flagged ? claims : clean ? [] : null`) and the
+ * comment above it claimed a sixth state would have to "decide what it
+ * records". It would not have: a sixth member of the union fell through to the
+ * `null` default, fired no trigger, and SENT — with tsc clean and every test
+ * passing. That was caught in code review, by someone adding the state and
+ * running the tree rather than reading the sentence, and it is this repo's
+ * signature defect class committed inside the ticket that exists to close an
+ * instance of it (CLAUDE.md, Common gotchas).
+ *
+ * `satisfies Record<GroundingBackstopResult['status'], …>` is what makes the
+ * claim true. A sixth state now fails to compile here until someone says what
+ * it writes to the row. Keyed on `status` rather than written as a switch
+ * because the map is also the thing to read when answering "what does this
+ * column mean" — the three-state contract migration 039 documents, plus the
+ * two no-verdict states, in five lines.
+ */
+const UNGROUNDED_CLAIMS_BY_STATUS = {
+  // The check ran and flagged these. Verbatim, so the operator can see which
+  // sentence is the suspect one.
+  flagged: (g) => (g.status === 'flagged' ? g.claims : null),
+  // The check RAN and found nothing. Distinct from null, and that distinction
+  // is the whole reason the column is nullable.
+  clean: () => [],
+  // It ran but the cap cut the verdict off, so we have no claim information.
+  truncated: () => null,
+  // Two attempts both faulted, so likewise none. TAC-424: this used to be
+  // `[]`, byte-identical to a clean pass, which was the defect.
+  degraded: () => null,
+  // The check did not run at all (demo guest, or the model self-reported).
+  skipped: () => null,
+} as const satisfies Record<
+  GroundingBackstopResult['status'],
+  (grounding: GroundingBackstopResult) => string[] | null
+>
 
 /**
  * TAC-350: independent grounding backstop. Runs a second, deterministic-in-
@@ -1045,26 +1140,36 @@ export type GroundingBackstopResult =
  *     two callers ever hits this skip either — every one of their turns pays
  *     for the check.
  *
- * Fails OPEN on a TRANSIENT AI-call error (network hiccup, provider 5xx,
- * timeout) — returns `clean`, logged via console.warn, not fireRedAlert.
- * This is a SECOND, additional safety net on top of the model's own
- * self-report; a transient failure degrades to exactly pre-TAC-350 behavior
- * (trust the model), never to something worse. Queuing every transient
- * failure closed would turn a rare Haiku hiccup into a broad, unrelated
- * availability regression for a check whose entire population already passed
- * self-report. Same posture on a proactive turn (2026-09-17 ruling, question
- * 3) — nobody is waiting on a followup or a holding message the way a guest
- * is waiting on an inbound reply, but the ruling kept the SAME posture rather
- * than tightening it, so this file has one failure policy, not two.
+ * FAILS CLOSED on every failure, after ONE immediate retry on a transient
+ * fault (TAC-424, ruled 2026-09-21). Truncation is not retried — retrying a
+ * cap that was already hit spends a second call to hit it again, and the fix
+ * is the cap. Same shape verifyProsePromiseStage already uses, deliberately:
+ * one retry policy in this file, not two.
  *
- * TAC-367 carves ONE cause out of that: output TRUNCATION fails CLOSED,
- * returning `truncated`, which queues via GROUNDING_CHECK_FAILED. The
- * distinction is that the model produced a verdict and the cap made it
- * unreadable — discarding it silently discards evidence — and that it
- * correlates with the replies hardest to ground rather than occurring at
- * random. Either way the stage now EMITS (captureGroundingVerifierUnavailable):
- * a fail-open path with no signal is how the truncation hole went unobserved
- * from TAC-301 part 1.5 until it was measured.
+ * THIS REVERSES TAC-367's fail-OPEN posture for transient faults, and the
+ * reasoning that overturned it is worth keeping. Fail-open was chosen because
+ * holding every reply during a provider outage looked too costly for a check
+ * that runs on every inbound. TAC-401's prose-promise check now runs
+ * CONCURRENTLY on nearly every generation and already fails closed after one
+ * retry — so during an outage the reply is held anyway, by that check. Failing
+ * open here bought no availability at all; it only left the one path where an
+ * invented fact could reach a guest unchecked. The retry is what pays for the
+ * closed posture: the flood case narrows from a single Haiku blip to a fault
+ * that survives two immediate attempts OF OURS, which is an outage rather than
+ * a hiccup — and rather more than two in provider terms, since this call does
+ * not set `maxRetries` and the AI SDK's own default applies inside each one.
+ * That strengthens the affordability argument; it just means "one retry"
+ * should not be read as two round trips.
+ *
+ * TAC-367's truncation carve-out is unchanged in effect and no longer a
+ * carve-out: the model produced a verdict and the cap made it unreadable, and
+ * that cause correlates with the replies hardest to ground rather than
+ * occurring at random. Both failures now queue via GROUNDING_CHECK_FAILED;
+ * they stay SEPARATELY LABELLED on the row (ruling 2 B) through
+ * GROUNDING_CHECK_DEGRADED, which rides alongside on a degraded turn. Either
+ * way the stage EMITS (captureGroundingVerifierUnavailable): a failure path
+ * with no signal is how the truncation hole went unobserved from TAC-301
+ * part 1.5 until it was measured.
  *
  * Deliberately reuses the SAME venueInfo + knowledgeCorpus the generator saw
  * (ctx.venue.venueInfo, ctx.knowledgeCorpus) rather than re-fetching either —
@@ -1080,7 +1185,12 @@ export async function verifyGroundingStage(
 
   const isProactive = ctx.currentMessage === null
 
-  const r = await verifyGrounding({
+  // TAC-424: built once and passed twice. The retry below used to restate
+  // this literal, which doubled the conflict surface inside the one function
+  // TAC-502 is going to edit — and TAC-502's whole subject is what the
+  // verifier is given, so a duplicated input object is the worst place for it
+  // to land. One site to change, and the parity test catches a divergence.
+  const verifyInput = {
     inboundBody: ctx.currentMessage?.body ?? '',
     replyBody: generation.body,
     venueInfo: ctx.venue.venueInfo,
@@ -1096,7 +1206,31 @@ export async function verifyGroundingStage(
     // that against Le Mil's live config. (## Operator instruction renders on
     // the followup path too, since TAC-376, so it can now appear here.)
     runtimeContext: generation.userPrompt,
-  })
+  }
+
+  let r = await verifyGrounding(verifyInput)
+  // TAC-424: one immediate retry, transient faults only. Truncation is
+  // excluded by errorCode rather than by message text, which is
+  // provider-formatted and not a contract. Same guard verifyProsePromiseStage
+  // uses, and it must stay keyed on the code for the same reason.
+  //
+  // `invalid_input` carries NO errorCode, so it lands on the transient side
+  // and is retried: one wasted call on a deterministic failure, and it now
+  // holds the draft where it used to pass through. Unreachable today
+  // (GeneratedMessageSchema.body is z.string().min(1)), and "no code means
+  // transient" is the deliberate default direction — the same one the
+  // unrecognized-errorCode test pins — so this is recorded rather than
+  // special-cased.
+  //
+  // "One retry" counts OUR attempts. The AI SDK applies its own default
+  // maxRetries inside each call, so a degraded verdict means roughly six
+  // provider attempts with backoff, not two. That makes the affordability
+  // argument stronger, not weaker, but the figure should not be misread.
+  let retried = false
+  if (!r.ok && r.errorCode !== VERIFY_GROUNDING_TRUNCATED_ERROR_CODE) {
+    retried = true
+    r = await verifyGrounding(verifyInput)
+  }
   if (!r.ok) {
     // TAC-367: truncation and transient faults both land here and are NOT
     // the same event. Emit either way — the whole reason the truncation hole
@@ -1105,7 +1239,7 @@ export async function verifyGroundingStage(
     // fabrication check that fires under real traffic did not run.
     const truncated = r.errorCode === VERIFY_GROUNDING_TRUNCATED_ERROR_CODE
     console.warn(
-      `[agent] grounding backstop ${truncated ? 'TRUNCATED' : 'degraded'} for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+      `[agent] grounding backstop ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
     // Decided BEFORE the emit, deliberately. The emit cannot throw today
     // (capturePostHogEvent and postToSlack both swallow their own errors),
@@ -1116,13 +1250,19 @@ export async function verifyGroundingStage(
     // by transitive luck.
     const verdict: GroundingBackstopResult = truncated
       ? { status: 'truncated' }
-      : { status: 'clean' }
+      : { status: 'degraded' }
     await captureGroundingVerifierUnavailable({
       agentRunId: ctx.agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
       outcome: truncated ? 'truncated' : 'degraded',
-      failedClosed: truncated,
+      // TAC-424: true on BOTH outcomes now. It stays as its own field rather
+      // than being re-derived from `outcome` so a query for "turns that sent
+      // without a grounding verdict" is one boolean filter, and so the day a
+      // third outcome lands its consequence has to be stated rather than
+      // inferred.
+      failedClosed: true,
+      retried,
       error: r.error,
       errorCode: r.errorCode,
     })
@@ -1181,11 +1321,15 @@ export function isCommitmentTypeGated(
  * queue-worthy outcome from "the check ran and found nothing."
  *
  * TAC-367: this used to contrast with GroundingBackstopFinding's two-state
- * shape. That type is gone — GroundingBackstopResult is now the same
- * four-state shape as this one — so the two backstops no longer differ in
- * SHAPE at all. They still differ in POSTURE, and that is the distinction
- * worth keeping straight: this one fails closed on EVERY failure, grounding
- * fails closed only on truncation and stays fail-open for transient faults.
+ * shape. That type is gone — GroundingBackstopResult is the same kind of
+ * shape as this one — so the two backstops no longer differ in SHAPE.
+ *
+ * TAC-424: they no longer differ in POSTURE either. Grounding used to fail
+ * closed only on truncation and stay fail-open for transient faults; it now
+ * fails closed on both, after one retry, exactly as this one and
+ * verifyProsePromiseStage do. All three post-generation checks in this file
+ * have one failure policy, which is worth more than any of the individual
+ * contrasts the comments here used to draw.
  */
 export type MechanicOfferBackstopResult =
   | { status: 'skipped' }
@@ -1332,11 +1476,14 @@ export type ProsePromiseBackstopResult =
  * narrows to a fault that survives two immediate attempts, which is an outage
  * rather than a blip.
  *
- * The divergence from verifyGroundingStage's fail-OPEN posture is deliberate
- * and is the one thing to understand before changing it: grounding degrades to
- * a defensible prior, the model's own self-report, which it is a second
- * opinion on. This check has no prior — the self-flag caught 0 of 220 and the
- * ruling forbids depending on it — so failing open returns to nothing at all.
+ * There is no longer a divergence from verifyGroundingStage's posture: TAC-424
+ * made that check fail closed after one retry too, so the retry-then-hold
+ * shape below is the shape all three post-generation checks share. What was
+ * once the argument for the divergence is still the argument for never
+ * loosening THIS one: grounding at least degrades to a defensible prior, the
+ * model's own self-report, which it is a second opinion on. This check has no
+ * prior — the self-flag caught 0 of 220 and the ruling forbids depending on
+ * it — so failing open returns to nothing at all.
  */
 export async function verifyProsePromiseStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'classification'>,
@@ -1700,11 +1847,11 @@ export async function applyApprovalPolicyStage(
   generation: GenerateMessageResult,
   // TAC-350: result of verifyGroundingStage, run by the orchestrator between
   // generateStage and this gate (needs an async AI call the gate itself
-  // can't make mid-synchronous-evaluation). Four states (TAC-367): 'skipped'
-  // (followup, demo, or the model already self-reported), 'clean' (ran and
-  // found nothing, OR degraded on a transient fault — deliberately
-  // indistinguishable, that IS the fail-open posture), 'flagged' (fires
-  // KNOWLEDGE_GAP_BACKSTOP), 'truncated' (fires GROUNDING_CHECK_FAILED).
+  // can't make mid-synchronous-evaluation). Five states (TAC-367, TAC-424):
+  // 'skipped' (demo, or the model already self-reported), 'clean' (ran and
+  // found nothing), 'flagged' (fires KNOWLEDGE_GAP_BACKSTOP), 'truncated' and
+  // 'degraded' (both fire GROUNDING_CHECK_FAILED; 'degraded' additionally
+  // fires GROUNDING_CHECK_DEGRADED so the row says which it was).
   // `null` is accepted for callers that didn't run the stage at all and is
   // normalized to 'skipped' below.
   groundingBackstop: GroundingBackstopResult | null = null,
@@ -1901,12 +2048,23 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
   }
 
-  // Trigger 9c (TAC-367): the grounding check produced a verdict that could
-  // not be read (output truncation). Fails CLOSED — see
-  // GROUNDING_CHECK_FAILED for why this one cause diverges from the
-  // fail-open posture the transient-fault path keeps.
-  if (grounding.status === 'truncated') {
+  // Trigger 9c (TAC-367, widened by TAC-424): the grounding check did not
+  // produce a readable verdict. Two causes, both fail CLOSED now —
+  // `truncated` (the model answered and the output cap cut it off) and
+  // `degraded` (two immediate attempts both faulted). One trigger, because
+  // the operator's decision is identical either way: nothing was checked, so
+  // read it yourself. Which cause it was is recorded separately on the row by
+  // GROUNDING_CHECK_DEGRADED; see its own comment on APPROVAL_TRIGGERS.
+  const groundingCheckIncomplete =
+    grounding.status === 'truncated' || grounding.status === 'degraded'
+  if (groundingCheckIncomplete) {
     triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+  }
+  // TAC-424: the sub-cause, recorded on the row beside the trigger that held
+  // the draft. Pushed second so `triggers` reads in the order the checks
+  // decided, and ranked below its partner so it never wins the label.
+  if (grounding.status === 'degraded') {
+    triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
   }
 
   // Trigger 10 (TAC-355): deterministic self-talk backstop. Unconditional —
@@ -1934,8 +2092,9 @@ export async function applyApprovalPolicyStage(
 
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
   // Fires on 'flagged' (the check found a gated mechanic offered) OR
-  // 'check_failed' (the check errored/timed out/didn't parse) — fail CLOSED,
-  // the deliberate divergence from the grounding backstop's fail-open
+  // 'check_failed' (the check errored/timed out/didn't parse) — fail CLOSED.
+  // Until TAC-424 that was a deliberate divergence from the grounding
+  // backstop; grounding fails closed too now, so it is simply the house
   // posture. 'skipped' and 'clean' never fire.
   if (
     mechanicOfferBackstop.status === 'flagged' ||
@@ -2004,17 +2163,20 @@ export async function applyApprovalPolicyStage(
   // BODY BLANKING IS THE EXCEPTION and no longer keys on this (TAC-301 part
   // 1.5) — see the blankBody rationale at the return below.
   //
-  // TAC-367: GROUNDING_CHECK_FAILED is deliberately NOT part of this. A
-  // truncated check is an absence of information about the reply, not a
-  // finding against it, and everything keyed on isGapTurn has a guest-facing
-  // consequence that would be wrong to trigger on that basis:
-  //   - it arms messages.pending_until, so an unread verdict would put a
+  // TAC-367: GROUNDING_CHECK_FAILED is deliberately NOT part of this, and
+  // TAC-424 keeps it out for BOTH of its causes. An incomplete check is an
+  // absence of information about the reply, not a finding against it, and
+  // everything keyed on isGapTurn has a guest-facing consequence that would be
+  // wrong to trigger on that basis:
+  //   - it arms messages.pending_until, so a missing verdict would put a
   //     "still looking into it" holding message in front of a guest whose
   //     reply was most likely fine, for a question they may not have asked;
   //   - it grants the protected-card carve-out, which silently DROPS the
   //     guest's next turn if that turn queues for any other reason.
-  // A truncated check queues the draft for a human to glance at. That is the
-  // whole intended consequence, and it needs none of the above.
+  // An incomplete check queues the draft for a human to glance at. That is the
+  // whole intended consequence, and it needs none of the above. What it DOES
+  // need is the drop exemption, which is `checkDidNotComplete` below and is a
+  // separate thing from this flag.
   const isGapTurn = knowledgeGapFired || backstopFired
 
   // ---- Pending-row resolution (TAC-308, TAC-394) ----
@@ -2161,8 +2323,17 @@ export async function applyApprovalPolicyStage(
   // and SENT. A guest already waiting on a knowledge-gap card would get
   // silence because a Haiku call failed twice — the one outcome worse than
   // either failing open or failing closed.
+  //
+  // TAC-424: `degraded` joins `truncated` here, and this is the load-bearing
+  // line of that ticket. Without it, a guest already holding a knowledge-gap
+  // card gets SILENCE the next time the verifier faults twice: the new trigger
+  // makes triggers.length > 0, which cancels the carve-out and drops a turn
+  // that before this ticket fired no trigger at all and SENT. A record-keeping
+  // change would have introduced a guest-facing regression.
   const checkDidNotComplete =
-    grounding.status === 'truncated' || prosePromiseBackstop.status === 'check_failed'
+    grounding.status === 'truncated' ||
+    grounding.status === 'degraded' ||
+    prosePromiseBackstop.status === 'check_failed'
   const slotDecision = decideSlotAction({
     rows: pendingRows,
     draftCommitment,
@@ -2220,23 +2391,21 @@ export async function applyApprovalPolicyStage(
     //
     //   flagged   → the claims
     //   clean     → []    the check ran and found nothing
-    //   skipped   → null  the check did not run (followup, demo guest, or the
-    //                     model self-reported a gap so we trusted it)
+    //   skipped   → null  the check did not run (demo guest, or the model
+    //                     self-reported a gap so we trusted it)
     //   truncated → null  it ran but the verdict was unreadable, so we have no
     //                     claim information — 'grounding_check_failed' on
     //                     review_reason is what says it didn't complete
+    //   degraded  → null  two attempts both faulted, so likewise no claim
+    //                     information
     //
-    // Known and accepted, inherited from TAC-367 rather than introduced here:
-    // a TRANSIENT fault also returns `clean`, so it records as "ran and found
-    // nothing". That indistinguishability IS the fail-open posture, and the
-    // degraded case is reported by captureGroundingVerifierUnavailable rather
-    // than by this column.
-    ungroundedClaims:
-      grounding.status === 'flagged'
-        ? grounding.claims
-        : grounding.status === 'clean'
-          ? []
-          : null,
+    // TAC-424 CLOSES the hole this comment used to record as known and
+    // accepted: a transient fault returned `clean` and landed here as `[]`,
+    // byte-identical to a genuine pass, so the column could not answer the one
+    // question migration 039 built it to answer. `degraded` is its own state
+    // now and maps to NULL with the other two no-verdict outcomes. Folding it
+    // back into `[]` is what the mapping test exists to fail on.
+    ungroundedClaims: UNGROUNDED_CLAIMS_BY_STATUS[grounding.status](grounding),
     // TAC-401: the carrier the prose-promise check produced, threaded to the
     // persist layer so an operator approving the card creates a real
     // guest_commitments row. Null whenever the check supplied nothing, and

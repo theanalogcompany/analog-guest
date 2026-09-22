@@ -1086,7 +1086,21 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         },
       )
     }
-    // TAC-367: an unexpected THROW degrades to 'skipped', not 'truncated'.
+    // TAC-367: an unexpected THROW degrades to 'skipped', not to a
+    // fail-closed state.
+    //
+    // TAC-424 reconciles this with the new "fails CLOSED on every failure"
+    // framing, because the two arguments sit side by side and the old one
+    // reads as contradicted. It is not: that framing is about faults INSIDE
+    // verifyGroundingStage, which it now holds on. A throw that escapes the
+    // stage entirely is a bug in our own code, not evidence about the reply
+    // or about the provider, and the flood argument TAC-424 rejected for
+    // transient faults does still apply to it — a defect here would fire on
+    // every inbound at once, where a provider fault is at least self-limiting.
+    //
+    // Recorded plainly because it is the one remaining path where a reply
+    // reaches a guest with no grounding verdict: 'skipped' is a pass-through
+    // to send.
     // The stage catches its own AI-call failures internally, so reaching here
     // means something structurally unexpected happened in our own code — not
     // evidence about the reply, and not the truncation case fail-closed was
@@ -1160,9 +1174,12 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
         claimCount: groundingBackstop.claims.length,
       })
     }
-    if (groundingBackstop.status === 'truncated') {
-      console.warn('[agent] inbound grounding backstop truncated — queuing (fail closed)', {
+    // TAC-424: both no-verdict outcomes queue, and the log says which, because
+    // the operator card cannot (one trigger, one label).
+    if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
+      console.warn('[agent] inbound grounding backstop did not complete — queuing (fail closed)', {
         agentRunId,
+        outcome: groundingBackstop.status,
       })
     }
     if (mechanicOfferBackstop.status === 'flagged' || mechanicOfferBackstop.status === 'check_failed') {
