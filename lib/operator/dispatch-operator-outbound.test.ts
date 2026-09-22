@@ -28,17 +28,25 @@ const guestMaybeSingleMock = vi.fn()
 // caller won, which is all the TAC-309 tests need (they assert on the flip
 // being attempted, not on what follows). TAC-469's tests set a claimed row.
 const claimResultMock = vi.fn(() => ({ data: null as unknown, error: null }))
+// TAC-513: records what each select() asked for.
+const rowSelectMock = vi.fn()
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => ({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () =>
-            table === 'guests' ? guestMaybeSingleMock() : rowMaybeSingleMock(),
-          eq: () => ({ maybeSingle: () => guestMaybeSingleMock() }),
-        }),
-      }),
+      // TAC-513: the argument is RECORDED. The mock hands back its fixture
+      // whatever is selected, so a column missing from the query is otherwise
+      // invisible behaviourally. Same technique heads-up-queue.test.ts uses.
+      select: (columns?: unknown) => {
+        rowSelectMock(columns)
+        return {
+          eq: () => ({
+            maybeSingle: () =>
+              table === 'guests' ? guestMaybeSingleMock() : rowMaybeSingleMock(),
+            eq: () => ({ maybeSingle: () => guestMaybeSingleMock() }),
+          }),
+        }
+      },
       // The UPDATE is the state flip. Recording the call IS the assertion:
       // on a refusal it must never happen, and on a real body it must.
       update: (payload: Record<string, unknown>) => {
@@ -63,7 +71,13 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('@/lib/messaging/send', () => ({
   sendMessage: (...a: unknown[]) => sendMessageMock(...a),
 }))
-vi.mock('@/lib/guests/commitments', () => ({ createCommitmentFromPending: vi.fn() }))
+// TAC-513: cancelCommitmentForGuest joins it. Both are DB writes this file
+// does not exercise; the step-7b tests assert what it is CALLED with.
+const cancelCommitmentMock = vi.fn()
+vi.mock('@/lib/guests/commitments', () => ({
+  createCommitmentFromPending: vi.fn(),
+  cancelCommitmentForGuest: (...a: unknown[]) => cancelCommitmentMock(...a),
+}))
 // TAC-469: the Instagram arm's database and Meta calls, mocked; their own
 // behaviour is dispatch-instagram-outbound.test.ts's. This file pins where the
 // arm sits relative to the flip.
@@ -77,9 +91,19 @@ vi.mock('./dispatch-instagram-outbound', () => ({
   settleFailedInstagramOperatorSend: (...a: unknown[]) => settleFailedMock(...a),
   stampInstagramOperatorSend: (...a: unknown[]) => stampInstagramMock(...a),
 }))
-vi.mock('@/lib/schemas', () => ({
-  PendingCommitmentSchema: { safeParse: () => ({ success: false }) },
-}))
+// TAC-513: partial mock. PendingCommitmentSchema keeps its always-fails stub,
+// which is what has kept commitment materialization out of this file's
+// ordering tests since TAC-297. PendingCancellationSchema is passed through
+// REAL, because the step-7b tests below need the actual parse: a stubbed
+// schema would test the mock's opinion of the carrier shape rather than the
+// shape, which is the barrel-mock trap CLAUDE.md names for emoji-cadence.
+vi.mock('@/lib/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/schemas')>()
+  return {
+    ...actual,
+    PendingCommitmentSchema: { safeParse: () => ({ success: false }) },
+  }
+})
 
 import { dispatchOperatorOutbound } from './dispatch-operator-outbound'
 
@@ -100,6 +124,8 @@ function row(body: string) {
       review_state: 'pending',
       created_at: new Date().toISOString(),
       pending_commitment: null,
+      // TAC-513: present and null, as every post-migration-052 row is.
+      pending_cancellation: null,
       // TAC-469: every row has a channel; this card is a text conversation's.
       channel: 'text',
     },
@@ -385,5 +411,160 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     expect(prepareInstagramMock).not.toHaveBeenCalled()
     expect(sendInstagramMock).not.toHaveBeenCalled()
     expect(sendMessageMock).toHaveBeenCalled()
+  })
+})
+
+// TAC-513, step 7b. The moment the ledger has to agree with the guest: the
+// reply has just gone out saying a promise is cancelled.
+describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () => {
+  const COMMITMENT_ID = 'cfa37ed7-1041-4679-a258-92062726f4c2'
+
+  function rowWithCancellation(carrier: unknown) {
+    const base = row('got it, just the cortado then. that one is off.')
+    return { ...base, data: { ...base.data, pending_cancellation: carrier } }
+  }
+
+  beforeEach(() => {
+    // The optimistic flip has to WIN, or dispatch returns already_acted and
+    // never reaches step 7b at all.
+    claimResultMock.mockReturnValue({
+      data: [{ id: MESSAGE_ID, review_state: 'approved' }],
+      error: null,
+    })
+    cancelCommitmentMock.mockResolvedValue({
+      ok: true,
+      data: { transitioned: true, row: { type: 'comp' } },
+    })
+  })
+
+  it('cancels the carried commitment, scoped to the row own venue and guest', async () => {
+    rowMaybeSingleMock.mockResolvedValue(
+      rowWithCancellation({ commitmentId: COMMITMENT_ID }),
+    )
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(cancelCommitmentMock).toHaveBeenCalledTimes(1)
+    expect(cancelCommitmentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commitmentId: COMMITMENT_ID,
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+      }),
+    )
+  })
+
+  it('cancels only AFTER the message has been sent', async () => {
+    // Ordering: cancelling first and then failing to send would take the comp
+    // away from a guest who was never told.
+    const order: string[] = []
+    sendMessageMock.mockImplementation(async () => {
+      order.push('send')
+      return { ok: true, data: { providerMessageId: 'p-1', status: 'QUEUED' } }
+    })
+    cancelCommitmentMock.mockImplementation(async () => {
+      order.push('cancel')
+      return { ok: true, data: { transitioned: true, row: { type: 'comp' } } }
+    })
+    rowMaybeSingleMock.mockResolvedValue(
+      rowWithCancellation({ commitmentId: COMMITMENT_ID }),
+    )
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(order).toEqual(['send', 'cancel'])
+  })
+
+  it('does nothing when the row carries no cancellation', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('hello there'))
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(cancelCommitmentMock).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the carrier is malformed, and still reports success', async () => {
+    // The message has gone out. A bad carrier must not turn a successful
+    // dispatch into a 502 for the operator.
+    rowMaybeSingleMock.mockResolvedValue(rowWithCancellation({ nope: true }))
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(cancelCommitmentMock).not.toHaveBeenCalled()
+    expect(r.ok).toBe(true)
+  })
+
+  it('does not fail the dispatch when the cancel write errors', async () => {
+    cancelCommitmentMock.mockResolvedValue({ ok: false, error: 'boom' })
+    rowMaybeSingleMock.mockResolvedValue(
+      rowWithCancellation({ commitmentId: COMMITMENT_ID }),
+    )
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it('does not fail the dispatch when the CAS matched nothing', async () => {
+    // The row left open/pending_ack between the draft and the approval. The
+    // guest has still been told it is cancelled.
+    cancelCommitmentMock.mockResolvedValue({
+      ok: true,
+      data: { transitioned: false, row: null },
+    })
+    rowMaybeSingleMock.mockResolvedValue(
+      rowWithCancellation({ commitmentId: COMMITMENT_ID }),
+    )
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it('runs on the edit path too', async () => {
+    rowMaybeSingleMock.mockResolvedValue(
+      rowWithCancellation({ commitmentId: COMMITMENT_ID }),
+    )
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'edit',
+      editedBody: 'that one is off, sorry for the mix up',
+    })
+    expect(cancelCommitmentMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('selects the column, or the carrier can never be read', async () => {
+    // The mock ignores its select() argument and hands back the fixture
+    // regardless, so a missing column in the query is invisible behaviourally.
+    // This is the same technique heads-up-queue.test.ts uses.
+    rowMaybeSingleMock.mockResolvedValue(row('hello there'))
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      allowedVenueIds: [VENUE_ID],
+      action: 'approve',
+    })
+    const selected = rowSelectMock.mock.calls.map((c) => String(c[0])).join(' ')
+    expect(selected).toContain('pending_cancellation')
   })
 })

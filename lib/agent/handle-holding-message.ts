@@ -43,12 +43,14 @@ import {
   type GroundingBackstopResult,
   type ProsePromiseBackstopResult,
   verifyGroundingStage,
+  verifyCancellationClaimStage,
   verifyProsePromiseStage,
 } from './stages'
 import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult, PendingQuestion } from '@/lib/ai'
+import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import type { RuntimeContext } from './types'
 
 /**
@@ -414,9 +416,15 @@ async function tryGenerateHolding(
   // allSettled, not Promise.all, for the reason both orchestrators give: a
   // hypothetical future throw in one stage must not discard the other's
   // finding on a check required to fail closed.
-  const [groundingSettled, prosePromiseSettled] = await Promise.allSettled([
+  const [groundingSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
     verifyGroundingStage(ctx, gen.result),
     verifyProsePromiseStage(ctx, gen.result),
+    // TAC-513: a holding message is content-free by construction and cancels
+    // nothing, so this is expected to return clean every time. It runs anyway,
+    // for the reason the prose-promise check runs here: "content-free by
+    // construction" is a claim about the prompt, not a property the code
+    // enforces, and this path generates through the ordinary generator.
+    verifyCancellationClaimStage(ctx, gen.result),
   ])
   if (groundingSettled.status === 'rejected') {
     console.warn(
@@ -485,6 +493,18 @@ async function tryGenerateHolding(
     groundingBackstop,
     { status: 'skipped' },
     prosePromiseBackstop,
+    // TAC-513: see handle-inbound.ts for why the resolution is RECOMPUTED on a
+    // throw rather than assumed to be 'none'. `resolveCancellation` is pure and
+    // cannot throw, so it answers the same here as it did inside the stage.
+    cancellationSettled.status === 'fulfilled'
+      ? cancellationSettled.value
+      : {
+          resolution: resolveCancellation(
+            gen.result.cancelsCommitmentId,
+            ctx.activeCommitments,
+          ),
+          claim: 'check_failed',
+        },
   )
   if (approval.action !== 'send') {
     console.warn(
@@ -607,6 +627,7 @@ function buildFallbackGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

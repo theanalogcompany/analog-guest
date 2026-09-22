@@ -56,6 +56,41 @@
 // in system-template.ts's # Commitments block (untouched, applies to every
 // commitment-bearing category). No worked-example phrasing added on purpose.
 //
+// TAC-513: a bounding paragraph was tried here and REVERTED (ruled
+// 2026-09-22). Read this before adding one back, because the obvious fix has
+// already been measured and it does not work.
+//
+// The incident: a guest complained about a cold cortado, was correctly offered
+// a replacement, then wrote "i also got the blossom tonic". That was labelled
+// comp_complaint and the agent apologised for the tonic and comped it too, on
+// a message that said nothing was wrong with it.
+//
+// The attempted fix was one paragraph, second in this block, telling the model
+// it does not know the other item was wrong and to ask. Measured over two runs
+// (325 generations, scripts/measurement/complaint-then-report.ts):
+//
+//   defect population  item-B comp   29/100  ->  0/100
+//   control population item-B comp   26/50   ->  7/50
+//
+// It closed the defect completely and took AC 5 with it: a GENUINE second
+// complaint ("the blossom tonic was bad too", "same with the cake") stopped
+// getting a remedy and got a clarifying question instead. A second wording
+// adding an explicit "if they do say something was wrong, that is a second
+// complaint" scored IDENTICALLY on the control metric (3/25 both), so this is
+// not a clause away from working.
+//
+// WHY IT FAILS, and why the next wording probably fails the same way: the
+// first paragraph of this block already licenses asking when there is not
+// enough to go on. A second sentence naming "another item" reads as a stronger
+// push toward asking whenever one is named, and the guest having already said
+// it was bad does not override it. Terse complaints break first.
+//
+// WHERE TO LOOK INSTEAD (TAC-514): with the guest's history neutralised the
+// classifier separated the two populations PERFECTLY on the message alone,
+// 0/50 comp_complaint on plain reports and 50/50 on genuine second complaints.
+// It misreads only with a prior complaint sitting in recentMessages. That is
+// context-driven, not a loose category definition, and not a copy problem.
+
 // TAC-356: universal R30 ("if a guest's message is unclear, ask what they
 // mean") generalizes this file's own "ask one real question" line below —
 // it does not duplicate or override it. This file's version stays because

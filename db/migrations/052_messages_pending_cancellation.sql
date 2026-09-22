@@ -1,0 +1,65 @@
+-- 052_messages_pending_cancellation.sql
+-- TAC-513: the words and the ledger always match.
+--
+-- On 2026-09-21 at Le Mil's the agent told a guest "the comp for the blossom
+-- tonic is cancelled" and nothing cancelled it. Comp GWPZ stayed `open` while
+-- the guest believed it was gone. The agent had no way to cancel a commitment
+-- and nothing stopped it saying it had.
+--
+-- This column is the carrier that lets a reply cancel one. It holds the
+-- commitment a queued draft withdraws, as {"commitmentId": <uuid>}, resolved
+-- against the guest's own open + pending_ack rows BEFORE it is written, so an
+-- id the model invented never lands here. Read back at dispatch by
+-- lib/operator/dispatch-operator-outbound.ts, which cancels the row at the
+-- moment the operator approves. Parsed by lib/schemas/guest-commitment.ts.
+--
+-- Shaped like messages.pending_commitment (migration 027) and
+-- messages.rendered_intentions (migration 045): a jsonb intent carrier on the
+-- draft row, camelCase inside the payload, materialized only on a successful
+-- dispatch. Skip therefore leaves the commitment open with no code to do it:
+-- a skipped draft never reaches the dispatch path at all.
+--
+-- WHY A SECOND COLUMN RATHER THAN A MEMBER OF pending_commitment.
+-- Two reasons, and the first is the load-bearing one.
+--
+-- 1. pending_commitment's SHAPE is read by things a union would reach.
+--    Migration 041's two partial unique indexes pick a draft's pending slot
+--    from `pending_commitment->>'type'`, and PendingCommitmentSchema.safeParse
+--    is the gate deciding whether createCommitmentFromPending runs at all. A
+--    `type: 'cancellation'` member would have to be taught to both, and a slot
+--    predicate is not a thing to teach a new vocabulary to on a live table.
+-- 2. A reply can legitimately do both: "that comp's off, but come back for a
+--    pastry" cancels one commitment and offers another. One column cannot
+--    express that; two can, and the draft then routes to the obligation slot
+--    on the strength of the offer, which is correct.
+--
+-- WHY THE ID AND NOT THE CODE (ruled with the plan, 2026-09-21).
+-- generateCommitmentCode draws 4 chars from a 31-char alphabet with no
+-- uniqueness constraint anywhere in the schema, so two open comps for one guest
+-- can collide; and `recommendation` rows carry code = NULL by construction, so
+-- a code-keyed reference cannot address them at all. The id is already rendered
+-- in the ## Active commitments block and already copied verbatim by the model
+-- into arrivalCapture.referencesCommitmentId. TAC-302 is the recorded failure
+-- of the alternative: through v1.17.0 the id was absent from that block, the
+-- model referenced the 4-char code instead, and every arrival capture no-op'd.
+--
+-- NULL means "this draft cancels nothing, or this row predates the migration".
+-- Both are the same instruction to the dispatch path: cancel nothing. There is
+-- no third value here and no meaning attached to an empty object.
+--
+-- NO BACKFILL: every existing row is already dispatched, or will be dispatched
+-- by code that reads NULL as "cancel nothing".
+-- NO INDEX: the only read is by primary key, inside dispatchOperatorOutbound.
+--
+-- ORDERING: additive, but deployed code SELECTs the column, so apply in Studio
+-- BEFORE merging the PR. The reverse order means every operator approve and
+-- edit 500s on a missing column, on the live queue.
+--
+-- HIGH-STAKES: touches `messages`. db/types.ts is hand-patched in the same
+-- commit until `npm run db:types` runs post-apply.
+--
+-- ROLLBACK (safe at any time: nothing else reads this column, and dropping it
+-- loses only the carrier on drafts still sitting in the queue):
+--   alter table messages drop column pending_cancellation;
+
+alter table messages add column pending_cancellation jsonb;

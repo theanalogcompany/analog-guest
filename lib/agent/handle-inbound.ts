@@ -18,6 +18,7 @@ import {
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
+import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -45,12 +46,14 @@ import {
   KNOWLEDGE_GAP_WINDOW_MS,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
+  type CancellationBackstopResult,
   type ProsePromiseBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
   verifyMechanicOfferStage,
+  verifyCancellationClaimStage,
   verifyProsePromiseStage,
 } from './stages'
 import {
@@ -302,6 +305,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 2,
     attemptScores: [],
     attemptHistory: [],
@@ -1030,10 +1034,11 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // span label into a throw on the reply path.
     const prosePromiseSpan = trace.span('verify_prose_promise', {})
     const verifyStartedAt = Date.now()
-    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled] = await Promise.allSettled([
+    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
       verifyProsePromiseStage(ctx, gen.result),
+      verifyCancellationClaimStage(ctx, gen.result),
     ])
     const verifyElapsedMs = Date.now() - verifyStartedAt
     if (groundingSettled.status === 'rejected') {
@@ -1054,6 +1059,18 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             prosePromiseSettled.reason instanceof Error
               ? prosePromiseSettled.reason.message
               : String(prosePromiseSettled.reason),
+        },
+      )
+    }
+    if (cancellationSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyCancellationClaimStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            cancellationSettled.reason instanceof Error
+              ? cancellationSettled.reason.message
+              : String(cancellationSettled.reason),
         },
       )
     }
@@ -1103,6 +1120,27 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       prosePromiseSettled.status === 'fulfilled'
         ? prosePromiseSettled.value
         : { status: 'check_failed' }
+    // TAC-513: an unexpected THROW degrades to check_failed, and the resolution
+    // is RECOMPUTED rather than assumed. `resolveCancellation` is pure, takes
+    // no I/O and cannot throw, so it gives the same answer here it gave inside
+    // the stage; assuming `{ status: 'none' }` instead would discard a
+    // resolvable id and hand the operator a card saying the check did not run,
+    // with no carrier behind text that tells the guest a comp is off. That is
+    // this ticket's own incident with an approval on it. Assuming `unresolved`
+    // is wrong in the other direction: on the common turn the field is '', and
+    // trigger 14 would then hold an ordinary reply under copy claiming it
+    // cancels something.
+    const cancellationBackstop: CancellationBackstopResult =
+      cancellationSettled.status === 'fulfilled'
+        ? cancellationSettled.value
+        : {
+            resolution: resolveCancellation(
+              gen.result.cancelsCommitmentId,
+              ctx.activeCommitments,
+            ),
+            claim: 'check_failed',
+          }
+
     const groundingClaims =
       groundingBackstop.status === 'flagged' ? groundingBackstop.claims : []
     verifySpan.end({
@@ -1177,6 +1215,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       groundingBackstop,
       mechanicOfferBackstop,
       prosePromiseBackstop,
+      cancellationBackstop,
     )
     console.log('[agent] inbound approval decision', {
       agentRunId,
@@ -1306,6 +1345,9 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             // Without this line the check catches the promise and the promise
             // still goes untracked, which is the entire ticket.
             promisedCommitment: approval.promisedCommitment,
+            // TAC-513: the cancellation this card carries, applied when an
+            // operator approves or edits it.
+            pendingCancellation: approval.pendingCancellation,
             // TAC-385 PR 1: carry the rendered set onto the card so
             // dispatchOperatorOutbound can record the ask if an operator
             // approves or edits it. Nulled by the persist layer under

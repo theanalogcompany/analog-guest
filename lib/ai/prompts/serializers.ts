@@ -981,7 +981,7 @@ function formatActiveCommitments(
 
   // Retained verbatim on both branches — see the header note.
   const idSentence =
-    'Each line carries an internal `id:` — copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. The id is system-internal: never read it aloud, never include it in your reply to the guest.'
+    'Each line carries an internal `id:` — copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back. The id is system-internal: never read it aloud, never include it in your reply to the guest.'
 
   const intro = isOperatorDecline
     ? 'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +

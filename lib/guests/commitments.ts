@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { RAGResult } from '@/lib/rag/types'
 import {
   type ArrivalSignal,
+  type CommitmentStatus,
   type CommitmentType,
   type GuestCommitmentRow,
   GuestCommitmentRowSchema,
@@ -606,6 +607,17 @@ export async function createCommitmentFromPending(opts: {
 
 // ===== Transitions (CAS-gated) =====
 
+/**
+ * TAC-513: the states a commitment can be cancelled FROM.
+ *
+ * Exactly the states `toActiveCommitment` projects and the ## Active
+ * commitments block renders, which is the point: a commitment the model can
+ * see is a commitment it can withdraw, and one it cannot see it cannot touch.
+ * Terminal states (acknowledged, redeemed, expired, cancelled) are absent
+ * deliberately. See cancelCommitmentForGuest for why.
+ */
+const CANCELLABLE_STATUSES = ['open', 'pending_ack'] as const satisfies readonly CommitmentStatus[]
+
 export type TransitionResult = {
   transitioned: boolean
   row: GuestCommitmentRow | null
@@ -830,6 +842,89 @@ export async function markCancelled(opts: {
       .eq('id', commitmentId)
       .eq('status', 'pending_ack')
       .in('venue_id', allowedVenueIds)
+      .select()
+    if (error) {
+      return { ok: false, error: error.message, errorCode: 'db_write_failed' }
+    }
+    if (!data || data.length === 0) {
+      return { ok: true, data: { transitioned: false, row: null } }
+    }
+    const parsed = GuestCommitmentRowSchema.safeParse(data[0])
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: `invalid commitment row shape: ${parsed.error.message}`,
+        errorCode: 'db_write_invalid_shape',
+      }
+    }
+    return { ok: true, data: { transitioned: true, row: parsed.data } }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg, errorCode: 'db_write_threw' }
+  }
+}
+
+/**
+ * TAC-513: cancel a commitment because the reply told the guest it is
+ * cancelled. CAS-gated on status IN ('open','pending_ack') AND venue_id AND
+ * guest_id.
+ *
+ * WHY THIS IS NOT markCancelled, which is 40 lines up and cancels the same
+ * column. The two differ in the one way that matters here: markCancelled is
+ * CAS-gated on status='pending_ack' ALONE, because TAC-299's operator decline
+ * only ever acts on a heads-up card, and a heads-up card is by definition a
+ * row the guest has already signalled arrival against. The 2026-09-21 comp
+ * this ticket exists for was `open` and had no arrival signal, so
+ * markCancelled could not have touched it. Widening that helper would change
+ * the decline path, which TAC-389 owns and this ticket must not move.
+ *
+ * So: two helpers, deliberately, and this comment is the pointer between them.
+ * Fold them when TAC-389's own follow-up is in hand, not here.
+ *
+ * SCOPING IS THE SECURITY PROPERTY. venue_id and guest_id are both in the CAS
+ * predicate, so even if a bad id reached this function it could only ever
+ * cancel a row belonging to the guest this reply is addressed to.
+ * resolveCancellation already makes that unreachable by matching against the
+ * guest's own rendered list, and this is the second layer: the boundary check
+ * is in application code and can be refactored away, where a WHERE clause is
+ * enforced by Postgres.
+ *
+ * TERMINAL STATES ARE EXCLUDED on purpose. A commitment the guest already
+ * redeemed, or that already expired, is not cancellable: there is nothing left
+ * to take back, and flipping a redeemed row to 'cancelled' would erase the
+ * record that the venue honoured it. Those land as transitioned=false.
+ *
+ * transitioned=false means one of: the row does not exist, it belongs to
+ * another guest or venue, or it has already left open/pending_ack. The caller
+ * (dispatchOperatorOutbound step 7b) LOGS that and does NOT fail the dispatch,
+ * because by then the message has gone to the guest and rolling it back is not
+ * on the table. We do not disambiguate, for the reason markCancelled gives:
+ * that needs a second SELECT the caller cannot act on differently anyway.
+ *
+ * No cancelled_at / cancelled_by columns, matching markCancelled and for the
+ * same reason (TAC-299 bounded itself to no migration, and nothing since has
+ * added them). The audit trail is the commitment_cancelled PostHog event and
+ * the source message that carried the cancellation.
+ */
+export async function cancelCommitmentForGuest(opts: {
+  commitmentId: string
+  venueId: string
+  guestId: string
+  now: Date
+}): Promise<RAGResult<TransitionResult>> {
+  const { commitmentId, venueId, guestId, now } = opts
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('guest_commitments')
+      .update({
+        status: 'cancelled',
+        updated_at: now.toISOString(),
+      })
+      .eq('id', commitmentId)
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .in('status', CANCELLABLE_STATUSES)
       .select()
     if (error) {
       return { ok: false, error: error.message, errorCode: 'db_write_failed' }

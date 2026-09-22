@@ -2061,7 +2061,7 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(introLineOf(out)).toBe(
       'The promise this message is declining. The venue can no longer honor it, and it is the only promise listed here, so this is the one to name. ' +
         'Do not ask when the guest is coming in, and do not invite them over for it. This message cancels the promise, so an arrival ask would contradict it. ' +
-        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back. ' +
         'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )
   })
@@ -2076,7 +2076,7 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
         "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
         "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally \u2014 but never force it, never pester. " +
         "Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
-        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival. ' +
+        'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back. ' +
         'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )
   })
@@ -3033,5 +3033,40 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
     // Every venue's prompt gains this block, which is why PROMPT_VERSION moved.
     expect(venueInfoToProse(makeVenueInfo())).toContain('## Links')
     expect(venueInfoToProse(makeVenueInfo({ links: [A] }))).toContain('## Links')
+  })
+})
+
+// TAC-513: the ## Active commitments intro is where the model learns what the
+// rendered id is FOR. It carried one use (arrival capture); a cancellation is
+// the second, and the block is the only place the id appears.
+describe('formatActiveCommitments — the id also carries a cancellation (TAC-513)', () => {
+  const commitment = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
+
+  it('names cancelsCommitmentId as a second use of the same id', () => {
+    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    expect(out).toContain(
+      'copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back',
+    )
+  })
+
+  it('still renders the id itself, which is the value both fields copy', () => {
+    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    expect(out).toContain(`id: ${commitment.id}`)
+  })
+
+  it('keeps the never-read-it-aloud rule attached to both uses', () => {
+    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    expect(out).toContain(
+      'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
+    )
   })
 })

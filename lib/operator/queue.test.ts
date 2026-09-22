@@ -284,6 +284,24 @@ describe('listPendingQueue', () => {
       // section 5) and the ruling comment that confirmed it, never read back
       // out of REVIEW_REASON_LABELS.
       ['prose_promise_backstop', 'This sounds like a promise to the guest. Your call.'],
+      // TAC-513: transcribed from the ruling comment on the ticket
+      // (2026-09-21), which approved the stronger of the two options put to
+      // Jaipal for prose_cancellation_backstop and the other two as proposed.
+      // Never read back out of REVIEW_REASON_LABELS: a table written by
+      // reading the map can only confirm the map equals itself, which is how
+      // TAC-310 certified a live defect on every green run.
+      ['commitment_cancellation_gated', 'This cancels something already promised. Your call.'],
+      [
+        'prose_cancellation_backstop',
+        "This tells the guest a promise is cancelled. Nothing here cancels it, so don't send it as written.",
+      ],
+      // TAC-513: transcribed from the 2026-09-22 ruling that split the two
+      // shapes apart. Same discipline as the rows above — the words here come
+      // from the ticket, not from the map.
+      [
+        'unresolved_cancellation_id',
+        "This reply points at a promise that doesn't exist. Check it before sending.",
+      ],
       // --- Something outside the draft needs you ---
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
       ['knowledge_gap_backstop', "I wasn't sure this was true, so I didn't send it."],
@@ -297,6 +315,9 @@ describe('listPendingQueue', () => {
       // TAC-401: the sibling of the line above, and deliberately a separate
       // sentence from prose_promise_backstop's — nothing was caught here.
       ['prose_promise_check_failed', "I couldn't check this one for a promise."],
+      // TAC-513: the sibling of the line above, and a separate sentence for
+      // the same reason — nothing was caught here, the check did not complete.
+      ['prose_cancellation_check_failed', "I couldn't check this one for a cancellation."],
       ['hold_all_outbound', "You're holding everything here right now."],
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a

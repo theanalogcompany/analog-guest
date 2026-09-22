@@ -3,9 +3,15 @@ import { randomUUID } from 'node:crypto'
 import { createAdminClient } from '@/lib/db/admin'
 import type { Database } from '@/db/types'
 import type { GenerateMessageResult } from '@/lib/ai'
-import { createCommitmentFromPending } from '@/lib/guests/commitments'
+import { captureCommitmentCancelled } from '@/lib/analytics/posthog'
+import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
-import { type PendingCommitment, pendingFromEmission } from '@/lib/schemas'
+import {
+  type PendingCancellation,
+  type PendingCommitment,
+  pendingFromEmission,
+  resolveCancellation,
+} from '@/lib/schemas'
 import { fireRedAlert } from './alerts'
 import type { OpenIntention } from './intentions/derive'
 import { buildRenderedIntentionsPayload } from './intentions/rendered'
@@ -202,6 +208,25 @@ export interface PersistQueuedDraftOptions {
    * here and the slot it was routed to cannot disagree.
    */
   promisedCommitment?: PendingCommitment | null
+  /**
+   * TAC-513: the cancellation this draft carries, resolved by the gate against
+   * the guest's own open + pending_ack list.
+   *
+   * Lands on `messages.pending_cancellation` (migration 052) so an operator
+   * approving the card cancels the commitment at the moment the guest is told
+   * it is cancelled. Skip writes nothing, because a skipped draft never
+   * reaches the dispatch path at all.
+   *
+   * UNLIKE `promisedCommitment` above, this is NEVER supplied by a backstop
+   * check. It only ever comes from the model's own id emission, resolved. That
+   * asymmetry is the ticket's safety property: recording an obligation nobody
+   * carried is protective, removing one is not.
+   *
+   * OVERWRITE-WHOLESALE on regen, like `pending_commitment`: a regenerated
+   * draft that no longer cancels must not keep the previous attempt's
+   * cancellation.
+   */
+  pendingCancellation?: PendingCancellation | null
 }
 
 /**
@@ -653,6 +678,7 @@ export async function scheduleAndSend(
   // start of the response regardless of how many bubbles it became.
   const firstMessageId = persistedIds[0]!
   await materializeInlineCommitment(ctx, generation, firstMessageId)
+  await applyInlineCancellation(ctx, generation, firstMessageId)
 
   return {
     outboundMessageId: firstMessageId,
@@ -690,6 +716,63 @@ export async function materializeInlineCommitment(
       `[agent] scheduleAndSend: inline commitment materialization failed for message=${firstMessageId}: ${commitmentResult.error}. Message already sent.`,
     )
   }
+}
+
+/**
+ * TAC-513: cancel the commitment a response that ALREADY WENT OUT said it was
+ * cancelling. Once per response, anchored to its first row.
+ *
+ * WHY THIS EXISTS AT ALL, given that a carried cancellation always queues.
+ * One path reaches a send with a cancellation on it: the TAC-284 demo-guest
+ * bypass, which short-circuits applyApprovalPolicyStage entirely and ships
+ * whatever the model wrote. CLAUDE.md states that bypass is total by design
+ * and overrides every trigger, so rather than carve a hole in it (ruled
+ * 2026-09-21) the ledger follows the words on that path too. A demo guest told
+ * their comp is cancelled has it cancelled.
+ *
+ * So this is not a second, quieter approval path. For every real guest the
+ * gate has already queued the draft and the cancellation happens at dispatch;
+ * by the time control reaches here on a non-demo turn, there is nothing to
+ * cancel because the gate did not let one through.
+ *
+ * Failure is LOGGED and accepted, matching materializeInlineCommitment
+ * directly above: the message has been sent, so the guest already believes the
+ * promise is off, and there is nothing to roll back. captureCommitmentCancelled
+ * relays either way, including on a CAS miss, because a guest told something is
+ * cancelled when it is not is exactly what this ticket exists to surface.
+ */
+export async function applyInlineCancellation(
+  ctx: RuntimeContext,
+  generation: GenerateMessageResult,
+  firstMessageId: string,
+): Promise<void> {
+  const resolution = resolveCancellation(
+    generation.cancelsCommitmentId,
+    ctx.activeCommitments,
+  )
+  if (resolution.status !== 'resolved') return
+
+  const result = await cancelCommitmentForGuest({
+    commitmentId: resolution.cancellation.commitmentId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    now: new Date(),
+  })
+  if (!result.ok) {
+    console.warn(
+      `[agent] scheduleAndSend: inline cancellation failed for message=${firstMessageId}, commitment=${resolution.cancellation.commitmentId}: ${result.error}. Message already sent.`,
+    )
+    return
+  }
+  await captureCommitmentCancelled({
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    commitmentId: resolution.cancellation.commitmentId,
+    commitmentType: resolution.commitment.type,
+    sourceMessageId: firstMessageId,
+    via: 'auto_send',
+    transitioned: result.data.transitioned,
+  })
 }
 
 /**
@@ -1021,6 +1104,12 @@ async function tryQueueInsert(
               ? null
               : buildRenderedIntentionsPayload(options.renderedIntentions),
           pending_commitment: pendingCommitment,
+          // TAC-513: the cancellation carrier. Nulled under `blankBody` with
+          // everything else, for the reason below: an operator approving a
+          // card they cannot read must not thereby cancel a guest's comp.
+          pending_cancellation: options.blankBody === true
+            ? null
+            : (options.pendingCancellation ?? null),
           // TAC-308: arms the holding-message timer. Undefined stays null —
           // only a knowledge-gap draft gets a clock.
           pending_until: options.pendingUntil?.toISOString() ?? null,
@@ -1149,6 +1238,10 @@ async function tryRegenUpdate(
       // See the INSERT path: a blank card must not carry an invisible
       // commitment the operator would unknowingly authorize on send.
       pending_commitment: blank ? null : pendingCommitment,
+      // TAC-513: overwrite-wholesale, exactly like the line above and for the
+      // same reason. A regen that no longer cancels anything must not keep the
+      // previous attempt's cancellation sitting on the row.
+      pending_cancellation: blank ? null : (options.pendingCancellation ?? null),
       // TAC-364: OVERWRITE-WHOLESALE, like pending_commitment directly above
       // and UNLIKE pending_until directly below. The distinction is the point,
       // and the three columns sitting together is why it's written down: both

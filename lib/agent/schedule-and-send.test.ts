@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
-import { createCommitmentFromPending } from '@/lib/guests/commitments'
+import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import { BUBBLE_DELIMITER, INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
@@ -169,6 +169,11 @@ vi.mock('@/lib/messaging', () => ({
 // TAC-313: scheduleAndSend materializes commitments inline after dispatch.
 vi.mock('@/lib/guests/commitments', () => ({
   createCommitmentFromPending: vi.fn(),
+  // TAC-513: applyInlineCancellation runs beside the materialisation above on
+  // the same auto-send path. Unmocked it arrives `undefined` here, which is
+  // invisible while every fixture cancels nothing and throws the moment one
+  // does.
+  cancelCommitmentForGuest: vi.fn().mockResolvedValue({ ok: true, data: { transitioned: true } }),
 }))
 
 function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
@@ -208,6 +213,7 @@ function makeGeneration(): GenerateMessageResult {
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
+    cancelsCommitmentId: '',
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
@@ -1725,4 +1731,86 @@ describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
     },
     2000,
   )
+})
+
+// ---------------------------------------------------------------------------
+// TAC-513: the auto-send path cancels what the reply says it cancels
+// ---------------------------------------------------------------------------
+//
+// A carried cancellation ALWAYS queues (trigger 13), so this path is reachable
+// only for a demo guest, where the TAC-284 bypass short-circuits the gate
+// wholesale. The ruling was to honour the cancellation on the send path rather
+// than carve the bypass, which means this call is the only thing keeping the
+// ledger in step with the words for those guests. Deleting it left the whole
+// suite green.
+describe('applyInlineCancellation (TAC-513)', () => {
+  const TONIC = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
+
+  // Mirrors the commitments describe above: this file clears per describe, not
+  // globally, so without this the first test's call leaks into the negatives
+  // and they pass or fail for the wrong reason.
+  beforeEach(() => {
+    scenario = freshScenario()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(createCommitmentFromPending)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
+    vi.mocked(cancelCommitmentForGuest)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { transitioned: true } } as never)
+  })
+
+  it('cancels the referenced commitment, anchored to the first bubble', async () => {
+    queueSends('p1')
+    queueInserts('m1')
+
+    await scheduleAndSend(
+      makeCtx({ activeCommitments: [TONIC] }),
+      { ...generationWithBody("that one's off then"), cancelsCommitmentId: TONIC.id },
+    )
+
+    expect(vi.mocked(cancelCommitmentForGuest)).toHaveBeenCalledTimes(1)
+    const arg = vi.mocked(cancelCommitmentForGuest).mock.calls[0]![0]
+    expect(arg.commitmentId).toBe(TONIC.id)
+    expect(arg.venueId).toBe('venue-1')
+    expect(arg.guestId).toBe('guest-1')
+  })
+
+  // The guest scope is re-asserted at the UPDATE, but this layer is what stops
+  // the call being made at all. An id the model invented resolves to
+  // `unresolved`, never to a row.
+  it('cancels NOTHING when the id does not resolve against this guest', async () => {
+    queueSends('p1')
+    queueInserts('m1')
+
+    await scheduleAndSend(
+      makeCtx({ activeCommitments: [TONIC] }),
+      {
+        ...generationWithBody("that one's off then"),
+        cancelsCommitmentId: '00000000-0000-4000-8000-000000000000',
+      },
+    )
+
+    expect(vi.mocked(cancelCommitmentForGuest)).not.toHaveBeenCalled()
+  })
+
+  it('cancels nothing on an ordinary reply', async () => {
+    queueSends('p1')
+    queueInserts('m1')
+
+    await scheduleAndSend(makeCtx({ activeCommitments: [TONIC] }), generationWithBody('sure thing'))
+
+    expect(vi.mocked(cancelCommitmentForGuest)).not.toHaveBeenCalled()
+  })
 })

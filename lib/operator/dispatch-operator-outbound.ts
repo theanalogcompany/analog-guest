@@ -29,13 +29,14 @@
 import { waitUntil } from '@vercel/functions'
 
 import {
+  captureCommitmentCancelled,
   captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import { createCommitmentFromPending } from '@/lib/guests/commitments'
+import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
-import { PendingCommitmentSchema } from '@/lib/schemas'
+import { PendingCancellationSchema, PendingCommitmentSchema } from '@/lib/schemas'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import {
   prepareInstagramOperatorSend,
@@ -154,7 +155,7 @@ export async function dispatchOperatorOutbound(
   const { data: row, error: readErr } = await supabase
     .from('messages')
     .select(
-      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment, rendered_intentions, channel',
+      'id, venue_id, guest_id, body, category, voice_fidelity, direction, review_state, created_at, pending_commitment, pending_cancellation, rendered_intentions, channel',
     )
     .eq('id', input.messageId)
     .maybeSingle()
@@ -446,6 +447,65 @@ export async function dispatchOperatorOutbound(
         console.warn(
           `[operator] dispatch-operator-outbound: commitment materialization failed for message=${row.id}: ${commitmentResult.error}. Message already sent.`,
         )
+      }
+    }
+  }
+
+  // ---- 7b. TAC-513: cancel the commitment this reply says is cancelled ----
+  // The message is now SENT, so the guest believes the promise is off. This is
+  // the moment the ledger has to agree with them, and it is the whole ticket:
+  // on 2026-09-21 comp GWPZ stayed `open` while a guest was told it was gone.
+  //
+  // Sits beside step 7 and shares its posture exactly: failure is LOGGED and
+  // does NOT roll back the dispatch, because the reply has gone out and
+  // unsending it is not on the table.
+  //
+  // SKIP NEEDS NO CODE. A skipped draft never reaches this function at all, so
+  // "on skip, nothing changes" holds by construction rather than by a branch
+  // somebody has to maintain.
+  //
+  // The carrier was resolved against the guest's own open commitments before
+  // it was written (lib/schemas/guest-commitment.ts, resolveCancellation), and
+  // cancelCommitmentForGuest scopes its UPDATE to this venue and guest again,
+  // so a row that somehow carried a foreign id still cannot cancel anything.
+  // `== null` covers BOTH null and undefined, deliberately. An absent field is
+  // `undefined`, and `undefined !== null` is true, so a `!== null` guard here
+  // would send a row that simply has no column into safeParse and log it as
+  // malformed. CLAUDE.md records the same trap on isKnowledgeGapCard's
+  // pending_until check.
+  if (row.pending_cancellation != null) {
+    const parsedCancellation = PendingCancellationSchema.safeParse(row.pending_cancellation)
+    if (!parsedCancellation.success) {
+      console.warn(
+        `[operator] dispatch-operator-outbound: malformed pending_cancellation on message=${row.id}: ${parsedCancellation.error.message}. Skipping cancellation.`,
+      )
+    } else {
+      const cancelResult = await cancelCommitmentForGuest({
+        commitmentId: parsedCancellation.data.commitmentId,
+        venueId: row.venue_id,
+        guestId: row.guest_id,
+        now: new Date(),
+      })
+      if (!cancelResult.ok) {
+        console.warn(
+          `[operator] dispatch-operator-outbound: cancellation failed for message=${row.id}, commitment=${parsedCancellation.data.commitmentId}: ${cancelResult.error}. Message already sent.`,
+        )
+      } else {
+        // Relayed on BOTH outcomes, deliberately. transitioned=false means the
+        // row had already left open/pending_ack between the draft being
+        // written and the operator approving it, and the guest has now been
+        // told it is cancelled either way. A guest told something is cancelled
+        // when it is not is precisely what this ticket exists to surface, so it
+        // must not be the quiet branch.
+        await captureCommitmentCancelled({
+          venueId: row.venue_id,
+          guestId: row.guest_id,
+          commitmentId: parsedCancellation.data.commitmentId,
+          commitmentType: cancelResult.data.row?.type ?? 'unknown',
+          sourceMessageId: row.id,
+          via: input.action === 'edit' ? 'operator_edit' : 'operator_approve',
+          transitioned: cancelResult.data.transitioned,
+        })
       }
     }
   }

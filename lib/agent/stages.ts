@@ -1,4 +1,6 @@
 import {
+  captureCancellationCheckUnavailable,
+  captureCancellationClaimUnbacked,
   captureClassificationLowConfidence,
   captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
@@ -26,6 +28,7 @@ import {
   type GenerateMessageResult,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
+  verifyCancellationClaim,
   verifyGrounding,
   verifyMechanicOffer,
   verifyProsePromise,
@@ -43,11 +46,16 @@ import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding
 // `undefined` would make the no-retry branch silently unreachable in every
 // one of them.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
+// TAC-513: imported BY PATH for the same reason as the two lines above.
+import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
 import { resolveOpenState } from '@/lib/schemas'
 import {
+  type CancellationResolution,
+  type PendingCancellation,
   isEmptyCommitmentEmission,
   type PendingCommitment,
   pendingFromEmission,
+  resolveCancellation,
 } from '@/lib/schemas/guest-commitment'
 import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
@@ -390,6 +398,64 @@ export const APPROVAL_TRIGGERS = {
   // alternative is inventing a description, which would land in
   // guest_commitments.description and render as a fact nobody wrote.
   PROSE_PROMISE_CHECK_FAILED: 'prose_promise_check_failed',
+  // TAC-513: the draft carries a structured cancellation, resolved against
+  // this guest's own open commitments. ALWAYS queues, whatever else is true:
+  // taking back something a guest was promised is an operator decision, and
+  // there is no auto-send path for one.
+  //
+  // The mirror of COMMITMENT_TYPE_GATED, and ranked directly below it. On a
+  // reply that both offers and cancels, the label the operator reads should be
+  // the one about money going OUT, which is the exposure this repo has bled on
+  // twice.
+  //
+  // The one path where a cancellation is not queued is the TAC-284 demo
+  // bypass, which overrides every trigger by design. schedule-and-send applies
+  // the cancellation inline there, so a demo guest's ledger still follows
+  // their words.
+  COMMITMENT_CANCELLATION_GATED: 'commitment_cancellation_gated',
+  // TAC-513: the reply TELLS the guest a promise is cancelled and nothing
+  // carries it. The 2026-09-21 incident exactly: comp GWPZ stayed `open` while
+  // the guest was told it was gone.
+  //
+  // Fires on two shapes, deliberately folded into one trigger because the
+  // operator's decision is identical and the copy is true of both: the
+  // independent check read a cancellation in the body with no carrier, OR the
+  // model emitted an id that did not resolve against this guest's own
+  // commitments. The PostHog event carries the unresolved id and the open
+  // count, which is where the two are told apart.
+  //
+  // NEVER SENDS. Unlike PROSE_PROMISE_BACKSTOP it carries no carrier and never
+  // mints one: minting an obligation from a second reading of prose is
+  // protective, minting a cancellation is destructive.
+  PROSE_CANCELLATION_BACKSTOP: 'prose_cancellation_backstop',
+  // TAC-513 (split out on the 2026-09-22 ruling): the model emitted a
+  // commitment id that resolves to NOTHING for this guest, while the body
+  // reads clean.
+  //
+  // This shipped folded into PROSE_CANCELLATION_BACKSTOP above, and the fold
+  // was wrong in the one way that matters on a card: that trigger's copy says
+  // "This tells the guest a promise is cancelled", which is simply FALSE of a
+  // reply whose text says nothing of the kind. An operator reading it goes
+  // looking for a sentence that is not there. Same wrong-reason-copy problem
+  // TAC-364 exists for, and the same one PROSE_CANCELLATION_CHECK_FAILED was
+  // kept separate to avoid.
+  //
+  // The HOLD is unchanged and still right: an emission reaching for a
+  // commitment that is not there is worth a human's glance whatever the prose
+  // says. Only the sentence the operator reads is different.
+  //
+  // Mutually exclusive with PROSE_CANCELLATION_BACKSTOP by construction (that
+  // one takes precedence whenever the body claims it), so the two can never
+  // both describe one card.
+  UNRESOLVED_CANCELLATION_ID: 'unresolved_cancellation_id',
+  // TAC-513: the cancellation-claim check produced no readable verdict.
+  //
+  // FAILS CLOSED on every failure mode, like PROSE_PROMISE_CHECK_FAILED and
+  // for the same reason: there is no prior to degrade to. A DISTINCT trigger
+  // rather than folding into the line above, per TAC-367 and TAC-364: telling
+  // an operator a cancellation was caught on a turn where nothing was caught
+  // is the wrong-reason-copy problem.
+  PROSE_CANCELLATION_CHECK_FAILED: 'prose_cancellation_check_failed',
 } as const
 
 /**
@@ -447,6 +513,11 @@ export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
  */
 export const PRIMARY_TRIGGER_PRIORITY = [
   APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+  // TAC-513: directly below the offer, and the ordering is a judgement. On a
+  // reply that both offers and cancels, the operator should read the label
+  // about money going OUT first: an unnoticed new comp costs the venue, where
+  // an unnoticed cancellation costs a card they were going to read anyway.
+  APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
   // TAC-355: ranked directly after COMMITMENT_TYPE_GATED — parity with it,
   // not below it. This backstop is the PRIMARY defense for the mechanic-
   // grant failure mode (see its own comment on APPROVAL_TRIGGERS above), so
@@ -470,6 +541,16 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // MECHANIC_OFFER_BACKSTOP to leave TAC-355's parity with the structural gate
   // undisturbed.
   APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+  // TAC-513: beside its sibling. A reply that lies to the guest about what
+  // they are owed outranks the softer signals below, and ranks under the
+  // promise backstop for the same money-first reason as the pair above.
+  APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+  // TAC-513: directly below the shape it was split from. The two are mutually
+  // exclusive, so this ordering never decides between them; it decides against
+  // everything else, and it sits ABOVE PROSE_CANCELLATION_CHECK_FAILED because
+  // an id that resolves to nothing is a finding about this draft where a failed
+  // check is an absence of one. Those two CAN co-fire.
+  APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
   // TAC-308: second, deliberately not first. The ticket asked for "top of
   // priority," but that request was reasoning about the TIMER — and the timer
   // anchors on messages.pending_until, not on review_reason, so rank decides
@@ -536,6 +617,10 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // above the two venue-wide policy signals because it is at least specific to
   // this message.
   APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
+  // TAC-513: beside its sibling, and low for the same reason
+  // GROUNDING_CHECK_FAILED is: it reports an ABSENCE of signal, so any
+  // concrete co-firing finding is the more useful operator label.
+  APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
   // v1.24.0: category routing is a POLICY signal, not a claim about this
   // draft. Every trigger above names a concrete risk in the specific message
   // and should carry the operator-facing label instead. Ranked above
@@ -1506,6 +1591,137 @@ export async function verifyProsePromiseStage(
 }
 
 /**
+ * TAC-513: what this turn said about cancelling, from two independent angles.
+ *
+ * `resolution` is the model's OWN structured emission, resolved against the
+ * guest's live open + pending_ack list. `claim` is a second, independent read
+ * of the drafted body that knows nothing about the emission.
+ *
+ * Two fields rather than one verdict because they answer different questions
+ * and the gate needs both: a reply can carry a cancellation and be fine, claim
+ * one and carry nothing (the incident), or carry an id for a commitment that is
+ * not this guest's. Collapsing them would lose the distinction the operator
+ * copy depends on.
+ */
+export type CancellationBackstopResult = {
+  resolution: CancellationResolution
+  claim: 'skipped' | 'clean' | 'flagged' | 'check_failed'
+}
+
+/**
+ * TAC-513: resolve the model's cancellation emission, and independently read
+ * the body for a cancellation it claims but did not carry.
+ *
+ * Fourth sibling to verifyGroundingStage, verifyMechanicOfferStage and
+ * verifyProsePromiseStage. See lib/ai/verify-cancellation-claim.ts for why this
+ * is a separate check rather than a second question on TAC-401's.
+ *
+ * Skips the model call (never the resolution, which is pure and always runs)
+ * when:
+ *   - the guest is a demo guest. TAC-284's bypass ships regardless of any
+ *     trigger, so the call buys nothing. The resolution still runs, because
+ *     schedule-and-send applies the cancellation inline on that path and the
+ *     demo guest's ledger still has to match their words.
+ *   - the emission RESOLVED. The draft already carries a real cancellation and
+ *     commitment_cancellation_gated already queues it, so the body cannot be
+ *     claiming something the system has not done.
+ *   - the body is empty. Nothing to read.
+ *
+ * It deliberately does NOT skip when the guest has no active commitments. A
+ * reply that tells a guest a promise is cancelled when no promise exists is
+ * just as wrong as one that names the wrong promise, and gating on a non-empty
+ * list would make the check blind to exactly that case.
+ *
+ * FAILS CLOSED on every failure, after ONE immediate retry on a transient
+ * fault, matching verifyProsePromiseStage. Truncation is not retried: retrying
+ * a cap that was already hit spends a second call to hit it again. The closed
+ * posture is easier to justify here than anywhere else in this file, because
+ * the cost of failing open is a reply that lies to a guest about what they are
+ * owed, and the cost of failing closed is one operator glance.
+ */
+export async function verifyCancellationClaimStage(
+  ctx: Pick<
+    RuntimeContext,
+    'agentRunId' | 'guest' | 'venue' | 'classification' | 'activeCommitments'
+  >,
+  generation: Pick<GenerateMessageResult, 'body' | 'cancelsCommitmentId'>,
+): Promise<CancellationBackstopResult> {
+  const resolution = resolveCancellation(
+    generation.cancelsCommitmentId,
+    ctx.activeCommitments,
+  )
+
+  if (ctx.guest.isDemo === true) return { resolution, claim: 'skipped' }
+  if (resolution.status === 'resolved') return { resolution, claim: 'skipped' }
+  if (generation.body.trim().length === 0) return { resolution, claim: 'skipped' }
+
+  let r = await verifyCancellationClaim({ replyBody: generation.body })
+  let retried = false
+  // One immediate retry, transient faults only. Truncation is excluded by
+  // errorCode rather than by message text, which is provider-formatted and not
+  // a contract.
+  if (!r.ok && r.errorCode !== VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE) {
+    retried = true
+    r = await verifyCancellationClaim({ replyBody: generation.body })
+  }
+
+  if (!r.ok) {
+    const truncated = r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
+    console.warn(
+      `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+    )
+    await captureCancellationCheckUnavailable({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      outcome: truncated ? 'truncated' : 'errored',
+      retried,
+      error: r.error,
+      errorCode: r.errorCode,
+    })
+    return { resolution, claim: 'check_failed' }
+  }
+
+  if (!r.data.claimsCancellation) {
+    // The body reads clean, but an id the model emitted resolved to nothing,
+    // and the gate holds on that alone (trigger 16). Without this the hold
+    // fires with no event anywhere, which was the one shape nothing could
+    // count. The card now has its own copy for it (the 2026-09-22 split), so
+    // this flag is no longer about compensating for a wrong sentence; it is
+    // what separates a model inventing a cancellation in prose from one
+    // reaching for a commitment id that is not there, which have different
+    // fixes.
+    if (resolution.status === 'unresolved') {
+      await captureCancellationClaimUnbacked({
+        agentRunId: ctx.agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        category: ctx.classification?.category ?? null,
+        unresolvedCommitmentId: resolution.claimedId,
+        activeCommitmentCount: ctx.activeCommitments.length,
+        replyBody: generation.body,
+        bodyClaimedIt: false,
+      })
+    }
+    return { resolution, claim: 'clean' }
+  }
+
+  await captureCancellationClaimUnbacked({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    category: ctx.classification?.category ?? null,
+    unresolvedCommitmentId:
+      resolution.status === 'unresolved' ? resolution.claimedId : null,
+    activeCommitmentCount: ctx.activeCommitments.length,
+    replyBody: generation.body,
+    bodyClaimedIt: true,
+  })
+
+  return { resolution, claim: 'flagged' }
+}
+
+/**
  * TAC-212 approval-policy gate. Runs after generateStage returns success;
  * decides whether to dispatch via Sendblue (action='send') or persist as a
  * pending draft for operator review (action='queue').
@@ -1594,6 +1810,19 @@ export type ApprovalDecision =
       // which the persist layer applies through the same resolveDraftCarrier
       // the gate used for the slot decision.
       promisedCommitment: PendingCommitment | null
+      // TAC-513: the cancellation this draft carries, or null. Non-null ONLY
+      // when the model emitted an id that RESOLVED against this guest's own
+      // open + pending_ack list.
+      //
+      // It reaches messages.pending_cancellation through the persist layer, so
+      // an operator approving the card cancels the commitment at the moment
+      // the guest is told it is cancelled. Skip writes nothing, because a
+      // skipped draft never reaches the dispatch path.
+      //
+      // Never supplied by the backstop check, unlike promisedCommitment above.
+      // That asymmetry is the ticket's safety property: recording an
+      // obligation nobody carried is protective, removing one is not.
+      pendingCancellation: PendingCancellation | null
       compMatchedPattern: string | null
       // TAC-264: when non-null, the persist layer UPDATEs this row in place
       // (regenerate) instead of INSERTing a new pending row. TAC-394: it is the
@@ -1677,6 +1906,19 @@ export async function applyApprovalPolicyStage(
   // 'check_failed' fires PROSE_PROMISE_CHECK_FAILED. Both of those queue —
   // this check fails closed on every failure, not only on truncation.
   prosePromiseBackstop: ProsePromiseBackstopResult = { status: 'skipped' },
+  // TAC-513: result of verifyCancellationClaimStage, run by the orchestrator
+  // alongside the three checks above. Two independent facts: `resolution` is
+  // the model's own emission resolved against this guest's live commitments,
+  // `claim` is an independent read of the body.
+  //
+  // A resolved resolution fires COMMITMENT_CANCELLATION_GATED and carries the
+  // cancellation onto the draft. A flagged claim, or an emission that did not
+  // resolve, fires PROSE_CANCELLATION_BACKSTOP and carries nothing.
+  // 'check_failed' fires PROSE_CANCELLATION_CHECK_FAILED. All of them queue.
+  cancellationBackstop: CancellationBackstopResult = {
+    resolution: { status: 'none' },
+    claim: 'skipped',
+  },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -1913,6 +2155,52 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
   }
 
+  // Trigger 13 (TAC-513): the draft carries a real cancellation, resolved
+  // against this guest's own open commitments. ALWAYS queues.
+  //
+  // Unconditional by design: there is no auto-send path for taking back
+  // something a guest was promised, and no fidelity score or venue policy that
+  // makes one. The single exception is the TAC-284 demo bypass, which
+  // short-circuits this whole function and is handled in schedule-and-send.
+  if (cancellationBackstop.resolution.status === 'resolved') {
+    triggers.push(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+  }
+
+  // Trigger 14 (TAC-513): the reply SAYS a promise is cancelled and nothing
+  // carries it. The 2026-09-21 incident.
+  //
+  // Neither this nor trigger 16 ever carries a carrier. Minting a cancellation
+  // from a second reading of prose is destructive where TAC-401's minting is
+  // protective.
+  if (cancellationBackstop.claim === 'flagged') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  }
+
+  // Trigger 16 (TAC-513, split from 14 on the 2026-09-22 ruling): the model
+  // emitted an id that resolves to nothing, and the body does NOT read as
+  // claiming a cancellation.
+  //
+  // `else`-shaped on purpose rather than two independent conditions: when the
+  // body claims it AND the id is unresolved, that is the incident's own shape
+  // and trigger 14's stronger sentence is the one to show. Writing it as
+  // `claim !== 'flagged'` keeps them mutually exclusive by construction, so no
+  // card can ever carry both descriptions of itself.
+  //
+  // It DOES co-fire with trigger 15: an unreadable check does not make the
+  // unresolved id any less unresolved. That one is ranked below this.
+  if (
+    cancellationBackstop.claim !== 'flagged' &&
+    cancellationBackstop.resolution.status === 'unresolved'
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+  }
+
+  // Trigger 15 (TAC-513): the cancellation-claim check produced no readable
+  // verdict. Fails CLOSED on every failure mode, like its TAC-401 sibling.
+  if (cancellationBackstop.claim === 'check_failed') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
+  }
+
   // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
   // covering EITHER the self-reported trigger or the independent backstop.
   // Clock arming and the protected-card drop key on this, so a
@@ -1979,6 +2267,17 @@ export async function applyApprovalPolicyStage(
   // treats them identically.
   const promisedCommitment: PendingCommitment | null =
     prosePromiseBackstop.status === 'flagged' ? prosePromiseBackstop.commitment : null
+  // TAC-513: the cancellation carrier, from the model's own resolved emission
+  // and nothing else.
+  //
+  // `blankBody` nulls it for TAC-309's reason unchanged: a blank knowledge-gap
+  // card's dispatched text is operator-authored, so the model's emission is
+  // not a claim about it, and an operator approving a card they cannot read
+  // must not thereby cancel a guest's comp.
+  const pendingCancellation: PendingCancellation | null =
+    !blankBody && cancellationBackstop.resolution.status === 'resolved'
+      ? cancellationBackstop.resolution.cancellation
+      : null
   // TAC-401: the model's own actionable emission still wins (ruling 3). This
   // differs from the pre-TAC-401 call only when generation emitted nothing
   // actionable AND the check named something, so a draft carrying a
@@ -2160,6 +2459,11 @@ export async function applyApprovalPolicyStage(
     // resolveDraftCarrier in the persist layer applies the same precedence the
     // gate used above — the model's own emission wins.
     promisedCommitment,
+    // TAC-513: the cancellation carrier, threaded to the persist layer so an
+    // operator approving the card cancels the commitment at the same moment
+    // the guest is told it is cancelled. Null unless the model's own emission
+    // resolved against this guest's list.
+    pendingCancellation,
     compMatchedPattern: comp.matched ? comp.pattern : null,
     existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
     slot,
