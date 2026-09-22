@@ -479,6 +479,15 @@ export async function regenerateWithCritique(
     // HID production behaviour from anyone reproducing it here. The honest
     // fix is an advisory `groundingCheckUnavailable` alongside the existing
     // advisory trio; it needs its own ticket, not a silent widening here.
+    //
+    // TAC-424 WIDENED that residual in the same direction, which is worth
+    // knowing before reproducing a held draft here. A TRANSIENT fault now
+    // holds the draft in production and is recorded as `degraded`; on this
+    // path it still lands in the same `else` and reads as clean. And this
+    // call does NOT retry, where production does — so a fault that production
+    // would have recovered from can surface here as a difference in the
+    // generated text with no indication why. Two behaviours to reproduce by
+    // hand rather than one.
     if (verify.ok) {
       hasUngroundedClaim = verify.data.hasUngroundedClaim
       ungroundedClaims = verify.data.ungroundedClaims
