@@ -171,6 +171,13 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // observations.
   prose_cancellation_backstop:
     "This tells the guest a promise is cancelled. Nothing here cancels it, so don't send it as written.",
+  // TAC-513, approved 2026-09-22. Split from the line above because that
+  // sentence is false here: on this shape the body says nothing about a
+  // cancellation, and only the emitted id is wrong. Sending an operator to
+  // look for a sentence that is not in the draft is the wrong-reason-copy
+  // problem TAC-364 exists for.
+  unresolved_cancellation_id:
+    "This reply points at a promise that doesn't exist. Check it before sending.",
   // TAC-513. Deliberately NOT folded under the line above: nothing was caught
   // here, the check just did not complete. Mirrors prose_promise_check_failed
   // and grounding_check_failed, and claims nothing was found, which is the

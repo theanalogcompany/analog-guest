@@ -428,6 +428,26 @@ export const APPROVAL_TRIGGERS = {
   // mints one: minting an obligation from a second reading of prose is
   // protective, minting a cancellation is destructive.
   PROSE_CANCELLATION_BACKSTOP: 'prose_cancellation_backstop',
+  // TAC-513 (split out on the 2026-09-22 ruling): the model emitted a
+  // commitment id that resolves to NOTHING for this guest, while the body
+  // reads clean.
+  //
+  // This shipped folded into PROSE_CANCELLATION_BACKSTOP above, and the fold
+  // was wrong in the one way that matters on a card: that trigger's copy says
+  // "This tells the guest a promise is cancelled", which is simply FALSE of a
+  // reply whose text says nothing of the kind. An operator reading it goes
+  // looking for a sentence that is not there. Same wrong-reason-copy problem
+  // TAC-364 exists for, and the same one PROSE_CANCELLATION_CHECK_FAILED was
+  // kept separate to avoid.
+  //
+  // The HOLD is unchanged and still right: an emission reaching for a
+  // commitment that is not there is worth a human's glance whatever the prose
+  // says. Only the sentence the operator reads is different.
+  //
+  // Mutually exclusive with PROSE_CANCELLATION_BACKSTOP by construction (that
+  // one takes precedence whenever the body claims it), so the two can never
+  // both describe one card.
+  UNRESOLVED_CANCELLATION_ID: 'unresolved_cancellation_id',
   // TAC-513: the cancellation-claim check produced no readable verdict.
   //
   // FAILS CLOSED on every failure mode, like PROSE_PROMISE_CHECK_FAILED and
@@ -525,6 +545,12 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // they are owed outranks the softer signals below, and ranks under the
   // promise backstop for the same money-first reason as the pair above.
   APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+  // TAC-513: directly below the shape it was split from. The two are mutually
+  // exclusive, so this ordering never decides between them; it decides against
+  // everything else, and it sits ABOVE PROSE_CANCELLATION_CHECK_FAILED because
+  // an id that resolves to nothing is a finding about this draft where a failed
+  // check is an absence of one. Those two CAN co-fire.
+  APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
   // TAC-308: second, deliberately not first. The ticket asked for "top of
   // priority," but that request was reasoning about the TIMER — and the timer
   // anchors on messages.pending_until, not on review_reason, so rank decides
@@ -1648,11 +1674,13 @@ export async function verifyCancellationClaimStage(
 
   if (!r.data.claimsCancellation) {
     // The body reads clean, but an id the model emitted resolved to nothing,
-    // and the gate holds on that alone (trigger 14). Without this the hold
-    // fires with no event anywhere, which is the one shape of this trigger
-    // that was invisible. Note the card's copy is written for the other shape
-    // and overstates this one; that is on the ticket as a copy decision, not
-    // something to fix by suppressing the hold.
+    // and the gate holds on that alone (trigger 16). Without this the hold
+    // fires with no event anywhere, which was the one shape nothing could
+    // count. The card now has its own copy for it (the 2026-09-22 split), so
+    // this flag is no longer about compensating for a wrong sentence; it is
+    // what separates a model inventing a cancellation in prose from one
+    // reaching for a commitment id that is not there, which have different
+    // fixes.
     if (resolution.status === 'unresolved') {
       await captureCancellationClaimUnbacked({
         agentRunId: ctx.agentRunId,
@@ -2128,24 +2156,33 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
   }
 
-  // Trigger 14 (TAC-513): the reply says a promise is cancelled and nothing
+  // Trigger 14 (TAC-513): the reply SAYS a promise is cancelled and nothing
   // carries it. The 2026-09-21 incident.
   //
-  // TWO SHAPES, one trigger, because the operator's decision is the same and
-  // the copy is true of both: the independent check read a cancellation in the
-  // body with no carrier, OR the model emitted an id that did not resolve
-  // against this guest's commitments. The second is included even when the
-  // body reads clean: an emission pointing at a commitment that is not there
-  // is the model reaching for something, and the safe reading of that is a
-  // card rather than a send.
+  // Neither this nor trigger 16 ever carries a carrier. Minting a cancellation
+  // from a second reading of prose is destructive where TAC-401's minting is
+  // protective.
+  if (cancellationBackstop.claim === 'flagged') {
+    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  }
+
+  // Trigger 16 (TAC-513, split from 14 on the 2026-09-22 ruling): the model
+  // emitted an id that resolves to nothing, and the body does NOT read as
+  // claiming a cancellation.
   //
-  // This trigger NEVER carries a carrier. Minting a cancellation from a second
-  // reading of prose is destructive where TAC-401's minting is protective.
+  // `else`-shaped on purpose rather than two independent conditions: when the
+  // body claims it AND the id is unresolved, that is the incident's own shape
+  // and trigger 14's stronger sentence is the one to show. Writing it as
+  // `claim !== 'flagged'` keeps them mutually exclusive by construction, so no
+  // card can ever carry both descriptions of itself.
+  //
+  // It DOES co-fire with trigger 15: an unreadable check does not make the
+  // unresolved id any less unresolved. That one is ranked below this.
   if (
-    cancellationBackstop.claim === 'flagged' ||
+    cancellationBackstop.claim !== 'flagged' &&
     cancellationBackstop.resolution.status === 'unresolved'
   ) {
-    triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    triggers.push(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
   }
 
   // Trigger 15 (TAC-513): the cancellation-claim check produced no readable

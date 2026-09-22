@@ -5051,7 +5051,11 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     expect(decision.pendingCancellation).toBeNull()
   })
 
-  it('queues an UNRESOLVED id under the same trigger, even when the body reads clean', async () => {
+  // REVERSED by the 2026-09-22 ruling, not deleted. It used to assert that an
+  // unresolved id fired PROSE_CANCELLATION_BACKSTOP, i.e. the folded shape.
+  // The hold is unchanged; only which sentence the operator reads is, and the
+  // old sentence was false here.
+  it('queues an UNRESOLVED id under its OWN trigger when the body reads clean', async () => {
     // An emission pointing at a commitment that is not there is the model
     // reaching for something. The safe reading of that is a card, not a send.
     const decision = await gate({
@@ -5060,8 +5064,56 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    // The load-bearing half. Without this, a mutant swapping the two
+    // conditions passes: both shapes queue either way, and only the ABSENCE of
+    // the other trigger tells them apart.
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
     expect(decision.pendingCancellation).toBeNull()
+  })
+
+  // The other side of the swap mutant. Pinned as an exact pair rather than a
+  // single `toContain`, because "both shapes queue" is true under every
+  // arrangement of these two conditions and proves nothing about which card
+  // the operator gets.
+  it('queues a CLAIMED cancellation under the prose trigger, never the id one', async () => {
+    const decision = await gate({ resolution: { status: 'none' }, claim: 'flagged' })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+  })
+
+  // The incident's own shape: the body claims it AND the id resolves to
+  // nothing. Exactly one of the two fires, and it is the stronger sentence.
+  // This is what makes the split mutually exclusive rather than merely
+  // usually-disjoint.
+  it('shows the CLAIMED copy when both shapes are true at once', async () => {
+    const decision = await gate({
+      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      claim: 'flagged',
+    })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+  })
+
+  // An unreadable check does not make the unresolved id any less unresolved,
+  // so these two DO co-fire, and the finding about the draft outranks the
+  // absence of one.
+  it('co-fires with a failed check, and the id finding takes the label', async () => {
+    const decision = await gate({
+      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      claim: 'check_failed',
+    })
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
   })
 
   it('queues a failed check under its OWN trigger', async () => {

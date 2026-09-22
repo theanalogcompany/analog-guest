@@ -83,6 +83,10 @@ const PUSH_POLICY = {
   // card at all.
   [APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP]: 'push',
 
+  // TAC-513. The card carries no timer and nothing else surfaces it, same as
+  // its sibling above.
+  [APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID]: 'push',
+
   // TAC-513. Fails closed, so a card exists and somebody has to look at it.
   [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]: 'push',
 

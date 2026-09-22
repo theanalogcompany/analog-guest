@@ -295,6 +295,13 @@ describe('listPendingQueue', () => {
         'prose_cancellation_backstop',
         "This tells the guest a promise is cancelled. Nothing here cancels it, so don't send it as written.",
       ],
+      // TAC-513: transcribed from the 2026-09-22 ruling that split the two
+      // shapes apart. Same discipline as the rows above — the words here come
+      // from the ticket, not from the map.
+      [
+        'unresolved_cancellation_id',
+        "This reply points at a promise that doesn't exist. Check it before sending.",
+      ],
       // --- Something outside the draft needs you ---
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
       ['knowledge_gap_backstop', "I wasn't sure this was true, so I didn't send it."],

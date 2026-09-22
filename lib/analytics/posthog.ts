@@ -838,8 +838,13 @@ export interface CancellationClaimUnbackedProps {
    * indistinguishable in the data while having completely different fixes: one
    * is the model writing a cancellation it cannot carry, the other is it
    * reaching for a commitment id on a turn whose text says nothing of the
-   * kind. The second case is also the one where the card's own copy is wrong
-   * about what the reply says, so it is worth being able to count.
+   * kind.
+   *
+   * Since the 2026-09-22 split the two also carry different operator copy
+   * (`prose_cancellation_backstop` vs `unresolved_cancellation_id`), so this
+   * field and the trigger agree by construction. It stays because the trigger
+   * says which card an operator saw and this says what the check actually
+   * found, and a future change to either should have to break both.
    */
   bodyClaimedIt: boolean
   // The held reply. Never sent, so safe to log here.
