@@ -266,7 +266,7 @@ describe('listPendingQueue', () => {
     // that the map equals itself, which is exactly how TAC-310 certified a
     // live defect on every green run.
     //
-    // All eighteen reachable values are here, and that completeness is the
+    // All reachable values are here, and that completeness is the
     // acceptance criterion "every trigger in the copy table renders its own
     // sentence". `demo_bypass` and `crisis_safety_reply` are deliberately
     // absent: both land on review_state='auto_sent' and the RPC filters
@@ -327,6 +327,24 @@ describe('listPendingQueue', () => {
       ['model_flagged', 'Something felt off about this one.'],
       ['self_talk_detected', 'I was talking about myself instead of to the guest.'],
       ['unverified_url', "Has a link we couldn't verify. Check it before sending."],
+      // TAC-363. PROPOSED COPY, not yet approved — the ruling of 2026-09-22
+      // says the operator-facing wording for both of these comes to Jaipal
+      // before merge. If he changes a word, it changes HERE and in
+      // REVIEW_REASON_LABELS together, and this table stays the transcription
+      // rather than becoming a copy of the map.
+      //
+      // Both name the venue being shut first. The structural one states what
+      // the reply does and what to send instead, because the emission makes it
+      // certain; the backstop one hedges, because it is a model judgement on
+      // prose and can be wrong.
+      [
+        'closed_venue_arrival_emitted',
+        "You're closed and this confirms they're coming over. Send them your opening time instead.",
+      ],
+      [
+        'closed_venue_arrival_backstop',
+        "You're closed and this may read as come on over. Check it before sending.",
+      ],
       ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
       // TAC-364, new: the crash card's own reason. Until now it borrowed
       // knowledge_gap's, which claimed the guest had asked something

@@ -36,6 +36,10 @@ const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' }
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
 const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+// TAC-363: defaults to 'skipped', which is what the real stage returns on
+// every turn at an OPEN venue — the fixtures' venue has no hours, so the
+// real stage would skip too.
+const verifyClosedVenueArrivalStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
@@ -120,6 +124,8 @@ vi.mock('./stages', async () => {
     // that is a TypeError swallowed into a rejected settlement — the check
     // would read as permanently degraded with every test here still green.
     verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyClosedVenueArrivalStage: (...a: unknown[]) =>
+      verifyClosedVenueArrivalStageMock(...a),
     verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
   }
 })

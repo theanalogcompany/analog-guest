@@ -8,6 +8,7 @@ import {
   captureEmojiDirectiveViolated,
   captureGroundingVerifierUnavailable,
   captureMechanicOfferBackstopCaught,
+  captureClosedVenueArrivalCaught,
   captureProsePromiseCaught,
   captureProsePromiseCheckUnavailable,
   captureRegenerationTriggered,
@@ -31,6 +32,7 @@ import {
   verifyCancellationClaim,
   verifyGrounding,
   verifyMechanicOffer,
+  verifyClosedVenueArrival,
   verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
@@ -48,10 +50,13 @@ import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 // TAC-513: imported BY PATH for the same reason as the two lines above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
-import { resolveVenueOpenState } from './venue-open-state'
+// TAC-363: imported BY PATH for the same reason as the three lines above.
+import { VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-closed-venue-arrival'
+import { isVenueClosed, resolveVenueOpenState } from './venue-open-state'
 import {
   type CancellationResolution,
   type PendingCancellation,
+  isEmptyArrivalCapture,
   isEmptyCommitmentEmission,
   type PendingCommitment,
   pendingFromEmission,
@@ -406,6 +411,44 @@ export const APPROVAL_TRIGGERS = {
   // alternative is inventing a description, which would land in
   // guest_commitments.description and render as a fact nobody wrote.
   PROSE_PROMISE_CHECK_FAILED: 'prose_promise_check_failed',
+  // TAC-363: the reply confirms an arrival at a venue that is CLOSED.
+  //
+  // Deterministic and structural: the generation emitted an `imminent`
+  // arrivalCapture and the venue's own hours say it is shut. No model
+  // judgement is involved, which is the point — TAC-301 part 1 put a
+  // `- Status:` line in the prompt telling the model the venue is closed, and
+  // on 2026-09-14 the model read it and said "See you soon" anyway. That is
+  // this repo's recurring pattern (TAC-314, TAC-327, TAC-329, TAC-330,
+  // TAC-338): a correctly worded instruction losing to content rendered
+  // closer to generation. The relationship this has to the status line is the
+  // one COMP_REGEX_BACKSTOP has to MODEL_FLAGGED.
+  //
+  // SCOPED TO `imminent` (ruled 2026-09-21, narrowing the ticket's literal
+  // proposal). A `scheduled` capture while closed is a guest arranging
+  // tomorrow morning at 11pm, which is correct behaviour and holds nothing;
+  // gating it would queue the most common out-of-hours arrival conversation
+  // and protect nobody, since nobody sets off on the strength of it. The
+  // commitment half of the literal proposal is dropped for a different
+  // reason: comp, hold and discount already queue on every turn via
+  // COMMITMENT_TYPE_GATED regardless of hours, so its only net-new coverage
+  // was a recommendation, which ruling 4(a) has just removed from the arrival
+  // path entirely.
+  CLOSED_VENUE_ARRIVAL_EMITTED: 'closed_venue_arrival_emitted',
+  // TAC-363: independent text backstop for the same failure, covering the
+  // shape the structural trigger above cannot see.
+  //
+  // A reply that reads as a same-moment confirmation while emitting NO
+  // structured field — "see you soon" with nothing attached — passes every
+  // other trigger by construction and auto-sends. The 2026-09-15 ruling added
+  // this check for exactly that gap.
+  //
+  // FAILS CLOSED, and 'flagged' and 'check_failed' ride ONE trigger, following
+  // MECHANIC_OFFER_BACKSTOP rather than the grounding and prose-promise splits.
+  // Those exist so an operator is never told "a claim was caught" on a turn
+  // where nothing was caught; here the operator's decision is identical either
+  // way (the venue is shut and this reply may be sending someone over, read
+  // it), which is the test that precedent turns on.
+  CLOSED_VENUE_ARRIVAL_BACKSTOP: 'closed_venue_arrival_backstop',
   // TAC-513: the draft carries a structured cancellation, resolved against
   // this guest's own open commitments. ALWAYS queues, whatever else is true:
   // taking back something a guest was promised is an operator decision, and
@@ -594,6 +637,21 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // one outranks self-talk because the guest ACTS on a wrong link: self-talk
   // tells them they are texting a bot, a bad link sends them to a 404. Label
   // only, like every entry in this array.
+  // TAC-363: both closed-venue arrival triggers sit here, below every money
+  // and fabrication signal and above the two deterministic text backstops.
+  //
+  // Below, because no money and no invented fact is at stake. Above
+  // UNVERIFIED_URL, because both are "the guest acts on this" failures and a
+  // wasted trip to a locked door costs them more than a dead link does.
+  // Structural above model judgement mirrors COMMITMENT_TYPE_GATED above
+  // PROSE_PROMISE_BACKSTOP.
+  //
+  // The two are mutually exclusive by construction — the backstop skips
+  // whenever the structural condition already fired — so this ordering is
+  // documentation rather than a live tie-break, the same caveat
+  // KNOWLEDGE_GAP_BACKSTOP's comment carries.
+  APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED,
+  APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP,
   APPROVAL_TRIGGERS.UNVERIFIED_URL,
   APPROVAL_TRIGGERS.SELF_TALK_DETECTED,
   // v1.23.0: below MODEL_FLAGGED so a self-flagged or structurally-typed
@@ -1359,6 +1417,25 @@ export function isCommitmentTypeGated(
 }
 
 /**
+ * TAC-363: did this generation emit an arrival the guest could act on NOW?
+ *
+ * `imminent` only. A `scheduled` capture says the guest is coming at a named
+ * later time, which is correct behaviour at a closed venue and holds nothing —
+ * see CLOSED_VENUE_ARRIVAL_EMITTED for why the ticket's literal condition was
+ * narrowed to this.
+ *
+ * Knows nothing about venue hours: the caller pairs it with isVenueClosed.
+ * Kept separate so the gate and the backstop's own skip check ask the same
+ * question of the emission rather than each writing their own.
+ */
+function isClosedVenueArrivalEmitted(
+  generation: Pick<GenerateMessageResult, 'arrivalCapture'>,
+): boolean {
+  if (isEmptyArrivalCapture(generation.arrivalCapture)) return false
+  return generation.arrivalCapture.signal === 'imminent'
+}
+
+/**
  * TAC-355: what verifyMechanicOfferStage found, when it ran. Four states,
  * not two — the fail-closed decision (see MECHANIC_OFFER_BACKSTOP's own
  * comment on APPROVAL_TRIGGERS) means "the check errored" is a DISTINCT,
@@ -1596,6 +1673,85 @@ export async function verifyProsePromiseStage(
   })
 
   return { status: 'flagged', commitment }
+}
+
+/**
+ * TAC-363: what verifyClosedVenueArrivalStage found, when it ran.
+ *
+ * Four states, the same shape the three sibling backstops settled on.
+ */
+export type ClosedVenueArrivalBackstopResult =
+  | { status: 'skipped' }
+  | { status: 'clean' }
+  | { status: 'flagged' }
+  | { status: 'check_failed' }
+
+/**
+ * TAC-363: independent text check for a reply that confirms an arrival while
+ * the venue is closed.
+ *
+ * WHEN IT RUNS. Three skips, and the first is the one that makes this cheap:
+ *
+ *   1. The venue is not positively CLOSED. During service, and at any venue
+ *      whose hours or timezone cannot be read, there is no question to ask —
+ *      so the overwhelming majority of turns cost nothing. `unknown` skipping
+ *      is ruling 2(a) again, reached through isVenueClosed rather than a
+ *      second comparison that could disagree with it.
+ *   2. The structural trigger already covers this turn. The generation emitted
+ *      an imminent arrivalCapture, so the draft is queueing either way and a
+ *      Haiku call would only prove it twice.
+ *   3. Demo guest, matching every sibling backstop.
+ *
+ * FAILS CLOSED on every failure mode, with one immediate retry on a transient
+ * fault and none on truncation — a cap already hit is hit again. This is the
+ * ticket's own stated fail direction: a false positive costs one unnecessary
+ * operator review, a false negative sends a guest to a locked door.
+ *
+ * Runs on the followup path as well as inbound. A proactive message can
+ * confirm an arrival just as easily as a reply can, and followups fire from a
+ * cron whose local-hour filter does not know the venue's opening time.
+ */
+export async function verifyClosedVenueArrivalStage(
+  ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'recognition'>,
+  generation: Pick<GenerateMessageResult, 'body' | 'arrivalCapture'>,
+): Promise<ClosedVenueArrivalBackstopResult> {
+  if (ctx.guest.isDemo === true) return { status: 'skipped' }
+  if (generation.body.trim().length === 0) return { status: 'skipped' }
+  // The same `now` the recognition snapshot and the arrival dispatch use, so
+  // the gate cannot reach a different verdict from the one capture reached a
+  // few lines earlier on the same turn.
+  if (!isVenueClosed(ctx.venue, ctx.recognition.computedAt)) return { status: 'skipped' }
+  if (isClosedVenueArrivalEmitted(generation)) return { status: 'skipped' }
+
+  let r = await verifyClosedVenueArrival({ replyBody: generation.body })
+  let retried = false
+  // One immediate retry, transient faults only. Truncation is excluded by
+  // errorCode rather than by message text, which is provider-formatted and
+  // not a contract.
+  if (!r.ok && r.errorCode !== VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE) {
+    retried = true
+    r = await verifyClosedVenueArrival({ replyBody: generation.body })
+  }
+
+  if (!r.ok) {
+    const truncated = r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
+    console.warn(
+      `[agent] closed-venue arrival check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}${retried ? ' (after one retry)' : ''}`,
+    )
+    return { status: 'check_failed' }
+  }
+
+  if (!r.data.confirmsArrival) return { status: 'clean' }
+
+  await captureClosedVenueArrivalCaught({
+    agentRunId: ctx.agentRunId,
+    venueId: ctx.venue.id,
+    guestId: ctx.guest.id,
+    source: 'text_backstop',
+    replyBody: generation.body,
+  })
+
+  return { status: 'flagged' }
 }
 
 /**
@@ -1927,6 +2083,14 @@ export async function applyApprovalPolicyStage(
     resolution: { status: 'none' },
     claim: 'skipped',
   },
+  // TAC-363: result of verifyClosedVenueArrivalStage, run by the orchestrator
+  // alongside the four checks above. 'skipped' | 'clean' never fire a trigger;
+  // 'flagged' and 'check_failed' both fire CLOSED_VENUE_ARRIVAL_BACKSTOP,
+  // which is the fail-closed posture the ticket specifies.
+  //
+  // The STRUCTURAL half of this pair needs no parameter: it reads the
+  // generation's own emission and the venue's hours, both already here.
+  closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult = { status: 'skipped' },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -2161,6 +2325,44 @@ export async function applyApprovalPolicyStage(
   }
   if (prosePromiseBackstop.status === 'check_failed') {
     triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
+  }
+
+  // Trigger 14 (TAC-363): the venue is CLOSED and this reply may send the
+  // guest over anyway.
+  //
+  // The structural half is deterministic and reads nothing but the emission
+  // and the venue's own hours — no model judgement, which is the whole point.
+  // TAC-301 part 1 put a `- Status: CLOSED` line in the prompt and on
+  // 2026-09-14 the model read it and replied "See you soon" regardless. This
+  // fires whatever the model concluded.
+  //
+  // `isVenueClosed` is true only for a POSITIVE closed verdict, so a venue
+  // whose hours or timezone cannot be read behaves as open and nothing fires
+  // (ruling 2(a)). The same `now` as the recognition snapshot, so the gate and
+  // the arrival dispatch cannot disagree about the clock within one turn.
+  const closedVenueArrivalEmitted =
+    isClosedVenueArrivalEmitted(generation) &&
+    isVenueClosed(ctx.venue, ctx.recognition.computedAt)
+  if (closedVenueArrivalEmitted) {
+    triggers.push(APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED)
+    // Captured here rather than in a stage, because this half has no stage —
+    // it is a field comparison, not a model call. Same in-gate placement
+    // UNVERIFIED_URL uses for the same reason. `source` is what keeps the two
+    // halves countable apart afterwards.
+    await captureClosedVenueArrivalCaught({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      source: 'structured',
+      replyBody: generation.body,
+    })
+  }
+  // Both non-clean states, one trigger — see CLOSED_VENUE_ARRIVAL_BACKSTOP.
+  if (
+    closedVenueArrivalBackstop.status === 'flagged' ||
+    closedVenueArrivalBackstop.status === 'check_failed'
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP)
   }
 
   // Trigger 13 (TAC-513): the draft carries a real cancellation, resolved

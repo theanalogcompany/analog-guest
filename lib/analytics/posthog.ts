@@ -955,6 +955,44 @@ function formatCancellationCheckUnavailable(props: CancellationCheckUnavailableP
 // UngroundedClaimCaughtProps/captureUngroundedClaimCaught's shape — same
 // "how often is the model caught doing the thing self-report was supposed to
 // catch" observability need, different failure mode.
+// TAC-363: a reply that would have sent a guest to a closed venue, caught and
+// queued. Modelled on captureMechanicOfferBackstopCaught.
+//
+// `source` is what makes this countable. The two mechanisms answer different
+// questions and would otherwise be indistinguishable in the data: 'structured'
+// means the model emitted an imminent arrival while the venue's own hours say
+// it is shut, and 'text_backstop' means the reply READ as a confirmation with
+// no structured field behind it. If the second ever dominates, the structural
+// condition is missing the real shape of the failure and should be revisited.
+export interface ClosedVenueArrivalCaughtProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  source: 'structured' | 'text_backstop'
+  // The reply that was caught. It is queued for operator review rather than
+  // blanked, so it is already operator-visible and safe to log here.
+  replyBody: string
+}
+
+export async function captureClosedVenueArrivalCaught(
+  props: ClosedVenueArrivalCaughtProps,
+): Promise<void> {
+  await capturePostHogEvent('closed_venue_arrival_caught', props.guestId, { ...props })
+  await postToSlack(formatClosedVenueArrivalCaught(props))
+}
+
+function formatClosedVenueArrivalCaught(props: ClosedVenueArrivalCaughtProps): string {
+  const lines = [
+    `*Arrival confirmed at a closed venue* — queued for review`,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `caught by: \`${props.source}\``,
+    `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  ]
+  return lines.join('\n')
+}
+
 export interface MechanicOfferBackstopCaughtProps {
   agentRunId: string
   venueId: string

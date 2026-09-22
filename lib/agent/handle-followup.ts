@@ -29,10 +29,12 @@ import {
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
   type CancellationBackstopResult,
+  type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
   verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyCancellationClaimStage,
+  verifyClosedVenueArrivalStage,
   verifyProsePromiseStage,
 } from './stages'
 import {
@@ -561,11 +563,20 @@ export async function handleFollowup(input: {
     // One of the four genuine uncarried promises in the measurement was on
     // this path (A4 #34, an engine day_3 followup, "we still owe you a good
     // cortado"), and under the fleet default it sends.
-    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
+    const [
+      groundingSettled,
+      mechanicOfferSettled,
+      prosePromiseSettled,
+      cancellationSettled,
+      closedVenueArrivalSettled,
+    ] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
       verifyProsePromiseStage(ctx, gen.result),
       verifyCancellationClaimStage(ctx, gen.result),
+      // TAC-363: fifth independent check. Skips without a model call unless
+      // the venue is positively closed, so it costs nothing during service.
+      verifyClosedVenueArrivalStage(ctx, gen.result),
     ])
     if (groundingSettled.status === 'rejected') {
       console.warn('[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)', {
@@ -674,6 +685,25 @@ export async function handleFollowup(input: {
         status: prosePromiseBackstop.status,
       })
     }
+    if (closedVenueArrivalSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyClosedVenueArrivalStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            closedVenueArrivalSettled.reason instanceof Error
+              ? closedVenueArrivalSettled.reason.message
+              : String(closedVenueArrivalSettled.reason),
+        },
+      )
+    }
+    // Degrades to check_failed, not skipped: this backstop fails CLOSED on
+    // every failure mode, and an unexpected throw is a failure mode.
+    const closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult =
+      closedVenueArrivalSettled.status === 'fulfilled'
+        ? closedVenueArrivalSettled.value
+        : { status: 'check_failed' }
+
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
@@ -681,6 +711,7 @@ export async function handleFollowup(input: {
       mechanicOfferBackstop,
       prosePromiseBackstop,
       cancellationBackstop,
+      closedVenueArrivalBackstop,
     )
     console.log('[agent] followup approval decision', {
       agentRunId,

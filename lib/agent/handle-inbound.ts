@@ -47,6 +47,7 @@ import {
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
   type CancellationBackstopResult,
+  type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
@@ -54,6 +55,7 @@ import {
   verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyCancellationClaimStage,
+  verifyClosedVenueArrivalStage,
   verifyProsePromiseStage,
 } from './stages'
 import {
@@ -1079,11 +1081,20 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // span label into a throw on the reply path.
     const prosePromiseSpan = trace.span('verify_prose_promise', {})
     const verifyStartedAt = Date.now()
-    const [groundingSettled, mechanicOfferSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
+    const [
+      groundingSettled,
+      mechanicOfferSettled,
+      prosePromiseSettled,
+      cancellationSettled,
+      closedVenueArrivalSettled,
+    ] = await Promise.allSettled([
       verifyGroundingStage(ctx, gen.result),
       verifyMechanicOfferStage(ctx, gen.result),
       verifyProsePromiseStage(ctx, gen.result),
       verifyCancellationClaimStage(ctx, gen.result),
+      // TAC-363: fifth independent check. Skips without a model call unless
+      // the venue is positively closed, so it costs nothing during service.
+      verifyClosedVenueArrivalStage(ctx, gen.result),
     ])
     const verifyElapsedMs = Date.now() - verifyStartedAt
     if (groundingSettled.status === 'rejected') {
@@ -1254,6 +1265,25 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     // land here, the latter fed by mechanicOfferBackstop above.
     // TAC-367: 9th (grounding_check_failed) also lands here, fed by the
     // 'truncated' state of the same groundingBackstop result.
+    if (closedVenueArrivalSettled.status === 'rejected') {
+      console.warn(
+        '[agent] verifyClosedVenueArrivalStage threw unexpectedly (degrading to check_failed)',
+        {
+          agentRunId,
+          error:
+            closedVenueArrivalSettled.reason instanceof Error
+              ? closedVenueArrivalSettled.reason.message
+              : String(closedVenueArrivalSettled.reason),
+        },
+      )
+    }
+    // Degrades to check_failed, not skipped: this backstop fails CLOSED on
+    // every failure mode, and an unexpected throw is a failure mode.
+    const closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult =
+      closedVenueArrivalSettled.status === 'fulfilled'
+        ? closedVenueArrivalSettled.value
+        : { status: 'check_failed' }
+
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
@@ -1261,6 +1291,7 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
       mechanicOfferBackstop,
       prosePromiseBackstop,
       cancellationBackstop,
+      closedVenueArrivalBackstop,
     )
     console.log('[agent] inbound approval decision', {
       agentRunId,
