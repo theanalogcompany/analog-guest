@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.64.0 (TAC-522: the calendar, and the weekday clauses as a lookup)', () => {
-    expect(PROMPT_VERSION).toBe('v1.64.0')
+  it('is v1.65.0 (TAC-498: the commitments heads-up example has no em dash)', () => {
+    expect(PROMPT_VERSION).toBe('v1.65.0')
   })
 })
 
@@ -2133,5 +2133,20 @@ describe('# Cancellations (TAC-513)', () => {
     const block = SYSTEM_TEMPLATE.slice(start, end)
     expect(block).not.toMatch(/\btext|\bSMS\b|iMessage|this number/i)
     expect(systemTemplateFor('instagram')).toContain('\n# Cancellations\n')
+  })
+})
+
+// TAC-498: the recommendation heads-up worked example in # Commitments used
+// an em dash, the exact punctuation R3 forbids everywhere else. Scoped to the
+// fixed sentence rather than the whole # Commitments section, which
+// legitimately carries a non-quoted-example dash in ordinary schema
+// prose ('commitment: {} (empty — no commitment this turn)').
+describe('SYSTEM_TEMPLATE — # Commitments recommendation heads-up example (TAC-498)', () => {
+  it('has no em or en dash', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('For recommendations, only ask about arrival')
+    const end = SYSTEM_TEMPLATE.indexOf('# Arrival capture')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
   })
 })
