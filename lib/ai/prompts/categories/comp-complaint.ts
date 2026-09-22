@@ -56,37 +56,41 @@
 // in system-template.ts's # Commitments block (untouched, applies to every
 // commitment-bearing category). No worked-example phrasing added on purpose.
 //
-// TAC-513: the bounding paragraph, second in the block, copy approved
-// 2026-09-21.
+// TAC-513: a bounding paragraph was tried here and REVERTED (ruled
+// 2026-09-22). Read this before adding one back, because the obvious fix has
+// already been measured and it does not work.
 //
-// On 2026-09-21 at Le Mil's a guest complained about a cold cortado, was
-// correctly offered a replacement, and then wrote "i also got the blossom
-// tonic". The classifier labelled that comp_complaint, and from there the
-// agent apologised for the tonic and comped it too. The guest had said
-// nothing was wrong with it.
+// The incident: a guest complained about a cold cortado, was correctly offered
+// a replacement, then wrote "i also got the blossom tonic". That was labelled
+// comp_complaint and the agent apologised for the tonic and comped it too, on
+// a message that said nothing was wrong with it.
 //
-// THE MISREADING IS AT CLASSIFICATION, and the fix is here anyway. The
-// classifier's own definition requires a quality issue and that message
-// asserts none, so the label was wrong on the prompt's own terms. But
-// rerouting it would cost the turn its category_requires_approval hold, and a
-// terse genuine second complaint ("the blossom tonic too") is one wording away
-// from the same reroute. Keeping the hold and bounding the instruction is the
-// safe direction: a wrong comp_complaint label is conservative in every
-// respect except that it instructs generosity, and this is what bounds the
-// generosity.
+// The attempted fix was one paragraph, second in this block, telling the model
+// it does not know the other item was wrong and to ask. Measured over two runs
+// (325 generations, scripts/measurement/complaint-then-report.ts):
 //
-// WHY IT SITS SECOND, immediately after the opening assertion rather than
-// further down. The opening line states the premise flatly, which is correct
-// for a turn that really does report a problem and is what gives the block its
-// warmth. This qualifies that premise, so it has to be next to it: three
-// paragraphs later the model has already been told to say sorry and make it up
-// to them.
+//   defect population  item-B comp   29/100  ->  0/100
+//   control population item-B comp   26/50   ->  7/50
 //
-// NOT a prohibition, deliberately, and not a rewrite of the opening line. This
-// file has caused two production failures in opposite directions and the
-// standing note on it is that prohibition is what produced the cold turn. A
-// trigger clause and one instruction is the smallest thing that closes this.
+// It closed the defect completely and took AC 5 with it: a GENUINE second
+// complaint ("the blossom tonic was bad too", "same with the cake") stopped
+// getting a remedy and got a clarifying question instead. A second wording
+// adding an explicit "if they do say something was wrong, that is a second
+// complaint" scored IDENTICALLY on the control metric (3/25 both), so this is
+// not a clause away from working.
 //
+// WHY IT FAILS, and why the next wording probably fails the same way: the
+// first paragraph of this block already licenses asking when there is not
+// enough to go on. A second sentence naming "another item" reads as a stronger
+// push toward asking whenever one is named, and the guest having already said
+// it was bad does not override it. Terse complaints break first.
+//
+// WHERE TO LOOK INSTEAD (TAC-514): with the guest's history neutralised the
+// classifier separated the two populations PERFECTLY on the message alone,
+// 0/50 comp_complaint on plain reports and 50/50 on genuine second complaints.
+// It misreads only with a prior complaint sitting in recentMessages. That is
+// context-driven, not a loose category definition, and not a copy problem.
+
 // TAC-356: universal R30 ("if a guest's message is unclear, ask what they
 // mean") generalizes this file's own "ask one real question" line below —
 // it does not duplicate or override it. This file's version stays because
@@ -94,8 +98,6 @@
 // above), not because R30 failed to cover it.
 
 export const COMP_COMPLAINT_INSTRUCTIONS = `The guest is telling you something went wrong.
-
-If their message names another item but does not say anything was wrong with it, you do not know that anything was. Ask how it was. Do not apologise for it and do not offer anything on it until they tell you.
 
 First, understand what actually happened. If you do not have enough to go on, ask one real question and send only that. A question is a complete turn on its own; you are not expected to solve anything in the same breath as asking.
 

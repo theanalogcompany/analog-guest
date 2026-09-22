@@ -73,33 +73,51 @@ import type {
 import { createRunLog } from './run-log'
 
 /**
- * The one sentence-group that differs between the arms. Sliced out of the live
- * constant rather than restated, so the `off` arm cannot drift away from being
- * "the shipped block minus this paragraph" if the copy is ever reworded.
+ * The anchor the arms inject after. It is the block's opening assertion, and
+ * the paragraph under test qualifies it, so it has to sit immediately next to
+ * it: three paragraphs later the model has already been told to say sorry and
+ * make it up to them.
+ */
+const ANCHOR = 'The guest is telling you something went wrong.'
+
+/**
+ * TAC-513's paragraph, which was tried in comp-complaint.ts and REVERTED
+ * (ruled 2026-09-22). It lives here now rather than being sliced out of the
+ * live constant, which is the inversion that keeps this harness runnable: with
+ * the paragraph unshipped, the `off` arm is simply the prompt as it composes
+ * today, and the other arms inject.
+ *
+ * Measured over two runs, 325 generations: defect population item-B comp
+ * 29/100 to 0/100, control population 26/50 to 7/50. It closes the defect and
+ * takes AC 5 with it.
  */
 const TAC_513_PARAGRAPH =
   'If their message names another item but does not say anything was wrong with it, you do not know that anything was. Ask how it was. Do not apologise for it and do not offer anything on it until they tell you.'
 
 /**
- * TAC-513: the candidate revision, added after the first full run.
- *
- * The shipped paragraph met the defect bar (item-B comp 11/50 to 0/50) and
- * MISSED the control bar (15/25 to 4/25), which is an AC-5 regression: a
- * genuine second complaint stopped getting a remedy and got a clarifying
- * question instead ("how was the cake" to a guest who had just said the cake
- * was bad too). The block's first paragraph already licenses asking when there
- * is not enough to go on, so the shipped sentence reads as a second, stronger
- * push toward asking whenever another item is named.
- *
- * The revision differs by ONE SENTENCE, which hands the genuine case back
- * explicitly rather than leaving it to inference.
- *
- * This is measured, NOT shipped. Jaipal approved the wording now in
- * comp-complaint.ts; changing it is his call, and this arm exists so that call
- * comes with numbers.
+ * The second wording, which added an explicit hand-back for the genuine case.
+ * It scored IDENTICALLY to the first on the control metric (3/25 both), which
+ * is the result that moved TAC-514 away from category-instruction wording
+ * altogether.
  */
 const CANDIDATE_PARAGRAPH =
   'If their message names another item but does not say anything was wrong with it, you do not know that anything was. Ask how it was, and do not apologise for it or offer anything on it until they answer. If they do say something was wrong with it, that is a second complaint: treat it exactly like the first.'
+
+/**
+ * `off` is the SHIPPED prompt, untouched. The other two inject their paragraph
+ * after the anchor.
+ *
+ * This is the inverse of how the harness ran during TAC-513, when the paragraph
+ * was briefly committed and `off` was "shipped minus the paragraph". The arms
+ * mean the same thing either way; what changed is which side needs surgery, and
+ * doing it this way means the harness keeps working with nothing unshipped
+ * sitting in comp-complaint.ts.
+ */
+const PARAGRAPH_BY_ARM: Record<string, string | null> = {
+  off: null,
+  on: TAC_513_PARAGRAPH,
+  candidate: CANDIDATE_PARAGRAPH,
+}
 
 const ARMS = ['off', 'on', 'candidate'] as const
 
@@ -236,12 +254,20 @@ function parseArgs() {
 async function main() {
   const args = parseArgs()
 
-  // The arm is a slice of the live constant, so a reworded paragraph either
-  // still matches or fails loudly here rather than silently measuring two
-  // identical arms.
-  if (!COMP_COMPLAINT_INSTRUCTIONS.includes(TAC_513_PARAGRAPH)) {
+  // Two guards, both of which have caught something.
+  //
+  // The anchor must still be in the block, or every injecting arm silently
+  // composes identically to `off` and the run measures nothing.
+  if (!COMP_COMPLAINT_INSTRUCTIONS.includes(ANCHOR)) {
     console.error(
-      '✗ the TAC-513 paragraph is not in COMP_COMPLAINT_INSTRUCTIONS. Both arms would be identical; refusing to run.',
+      `\u2717 the anchor is no longer in COMP_COMPLAINT_INSTRUCTIONS: ${ANCHOR}\n  Every injecting arm would compose identically to off; refusing to run.`,
+    )
+    process.exit(1)
+  }
+  // And the paragraph must NOT already be shipped, or `off` is not a baseline.
+  if (COMP_COMPLAINT_INSTRUCTIONS.includes(TAC_513_PARAGRAPH)) {
+    console.error(
+      '\u2717 the TAC-513 paragraph is already in COMP_COMPLAINT_INSTRUCTIONS, so the off arm is not a baseline. Refusing to run.',
     )
     process.exit(1)
   }
@@ -268,8 +294,7 @@ async function main() {
       guestId: args.guest,
       reps: args.reps,
       scenarios: SCENARIOS.map((s) => `${s.population}:${s.id}`),
-      paragraph: TAC_513_PARAGRAPH,
-      candidateParagraph: CANDIDATE_PARAGRAPH,
+      paragraphs: PARAGRAPH_BY_ARM,
       note: 'generate-only; nothing sent, nothing written to the database; one attempt per rep, no regen loop',
     },
   })
@@ -406,6 +431,20 @@ async function main() {
       for (const arm of ARMS) {
         // The one difference. `off` is the shipped prompt minus the paragraph,
         // so nothing else about the composition can vary between arms.
+        // The one difference between arms: which paragraph, if any, is
+        // injected after the anchor.
+        const paragraph = PARAGRAPH_BY_ARM[arm] ?? null
+        const composed =
+          paragraph === null
+            ? systemPrompt
+            : systemPrompt.replace(ANCHOR, `${ANCHOR}\n\n${paragraph}`)
+        if (paragraph !== null && composed === systemPrompt) {
+          console.error(
+            `\u2717 ${scenario.id} rep${rep} ${arm}: injection did not change the prompt (category ${category}); refusing to record a meaningless pair.`,
+          )
+          process.exit(1)
+        }
+
         // VOICE_FIDELITY_INSTRUCTION is appended exactly as generateMessage
         // appends it. composePrompt does NOT include it, and without it the
         // model returns voiceFidelity on a 1-to-10 scale, which the schema's
@@ -415,19 +454,7 @@ async function main() {
         // because it was systematic rather than intermittent. The constant's
         // own comment in generate-message.ts documents the failure; the
         // harness simply was not sending it.
-        const composed =
-          arm === 'off'
-            ? systemPrompt.replace(`\n${TAC_513_PARAGRAPH}\n`, '')
-            : arm === 'candidate'
-              ? systemPrompt.replace(TAC_513_PARAGRAPH, CANDIDATE_PARAGRAPH)
-              : systemPrompt
         const system = `${composed}\n\n${VOICE_FIDELITY_INSTRUCTION}`
-        if (arm !== 'on' && composed === systemPrompt) {
-          console.error(
-            `✗ ${scenario.id} rep${rep} ${arm}: this arm is identical to the on arm. The paragraph did not render into this prompt (category ${category}); refusing to record a meaningless pair.`,
-          )
-          process.exit(1)
-        }
 
         let body: string | null = null
         let commitment: { type?: string; description?: string } = {}
