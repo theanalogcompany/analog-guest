@@ -77,6 +77,7 @@ vi.mock('voyageai', () => ({
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
 const generateStageMock = vi.fn()
+const verifyProsePromiseStageMock = vi.fn()
 const loadPendingRowsBySlotMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
@@ -90,9 +91,15 @@ const captureAgentLatencyHighMock = vi.fn()
 vi.mock('./build-runtime-context', () => ({
   buildRuntimeContext: (...args: unknown[]) => buildRuntimeContextMock(...args),
 }))
+// TAC-527: this factory is an explicit ALLOW-LIST, so a stage the source
+// imports and this object omits arrives `undefined`. The decline path wraps
+// its prose-promise call in a try/catch that degrades to 'check_failed', so an
+// omission here would leave the carrier permanently null while every test in
+// this file stayed green — this repo's documented handle-inbound.test.ts trap.
 vi.mock('./stages', () => ({
   retrieveCorpusStage: (...args: unknown[]) => retrieveCorpusStageMock(...args),
   generateStage: (...args: unknown[]) => generateStageMock(...args),
+  verifyProsePromiseStage: (...args: unknown[]) => verifyProsePromiseStageMock(...args),
 }))
 // TAC-394: only the slot read is mocked. decideSlotAction and the identity
 // helpers run REAL, so which card a decline regenerates is decided by the code
@@ -290,6 +297,12 @@ function pendingRow(id: string, body: string, pendingCommitment: unknown = null)
 
 beforeEach(() => {
   buildRuntimeContextMock.mockReset()
+  // TAC-527: explicit, never a bare mockReset. An undefined resolution reads
+  // as a thrown TypeError inside the orchestrator and degrades to
+  // 'check_failed', which is a DIFFERENT state from the clean one most tests
+  // here mean to exercise.
+  verifyProsePromiseStageMock.mockReset()
+  verifyProsePromiseStageMock.mockResolvedValue({ status: 'clean' })
   // TAC-389: mirror production. build-runtime-context.ts puts the trigger it
   // was handed straight onto the ctx it returns (`input.followupTrigger ?? null`),
   // so a fixture that returns `followupTrigger: null` on a path that always has
@@ -555,7 +568,8 @@ describe('handleOperatorDecline', () => {
     expect(persistArgs[2]).toBe('operator_decline_initiated')
     expect(persistArgs[3]).toBe(EXISTING_PENDING_ID)
     // TAC-394: race recovery decides with the decline's own policy.
-    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
+    // TAC-527: and carries the prose-promise carrier, null on a clean check.
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always', promisedCommitment: null })
     expect(result.status).toBe('queued')
   })
 
@@ -773,7 +787,7 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
 
     const persistArgs = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistArgs[3]).toBe('card-conv')
-    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always', promisedCommitment: null })
     expect(result.status).toBe('queued')
   })
 
@@ -903,7 +917,143 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
 
     const persistArgs = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistArgs[3]).toBeNull()
-    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always' })
+    expect(persistArgs[4]).toEqual({ callerPolicy: 'regen_always', promisedCommitment: null })
     expect(result.status).toBe('queued')
+  })
+})
+
+// TAC-527 gap B. This path skips applyApprovalPolicyStage by design, and the
+// prose-promise check is called from the gate's CALLERS rather than the gate,
+// so it was skipped here too and the persist call supplied no carrier. A
+// decline draft promising a comp in prose created nothing on approval — the
+// reported incident's defect on a different route.
+describe('handleOperatorDecline: a prose promise in a decline draft (TAC-527)', () => {
+  const PROMISED_COMP = {
+    type: 'comp' as const,
+    description: 'a replacement olive cake',
+    code: 'QQ41',
+    expiresAt: null,
+  }
+  const OTHER_COMP = {
+    type: 'comp',
+    description: 'a free cortado on your next visit',
+    code: '7K2P',
+    expiresAt: null,
+  }
+  const INPUT = {
+    venueId: VENUE_ID,
+    guestId: GUEST_ID,
+    commitmentId: COMMITMENT_ID,
+    commitmentDescription: 'olive cake',
+  }
+
+  it('persists the carrier the check named, so approving creates the comp', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      commitment: PROMISED_COMP,
+    })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      // No structured commitment: the promise is in the prose only, which is
+      // the whole shape of this defect.
+      result: { ...makeGenerationResult(), body: "sorry, we're out. next one's on us" },
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    expect(result.status).toBe('queued')
+    expect(persistOrRegenQueuedDraftMock.mock.calls[0][4]).toEqual({
+      callerPolicy: 'regen_always',
+      promisedCommitment: PROMISED_COMP,
+    })
+  })
+
+  // AC5, on this route. A decline that gives nothing away must not mint an
+  // obligation just because it is a decline.
+  it('persists NO carrier when the check finds no promise', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'clean' })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleOperatorDecline(INPUT)
+
+    expect(persistOrRegenQueuedDraftMock.mock.calls[0][4]).toEqual({
+      callerPolicy: 'regen_always',
+      promisedCommitment: null,
+    })
+  })
+
+  // THE DIVERGENCE GUARD, and the reason this ticket moved the slot identity
+  // off draftCommitmentIdentity. The slot the decision is made against and the
+  // carrier the row persists have to be the same thing. Under the old call the
+  // draft below has no structured commitment, so it read as a CONVERSATION
+  // draft, regenerated the conversation card and wrote — while persisting a
+  // comp carrier. That is the TAC-401 blocker: a flagged draft 23505s into a
+  // card the slot decision had left alone.
+  it('routes a prose-promised comp to the OBLIGATION slot, and drops rather than overwriting a different comp', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: pendingRow('card-a', "the next one's on us", OTHER_COMP),
+      conversation: [pendingRow('card-b', 'an earlier reply')],
+    })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      commitment: PROMISED_COMP,
+    })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: { ...makeGenerationResult(), body: "sorry, we're out. next one's on us" },
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    expect(result).toEqual({
+      status: 'dropped',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-a',
+      triggers: ['operator_decline_initiated'],
+    })
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // Degrades to no carrier, NOT to a hold. There is nothing stronger to fail
+  // closed into here: the draft is queued unconditionally already.
+  it('still queues with no carrier when the check throws', async () => {
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyProsePromiseStageMock.mockRejectedValueOnce(new Error('boom'))
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
+      outboundMessageId: MESSAGE_ID,
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const result = await handleOperatorDecline(INPUT)
+
+    expect(result.status).toBe('queued')
+    expect(persistOrRegenQueuedDraftMock.mock.calls[0][4]).toEqual({
+      callerPolicy: 'regen_always',
+      promisedCommitment: null,
+    })
+    warn.mockRestore()
   })
 })

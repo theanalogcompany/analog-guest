@@ -50,17 +50,19 @@ import {
   type CommitmentIdentity,
   commitmentIdentityOf,
   decideSlotAction,
-  draftCommitmentIdentity,
   EMPTY_PENDING_ROWS,
   loadPendingRowsBySlot,
   occupantOfSlot,
   otherSlotOccupied,
+  resolveDraftCarrierIdentity,
   type SlotDropReason,
 } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
 import {
   generateStage,
+  type ProsePromiseBackstopResult,
   retrieveCorpusStage,
+  verifyProsePromiseStage,
 } from './stages'
 import {
   buildCorpusContent,
@@ -386,6 +388,43 @@ export async function handleOperatorDecline(input: {
       )
     }
 
+    // TAC-527 gap B: the prose-promise check, the one post-generation check
+    // this path runs.
+    //
+    // WHY IT WAS MISSING. This orchestrator skips applyApprovalPolicyStage by
+    // design, and the check is called from the gate's callers rather than the
+    // gate, so it was skipped here too and the persist call supplied no
+    // carrier. A decline draft that promised a comp in prose ("sorry, we're
+    // out of those, next one's on us") persisted pending_commitment: null and
+    // created nothing when the operator approved it. That is the reported
+    // incident's defect on a different route, and the one route where the
+    // operator has already decided to act.
+    //
+    // IT DOES NOT GAIN THE GATE. No trigger is pushed, no hold is introduced,
+    // the swipe-left is still the approval, and this file's structural
+    // invariant is untouched (still no scheduleAndSend, no sendMessage, no
+    // applyApprovalPolicyStage). Only the carrier changes.
+    //
+    // A failure degrades to NO CARRIER rather than to a hold, and that is the
+    // only coherent direction here: the draft is queued unconditionally
+    // already, so there is nothing stronger to fail closed into. The stage
+    // emits captureProsePromiseCheckUnavailable itself on either failure mode,
+    // so a degraded check is still observable.
+    //
+    // ctx.currentMessage is null on this path (no guest message is being
+    // answered), so the check composes a body-only prompt exactly as it did
+    // before TAC-527.
+    let prosePromise: ProsePromiseBackstopResult = { status: 'check_failed' }
+    try {
+      prosePromise = await verifyProsePromiseStage(ctx, gen.result)
+    } catch (err) {
+      console.warn(
+        '[agent] operator decline verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
+        { agentRunId, error: err instanceof Error ? err.message : String(err) },
+      )
+    }
+    const promisedCommitment = prosePromise.status === 'flagged' ? prosePromise.commitment : null
+
     // Persist as pending. NO approval gate (operator's swipe-left IS the
     // approval). NO scheduleAndSend — persist-only.
     //
@@ -409,7 +448,17 @@ export async function handleOperatorDecline(input: {
     try {
       const pendingRows =
         (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
-      const draftCommitment = draftCommitmentIdentity(gen.result.commitment, false)
+      // TAC-527: resolveDraftCarrierIdentity, NOT draftCommitmentIdentity.
+      // The slot the gate decides against and the carrier the row persists
+      // have to be the same thing. TAC-401 shipped that divergence once and it
+      // was caught in review: a flagged draft 23505s into a card the slot
+      // decision had left alone. Passing the promised carrier here is what
+      // keeps the two in step.
+      const draftCommitment = resolveDraftCarrierIdentity(
+        gen.result.commitment,
+        promisedCommitment,
+        false,
+      )
       const slotDecision = decideSlotAction({
         rows: pendingRows,
         draftCommitment,
@@ -483,7 +532,7 @@ export async function handleOperatorDecline(input: {
         gen.result,
         OPERATOR_DECLINE_PRIMARY_TRIGGER,
         slotDecision.action === 'regen' ? slotDecision.draftId : null,
-        { callerPolicy: 'regen_always' },
+        { callerPolicy: 'regen_always', promisedCommitment },
       )
       if (persistResult.action === 'dropped') {
         return await reportDrop(persistResult)
