@@ -33,8 +33,11 @@
  *      it dispatches, and adopts it rather than sending a reply to a message
  *      the guest has already moved past. Bounded by `MAX_TURN_EXTENSIONS`.
  *
- * And one thing that is none of the three and is load-bearing anyway: the
- * POST-TURN HANDOFF in `handle-inbound.ts`. See `RELEASE_THEN_HANDOFF` below.
+ * And two things that are none of the three and are load-bearing anyway, both
+ * in `handle-inbound.ts`: the POST-TURN HANDOFF, which re-invokes for a message
+ * this turn did not cover, and the RETRY, which re-invokes once for the message
+ * it did cover when the turn failed. Without them the claim is a robustness
+ * regression — it removes the second run that used to cover a dead first one.
  *
  * EVERY FAILURE FAILS OPEN. A store that cannot be read or written returns
  * `unavailable`, and the caller proceeds exactly as it does today. This whole
