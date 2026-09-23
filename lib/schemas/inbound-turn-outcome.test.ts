@@ -9,14 +9,20 @@ import {
 } from './inbound-turn-outcome'
 
 /**
- * TAC-523: bind the TS vocabulary to migration 055's CHECK constraints.
+ * TAC-523: bind the TS vocabulary to the CHECK constraints that are LIVE.
  *
  * The constants and the CHECKs are two statements of one list. If they drift,
  * the writer's inserts fail in production and nothing here fails first — the
  * table exists precisely because that class of silence is expensive.
  *
- * Migrations are append-only, so this reads 055 BY NAME. A later migration
- * that replaces any of these constraints has to update this test itself;
+ * TWO MIGRATIONS NOW, and which one owns which column is the point. Migrations
+ * are append-only, and widening a CHECK means dropping and recreating it, so
+ * TAC-526's migration 057 now owns `reason` while 055 still owns `outcome`,
+ * `layer` and `channel`. Reading 055 for `reason` would bind the constants to
+ * a constraint the database no longer has — green here, failing inserts in
+ * production, which is the exact silence this table exists to remove.
+ *
+ * A later migration that replaces any of these has to update this test itself;
  * that is the same limitation `pending-slots.test.ts` records for 041 and
  * `reached-guest-condition.test.ts` for 043/044.
  */
@@ -26,31 +32,58 @@ const MIGRATION = readFileSync(
   'utf8',
 )
 
+/** TAC-526 dropped and recreated the `reason` CHECK; 057 is the live one. */
+const REASON_MIGRATION = readFileSync(
+  join(__dirname, '..', '..', 'db', 'migrations', '057_inbound_turn_coalescing.sql'),
+  'utf8',
+)
+
 /**
  * SQL line comments are stripped FIRST and that is load-bearing, not tidiness:
  * the comments inside these CHECK lists quote values (`-- layer 'webhook'`),
  * so extracting quoted strings from the raw text would pick up words that are
  * not in the constraint at all.
  */
-const SQL_WITHOUT_COMMENTS = MIGRATION.split('\n')
-  .map((line) => line.replace(/--.*$/, ''))
-  .join('\n')
+function stripComments(sql: string): string {
+  return sql
+    .split('\n')
+    .map((line) => line.replace(/--.*$/, ''))
+    .join('\n')
+}
 
-function checkListFor(column: string): string[] {
+const SQL_WITHOUT_COMMENTS = stripComments(MIGRATION)
+
+/**
+ * 057's rollback is written as a COMMENTED block holding the old, narrower
+ * list. Stripping comments first is what keeps it out of the extraction — and
+ * is why the guard below asserts the live list contains the new value while
+ * the raw file still contains the old one.
+ */
+const REASON_SQL_WITHOUT_COMMENTS = stripComments(REASON_MIGRATION)
+
+function checkListIn(sql: string, column: string): string[] {
   const opener = `check (${column} in (`
-  const start = SQL_WITHOUT_COMMENTS.indexOf(opener)
+  const start = sql.indexOf(opener)
   if (start === -1) throw new Error(`no CHECK list found for column ${column}`)
-  const body = SQL_WITHOUT_COMMENTS.slice(start + opener.length)
+  const body = sql.slice(start + opener.length)
   const end = body.indexOf('))')
   if (end === -1) throw new Error(`unterminated CHECK list for column ${column}`)
   return [...body.slice(0, end).matchAll(/'([^']*)'/g)].map((m) => m[1])
 }
 
+function checkListFor(column: string): string[] {
+  // `reason` moved to 057; everything else is still 055's.
+  return column === 'reason'
+    ? checkListIn(REASON_SQL_WITHOUT_COMMENTS, column)
+    : checkListIn(SQL_WITHOUT_COMMENTS, column)
+}
+
 describe('migration 055 CHECK constraints match the TS vocabulary', () => {
-  it('guards itself: the migration is readable and the extractor finds values', () => {
+  it('guards itself: both migrations are readable and the extractor finds values', () => {
     // Without this, a rename or a failed read would make every assertion below
     // pass vacuously against empty arrays.
     expect(MIGRATION.length).toBeGreaterThan(0)
+    expect(REASON_MIGRATION.length).toBeGreaterThan(0)
     expect(checkListFor('outcome').length).toBeGreaterThan(0)
     expect(checkListFor('reason').length).toBeGreaterThan(0)
     expect(checkListFor('layer').length).toBeGreaterThan(0)
@@ -63,6 +96,24 @@ describe('migration 055 CHECK constraints match the TS vocabulary', () => {
     // permitted reason, which it is not.
     expect(MIGRATION).toContain("-- layer 'webhook', Instagram")
     expect(checkListFor('reason')).not.toContain('webhook')
+  })
+
+  /**
+   * TAC-526. The reason list is read from 057, and 057's ROLLBACK block is a
+   * commented copy of the narrower 055 list. If comment-stripping ever stopped
+   * running for this file the extractor would find the rollback's list first
+   * (it is the second `check (reason in (` in the file, but a future edit
+   * could reorder them) and bind the constants to the list this ticket
+   * replaced — passing here while every coalesced insert failed in production.
+   *
+   * So: assert the LIVE list carries the new value, and assert the raw file
+   * still carries the old one. Together those say the stripping is doing work.
+   */
+  it('reads the LIVE reason list from 057, not the rollback block', () => {
+    expect(checkListFor('reason')).toContain('coalesced_into_turn')
+    // The rollback block is still in the file, and must not be what we read.
+    expect(REASON_MIGRATION).toContain('-- rollback:')
+    expect(REASON_SQL_WITHOUT_COMMENTS).not.toContain('rollback')
   })
 
   it('outcome matches INBOUND_TURN_OUTCOMES exactly, in order', () => {

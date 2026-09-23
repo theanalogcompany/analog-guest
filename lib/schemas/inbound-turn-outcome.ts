@@ -6,10 +6,17 @@
  * 2026-09-23). Before this, both webhooks discarded the AgentResult and
  * eighteen distinct paths could end a turn with nothing queryable behind it.
  *
- * These constants are mirrored by CHECK constraints in migration 055 and
- * bound to it by `inbound-turn-outcome.test.ts`, which reads the migration
- * file. Adding a value here without widening the CHECK ships a writer whose
+ * These constants are mirrored by CHECK constraints in the migrations and
+ * bound to them by `inbound-turn-outcome.test.ts`, which reads the migration
+ * files. Adding a value here without widening the CHECK ships a writer whose
  * every insert fails; the test is what stops that reaching production.
+ *
+ * THE REASON LIST LIVES IN 057, NOT 055. TAC-526 widened it by one value, and
+ * widening a CHECK means dropping and recreating it, so 057 now carries the
+ * live constraint. `outcome`, `layer` and `channel` are still 055's. The
+ * binding test reads whichever migration owns each one; migrations are
+ * append-only, so a later one that replaces any of these has to update that
+ * test itself.
  *
  * Deliberately NOT exported from lib/schemas/index.ts. Every consumer imports
  * it by path, so a barrel entry would add a second import route for no gain —
@@ -108,6 +115,27 @@ export const INBOUND_TURN_REASONS = [
   'send',
   /** the wrapper caught something the orchestrator's own catch did not */
   'unexpected',
+
+  // ---- outcome 'superseded' (TAC-526) ----
+  /**
+   * This message was folded into another run's turn: the guest sent it
+   * seconds after another, one run claimed the conversation, and this one
+   * stood down. A DECISION, not a failure — the guest WAS answered, by the
+   * turn named in `detail.coalescedIntoAgentRunId`.
+   *
+   * Distinct from a bare `superseded`, which is TAC-469's reply check: staff
+   * answered by hand in the Instagram app. Same outcome, different cause, and
+   * merging them would make both unanswerable in SQL.
+   *
+   * With `skipped_duplicate`, this is the second value meaning the agent ran
+   * more than once for one guest action, so a strict turn count excludes it:
+   *
+   *   select count(*) from inbound_turn_outcomes
+   *   where layer = 'agent'
+   *     and outcome <> 'skipped_duplicate'
+   *     and reason is distinct from 'coalesced_into_turn'
+   */
+  'coalesced_into_turn',
 ] as const
 
 export type InboundTurnReason = (typeof INBOUND_TURN_REASONS)[number]

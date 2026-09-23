@@ -322,4 +322,21 @@ export type AgentResult =
   // came to send, usually one staff typed in the Instagram app. Nothing sent,
   // by design (rule 3). Only handleInbound produces it.
   | { status: 'superseded'; byMessageId: string }
+  // TAC-526: this message was folded into another run's turn. The guest sent
+  // it seconds after another, one run claimed the conversation, and this one
+  // stood down without generating anything.
+  //
+  // A SEPARATE MEMBER rather than a field on 'superseded', and the reason is
+  // the comment four lines above this one: 'superseded' means a reply already
+  // EXISTED and someone else had sent it. Here no reply exists yet — another
+  // run is producing it. Reusing 'superseded' would make its own docstring
+  // false, and an unenforced claim in a comment is what this repo keeps paying
+  // for. It also buys the `tsc` totality LEDGER_DERIVERS is built on: a new
+  // member cannot reach the ledger without someone deciding what it records.
+  //
+  // Recorded as outcome 'superseded' with reason 'coalesced_into_turn', so the
+  // two remain one bucket to count and two causes to tell apart.
+  //
+  // Only handleInbound produces it. A followup has no competing guest message.
+  | { status: 'coalesced'; intoAgentRunId: string; intoMessageId: string }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

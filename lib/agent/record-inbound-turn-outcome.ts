@@ -155,6 +155,24 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     outboundMessageId: null,
     detail: { byMessageId: r.byMessageId },
   }),
+  // TAC-526: folded into another run's turn. Recorded as outcome 'superseded'
+  // with a distinct reason, so the one bucket stays countable while the two
+  // causes stay apart: a bare 'superseded' is TAC-469's reply check (staff
+  // answered by hand in the Instagram app), this is a burst the agent
+  // coalesced. Merging them would make both unanswerable in SQL.
+  //
+  // A DECISION, NOT A FAILURE — the guest was answered, by the run named in
+  // detail. With 'skipped_duplicate' it is the second value meaning the agent
+  // ran more than once for one guest action, so a strict turn count excludes
+  // it. Migration 057's header carries that query.
+  coalesced: (r) => ({
+    outcome: 'superseded',
+    reason: 'coalesced_into_turn',
+    outboundMessageId: null,
+    // Vocabulary and ids only, never guest text. The run id is what joins this
+    // row to the turn that actually replied.
+    detail: { coalescedIntoAgentRunId: r.intoAgentRunId, coalescedIntoMessageId: r.intoMessageId },
+  }),
   // TAC-397, mapped when the rebase made `tsc` refuse to compile without it —
   // the total map firing on a real merge rather than on a mutant. A decision,
   // not a failure: the guest said "haha" and already holds a pending card.

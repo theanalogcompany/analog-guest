@@ -87,6 +87,23 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
       reason: 'obligation_slot_taken',
     },
     { result: { status: 'superseded', byMessageId: 'm1' }, outcome: 'superseded', reason: null },
+    // TAC-526. Shares the 'superseded' OUTCOME with the case above and is told
+    // apart by the reason, which is the whole point of the reason existing: a
+    // bare 'superseded' is staff answering by hand in the Instagram app, this
+    // is a burst the agent coalesced, and merging them makes both
+    // unanswerable in SQL.
+    //
+    // The outcome-coverage test below could NOT have forced this case to
+    // exist, because 'superseded' was already produced by its sibling — so a
+    // typo in either literal shipped green, and two mutants proved it
+    // ('coalesced_into_turn' misspelled, and the outcome flipped to 'failed',
+    // which would have counted every coalesced message as a turn failure in
+    // the denominator TAC-523 built the table to produce). Both die here now.
+    {
+      result: { status: 'coalesced', intoAgentRunId: 'run-a', intoMessageId: 'm2' },
+      outcome: 'superseded',
+      reason: 'coalesced_into_turn',
+    },
     // TAC-397. A decision, not a failure — and the one outcome the ledger most
     // needs to tell apart, since a deliberate silence and a swallowed reply
     // are identical from the database without it.
@@ -102,6 +119,35 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
     const entry = ledgerEntryFor(result)
     expect(entry.outcome).toBe(outcome)
     expect(entry.reason).toBe(reason)
+  })
+
+  /**
+   * TAC-526. CASES is a literal table, so it can only ever check the members
+   * someone remembered to add — and the outcome-coverage test below cannot
+   * catch a missing one when its outcome is already produced by a sibling,
+   * which is exactly how `coalesced` reached this file untested.
+   *
+   * This closes that by iterating the AgentResult union itself: every status
+   * must appear in CASES. A new member fails here the moment the deriver's
+   * total map forces someone to map it, rather than whenever a reader happens
+   * to notice.
+   */
+  it('has a case for EVERY AgentResult status, not just the ones with a unique outcome', () => {
+    const covered = new Set(CASES.map((c) => c.result.status))
+    // Written out, not derived from CASES: a list built from the thing under
+    // test agrees with it by construction.
+    const everyStatus = [
+      'sent',
+      'queued',
+      'skipped_duplicate',
+      'refused',
+      'dropped',
+      'superseded',
+      'coalesced',
+      'silenced',
+      'failed',
+    ] as const satisfies readonly AgentResult['status'][]
+    expect([...everyStatus].filter((s) => !covered.has(s))).toEqual([])
   })
 
   it('covers every value in INBOUND_TURN_OUTCOMES except the webhook-only one', () => {
