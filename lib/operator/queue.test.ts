@@ -10,7 +10,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { _REVIEW_REASON_KEYS_FOR_TESTS, listPendingQueue } from './queue'
 
 const rpcMock = vi.fn()
-const adminMock = vi.fn(() => ({ rpc: rpcMock }))
+// TAC-527: the carrier read. Returns rows of { id, pending_commitment }, and
+// defaults to EMPTY so every pre-existing test in this file describes a queue
+// with no carriers — i.e. exactly the static copy it asserted before.
+const carrierSelectMock = vi.fn()
+const adminMock = vi.fn(() => ({
+  rpc: rpcMock,
+  from: (table: string) => {
+    if (table !== 'messages') throw new Error(`unexpected table: ${table}`)
+    return {
+      select: (columns: string) => ({
+        in: (column: string, ids: string[]) => carrierSelectMock({ columns, column, ids }),
+      }),
+    }
+  },
+}))
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => adminMock(),
@@ -20,6 +34,8 @@ describe('listPendingQueue', () => {
   beforeEach(() => {
     rpcMock.mockReset()
     adminMock.mockClear()
+    carrierSelectMock.mockReset()
+    carrierSelectMock.mockResolvedValue({ data: [], error: null })
   })
 
   afterEach(() => {
@@ -387,7 +403,16 @@ describe('listPendingQueue', () => {
       // which approved this wording verbatim. Never read back out of
       // REVIEW_REASON_LABELS.
       ['commitment_type_gated', 'This commits you to something. Your call.'],
-      ['comp_regex_backstop', "This sounds like it's offering something on the house."],
+      // TAC-527, copy approved verbatim (2026-09-23). This table renders with
+      // NO carrier, which is exactly the residual case: the regex held a reply
+      // and approving it creates nothing. The suffix says so. With a carrier
+      // resolved the suffix is dropped, because it would be false and the
+      // prose-promise line is already naming what gets created — pinned
+      // separately below.
+      [
+        'comp_regex_backstop',
+        "This sounds like it's offering something on the house. Approving won't create anything.",
+      ],
       [
         'complaint_commitment_floor',
         'Someone complained and this promises to make it right.',
@@ -917,6 +942,213 @@ describe('listPendingQueue', () => {
       })
       const result = await listPendingQueue(['v1'])
       expect(result.ok && result.drafts[0]!.otherPendingDraftsForGuest).toBe(0)
+    })
+  })
+})
+
+// TAC-527: the card says what approving will create.
+//
+// Every string here is transcribed VERBATIM from Jaipal's approval
+// (2026-09-23), not read back out of COMMITMENT_SENTENCE. Per CLAUDE.md's
+// cross-repo rule 5, a test written by reading the map can only confirm the map
+// equals itself, and analog-operator renders reviewReason as written.
+describe('listPendingQueue: what approving creates (TAC-527)', () => {
+  const baseRow = {
+    draft_id: 'd1',
+    venue_id: 'v1',
+    venue_slug: 'x',
+    guest_id: 'g1',
+    guest_display_name: null,
+    guest_phone: '+15555550005',
+    guest_opted_out_at: null,
+    draft_body: "ugh, that's on us too",
+    category: null,
+    voice_fidelity: null,
+    recognition_state: null,
+    created_at: '2026-05-12T20:00:00.000Z',
+    langfuse_trace_id: null,
+    recent_context: null,
+  }
+
+  beforeEach(() => {
+    rpcMock.mockReset()
+    adminMock.mockClear()
+    carrierSelectMock.mockReset()
+    carrierSelectMock.mockResolvedValue({ data: [], error: null })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function withCarrier(carrier: unknown, reviewReason = 'prose_promise_backstop') {
+    rpcMock.mockResolvedValue({
+      data: [{ ...baseRow, review_reason: reviewReason, review_triggers: [reviewReason] }],
+      error: null,
+    })
+    carrierSelectMock.mockResolvedValue({
+      data: [{ id: 'd1', pending_commitment: carrier }],
+      error: null,
+    })
+  }
+
+  const APPROVED = [
+    ['comp', 'Approving this comps a replacement gulab jamun. Your call.'],
+    ['hold', 'Approving this sets aside a replacement gulab jamun for them. Your call.'],
+    [
+      'discount',
+      'Approving this promises a discount on a replacement gulab jamun. Your call.',
+    ],
+  ] as const
+
+  it.each(APPROVED)('names what a %s carrier will create', async (type, expected) => {
+    withCarrier({ type, description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(expected)
+    // Index-aligned with the codes, so the secondary chip says the same thing
+    // the primary label does rather than contradicting it.
+    expect(result.drafts[0]!.reviewTriggerLabels).toEqual([expected])
+  })
+
+  it('keeps the TAC-401 wording when the check flagged a promise it could not name', async () => {
+    withCarrier(null)
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+  })
+
+  // The residual, both ways round. With no carrier the operator is told
+  // approving creates nothing; with one, that sentence would be false.
+  it('tells the operator a regex-only hold creates nothing', async () => {
+    withCarrier(null, 'comp_regex_backstop')
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      "This sounds like it's offering something on the house. Approving won't create anything.",
+    )
+  })
+
+  it('drops the creates-nothing suffix when the regex hold DOES carry something', async () => {
+    withCarrier(
+      { type: 'comp', description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null },
+      'comp_regex_backstop',
+    )
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      "This sounds like it's offering something on the house.",
+    )
+    expect(result.drafts[0]!.reviewReason).not.toContain("won't create anything")
+  })
+
+  // THE INTERPOLATION GUARD. The no-em-dash invariant above runs the STATIC
+  // map, so it cannot see a dash arriving through model-written text. This is
+  // the first card string built from any.
+  it('strips an em dash arriving through the description', async () => {
+    withCarrier({
+      type: 'comp',
+      description: 'a replacement gulab jamun — the stale one',
+      code: 'G1H2',
+      expiresAt: null,
+    })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).not.toMatch(/—/)
+    expect(result.drafts[0]!.reviewReason).not.toMatch(/–/)
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'Approving this comps a replacement gulab jamun the stale one. Your call.',
+    )
+  })
+
+  it('caps a long description at a word boundary', async () => {
+    withCarrier({
+      type: 'comp',
+      description:
+        'a replacement gulab jamun and also the cortado and anything else they would like today',
+      code: 'G1H2',
+      expiresAt: null,
+    })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Pinned exactly. An earlier version of this asserted a negative regex
+    // that could never match — the sentence always ends in a word character
+    // before ". Your call." — so it passed for every implementation, including
+    // one that cut mid-word. The whole string is the only honest assertion.
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'Approving this comps a replacement gulab jamun and also the cortado and anything. Your call.',
+    )
+  })
+
+  // A recommendation costs the venue nothing and has no sentence here, so the
+  // card falls back rather than inventing one.
+  it('falls back to static copy for a recommendation carrier', async () => {
+    withCarrier({ type: 'recommendation', description: 'the cortado', code: null, expiresAt: null })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+  })
+
+  // FAILS SOFT. Losing the specific sentence is a worse card; losing the queue
+  // is every operator at that venue losing every card, each of which has a
+  // clock on it.
+  it('still returns the queue when the carrier read fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    rpcMock.mockResolvedValue({
+      data: [
+        {
+          ...baseRow,
+          review_reason: 'prose_promise_backstop',
+          review_triggers: ['prose_promise_backstop'],
+        },
+      ],
+      error: null,
+    })
+    carrierSelectMock.mockResolvedValue({ data: null, error: { message: 'connection reset' } })
+
+    const result = await listPendingQueue(['v1'])
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts).toHaveLength(1)
+    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    warn.mockRestore()
+  })
+
+  it('falls back to static copy on a malformed carrier', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    withCarrier({ type: 'comp' })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    warn.mockRestore()
+  })
+
+  it('reads the carrier in ONE batched query for every draft', async () => {
+    rpcMock.mockResolvedValue({
+      data: [
+        { ...baseRow, draft_id: 'd1', review_reason: 'prose_promise_backstop' },
+        { ...baseRow, draft_id: 'd2', review_reason: 'prose_promise_backstop' },
+      ],
+      error: null,
+    })
+    carrierSelectMock.mockResolvedValue({ data: [], error: null })
+
+    await listPendingQueue(['v1'])
+
+    expect(carrierSelectMock).toHaveBeenCalledTimes(1)
+    expect(carrierSelectMock).toHaveBeenCalledWith({
+      columns: 'id, pending_commitment',
+      column: 'id',
+      ids: ['d1', 'd2'],
     })
   })
 })

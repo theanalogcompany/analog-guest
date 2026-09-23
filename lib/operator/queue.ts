@@ -13,6 +13,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
 import type { ApprovalTrigger } from '@/lib/agent/stages'
 import type { ThreadMessage } from '@/lib/schemas'
+import { PendingCommitmentSchema } from '@/lib/schemas/guest-commitment'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
 
@@ -382,9 +383,83 @@ export const _REVIEW_REASON_KEYS_FOR_TESTS: readonly string[] =
 
 const REVIEW_REASON_FALLBACK = 'Needs review'
 
-function normalizeReviewReason(raw: string | null): string | null {
+/**
+ * TAC-527, copy approved verbatim (2026-09-23). What approving this card will
+ * CREATE, named, because the operator had no way to tell from the card.
+ *
+ * The two non-comp lines carry a constraint from the approval and must keep it
+ * through any rewording. "Approving this holds X" was rejected because "holds"
+ * reads as the SYSTEM holding the item rather than the venue setting one
+ * aside, so the hold line names the venue's action. "Approving this discounts
+ * X" was rejected because it implies we know the amount, which we do not, so
+ * the discount line stays silent on it.
+ *
+ * A total map over the three obligation types rather than a switch with a
+ * default: a fourth obligation type has to decide its own sentence instead of
+ * inheriting a wrong one.
+ */
+const COMMITMENT_SENTENCE = {
+  comp: (d: string) => `Approving this comps ${d}. Your call.`,
+  hold: (d: string) => `Approving this sets aside ${d} for them. Your call.`,
+  discount: (d: string) => `Approving this promises a discount on ${d}. Your call.`,
+} satisfies Record<'comp' | 'hold' | 'discount', (d: string) => string>
+
+/**
+ * TAC-527: a card-facing string may not contain an em dash (ruled 2026-09-14),
+ * and this is the first one built from MODEL-WRITTEN text.
+ *
+ * queue.test.ts's no-em-dash invariant runs every key of the STATIC label map,
+ * so it cannot see a dash arriving through an interpolated description. Strip
+ * here rather than relying on that test, and the test gains an interpolated
+ * case so the guard is checked rather than asserted.
+ *
+ * The cap is on the same footing: `commitmentDescription` is a short noun
+ * phrase by the verifier's own prompt, but nothing enforces that, and an
+ * operator reads this on a phone mid-shift. Cut back to a word boundary so a
+ * long one reads as shortened rather than as broken.
+ */
+const MAX_CARD_DESCRIPTION_CHARS = 60
+
+function sanitizeCardDescription(raw: string): string {
+  const flattened = raw.replace(/[\u2014\u2013]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (flattened.length <= MAX_CARD_DESCRIPTION_CHARS) return flattened
+  const cut = flattened.slice(0, MAX_CARD_DESCRIPTION_CHARS)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
+/**
+ * TAC-527: the card copy for one trigger, given what the row will actually
+ * create if approved.
+ *
+ * Two triggers read the carrier and the rest are untouched:
+ *
+ *   - `prose_promise_backstop` with a resolved carrier names what it creates.
+ *     Without one it keeps its TAC-401 wording, which is still true: the check
+ *     flagged a promise it could not name.
+ *   - `comp_regex_backstop` with NO carrier says so, because that is the
+ *     residual case where the regex held a reply and approving creates
+ *     nothing. With a carrier it keeps its plain wording — the suffix would be
+ *     false, and the prose-promise line above is already saying what gets
+ *     created.
+ *
+ * `commitment_type_gated` is deliberately NOT here. That path already carries
+ * the model's own structured emission and works today; widening this to it is
+ * a separate decision with its own copy.
+ */
+function labelForTrigger(code: string, carrier: CardCarrier | null): string {
+  if (code === 'prose_promise_backstop' && carrier !== null) {
+    return COMMITMENT_SENTENCE[carrier.type](carrier.description)
+  }
+  if (code === 'comp_regex_backstop' && carrier === null) {
+    return "This sounds like it's offering something on the house. Approving won't create anything."
+  }
+  return (REVIEW_REASON_LABELS as Record<string, string>)[code] ?? REVIEW_REASON_FALLBACK
+}
+
+function normalizeReviewReason(raw: string | null, carrier: CardCarrier | null): string | null {
   if (raw === null) return null
-  return (REVIEW_REASON_LABELS as Record<string, string>)[raw] ?? REVIEW_REASON_FALLBACK
+  return labelForTrigger(raw, carrier)
 }
 
 /**
@@ -424,10 +499,8 @@ function normalizeReviewTriggers(raw: string[] | null): string[] {
  * already-normalized codes, not the raw column, or the alignment guarantee is
  * theirs to keep rather than this function's.
  */
-function toReviewTriggerLabels(codes: string[]): string[] {
-  return codes.map(
-    (t) => (REVIEW_REASON_LABELS as Record<string, string>)[t] ?? REVIEW_REASON_FALLBACK,
-  )
+function toReviewTriggerLabels(codes: string[], carrier: CardCarrier | null): string[] {
+  return codes.map((t) => labelForTrigger(t, carrier))
 }
 
 /**
@@ -519,6 +592,71 @@ function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
   return out
 }
 
+/**
+ * TAC-527: what approving a card will create, as the card needs to say it.
+ *
+ * Narrowed to the three OBLIGATION types on purpose. `pending_commitment` can
+ * also hold a recommendation, which costs the venue nothing and has no
+ * sentence here; that row falls back to its static copy.
+ */
+type CardCarrier = { type: 'comp' | 'hold' | 'discount'; description: string }
+
+/**
+ * TAC-527: the carrier for each draft, read in ONE batched query keyed on the
+ * ids the RPC just returned.
+ *
+ * A second SELECT rather than a new RPC return column, and that is what keeps
+ * this ticket free of a migration on `messages`: `pending_commitment` has
+ * existed since migration 027, and widening `list_operator_queue`'s return type
+ * would mean a DROP and CREATE of a function the operator queue depends on.
+ * Same shape TAC-299 used for the recognition-state lookup.
+ *
+ * FAILS SOFT. A failure here loses the specific sentence and leaves the static
+ * copy, which is what the card said yesterday. Failing the whole queue would
+ * take every card away from every operator at that venue to avoid rendering a
+ * slightly less specific label, and the cards are the thing with the clock on
+ * them.
+ */
+async function loadCardCarriers(
+  supabase: ReturnType<typeof createAdminClient>,
+  draftIds: string[],
+): Promise<Map<string, CardCarrier>> {
+  const carriers = new Map<string, CardCarrier>()
+  if (draftIds.length === 0) return carriers
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, pending_commitment')
+    .in('id', draftIds)
+
+  if (error) {
+    console.warn(
+      `[operator] queue: could not read pending_commitment for ${draftIds.length} drafts, falling back to static copy: ${error.message}`,
+    )
+    return carriers
+  }
+
+  for (const row of data ?? []) {
+    if (row.pending_commitment === null || row.pending_commitment === undefined) continue
+    const parsed = PendingCommitmentSchema.safeParse(row.pending_commitment)
+    if (!parsed.success) {
+      // Same posture dispatchOperatorOutbound takes on a malformed carrier:
+      // log and skip. The card still renders; it just cannot name the item.
+      console.warn(
+        `[operator] queue: malformed pending_commitment on message=${row.id}, falling back to static copy`,
+      )
+      continue
+    }
+    const { type, description } = parsed.data
+    if (type !== 'comp' && type !== 'hold' && type !== 'discount') continue
+    const clean = sanitizeCardDescription(description)
+    if (clean.length === 0) continue
+    carriers.set(row.id, { type, description: clean })
+  }
+
+  return carriers
+}
+
 export async function listPendingQueue(
   allowedVenueIds: string[],
   /** Optional override for testing. Defaults to Date.now(). */
@@ -539,12 +677,22 @@ export async function listPendingQueue(
     return { ok: false, error: error.message }
   }
 
+  // TAC-527: one batched read for every draft the RPC returned.
+  const carriers = await loadCardCarriers(
+    supabase,
+    (data ?? []).map((row) => row.draft_id),
+  )
+
   const drafts: QueueDraft[] = (data ?? []).map((row) => {
     const createdAt = new Date(row.created_at).getTime()
     // Computed once and used twice, so the codes and their labels are
     // guaranteed to be the same array in the same order rather than two
     // independent normalizations that happen to agree today.
     const reviewTriggerCodes = normalizeReviewTriggers(row.review_triggers)
+    // TAC-527: what approving THIS row creates, or null. Resolved once and
+    // used for both the primary label and the secondary chips, so the two
+    // cannot disagree about what the card is offering.
+    const carrier = carriers.get(row.draft_id) ?? null
     return {
       messageId: row.draft_id,
       venueId: row.venue_id,
@@ -562,7 +710,7 @@ export async function listPendingQueue(
       draftBody: row.draft_body,
       category: row.category,
       voiceFidelity: row.voice_fidelity,
-      reviewReason: normalizeReviewReason(row.review_reason),
+      reviewReason: normalizeReviewReason(row.review_reason, carrier),
       // TAC-364: the RAW code, un-normalized and never null — this is what the
       // client keys card colour on, and `''` is the "nothing recorded" value so
       // it never has to branch on presence. Deliberately NOT derived from
@@ -570,7 +718,7 @@ export async function listPendingQueue(
       // that can be edited, and a colour must not move when copy does.
       reviewReasonCode: row.review_reason ?? '',
       reviewTriggers: reviewTriggerCodes,
-      reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes),
+      reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes, carrier),
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       otherPendingDraftsForGuest: normalizeOtherPendingCount(row.other_pending_for_guest),
       replacedDraft: normalizeReplacedDraft(row.replaced_draft_body, row.replaced_draft_at),
