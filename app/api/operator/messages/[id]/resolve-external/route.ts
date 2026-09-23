@@ -34,7 +34,10 @@ import { NextResponse } from 'next/server'
 import { captureOperatorMessageResolvedExternally } from '@/lib/analytics/posthog'
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
-import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/messaging/instagram/resolve-external'
+// From lib/schemas, not the Instagram folder: this route is deliberately not
+// Instagram-specific, and the value is shared by three callers that must not
+// import each other.
+import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
 
 // Canonical UUID regex, as app/api/operator/messages/[id]/thread/route.ts.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -64,6 +67,23 @@ export async function POST(
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
+  // An EMPTY allowlist means NO venue access on this path, and it is a deny.
+  //
+  // `verifyOperatorRequest` builds allowedVenueIds from the operator's literal
+  // `operator_venues` rows (lib/auth/verify-jwt.ts), so empty means they are
+  // allowlisted for nothing. The `if (length > 0)` idiom belongs to the COOKIE
+  // path (lib/auth/require-admin.ts), where empty deliberately means
+  // analog-admin scope and therefore every venue. Two auth paths, one field
+  // name, opposite meanings.
+  //
+  // Guarded here, before the database, exactly as listPendingQueue,
+  // listOperatorConversations, listHeadsUpQueue, loadGuestThread and the two
+  // commitment helpers all do. 404 rather than 403, per the existence-leak rule
+  // the rest of app/api/operator/* follows.
+  if (operator.allowedVenueIds.length === 0) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
+
   const supabase = createAdminClient()
   const now = new Date().toISOString()
 
@@ -75,10 +95,13 @@ export async function POST(
   // record than an echo proving it. Leaving it NULL is what keeps the two
   // distinguishable in SQL afterwards.
   //
-  // previous_review_state is deliberately NOT set either: /undo reads it, and
-  // this is not an action with an undo window. If it turns out one is wanted,
-  // that is a decision, not an oversight to be corrected in passing.
-  let claimQuery = supabase
+  // previous_review_state is deliberately NOT set either. Note what actually
+  // stops /undo reaching this row: NOT the operator stamps below, which this
+  // route does set, so within the 3-second window /undo finds it. It is that
+  // /undo's state switch has no branch for this value and falls through to its
+  // 409 "nothing to undo". If an undo is ever wanted here, that is a decision,
+  // not an oversight to be corrected in passing.
+  const claimQuery = supabase
     .from('messages')
     .update({
       review_state: RESOLVED_EXTERNALLY_REVIEW_STATE,
@@ -88,10 +111,7 @@ export async function POST(
     .eq('id', messageId)
     .eq('review_state', 'pending')
     .eq('direction', 'outbound')
-
-  if (operator.allowedVenueIds.length > 0) {
-    claimQuery = claimQuery.in('venue_id', operator.allowedVenueIds)
-  }
+    .in('venue_id', operator.allowedVenueIds)
 
   const { data: claimed, error: claimErr } = await claimQuery.select(
     'id, venue_id, guest_id, channel, created_at',
@@ -104,16 +124,16 @@ export async function POST(
   if (!claimed || claimed.length === 0) {
     // Rowcount 0 — either not found / not allowed, or already acted on. Look
     // up the current state to tell them apart.
-    let lookupQuery = supabase
+    // The allowlist is applied HERE TOO, and it is load-bearing rather than
+    // belt-and-braces: without it this lookup reports `review_state` for any
+    // message in the fleet by id, which is the existence leak the uniform 404
+    // below exists to prevent.
+    const { data: current, error: lookupErr } = await supabase
       .from('messages')
       .select('id, review_state, direction')
       .eq('id', messageId)
-
-    if (operator.allowedVenueIds.length > 0) {
-      lookupQuery = lookupQuery.in('venue_id', operator.allowedVenueIds)
-    }
-
-    const { data: current, error: lookupErr } = await lookupQuery.maybeSingle()
+      .in('venue_id', operator.allowedVenueIds)
+      .maybeSingle()
     if (lookupErr) {
       return NextResponse.json({ error: 'internal_error' }, { status: 500 })
     }

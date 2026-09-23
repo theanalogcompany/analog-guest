@@ -294,6 +294,8 @@ export async function POST(request: Request): Promise<Response> {
               cardId:
                 result.status === 'resolved' || result.status === 'lost_race' ? result.cardId : null,
               outcome: result.status,
+              hadPendingCommitment:
+                result.status === 'resolved' ? result.hadPendingCommitment : null,
               error: result.status === 'failed' ? result.error : null,
             }),
           ),

@@ -29,10 +29,14 @@ interface Script {
   claimError?: string
   /** Ids whose CAS claim should lose. */
   casLost?: string[]
+  /** Ids already marked by a CONCURRENT tick before this one scanned. */
+  preWarned?: string[]
 }
 
 let script: Script = {}
 const claims: Array<{ patch: Record<string, unknown>; filters: Record<string, unknown> }> = []
+/** Drafts this fake has recorded a WON claim for, i.e. whose marker is set. */
+const warned = new Set<string>()
 const scanFilters: Record<string, unknown> = {}
 let anchorLookups = 0
 
@@ -75,7 +79,24 @@ vi.mock('@/lib/db/admin', () => ({
               // The scan itself is awaited directly, with no maybeSingle.
               Object.assign(scanFilters, filters)
               if (script.scanError) return resolve({ data: null, error: { message: script.scanError } })
-              return resolve({ data: script.drafts ?? [], error: null })
+              // The marker is MODELLED, not hand-waved: a draft this fake has
+              // already recorded a successful claim for is excluded, exactly as
+              // `.is('window_warning_pushed_at', null)` excludes it in Postgres.
+              // Without this the second-tick test could only assert that an
+              // empty array produces no pushes, which is true of any
+              // implementation — the test named for the acceptance criterion
+              // passed with both the scan filter and the CAS predicate deleted.
+              const rows = (script.drafts ?? []).filter(
+                (d) => !filters.window_warning_pushed_at || !warned.has(d.id),
+              )
+              // `preWarned` is applied AFTER the filter, deliberately: it
+              // models a concurrent tick that claimed the marker between this
+              // tick's scan and its CAS, so the row is legitimately in this
+              // scan's result and is already marked by the time the UPDATE
+              // runs. Seeding it before the filter would just exclude the row
+              // and test nothing.
+              for (const id of script.preWarned ?? []) warned.add(id)
+              return resolve({ data: rows, error: null })
             },
           }
           void columns
@@ -96,6 +117,12 @@ vi.mock('@/lib/db/admin', () => ({
               claims.push({ patch, filters })
               if (script.claimError) return { data: null, error: { message: script.claimError } }
               if ((script.casLost ?? []).includes(filters.id as string)) return { data: [], error: null }
+              // The CAS's own predicate, modelled: a draft already marked
+              // cannot be claimed again.
+              if (filters.window_warning_pushed_at === 'IS NULL' && warned.has(filters.id as string)) {
+                return { data: [], error: null }
+              }
+              warned.add(filters.id as string)
               return { data: [{ id: filters.id }], error: null }
             },
           }
@@ -128,6 +155,7 @@ function draft(id: string, over: Partial<DraftRow> = {}): DraftRow {
 beforeEach(() => {
   vi.clearAllMocks()
   claims.length = 0
+  warned.clear()
   anchorLookups = 0
   for (const k of Object.keys(scanFilters)) delete scanFilters[k]
   script = {}
@@ -157,9 +185,10 @@ describe('processInstagramWindowWarnings', () => {
     await processInstagramWindowWarnings(NOW)
     expect(pushMock).toHaveBeenCalledTimes(1)
 
-    // The second tick's scan excludes the row, because the marker is set.
-    // Modelled the way the database would: the filter is on the column.
-    script = { drafts: [], anchors: script.anchors }
+    // The SAME script, re-run. The fake models the marker, so the second tick
+    // genuinely re-scans the same row and finds it excluded — rather than the
+    // test hand-writing an empty array, which is what it used to do and which
+    // passed with both the scan filter and the CAS predicate deleted.
     pushMock.mockClear()
     const second = await processInstagramWindowWarnings(new Date(NOW.getTime() + 60_000))
     expect(second).toMatchObject({ scanned: 0, pushed: 0 })
@@ -199,6 +228,25 @@ describe('processInstagramWindowWarnings', () => {
     }
     const summary = await processInstagramWindowWarnings(NOW)
     expect(summary).toMatchObject({ due: 1, claimed: 0, casLost: 1, pushed: 0 })
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  // The race the CAS exists for, which the scan filter alone cannot cover: a
+  // concurrent tick read the same row BEFORE either claimed, so this tick's
+  // scan legitimately returns a draft that is already marked by the time it
+  // gets to the UPDATE. Only the CAS predicate stops the second push.
+  //
+  // Without it this is a DOUBLE PUSH for one card, which is the acceptance
+  // criterion. `preWarned` is applied at scan time so the row is still
+  // returned, exactly as a concurrent tick's already-issued query would.
+  it('does not push when a concurrent tick claimed the marker between scan and CAS', async () => {
+    script = {
+      drafts: [draft('d1')],
+      anchors: { [`${VENUE}:${GUEST}`]: anchorLeaving(10 * 60_000) },
+      preWarned: ['d1'],
+    }
+    const summary = await processInstagramWindowWarnings(NOW)
+    expect(summary).toMatchObject({ scanned: 1, due: 1, claimed: 0, casLost: 1, pushed: 0 })
     expect(pushMock).not.toHaveBeenCalled()
   })
 

@@ -134,8 +134,45 @@ describe('listOperatorConversations', () => {
   })
 
   it('takes the last inbound channel for a guest who has BOTH identifiers', async () => {
+    // THE ONLY FIXTURE SHAPE THAT CAN FAIL. A guest with a phone AND an
+    // Instagram id whose last inbound was INSTAGRAM: with the wiring the
+    // answer is 'instagram', without it resolveConversationChannel falls
+    // through to `if (hasPhone) return 'text'` and the answer is 'text'.
+    //
+    // The first version of this test used last_inbound_channel: 'text' and
+    // expected 'text', which is what BOTH readings return, so passing
+    // `lastInboundChannel: undefined` survived the whole 5993-test suite. The
+    // rule was covered at the unit level and its WIRING was not, which is the
+    // TAC-476 shape CLAUDE.md records.
     rpcMock.mockResolvedValueOnce({
-      data: [{ ...RAW_INSTAGRAM_ROW, guest_phone: '+15551110002', last_inbound_channel: 'text' }],
+      data: [
+        {
+          ...RAW_INSTAGRAM_ROW,
+          guest_phone: '+15551110002',
+          guest_has_instagram_id: true,
+          last_inbound_channel: 'instagram',
+        },
+      ],
+      error: null,
+    })
+    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.conversations[0].guestChannel).toBe('instagram')
+  })
+
+  it('falls back to the phone for a both-identifier guest whose last inbound is unreadable', async () => {
+    // Documents the fallback. Deliberately NOT the wiring test: both readings
+    // answer 'text' here, so it cannot fail if the wiring is dropped.
+    rpcMock.mockResolvedValueOnce({
+      data: [
+        {
+          ...RAW_INSTAGRAM_ROW,
+          guest_phone: '+15551110002',
+          guest_has_instagram_id: true,
+          last_inbound_channel: null,
+        },
+      ],
       error: null,
     })
     const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])

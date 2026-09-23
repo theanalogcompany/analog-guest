@@ -20,9 +20,15 @@
 -- ============================================================================
 -- ORDERING: APPLY IN STUDIO **BEFORE** MERGING THE PR
 -- ============================================================================
--- Deployed code SELECTs the new RPC columns, so merging first breaks
--- `GET /api/operator/queue` and `GET /api/operator/conversations` outright —
--- every operator loses the queue until this is applied.
+-- Deployed code SELECTs the new RPC columns. **It does NOT break outright**, and
+-- an earlier version of this header said it did — corrected here because this
+-- is the artefact someone calibrates the risk from. The missing columns arrive
+-- `undefined`, `queueGuestChannel` logs an error and falls back to 'text', and
+-- `replyWindowExpiresAt(undefined)` returns null through its NaN guard. The
+-- real cost of merging first is that the FEATURE IS SILENTLY INERT: every
+-- Instagram card reports `guestChannel: 'text'` with no window, TAC-486 shows
+-- no timer at all, and every draft logs an error line. Apply-first is still
+-- right; it is just not an outage.
 --
 -- Applying FIRST is safe in the other direction: the currently-deployed TS
 -- projects RPC rows by column name and ignores columns it does not know, and
@@ -33,7 +39,7 @@
 -- all made on this table.
 --
 -- ============================================================================
--- PRECONDITIONS: run these three READ-ONLY checks in Studio first
+-- PRECONDITIONS: run these four READ-ONLY checks in Studio first
 -- ============================================================================
 -- (a) The live list_operator_queue is migration 054's body, not something
 --     applied by hand. Migration 021's orphaned link_operator_auth is the
@@ -49,6 +55,19 @@
 --
 --     select oid::regprocedure from pg_proc
 --     where proname in ('list_operator_queue', 'list_operator_conversations');
+--
+-- (d) The live `messages_review_state_check` is migration 018's five values.
+--     This migration DROPS it and recreates it with a hard-coded list, so if it
+--     was ever widened by hand in Studio this silently narrows it back and the
+--     recreate ABORTS on any row already carrying the extra value. Migration
+--     034's entry sets the standing rule for this table: re-verify against live
+--     `pg_constraint`, never against the repo. Migration 021's orphaned
+--     `link_operator_auth` is the recorded precedent for why.
+--
+--     select pg_get_constraintdef(oid) from pg_constraint
+--     where conname = 'messages_review_state_check';
+--
+--     Expect exactly: pending, approved, edited, skipped, auto_sent.
 --
 -- No GRANT/REVOKE to re-issue on either: migrations 033 and 018 issue none, and
 -- both functions are called with the service-role client.
@@ -170,10 +189,15 @@ comment on column messages.window_warning_pushed_at is
 -- existing value stays permitted, so no row can fail it.
 --
 -- `messages_previous_review_state_check` is deliberately NOT widened. Nothing
--- writes the new value there: external resolution is not an operator action
--- with an undo window, and /undo gates on last_operator_action_at plus an
--- operator match, so it cannot reach one of these rows. A value permitted in a
--- column nothing writes is a claim the schema cannot back.
+-- writes the new value there, and that alone is the reason: a value permitted
+-- in a column nothing writes is a claim the schema cannot back.
+--
+-- An earlier version of this comment added that /undo "cannot reach one of
+-- these rows" because it gates on last_operator_action_at plus an operator
+-- match. That is wrong and is corrected rather than dropped: the
+-- resolve-external route DOES stamp both, so within the 3-second window /undo
+-- reaches the row fine. What stops it is the state switch falling through to
+-- the 409 "nothing to undo" branch. The conclusion is unchanged.
 alter table messages drop constraint messages_review_state_check;
 
 alter table messages

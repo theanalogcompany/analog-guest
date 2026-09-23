@@ -29,6 +29,7 @@ interface DbScript {
 }
 
 const updateFilters: Array<Record<string, unknown>> = []
+const lookupFilters: Array<Record<string, unknown>> = []
 let updatePatch: Record<string, unknown> = {}
 let script: DbScript = {}
 
@@ -57,14 +58,22 @@ vi.mock('@/lib/db/admin', () => ({
           return b
         },
         select() {
+          // The filters are RECORDED, not discarded. A builder that swallows
+          // them cannot tell "the allowlist was applied" from "the script said
+          // no row", which is how the venue scoping on this query went
+          // unasserted and a mutant removing it passed all 14 tests.
+          const filters: Record<string, unknown> = {}
           const b = {
-            eq() {
+            eq(c: string, v: unknown) {
+              filters[c] = v
               return b
             },
-            in() {
+            in(c: string, v: unknown) {
+              filters[c] = v
               return b
             },
             async maybeSingle() {
+              lookupFilters.push({ ...filters })
               if (script.lookupError) return { data: null, error: { message: script.lookupError } }
               return { data: script.current ?? null, error: null }
             },
@@ -108,6 +117,7 @@ async function resolveExternal(
 beforeEach(() => {
   vi.clearAllMocks()
   updateFilters.length = 0
+  lookupFilters.length = 0
   updatePatch = {}
   script = {}
   verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
@@ -199,6 +209,27 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
     const absent = await resolveExternal()
     expect(outOfScope).toEqual(absent)
     expect(outOfScope).toEqual({ status: 404, body: { error: 'not_found' } })
+  })
+
+  // An EMPTY allowlist is NO access on the operator bearer path, not every
+  // venue. Nothing asserted this before, and the route granted access: it used
+  // the `if (length > 0)` idiom from the COOKIE path, where empty means
+  // analog-admin scope. Same field name, opposite meaning.
+  it('answers 404 and touches nothing when the operator is allowlisted for no venue', async () => {
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    script = { claimed: [PENDING_CARD] }
+    expect(await resolveExternal()).toEqual({ status: 404, body: { error: 'not_found' } })
+    expect(updateFilters).toHaveLength(0)
+    expect(lookupFilters).toHaveLength(0)
+    expect(captureMock).not.toHaveBeenCalled()
+  })
+
+  it('scopes the fallback LOOKUP to the venue allowlist, not just the claim', async () => {
+    // Without this the lookup reports review_state for any message in the
+    // fleet by id, which is the existence leak the uniform 404 exists to stop.
+    script = { claimed: [], current: null }
+    await resolveExternal()
+    expect(lookupFilters[0]).toEqual({ id: VALID_UUID, venue_id: [VENUE_A] })
   })
 
   it('answers 404 for an inbound row', async () => {

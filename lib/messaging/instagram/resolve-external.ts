@@ -20,10 +20,22 @@
 // racing its own echo has not written its `mid` yet (TAC-469 rule 6).
 //
 // The window is what separates them. EVERY send we make is gated on the reply
-// window being OPEN — prepareInstagramOperatorSend refuses a closed window
-// before the card leaves the queue, and the agent arm gates the same way. So
-// an echo that arrives while the window is EXPIRED cannot be ours. It is staff
-// typing in the Instagram app, which is exactly the population this exists for.
+// window being OPEN: prepareInstagramOperatorSend refuses a closed one before
+// the card leaves the queue, dispatchInstagramReply gates before the first
+// bubble and RE-CHECKS before every later one, and the hand-run smoke script
+// (scripts/instagram-send-smoke.ts) has its own stricter pre-flight. So an echo
+// arriving while the window is EXPIRED is staff typing in the Instagram app,
+// which is exactly the population this exists for.
+//
+// BE PRECISE ABOUT THE MARGIN, because the absolute phrasing this comment first
+// carried was not quite true. A send is permitted only while more than
+// INSTAGRAM_WINDOW_MARGIN_MS (5 minutes) remains, and windowHasExpired below
+// measures against the TRUE deadline. So the honest claim is: an echo arriving
+// after expiry cannot be ours UNLESS it took more than 5 minutes to reach us
+// after our own send — which a Meta retry can exceed. The direction is still
+// the safe one (see windowHasExpired's own docstring: the true deadline keeps
+// the expired set as small as it can be, and the margin is the buffer), but
+// "cannot be ours" is a 5-minute guarantee, not an absolute one.
 //
 // That is why the expiry check is not a nicety and must not be relaxed into
 // "resolve any card when an echo arrives". It is the only thing standing
@@ -57,14 +69,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
 
 import type { InstagramEventOutcome } from './handle-events'
 import { INSTAGRAM_WINDOW_MS, loadLastGuestActionAt } from './window'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
-/** The review_state a card reaches when it was answered outside the app. */
-export const RESOLVED_EXTERNALLY_REVIEW_STATE = 'resolved_externally'
 
 export interface ExternalResolutionTarget {
   venueId: string
@@ -75,7 +86,7 @@ export interface ExternalResolutionTarget {
 
 export type ExternalResolutionOutcome =
   /** A card was resolved. */
-  | { status: 'resolved'; cardId: string }
+  | { status: 'resolved'; cardId: string; hadPendingCommitment: boolean }
   /** The window is still open, so this echo is one of our own sends. */
   | { status: 'window_open' }
   /** No saved guest action carries Meta's clock, so expiry cannot be established. */
@@ -145,7 +156,8 @@ export async function resolveCardAnsweredExternally(
 
     const { data: card, error: cardError } = await supabase
       .from('messages')
-      .select('id')
+      // pending_commitment comes back so the caller can COUNT the case below.
+      .select('id, pending_commitment')
       .eq('venue_id', target.venueId)
       .eq('guest_id', target.guestId)
       .eq('review_state', 'pending')
@@ -169,7 +181,19 @@ export async function resolveCardAnsweredExternally(
       .select('id')
     if (updateError) return { status: 'failed', error: updateError.message }
     if (!updated || updated.length !== 1) return { status: 'lost_race', cardId: card.id }
-    return { status: 'resolved', cardId: card.id }
+    return {
+      status: 'resolved',
+      cardId: card.id,
+      // FIFO takes the oldest pending card whatever slot it is in, so it CAN be
+      // an obligation card carrying a comp, hold or discount. Resolving one
+      // means createCommitmentFromPending never runs and nobody sees that the
+      // venue promised something. The card was unsendable anyway (the window is
+      // closed), so this is a visibility loss rather than a wrong send, and
+      // narrowing FIFO to the conversation slot would leave obligation cards
+      // stuck for ever. Surfaced rather than decided: the telemetry carries it
+      // so the case can be counted before anyone rules on it.
+      hadPendingCommitment: card.pending_commitment != null,
+    }
   } catch (err) {
     return { status: 'failed', error: err instanceof Error ? err.message : String(err) }
   }

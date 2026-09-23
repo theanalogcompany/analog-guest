@@ -452,6 +452,9 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
   it.each([
     ['awaiting_review', 'NOT SENT: waiting for the venue to approve it'],
     ['skipped_by_operator', 'NOT SENT: the venue decided not to send it'],
+    // TAC-473. Its own marker rather than never_sent's, which would tell the
+    // model a send FAILED when staff simply answered in the Instagram app.
+    ['answered_outside_app', 'NOT SENT: the venue answered this in the Instagram app instead'],
     ['never_sent', 'NEVER SENT: it failed to send'],
   ] as const)('marks a %s line "%s" and adds only the note', (delivery, marker) => {
     expect(historyBlock(render(incident(delivery)))).toBe(
@@ -465,7 +468,7 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
   // v1.50.0 first exempted pending lines from the cap, because the removed
   // instruction asked the model to carry a pending offer forward. With nothing
   // asking that, an exemption has no reason to exist.
-  it.each(['delivered', 'awaiting_review', 'skipped_by_operator', 'never_sent'] as const)(
+  it.each(['delivered', 'awaiting_review', 'skipped_by_operator', 'answered_outside_app', 'never_sent'] as const)(
     'truncates a %s line at 200 characters',
     (delivery) => {
       const long = 'a'.repeat(250)

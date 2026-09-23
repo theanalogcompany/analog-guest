@@ -9,11 +9,9 @@
 import { describe, expect, it } from 'vitest'
 
 import type { InstagramEventOutcome } from './handle-events'
-import {
-  externalResolutionTargetFor,
-  resolveCardAnsweredExternally,
-  RESOLVED_EXTERNALLY_REVIEW_STATE,
-} from './resolve-external'
+import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
+
+import { externalResolutionTargetFor, resolveCardAnsweredExternally } from './resolve-external'
 import { INSTAGRAM_WINDOW_MS } from './window'
 
 const VENUE = 'venue-1'
@@ -28,6 +26,7 @@ interface CardRow {
   review_state: string
   channel: string
   created_at: string
+  pending_commitment?: Record<string, unknown> | null
 }
 
 interface FakeOptions {
@@ -90,7 +89,10 @@ function createDb(options: FakeOptions = {}) {
             ? b.created_at.localeCompare(a.created_at)
             : a.created_at.localeCompare(b.created_at),
         )
-        return { data: sorted[0] ? { id: sorted[0].id } : null, error: null }
+        return {
+          data: sorted[0] ? { id: sorted[0].id, pending_commitment: sorted[0].pending_commitment ?? null } : null,
+          error: null,
+        }
       },
     }
     return builder
@@ -247,7 +249,7 @@ describe('resolveCardAnsweredExternally', () => {
   it('resolves the one expired pending card and records the echo against it', async () => {
     const db = createDb({ lastGuestActionAt: EXPIRED_ANCHOR, cards: [card('c1', '2026-09-22T09:00:00.000Z')] })
     const result = await resolveCardAnsweredExternally(db.client, target, NOW)
-    expect(result).toEqual({ status: 'resolved', cardId: 'c1' })
+    expect(result).toEqual({ status: 'resolved', cardId: 'c1', hadPendingCommitment: false })
     expect(db.updates).toHaveLength(1)
     expect(db.updates[0]!.patch).toEqual({
       review_state: RESOLVED_EXTERNALLY_REVIEW_STATE,
@@ -268,7 +270,7 @@ describe('resolveCardAnsweredExternally', () => {
       ],
     })
     const result = await resolveCardAnsweredExternally(db.client, target, NOW)
-    expect(result).toEqual({ status: 'resolved', cardId: 'oldest' })
+    expect(result).toEqual({ status: 'resolved', cardId: 'oldest', hadPendingCommitment: false })
     expect(db.updates).toHaveLength(1)
     expect(db.updates[0]!.filters.id).toBe('oldest')
     // The ordering is what makes "oldest" true; a read that forgot it would
@@ -277,6 +279,19 @@ describe('resolveCardAnsweredExternally', () => {
   })
 
   // AC: no card.
+  it('reports when the card it resolved carried an obligation', async () => {
+    // FIFO takes the oldest card whatever slot it is in, so an obligation card
+    // (comp / hold / discount) can be resolved and its commitment never
+    // materialised. Counted rather than prevented; this is what makes it
+    // countable, and a mutant hardcoding the flag false hides the case.
+    const db = createDb({
+      lastGuestActionAt: EXPIRED_ANCHOR,
+      cards: [card('c1', '2026-09-22T09:00:00.000Z', { pending_commitment: { type: 'comp' } })],
+    })
+    const result = await resolveCardAnsweredExternally(db.client, target, NOW)
+    expect(result).toEqual({ status: 'resolved', cardId: 'c1', hadPendingCommitment: true })
+  })
+
   it('does nothing when the guest holds no pending card', async () => {
     const db = createDb({ lastGuestActionAt: EXPIRED_ANCHOR, cards: [] })
     const result = await resolveCardAnsweredExternally(db.client, target, NOW)

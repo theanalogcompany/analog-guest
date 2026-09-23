@@ -2255,6 +2255,15 @@ export interface InstagramCardResolvedExternallyProps {
   /** The card resolved, or null when none was. */
   cardId: string | null
   outcome: 'resolved' | 'window_open' | 'window_unknown' | 'no_card' | 'lost_race' | 'failed'
+  /**
+   * TAC-473: whether the resolved card carried a comp, hold or discount.
+   *
+   * FIFO takes the oldest pending card whatever slot it is in, so it can be an
+   * obligation card; resolving one means the commitment is never materialised
+   * and nobody sees the venue promised something. Counted here rather than
+   * ruled on, so the decision has evidence. Null when nothing was resolved.
+   */
+  hadPendingCommitment: boolean | null
   error: string | null
 }
 
