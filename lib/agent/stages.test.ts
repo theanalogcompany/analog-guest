@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyApprovalPolicyStage,
+  verifyClosedVenueArrivalStage,
   APPROVAL_TRIGGERS,
   buildAiRuntime,
   classifyStage,
@@ -54,11 +55,14 @@ const captureGroundingVerifierUnavailableMock = vi.fn()
 const verifyMechanicOfferMock = vi.fn()
 // TAC-401: the prose-promise check's model call.
 const verifyProsePromiseMock = vi.fn()
+// TAC-363: the closed-venue arrival backstop's model call.
+const verifyClosedVenueArrivalMock = vi.fn()
 // TAC-513: the cancellation-claim check's model call.
 const verifyCancellationClaimMock = vi.fn()
 const captureCancellationClaimUnbackedMock = vi.fn()
 const captureCancellationCheckUnavailableMock = vi.fn()
 const captureProsePromiseCaughtMock = vi.fn()
+const captureClosedVenueArrivalCaughtMock = vi.fn()
 const captureProsePromiseCheckUnavailableMock = vi.fn()
 const captureMechanicOfferBackstopCaughtMock = vi.fn()
 // TAC-284: applyApprovalPolicyStage fires captureDemoBypassedApprovalGate
@@ -120,6 +124,7 @@ vi.mock('@/lib/ai', () => ({
   // this file, which is the trap CLAUDE.md documents on this exact mock.
   verifyProsePromise: (...args: unknown[]) => verifyProsePromiseMock(...args),
   verifyCancellationClaim: (...args: unknown[]) => verifyCancellationClaimMock(...args),
+  verifyClosedVenueArrival: (...args: unknown[]) => verifyClosedVenueArrivalMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -140,6 +145,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
   captureProsePromiseCaught: (...args: unknown[]) => captureProsePromiseCaughtMock(...args),
+  captureClosedVenueArrivalCaught: (...args: unknown[]) =>
+    captureClosedVenueArrivalCaughtMock(...args),
   captureCancellationClaimUnbacked: (...args: unknown[]) =>
     captureCancellationClaimUnbackedMock(...args),
   captureCancellationCheckUnavailable: (...args: unknown[]) =>
@@ -5403,5 +5410,357 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     if (decision.action !== 'queue') return
     expect(decision.blankBody).toBe(true)
     expect(decision.pendingCancellation).toBeNull()
+  })
+})
+
+// ===== TAC-363: a reply that confirms an arrival at a closed venue =====
+//
+// Two mechanisms, deliberately split. The structural trigger reads the
+// emission and the venue's hours; the backstop reads the reply text. The
+// tests that matter most are NEGATIVE — that a `scheduled` capture does not
+// fire, and that unknown hours do not — because both are ways this could
+// quietly start holding correct replies.
+
+describe('closed-venue arrival (TAC-363)', () => {
+  // Le Mil's real shape. 2026-09-22 is a Tuesday: 17:00Z is 10:00 Pacific
+  // (open), 08:00Z is 01:00 Pacific (the hour the incident landed in).
+  const OPEN_HOURS = {
+    monday: '7:00 AM – 3:00 PM',
+    tuesday: '7:00 AM – 3:00 PM',
+    wednesday: '7:00 AM – 3:00 PM',
+    thursday: '7:00 AM – 3:00 PM',
+    friday: '7:00 AM – 3:00 PM',
+    saturday: '7:00 AM – 3:00 PM',
+    sunday: '7:00 AM – 3:00 PM',
+  }
+  const DURING_SERVICE = new Date('2026-09-22T17:00:00Z')
+  const AFTER_CLOSE = new Date('2026-09-22T08:00:00Z')
+
+  const IMMINENT = { signal: 'imminent' as const, referencesCommitmentId: 'c-1' }
+  const SCHEDULED = {
+    signal: 'scheduled' as const,
+    expectedArrival: '2026-09-22T15:00:00Z',
+    referencesCommitmentId: 'c-1',
+  }
+
+  function ctxAt(now: Date, hours: Record<string, string> = OPEN_HOURS) {
+    return makeCtx({
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        venueInfo: { ...TEST_VENUE_INFO, hours },
+      } as RuntimeContext['venue'],
+      recognition: { computedAt: now } as RuntimeContext['recognition'],
+    })
+  }
+
+  beforeEach(() => {
+    verifyClosedVenueArrivalMock.mockReset()
+    captureClosedVenueArrivalCaughtMock.mockReset()
+  })
+
+  describe('the structural trigger', () => {
+    it('fires on an imminent arrival while the venue is closed', async () => {
+      // The 2026-09-14 incident: "omw" at 1am, six hours after close.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: IMMINENT }),
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toContain('closed_venue_arrival_emitted')
+      expect(d.primaryTrigger).toBe('closed_venue_arrival_emitted')
+    })
+
+    it('does NOT fire on the same emission during service hours', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(DURING_SERVICE),
+        makeGenerationResult({ arrivalCapture: IMMINENT }),
+      )
+      expect(d.action).toBe('send')
+    })
+
+    it('does NOT fire on a SCHEDULED capture while closed', async () => {
+      // A guest at 1am arranging 8am tomorrow. Correct behaviour, and the
+      // most common out-of-hours arrival conversation — holding it would be
+      // noise that protects nobody, since nobody sets off on it.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: SCHEDULED }),
+      )
+      expect(d.action).toBe('send')
+    })
+
+    it('does NOT fire when the venue hours cannot be read', async () => {
+      // Ruling 2(a). If unknown fired, every venue whose hours nobody has
+      // filled in would start queueing its arrival turns.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE, {}),
+        makeGenerationResult({ arrivalCapture: IMMINENT }),
+      )
+      expect(d.action).toBe('send')
+    })
+
+    it('does NOT fire when nothing was emitted at all', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: {} }),
+      )
+      expect(d.action).toBe('send')
+    })
+
+    it('reports the catch with source "structured"', async () => {
+      await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: IMMINENT, body: 'See you soon!' }),
+      )
+      expect(captureClosedVenueArrivalCaughtMock).toHaveBeenCalledTimes(1)
+      expect(captureClosedVenueArrivalCaughtMock.mock.calls[0][0]).toMatchObject({
+        source: 'structured',
+        venueId: 'venue-1',
+        replyBody: 'See you soon!',
+      })
+    })
+  })
+
+  describe('the text backstop trigger', () => {
+    it('queues on a flagged result', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'flagged' },
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toContain('closed_venue_arrival_backstop')
+    })
+
+    it('FAILS CLOSED — a check_failed result queues under the same trigger', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'check_failed' },
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toContain('closed_venue_arrival_backstop')
+    })
+
+    it('a clean result does not queue', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'clean' },
+      )
+      expect(d.action).toBe('send')
+    })
+
+    it('defaults to skipped when the caller passes nothing', async () => {
+      const d = await applyApprovalPolicyStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      expect(d.action).toBe('send')
+    })
+  })
+
+  describe('priority placement', () => {
+    it('loses the label to a co-firing commitment gate', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({
+          arrivalCapture: IMMINENT,
+          commitment: { type: 'comp', description: 'oat latte' },
+        }),
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toContain('closed_venue_arrival_emitted')
+      expect(d.primaryTrigger).toBe('commitment_type_gated')
+    })
+
+    it('wins the label over a co-firing unverified link', async () => {
+      // Ranked above UNVERIFIED_URL: both are "the guest acts on this", and a
+      // wasted trip costs more than a dead link. Co-fired with a trigger it
+      // must BEAT, so the assertion cannot pass via pickPrimaryTrigger's
+      // fallback to triggers[0] the way a single-trigger test can.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({
+          arrivalCapture: IMMINENT,
+          unverifiedUrls: ['https://lemils.com/menu'],
+        }),
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toEqual(
+        expect.arrayContaining(['closed_venue_arrival_emitted', 'unverified_url']),
+      )
+      expect(d.primaryTrigger).toBe('closed_venue_arrival_emitted')
+    })
+
+    it('the BACKSTOP alone outranks a co-firing lower trigger', async () => {
+      // Co-fired deliberately. The two tests above both fire the STRUCTURAL
+      // trigger, which wins regardless, so deleting the backstop's own line
+      // from PRIMARY_TRIGGER_PRIORITY survived the entire suite: the array has
+      // no `satisfies` clause and pickPrimaryTrigger falls back to
+      // triggers[0]. In production that would label the card with the wrong
+      // reason, which is TAC-364's exact defect class.
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ voiceFidelity: 0.45 }),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'flagged' },
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.triggers).toEqual(
+        expect.arrayContaining([
+          'closed_venue_arrival_backstop',
+          'fidelity_below_auto_send_floor',
+        ]),
+      )
+      expect(d.primaryTrigger).toBe('closed_venue_arrival_backstop')
+    })
+
+    it('the structural trigger outranks the backstop when both somehow fire', async () => {
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: IMMINENT }),
+        null,
+        { status: 'skipped' },
+        { status: 'skipped' },
+        { resolution: { status: 'none' }, claim: 'skipped' },
+        { status: 'flagged' },
+      )
+      expect(d.action).toBe('queue')
+      if (d.action !== 'queue') return
+      expect(d.primaryTrigger).toBe('closed_venue_arrival_emitted')
+    })
+  })
+
+  describe('verifyClosedVenueArrivalStage', () => {
+    it('skips without a model call when the venue is open', async () => {
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(DURING_SERVICE),
+        makeGenerationResult(),
+      )
+      expect(r).toEqual({ status: 'skipped' })
+      expect(verifyClosedVenueArrivalMock).not.toHaveBeenCalled()
+    })
+
+    it('skips without a model call when the hours are unreadable', async () => {
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE, {}),
+        makeGenerationResult(),
+      )
+      expect(r).toEqual({ status: 'skipped' })
+      expect(verifyClosedVenueArrivalMock).not.toHaveBeenCalled()
+    })
+
+    it('skips when the structural trigger already covers the turn', async () => {
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ arrivalCapture: IMMINENT }),
+      )
+      expect(r).toEqual({ status: 'skipped' })
+      expect(verifyClosedVenueArrivalMock).not.toHaveBeenCalled()
+    })
+
+    it('skips for a demo guest', async () => {
+      const ctx = ctxAt(AFTER_CLOSE)
+      const r = await verifyClosedVenueArrivalStage(
+        { ...ctx, guest: { ...ctx.guest, isDemo: true } },
+        makeGenerationResult(),
+      )
+      expect(r).toEqual({ status: 'skipped' })
+      expect(verifyClosedVenueArrivalMock).not.toHaveBeenCalled()
+    })
+
+    it('RUNS when the venue is closed and nothing structural fired', async () => {
+      // The gap this check exists for: "see you soon" with no emission behind
+      // it passes every other trigger by construction.
+      verifyClosedVenueArrivalMock.mockResolvedValue({
+        ok: true,
+        data: { confirmsArrival: true, promptVersion: 'v1.0.0' },
+      })
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ body: 'See you soon!' }),
+      )
+      expect(r).toEqual({ status: 'flagged' })
+      expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports the catch with source "text_backstop"', async () => {
+      verifyClosedVenueArrivalMock.mockResolvedValue({
+        ok: true,
+        data: { confirmsArrival: true, promptVersion: 'v1.0.0' },
+      })
+      await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ body: 'See you soon!' }),
+      )
+      expect(captureClosedVenueArrivalCaughtMock.mock.calls[0][0]).toMatchObject({
+        source: 'text_backstop',
+      })
+    })
+
+    it('returns clean and reports nothing when the reply is fine', async () => {
+      verifyClosedVenueArrivalMock.mockResolvedValue({
+        ok: true,
+        data: { confirmsArrival: false, promptVersion: 'v1.0.0' },
+      })
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ body: "we're closed, back at 7 tomorrow" }),
+      )
+      expect(r).toEqual({ status: 'clean' })
+      expect(captureClosedVenueArrivalCaughtMock).not.toHaveBeenCalled()
+    })
+
+    it('retries ONCE on a transient fault, then fails closed', async () => {
+      verifyClosedVenueArrivalMock
+        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
+        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
+      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      expect(r).toEqual({ status: 'check_failed' })
+      expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('a retry that succeeds is used', async () => {
+      verifyClosedVenueArrivalMock
+        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: { confirmsArrival: false, promptVersion: 'v1.0.0' },
+        })
+      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      expect(r).toEqual({ status: 'clean' })
+    })
+
+    it('does NOT retry a truncated verdict', async () => {
+      // The cap was already hit. A second call spends money to hit it again.
+      verifyClosedVenueArrivalMock.mockResolvedValue({
+        ok: false,
+        error: 'no object generated',
+        errorCode: 'ai_verify_closed_venue_arrival_truncated',
+      })
+      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      expect(r).toEqual({ status: 'check_failed' })
+      expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(1)
+    })
   })
 })

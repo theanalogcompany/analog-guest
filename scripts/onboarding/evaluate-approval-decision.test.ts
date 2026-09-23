@@ -75,6 +75,10 @@ describe('evaluate-approval-decision structural invariants (TAC-347)', () => {
         'ApprovalDecision',
         'GroundingBackstopResult',
         'ProsePromiseBackstopResult',
+        // TAC-363: a type, not a call. The module still makes no AI call and
+        // no decision of its own; the harness owns running the stage, exactly
+        // as it already owns grounding and prose-promise.
+        'ClosedVenueArrivalBackstopResult',
         'RuntimeContext',
         'GenerateMessageResult',
       ]),

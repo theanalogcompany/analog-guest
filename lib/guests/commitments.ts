@@ -637,14 +637,32 @@ export type TransitionResult = {
  * captures both at transition time (signal is 'imminent', expectedArrival is
  * now). The scheduled path uses scheduleArrival earlier to set them, then
  * the cron picks up the row and calls this with the prior values.
+ *
+ * TAC-363: `venueId` and `guestId` are REQUIRED and are part of the CAS, not
+ * bookkeeping. Until this ticket the predicate was `id` and `status` alone, so
+ * whoever supplied the id decided which row moved — and on the agent path that
+ * was the MODEL, copying a uuid out of the `## Active commitments` prompt
+ * block. A hallucinated or stale id transitioned whatever row it named,
+ * including a row belonging to a different guest or a different venue, and the
+ * caller could not tell: the returned row looked like a clean CAS win.
+ *
+ * Scoping it here rather than only at the call site is deliberate. The agent
+ * path now selects rows from `ctx.activeCommitments`, which is already
+ * guest-scoped, so this is the second of two locks rather than the only one —
+ * but the first lock lives in a different file and a future caller will not
+ * inherit it. Cross-venue isolation is the product invariant every venue's
+ * data rests on ("every venue is its own isolated block"), and an UPDATE that
+ * can reach across it should not be reachable by passing the wrong argument.
  */
 export async function transitionToPendingAck(opts: {
   commitmentId: string
+  venueId: string
+  guestId: string
   expectedArrival: Date
   arrivalSignal: ArrivalSignal
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, expectedArrival, arrivalSignal, now } = opts
+  const { commitmentId, venueId, guestId, expectedArrival, arrivalSignal, now } = opts
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -656,6 +674,8 @@ export async function transitionToPendingAck(opts: {
         updated_at: now.toISOString(),
       })
       .eq('id', commitmentId)
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
       .eq('status', 'open')
       .select()
     if (error) {
@@ -686,14 +706,22 @@ export async function transitionToPendingAck(opts: {
  *
  * CAS-gated on status='open' so we don't accidentally overwrite arrival
  * info on an already-acknowledged or cancelled row.
+ *
+ * TAC-363: venue- and guest-scoped for the same reason its sibling above is,
+ * and scoped in the same change deliberately. The two are called from the same
+ * function on the same model-supplied id, so scoping only the one the ruling
+ * named would have left the identical hole open on every `scheduled` capture
+ * while reading, in this file, as though the question had been considered.
  */
 export async function scheduleArrival(opts: {
   commitmentId: string
+  venueId: string
+  guestId: string
   expectedArrival: Date
   arrivalSignal: ArrivalSignal
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, expectedArrival, arrivalSignal, now } = opts
+  const { commitmentId, venueId, guestId, expectedArrival, arrivalSignal, now } = opts
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -704,6 +732,8 @@ export async function scheduleArrival(opts: {
         updated_at: now.toISOString(),
       })
       .eq('id', commitmentId)
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
       .eq('status', 'open')
       .select()
     if (error) {

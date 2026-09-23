@@ -36,6 +36,10 @@ const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' }
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
 const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+// TAC-363: defaults to 'skipped', which is what the real stage returns on
+// every turn at an OPEN venue — the fixtures' venue has no hours, so the
+// real stage would skip too.
+const verifyClosedVenueArrivalStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
@@ -120,6 +124,8 @@ vi.mock('./stages', async () => {
     // that is a TypeError swallowed into a rejected settlement — the check
     // would read as permanently degraded with every test here still green.
     verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyClosedVenueArrivalStage: (...a: unknown[]) =>
+      verifyClosedVenueArrivalStageMock(...a),
     verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
   }
 })
@@ -149,8 +155,13 @@ vi.mock('./alerts', () => ({
   fireRedAlert: (...a: unknown[]) => fireRedAlertMock(...a),
   capturePostHogEvent: vi.fn(),
 }))
+// TAC-363: a named handle, because the push fan-out below is the delivery
+// mechanism for "every open obligation is surfaced" and a fixed 'noop' cannot
+// reach it. Reverting the loop to a single row passed every test in this file
+// while dispatch-arrival-capture.test.ts still proved both rows came back.
+const dispatchArrivalCaptureMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('./dispatch-arrival-capture', () => ({
-  dispatchArrivalCapture: vi.fn(async () => ({ kind: 'noop' })),
+  dispatchArrivalCapture: (...a: unknown[]) => dispatchArrivalCaptureMock(...a),
 }))
 // TAC-323: fire-and-forget side effect, mocked wholesale — its own unit
 // coverage lives in extract-reported-order.test.ts.
@@ -212,8 +223,13 @@ vi.mock('@/lib/notifications/send', () => ({
   sendDraftFlaggedPush: (...a: unknown[]) => sendDraftFlaggedPushMock(...a),
   shouldSendDraftFlaggedPush: () => true,
 }))
+// TAC-363: must RESOLVE, not return undefined. handle-inbound calls
+// `.catch()` on the result, so a bare vi.fn() throws a TypeError after the
+// first push and the fan-out silently stops at one — which is exactly the
+// defect these tests exist to catch, arriving through the mock instead.
+const sendCommitmentArrivalPushMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('@/lib/notifications/send-commitment-push', () => ({
-  sendCommitmentArrivalPush: vi.fn(),
+  sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 vi.mock('@/lib/observability', () => ({
@@ -296,6 +312,10 @@ const GEN_FAILED = { status: 'failed' as const, error: 'No object generated' }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // TAC-363: vi.clearAllMocks() wipes the factory's own implementation, so the
+  // default has to be restored here or every test gets `undefined` back.
+  dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'noop' })
+  sendCommitmentArrivalPushMock.mockResolvedValue(undefined)
   inboundSingleMock.mockResolvedValue({
     data: {
       id: INBOUND_ID,
@@ -2039,5 +2059,70 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
 
     const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({ resolution: { status: 'none' }, claim: 'check_failed' })
+  })
+})
+
+// TAC-363: the push fan-out.
+//
+// This is the delivery half of "every open obligation is surfaced when the
+// guest walks in" — the dispatch returning two rows is necessary and not
+// sufficient, because the operator learns about them from the push. Before
+// these tests, reverting the loop to `commitmentRows.slice(0, 1)` — the
+// 5Q22/ADH8 defect reinstated one layer up — passed every test in this file
+// and the whole suite, because the dispatch was mocked to a fixed 'noop' and
+// sendCommitmentArrivalPush was asserted nowhere.
+describe('handleInbound — arrival push fan-out (TAC-363)', () => {
+  const COMMITMENT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const COMMITMENT_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+
+  function commitmentRow(id: string, code: string) {
+    return {
+      id,
+      venue_id: VENUE_ID,
+      guest_id: GUEST_ID,
+      type: 'comp',
+      description: 'replacement cortado',
+      code,
+      status: 'pending_ack',
+      expected_arrival: '2026-09-22T17:00:00Z',
+      arrival_signal: 'imminent',
+      created_at: '2026-09-20T12:00:00Z',
+    }
+  }
+
+  it('pushes once per transitioned obligation, not once per arrival', async () => {
+    dispatchArrivalCaptureMock.mockResolvedValue({
+      kind: 'imminent_won',
+      commitmentRows: [commitmentRow(COMMITMENT_A, '5Q22'), commitmentRow(COMMITMENT_B, 'ADH8')],
+      failedCount: 0,
+    })
+
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(sendCommitmentArrivalPushMock).toHaveBeenCalledTimes(2)
+    expect(
+      sendCommitmentArrivalPushMock.mock.calls.map(
+        (c) => (c[0] as unknown as { commitmentId: string }).commitmentId,
+      ),
+    ).toEqual([COMMITMENT_A, COMMITMENT_B])
+  })
+
+  it('pushes nothing when the venue was closed and nothing was recorded', async () => {
+    // Ruling 1(a) end to end: no row comes back, so no operator is woken at
+    // 1am for an arrival that cannot happen.
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'closed_venue_skipped' })
+    await handleInbound(INBOUND_ID)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+
+  it('pushes nothing when the guest owes nothing an arrival can attach to', async () => {
+    // Ruling 4(a): the only thing open was a recommendation.
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'no_open_obligations' })
+    await handleInbound(INBOUND_ID)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
   })
 })

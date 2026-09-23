@@ -177,6 +177,16 @@ const PUSH_POLICY = {
   // loud side is the house rule here.
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'push',
 
+  // TAC-363: the venue is closed and this reply may be sending the guest over
+  // anyway. Both push.
+  //
+  // Nothing else surfaces these. The card carries no timer, and the failure is
+  // time-critical in a way most queue entries are not: the value of catching it
+  // decays to nothing the moment the guest sets off. A dismissible push is
+  // exactly the instrument for that.
+  [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED]: 'push',
+  [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP]: 'push',
+
   // The ONLY skip. A pending draft already exists in this draft's slot, and
   // persistOrRegenQueuedDraft UPDATEs that row IN PLACE rather than inserting
   // a new one (TAC-264). Since TAC-394 a card in the OTHER slot never fires

@@ -368,6 +368,12 @@ export async function handleOperatorDecline(input: {
     }
     const arrival = await dispatchArrivalCapture({
       arrivalCapture: gen.result.arrivalCapture,
+      venue: ctx.venue,
+      guestId: ctx.guest.id,
+      // TAC-363: the model's referencesCommitmentId no longer selects the row.
+      // Every open obligation this guest holds is swept, so a guest owed two
+      // things has both surfaced when they walk in.
+      activeCommitments: ctx.activeCommitments,
       now: ctx.recognition.computedAt,
     })
     if (arrival.kind !== 'noop') {
