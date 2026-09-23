@@ -64,6 +64,7 @@ import {
   transitionToPendingAck,
 } from './commitments'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
+import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   resolveOpeningToday,
@@ -141,6 +142,13 @@ export interface ProcessDueCommitmentsResult {
    * absence of one.
    */
   venueClosedToday: number
+  /**
+   * TAC-529. Number of rows at a venue whose `venues.status` is `paused` or
+   * `archived`. Never transitioned and never pushed: pausing a venue has to
+   * stop the arrival heads-up too, or it is a switch that does not do what
+   * its name says.
+   */
+  venueHalted: number
   /** Number of rows that failed defensive checks (null signal, malformed timestamp, missing venue timezone). */
   invalid: number
   /** Number of rows that errored during the transition CAS round trip. */
@@ -195,6 +203,7 @@ export async function processDueCommitments(
     arrivalPassed: 0,
     openingTimeUnreadable: 0,
     venueClosedToday: 0,
+    venueHalted: 0,
     invalid: 0,
     errored: 0,
     pushed: 0,
@@ -233,6 +242,28 @@ export async function processDueCommitments(
     }
 
     const venueClock = venueClocks.get(row.venue_id) ?? null
+
+    // TAC-529: the venue is paused or archived.
+    //
+    // FIRST among the venue checks, and BEFORE transitionToPendingAck, which
+    // is the placement that matters. That CAS is a state change: flipping a
+    // commitment to `pending_ack` and then not pushing would leave the row
+    // marked "guest arriving" with nobody told, which is worse than either
+    // pushing or leaving it alone. Ahead of the clock checks too, so a halted
+    // venue does not also spend `future` / `beforeOpening` counters that
+    // describe rows we were never going to act on.
+    //
+    // A venue missing from the clock map (no usable timezone) has no status
+    // here and falls through to the `invalid` branch below, as it did before.
+    // It is refused either way; only the counter differs.
+    if (isVenueProcessingHalted(venueClock?.status)) {
+      summary.venueHalted += 1
+      console.warn(
+        `[cron commitments-due] venue=${row.venue_id} is "${venueClock?.status}", not announcing commitment=${row.id}`,
+      )
+      continue
+    }
+
     const venueTimezone = venueClock?.timezone ?? null
     const venueHours: VenueInfo['hours'] = venueClock?.hours ?? {}
     if (venueTimezone === null) {
@@ -414,12 +445,18 @@ export async function processDueCommitments(
 
 async function loadVenueClocks(
   venueIds: readonly string[],
-): Promise<Map<string, { timezone: string; hours: VenueInfo['hours'] }>> {
-  const out = new Map<string, { timezone: string; hours: VenueInfo['hours'] }>()
+): Promise<Map<string, { timezone: string; status: string | null; hours: VenueInfo['hours'] }>> {
+  const out = new Map<
+    string,
+    { timezone: string; status: string | null; hours: VenueInfo['hours'] }
+  >()
   if (venueIds.length === 0) return out
   const supabase = createAdminClient()
   const [venues, configs] = await Promise.all([
-    supabase.from('venues').select('id, timezone').in('id', venueIds),
+    // TAC-529: `status` rides the venue read this function already makes, so
+    // gating the arrival push costs no extra round trip. Dropping it from
+    // this select makes the gate below read `undefined` and go inert.
+    supabase.from('venues').select('id, timezone, status').in('id', venueIds),
     supabase.from('venue_configs').select('venue_id, venue_info').in('venue_id', venueIds),
   ])
   if (venues.error || !venues.data) {
@@ -455,7 +492,11 @@ async function loadVenueClocks(
     // loaders are near-duplicates (batched here, single-venue there) and move
     // together.
     if (typeof row.timezone !== 'string' || row.timezone.length === 0) continue
-    out.set(row.id, { timezone: row.timezone, hours: hoursByVenue.get(row.id) ?? {} })
+    out.set(row.id, {
+      timezone: row.timezone,
+      status: row.status,
+      hours: hoursByVenue.get(row.id) ?? {},
+    })
   }
   return out
 }
