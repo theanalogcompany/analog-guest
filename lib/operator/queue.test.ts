@@ -1086,6 +1086,26 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     )
   })
 
+  // THE SCOPE BOUNDARY, and it needs a test rather than a comment. A mutant
+  // that widened the dynamic sentence to commitment_type_gated passed all 71
+  // tests in this file: the copy table renders that trigger with NO carrier, so
+  // the dynamic branch was never reachable for it. Jaipal's approval scoped
+  // this ticket to the two prose triggers and left commitment_type_gated
+  // alone — that path carries the model's own structured emission and works
+  // today — so the boundary is asserted here instead of only being asserted in
+  // prose.
+  it('leaves commitment_type_gated alone even when a carrier resolved', async () => {
+    withCarrier(
+      { type: 'comp', description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null },
+      'commitment_type_gated',
+    )
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe('This commits you to something. Your call.')
+    expect(result.drafts[0]!.reviewReason).not.toContain('Approving this')
+  })
+
   // A recommendation costs the venue nothing and has no sentence here, so the
   // card falls back rather than inventing one.
   it('falls back to static copy for a recommendation carrier', async () => {
