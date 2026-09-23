@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GenerateMessageResult } from '@/lib/ai'
 import { createPendingRowsFake, type PendingIndexMode } from './testing/pending-rows-fake'
+import { APPROVAL_TRIGGERS } from './stages'
 import type { RuntimeContext } from './types'
 
 const mockAdmin: { client: unknown } = { client: null }
@@ -101,6 +102,11 @@ function ctxFor(opts: {
   // the pending card is answering. Defaults false, which is `own_card` — a
   // second question gets its own card, the shipped behaviour.
   corrects?: boolean
+  // TAC-397: migration 054 keys the conversation index on the inbound, so two
+  // turns of one exchange must carry DIFFERENT ids or they collide. Defaults
+  // to the single id every pre-existing test in this file used.
+  inboundId?: string
+  body?: string
 }): RuntimeContext {
   return {
     agentRunId: 'run-1',
@@ -115,8 +121,8 @@ function ctxFor(opts: {
     currentMessage: opts.manual
       ? null
       : {
-          id: 'inbound-1',
-          body: 'what time do you open on sundaus',
+          id: opts.inboundId ?? 'inbound-1',
+          body: opts.body ?? 'what time do you open on sundaus',
           providerMessageId: 'p1',
           receivedAt: new Date(),
         },
@@ -213,6 +219,12 @@ async function runTurn(
       // TAC-513: same reasoning as the line above. Dropping it is the mutant
       // the end-to-end test below kills, and no per-mock assertion would.
       pendingCancellation: decision.pendingCancellation,
+      // TAC-397: same reasoning as the two lines above. Dropping either is a
+      // mutant the replay below kills and no per-mock assertion would — the
+      // replaced text would silently never reach the row, and recovery would
+      // decide a card the gate never saw differently from the gate.
+      captureReplacedDraft: decision.captureReplacedDraft,
+      conversationDisposition: decision.conversationDisposition,
       callerPolicy,
     },
   )
@@ -1171,5 +1183,191 @@ describe('a cancellation reaches messages.pending_cancellation (TAC-513)', () =>
     const regenerated = fake.rows.find((r) => r.id === cardId)
     expect(regenerated?.body).toContain('open till 3')
     expect(regenerated?.pending_cancellation ?? null).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-397: the 2026-09-18 Le Mil's exchange, replayed against the real gate
+// and the real persist layer.
+//
+//   16:07  guest: any events coming up?
+//          agent: a draft about the events, QUEUED for review.
+//   16:10  guest: my sofi was flat
+//          agent: a draft apologising, which REGENERATED the events draft out
+//                 of existence. The events question was never answered.
+//
+// Migration 041 allowed one conversation card per guest and TAC-264
+// regenerates that card in place, so the second reply overwrote the first.
+// Measured at roughly 4 in 10 regens, the replacement answered only the newest
+// message (TAC-394 PR 1).
+//
+// Replayed with FIXTURE ROW STATE rather than live model calls: the routing is
+// what this ticket changed, and a live generation would make the test a
+// measurement of the model instead of a test of the mechanism. The classifier
+// judgement each turn is stated, which is exactly what the pre-registered
+// measurement harness exists to check separately.
+//
+// The NEGATIVE CONTROL is the same exchange under migration 041's index: it
+// reproduces the incident. Without it, "two cards, neither question lost"
+// could pass against a fake that simply never collides.
+// ---------------------------------------------------------------------------
+describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)", () => {
+  const EVENTS_Q = 'any events coming up?'
+  const EVENTS_A = "we've got an open mic on the 24th and a cupping the week after"
+  const SOFI_COMPLAINT = 'my sofi was flat'
+  const SOFI_A = "sorry about that, that's not how it should taste"
+
+  async function replay() {
+    const first = await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const second = await runTurn(
+      // The SoFi complaint is a NEW subject, not an amendment of the events
+      // question, so the classifier says false and the disposition is own_card.
+      ctxFor({
+        category: 'comp_complaint',
+        held: true,
+        inboundId: 'in-sofi',
+        body: SOFI_COMPLAINT,
+        corrects: false,
+      }),
+      generation({ body: SOFI_A }),
+    )
+    return { first, second }
+  }
+
+  it('produces TWO cards and loses neither question', async () => {
+    const fake = useFake('054')
+    const { first, second } = await replay()
+
+    expect(first.persisted?.action).toBe('inserted')
+    expect(second.persisted?.action).toBe('inserted')
+    expect(first.persisted?.outboundMessageId).not.toBe(second.persisted?.outboundMessageId)
+
+    const pending = fake.rows.filter((r) => r.review_state === 'pending')
+    expect(pending).toHaveLength(2)
+
+    // The events answer is still there, byte-identical, answering its own
+    // inbound. That is the whole acceptance criterion.
+    const events = fake.snapshot(first.persisted!.outboundMessageId as string)
+    expect(events?.body).toBe(EVENTS_A)
+    expect(events?.reply_to_message_id).toBe('in-events')
+
+    const sofi = fake.snapshot(second.persisted!.outboundMessageId as string)
+    expect(sofi?.body).toBe(SOFI_A)
+    expect(sofi?.reply_to_message_id).toBe('in-sofi')
+
+    // Neither card claims to have replaced anything, because neither did.
+    expect(events?.replaced_draft_body ?? null).toBeNull()
+    expect(sofi?.replaced_draft_body ?? null).toBeNull()
+  })
+
+  it('the second card does NOT claim it was held behind the first', async () => {
+    useFake('054')
+    const { second } = await replay()
+    expect(second.decision.action).toBe('queue')
+    if (second.decision.action !== 'queue') return
+    // previous_pending_held would be false here: nothing was replaced.
+    expect(second.decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(second.decision.existingPendingDraftId).toBeNull()
+    // It does report that the guest has another card waiting, which is true.
+    expect(second.decision.otherSlotOccupied).toBe(false)
+  })
+
+  // NEGATIVE CONTROL. Without one, "two cards, neither question lost" could
+  // pass against a fake that simply never collides, or against a routing layer
+  // that had stopped consulting the disposition at all.
+  //
+  // The control is the SAME exchange with the SoFi complaint judged a
+  // correction instead. That reproduces the incident exactly — one card, the
+  // events answer overwritten — which shows the two-card result above comes
+  // from the disposition and nothing else.
+  //
+  // It is NOT run under migration 041, deliberately: new code against 041
+  // cannot reproduce the old behaviour, it red-alerts on the second card. That
+  // is the deploy-window failure, and it has its own test above.
+  it('CONTROL: judged a correction instead, the same exchange overwrites the events answer', async () => {
+    const fake = useFake('054')
+
+    const first = await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const eventsCardId = first.persisted!.outboundMessageId as string
+    expect(fake.snapshot(eventsCardId)?.body).toBe(EVENTS_A)
+
+    const second = await runTurn(
+      ctxFor({
+        category: 'comp_complaint',
+        held: true,
+        inboundId: 'in-sofi',
+        body: SOFI_COMPLAINT,
+        corrects: true,
+      }),
+      generation({ body: SOFI_A }),
+    )
+
+    // One card, and it is the events card with the SoFi reply written over it.
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(second.persisted?.outboundMessageId).toBe(eventsCardId)
+    expect(fake.snapshot(eventsCardId)?.body).toBe(SOFI_A)
+    // The difference from the incident: the replaced text is KEPT, so the
+    // operator can see what the correction displaced rather than losing it.
+    expect(fake.snapshot(eventsCardId)?.replaced_draft_body).toBe(EVENTS_A)
+  })
+
+  // The third case, on the same exchange: had the guest AMENDED the events
+  // question instead of changing the subject, the card is rewritten in place
+  // and keeps what it replaced, so the operator can compare.
+  it('an amendment of the events question rewrites that card and keeps the old text', async () => {
+    const fake = useFake('054')
+    const first = await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const cardId = first.persisted!.outboundMessageId as string
+
+    const second = await runTurn(
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-amend',
+        body: 'sorry i meant this weekend',
+        corrects: true,
+      }),
+      generation({ body: 'nothing this weekend, next one is the 24th' }),
+    )
+
+    expect(second.persisted?.action).toBe('updated')
+    expect(second.persisted?.outboundMessageId).toBe(cardId)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+
+    const card = fake.snapshot(cardId)
+    expect(card?.body).toBe('nothing this weekend, next one is the 24th')
+    expect(card?.replaced_draft_body).toBe(EVENTS_A)
+    expect(typeof card?.replaced_draft_at).toBe('string')
+    // The card now answers the amending message.
+    expect(card?.reply_to_message_id).toBe('in-amend')
+  })
+
+  it('a message needing no answer leaves the events card byte-identical', async () => {
+    const fake = useFake('054')
+    const first = await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const cardId = first.persisted!.outboundMessageId as string
+    const before = fake.snapshot(cardId)
+
+    const second = await runTurn(
+      ctxFor({ category: 'acknowledgment', held: true, inboundId: 'in-haha', body: 'haha' }),
+      generation({ body: 'glad you think so' }),
+    )
+
+    expect(second.decision.action).toBe('silence')
+    expect(second.persisted).toBeNull()
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.snapshot(cardId)).toEqual(before)
   })
 })
