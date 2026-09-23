@@ -1116,12 +1116,16 @@ function formatMechanicEligibility(
 }
 
 // TAC-324: render open first-touch intentions as a `## What you're hoping to
-// get to` block. Position: after `## What this guest can access`, before
-// `## Follow-up context` / `## Visit history` — Sana's own goals sit with
-// who-the-guest-is, not with what-was-recently-said. Only ever non-empty on
+// get to` block. Position: LAST of the content blocks, immediately before the
+// emoji directive (moved there by TAC-519). It sat after
+// `## What this guest can access` and before `## Follow-up context` /
+// `## Visit history` until then, on the reading that Sana's own goals belong
+// with who-the-guest-is rather than with what-was-recently-said. That reading
+// is tidy and it cost the feature its purpose: measured on 39 real Le Mil's
+// turns, intentions were raised 4 times from the old position and 13 times from
+// last. See the push site in runtimeToProse for the run. Only ever non-empty on
 // the inbound path (build-runtime-context.ts gates it there), so this never
-// co-renders with the followup-only blocks in practice — the ordering just
-// keeps a single deterministic position regardless.
+// co-renders with the followup-only blocks in practice.
 //
 // The non-steering paragraph below is load-bearing in the same way the
 // empty-mechanics framing above is: it's what turns "things Sana wants" into

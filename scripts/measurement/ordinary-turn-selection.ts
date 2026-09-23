@@ -6,8 +6,14 @@
 // the one write anywhere on the measurement path is not this file's:
 // buildRuntimeContext runs computeGuestState, which persists a `guest_states`
 // row when a guest's recognition BAND changes. It does not fire for a guest
-// whose band is stable. The caller reports the row count before and after so
-// the claim is checked rather than asserted (the shape TAC-423's harness used).
+// whose band is stable.
+//
+// NOTHING IN THIS REPO CHECKS THAT, and an earlier version of this comment said
+// the caller did. It does not: the 2026-09-23 run was checked BY HAND (25
+// guest_states rows at Le Mil's before and after, unchanged), which is what
+// TAC-423's harness header records for its own run too. Stated as a hand check
+// rather than an automated one, because claiming a verification that does not
+// exist is worse than naming the gap. Found in review.
 //
 // WHAT "a turn that rendered intentions" MEANS. messages.rendered_intentions
 // (migration 045) is written on every send path and TAC-436 ruling 4 added the
@@ -19,7 +25,7 @@
 // with "the QR opener turn, where the block rendered but the recordable set is
 // forced empty". Only the non-empty rows are used.
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { createAdminClient } from '@/lib/db/admin'
 
 import type { OpenIntention } from '@/lib/agent/intentions/derive'
 import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
@@ -71,7 +77,10 @@ export interface OrdinaryTurnSelection {
  * a single `in` over at most a few dozen ids.
  */
 export async function selectOrdinaryTurns(
-  supabase: SupabaseClient,
+  // The repo convention (schedule-and-send.ts, dispatch-instagram-reply.ts). A
+  // bare SupabaseClient erases the schema types and makes every row read `any`,
+  // so a column typo would be invisible to tsc. Found in review.
+  supabase: ReturnType<typeof createAdminClient>,
   venueId: string,
   sinceIso: string,
 ): Promise<OrdinaryTurnSelection> {

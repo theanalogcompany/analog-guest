@@ -137,6 +137,55 @@ describe('moveIntentionBlockLate', () => {
     expect(r.reason).toContain('not at a block boundary')
   })
 
+  // THE CASE THE FIRST VERSION MANGLED, found in review. With no emoji directive
+  // the block goes before the tail, and the cut used to be taken at the final
+  // element's FIRST blank line. formatRecentConversation appends the
+  // unsent-history note after one, so the block landed between the conversation
+  // and its own note and the function returned ok: true. Reachable with no guest
+  // weirdness: resolveEmojiDirective returns null for `never` and `sparingly`.
+  it('does not splice into a final block that has its own internal blank line', () => {
+    const recentWithNote = [
+      '## Recent conversation',
+      '[2h ago] guest: hey',
+      '[1h ago] venue: hi [NOT SENT: waiting for the venue to approve it]',
+      '',
+      'Lines marked NOT SENT never reached the guest.',
+    ].join('\n')
+    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, recentWithNote]))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // The note must still sit with its own block, not be orphaned onto the
+    // intentions block.
+    expect(r.prompt).toContain(recentWithNote)
+    expect(r.prompt.indexOf('Lines marked NOT SENT')).toBeLessThan(
+      r.prompt.indexOf(INTENTIONS_HEADER),
+    )
+    expect(r.prompt.endsWith(GENERATE_LINE)).toBe(true)
+  })
+
+  // The separator is DERIVED, so a final block with several internal blank lines
+  // still lands correctly: every one of them comes before the separator, and the
+  // tail contributes the last. My first "ambiguous boundary" test was written for
+  // the guessing version and used a tail with two blank lines, a shape
+  // runtimeToProse cannot produce (tail lines are joined with \n, never \n\n).
+  it('handles a final block with several internal blank lines', () => {
+    const chatty = [
+      '## Recent conversation',
+      '[3h ago] guest: hey',
+      '',
+      'a note',
+      '',
+      'another note',
+    ].join('\n')
+    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, chatty]))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.prompt).toContain(chatty)
+    expect(r.prompt).toContain(INTENTIONS_BLOCK)
+    expect(r.prompt.indexOf('another note')).toBeLessThan(r.prompt.indexOf(INTENTIONS_HEADER))
+    expect(r.prompt.endsWith(GENERATE_LINE)).toBe(true)
+  })
+
   it('refuses a prompt with no generate line', () => {
     const r = moveIntentionBlockLate(`## Right now\nit is 9am\n\n${INTENTIONS_BLOCK}`)
     expect(r.ok).toBe(false)

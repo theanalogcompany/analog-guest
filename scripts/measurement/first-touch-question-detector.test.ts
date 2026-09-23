@@ -148,7 +148,11 @@ describe('carriesApology', () => {
 
   it.each([
     ['apologies for the confusion, that was our error', true],
-    ['my bad, that should not have happened', true],
+    ['my bad, the order was wrong', true],
+    // THE CONTRACTION, which is what the pattern matches. This fixture read
+    // 'that should not have happened', which matches on \\bmy bad\\b instead, so
+    // deleting /shouldn't have/ killed nothing. Found in review.
+    ["we shouldn't have let that go out", true],
     ["that's on us, come back and we'll sort it", true],
     ['we messed up the order', true],
     ['sorry about that', true],

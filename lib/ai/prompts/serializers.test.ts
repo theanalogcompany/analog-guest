@@ -673,47 +673,108 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   })
 
   // TAC-519 REVERSES this assertion rather than deleting it, because the old
-  // order is exactly what changed and a deleted test records nothing. TAC-324
-  // put the block before ## Follow-up context; from there it was 3rd of 7 on an
-  // ordinary turn and intentions were raised on 4 of 39 real turns. Measured,
-  // the move to last took that to 13/35. See runtimeToProse's own comment.
-  it('renders AFTER ## Follow-up context and ## Recent conversation, not before them', () => {
+  // order is exactly what changed and a deleted test records nothing.
+  //
+  // ON AN INBOUND CATEGORY, and that is load-bearing. The first version of this
+  // test used 'follow_up', and code review proved it worthless: on a followup run
+  // build-runtime-context never derives openIntentions (it is set inside
+  // `if (input.currentMessage)`), so the block CANNOT render on a follow_up turn
+  // in production. A mutant reverting the position for every category except
+  // follow_up passed all 248 tests. The block only ever renders on an inbound
+  // turn, so the guard has to run on one.
+  it('renders AFTER ## Recent conversation on an inbound turn, not before it', () => {
     const out = runtimeToProse(
       {
         mechanics: [],
         openIntentions: ["You haven't told them to save your number."],
-        followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
+        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
         recentMessages: [
-          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 3600_000), delivery: 'delivered' },
+          {
+            direction: 'inbound',
+            body: 'hey',
+            createdAt: new Date(NOW.getTime() - 3600_000),
+            delivery: 'delivered',
+          },
         ],
       },
-      'follow_up',
+      'reply',
       NOW,
     )
     const eligibilityIdx = out.indexOf('## What this guest can access')
-    const intentionsIdx = out.indexOf("## What you're hoping to get to")
-    const followupIdx = out.indexOf('## Follow-up context')
+    const visitIdx = out.indexOf('## Visit history')
     const recentIdx = out.indexOf('## Recent conversation')
+    const intentionsIdx = out.indexOf("## What you're hoping to get to")
     expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
-    expect(followupIdx).toBeGreaterThan(eligibilityIdx)
-    expect(recentIdx).toBeGreaterThan(followupIdx)
+    expect(visitIdx).toBeGreaterThan(eligibilityIdx)
+    expect(recentIdx).toBeGreaterThan(visitIdx)
     expect(intentionsIdx).toBeGreaterThan(recentIdx)
   })
 
-  // TAC-519. Nothing pinned the WHOLE order before this: there were pairwise
-  // indexOf comparisons, which is how a block's position drifts for two years
-  // with no failing test. This asserts the full sequence, so any future move of
-  // any block in the user prompt has to change a test that says what the order is.
+  // TAC-519. The block is LAST of the content blocks on every category that
+  // renders it, not just on one fixture's. This is the assertion the
+  // category-conditional mutant above dies to: it cannot be satisfied by moving
+  // the block for some categories and not others.
   //
-  // The emoji directive stays LAST (TAC-362, measured). The intentions block
-  // sits immediately before it, which is the change this ticket shipped.
-  it('pins the full user-prompt block order', () => {
+  // opt_out and comp_complaint are excluded because shouldRenderOpenIntentions
+  // suppresses the block on them entirely (TAC-328, TAC-436), which the
+  // suppression tests below cover separately.
+  const CATEGORIES_THAT_RENDER_INTENTIONS = MESSAGE_CATEGORIES.filter(
+    (c) => c !== 'opt_out' && c !== 'comp_complaint',
+  )
+
+  it.each(CATEGORIES_THAT_RENDER_INTENTIONS)(
+    'renders the block last of the content blocks on category %s',
+    (category) => {
+      const out = runtimeToProse(
+        {
+          mechanics: [],
+          openIntentions: ["You haven't told them to save your number."],
+          recentMessages: [
+            {
+              direction: 'inbound',
+              body: 'hey',
+              createdAt: new Date(NOW.getTime() - 3600_000),
+              delivery: 'delivered',
+            },
+          ],
+          emojiDirective: 'none',
+        },
+        category,
+        NOW,
+      )
+      const headings = out
+        .split('\n')
+        .filter((l) => l.startsWith('## '))
+        .map((l) => l.trim())
+      expect(headings).toContain("## What you're hoping to get to")
+      // Last of the content blocks: only the emoji directive may follow it.
+      expect(headings.slice(headings.indexOf("## What you're hoping to get to") + 1)).toEqual([
+        '## Emoji for this message',
+      ])
+    },
+  )
+
+  // TAC-519. Nothing pinned the WHOLE order before this: there were pairwise
+  // indexOf comparisons, which is how a block's position drifts with no failing
+  // test. Two shapes, because no single turn renders every block:
+  //
+  //   - the INBOUND shape, which is the one this ticket is about and the only one
+  //     the intentions block renders on;
+  //   - the OUTBOUND/followup shape, which is where ## Follow-up context and
+  //     ## Operator instruction render and where intentions never do.
+  //
+  // Between them every block except ## Critique to incorporate (the Voices regen
+  // path, asserted at its own site) is pinned by position rather than by a
+  // pairwise comparison. The first version of this pinned one shape and its
+  // comment claimed "any future move of any block" had to change it; code review
+  // showed three blocks were absent from the fixture and that moving
+  // ## Unanswered question passed the whole suite.
+  it('pins the full block order on an inbound turn', () => {
     const out = runtimeToProse(
       {
         today,
         mechanics: [],
         openIntentions: ["You haven't told them to save your number."],
-        followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
         recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
         guestContext: { observations: [{ note: 'likes oat', captured_at: NOW.toISOString() }] },
         activeCommitments: [
@@ -728,9 +789,49 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
             created_at: new Date(NOW.getTime() - 86_400_000).toISOString(),
           },
         ],
+        pendingQuestion: {
+          question: 'where do you source the beans',
+          askedAt: new Date(NOW.getTime() - 600_000),
+          mode: 'outstanding',
+        },
         recentMessages: [
-          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 3600_000), delivery: 'delivered' },
+          {
+            direction: 'inbound',
+            body: 'hey',
+            createdAt: new Date(NOW.getTime() - 3600_000),
+            delivery: 'delivered',
+          },
         ],
+        emojiDirective: 'none',
+      },
+      'reply',
+      NOW,
+    )
+    const order = out
+      .split('\n')
+      .filter((l) => l.startsWith('## '))
+      .map((l) => l.trim())
+    expect(order).toEqual([
+      '## Right now',
+      '## What this guest can access',
+      '## Visit history',
+      '## Guest context',
+      '## Active commitments',
+      '## Unanswered question',
+      '## Recent conversation',
+      "## What you're hoping to get to",
+      '## Emoji for this message',
+    ])
+  })
+
+  it('pins the full block order on an outbound followup turn', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        operatorInstruction: 'tell her about the new Panama lot',
+        followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
+        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
         emojiDirective: 'none',
       },
       'follow_up',
@@ -742,13 +843,10 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       .map((l) => l.trim())
     expect(order).toEqual([
       '## Right now',
+      '## Operator instruction',
       '## What this guest can access',
       '## Follow-up context',
       '## Visit history',
-      '## Guest context',
-      '## Active commitments',
-      '## Recent conversation',
-      "## What you're hoping to get to",
       '## Emoji for this message',
     ])
   })

@@ -33,6 +33,10 @@ export const EMOJI_HEADER = '## Emoji for this message'
 /** The prompt's final line, and the anchor for "before the tail". */
 export const GENERATE_LINE = 'Generate the message now.'
 
+function escapeForRegex(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 export type MoveResult =
   | { ok: true; prompt: string }
   | { ok: false; reason: string }
@@ -64,7 +68,10 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
   // forged line was found, moved, and the refusal written for it was
   // unreachable. Requiring the header to BE the line distinguishes the real
   // block (header alone on its line) from any body that merely quotes it.
-  const wholeLineHits = (userPrompt.match(/^## What you're hoping to get to$/gm) ?? []).length
+  // Derived from INTENTIONS_HEADER rather than re-typed, so renaming the
+  // constant cannot silently make this guard match nothing. Found in review.
+  const headerLine = new RegExp(`^${escapeForRegex(INTENTIONS_HEADER)}$`, 'gm')
+  const wholeLineHits = (userPrompt.match(headerLine) ?? []).length
   if (wholeLineHits !== 1) {
     return {
       ok: false,
@@ -99,16 +106,47 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
     return { ok: true, prompt: rest.join('\n\n') }
   }
 
-  // No emoji directive this turn, so the block goes before the tail that the
-  // final element carries. The tail is whatever follows that element's own
-  // first blank line.
+  // No emoji directive this turn, so the block goes before the tail the final
+  // element carries.
+  //
+  // THE CUT IS ANCHORED ON THE TAIL, NOT ON THE FIRST BLANK LINE, and the first
+  // version got this wrong in a way its own tests could not see. It cut at
+  // `last.indexOf('\n\n')`, which assumes the final block has no internal blank
+  // line. `formatRecentConversation` appends the unsent-history note after one,
+  // and `formatGuestContext` and `formatPendingQuestion` both contain them. So
+  // with no emoji directive and one unsent line in the history, the block was
+  // spliced BETWEEN the conversation and its own note, silently, returning
+  // ok: true. Reachable with no guest weirdness at all: resolveEmojiDirective
+  // returns null for both `never` and `sparingly`, so two of the three emoji
+  // policies render no directive. Found in review.
+  //
+  // THE SEPARATOR IS THE SECOND-TO-LAST BLANK LINE, and this is derivable rather
+  // than guessed. runtimeToProse builds the final element as
+  // `<lastBlock>\n\n<tailLines>\n\nGenerate the message now.`, and the tail's
+  // lines are single lines joined by \n, so the TAIL always contributes exactly
+  // one blank line and it is always the last one. Whatever internal blank lines
+  // the last block has come before the separator. So the separator is the blank
+  // line immediately before the tail's own.
+  //
+  // Two earlier versions of this guessed and both were wrong. The first cut at
+  // the FIRST blank line, which splices into any final block that has one
+  // (`formatRecentConversation`'s unsent-history note, `formatGuestContext`,
+  // `formatPendingQuestion`) and returned ok: true while orphaning the note onto
+  // the intentions block. The second cut at the last blank line BEFORE the
+  // generate line, which lands inside the tail itself, because the tail has one.
+  // That one was caught by the test written for the first. Both are why this is
+  // derived from the known structure rather than from a heuristic.
   if (rest.length === 0) {
     return { ok: false, reason: 'the intentions block was the only block in the prompt' }
   }
   const last = rest[rest.length - 1]
-  const cut = last.indexOf('\n\n')
+  if (!last.includes(GENERATE_LINE)) {
+    return { ok: false, reason: 'the final element does not carry the generate line' }
+  }
+  const tailBlank = last.lastIndexOf('\n\n')
+  const cut = tailBlank === -1 ? -1 : last.lastIndexOf('\n\n', tailBlank - 1)
   if (cut === -1) {
-    return { ok: false, reason: 'the final block carries no tail to insert before' }
+    return { ok: false, reason: 'the final element carries no block/tail boundary' }
   }
   const finalBlock = last.slice(0, cut)
   const tail = last.slice(cut + 2)

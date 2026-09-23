@@ -305,9 +305,11 @@ export type RuntimeContext = {
   pendingQuestion?: PendingQuestion
   // TAC-324 / TAC-380: the intentions this turn renders, one line per
   // intention in priority order (already the prompt-facing copy, not a key).
-  // The serializer renders a `## What you're hoping to get to` block between
-  // mechanics and `## Follow-up context` / `## Visit history` when this is
-  // non-empty and the category is not opt_out (TAC-328). Mapped by
+  // The serializer renders a `## What you're hoping to get to` block LAST of
+  // the content blocks, immediately before the emoji directive, when this is
+  // non-empty and the category is not opt_out (TAC-328). TAC-519 moved it there
+  // from between mechanics and `## Follow-up context`: measured, 4 of 39 real
+  // turns raised an intention from the old position and 13 of 35 from last. Mapped by
   // buildAiRuntime through renderableIntentions, so it is already gated to
   // inbound runs, current-turn-suppressed, and empty on opt_out or while a
   // question is pending. undefined or empty = block omitted entirely (zero

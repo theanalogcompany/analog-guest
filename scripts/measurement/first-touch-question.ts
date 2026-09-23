@@ -9,7 +9,13 @@
 // rather than claimed away, because "writes nothing" is the kind of sentence
 // that stops being true without anyone noticing.
 //
-// The change under test removes the opener's own question and leaves the ask
+// TAC-519 REPLACED THE TWO-ARM DESIGN THIS HEADER DESCRIBES. There are now five
+// arms on a first-touch turn and four on an ordinary one; every non-control arm
+// carries the opener with its question removed (derived from the live constant,
+// never transcribed), and they differ from each other only in which candidate
+// transformation is applied to the intentions block. See ARMS below.
+//
+// The change TAC-423 tested removed the opener's own question and left the ask
 // to the intention line rendered beneath it. TAC-519 measured what that line
 // achieves in production at Le Mil's: 4 intention asks in 9 days,
 // understand_order armed 5 and asked 1, learn_name armed 7 and asked 0. So the
@@ -71,12 +77,6 @@ import { createRunLog } from './run-log'
 import { classifyFirstTouchReply } from './first-touch-question-detector'
 import { moveIntentionBlockLate } from './intention-block-move'
 import { selectOrdinaryTurns, type OrdinaryTurn } from './ordinary-turn-selection'
-
-// v1.52.0's opener, transcribed from the commit it shipped in, not rebuilt
-// from the current source. This is the BEFORE arm and it must not drift with
-// the code under test.
-const OPENER_BEFORE =
-  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
 
 // THE QUESTION-REMOVED OPENER, DERIVED RATHER THAN TRANSCRIBED.
 //
@@ -392,6 +392,14 @@ type Cell = {
   twoQuestions: number
   /** TAC-519 ceiling: raises landing on a reply that carries an apology. */
   apologyRaise: number
+  /**
+   * The JUDGE failed, as opposed to the generation. Excluded from `n` for the
+   * same reason `failed` is: `raised` is the ordinary mode's primary metric, and
+   * a judge that errored produces no verdict, so counting it in the denominator
+   * scores it as a non-raise. Found in review, one model call away from the
+   * comment that states the rule.
+   */
+  judgeFailed: number
   invalid: number
 }
 
@@ -488,20 +496,40 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
     })
     const raisedKeys = judged.ok ? judged.data.raisedKeys : null
 
+    // A FAILED JUDGE IS NOT A RESULT EITHER. Without this the unit lands in the
+    // denominator and can never increment `raised`, i.e. it scores as a
+    // non-raise: the `failed` defect above, one model call over. Found in review.
+    if (raisedKeys === null) {
+      t.judgeFailed += 1
+      u.log.appendUnit({
+        groupId: u.groupId,
+        guestId: u.guestId,
+        inbound: u.inbound,
+        rep: u.rep,
+        arm,
+        body,
+        judgeFailed: true,
+        ...verdict,
+      })
+      console.log(`· ${u.groupId} rep${u.rep} ${arm.padEnd(16)} (judge failed)`)
+      return
+    }
+
     t.n += 1
     if (verdict.hasQuestion) t.question += 1
     if (verdict.isOrderQuestion) t.order += 1
-    if (raisedKeys !== null && raisedKeys.length > 0) t.raised += 1
+    if (raisedKeys.length > 0) t.raised += 1
     // Ceiling, not a rate: the acceptance criteria forbid asking two things
     // in one message, and an arm that breaks it fails whatever its rate.
     if (verdict.questionSentences.length > 1) t.twoQuestions += 1
     // TAC-519 ceiling. The block says a message carrying an apology or bad news
     // is not an opening and to leave it alone entirely, so a raise on one breaks
     // the block's own restraint.
-    if (verdict.carriesApology && raisedKeys !== null && raisedKeys.length > 0) t.apologyRaise += 1
+    if (verdict.carriesApology && raisedKeys.length > 0) t.apologyRaise += 1
 
     u.log.appendUnit({
       groupId: u.groupId,
+      guestId: u.guestId,
       inbound: u.inbound,
       rep: u.rep,
       arm,
@@ -510,13 +538,12 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
       error,
       offeredKeys: u.offeredForClassifier.map((o) => o.key),
       raisedKeys,
-      judgeFailed: !judged.ok,
       ...verdict,
     })
 
-    const mark = raisedKeys && raisedKeys.length > 0 ? '✓' : verdict.hasQuestion ? '?' : '✗'
+    const mark = raisedKeys.length > 0 ? '✓' : verdict.hasQuestion ? '?' : '✗'
     console.log(
-      `${mark} ${u.groupId} rep${u.rep} ${arm.padEnd(16)} ${(raisedKeys ?? ['judge-failed']).join(',').padEnd(24)} ${JSON.stringify(body).slice(0, 90)}`,
+      `${mark} ${u.groupId} rep${u.rep} ${arm.padEnd(16)} ${raisedKeys.join(',').padEnd(24)} ${JSON.stringify(body).slice(0, 90)}`,
     )
   }
 }
@@ -575,8 +602,16 @@ async function main(): Promise<void> {
       reps: args.reps,
       scenarios: scenarios.map((x) => x.id),
       arms,
-      openerBefore: OPENER_BEFORE,
-      openerAfter,
+      // TAC-519: the arms as they ACTUALLY ran. This recorded v1.52.0's opener
+      // as `openerBefore`, which no arm used: `before` is derived from the live
+      // constant, and in ordinary mode it applies no opener transformation at
+      // all. A header naming the WRONG arm is worse than one naming none
+      // (CLAUDE.md measurement property 4). Found in review.
+      openerShipped: openerAfter,
+      openerQuestionRemoved: openerWithoutQuestion(openerAfter),
+      balanceSpanStart: BALANCE_SPAN_START,
+      balanceSpanEnd: BALANCE_SPAN_END,
+      balanceReplacement: BALANCE_REPLACEMENT,
       note: 'generate-only; nothing sent. Single attempt per arm, no regen loop. buildRuntimeContext can persist a guest_states row on a band change; none observed.',
     },
   })
@@ -595,7 +630,17 @@ async function main(): Promise<void> {
 
   const tally: Record<string, Cell> = {}
   const bump = (k: string) =>
-    (tally[k] ??= { n: 0, failed: 0, question: 0, order: 0, raised: 0, twoQuestions: 0, apologyRaise: 0, invalid: 0 })
+    (tally[k] ??= {
+      n: 0,
+      failed: 0,
+      question: 0,
+      order: 0,
+      raised: 0,
+      twoQuestions: 0,
+      apologyRaise: 0,
+      judgeFailed: 0,
+      invalid: 0,
+    })
 
   if (args.dumpBlocks) {
     const prepared =
@@ -728,6 +773,7 @@ async function main(): Promise<void> {
         raised: 0,
         twoQuestions: 0,
         apologyRaise: 0,
+        judgeFailed: 0,
         invalid: 0,
       })
       for (const k of Object.keys(acc) as (keyof Cell)[]) acc[k] += t[k]
@@ -789,6 +835,12 @@ async function main(): Promise<void> {
       anyCeilingBreach = true
       console.log(
         `FAIL  ceiling: ${arm} asked two things in one reply ${t.twoQuestions}/${t.n} times (must be 0)`,
+      )
+    }
+    if (t.apologyRaise > 0) {
+      anyCeilingBreach = true
+      console.log(
+        `FAIL  ceiling: ${arm} raised an intention on a reply carrying an apology ${t.apologyRaise}/${t.raised} raises (must be 0)`,
       )
     }
   }
