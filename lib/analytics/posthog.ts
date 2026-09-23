@@ -1614,7 +1614,7 @@ export interface PushSentProps {
   /** TAC-297: discriminator so the two push surfaces can be analyzed
    * separately in PostHog. Optional + defaults to 'draft_flagged' so the
    * existing TAC-207 callsite doesn't have to pass it. */
-  surface?: 'draft_flagged' | 'commitment_arrival'
+  surface?: 'draft_flagged' | 'commitment_arrival' | 'instagram_window_warning'
 }
 
 export async function capturePushSent(props: PushSentProps): Promise<void> {
@@ -1637,7 +1637,7 @@ export interface PushTokenInvalidProps {
   /** APNs `reason` field. Null on 410 with empty body. */
   reason: string | null
   /** TAC-297: same discriminator semantics as PushSentProps.surface. */
-  surface?: 'draft_flagged' | 'commitment_arrival'
+  surface?: 'draft_flagged' | 'commitment_arrival' | 'instagram_window_warning'
 }
 
 export async function capturePushTokenInvalid(props: PushTokenInvalidProps): Promise<void> {

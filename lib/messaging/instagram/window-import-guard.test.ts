@@ -46,6 +46,17 @@ const ALLOWED_IMPORTERS = [
   // this repo already pays for DELIVERED_OUTBOUND_STATUSES. One definition of
   // the window beat one fewer line in this list.
   join('lib', 'operator', 'instagram-fields.ts'),
+  // TAC-473. The cron processor that warns an operator when a held Instagram
+  // draft has an hour left. It imports INSTAGRAM_WINDOW_MS to work out how much
+  // of the window is left, and nothing else: no send, no send target, no reply
+  // check. It pushes a notification and routes no message.
+  //
+  // It lives in lib/agent/ rather than inside lib/messaging/instagram/ (which
+  // would need no entry here) because it is a cron processor, and this repo
+  // keeps those beside their siblings — processDueKnowledgeGaps,
+  // processDueCommitments, processDueFollowups — rather than inside a provider
+  // folder. Paying one line here is the better trade.
+  join('lib', 'agent', 'instagram-window-warning.ts'),
 ]
 
 function sourceFiles(): string[] {
