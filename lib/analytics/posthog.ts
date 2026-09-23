@@ -2115,54 +2115,6 @@ export async function captureCommitmentExpired(
 }
 
 // ---------------------------------------------------------------------------
-// TAC-428: a scheduled arrival whose heads-up push will never fire
-// ---------------------------------------------------------------------------
-
-export interface CommitmentArrivalPushMissedProps {
-  commitmentId: string
-  venueId: string
-  guestId: string
-  type: string
-  /** ISO string from guest_commitments.expected_arrival. */
-  expectedArrival: string | null
-  /**
-   * `arrival_day_passed` — the arrival's venue-local day is over, so catch-up
-   * is out of bounds. `arrival_passed` — the arrival was today, at or after
-   * opening, and has already gone by.
-   */
-  reason: 'arrival_day_passed' | 'arrival_passed'
-}
-
-/**
- * Fires when the morning cron declines to announce a scheduled arrival.
- *
- * SLACK-RELAYED, deliberately. Before TAC-428 both of these cases DID push,
- * announcing a past arrival as "this morning" — wrong, but at least visible.
- * Declining is the correct behaviour and it is silent, and this whole ticket
- * exists because a job that silently did not happen went unnoticed from
- * 2026-08-27. A skip that is only a counter inside a 200 response is exactly
- * as invisible as the defect being fixed.
- *
- * Carries no guest content: ids, the commitment type, and the timestamp the
- * operator would need to find the row.
- */
-export async function captureCommitmentArrivalPushMissed(
-  props: CommitmentArrivalPushMissedProps,
-): Promise<void> {
-  await capturePostHogEvent('commitment_arrival_push_missed', props.guestId, { ...props })
-  await postToSlack(
-    [
-      '*Arrival heads-up not sent*: the arrival it would announce has already passed',
-      `reason: \`${props.reason}\``,
-      `expected arrival: \`${props.expectedArrival ?? 'unknown'}\``,
-      `commitment: \`${props.commitmentId}\` (\`${props.type}\`)`,
-      `venue: \`${props.venueId}\``,
-      `guest: \`${props.guestId}\``,
-    ].join('\n'),
-  )
-}
-
-// ---------------------------------------------------------------------------
 // TAC-469: a conversation whose channel could not be resolved
 // ---------------------------------------------------------------------------
 

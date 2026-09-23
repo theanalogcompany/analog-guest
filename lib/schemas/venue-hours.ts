@@ -368,9 +368,20 @@ export function resolveOpenState(
  *   - the timezone is unusable, so there is no local clock at all;
  *   - today's value is absent, blank or unreadable (`classifyDay` → unknown);
  *   - today positively states a closure (`classifyDay` → closed).
- * Every one of them means "we could not positively read an opening time", and
- * the documented caller behaviour is to fall back to a fixed hour rather than
- * to skip. That is the inherited governing rule of this module — never claim
+ *
+ * The first two mean "we could not read an opening time". THE THIRD DOES NOT,
+ * and saying so would be the kind of false rationale this codebase pays for:
+ * a stated closure is read perfectly, it simply has no opening time to give.
+ * It is folded in deliberately, because the caller's question is "when may an
+ * arrival be announced today" and a venue that is shut still has commitments
+ * on its books — a heads-up on a closed Sunday costs an operator a glance,
+ * where withholding it costs a guest standing at a locked door with nobody
+ * expecting them. The consequence is real and is named here rather than
+ * discovered: a venue closed Sundays still gets Sunday arrival pushes at the
+ * caller's fallback hour.
+ *
+ * In all three cases the documented caller behaviour is to fall back to a
+ * fixed hour rather than to skip. That is the inherited governing rule of this module — never claim
  * OPEN or CLOSED on input nobody understood — applied to a different question:
  * unknown behaves as open, exactly as `venue-open-state.ts` arranges by
  * testing only for `closed`. A venue whose hours nobody has filled in must not

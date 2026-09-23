@@ -14,13 +14,6 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
 }))
 
-// TAC-428: the skip paths Slack-relay. Mocked so tests assert WHICH skip
-// fired without reaching PostHog or Slack.
-const arrivalPushMissedMock = vi.fn<(props: Record<string, unknown>) => Promise<void>>()
-vi.mock('@/lib/analytics/posthog', () => ({
-  captureCommitmentArrivalPushMissed: (props: Record<string, unknown>) =>
-    arrivalPushMissedMock(props),
-}))
 
 // Stub the push module — the processor tests assert which rows trigger the
 // CAS + push fanout; the actual APNs call isn't under test here.
@@ -211,8 +204,6 @@ function makeMockClient(state: DBState) {
 }
 
 beforeEach(() => {
-  arrivalPushMissedMock.mockReset()
-  arrivalPushMissedMock.mockResolvedValue(undefined)
   waitUntilMock.mockReset()
   sendCommitmentArrivalPushMock.mockReset()
   sendCommitmentArrivalPushMock.mockResolvedValue(undefined)
@@ -367,9 +358,6 @@ describe('processDueCommitments — date-of-expected-arrival gate', () => {
     expect(r.transitioned).toBe(0)
     expect(r.pushed).toBe(0)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
-    expect(arrivalPushMissedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ commitmentId: 'cmt-pastdue', reason: 'arrival_day_passed' }),
-    )
   })
 
   it('skips FUTURE — expected_arrival date in venue tz is tomorrow', async () => {
@@ -646,9 +634,6 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
     expect(r.arrivalPassed).toBe(1)
     expect(r.transitioned).toBe(0)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
-    expect(arrivalPushMissedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ commitmentId: 'cmt-gone', reason: 'arrival_passed' }),
-    )
   })
 
   it('still fires while the arrival is ahead of the tick', async () => {
@@ -679,7 +664,6 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
     expect(r.transitioned).toBe(1)
     expect(r.pushed).toBe(1)
     expect(r.arrivalPassed).toBe(0)
-    expect(arrivalPushMissedMock).not.toHaveBeenCalled()
   })
 
   it('does not extend that carve-out to an arrival on a previous day', async () => {
@@ -691,6 +675,140 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
     const r = await run(newState({ dueRows: [row] }), NOW)
     expect(r.arrivalDayPassed).toBe(1)
     expect(r.transitioned).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-428 code-review follow-ups. Each of these was a hole a mutant walked
+// through, or a case the reviewer reproduced against a Le Mil's-shaped venue.
+// ---------------------------------------------------------------------------
+describe('TAC-428 review: gaps the first pass left', () => {
+  function laState(row: ReturnType<typeof makeDueRow>, range: string, transitions = true) {
+    const base = newState({
+      dueRows: [row],
+      updateReturnByRowId: transitions
+        ? new Map([[row.id, [{ ...row, status: 'pending_ack' }]]])
+        : new Map(),
+    })
+    return {
+      ...base,
+      venueConfigs: [
+        { venue_id: VENUE_LA, venue_info: hoursOpeningAt(range) },
+        ...base.venueConfigs.filter((c) => c.venue_id !== VENUE_LA),
+      ],
+    }
+  }
+  function run(state: ReturnType<typeof newState>, now: Date) {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    return processDueCommitments(now)
+  }
+
+  // The earlier-opening half of the fix had NO test that could fail: the
+  // existing one ticks at 07:00, where a 06:00 opening and the 07:00 fallback
+  // agree. Mutation-proven — clamping the resolved opening up to the constant
+  // with Math.max passed all 151 tests across the five changed files. This
+  // ticks at 06:00, where only the venue's real hours can produce a push.
+  it('fires at 06:00 local for a venue that opens at 06:00 (kills the clamp mutant)', async () => {
+    const r = await run(
+      laState(makeDueRow('cmt-open6-at6'), '6:00 AM – 3:00 PM'),
+      new Date('2026-05-29T13:00:00Z'), // 06:00 PDT
+    )
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+    expect(r.beforeOpening).toBe(0)
+  })
+
+  // The reviewer's reproduction A. The pre-opening carve-out disabled the
+  // past-arrival check for the WHOLE day, so a 06:00 arrival caught up on a
+  // 14:00 tick pushed "arriving this morning" at 2pm — the investigation-2
+  // defect arriving through clause 3 instead of clause 2.
+  it('refuses a pre-opening arrival on a LATE tick, not just a passed-day one', async () => {
+    const row = makeDueRow('cmt-preopen-late', {
+      expected_arrival: '2026-05-29T13:00:00Z', // 06:00 PDT, before the 07:00 opening
+    })
+    const r = await run(
+      laState(row, '7:00 AM – 3:00 PM', false),
+      new Date('2026-05-29T21:00:00Z'), // 14:00 PDT
+    )
+    expect(r.arrivalPassed).toBe(1)
+    expect(r.transitioned).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+
+  it('still announces that pre-opening arrival on the opening tick itself', async () => {
+    const row = makeDueRow('cmt-preopen-ontime', {
+      expected_arrival: '2026-05-29T13:00:00Z', // 06:00 PDT
+    })
+    const r = await run(laState(row, '7:00 AM – 3:00 PM'), NOW) // 07:00 PDT
+    expect(r.transitioned).toBe(1)
+    expect(r.arrivalPassed).toBe(0)
+  })
+
+  // An overnight range makes openMin large (17:00 = 1020), which is where an
+  // unbounded carve-out did most damage: it stayed live until midnight, so a
+  // 01:00 arrival could be announced 16 hours late. The grace bounds it to the
+  // opening tick.
+  //
+  // KNOWN AND ACCEPTED, stated so it is not mistaken for an oversight: inside
+  // the grace this still announces a 01:00 arrival, and buildArrivalContext
+  // buckets on hour-of-day alone, so the push reads "this morning" at 17:30.
+  // That is the push's WORDING, which this ticket is scoped out of changing,
+  // and it is reachable only at an overnight venue — none exists today.
+  it('refuses a pre-opening arrival at an overnight venue once the grace is past', async () => {
+    const row = makeDueRow('cmt-overnight', {
+      expected_arrival: '2026-05-29T08:00:00Z', // 01:00 PDT
+    })
+    const r = await run(
+      laState(row, '5:00 PM – 2:00 AM', false),
+      new Date('2026-05-30T02:00:00Z'), // 19:00 PDT, two hours past opening
+    )
+    expect(r.arrivalPassed).toBe(1)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+
+  it('announces that same overnight arrival on the opening tick', async () => {
+    const row = makeDueRow('cmt-overnight-ontime', {
+      expected_arrival: '2026-05-29T08:00:00Z', // 01:00 PDT
+    })
+    const r = await run(
+      laState(row, '5:00 PM – 2:00 AM'),
+      new Date('2026-05-30T00:00:00Z'), // 17:00 PDT, exactly opening
+    )
+    expect(r.transitioned).toBe(1)
+    expect(r.arrivalPassed).toBe(0)
+  })
+
+  // "I'll come by when you open at 7" stamps expected_arrival at exactly the
+  // opening minute. A strict `<` refused it, because the first eligible tick
+  // is at or after opening and so is never strictly before the arrival — and
+  // it is among the commonest phrasings a scheduled arrival takes.
+  it('announces an arrival stamped at exactly the opening minute', async () => {
+    const row = makeDueRow('cmt-at-opening', {
+      expected_arrival: '2026-05-29T14:00:00Z', // exactly 07:00 PDT
+    })
+    const r = await run(laState(row, '7:00 AM – 3:00 PM'), NOW)
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+    expect(r.arrivalPassed).toBe(0)
+  })
+
+  // Clause ordering: the date gate runs before the opening lookup, so a row
+  // whose arrival is days away does not take a warn and an
+  // openingTimeUnreadable increment on every tick until then.
+  it('counts a future-dated row as future, without touching the opening lookup', async () => {
+    const row = makeDueRow('cmt-future-noconfig', {
+      expected_arrival: '2026-05-30T20:00:00Z',
+    })
+    const base = newState({ dueRows: [row] })
+    const state = {
+      ...base,
+      venueConfigs: base.venueConfigs.filter((c) => c.venue_id !== VENUE_LA),
+    }
+    const r = await run(state, NOW)
+    expect(r.future).toBe(1)
+    expect(r.openingTimeUnreadable).toBe(0)
   })
 })
 

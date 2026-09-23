@@ -32,7 +32,7 @@ import { processDueFollowups } from '@/lib/followups/engine'
 // missing secret simply never matches, and with neither set the function
 // returns false. `webhook-silence`, `pos-tap-reconcile` and
 // `commitment-lifecycle` are deliberately NOT extended — cron-job.org reaches
-// this route, `followups-due` and `pending-timeout`, and nothing else.
+// `commitments-due`, `followups-due` and `pending-timeout`, and nothing else.
 function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true
   const presented = request.headers.get('authorization')

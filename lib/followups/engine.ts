@@ -328,12 +328,31 @@ function parseMessagingCadence(value: unknown): MessagingCadence {
  * venue-local day as the 2026-09-17 ruling requires: at 00:00 local the hour
  * drops below cron_hour_local again. No date bookkeeping is needed for it.
  *
- * Two mechanisms already bound the rest, and neither needed changing:
+ * `>=` cannot cross midnight FOR ANY NON-ZERO cron_hour_local. The schema
+ * permits 0 (`z.number().int().min(0).max(23)`), and `hour >= 0` is always
+ * true, so a venue configured that way has no hour gate at all and is bounded
+ * only by quiet hours. No venue is configured that way; it is named because
+ * the bound is otherwise stated as absolute.
+ *
+ * What bounds the rest, corrected in code review — the first version of this
+ * comment named the wrong mechanism, which is worse than naming none:
  *   - quiet hours (default 21:00-08:00 local) suppress every guest late in the
  *     day, so the real window is cron_hour_local to 20:59;
- *   - the followup_log claim is a UNIQUE insert on (venue, guest, dedup_key),
- *     and dedupKeyForReason is stable within a day for all three reasons, so
- *     the second and later ticks of a day are a no-op per guest.
+ *   - WEEKLY_CAP is the real per-guest brake (default 1: any engine row in the
+ *     rolling 7 days suppresses the next). It is what makes repeated ticks
+ *     safe.
+ *   - the followup_log UNIQUE claim on (venue, guest, dedup_key) covers
+ *     `cold_lapsed` and `perk_unlock`, whose keys are stable within a day. It
+ *     does NOT cover post_visit, and the claim that it did was false:
+ *     `dedupKeyForReason` embeds the TIER (`day_1:<iso>` vs `day_3:<iso>`) and
+ *     `detectPostVisitReason` recomputes the elapsed day count on every tick,
+ *     so the tier flips at the visit's own 24-hour anniversary — which under
+ *     `>=` now falls INSIDE the dispatch window. Two ticks either side of it
+ *     produce two different keys and two successful claims.
+ *
+ * So at a venue with weekly_cap raised above 1, an anniversary-crossing day
+ * can produce two post-visit follow-ups where `===` made that impossible. With
+ * the default cap it cannot, and there is a test for exactly that.
  *
  * Known cost, accepted: a guest whose dispatch fails at a pre-persist stage
  * has its claim released, so it is retried on every remaining tick that day

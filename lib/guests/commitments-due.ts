@@ -63,7 +63,6 @@ import {
 } from './commitments'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { createAdminClient } from '@/lib/db/admin'
-import { captureCommitmentArrivalPushMissed } from '@/lib/analytics/posthog'
 import {
   resolveOpeningMinutes,
   venueLocalMinutes,
@@ -86,6 +85,23 @@ import {
  * testing for a closure.
  */
 export const FALLBACK_MORNING_HOUR_LOCAL = 7
+
+/**
+ * How long after opening an arrival stamped AT OR BEFORE opening may still be
+ * announced, in venue-local minutes.
+ *
+ * Equal to the external cron's tick interval (hourly), because that is the
+ * resolution at which "announced at opening" can be observed at all: with
+ * ticks on the hour, a venue opening at 07:30 is first seen at 08:00. Change
+ * this if that interval changes.
+ *
+ * It exists because the carve-out for a pre-opening arrival must not become a
+ * licence to announce it all day. Unbounded, a 06:00 arrival at a venue
+ * opening 07:00 would be pushed as "arriving this morning" by a 14:00
+ * catch-up tick — which is the same defect the same-day bound closes, arriving
+ * by another route.
+ */
+export const ARRIVAL_AT_OPENING_GRACE_MINUTES = 60
 
 export interface ProcessDueCommitmentsResult {
   /** Number of `status='open' AND arrival_signal='scheduled'` rows scanned. */
@@ -213,14 +229,42 @@ export async function processDueCommitments(
       continue
     }
 
+    // Clause 2 FIRST: same venue-local day, in both directions.
+    //
+    // Deliberately ahead of the opening check. Clause 1 costs a warn and a
+    // counter increment on every tick, and a row whose arrival is a week away
+    // would otherwise take them hourly until then, making
+    // `openingTimeUnreadable` a count of rows-per-tick rather than of rows.
+    const todayDate = dateInVenueTz(now, venueTimezone)
+    const expectedDate = dateInVenueTz(expectedArrival, venueTimezone)
+    if (todayDate === null || expectedDate === null) {
+      summary.invalid += 1
+      continue
+    }
+    if (expectedDate > todayDate) {
+      // Future-dated. Fires from the opening time on expectedDate itself.
+      summary.future += 1
+      continue
+    }
+    if (expectedDate < todayDate) {
+      // The arrival day has fully passed. Deliberately NOT a catch-up: until
+      // TAC-428 the date filter was `<=`, so a missed day fired on a later
+      // morning and buildArrivalContext, which buckets only the hour-of-day,
+      // announced it as "this morning". That was the confirmed downstream
+      // defect of this ticket's investigation 2. The row stays open; for comp,
+      // hold and discount the TAC-341 lifecycle processor still expires and
+      // escalates it, so nothing is lost from the obligation ledger.
+      summary.arrivalDayPassed += 1
+      continue
+    }
+
     // Clause 1: at or after today's opening time, on the venue's own clock.
     //
-    // The opening time comes from the venue's published hours. When it cannot
-    // be read — no timezone, day absent, day unparseable, or a stated closure —
-    // we fall back to FALLBACK_MORNING_HOUR_LOCAL rather than skipping, per the
-    // 2026-09-22 ruling. `resolveOpeningMinutes` returns null in exactly that
-    // case and so cannot also hand back a clock, which is why the fallback path
-    // asks `venueLocalMinutes` for one.
+    // The opening time comes from the venue's published hours. When there is
+    // none to read we fall back to FALLBACK_MORNING_HOUR_LOCAL rather than
+    // skipping, per the 2026-09-22 ruling. `resolveOpeningMinutes` returns null
+    // in exactly that case and so cannot also hand back a clock, which is why
+    // the fallback path asks `venueLocalMinutes` for one.
     const opening = resolveOpeningMinutes(venueHours, venueTimezone, now)
     let openMin: number
     let nowMin: number
@@ -231,8 +275,7 @@ export async function processDueCommitments(
       const fallbackNow = venueLocalMinutes(venueTimezone, now)
       if (fallbackNow === null) {
         // No usable clock at all. Distinct from unreadable HOURS: without a
-        // timezone there is no venue-local day either, so no clause below can
-        // be evaluated.
+        // timezone there is no venue-local day either.
         console.warn(
           `[cron commitments-due] invalid venue timezone "${venueTimezone}" for venue=${row.venue_id}, skipping commitment=${row.id}`,
         )
@@ -248,64 +291,43 @@ export async function processDueCommitments(
     }
 
     if (nowMin < openMin) {
-      // Doors are not open yet. A later tick today will pick this up — that is
-      // the catch-up, and it is why this is `<` and not `!==`.
+      // Doors are not open yet. A later tick today picks this up — that is the
+      // catch-up, and it is why this is `<` and not `!==`.
       summary.beforeOpening += 1
-      continue
-    }
-
-    const todayDate = dateInVenueTz(now, venueTimezone)
-    const expectedDate = dateInVenueTz(expectedArrival, venueTimezone)
-    if (todayDate === null || expectedDate === null) {
-      summary.invalid += 1
-      continue
-    }
-
-    // Clause 2: same venue-local day, in both directions.
-    if (expectedDate > todayDate) {
-      // Future-dated. Fires from the opening time on expectedDate itself.
-      summary.future += 1
-      continue
-    }
-    if (expectedDate < todayDate) {
-      // The arrival day has fully passed. Deliberately NOT a catch-up: until
-      // TAC-428 the date filter was `<=`, so a missed day fired on a later
-      // morning and buildArrivalContext, which buckets only the hour-of-day,
-      // announced it as "this morning". That was the confirmed downstream
-      // defect of this ticket's investigation 2. The row stays open; for comp,
-      // hold and discount the TAC-341 lifecycle processor still expires and
-      // escalates it, so nothing is lost from the obligation ledger.
-      summary.arrivalDayPassed += 1
-      void captureCommitmentArrivalPushMissed({
-        commitmentId: row.id,
-        venueId: row.venue_id,
-        guestId: row.guest_id,
-        type: row.type,
-        expectedArrival: row.expected_arrival,
-        reason: 'arrival_day_passed',
-      })
       continue
     }
 
     // Clause 3: the arrival has not already happened.
     //
-    // The carve-out is the ruling's own: an arrival earlier than opening is one
-    // nobody could have been ready for, so it is announced AT opening and is
-    // never treated as past. Without it, a guest saying "I'll come at 6" to a
-    // venue opening at 7 would produce no push at all — they are the arrival
-    // the operator most needs to hear about.
+    // An arrival at or BEFORE opening is one nobody could have been ready for,
+    // so it is announced at opening rather than treated as past — the ruling's
+    // own carve-out. Without it, "I'll come at 6" to a venue opening at 7
+    // produces no push at all, and that is the arrival an operator most needs.
+    //
+    // `<=`, not `<`: "I'll come by when you open at 7" stamps expected_arrival
+    // at exactly the opening minute, which is among the commonest phrasings. A
+    // strict `<` refuses it, because the first eligible tick is at or after
+    // opening and so is never strictly before the arrival.
+    //
+    // The null guard is NOT dead weight, and must not be tidied away: this
+    // branch is reachable only when the timezone is usable, so it never fires
+    // today, but `null < openMin` coerces to `0 < openMin` and would carve out
+    // EVERY past arrival — the exact defect clause 2 and this clause exist to
+    // close.
     const expectedMin = venueLocalMinutes(venueTimezone, expectedArrival)
-    const arrivalIsBeforeOpening = expectedMin !== null && expectedMin < openMin
-    if (!arrivalIsBeforeOpening && now.getTime() >= expectedArrival.getTime()) {
+    const arrivalIsAtOrBeforeOpening = expectedMin !== null && expectedMin <= openMin
+
+    // THE CARVE-OUT IS BOUNDED TO OPENING, NOT TO THE WHOLE DAY. Left
+    // unbounded it re-creates the very defect clause 2 closes: a 06:00 arrival
+    // at a venue opening 07:00, caught up on a 14:00 tick, pushes "arriving
+    // this morning" at 2pm. The bound is one tick interval, because an hourly
+    // cron is the resolution at which "at opening" can be observed at all. If
+    // the external cron's interval changes, this changes with it.
+    const arrivalHasPassed = arrivalIsAtOrBeforeOpening
+      ? nowMin >= openMin + ARRIVAL_AT_OPENING_GRACE_MINUTES
+      : now.getTime() >= expectedArrival.getTime()
+    if (arrivalHasPassed) {
       summary.arrivalPassed += 1
-      void captureCommitmentArrivalPushMissed({
-        commitmentId: row.id,
-        venueId: row.venue_id,
-        guestId: row.guest_id,
-        type: row.type,
-        expectedArrival: row.expected_arrival,
-        reason: 'arrival_passed',
-      })
       continue
     }
 
@@ -404,6 +426,11 @@ async function loadVenueClocks(
   }
 
   for (const row of venues.data) {
+    // Same guard as commitments.ts's loadVenueClock: an empty string is not a
+    // timezone, and treating it as one defers the failure into Intl. The two
+    // loaders are near-duplicates (batched here, single-venue there) and move
+    // together.
+    if (typeof row.timezone !== 'string' || row.timezone.length === 0) continue
     out.set(row.id, { timezone: row.timezone, hours: hoursByVenue.get(row.id) ?? {} })
   }
   return out

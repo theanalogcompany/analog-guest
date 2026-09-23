@@ -401,13 +401,23 @@ describe('resolveOpeningMinutes (TAC-428)', () => {
   })
 
   it('reads the day in the VENUE timezone, not the runtime one', () => {
-    // 2026-09-23T04:00:00Z is Wednesday UTC but still 21:00 TUESDAY in LA.
+    // 2026-09-23T04:00:00Z is Wednesday in UTC and still Tuesday in LA.
+    //
+    // Asserting the LA value alone would be vacuous on a developer machine set
+    // to America/Los_Angeles, where venue-local and runtime-local agree — it
+    // would pass for a reason that stops being true on a UTC runner. Two
+    // venue timezones whose WEEKDAY differs at one instant is the only form
+    // that means the same thing on every machine, the same fix the
+    // venueLocalMinutes test below uses.
     const varies: VenueInfo['hours'] = {
       ...LE_MILS,
       tuesday: '9:00 AM – 3:00 PM',
       wednesday: '6:00 AM – 3:00 PM',
     }
-    expect(resolveOpeningMinutes(varies, TZ, at('2026-09-23T04:00:00Z'))?.openMin).toBe(9 * 60)
+    const instant = at('2026-09-23T04:00:00Z')
+    expect(resolveOpeningMinutes(varies, TZ, instant)?.openMin).toBe(9 * 60)
+    // Same instant, Tokyo: already Wednesday afternoon there.
+    expect(resolveOpeningMinutes(varies, 'Asia/Tokyo', instant)?.openMin).toBe(6 * 60)
   })
 
   it('carries a half-hour opening through rather than rounding it', () => {

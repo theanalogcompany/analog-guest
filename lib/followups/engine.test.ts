@@ -751,6 +751,29 @@ describe('processDueFollowups — venue local-hour filter', () => {
     expect(handleFollowup).toHaveBeenCalled()
   })
 
+  // Code-review follow-up. `>=` widened the window, and post_visit's dedup key
+  // embeds the TIER, which flips at the visit's own 24-hour anniversary — so
+  // two ticks either side of it claim two different keys. The UNIQUE claim
+  // does NOT stop a same-day second dispatch; weekly_cap does. This pins the
+  // brake that actually holds, because the comment that used to name the claim
+  // was wrong and a wrong stated reason is what this repo pays for repeatedly.
+  it('weekly_cap, not the dedup key, is what stops a second post-visit send the same day (TAC-428)', async () => {
+    vi.mocked(loadFollowupSnapshotsForVenue).mockResolvedValue({
+      ok: true,
+      data: new Map([
+        [
+          GUEST_ID,
+          { weeklyCount: 1, lastByReason: {}, announcedMechanicIds: new Set<string>() },
+        ],
+      ]),
+    } as unknown as Awaited<ReturnType<typeof loadFollowupSnapshotsForVenue>>)
+    const nowLate = new Date('2026-06-04T22:00:00Z') // 15:00 PT, a catch-up tick
+    const result = await processDueFollowups(nowLate)
+    expect(result.venuesDispatching).toBe(1)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(result.suppressedBy.weekly_cap).toBe(1)
+  })
+
   // The bound the 2026-09-17 ruling set. `>=` cannot cross midnight on its
   // own: once the venue-local date rolls, the hour drops back under
   // cron_hour_local. So catch-up stops at the end of the venue's day with no
