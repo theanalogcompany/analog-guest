@@ -22,6 +22,20 @@
 
 export interface FirstTouchVerdict {
   hasQuestion: boolean
+  /**
+   * TAC-519: does this reply carry an apology, bad news, or an acknowledgement
+   * that something went wrong?
+   *
+   * A CEILING INPUT, not a rate. `## What you're hoping to get to` says in as
+   * many words that such a message is not an opening and to leave it alone
+   * entirely, so a raise on one is the block's own restraint being broken. The
+   * 2026-09-23 position run produced exactly one ("sorry for the mix-up ...
+   * what's your name, by the way?", 1 of 13 raises, 0 in every other arm),
+   * which is an observation at n=1 and not a reason to hold the change. It is
+   * counted from here on so it cannot creep in unmeasured on the next run
+   * against this block (ruled 2026-09-23).
+   */
+  carriesApology: boolean
   questionSentences: string[]
   isOrderQuestion: boolean
   orderPhrase: string | null
@@ -53,6 +67,20 @@ const ORDER_PATTERNS: readonly RegExp[] = [
   /\bwhat did you end up with\b/,
 ]
 
+
+// TAC-519. Deliberately narrow: an explicit apology or an admission that
+// something went wrong, not any mention of a problem. The block's restraint is
+// about the message the venue is SENDING carrying bad news, so it is matched
+// against the reply, never the guest's inbound. Over-matching would turn a
+// ceiling into noise and the ceiling's whole job is to be actionable at n=1.
+const APOLOGY_PATTERNS: readonly RegExp[] = [
+  /\bsorry\b/,
+  /\bapolog(?:y|ies|ise|ize|izing|ising)\b/,
+  /\bmy bad\b/,
+  /\bthat(?:'s| is) on us\b/,
+  /\bwe (?:messed|screwed) (?:that )?up\b/,
+  /\bshouldn't have\b/,
+]
 
 // An ask with no question mark. Secondary only.
 const IMPLIED_ASK_PHRASES = [
@@ -111,6 +139,7 @@ export function classifyFirstTouchReply(body: string): FirstTouchVerdict {
     isOrderQuestion: orderPhrase !== null,
     orderPhrase,
     impliedAsk: IMPLIED_ASK_PHRASES.some((p) => normalizedBody.includes(p)),
+    carriesApology: APOLOGY_PATTERNS.some((re) => re.test(normalizedBody)),
     namesSomeone: /\bhimanshu\b/i.test(body) || /le mil/i.test(body),
     thanks: /\bthank(s| you)\b/i.test(body),
   }
