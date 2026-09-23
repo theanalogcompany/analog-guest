@@ -37,10 +37,11 @@
 //
 // The guest's inbound text still never appears here.
 //
-// Helpers duplicated from lib/notifications/send.ts (loadRecipients,
-// countPendingForOperator, nullOperatorToken). Extraction into a shared
-// lib/notifications/recipients.ts module is a follow-up — duplicating now
-// to keep the TAC-297 change scoped and unblock TAC-298.
+// (The paragraph that stood here said loadRecipients, countPendingForOperator
+// and nullOperatorToken were duplicated from send.ts and that extracting them
+// was a follow-up. TAC-473 did it: this file imports them from ./recipients
+// six lines below. Corrected in TAC-532 rather than left contradicting the
+// import directly beneath it.)
 
 import {
   capturePushSent,
@@ -55,12 +56,11 @@ import { sendApnsRequest } from './apns/client'
 
 const APNS_TOKEN_INVALID_STATUS = 410
 const APNS_BAD_DEVICE_TOKEN_STATUS = 400
-// Larger than the 40-char budget in send.ts because the commitment body
-// format ("{firstName} arriving {context} — {typeLabel}{ code}") naturally
-// runs longer than the draft-flagged format ("Reply to {firstName} —
-// {context}"). 80 keeps a typical first-name + scheduled context + code
-// intact while still preventing pathological payloads from a malformed
-// firstName.
+// TAC-532 raised this from 80, which predated the description. A typical
+// first name, a scheduled context, the type, a description and a code have to
+// fit intact; the description is what gives way first when they do not, and
+// is dropped whole below MIN_DESCRIPTION_CHARS. Still a bound against a
+// pathological payload from a malformed firstName or description.
 const MAX_PUSH_BODY_CHARS = 120
 // Below this a description fragment says nothing useful, so it is dropped
 // whole rather than rendered as a word and an ellipsis.
