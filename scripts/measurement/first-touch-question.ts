@@ -166,6 +166,10 @@ async function main(): Promise<void> {
           body: scenario.body,
           receivedAt: new Date(),
           channel: 'text',
+          // TAC-518: the SMS arm carries no referral, so the opener and the
+          // order arming both key off created_via exactly as they did when
+          // this harness was written. Keeping the measurement comparable.
+          referralSource: null,
         },
       })
 
