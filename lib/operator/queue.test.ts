@@ -383,9 +383,9 @@ describe('listPendingQueue', () => {
     // review_state='pending', so neither can reach a card.
     const COPY_TABLE: ReadonlyArray<readonly [string, string]> = [
       // --- Obligation ---
-      // TAC-397: transcribed from the proposal comment on the ticket, PENDING
-      // approval. If the approved wording differs, this row and the map move
-      // together — never read this back out of REVIEW_REASON_LABELS.
+      // TAC-397: transcribed from the 2026-09-22 ruling comment on the ticket,
+      // which approved this wording verbatim. Never read back out of
+      // REVIEW_REASON_LABELS.
       ['commitment_type_gated', 'This commits you to something. Your call.'],
       ['comp_regex_backstop', "This sounds like it's offering something on the house."],
       [
@@ -435,8 +435,8 @@ describe('listPendingQueue', () => {
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a
       // welcome reply to "Hi Himanshu!" with no complaint anywhere in it.
-      // TAC-397: transcribed from the proposal comment on the ticket, PENDING
-      // approval. Same discipline as the row above.
+      // TAC-397: transcribed from the same 2026-09-22 ruling. Same discipline
+      // as the row above.
       ['category_requires_approval', 'Replies like this one always come to you.'],
       // --- The draft came out wrong ---
       ['model_flagged', 'Something felt off about this one.'],

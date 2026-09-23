@@ -170,7 +170,7 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-297: structural commitment-type gate, top of PRIMARY_TRIGGER_PRIORITY.
   // Says what is at stake (something free) and whose call it is, rather than
   // naming the gate.
-  // TAC-397, proposed 2026-09-22, PENDING Jaipal's approval before merge.
+  // TAC-397, copy approved verbatim (2026-09-22).
   //
   // The old string, 'This offers something free. Your call.', was true for one
   // of the three types this trigger fires on. A `hold` is an item set aside
@@ -275,7 +275,7 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // and the copy never followed, so a welcome reply to "Hi Himanshu!" reached
   // the operator labelled as a complaint. Now it names the only thing that is
   // actually true on every routed category: they chose this.
-  // TAC-397, proposed 2026-09-22, PENDING Jaipal's approval before merge.
+  // TAC-397, copy approved verbatim (2026-09-22).
   //
   // The old string, 'You chose to review these yourself.', is false at a venue
   // that never chose. The trigger fires whenever resolvePolicyDecision returns
