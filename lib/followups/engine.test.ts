@@ -69,6 +69,17 @@ const NOW = new Date('2026-06-04T17:00:00Z')
 interface VenueLoadShape {
   id: string
   timezone: string
+  // TAC-529. REQUIRED, for the same reason last_visit_precision and the two
+  // guest identifier columns below carry their own comments: the engine now
+  // gates on all three, and a fixture omitting them reads `undefined`. That
+  // is not merely unhelpful here, it is WRONG in the flattering direction —
+  // `undefined !== null` is true, so an omitted messaging_phone_number would
+  // read as "this venue has a phone" and the gate would be unreachable while
+  // every test stayed green. Required fields are what force each fixture to
+  // say which venue it is describing.
+  status: string | null
+  messaging_phone_number: string | null
+  instagram_account_id: string | null
   venue_configs: { followup_rules: unknown; messaging_cadence: unknown } | null
 }
 
@@ -77,6 +88,12 @@ interface VenueLoadShape {
 // argument (it returns opts.guests regardless), so without this a mutant
 // that drops the column from the query passes every behavioural test while
 // production reads `undefined` and silently degrades to always-permissive.
+// TAC-529: the venues SELECT string. Same reasoning as capturedGuestSelect
+// directly below — the venues mock's select() ignores its argument and returns
+// opts.venues regardless, so dropping `status` or either channel column from
+// the query passes every behavioural test while production reads `undefined`
+// and the gate goes inert.
+let capturedVenueSelect: string | null = null
 let capturedGuestSelect: string | null = null
 let capturedGuestOrFilter: string | null = null
 // TAC-476: every rpc() call, so a test can assert the engine asks
@@ -126,7 +143,10 @@ function makeSupabaseMock(opts: {
 }) {
   const builders: Record<string, unknown> = {
     venues: {
-      select: () => Promise.resolve({ data: opts.venues, error: null }),
+      select: (columns: string) => {
+        capturedVenueSelect = columns
+        return Promise.resolve({ data: opts.venues, error: null })
+      },
     },
     guests: {
       select: (columns: string) => ({
@@ -174,6 +194,7 @@ function makeSupabaseMock(opts: {
 }
 
 beforeEach(() => {
+  capturedVenueSelect = null
   capturedGuestSelect = null
   capturedGuestOrFilter = null
   capturedRpcCalls = []
@@ -197,6 +218,9 @@ beforeEach(() => {
           {
             id: VENUE_ID,
             timezone: 'America/Los_Angeles',
+            status: 'active',
+            messaging_phone_number: '+15550000001',
+            instagram_account_id: null,
             venue_configs: {
               followup_rules: null, // → FOLLOWUP_RULES_DEFAULT
               messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
@@ -282,6 +306,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
       {
         id: VENUE_ID,
         timezone: 'America/Los_Angeles',
+        status: 'active',
+        messaging_phone_number: '+15550000001',
+        instagram_account_id: null,
         venue_configs: {
           followup_rules: null,
           messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
@@ -356,6 +383,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
       {
         id: VENUE_ID,
         timezone: 'America/Los_Angeles',
+        status: 'active',
+        messaging_phone_number: '+15550000001',
+        instagram_account_id: null,
         venue_configs: {
           // → FOLLOWUP_RULES_DEFAULT, recent_conversation_hours = 48. Typed
           // `unknown` rather than inferred, so a test can override it.
@@ -570,6 +600,9 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
             {
               id: VENUE_ID,
               timezone: 'America/Los_Angeles',
+              status: 'active',
+              messaging_phone_number: '+15550000001',
+              instagram_account_id: null,
               venue_configs: {
                 followup_rules: null,
                 messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
@@ -697,6 +730,9 @@ describe('processDueFollowups — gate suppression', () => {
             {
               id: VENUE_ID,
               timezone: 'America/Los_Angeles',
+              status: 'active',
+              messaging_phone_number: '+15550000001',
+              instagram_account_id: null,
               venue_configs: {
                 followup_rules: null,
                 messaging_cadence: { day_7: true },
@@ -799,6 +835,9 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
       {
         id: VENUE_ID,
         timezone: 'America/Los_Angeles',
+        status: 'active',
+        messaging_phone_number: '+15550000001',
+        instagram_account_id: null,
         venue_configs: {
           followup_rules: null,
           messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
@@ -913,5 +952,195 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
     expect(recordManualFollowupTask).not.toHaveBeenCalled()
     expect(result.guestsDispatched).toBe(1)
     expect(result.guestsTasked).toBe(0)
+  })
+})
+
+// TAC-529. Two venue-level gates and one guest-level one.
+//
+// The assertion that a venue was skipped BEFORE context build is
+// `capturedGuestSelect` staying null: the guests query is the first thing
+// scanVenue does, so if it never ran, nothing downstream of it did either.
+// A `guestsDispatched === 0` assertion alone would pass for a venue that was
+// scanned in full and merely had nobody due.
+describe('processDueFollowups — venue status and channel gates (TAC-529)', () => {
+  const useVenue = (overrides: Partial<VenueLoadShape>) => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () =>
+        makeSupabaseMock({
+          venues: [
+            {
+              id: VENUE_ID,
+              timezone: 'America/Los_Angeles',
+              status: 'active',
+              messaging_phone_number: '+15550000001',
+              instagram_account_id: null,
+              venue_configs: {
+                followup_rules: null,
+                messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+              },
+              ...overrides,
+            },
+          ],
+          guests: [
+            {
+              id: GUEST_ID,
+              opted_out_at: null,
+              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              phone_number: '+15551230000',
+              instagram_scoped_id: null,
+            },
+          ],
+          activity: [],
+        }) as unknown as ReturnType<typeof createAdminClient>,
+    )
+  }
+
+  it.each(['paused', 'archived'])('does not process a %s venue at all', async (status) => {
+    useVenue({ status })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesHalted).toBe(1)
+    expect(result.venuesDispatching).toBe(0)
+    expect(result.guestsDispatched).toBe(0)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    // Never reached the guest load, so never reached context build.
+    expect(capturedGuestSelect).toBeNull()
+  })
+
+  // THE LIVE-DATA TEST, and the reason this is a deny-list. Le Mil's, the only
+  // real venue, is 'pending' in production while both mock venues are
+  // 'active' (checked 2026-09-23). An allow-list admitting only 'active'
+  // reads as the obvious implementation and would have stopped every
+  // follow-up at the pilot venue on the day it merged.
+  it('DOES process a pending venue, because the live venue is pending', async () => {
+    useVenue({ status: 'pending' })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesHalted).toBe(0)
+    expect(result.venuesDispatching).toBe(1)
+    expect(result.guestsDispatched).toBe(1)
+    expect(handleFollowup).toHaveBeenCalledOnce()
+  })
+
+  it('processes an active venue', async () => {
+    useVenue({ status: 'active' })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesHalted).toBe(0)
+    expect(result.guestsDispatched).toBe(1)
+  })
+
+  // Fails open. A value outside the CHECK means someone widened the
+  // constraint ahead of the code; going silent on a live venue for that is
+  // the worse of the two failures.
+  it('processes a venue whose status it cannot read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    useVenue({ status: 'suspended' })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesHalted).toBe(0)
+    expect(result.guestsDispatched).toBe(1)
+    warn.mockRestore()
+  })
+
+  it('processes a venue whose status is null', async () => {
+    useVenue({ status: null })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesHalted).toBe(0)
+    expect(result.guestsDispatched).toBe(1)
+  })
+
+  // Mock Central Perk: no phone, no Instagram account. Every guest there
+  // resolves to 'text' and throws in buildRuntimeContext, which red-alerts
+  // per guest and releases the claim, so the same guests are re-detected
+  // every hour for ever. This is where that ends.
+  it('skips a venue with neither a phone nor an Instagram account', async () => {
+    useVenue({ messaging_phone_number: null, instagram_account_id: null })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesNoChannel).toBe(1)
+    expect(result.venuesDispatching).toBe(0)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    expect(capturedGuestSelect).toBeNull()
+  })
+
+  it('still processes a venue that has only an Instagram account', async () => {
+    useVenue({ messaging_phone_number: null, instagram_account_id: 'ig-acct-1' })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesNoChannel).toBe(0)
+    expect(result.venuesDispatching).toBe(1)
+  })
+
+  // A halted venue is counted once per run whatever its local clock says.
+  // Reversed, `venuesDispatching` would hide it before its cron hour and
+  // report it after, so the count would depend on when the tick landed.
+  it('counts a paused venue as halted even before its cron hour', async () => {
+    // 04:00 in Los Angeles, well before the default cron_hour_local of 10.
+    const beforeCronHour = new Date('2026-01-15T12:00:00.000Z')
+    useVenue({ status: 'paused' })
+    const result = await processDueFollowups(beforeCronHour)
+    expect(result.venuesHalted).toBe(1)
+  })
+
+  it('asks for status and both channel columns', async () => {
+    useVenue({})
+    await processDueFollowups(NOW)
+    expect(capturedVenueSelect).toContain('status')
+    expect(capturedVenueSelect).toContain('messaging_phone_number')
+    expect(capturedVenueSelect).toContain('instagram_account_id')
+  })
+
+  // The narrower case gate 2 leaves: the venue CAN send, just not on the
+  // channel this guest needs. Le Mil's becomes exactly this venue when its
+  // number is deleted and it goes Instagram-only, so without this the fix
+  // expires at the live venue.
+  it('skips a phone guest at a venue that has Instagram but no number', async () => {
+    useVenue({ messaging_phone_number: null, instagram_account_id: 'ig-acct-1' })
+    const result = await processDueFollowups(NOW)
+    expect(result.guestsUnservable).toBe(1)
+    expect(result.guestsDispatched).toBe(0)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    // Before the claim, so no dedup row is written and released each tick.
+    expect(claimFollowupLogRows).not.toHaveBeenCalled()
+    expect(result.perVenue[0]?.guestsUnservable).toBe(1)
+  })
+
+  // The mirror of the test above, and the one that stops the skip being
+  // widened to "the venue has no phone". An Instagram guest needs no phone
+  // number on our side: rule 2 records them as a task.
+  it('does NOT skip an Instagram guest at a venue with no number', async () => {
+    vi.mocked(createAdminClient).mockImplementation(
+      () =>
+        makeSupabaseMock({
+          venues: [
+            {
+              id: VENUE_ID,
+              timezone: 'America/Los_Angeles',
+              status: 'active',
+              messaging_phone_number: null,
+              instagram_account_id: 'ig-acct-1',
+              venue_configs: {
+                followup_rules: null,
+                messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+              },
+            },
+          ],
+          guests: [
+            {
+              id: GUEST_ID,
+              opted_out_at: null,
+              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              phone_number: null,
+              instagram_scoped_id: 'igsid-1',
+            },
+          ],
+          activity: [],
+        }) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    vi.mocked(recordManualFollowupTask).mockResolvedValue({
+      ok: true,
+      data: { updatedCount: 1 },
+    })
+    const result = await processDueFollowups(NOW)
+    expect(result.guestsUnservable).toBe(0)
+    expect(recordManualFollowupTask).toHaveBeenCalledOnce()
+    expect(result.guestsTasked).toBe(1)
   })
 })
