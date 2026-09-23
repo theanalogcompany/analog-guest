@@ -111,26 +111,6 @@ export const CLAIM_LEASE_MS = 120_000
  */
 export const MAX_TURN_EXTENSIONS = 2
 
-/**
- * WHY THE HANDOFF EXISTS, quoted at the site that needs it rather than left in
- * a ticket: *without the post-turn handoff, the claim turns a dead run into a
- * dropped guest, where today run B covers it.*
- *
- * Today, if run A dies, run B still replies — two runs is the bug, but it is
- * also the redundancy. Add a claim and remove the handoff and run B has
- * already exited as a loser, so the guest gets silence. The handoff is
- * therefore not an optimisation and not a nicety: it is what stops the claim
- * being a robustness regression.
- *
- * It is dead code on the happy path. That is exactly the problem — a future
- * reader who sees "release the claim, then maybe re-invoke" without this will
- * delete the re-invoke as unreachable. It is reachable on every path where the
- * winner did not cover the newest message: a throw, an exhausted extension
- * bound, a refusal, a drop.
- */
-export const RELEASE_THEN_HANDOFF =
-  'release the claim, then re-invoke for any message this turn did not cover: without it a dead run means a silent guest'
-
 /** A row of `inbound_turn_claims` (migration 057). */
 export interface TurnClaimRow {
   venueId: string
@@ -458,4 +438,149 @@ export function pickNewer(
     if (ms === afterMs && row.id > afterId) return { id: row.id, createdAt: new Date(ms) }
   }
   return null
+}
+
+/**
+ * What one run carries across its own extensions, and what `handleInbound`'s
+ * `finally` needs in order to release and hand off.
+ *
+ * Mutable and threaded rather than returned, because an extension RE-ENTERS
+ * `runInboundTurn` and the claim, the extension budget and the answered
+ * message all have to outlive that call.
+ */
+export interface InboundTurnState {
+  /** Set once this run holds the claim. Null means there is nothing to release. */
+  claim: { venueId: string; guestId: string } | null
+  /** How many times this turn has already adopted a newer message. */
+  extensionsUsed: number
+  /** The newest message this turn actually covered. The handoff compares against it. */
+  answered: { id: string; createdAt: Date } | null
+  /** Whether coalescing ran for this turn. The handoff is part of the feature. */
+  enabled: boolean
+}
+
+export function newInboundTurnState(enabled: boolean): InboundTurnState {
+  return { claim: null, extensionsUsed: 0, answered: null, enabled }
+}
+
+/**
+ * What came of opening a turn.
+ *
+ * `proceed` carries the message the run should actually answer, which is the
+ * newest one it can see — not necessarily the one the webhook invoked it for.
+ */
+export type OpenTurnOutcome =
+  | {
+      status: 'proceed'
+      answerMessageId: string
+      /** False when the store could not answer: nothing to release later. */
+      claimed: boolean
+      /** Set when the store failed, so the caller can log why it proceeded unclaimed. */
+      degraded: string | null
+    }
+  | { status: 'stand_down'; intoAgentRunId: string; intoMessageId: string }
+
+/**
+ * Settle, claim, and adopt the newest message of the burst.
+ *
+ * THE RUN THAT WAKES FIRST CLAIMS, AND ANSWERS THE NEWEST MESSAGE. The
+ * alternative — the earlier run standing down so the later one replies — is
+ * strictly worse: the earlier run has already served its settle, so deferring
+ * makes the guest wait the later run's settle too, and it leaves a window
+ * where nobody holds the turn.
+ *
+ * `enabled` is a parameter rather than a read of the constant so tests can
+ * force the gate BOTH ways. That matters after the flip as much as before it:
+ * a rollback restores the shut path, so the shut path must stay covered.
+ */
+export async function openCoalescedTurn(
+  input: {
+    venueId: string
+    guestId: string
+    messageId: string
+    messageCreatedAt: Date
+    agentRunId: string
+  },
+  deps: CoalesceDeps,
+  enabled: boolean = INBOUND_COALESCING_ENABLED,
+): Promise<OpenTurnOutcome> {
+  // The shut path is today's behaviour exactly: no wait, no claim, no adopt.
+  if (!enabled) {
+    return { status: 'proceed', answerMessageId: input.messageId, claimed: false, degraded: null }
+  }
+
+  if (COALESCE_SETTLE_MS > 0) await deps.sleep(COALESCE_SETTLE_MS)
+
+  const claimed = await claimInboundTurn(
+    {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      claimedMessageId: input.messageId,
+      agentRunId: input.agentRunId,
+    },
+    deps,
+  )
+
+  if (claimed.status === 'lost') {
+    return {
+      status: 'stand_down',
+      intoAgentRunId: claimed.heldByAgentRunId,
+      intoMessageId: claimed.heldForMessageId,
+    }
+  }
+
+  // FAIL OPEN. The store could not answer, so behave as today: reply, and do
+  // not pretend to hold a claim we would then try to release.
+  if (claimed.status === 'unavailable') {
+    return {
+      status: 'proceed',
+      answerMessageId: input.messageId,
+      claimed: false,
+      degraded: claimed.error,
+    }
+  }
+
+  // Won. Adopt the newest message of the burst, which is what the settle was
+  // for. A read failure here costs the adoption, never the reply.
+  const newer = await deps.findNewerInbound({
+    venueId: input.venueId,
+    guestId: input.guestId,
+    afterCreatedAt: input.messageCreatedAt,
+    afterId: input.messageId,
+  })
+  const answerMessageId = newer.ok && newer.newer ? newer.newer.id : input.messageId
+  return {
+    status: 'proceed',
+    answerMessageId,
+    claimed: true,
+    degraded: newer.ok ? null : newer.error,
+  }
+}
+
+/**
+ * Is there a message this turn has not covered, arrived while it worked?
+ *
+ * Called immediately before dispatch (the extension) and again after release
+ * (the handoff). Returns null when there is nothing newer, when the budget is
+ * spent, when coalescing is off, or when the read failed — every one of which
+ * means "carry on", because none of them is a reason to withhold a reply.
+ */
+export async function findUncoveredInbound(
+  input: { venueId: string; guestId: string },
+  turn: InboundTurnState,
+  deps: Pick<CoalesceDeps, 'findNewerInbound'>,
+): Promise<NewerInbound | null> {
+  if (!turn.enabled || turn.answered === null) return null
+  const newer = await deps.findNewerInbound({
+    venueId: input.venueId,
+    guestId: input.guestId,
+    afterCreatedAt: turn.answered.createdAt,
+    afterId: turn.answered.id,
+  })
+  return newer.ok ? newer.newer : null
+}
+
+/** Whether this turn may adopt another message rather than send what it has. */
+export function mayExtend(turn: InboundTurnState): boolean {
+  return turn.enabled && turn.extensionsUsed < MAX_TURN_EXTENSIONS
 }

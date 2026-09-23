@@ -22,6 +22,17 @@ import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
+import {
+  INBOUND_COALESCING_ENABLED,
+  defaultCoalesceDeps,
+  findUncoveredInbound,
+  mayExtend,
+  newInboundTurnState,
+  openCoalescedTurn,
+  releaseInboundTurn,
+  type CoalesceDeps,
+  type InboundTurnState,
+} from './coalesce-turn'
 import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import {
@@ -430,20 +441,95 @@ function undeliveredAgentResult(
  * inside the webhook's `waitUntil` keep-alive window, so the flush
  * completes before the function ends.
  */
-export async function handleInbound(inboundMessageId: string): Promise<AgentResult> {
+export async function handleInbound(
+  inboundMessageId: string,
+  options: { coalescing?: boolean; coalesceDeps?: CoalesceDeps } = {},
+): Promise<AgentResult> {
   const agentRunId = randomUUID()
+  const enabled = options.coalescing ?? INBOUND_COALESCING_ENABLED
+  const coalesceDeps = options.coalesceDeps ?? defaultCoalesceDeps()
+  const turn = newInboundTurnState(enabled)
   let result: AgentResult
   try {
-    result = await runInboundTurn(inboundMessageId, agentRunId)
+    result = await runInboundTurn(inboundMessageId, agentRunId, turn, coalesceDeps)
   } catch (unexpected) {
     // Not redundant with runInboundTurn's own top-level catch: its `finally`
     // block awaits captureAgentLatencyHigh, which is guarded today but by a
     // guarantee living in another module. The ledger should not depend on it.
     await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
+    await closeCoalescedTurn(turn, agentRunId, coalesceDeps)
     throw unexpected
   }
   await recordSafely({ inboundMessageId, agentRunId, result })
+  await closeCoalescedTurn(turn, agentRunId, coalesceDeps)
   return result
+}
+
+/**
+ * Release the claim, then re-invoke for anything this turn did not cover.
+ *
+ * THE SECOND HALF IS NOT AN OPTIMISATION, and this comment is here because a
+ * future reader will otherwise delete it as dead code — it IS dead on the
+ * happy path, which is exactly the problem. Without the post-turn handoff,
+ * the claim turns a dead run into a dropped guest.
+ *
+ * Today two runs is the bug and also the redundancy: if run A dies, run B
+ * still replies. Add a claim and remove this handoff and run B has already
+ * exited as a loser, so the guest gets silence. It is reachable on every path
+ * where the winner did not cover the newest message — a throw, an exhausted
+ * extension budget, a refusal, a drop, a queue.
+ *
+ * Runs on EVERY terminal path including the top-level catch, which is why it
+ * sits in `handleInbound` rather than inside the orchestrator: the
+ * orchestrator's own `finally` cannot see a throw that escaped it.
+ *
+ * Fire-and-forget through `waitUntil`, and guarded whole: a handoff that threw
+ * would turn a reply that reached the guest into a failed request, which is
+ * strictly worse than the silence it exists to prevent.
+ */
+async function closeCoalescedTurn(
+  turn: InboundTurnState,
+  agentRunId: string,
+  deps: CoalesceDeps,
+): Promise<void> {
+  const claim = turn.claim
+  if (claim === null) return
+  try {
+    const released = await releaseInboundTurn({ ...claim, agentRunId }, deps)
+    if (!released.ok) {
+      // The lease is the backstop. Log rather than alert: the turn already
+      // finished, and the next run takes over when the lease expires.
+      console.warn('[agent] inbound turn claim not released; leaving it to the lease', {
+        agentRunId,
+        error: released.error,
+      })
+    }
+    // Released FIRST, deliberately: the handoff re-invokes handleInbound, and
+    // that run has to be able to take the claim we were holding.
+    turn.claim = null
+
+    const uncovered = await findUncoveredInbound(claim, turn, deps)
+    if (uncovered === null) return
+    console.log('[agent] inbound turn handing off an uncovered message', {
+      agentRunId,
+      answeredMessageId: turn.answered?.id ?? null,
+      handingOffMessageId: uncovered.id,
+    })
+    waitUntil(
+      handleInbound(uncovered.id, { coalescing: turn.enabled, coalesceDeps: deps }).catch((e) => {
+        console.error('[agent] inbound turn handoff failed', {
+          agentRunId,
+          handingOffMessageId: uncovered.id,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }),
+    )
+  } catch (e) {
+    console.error('[agent] inbound turn close failed', {
+      agentRunId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
 }
 
 /**
@@ -482,8 +568,15 @@ async function recordSafely(input: {
 async function runInboundTurn(
   inboundMessageId: string,
   agentRunId: string,
+  turn: InboundTurnState,
+  coalesceDeps: CoalesceDeps,
 ): Promise<AgentResult> {
   const start = Date.now()
+  // Captured at ENTRY, because an extension increments the counter before it
+  // recurses. Only the outermost call emits latency, so one turn produces one
+  // measurement covering the settle and every extension — the honest
+  // end-to-end number rather than one per attempt.
+  const entryExtensionDepth = turn.extensionsUsed
   const trace = startAgentTrace({
     name: 'agent.inbound',
     agentRunId,
@@ -522,9 +615,83 @@ async function runInboundTurn(
     }
 
     // Load inbound row
-    const inbound = await loadInbound(inboundMessageId)
-    knownVenueId = inbound.venueId
-    knownGuestId = inbound.guestId
+    const invoked = await loadInbound(inboundMessageId)
+    knownVenueId = invoked.venueId
+    knownGuestId = invoked.guestId
+
+    // TAC-526: settle, claim, adopt. Sits here because this is where venue and
+    // guest first exist, and before buildRuntimeContext, which is the first
+    // expensive step (a Voyage embed and retrieval).
+    //
+    // Skipped entirely on an extension: we already hold the claim, and a
+    // second settle would wait out the window again for a message that has
+    // already arrived.
+    let inbound = invoked
+    if (turn.claim === null) {
+      const opened = await openCoalescedTurn(
+        {
+          venueId: invoked.venueId,
+          guestId: invoked.guestId,
+          messageId: invoked.message.id,
+          messageCreatedAt: invoked.message.receivedAt,
+          agentRunId,
+        },
+        coalesceDeps,
+        turn.enabled,
+      )
+      if (opened.status === 'stand_down') {
+        // Another run holds this conversation. It will answer this message
+        // too, because it adopts the newest one it can see. Nothing generated,
+        // nothing sent, and the ledger records which turn covered us.
+        console.log('[agent] inbound folded into another turn', {
+          agentRunId,
+          inboundMessageId,
+          intoAgentRunId: opened.intoAgentRunId,
+        })
+        trace.update({ output: { status: 'coalesced', intoAgentRunId: opened.intoAgentRunId } })
+        skipLatencyEmit = true
+        return {
+          status: 'coalesced',
+          intoAgentRunId: opened.intoAgentRunId,
+          intoMessageId: opened.intoMessageId,
+        }
+      }
+      if (opened.claimed) turn.claim = { venueId: invoked.venueId, guestId: invoked.guestId }
+      if (opened.degraded !== null) {
+        // Fail-open happened. Worth a line: the reply is going out unclaimed,
+        // which is today's behaviour, but a run of these means the claim is
+        // not protecting anyone.
+        console.warn('[agent] inbound turn proceeding without a claim', {
+          agentRunId,
+          inboundMessageId,
+          error: opened.degraded,
+        })
+      }
+      if (opened.answerMessageId !== invoked.message.id) {
+        // The settle caught a fragment. Answer the newest message; every
+        // earlier one is already in `## Recent conversation` via the existing
+        // history query, so nothing the guest said is dropped.
+        //
+        // Guarded: a reload that fails costs the adoption, never the reply.
+        try {
+          inbound = await loadInbound(opened.answerMessageId)
+          console.log('[agent] inbound turn adopted a newer message', {
+            agentRunId,
+            invokedFor: inboundMessageId,
+            answering: inbound.message.id,
+          })
+        } catch (e) {
+          console.warn('[agent] inbound turn could not adopt a newer message', {
+            agentRunId,
+            answerMessageId: opened.answerMessageId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
+      }
+    }
+    // What this turn covers. The handoff compares against it, so it must be
+    // the message actually answered rather than the one we were invoked for.
+    turn.answered = { id: inbound.message.id, createdAt: inbound.message.receivedAt }
     trace.update({
       metadata: { venueId: inbound.venueId, guestId: inbound.guestId },
       content: { inboundBody: inbound.message.body },
@@ -1707,6 +1874,42 @@ async function runInboundTurn(
       }
     }
 
+    // TAC-526: the extension. A message that landed while this run was
+    // generating means the guest has moved past what we are about to send, so
+    // adopt it and generate again rather than answering a stale turn.
+    //
+    // ONLY ON THE AUTO-SEND PATH, never the queue path above: a draft waiting
+    // for an operator is TAC-397's `resolveConversationDisposition`, and this
+    // ticket does not touch it. The boundary is a run in progress (here)
+    // versus a draft already waiting (there).
+    //
+    // NOT ON THE CRISIS PATH either, and that is structural rather than a
+    // check: the crisis short-circuit returns hundreds of lines above this,
+    // before retrieval. A crisis reply is fixed and unconditional, and
+    // deferring it to a newer fragment is the worst failure this feature could
+    // have. There is a test pinning that it never reaches here.
+    if (mayExtend(turn)) {
+      const uncovered = await findUncoveredInbound(
+        { venueId: ctx.venue.id, guestId: ctx.guest.id },
+        turn,
+        coalesceDeps,
+      )
+      if (uncovered !== null) {
+        turn.extensionsUsed += 1
+        console.log('[agent] inbound turn extending to a newer message', {
+          agentRunId,
+          extensionsUsed: turn.extensionsUsed,
+          from: ctx.currentMessage.id,
+          to: uncovered.id,
+        })
+        // Re-enter with the SAME claim and the SAME agentRunId: one turn, one
+        // claim, one ledger row. A fresh handleInbound would mint a second run
+        // id and a second row for one guest action, which is what breaks the
+        // ledger's denominator.
+        return await runInboundTurn(uncovered.id, agentRunId, turn, coalesceDeps)
+      }
+    }
+
     // Send + persist. TAC-284: demo guests skip the read receipt and typing
     // indicators (TAC-421 removed the pre-send sleep this also used to skip)
     // and, when applyApprovalPolicyStage short-circuited the gate, the send is
@@ -1907,7 +2110,11 @@ async function runInboundTurn(
     })
     return { status: 'failed', stage: 'context_build', error: errMsg }
   } finally {
-    if (!skipLatencyEmit) {
+    // `entryExtensionDepth === 0` keeps one turn to one measurement: an
+    // extension re-enters this function, and both calls would otherwise emit,
+    // double-counting a single turn. The outermost call's elapsed covers the
+    // settle and every extension, which is the number worth having.
+    if (!skipLatencyEmit && entryExtensionDepth === 0) {
       const totalElapsedMs = Date.now() - start
       if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
         await captureAgentLatencyHigh({

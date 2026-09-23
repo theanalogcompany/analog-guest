@@ -1,6 +1,73 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * A RECORDING Supabase client, so the DEFAULT store's queries can be asserted.
+ *
+ * It exists because two mutants survived a run against the fake alone:
+ * dropping the `agent_run_id` filter from the real DELETE, and dropping the
+ * CAS filter from the real UPDATE. Both are the guarantee — a release that is
+ * not scoped deletes the claim a takeover just granted someone else, and an
+ * UPDATE without the CAS lets two runs both take over one expired lease — and
+ * neither is reachable through the fake, which implements the scoping itself.
+ * Every test above proves the LOGIC; these prove the QUERY.
+ */
+interface RecordedQuery {
+  table: string
+  op: 'insert' | 'select' | 'update' | 'delete'
+  payload: Record<string, unknown> | null
+  filters: [string, unknown][]
+}
+const recorded: RecordedQuery[] = []
+// A plain literal, not a reference to the VENUE const below: `vi.mock` is
+// hoisted above every declaration in this file, so anything this initializer
+// touches must not be one of them. Each test resets it in `beforeEach`.
+let nextResult: { data: unknown; error: unknown } = { data: [{ venue_id: 'venue-1' }], error: null }
+
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: () => ({
+    from: (table: string) => {
+      const q: RecordedQuery = { table, op: 'select', payload: null, filters: [] }
+      const chain = {
+        eq(column: string, value: unknown) {
+          q.filters.push([column, value])
+          return chain
+        },
+        select() {
+          recorded.push(q)
+          return Object.assign(Promise.resolve(nextResult), chain)
+        },
+        maybeSingle: async () => {
+          recorded.push(q)
+          return nextResult
+        },
+        then: undefined,
+      }
+      return {
+        insert(payload: Record<string, unknown>) {
+          q.op = 'insert'
+          q.payload = payload
+          recorded.push(q)
+          return Promise.resolve(nextResult)
+        },
+        select() {
+          q.op = 'select'
+          return chain
+        },
+        update(payload: Record<string, unknown>) {
+          q.op = 'update'
+          q.payload = payload
+          return chain
+        },
+        delete() {
+          q.op = 'delete'
+          return chain
+        },
+      }
+    },
+  }),
+}))
 import {
   CLAIM_LEASE_MS,
   COALESCE_SETTLE_MS,
@@ -435,5 +502,103 @@ describe('the default store is bound to migration 057', () => {
     expect(typeof deps.store.insertClaim).toBe('function')
     expect(typeof deps.findNewerInbound).toBe('function')
     expect(deps.now()).toBeInstanceOf(Date)
+  })
+})
+
+describe('the DEFAULT store issues the right queries', () => {
+  // Not "does the logic work" — that is every test above, against the fake.
+  // This is "does the SQL carry the filters the logic depends on", which the
+  // fake cannot show because it implements the scoping itself. Two mutants
+  // survived a run against the fake alone and are killed here.
+  beforeEach(() => {
+    recorded.length = 0
+    nextResult = { data: [{ venue_id: VENUE }], error: null }
+  })
+
+  it('inserts the claim with NO onConflict: the primary key must decide', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.store.insertClaim(claimRow())
+    const insert = recorded.find((q) => q.op === 'insert')
+    expect(insert?.table).toBe('inbound_turn_claims')
+    // The insert takes the row and nothing else. An `ignoreDuplicates` or an
+    // upsert option here would hand BOTH racing runs a success, which is the
+    // entire defect wearing the fix's clothes.
+    expect(insert?.payload).toEqual({
+      venue_id: VENUE,
+      guest_id: GUEST,
+      claimed_message_id: 'msg-1',
+      agent_run_id: 'run-a',
+      claimed_at: T0.toISOString(),
+      expires_at: new Date(T0.getTime() + CLAIM_LEASE_MS).toISOString(),
+    })
+  })
+
+  it('maps a 23505 to a conflict rather than an error', async () => {
+    nextResult = { data: null, error: { code: '23505', message: 'duplicate key' } }
+    const deps = defaultCoalesceDeps()
+    // Read as an error instead, every racing run would fail OPEN and reply —
+    // the claim would be inert and the defect unchanged.
+    expect(await deps.store.insertClaim(claimRow())).toEqual({ ok: true, conflict: true })
+  })
+
+  it('reports a non-23505 insert failure as an error, so the caller fails open', async () => {
+    nextResult = { data: null, error: { code: '42P01', message: 'relation does not exist' } }
+    const deps = defaultCoalesceDeps()
+    const r = await deps.store.insertClaim(claimRow())
+    expect(r.ok).toBe(false)
+  })
+
+  /** M7. Unscoped, a release deletes the claim a takeover just granted. */
+  it('scopes the DELETE to venue, guest AND agent_run_id', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.store.deleteClaim({ venueId: VENUE, guestId: GUEST, agentRunId: 'run-a' })
+    const del = recorded.find((q) => q.op === 'delete')
+    expect(del?.table).toBe('inbound_turn_claims')
+    expect(del?.filters).toEqual([
+      ['venue_id', VENUE],
+      ['guest_id', GUEST],
+      ['agent_run_id', 'run-a'],
+    ])
+  })
+
+  /** M10. Without the CAS filter two runs both take over one expired lease. */
+  it('gates the takeover UPDATE on the EXPECTED agent_run_id, not its own', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.store.takeOverClaim({
+      row: claimRow({ agentRunId: 'run-new' }),
+      expectedAgentRunId: 'run-dead',
+    })
+    const upd = recorded.find((q) => q.op === 'update')
+    expect(upd?.filters).toEqual([
+      ['venue_id', VENUE],
+      ['guest_id', GUEST],
+      // The CAS. `run-dead` is what we READ; `run-new` is what we are writing.
+      // Filtering on our own id would match nothing and the takeover could
+      // never succeed; filtering on neither lets two runs both take it.
+      ['agent_run_id', 'run-dead'],
+    ])
+    expect(upd?.payload).toMatchObject({ agent_run_id: 'run-new' })
+  })
+
+  it('reports a takeover that matched no row as not taken over', async () => {
+    nextResult = { data: [], error: null }
+    const deps = defaultCoalesceDeps()
+    expect(
+      await deps.store.takeOverClaim({
+        row: claimRow(),
+        expectedAgentRunId: 'run-dead',
+      }),
+    ).toEqual({ ok: true, tookOver: false })
+  })
+
+  it('scopes the claim read to venue and guest', async () => {
+    nextResult = { data: null, error: null }
+    const deps = defaultCoalesceDeps()
+    await deps.store.readClaim(VENUE, GUEST)
+    const sel = recorded.find((q) => q.op === 'select')
+    expect(sel?.filters).toEqual([
+      ['venue_id', VENUE],
+      ['guest_id', GUEST],
+    ])
   })
 })
