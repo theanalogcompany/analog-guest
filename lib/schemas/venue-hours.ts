@@ -350,3 +350,66 @@ export function resolveOpenState(
 
   return { state: 'closed', opensAt: findNextOpening(hours, local.dayIndex, local.minutes) }
 }
+
+/**
+ * What today's published hours say about when this venue opens.
+ *
+ * Three states, and the caller must treat them differently — which is the
+ * whole reason this is a union and not `number | null`. TAC-428 shipped it as
+ * the latter, folding a stated closure in with "we could not read it", and
+ * that was corrected on 2026-09-23: a closure is a READ FACT, and collapsing
+ * it into the unreadable case throws away the only thing it told us.
+ *
+ *   - `open`   — today states a range. `openMin` is when the doors open.
+ *   - `closed` — today positively states a closure. There is no opening time
+ *                because the venue is shut, not because nobody wrote one down.
+ *   - `unknown` — nobody said, or what they said cannot be parsed, or the
+ *                timezone is unusable. This is the only state that means "we
+ *                could not read it", and the only one a caller may guess past.
+ *
+ * It reads the SAME `classifyDay` every other consumer of this module reads;
+ * there is deliberately no second parser, no second notion of what a day's
+ * value means, and no second answer to "is `Closed` a range". Adding one is
+ * how the prompt's open/closed line, the TAC-363 closed-venue gate and the
+ * arrival push would come to disagree about the same venue.
+ *
+ * INHERITED GOVERNING RULE, not restated: this module never claims OPEN or
+ * CLOSED on input it did not positively understand. `closed` is returned only
+ * for a value `classifyDay` positively read as a closure; every ambiguity
+ * lands on `unknown`.
+ *
+ * An OVERNIGHT range reports its own `openMin` (a bar opening 17:00 reports
+ * 1020), not the post-midnight tail it inherits from yesterday. The caller is
+ * asking "when does today's service begin", which is when the doors open.
+ */
+export type VenueOpeningToday =
+  | { state: 'open'; openMin: number; nowMin: number }
+  | { state: 'closed' }
+  | { state: 'unknown' }
+
+export function resolveOpeningToday(
+  hours: VenueInfo['hours'],
+  timezone: string,
+  now: Date,
+): VenueOpeningToday {
+  const local = venueLocalNow(timezone, now)
+  if (!local) return { state: 'unknown' }
+
+  const today = classifyDay(hours[DAY_KEYS[local.dayIndex]])
+  if (today.kind === 'closed') return { state: 'closed' }
+  if (today.kind !== 'range') return { state: 'unknown' }
+
+  return { state: 'open', openMin: today.range.openMin, nowMin: local.minutes }
+}
+
+/**
+ * The venue-local wall clock for `now`, as minutes since local midnight.
+ * Null on a timezone this runtime cannot use.
+ *
+ * Exists so a caller that took the fallback opening hour still has a clock to
+ * compare it against: `resolveOpeningToday` carries `nowMin` only on its
+ * `open` state, so a caller taking the fallback hour has no clock from it.
+ */
+export function venueLocalMinutes(timezone: string, now: Date): number | null {
+  return venueLocalNow(timezone, now)?.minutes ?? null
+}

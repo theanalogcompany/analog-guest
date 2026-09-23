@@ -725,7 +725,10 @@ describe('processDueFollowups — gate suppression', () => {
 })
 
 describe('processDueFollowups — venue local-hour filter', () => {
-  it("skips venues whose local hour doesn't match cron_hour_local", async () => {
+  // Renamed by TAC-428. The gate is `>=` now, so this fixture no longer tests
+  // "doesn't match" — 03:00 is BEFORE the firing hour, which is the half that
+  // still holds. The after-hour half reversed and has its own test below.
+  it('skips venues whose local clock has not reached cron_hour_local yet', async () => {
     // Pin NOW to 3am Pacific — no venue should dispatch at this hour with
     // the default cron_hour_local=10.
     const nowEarly = new Date('2026-06-04T10:00:00Z') // 03:00 PT
@@ -734,6 +737,53 @@ describe('processDueFollowups — venue local-hour filter', () => {
     expect(result.venuesScanned).toBe(1)
     expect(result.venuesDispatching).toBe(0)
     expect(result.guestsEvaluated).toBe(0)
+  })
+
+  // TAC-428 REVERSAL, and the test this ticket exists for. Before it, a venue
+  // whose 10:00 tick never landed was simply skipped for the day: measured
+  // 2026-09-22, that was 14 of the 26 days since 2026-08-27 and 5 of the last
+  // 7. A later tick the same day now catches it up.
+  it('DISPATCHES at 15:00 local, hours after cron_hour_local, same venue-local day (TAC-428)', async () => {
+    const nowLate = new Date('2026-06-04T22:00:00Z') // 15:00 PT
+    const result = await processDueFollowups(nowLate)
+    expect(result.venuesDispatching).toBe(1)
+    expect(result.guestsEvaluated).toBe(1)
+    expect(handleFollowup).toHaveBeenCalled()
+  })
+
+  // Code-review follow-up. `>=` widened the window, and post_visit's dedup key
+  // embeds the TIER, which flips at the visit's own 24-hour anniversary — so
+  // two ticks either side of it claim two different keys. The UNIQUE claim
+  // does NOT stop a same-day second dispatch; weekly_cap does. This pins the
+  // brake that actually holds, because the comment that used to name the claim
+  // was wrong and a wrong stated reason is what this repo pays for repeatedly.
+  it('weekly_cap, not the dedup key, is what stops a second post-visit send the same day (TAC-428)', async () => {
+    vi.mocked(loadFollowupSnapshotsForVenue).mockResolvedValue({
+      ok: true,
+      data: new Map([
+        [
+          GUEST_ID,
+          { weeklyCount: 1, lastByReason: {}, announcedMechanicIds: new Set<string>() },
+        ],
+      ]),
+    } as unknown as Awaited<ReturnType<typeof loadFollowupSnapshotsForVenue>>)
+    const nowLate = new Date('2026-06-04T22:00:00Z') // 15:00 PT, a catch-up tick
+    const result = await processDueFollowups(nowLate)
+    expect(result.venuesDispatching).toBe(1)
+    expect(handleFollowup).not.toHaveBeenCalled()
+    expect(result.suppressedBy.weekly_cap).toBe(1)
+  })
+
+  // The bound the 2026-09-17 ruling set. `>=` cannot cross midnight on its
+  // own: once the venue-local date rolls, the hour drops back under
+  // cron_hour_local. So catch-up stops at the end of the venue's day with no
+  // date bookkeeping, and this pins that rather than leaving it as prose.
+  it('stops catching up once the venue-local day rolls over (TAC-428)', async () => {
+    // 2026-06-05T07:00:00Z = 00:00 PT on the FOLLOWING venue-local day.
+    const nowAfterMidnight = new Date('2026-06-05T07:00:00Z')
+    const result = await processDueFollowups(nowAfterMidnight)
+    expect(result.venuesDispatching).toBe(0)
+    expect(handleFollowup).not.toHaveBeenCalled()
   })
 })
 

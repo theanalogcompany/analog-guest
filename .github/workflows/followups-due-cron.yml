@@ -11,12 +11,21 @@
 # pattern, same auth, same repo-vars. Vercel's Hobby tier caps cron
 # granularity at daily/weekly, so both engine cadences live here.
 #
-# Reliability note (documented in CLAUDE.md): GitHub Actions scheduled
-# runs can lag the target minute under platform load. The follow-up
-# engine's daily dispatch tolerates ±1h precision (it picks ONE morning
-# tick per venue regardless of which UTC hour the GH job actually
-# fires). Revisit (Vercel Pro native cron, or QStash) if drift becomes
-# painful, or when the project moves to a commercial plan.
+# THIS IS NO LONGER THE PRIMARY TRIGGER (TAC-428). An hourly external cron
+# on cron-job.org calls the same endpoint with EXTERNAL_CRON_SECRET; this
+# workflow stays as a REDUNDANT NET so that service is not a single point of
+# failure. Both are safe together because the followup_log claim is a UNIQUE
+# insert, so the second tick of a day is a no-op per guest.
+#
+# The reliability note that used to stand here said GH runs "can lag the
+# target minute" and that the engine "tolerates ±1h precision (it picks ONE
+# morning tick per venue)". That was the whole defect: it picked one tick only
+# if a tick landed in the hour at all, and since 2026-08-27 one has on 12 of
+# 26 days, and 2 of the last 7. The processor now accepts any tick from
+# cron_hour_local to local midnight. See CLAUDE.md, "Cron timing".
+#
+# Do not respond to a missed run by shortening the cron below. */5, */15 and
+# hourly all produced 7-9 runs in 33 hours; asking for more buys nothing.
 
 name: cron / followups-due
 
