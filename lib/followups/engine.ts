@@ -22,11 +22,16 @@
 //      finalizeFollowupLogClaim stamps message_id. Refusal / failure →
 //      releaseFollowupLogClaim deletes the claim so dedup isn't burned.
 //
-// Cron trigger: re-uses the GH Actions surface introduced by TAC-297
-// (Vercel Hobby caps cron at daily; sub-daily lives on GH Actions). The
-// new endpoint is /api/cron/followups-due. Per-venue local-hour
-// filtering happens here in JS, mirroring MORNING_HOUR_LOCAL=7 in
-// commitments-due.ts.
+// Cron trigger: /api/cron/followups-due, hit hourly by an external cron on
+// cron-job.org since TAC-428. The GH Actions workflow TAC-297 introduced stays
+// as a redundant net rather than the primary trigger, because GitHub stopped
+// honouring its own schedule closely enough for an exact-hour gate (see
+// isVenueDispatchingNow). Vercel Hobby caps cron at daily, so neither trigger
+// can live there. Per-venue local-hour filtering happens here in JS, mirroring
+// FALLBACK_MORNING_HOUR_LOCAL in commitments-due.ts — though that sibling now
+// resolves each venue's real opening time and uses its constant only as a
+// fallback, where this one is a venue's stated messaging preference and stays
+// a configured hour.
 //
 // Manual followups (TAC-249 Command Center button) bypass this engine
 // entirely — they go through handleFollowup with trigger.reason='manual',
@@ -85,7 +90,11 @@ import {
 export interface ProcessDueFollowupsResult {
   /** Total venues scanned (rows in `venues`). */
   venuesScanned: number
-  /** Venues whose local hour matched their cron_hour_local this tick. */
+  /**
+   * Venues whose local clock has reached their cron_hour_local today. Since
+   * TAC-428 this counts a venue on every tick from that hour to local
+   * midnight, not only the one inside the hour itself.
+   */
   venuesDispatching: number
   /** Total enrolled guests evaluated across dispatching venues. */
   guestsEvaluated: number
@@ -196,8 +205,8 @@ interface RedemptionRow {
 
 /**
  * Top-level entry. Iterates every venue in `venues`, dispatches due
- * follow-ups for the venues whose local hour matches their
- * cron_hour_local. Failures per-venue / per-guest are caught + logged;
+ * follow-ups for the venues whose local clock has reached their
+ * cron_hour_local today. Failures per-venue / per-guest are caught + logged;
  * the function itself never throws into the cron route.
  */
 export async function processDueFollowups(
@@ -304,6 +313,33 @@ function parseMessagingCadence(value: unknown): MessagingCadence {
   return out
 }
 
+/**
+ * True once this venue's local clock has reached its cron_hour_local today.
+ *
+ * TAC-428 changed `===` to `>=`. The equality demanded that a tick land INSIDE
+ * the firing hour, and GitHub Actions stopped delivering that: measured
+ * 2026-09-22, a scheduled run landed inside Le Mil's 10:00 hour on 12 of the 26
+ * days since the 2026-08-27 onset and 2 of the last 7. On the other days the
+ * scan simply did not run, and a follow-up nobody sent looks identical to a
+ * follow-up nobody was due. cron-job.org is the primary trigger now (see the
+ * route); this is the safety net for a tick it still misses.
+ *
+ * `>=` CANNOT CROSS MIDNIGHT, which is what bounds the catch-up to the same
+ * venue-local day as the 2026-09-17 ruling requires: at 00:00 local the hour
+ * drops below cron_hour_local again. No date bookkeeping is needed for it.
+ *
+ * Two mechanisms already bound the rest, and neither needed changing:
+ *   - quiet hours (default 21:00-08:00 local) suppress every guest late in the
+ *     day, so the real window is cron_hour_local to 20:59;
+ *   - the followup_log claim is a UNIQUE insert on (venue, guest, dedup_key),
+ *     and dedupKeyForReason is stable within a day for all three reasons, so
+ *     the second and later ticks of a day are a no-op per guest.
+ *
+ * Known cost, accepted: a guest whose dispatch fails at a pre-persist stage
+ * has its claim released, so it is retried on every remaining tick that day
+ * rather than tomorrow. That is more generation attempts, never a duplicate
+ * send, and a failing generation already red-alerts.
+ */
 function isVenueDispatchingNow(ctx: VenueScanContext, now: Date): boolean {
   try {
     const formatted = new Intl.DateTimeFormat('en-GB', {
@@ -313,7 +349,7 @@ function isVenueDispatchingNow(ctx: VenueScanContext, now: Date): boolean {
     }).format(now)
     const hour = Number(formatted)
     if (Number.isNaN(hour)) return false
-    return hour === ctx.rules.cron_hour_local
+    return hour >= ctx.rules.cron_hour_local
   } catch {
     console.warn(
       `[followup-engine] invalid timezone "${ctx.timezone}" for venue ${ctx.id}, skipping`,
