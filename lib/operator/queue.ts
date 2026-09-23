@@ -620,21 +620,33 @@ function normalizeReplacedDraft(
  * `createdAt` still demand a non-empty string: empty there means the row is
  * not describable, where an empty body means the guest sent a photo.
  *
- * The ID is what decides whether there is an object at all. Under migration
- * 001's `on delete set null` FK a non-null `reply_to_message_id` always
- * resolves to a row, so a missing body or timestamp means this is running
- * against a pre-058 function — a local-dev state the deploy ordering forbids in
- * production — and a half-object would break a Contract promising strings.
+ * The ID is what decides whether there is an object at all, and migration 058
+ * takes all three columns from the same lateral, so they are null together:
+ * a row carrying an id with no body or timestamp means this is running against
+ * a PRE-058 function, which the deploy ordering forbids in production. It is
+ * logged rather than swallowed, the way queueGuestChannel logs its own
+ * degrade, because the symptom on the card — `replyingTo: null` — is
+ * indistinguishable from a proactive card that legitimately has none.
  */
 function normalizeReplyingTo(
   messageId: string | null | undefined,
   body: string | null | undefined,
   createdAt: string | null | undefined,
+  draftId: string,
 ): { messageId: string; body: string; createdAt: string } | null {
   if (typeof messageId !== 'string' || messageId.length === 0) return null
-  if (typeof body !== 'string') return null
-  if (typeof createdAt !== 'string' || createdAt.length === 0) return null
-  return { messageId, body, createdAt }
+  // An EMPTY body is legitimate and must not reach the guards below.
+  if (typeof body === 'string' && typeof createdAt === 'string' && createdAt.length > 0) {
+    return { messageId, body, createdAt }
+  }
+  console.error('[operator] queue draft names a replied-to message it could not resolve', {
+    draftId,
+    // Flags, never the body: this says which column was missing and nothing
+    // about what the guest wrote.
+    hasBody: typeof body === 'string',
+    hasCreatedAt: typeof createdAt === 'string' && createdAt.length > 0,
+  })
+  return null
 }
 
 /**
@@ -836,6 +848,7 @@ export async function listPendingQueue(
         row.reply_to_message_id as string | null,
         row.replying_to_body as string | null,
         row.replying_to_created_at as string | null,
+        row.draft_id,
       ),
       recentContext: normalizeRecentContext(row.recent_context),
       langfuseTraceId: row.langfuse_trace_id,

@@ -153,6 +153,28 @@ function functionText(file: string, fnName: string): string {
   return normalizeSql(sql.slice(start, end + '$function$;'.length))
 }
 
+/**
+ * Every migration numbered ABOVE `file` whose comment-stripped SQL so much as
+ * mentions `fnName`.
+ *
+ * DELIBERATELY INDEPENDENT of createsFunction. The guard below has to be able
+ * to catch a definition that scan does not recognise — an unqualified
+ * `create function list_operator_queue(...)`, or `public."list_operator_queue"`
+ * quoted, both legal and both resolving to the same function — and a check
+ * built from the same predicate would agree with the derivation by
+ * construction and see nothing. Mentioning the name is a far weaker signal
+ * than creating it, which is exactly why it catches spellings the stronger one
+ * misses. Comments are stripped, so prose about a function in a later
+ * migration's header does not trip it.
+ */
+function laterMigrationsMentioning(file: string, fnName: string): string[] {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((candidate) => /^\d+_.*\.sql$/.test(candidate))
+    .filter((candidate) => Number.parseInt(candidate, 10) > Number.parseInt(file, 10))
+    .filter((candidate) => stripComments(readFileSync(join(MIGRATIONS_DIR, candidate), 'utf8')).includes(fnName))
+    .sort()
+}
+
 const CONVERSATIONS_MIGRATION = currentDefiner('list_operator_conversations')
 const QUEUE_MIGRATION = currentDefiner('list_operator_queue')
 
@@ -161,7 +183,7 @@ const QUEUE_SQL = functionText(QUEUE_MIGRATION, 'list_operator_queue')
 
 // Each fragment names the CTE or clause it belongs to. Written with the same
 // line breaks as the migration only for readability; normalizeSql flattens both.
-const FRAGMENTS_043: Array<[string, string]> = [
+const CONVERSATIONS_FRAGMENTS: Array<[string, string]> = [
   [
     'scoped_messages flags each row with the condition',
     `(m.direction = 'inbound'
@@ -229,7 +251,7 @@ describe('the reached-guest condition (TAC-395)', () => {
 
   describe('list_operator_conversations (the conversations list)', () => {
     const sql = CONVERSATIONS_SQL
-    it.each(FRAGMENTS_043)('%s', (_label, fragment) => {
+    it.each(CONVERSATIONS_FRAGMENTS)('%s', (_label, fragment) => {
       expect(sql).toContain(normalizeSql(fragment))
     })
   })
@@ -253,8 +275,52 @@ describe('the reached-guest condition (TAC-395)', () => {
     // 22:08 ruling: recent_context has always returned empty-body entries (a
     // reaction, a photo-only text), and a photo the guest sent is context the
     // operator needs. Any spelling of a body filter here is a behaviour change.
+    // TAC-534. WITHOUT THIS THE SERVER HALF IS UNVERIFIED IN CI and the feature
+    // can ship inert: queue.test.ts mocks the RPC and db/types.ts is
+    // hand-written, so deleting the lateral, the three select entries and the
+    // three return columns from migration 058 leaves the whole suite green
+    // while every card returns `replyingTo: null`. That is the TAC-401 shape
+    // CLAUDE.md records — the ticket shipped inert with the tests passing.
+    // Same technique as pending-slots.test.ts's migration 042 and 054 blocks.
+    it('declares the three replied-to return columns', () => {
+      expect(sql).toContain(
+        normalizeSql(`reply_to_message_id uuid,
+          replying_to_body text,
+          replying_to_created_at timestamptz`),
+      )
+    })
+
+    // The id comes from the LATERAL, not from m., so all three are null
+    // together and the Contract's "null exactly when reply_to_message_id is
+    // NULL" is true of the wire rather than true apart from a scope miss.
+    it('selects all three from the lateral, not the id from the draft row', () => {
+      expect(sql).toContain(
+        normalizeSql(`replying_to.id as reply_to_message_id,
+          replying_to.body as replying_to_body,
+          replying_to.created_at as replying_to_created_at`),
+      )
+      expect(sql).not.toContain('m.reply_to_message_id as reply_to_message_id')
+    })
+
+    // The whole lateral, so a dropped join key, a dropped venue or guest scope,
+    // or `or` for `and` all fail rather than only a missing block.
+    it('resolves the replied-to message by id, scoped to the same venue and guest', () => {
+      expect(sql).toContain(
+        normalizeSql(`select rt.id, rt.body, rt.created_at
+          from messages rt
+          where rt.id = m.reply_to_message_id
+            and rt.venue_id = m.venue_id
+            and rt.guest_id = m.guest_id`),
+      )
+    })
+
     it('adds no body filter', () => {
-      expect(sql).not.toMatch(/body\s*(<>|!=)\s*''|length\((btrim\()?body|body\s+is\s+distinct\s+from\s+''|nullif\(body/)
+      // The alternatives allow an optional `rt.`-style qualifier: the TAC-534
+      // lateral aliases its table, so `length(rt.body)` and `nullif(rt.body, '')`
+      // would both have slipped past the bare-column spellings.
+      expect(sql).not.toMatch(
+        /body\s*(<>|!=)\s*''|length\((btrim\()?(\w+\.)?body|(\w+\.)?body\s+is\s+distinct\s+from\s+''|nullif\((\w+\.)?body/,
+      )
     })
   })
 
@@ -273,6 +339,10 @@ describe('the reached-guest condition (TAC-395)', () => {
         readdirSync(MIGRATIONS_DIR)
           .filter((file) => /^\d+_.*\.sql$/.test(file))
           .filter((file) => createsFunction(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'), fn))
+          // readdirSync order is not guaranteed by Node or POSIX, and
+          // currentDefiner sorts numerically. Without this the comparison below
+          // passes or fails on the filesystem's mood.
+          .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
       // Both functions have been recreated several times, so "the last one" is
       // a real choice here rather than a list of one that happens to be right.
       const queue = definers('list_operator_queue')
@@ -281,6 +351,18 @@ describe('the reached-guest condition (TAC-395)', () => {
       expect(conversations.length).toBeGreaterThan(1)
       expect(QUEUE_MIGRATION).toBe(queue.at(-1))
       expect(CONVERSATIONS_MIGRATION).toBe(conversations.at(-1))
+    })
+
+    // THE ONE THAT MAKES THE BLOCK'S CLAIM TRUE. Every other assertion here
+    // routes through createsFunction, so it agrees with the derivation by
+    // construction and cannot see it pointing at the wrong file. This asks a
+    // weaker, independent question — does anything LATER so much as mention the
+    // name — which catches a definition written in a spelling createsFunction
+    // does not match, such as an unqualified or quoted function name. That is
+    // migration 056's failure exactly, and the shape a re-pin would reintroduce.
+    it('has no LATER migration that so much as mentions the function', () => {
+      expect(laterMigrationsMentioning(QUEUE_MIGRATION, 'list_operator_queue')).toEqual([])
+      expect(laterMigrationsMentioning(CONVERSATIONS_MIGRATION, 'list_operator_conversations')).toEqual([])
     })
 
     it('extracts ONE function, not the whole migration file', () => {

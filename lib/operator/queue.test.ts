@@ -5,6 +5,8 @@ import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from '@/lib/agent/dispatch-instag
 // verify the TypeScript glue: jsonb null → [], recognition state filter,
 // pendingSinceMs computation, and short-circuit on empty allowlist.
 
+import { formatWithOptions } from 'node:util'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { _REVIEW_REASON_KEYS_FOR_TESTS, listPendingQueue } from './queue'
@@ -1462,11 +1464,17 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
     })
   })
 
-  // THE LOAD-BEARING ONE, and the reason the Contract insists the body travels
-  // rather than the id alone. recentContext carries the three newest
-  // responses; the oat milk question is four back and appears in NONE of them.
-  // An implementation that resolved the quote by looking the id up in
-  // recentContext returns null here and passes every other test in this block.
+  // The reason the Contract insists the body travels rather than the id alone:
+  // recentContext carries the three newest responses, and the oat milk question
+  // is four back, appearing in NONE of them. An implementation that resolved
+  // the quote by looking the id up in recentContext returns null here.
+  //
+  // It is NOT the only test that catches that implementation — a mutation run
+  // killed five, because the other fixtures leave recent_context null and so
+  // resolve to null too. This one is the case a reader can see the point in,
+  // and the only one whose fixture is shaped like the incident on the ticket.
+  // Calling it the discriminating test would be the overstatement this repo
+  // keeps recording; the mutation output said otherwise and is what counts.
   it('carries the body when the replied-to message is OUTSIDE recentContext', async () => {
     const draft = await draftFor({
       recent_context: [
@@ -1533,6 +1541,35 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
   ])('degrades to null rather than emitting a half-object: %s', async (_label, over) => {
     const draft = await draftFor(over)
     expect(draft.replyingTo).toBeNull()
+  })
+
+  // The symptom on the card is `replyingTo: null`, which is exactly what a
+  // proactive card looks like, so the degrade has to say something or a
+  // pre-058 function in production is invisible. queueGuestChannel sets the
+  // precedent for degrading AND logging.
+  //
+  // Rendered through util.formatWithOptions rather than JSON.stringify,
+  // because that is what console actually prints: stringify turns an Error or
+  // a Headers into {} and would report a leak as clean (TAC-458).
+  it('logs the unresolved case, naming the draft and never the body', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await draftFor({ replying_to_created_at: null })
+    expect(spy).toHaveBeenCalledTimes(1)
+    const rendered = spy.mock.calls
+      .map((args) => formatWithOptions({ depth: null, maxStringLength: null, maxArrayLength: null }, ...args))
+      .join('\n')
+    expect(rendered).toContain('d-1')
+    expect(rendered).toContain('hasBody')
+    // The guest's words never reach a log line.
+    expect(rendered).not.toContain('do you have oat milk')
+    spy.mockRestore()
+  })
+
+  it('does not log when there is simply nothing to reply to', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await draftFor({ reply_to_message_id: null, replying_to_body: null, replying_to_created_at: null })
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
   })
 
   it('resolves each row independently across a multi-card queue', async () => {

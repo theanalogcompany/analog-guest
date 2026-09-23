@@ -42,7 +42,11 @@
 -- ---------------------------------------------------------------------------
 -- The body below restates migration 056's verbatim, with only the three new
 -- return columns, their three select entries, and one new lateral added. Diff
--- it against db/migrations/056_operator_instagram_fields.sql lines 232-427.
+-- it against db/migrations/056_operator_instagram_fields.sql lines 232-406.
+--
+-- 232-406 and not further: 056 line 406 is this function's closing
+-- `$function$;`, 407-428 are the NEXT function's header comment, and line 429
+-- is `drop function if exists public.list_operator_conversations(uuid[]);`.
 --
 -- This repo has been bitten by a Studio-only SQL object before (migration
 -- 021's orphan `link_operator_auth`), so confirm the live body is 056's and
@@ -69,27 +73,46 @@
 -- ---------------------------------------------------------------------------
 -- AFTERWARDS: what should be true
 -- ---------------------------------------------------------------------------
---     select count(*) as with_quote
---     from list_operator_queue(array(select id from venues))
---     where reply_to_message_id is not null;
+-- The one that can actually fail. A card whose id resolved to nothing is the
+-- failure that matters, because it reaches the client as `replyingTo: null` on
+-- a card that was generated from a guest message — indistinguishable from a
+-- proactive card. Expect 0:
 --
--- Every card generated from a guest message has a non-null
--- `reply_to_message_id` and a non-null `replying_to_created_at`. A proactive
--- card (manual followup, operator decline, crash card, engine followup) has
--- NULL in all three. `replying_to_body` may legitimately be '' for a
--- media-only inbound, which is NOT the same as NULL.
+--     select count(*) as broken
+--     from list_operator_queue(array(select id from venues))
+--     where reply_to_message_id is not null
+--       and replying_to_created_at is null;
+--
+-- And one that shows the body is really travelling, rather than a count that
+-- is equally true of three NULLs:
+--
+--     select draft_id, reply_to_message_id, replying_to_body, replying_to_created_at
+--     from list_operator_queue(array(select id from venues))
+--     where reply_to_message_id is not null
+--     limit 5;
+--
+-- A proactive card (manual followup, operator decline, crash card, engine
+-- followup) has NULL in all three. `replying_to_body` may legitimately be ''
+-- for a media-only inbound, which is NOT the same as NULL.
 --
 -- ---------------------------------------------------------------------------
 -- ROLLBACK
 -- ---------------------------------------------------------------------------
--- Restore migration 056's definition of this function, which is the whole of
--- db/migrations/056_operator_instagram_fields.sql lines 232-427, wrapped the
+-- Restore migration 056's definition of this function, which is
+-- db/migrations/056_operator_instagram_fields.sql lines 232-406, wrapped the
 -- same way:
+--
+-- READ THE END OF THAT RANGE CAREFULLY. It stops at line 406, this function's
+-- closing `$function$;`. Line 429 of 056 is
+-- `drop function if exists public.list_operator_conversations(uuid[]);` — a
+-- paste that runs one statement wider drops the conversations RPC inside this
+-- transaction with no matching create, commits, and breaks
+-- `GET /api/operator/conversations` for every operator.
 --
 --     begin;
 --     set local lock_timeout = '5s';
 --     drop function if exists public.list_operator_queue(uuid[]);
---     -- ... paste 056 lines 234-427 here ...
+--     -- ... paste 056 lines 234-406 here, and no further ...
 --     commit;
 --
 -- Safe at any time on its own: nothing but `lib/operator/queue.ts` reads the
@@ -185,7 +208,7 @@ as $function$
     window_anchor.last_guest_action_at,
     -- TAC-534: the guest message this draft answers. The id is the column
     -- itself; the body and the timestamp come from the lateral below.
-    m.reply_to_message_id,
+    replying_to.id         as reply_to_message_id,
     replying_to.body       as replying_to_body,
     replying_to.created_at as replying_to_created_at
   from messages m
@@ -309,9 +332,18 @@ as $function$
     -- reply_to_message_id from this guest's own inbound
     -- (schedule-and-send.ts, dispatch-instagram-reply.ts, expressions.ts), so
     -- the scope excludes nothing real; without it, one mis-set id would put
-    -- another guest's message body on this card. idx_messages_reply_to covers
-    -- the lookup.
-    select rt.body, rt.created_at
+    -- another guest's message body on this card.
+    --
+    -- The seek is on rt.id, the PRIMARY KEY, so this rides messages_pkey.
+    -- NOT idx_messages_reply_to, which indexes the pointing column and is what
+    -- you would use to find the drafts answering a given message — the
+    -- opposite direction to this join.
+    --
+    -- The ID COMES OUT OF THIS LATERAL, not from m.reply_to_message_id, so all
+    -- three columns are null together. Taken from m., a row whose id failed the
+    -- venue/guest scope would return (id, null, null), and the Contract's "null
+    -- exactly when reply_to_message_id is NULL" would be false on the wire.
+    select rt.id, rt.body, rt.created_at
     from messages rt
     where rt.id = m.reply_to_message_id
       and rt.venue_id = m.venue_id
