@@ -560,24 +560,46 @@ export async function openCoalescedTurn(
 /**
  * Is there a message this turn has not covered, arrived while it worked?
  *
- * Called immediately before dispatch (the extension) and again after release
- * (the handoff). Returns null when there is nothing newer, when the budget is
- * spent, when coalescing is off, or when the read failed — every one of which
- * means "carry on", because none of them is a reason to withhold a reply.
+ * THREE STATES, AND THE THIRD IS NOT PEDANTRY. It was two — "something" or
+ * "nothing", with a failed read folded into "nothing" — and that is the right
+ * fail-open direction for ONE of its two callers and exactly backwards for the
+ * other:
+ *
+ *   EXTENSION (before dispatch): `unreadable` means send what you have. A read
+ *   failure costs an adoption, never a reply.
+ *
+ *   HANDOFF (after release): `unreadable` folded into `none` means NO HANDOFF.
+ *   The loser has already stood down and recorded itself as coalesced, so a
+ *   single transient `messages` read silences that guest's message for good —
+ *   no retry, no alert, nothing in the logs. One failed read, permanent
+ *   silence, on the mechanism that exists to stop exactly that.
+ *
+ * Found in code review, not by a test: the old docstring claimed every null
+ * "means carry on, because none of them is a reason to withhold a reply",
+ * which was false in the handoff position and is the kind of comment CLAUDE.md
+ * warns is read INSTEAD of the code it describes.
  */
+export type UncoveredInbound =
+  /** Nothing newer exists, or this turn is not eligible to look. */
+  | { status: 'none' }
+  | { status: 'found'; message: NewerInbound }
+  /** The read did not complete, so whether anything is uncovered is UNKNOWN. */
+  | { status: 'unreadable'; error: string }
+
 export async function findUncoveredInbound(
   input: { venueId: string; guestId: string },
   turn: InboundTurnState,
   deps: Pick<CoalesceDeps, 'findNewerInbound'>,
-): Promise<NewerInbound | null> {
-  if (!turn.enabled || turn.answered === null) return null
+): Promise<UncoveredInbound> {
+  if (!turn.enabled || turn.answered === null) return { status: 'none' }
   const newer = await deps.findNewerInbound({
     venueId: input.venueId,
     guestId: input.guestId,
     afterCreatedAt: turn.answered.createdAt,
     afterId: turn.answered.id,
   })
-  return newer.ok ? newer.newer : null
+  if (!newer.ok) return { status: 'unreadable', error: newer.error }
+  return newer.newer === null ? { status: 'none' } : { status: 'found', message: newer.newer }
 }
 
 /** Whether this turn may adopt another message rather than send what it has. */

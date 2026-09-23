@@ -61,6 +61,10 @@ const captureCrisisSafetyReplySentMock = vi.fn()
 const captureIntentionPromptRecordingFailedMock = vi.fn()
 const captureIntentionPromptRaisedMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
+// TAC-526: named, because the once-per-turn latency guard is a stated
+// guarantee and a bare vi.fn() in the factory cannot be asserted on.
+const captureAgentLatencyHighMock = vi.fn()
+const capturePostHogEventMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
 const existingReplyMaybeSingleMock = vi.fn()
@@ -164,7 +168,11 @@ vi.mock('./pending-slots', async () => {
 })
 vi.mock('./alerts', () => ({
   fireRedAlert: (...a: unknown[]) => fireRedAlertMock(...a),
-  capturePostHogEvent: vi.fn(),
+  // TAC-526: NAMED, not a bare vi.fn(). The handoff's "could not check"
+  // branch cannot recover — a retry needs the id the read failed to produce —
+  // so making it VISIBLE is the entire obligation, and a bare stub cannot
+  // show that it is. A mutant disabling that branch survived until this.
+  capturePostHogEvent: (...a: unknown[]) => capturePostHogEventMock(...a),
 }))
 // TAC-523: the ledger writer, mocked wholesale — its own coverage lives in
 // record-inbound-turn-outcome.test.ts, against a fake that records inserts.
@@ -215,7 +223,7 @@ vi.mock('@/lib/guests/context', () => ({
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
   AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
-  captureAgentLatencyHigh: vi.fn(),
+  captureAgentLatencyHigh: (...a: unknown[]) => captureAgentLatencyHighMock(...a),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
@@ -282,7 +290,7 @@ vi.mock('./trace-content', () => ({
 // The real fake, not a stub: the primary key it enforces IS the claim, and a
 // stub that answered "won" twice would make every assertion here vacuous.
 import { createTurnClaimsFake } from './testing/turn-claims-fake'
-import { pickNewer, type CoalesceDeps } from './coalesce-turn'
+import { COALESCE_SETTLE_MS, pickNewer, type CoalesceDeps } from './coalesce-turn'
 import { handleInbound } from './handle-inbound'
 
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
@@ -831,22 +839,39 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
    * loses the claim it was invoked to take and the guest gets nothing —
    * the handoff defeating itself.
    */
+  /**
+   * The claim must be GONE before the handoff runs, or the handed-off run
+   * loses the claim it was invoked to take and the guest gets nothing — the
+   * handoff defeating itself.
+   *
+   * The fragment arrives during the SEND, so the extension check has already
+   * run and a handoff genuinely happens. A first version seeded it during
+   * GENERATION, where the extension adopted it and no handoff occurred at all,
+   * under a comment asserting the opposite.
+   */
   it('releases the claim before handing off, so the next run can take it', async () => {
     sendSucceeds()
     const { store, deps } = makeDeps()
-    generateStageMock.mockImplementationOnce(async () => {
-      // Arrives too late for the extension budget to matter; what is asserted
-      // is the release ordering, not the extension.
-      seedInbox(
-        { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
-        { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
-      )
-      return { status: 'success', result: successResult() }
+    let seeded = false
+    scheduleAndSendMock.mockImplementation(async () => {
+      if (!seeded) {
+        seeded = true
+        seedInbox(
+          { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+          { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+        )
+      }
+      return { outboundMessageId: 'sent-1', providerMessageId: 'p' }
     })
 
     await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
 
-    // Whatever ran, nothing is left holding the conversation.
+    // The handed-off run took the claim and replied, which it could only do
+    // if the release had already landed.
+    await vi.waitFor(() => {
+      expect(scheduleAndSendMock).toHaveBeenCalledTimes(2)
+    })
+    // And nothing is left holding the conversation afterwards.
     expect(store.rows()).toHaveLength(0)
   })
 })
@@ -861,22 +886,55 @@ describe('TAC-526 — the paths it must not touch', () => {
    * the extension earlier fails here rather than in production.
    */
   it('never extends a crisis-safety turn, even with a newer message waiting', async () => {
-    seedTheBurst()
-    classifyStageMock.mockResolvedValue({
-      category: 'unknown',
-      classifierConfidence: 0.9,
-      reasoning: 'crisis',
-      crisisSafety: true,
-    })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-1', providerMessageId: 'p' })
     const { deps } = makeDeps()
+    // THE FRAGMENT ARRIVES DURING CLASSIFY, and the placement is the whole
+    // test. It has to exist AFTER the settle's adopt (or the adopt takes it
+    // and nothing is uncovered) and BEFORE the crisis short-circuit (or an
+    // extension check placed above that branch finds nothing and the mutant
+    // survives). Classify is the only window that satisfies both.
+    //
+    // Two earlier fixtures failed this: seeding up front let the adopt take
+    // it, and seeding during the dispatch put it after the branch. Both left a
+    // mutant that inserts a full extension check ABOVE the crisis short
+    // circuit passing the entire suite, while this test's own comment claimed
+    // it would fail — an assertion whose fixture could not reach the code, on
+    // the one path CLAUDE.md calls the worst failure this feature could have.
+    classifyStageMock.mockImplementation(async () => {
+      seedInbox(
+        { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+        { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+      )
+      return {
+        category: 'unknown',
+        classifierConfidence: 0.9,
+        reasoning: 'crisis',
+        crisisSafety: true,
+      }
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-1',
+      providerMessageId: 'p',
+    })
 
     const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
 
     expect(result).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-1' })
-    // Sent once, and generation never ran: the crisis body is a fixed string.
+    // ONE dispatch: the fixed crisis body, never deferred to a newer fragment.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    // And generation never ran at all — the crisis body is a fixed string.
     expect(generateStageMock).not.toHaveBeenCalled()
+    // ONE context build. THIS is the assertion that catches an extension on a
+    // crisis turn, and the earlier version did not have it: an extension
+    // re-enters the orchestrator, so it shows up as a SECOND build. Asserting
+    // only on `calls[0]` passed the mutant, because the mutant adds a second
+    // call and leaves the first alone.
+    expect(buildRuntimeContextMock).toHaveBeenCalledTimes(1)
+    // And the one build answers the message the run was invoked for: nothing
+    // about a crisis turn waits on what the guest types next.
+    const builds = buildRuntimeContextMock.mock.calls.map(
+      (c) => (c[0] as { currentMessage: { id: string } }).currentMessage.id,
+    )
+    expect(builds).toEqual([MSG_1])
   })
 
   /**
@@ -1038,5 +1096,177 @@ describe('TAC-526 — replay: Le Mils, 2026-09-23', () => {
     expect(statuses(results)).toEqual(['sent', 'sent'])
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(2)
     expect(recordIntentionPromptsMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('TAC-526 — the settle and the latency emit', () => {
+  /**
+   * THE SETTLE HAD NO TEST AT ALL. Deleting the `await deps.sleep(...)` line
+   * outright passed the entire suite: the constant's VALUE was pinned, and
+   * nothing pinned that it was ever applied. It is mechanism (1) of three and
+   * the whole 8-second guest-facing cost of this feature, so a wrong unit, a
+   * dropped call or a swap for another constant all shipped green.
+   */
+  it('waits COALESCE_SETTLE_MS once, BEFORE claiming', async () => {
+    sendSucceeds()
+    const slept: number[] = []
+    const { store, deps } = makeDeps({
+      sleep: async (ms: number) => {
+        // Captured relative to the claim so the ORDER is asserted, not just
+        // the call: settling after the claim would defeat the point entirely.
+        slept.push(ms)
+        expect(store.calls.insert).toBe(0)
+      },
+    })
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(slept).toEqual([COALESCE_SETTLE_MS])
+    expect(store.calls.insert).toBe(1)
+  })
+
+  it('does NOT settle when coalescing is off', async () => {
+    sendSucceeds()
+    const slept: number[] = []
+    const { deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+
+    await handleInbound(MSG_1, { coalescing: false, coalesceDeps: deps })
+
+    expect(slept).toEqual([])
+  })
+
+  /**
+   * An extension re-enters the orchestrator, and settling again would wait out
+   * the window a second time for a message that has ALREADY arrived — pure
+   * latency, on the turn that is already the slowest.
+   */
+  it('does NOT settle again on an extension', async () => {
+    sendSucceeds()
+    const slept: number[] = []
+    const { deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    generateStageMock.mockImplementationOnce(async () => {
+      seedInbox(
+        { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+        { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+      )
+      return { status: 'success', result: successResult() }
+    })
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(generateStageMock).toHaveBeenCalledTimes(2)
+    expect(slept).toEqual([COALESCE_SETTLE_MS])
+  })
+
+  /**
+   * And not on an extension of a run that FAILED OPEN either. That is the one
+   * path where "we hold a claim" and "we already settled" disagree, and the
+   * guard used to key on the claim: an unclaimed run settled a second time on
+   * every extension, and could lose the claim mid-turn on the retry and
+   * discard a generation it had already paid for.
+   */
+  it('does NOT settle again on an extension of an UNCLAIMED run', async () => {
+    sendSucceeds()
+    const slept: number[] = []
+    const { store, deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    store.failNext('insert', 10)
+    generateStageMock.mockImplementationOnce(async () => {
+      seedInbox(
+        { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+        { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+      )
+      return { status: 'success', result: successResult() }
+    })
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(slept).toEqual([COALESCE_SETTLE_MS])
+  })
+
+  /**
+   * One turn, one latency measurement. Both calls emitting would double-count
+   * a single turn, and the outermost call's elapsed is the honest end-to-end
+   * number because it covers the settle and every extension.
+   */
+  it('emits latency ONCE for a turn that extended', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+    // EVERY generation advances the clock, not just the first. Advancing only
+    // once put the whole 20s inside the OUTER call's elapsed and left the
+    // inner call's at nearly zero — under the threshold, so the inner never
+    // emitted and removing the guard changed nothing. The mutant survived and
+    // the test looked like it covered the guarantee.
+    let generated = 0
+    generateStageMock.mockImplementation(async () => {
+      generated += 1
+      if (generated === 1) {
+        seedInbox(
+          { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+          { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+        )
+      }
+      // Past AGENT_LATENCY_HIGH_THRESHOLD_MS (mocked to 10s) so the emit is
+      // reachable at all — without this the assertion is vacuous.
+      vi.setSystemTime(new Date(Date.now() + 20_000))
+      return { status: 'success', result: successResult() }
+    })
+
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(generateStageMock).toHaveBeenCalledTimes(2)
+    expect(captureAgentLatencyHighMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('TAC-526 — a close-time read that fails is never silent', () => {
+  /**
+   * THE BLOCKER THIS EXISTS FOR. `findUncoveredInbound` used to fold "the read
+   * failed" into "nothing newer", and `closeCoalescedTurn` reads that as
+   * nothing to do — so one transient `messages` read meant no handoff, and the
+   * run that would have covered the folded message had already stood down.
+   * Permanent silence for that guest, with no retry and nothing in the logs.
+   *
+   * It CANNOT be recovered from here: a retry needs the id the read failed to
+   * produce. So the obligation is that it is visible, and this is what pins
+   * that — a mutant disabling the branch survives every other assertion in
+   * this file, because the turn itself still succeeds.
+   */
+  it('reports the failure rather than treating it as nothing to hand off', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+    const realFind = deps.findNewerInbound
+    let calls = 0
+    deps.findNewerInbound = async (input) => {
+      calls += 1
+      // The open-time and extension reads succeed; the CLOSE-time one fails.
+      // Failing them all would leave the turn unclaimed and never reach here.
+      if (calls >= 3) return { ok: false, error: 'connection reset' }
+      return realFind(input)
+    }
+
+    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    // The turn itself is unaffected: the guest got their reply.
+    expect(result).toMatchObject({ status: 'sent' })
+    // And the thing we could not check is on the record.
+    const events = capturePostHogEventMock.mock.calls.map((c) => c[0])
+    expect(events).toContain('inbound_turn_handoff_check_failed')
+  })
+
+  it('reports nothing when the close-time read succeeds', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    // The negative half: without it the assertion above passes against a
+    // branch that fires on every turn, which would be its own kind of useless.
+    const events = capturePostHogEventMock.mock.calls.map((c) => c[0])
+    expect(events).not.toContain('inbound_turn_handoff_check_failed')
   })
 })

@@ -504,22 +504,45 @@ async function closeCoalescedTurn(
         error: released.error,
       })
     }
-    // Released FIRST, deliberately: the handoff re-invokes handleInbound, and
-    // that run has to be able to take the claim we were holding.
     turn.claim = null
 
     const uncovered = await findUncoveredInbound(claim, turn, deps)
-    if (uncovered === null) return
+    // UNREADABLE IS NOT "NOTHING". A failed read here means we do not know
+    // whether a message is uncovered, and the run that would have covered it
+    // has already stood down — so treating it as "nothing to do" is a silent,
+    // permanent silence for that guest. It cannot be recovered from here (a
+    // retry needs the id the read failed to produce), so the obligation is to
+    // make it VISIBLE rather than to guess.
+    if (uncovered.status === 'unreadable') {
+      console.error('[agent] inbound turn could not check for an uncovered message', {
+        agentRunId,
+        answeredMessageId: turn.answered?.id ?? null,
+        error: uncovered.error,
+      })
+      await capturePostHogEvent('inbound_turn_handoff_check_failed', agentRunId, {
+        agentRunId,
+        venueId: claim.venueId,
+        guestId: claim.guestId,
+        answeredMessageId: turn.answered?.id ?? null,
+        error: uncovered.error,
+      })
+      return
+    }
+    if (uncovered.status === 'none') return
     console.log('[agent] inbound turn handing off an uncovered message', {
       agentRunId,
       answeredMessageId: turn.answered?.id ?? null,
-      handingOffMessageId: uncovered.id,
+      handingOffMessageId: uncovered.message.id,
     })
+    // Released BEFORE this, deliberately, and the ordering is the guarantee:
+    // the handoff re-invokes handleInbound, and that run has to be able to
+    // take the claim we were holding. Held, it would stand down immediately
+    // and the message would go unanswered — the handoff defeating itself.
     waitUntil(
-      handleInbound(uncovered.id, { coalescing: turn.enabled, coalesceDeps: deps }).catch((e) => {
+      handleInbound(uncovered.message.id, { coalescing: turn.enabled, coalesceDeps: deps }).catch((e) => {
         console.error('[agent] inbound turn handoff failed', {
           agentRunId,
-          handingOffMessageId: uncovered.id,
+          handingOffMessageId: uncovered.message.id,
           error: e instanceof Error ? e.message : String(e),
         })
       }),
@@ -623,11 +646,17 @@ async function runInboundTurn(
     // guest first exist, and before buildRuntimeContext, which is the first
     // expensive step (a Voyage embed and retrieval).
     //
-    // Skipped entirely on an extension: we already hold the claim, and a
-    // second settle would wait out the window again for a message that has
-    // already arrived.
+    // Skipped entirely on an extension: we already settled, and a second
+    // 8-second wait for a message that has ALREADY arrived is pure latency.
+    //
+    // Keyed on extension depth, NOT on `turn.claim === null`. Those differ on
+    // exactly one path and it is a real one: a run that failed open (the store
+    // was unreachable, so it holds no claim) would otherwise settle a second
+    // time on every extension — two 8s waits in one turn — and could LOSE the
+    // claim mid-turn on the retry, discarding a generation it had already
+    // paid for. Found in code review; the old comment was false for it.
     let inbound = invoked
-    if (turn.claim === null) {
+    if (entryExtensionDepth === 0) {
       const opened = await openCoalescedTurn(
         {
           venueId: invoked.venueId,
@@ -1894,19 +1923,22 @@ async function runInboundTurn(
         turn,
         coalesceDeps,
       )
-      if (uncovered !== null) {
+      // Only 'found' extends. 'unreadable' sends what we have, which is the
+      // right direction HERE and the wrong one at the handoff — see
+      // findUncoveredInbound's own docstring for why the two callers differ.
+      if (uncovered.status === 'found') {
         turn.extensionsUsed += 1
         console.log('[agent] inbound turn extending to a newer message', {
           agentRunId,
           extensionsUsed: turn.extensionsUsed,
           from: ctx.currentMessage.id,
-          to: uncovered.id,
+          to: uncovered.message.id,
         })
         // Re-enter with the SAME claim and the SAME agentRunId: one turn, one
         // claim, one ledger row. A fresh handleInbound would mint a second run
         // id and a second row for one guest action, which is what breaks the
         // ledger's denominator.
-        return await runInboundTurn(uncovered.id, agentRunId, turn, coalesceDeps)
+        return await runInboundTurn(uncovered.message.id, agentRunId, turn, coalesceDeps)
       }
     }
 

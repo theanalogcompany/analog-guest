@@ -18,6 +18,9 @@ interface RecordedQuery {
   op: 'insert' | 'select' | 'update' | 'delete'
   payload: Record<string, unknown> | null
   filters: [string, unknown][]
+  bounds: ['gte' | 'gt', string, unknown][]
+  orders: [string, boolean][]
+  limit: number | null
 }
 const recorded: RecordedQuery[] = []
 // A plain literal, not a reference to the VENUE const below: `vi.mock` is
@@ -28,11 +31,36 @@ let nextResult: { data: unknown; error: unknown } = { data: [{ venue_id: 'venue-
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => {
-      const q: RecordedQuery = { table, op: 'select', payload: null, filters: [] }
+      const q: RecordedQuery = {
+        table,
+        op: 'select',
+        payload: null,
+        filters: [],
+        bounds: [],
+        orders: [],
+        limit: null,
+      }
       const chain = {
         eq(column: string, value: unknown) {
           q.filters.push([column, value])
           return chain
+        },
+        gte(column: string, value: unknown) {
+          q.bounds.push(['gte', column, value])
+          return chain
+        },
+        gt(column: string, value: unknown) {
+          q.bounds.push(['gt', column, value])
+          return chain
+        },
+        order(column: string, opts: { ascending: boolean }) {
+          q.orders.push([column, opts.ascending])
+          return chain
+        },
+        limit(n: number) {
+          q.limit = n
+          recorded.push(q)
+          return Promise.resolve(nextResult)
         },
         select() {
           recorded.push(q)
@@ -75,9 +103,11 @@ import {
   MAX_TURN_EXTENSIONS,
   claimInboundTurn,
   defaultCoalesceDeps,
+  findUncoveredInbound,
   pickNewer,
   releaseInboundTurn,
   type CoalesceDeps,
+  type InboundTurnState,
   type TurnClaimRow,
 } from './coalesce-turn'
 import { createTurnClaimsFake, type TurnClaimsFake } from './testing/turn-claims-fake'
@@ -269,35 +299,61 @@ describe('claimInboundTurn', () => {
     expect(store.rows()).toHaveLength(1)
   })
 
-  it('retries the insert ONCE when the holder released between insert and read', async () => {
+  /**
+   * The holder released between our INSERT and our read, so the claim is
+   * free again and one retry takes it.
+   *
+   * ASSERTS THE INSERT COUNT, because the first version asserted only the
+   * final status — which is the SAME whether the retry happens or not when
+   * the retry also conflicts, so deleting the entire retry branch passed. The
+   * fixture also carried a line that cleared nothing under a comment saying it
+   * cleared the table, and a second comment four lines below contradicting the
+   * first. Both are gone.
+   */
+  it('retries the insert ONCE and WINS when the holder released in between', async () => {
     const store = createTurnClaimsFake()
-    store.seed(claimRow({ agentRunId: 'run-a' }))
-    // The read finds nothing: the holder released in between.
-    const vanishing = {
-      ...store,
-      readClaim: async () => ({ ok: true as const, claim: null }),
-    }
-    // First insert conflicts against the seeded row; drop it so the retry wins.
-    let first = true
+    let inserts = 0
     const deps = makeDeps(store, {
       store: {
-        ...vanishing,
+        ...store,
         insertClaim: async (row) => {
-          if (first) {
-            first = false
-            return { ok: true as const, conflict: true }
-          }
+          inserts += 1
+          // First attempt races a holder that is gone by the time we look.
+          if (inserts === 1) return { ok: true as const, conflict: true }
           return store.insertClaim(row)
         },
+        readClaim: async () => ({ ok: true as const, claim: null }),
       },
     })
-    // Clear the table so the retry can succeed, mirroring the release.
-    store.rows().forEach(() => undefined)
     const outcome = await claimInboundTurn(
       { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
       deps,
     )
-    // The seeded row is still there, so the retry conflicts and we defer.
+    expect(outcome).toEqual({ status: 'won' })
+    expect(inserts).toBe(2)
+  })
+
+  it('retries the insert AT MOST once, then defers', async () => {
+    const store = createTurnClaimsFake()
+    let inserts = 0
+    const deps = makeDeps(store, {
+      store: {
+        ...store,
+        insertClaim: async () => {
+          inserts += 1
+          return { ok: true as const, conflict: true }
+        },
+        readClaim: async () => ({ ok: true as const, claim: null }),
+      },
+    })
+    const outcome = await claimInboundTurn(
+      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      deps,
+    )
+    // Bounded: a third party can always take it, and a caller that fails open
+    // loses nothing by deferring. Unbounded, this is a spin against a busy
+    // conversation.
+    expect(inserts).toBe(2)
     expect(outcome.status).toBe('lost')
   })
 
@@ -600,5 +656,152 @@ describe('the DEFAULT store issues the right queries', () => {
       ['venue_id', VENUE],
       ['guest_id', GUEST],
     ])
+  })
+})
+
+describe('the DEFAULT findNewerInbound query', () => {
+  /**
+   * Its own block because it was missed entirely, and the mutant that found
+   * the gap is the worst in this change:
+   *
+   *   DELETING `.eq('direction', 'inbound')` SURVIVED THE WHOLE SUITE.
+   *
+   * In production an outbound reply is always newer than the inbound it
+   * answers, so without that filter EVERY turn finds its own reply as the
+   * "newer inbound", re-enters with an outbound id, and `loadInbound` throws
+   * on `direction !== 'inbound'` — discarding a reply it had already generated
+   * and returning `failed`. Total silencing, one deleted line, zero coverage.
+   *
+   * The in-memory inbox fake used by the orchestrator tests models none of
+   * these filters, which is precisely why it could not show them: the same
+   * "a fake that enforces the guarantee cannot show the QUERY carries it"
+   * lesson already recorded for the DELETE scope and the takeover CAS, not
+   * applied to this fourth query until a mutant found it.
+   */
+  beforeEach(() => {
+    recorded.length = 0
+    nextResult = { data: [], error: null }
+  })
+
+  const AFTER = new Date('2026-09-23T15:32:36.000Z')
+
+  it('scopes to this venue, this guest, and INBOUND only', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.findNewerInbound({
+      venueId: VENUE,
+      guestId: GUEST,
+      afterCreatedAt: AFTER,
+      afterId: 'msg-1',
+    })
+    const q = recorded.at(-1)
+    expect(q?.table).toBe('messages')
+    expect(q?.filters).toEqual([
+      ['venue_id', VENUE],
+      ['guest_id', GUEST],
+      // Without this every turn finds its own outbound reply. See above.
+      ['direction', 'inbound'],
+    ])
+  })
+
+  it('bounds on created_at with gte, not gt', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.findNewerInbound({
+      venueId: VENUE,
+      guestId: GUEST,
+      afterCreatedAt: AFTER,
+      afterId: 'msg-1',
+    })
+    // `gte`, deliberately: two messages of one Instagram delivery can share a
+    // millisecond, and a strict `gt` on the timestamp drops the sibling this
+    // query exists to find. `pickNewer`'s id tiebreak excludes the row itself.
+    expect(recorded.at(-1)?.bounds).toEqual([['gte', 'created_at', AFTER.toISOString()]])
+  })
+
+  it('orders on (created_at, id) DESC and takes two', async () => {
+    const deps = defaultCoalesceDeps()
+    await deps.findNewerInbound({
+      venueId: VENUE,
+      guestId: GUEST,
+      afterCreatedAt: AFTER,
+      afterId: 'msg-1',
+    })
+    const q = recorded.at(-1)
+    // Both orders: `created_at` alone is not a total order across one
+    // Instagram batch, which is the tie the claim exists to break safely.
+    expect(q?.orders).toEqual([
+      ['created_at', false],
+      ['id', false],
+    ])
+    // Two rows, not one: with `gte` the first row back can be the anchor
+    // itself, so a limit of 1 would hide a same-millisecond sibling.
+    expect(q?.limit).toBe(2)
+  })
+
+  it('reports a read failure rather than pretending nothing is newer', async () => {
+    nextResult = { data: null, error: { message: 'connection reset' } }
+    const deps = defaultCoalesceDeps()
+    const r = await deps.findNewerInbound({
+      venueId: VENUE,
+      guestId: GUEST,
+      afterCreatedAt: AFTER,
+      afterId: 'msg-1',
+    })
+    // Load-bearing: folded into "nothing newer", a failed read at close time
+    // silences a folded message permanently. findUncoveredInbound's third
+    // state depends on this staying distinguishable.
+    expect(r.ok).toBe(false)
+  })
+})
+
+describe('findUncoveredInbound tells "nothing" apart from "could not check"', () => {
+  const answered = { id: 'msg-1', createdAt: new Date('2026-09-23T15:32:36.000Z') }
+  const turnOf = (enabled: boolean): InboundTurnState => ({
+    claim: { venueId: VENUE, guestId: GUEST },
+    extensionsUsed: 0,
+    answered,
+    enabled,
+  })
+
+  it('reports none when the read succeeded and found nothing', async () => {
+    expect(
+      await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
+        findNewerInbound: async () => ({ ok: true, newer: null }),
+      }),
+    ).toEqual({ status: 'none' })
+  })
+
+  it('reports found when there is something newer', async () => {
+    const message = { id: 'msg-2', createdAt: new Date('2026-09-23T15:32:43.000Z') }
+    expect(
+      await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
+        findNewerInbound: async () => ({ ok: true, newer: message }),
+      }),
+    ).toEqual({ status: 'found', message })
+  })
+
+  /**
+   * THE DISTINCTION THIS TYPE EXISTS FOR. Folded into `none`, a failed read at
+   * close time means no handoff — and the run that would have covered that
+   * message has already stood down, so the guest is silenced permanently with
+   * nothing logged. The old two-state version did exactly that, and its own
+   * docstring claimed every null "means carry on".
+   */
+  it('reports unreadable when the read FAILED, never none', async () => {
+    const r = await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
+      findNewerInbound: async () => ({ ok: false, error: 'connection reset' }),
+    })
+    expect(r).toEqual({ status: 'unreadable', error: 'connection reset' })
+  })
+
+  it('does not look at all when coalescing is off', async () => {
+    let called = false
+    const r = await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(false), {
+      findNewerInbound: async () => {
+        called = true
+        return { ok: true, newer: null }
+      },
+    })
+    expect(r).toEqual({ status: 'none' })
+    expect(called).toBe(false)
   })
 })
