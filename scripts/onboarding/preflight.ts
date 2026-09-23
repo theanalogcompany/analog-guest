@@ -131,15 +131,20 @@ export async function checkCleanState(
       })
     } else {
       for (const slot of PENDING_SLOTS) {
-        const row = pending[slot]
-        if (row === null) continue
-        hits.push({
-          state,
-          phone: phonesByState[state] ?? 'unknown',
-          guestId,
-          kind: 'pending_draft',
-          detail: `message id=${row.id}, slot=${slot}, review_reason=${row.review_reason ?? 'null'}`,
-        })
+        // TAC-397: the conversation slot is many-valued now, so report EVERY
+        // card. Showing one of three would read as "this guest is nearly
+        // clean", which is worse than showing none.
+        const rows = slot === 'obligation' ? [pending.obligation] : pending.conversation
+        for (const row of rows) {
+          if (row === null) continue
+          hits.push({
+            state,
+            phone: phonesByState[state] ?? 'unknown',
+            guestId,
+            kind: 'pending_draft',
+            detail: `message id=${row.id}, slot=${slot}, review_reason=${row.review_reason ?? 'null'}`,
+          })
+        }
       }
     }
     const commitments = await findActiveCommitmentsForGuest({ venueId, guestId })

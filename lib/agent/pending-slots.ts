@@ -32,6 +32,7 @@
 // Inside either slot, TAC-264's regenerate-in-place and TAC-308's knowledge-gap
 // card protection apply unchanged.
 
+import type { MessageCategory } from '@/lib/ai/types'
 import { capturePendingSlotInvariantBroken } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isObligationType, OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
@@ -43,6 +44,7 @@ import {
   isEmptyCommitmentEmission,
   pendingFromEmission,
 } from '@/lib/schemas/guest-commitment'
+import { looksLikeQuestion } from './looks-like-question'
 
 // ===== The slot =====
 
@@ -264,45 +266,102 @@ export interface PendingSlotRow {
   review_reason: string | null
   pending_commitment: unknown
   created_at: string
+  /**
+   * TAC-397: the inbound this card answers. Migration 054 keys the
+   * conversation index on it, so 23505 race recovery reads it to tell "the
+   * same message arrived twice" from "a different message won the slot" —
+   * two situations that need opposite handling and are indistinguishable
+   * without it.
+   */
+  reply_to_message_id: string | null
 }
 
 export interface PendingRowsBySlot {
   obligation: PendingSlotRow | null
-  conversation: PendingSlotRow | null
+  /**
+   * TAC-397: every pending conversation card, OLDEST FIRST.
+   *
+   * Was a single row until migration 054. A guest now holds one conversation
+   * card per unanswered inbound, because a second question gets its own card
+   * rather than regenerating the first one over the top of the earlier one.
+   *
+   * Oldest first so `at(-1)` is the most recently opened card, which is the
+   * only one a correction may ever be matched against (ruled 2026-09-22,
+   * question 2). Read it through mostRecentlyOpenedConversationCard rather
+   * than indexing here, so that ruling has one implementation.
+   */
+  conversation: PendingSlotRow[]
 }
 
 export const EMPTY_PENDING_ROWS: PendingRowsBySlot = Object.freeze({
   obligation: null,
-  conversation: null,
+  // Frozen too: this is a shared singleton, and an unfrozen array on it could
+  // be pushed into by one caller and read by the next.
+  conversation: Object.freeze([]) as unknown as PendingSlotRow[],
 })
 
 export const PENDING_SLOT_ROW_COLUMNS =
-  'id, body, pending_until, review_reason, pending_commitment, created_at'
+  'id, body, pending_until, review_reason, pending_commitment, created_at, reply_to_message_id'
 
-// Two slots, plus one row to notice a broken invariant. With migration 041 live
-// a guest has at most two pending rows, so a third means the indexes are gone.
-const PENDING_ROWS_READ_LIMIT = 3
+/**
+ * TAC-397: was 3 (two slots plus one row to notice a broken invariant), which
+ * was right while migration 041 capped a guest at two pending rows. Migration
+ * 054 caps the conversation slot per INBOUND instead, so the count is bounded
+ * by how many unanswered questions a guest has in flight, not by 2.
+ *
+ * 25 is generous rather than derived. A guest holding 25 unanswered cards is
+ * already a queue-management failure, and hitting the limit is REPORTED (see
+ * loadPendingRowsBySlot) rather than silently truncated.
+ */
+export const PENDING_ROWS_READ_LIMIT = 25
 
 /**
  * Sort a guest's pending rows, OLDEST FIRST, into their slots. Pure.
  *
- * When a slot holds more than one row, which migration 041 makes impossible,
- * the OLDEST is kept: it is the card an operator has been looking at longest,
- * and keeping it matches the queue's own FIFO order. The rest come back in
- * `extra` so the caller can report them rather than silently pick one.
+ * The two slots are treated DIFFERENTLY as of TAC-397, and the asymmetry is
+ * the point:
+ *
+ *   obligation   — still at most one. More than one is an invariant break
+ *                  (migration 041's obligation index is untouched), so the
+ *                  OLDEST is kept — the card an operator has been looking at
+ *                  longest, matching the queue's FIFO order — and the rest
+ *                  come back in `extra` for the caller to report rather than
+ *                  silently discard.
+ *   conversation — many is NORMAL now. Every row is kept, in order. Nothing
+ *                  about a second conversation card is an invariant break,
+ *                  and reporting one as such would have made migration 054's
+ *                  whole purpose look like a fault.
  */
 export function partitionPendingRows(rows: readonly PendingSlotRow[]): {
   rows: PendingRowsBySlot
   extra: PendingSlotRow[]
 } {
-  const bySlot: PendingRowsBySlot = { obligation: null, conversation: null }
+  const bySlot: PendingRowsBySlot = { obligation: null, conversation: [] }
   const extra: PendingSlotRow[] = []
   for (const row of rows) {
-    const slot = pendingSlotOf(row.pending_commitment)
-    if (bySlot[slot] === null) bySlot[slot] = row
+    if (pendingSlotOf(row.pending_commitment) === 'conversation') {
+      bySlot.conversation.push(row)
+      continue
+    }
+    if (bySlot.obligation === null) bySlot.obligation = row
     else extra.push(row)
   }
   return { rows: bySlot, extra }
+}
+
+/**
+ * The card a correction may be matched against, or null when the guest holds
+ * none. THE single implementation of the 2026-09-22 ruling (question 2): only
+ * ever the most recently opened conversation card, never an older one.
+ *
+ * Also what the three non-`regen` caller policies read as "the occupant", so
+ * the decline, the crash card and a manual followup keep treating the slot as
+ * single-occupant exactly as they did before TAC-397.
+ */
+export function mostRecentlyOpenedConversationCard(
+  rows: PendingRowsBySlot,
+): PendingSlotRow | null {
+  return rows.conversation.at(-1) ?? null
 }
 
 /**
@@ -336,7 +395,18 @@ export async function loadPendingRowsBySlot(
       .eq('guest_id', guestId)
       .eq('direction', 'outbound')
       .eq('review_state', 'pending')
-      .order('created_at', { ascending: true })
+      // TAC-397: DESCENDING, then reversed below. This is the TAC-316
+      // DESC-window pattern and the ordering is load-bearing, not a
+      // preference.
+      //
+      // With `ascending: true` a guest over the limit loses their NEWEST
+      // cards — which is precisely the one a correction must be matched
+      // against (mostRecentlyOpenedConversationCard), and precisely the one
+      // the gate needs to decide whether this turn regenerates or inserts.
+      // TAC-316 shipped exactly that bug in the Command Center's own
+      // conversation query: `ASC LIMIT 200` kept the OLDEST 200 rows and hid
+      // everything newer the night Mock Sextant crossed the cap.
+      .order('created_at', { ascending: false })
       .limit(PENDING_ROWS_READ_LIMIT)
     if (result.error) {
       console.warn(
@@ -344,7 +414,8 @@ export async function loadPendingRowsBySlot(
       )
       return null
     }
-    data = (result.data ?? []) as PendingSlotRow[]
+    // Newest-first off the wire, oldest-first for every consumer.
+    data = ((result.data ?? []) as PendingSlotRow[]).slice().reverse()
   } catch (e) {
     console.warn(
       `[agent] loadPendingRowsBySlot threw for venue=${venueId} guest=${guestId}: ${
@@ -354,23 +425,43 @@ export async function loadPendingRowsBySlot(
     return null
   }
 
-  const { rows, extra } = partitionPendingRows(data)
-  if (extra.length > 0) {
-    // Unreachable while migration 041 is live. Kept loud rather than silent,
-    // and Slack-relayed, because this is the one signal that the indexes are gone.
-    console.error('[agent] pending-slot invariant broken: more than one pending row in a slot', {
+  // TAC-397: hitting the read limit means rows were dropped, and the ones
+  // dropped are the guest's OLDEST cards (see the DESC ordering above). That
+  // is the right end to lose, but it is still a truncation, and an obligation
+  // card older than 25 conversation cards would fall outside the window and
+  // read as an empty obligation slot. Loud rather than silent; the same
+  // channel as the invariant break below, because the consequence is the
+  // same — the gate is deciding against an incomplete picture.
+  if (data.length >= PENDING_ROWS_READ_LIMIT) {
+    console.error('[agent] pending-slot read hit its limit; older cards were not read', {
       venueId,
       guestId,
-      keptObligationId: rows.obligation?.id ?? null,
-      keptConversationId: rows.conversation?.id ?? null,
-      extraIds: extra.map((r) => r.id),
+      limit: PENDING_ROWS_READ_LIMIT,
     })
+  }
+
+  const { rows, extra } = partitionPendingRows(data)
+  if (extra.length > 0) {
+    // TAC-397: OBLIGATION slot only. A second conversation card is normal
+    // since migration 054 and is not reported here. Unreachable while
+    // migration 041's obligation index is live. Kept loud rather than silent,
+    // and Slack-relayed, because this is the one signal that index is gone.
+    console.error(
+      '[agent] pending-slot invariant broken: more than one pending row in the obligation slot',
+      {
+        venueId,
+        guestId,
+        keptObligationId: rows.obligation?.id ?? null,
+        keptConversationId: mostRecentlyOpenedConversationCard(rows)?.id ?? null,
+        extraIds: extra.map((r) => r.id),
+      },
+    )
     try {
       await capturePendingSlotInvariantBroken({
         venueId,
         guestId,
         keptObligationId: rows.obligation?.id ?? null,
-        keptConversationId: rows.conversation?.id ?? null,
+        keptConversationId: mostRecentlyOpenedConversationCard(rows)?.id ?? null,
         extraIds: extra.map((r) => r.id),
       })
     } catch {
@@ -397,6 +488,128 @@ export async function loadPendingRowsBySlot(
  */
 export type SlotCallerPolicy = 'regen' | 'regen_always' | 'regen_gap_card_only' | 'never_regen'
 
+/**
+ * TAC-397: what a guest's new message does to the conversation card they
+ * already have waiting. The three cases from the ticket's own spec.
+ *
+ *   own_card    it needs its own answer. A new card; the pending one is
+ *               untouched. Also the answer whenever nothing is pending.
+ *   no_answer   it needs no answer at all ("haha", "thanks"). Nothing is
+ *               generated into a row and nothing is regenerated.
+ *   correction  it amends the question the pending card is answering. That
+ *               card is regenerated in place and keeps the text it replaced.
+ */
+export type ConversationDisposition = 'own_card' | 'no_answer' | 'correction'
+
+/**
+ * Categories whose own classifier definitions already mean "no question or
+ * request in this message":
+ *
+ *   acknowledgment  "acknowledging, signing off, or otherwise closing a
+ *                   thread without a question or request"
+ *   casual_chatter  "small talk or an unprompted casual comment without
+ *                   asking a question"
+ *
+ * Narrower than the ticket's "acknowledgement, reaction, chatter" on purpose.
+ * A reaction with no text never reaches the agent at all, and every other
+ * category can carry something worth answering.
+ */
+const NO_ANSWER_CATEGORIES: ReadonlySet<string> = new Set<MessageCategory>([
+  'acknowledgment',
+  'casual_chatter',
+])
+
+export interface ConversationDispositionInput {
+  /** Whether the guest already holds at least one pending conversation card. */
+  hasConversationOccupant: boolean
+  /** This turn's classified category; null on a run with no inbound. */
+  category: MessageCategory | null
+  /** The classifier's judgement (TAC-397). False on a run with no inbound. */
+  correctsPendingReply: boolean
+  /** The guest's message; null on a followup, the decline, the crash card. */
+  inboundBody: string | null
+}
+
+/**
+ * Which of the three cases this turn is. Pure.
+ *
+ * Order matters and each step is a decision:
+ *
+ * 1. NOTHING PENDING -> own_card. This is the safety bound on the whole
+ *    mechanism: `no_answer` is UNREACHABLE unless a card is already waiting,
+ *    so a misjudged silence can never be the reason a guest gets nothing at
+ *    all — only the reason they get nothing EXTRA while an operator already
+ *    holds a card for them. Before TAC-397 that same message overwrote the
+ *    card, so even a wrong silence is strictly better than the old behaviour.
+ *
+ * 2. correctsPendingReply -> correction, checked BEFORE the chatter test. A
+ *    correction phrased casually ("oh wait, oat milk actually") still
+ *    corrects, and reading it as chatter would silence the one message that
+ *    must not be silenced.
+ *
+ * 3. A no-question category AND a body that does not read as a question ->
+ *    no_answer.
+ *
+ *    The AND is doing the safety work here, not looksLikeQuestion. That
+ *    function is deliberately precision-biased (TAC-484) — its own test pins
+ *    `looksLikeQuestion('tell me the wifi password') === false` — and TAC-484
+ *    uses it where a false return costs a nudge. Here a false return argues
+ *    for SILENCE, the opposite direction, so it is never trusted alone: an
+ *    imperative request would also have to classify as acknowledgment or
+ *    casual_chatter before anything is silenced.
+ *
+ * 4. Anything else -> own_card. The ticket's "when unsure, choose case 1":
+ *    a separate card never loses content, a wrong regen can lose a question.
+ */
+export function resolveConversationDisposition(
+  input: ConversationDispositionInput,
+): ConversationDisposition {
+  if (!input.hasConversationOccupant) return 'own_card'
+  if (input.correctsPendingReply) return 'correction'
+  if (
+    input.category !== null &&
+    NO_ANSWER_CATEGORIES.has(input.category) &&
+    !looksLikeQuestion(input.inboundBody ?? '')
+  ) {
+    return 'no_answer'
+  }
+  return 'own_card'
+}
+
+/**
+ * TAC-397: does this turn produce NO write at all?
+ *
+ * Shared by the approval gate and decideSlotAction, and it has to be, because
+ * the two ask it at different moments. The gate must ask BEFORE its
+ * `triggers.length === 0 -> send` return: a clean reply to "haha" fires no
+ * trigger, so by the time decideSlotAction runs the gate has already sent it.
+ * decideSlotAction asks again for the queue path and for 23505 recovery.
+ *
+ * Two conditions beyond the disposition itself, and both matter:
+ *
+ *   slot === 'conversation'  a draft carrying a comp, hold or discount goes to
+ *                            the obligation slot and is never silenced by a
+ *                            judgement about conversational chatter. If the
+ *                            model answered "haha" with a comp, that is a
+ *                            comp and an operator sees it.
+ *   callerPolicy === 'regen' only a guest's own inbound can be judged. A
+ *                            followup, the decline and the crash card have no
+ *                            message to read.
+ */
+export function silencesConversationTurn(input: {
+  slot: PendingSlot
+  callerPolicy: SlotCallerPolicy
+  disposition: ConversationDisposition | null
+  hasOccupant: boolean
+}): boolean {
+  return (
+    input.slot === 'conversation' &&
+    input.callerPolicy === 'regen' &&
+    input.hasOccupant &&
+    (input.disposition ?? 'own_card') === 'no_answer'
+  )
+}
+
 export type SlotDropReason =
   | 'obligation_slot_taken'
   | 'knowledge_gap_card_protected'
@@ -404,7 +617,25 @@ export type SlotDropReason =
 
 export type SlotDecision =
   | { action: 'insert'; slot: PendingSlot }
-  | { action: 'regen'; slot: PendingSlot; draftId: string }
+  | {
+      action: 'regen'
+      slot: PendingSlot
+      draftId: string
+      /**
+       * TAC-397: capture the body this card held before the UPDATE, so the
+       * operator can compare. True ONLY on a correction — every other regen
+       * (the decline, the crash card, a gap card refreshed by a second
+       * unanswerable question) clears the columns instead, so a card since
+       * overwritten for an unrelated reason never keeps a stale correction's
+       * text.
+       */
+      captureReplacedDraft: boolean
+    }
+  // TAC-397: the guest's message needs no answer and a card is already
+  // waiting. Nothing is written and nothing is regenerated. DISTINCT from
+  // `drop`, which means a draft competed for a slot and lost — here nothing
+  // competed, and there was never a reply worth keeping.
+  | { action: 'silence'; slot: 'conversation' }
   | { action: 'drop'; slot: PendingSlot; reason: SlotDropReason; protectedDraftId: string }
 
 export interface SlotDecisionInput {
@@ -416,6 +647,21 @@ export interface SlotDecisionInput {
   /** The grounding check truncated (TAC-367). Exempt from gap-card protection. */
   checkDidNotComplete: boolean
   callerPolicy: SlotCallerPolicy
+  /**
+   * TAC-397: what this turn does to the conversation card, from
+   * resolveConversationDisposition. Read ONLY by the `regen` policy.
+   *
+   * Required but nullable, so every call site states a value rather than
+   * inheriting one by omission. `null` means "no guest inbound to judge" —
+   * an engine followup, the decline, the crash card, the Instagram
+   * send-failed card.
+   *
+   * A `null` disposition keeps the PRE-TAC-397 behaviour for the conversation
+   * slot: regenerate in place. It must not become `own_card`, because every
+   * proactive run shares migration 054's sentinel key and so cannot hold a
+   * second card — see the branch in decideSlotAction for what that costs.
+   */
+  conversationDisposition: ConversationDisposition | null
 }
 
 /**
@@ -438,14 +684,77 @@ export interface SlotDecisionInput {
  *   4. regen_always: regenerate.
  *   5. regen_gap_card_only: regenerate a knowledge-gap card, refuse anything
  *      else.
- *   6. regen: TAC-308 protects a knowledge-gap card from a turn that is not
- *      itself a gap turn, unless only the grounding check truncated (a draft
- *      nobody could read the verdict for is handed to an operator, never
- *      destroyed; see TAC-367 in stages.ts). Anything else regenerates in place.
+ *   6. regen: the conversation slot consults the DISPOSITION (TAC-397); the
+ *      obligation slot keeps TAC-308's knowledge-gap protection, which
+ *      protects a gap card from a turn that is not itself a gap turn unless
+ *      only a check failed to complete (a draft nobody could read the verdict
+ *      for is handed to an operator, never destroyed; see TAC-367 in
+ *      stages.ts).
  */
 export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
   const slot = pendingSlotOf(input.draftCommitment)
-  const occupant = input.rows[slot]
+  const occupant =
+    slot === 'obligation' ? input.rows.obligation : mostRecentlyOpenedConversationCard(input.rows)
+
+  // TAC-397: on the conversation slot the `regen` policy decides from the
+  // DISPOSITION first, because "this message deserves its own card" is true
+  // whether or not a card is already there. An occupant is no longer, on its
+  // own, a reason to do anything to it.
+  //
+  // This is also where TAC-308's protected-card DROP disappears for this
+  // path, per the 2026-09-22 ruling (question 3): that drop existed only to
+  // stop an unrelated turn overwriting a knowledge-gap card, and an unrelated
+  // turn now inserts its own card instead. Nothing is overwritten, so nothing
+  // needs protecting. A CORRECTION reaching a gap card is not unrelated by
+  // definition — it amends the very question the card is stuck on — so it is
+  // allowed to regenerate it.
+  //
+  // `conversationDisposition !== null` is what scopes this to a run that HAS a
+  // guest message, and it is load-bearing rather than defensive. Migration
+  // 054's index folds a NULL `reply_to_message_id` onto one sentinel, so every
+  // proactive run (an engine followup, the decline, the crash card) shares a
+  // single conversation key and CANNOT have a card of its own. Returning
+  // `insert` for one produces a 23505 that recovery cannot converge on — it
+  // has no inbound to match, decides `insert` again, exhausts
+  // RACE_RECOVERY_MAX_ATTEMPTS and throws. For an engine followup that is a
+  // red alert every tick AND a permanently burned dedup claim, because
+  // `followups/engine.ts` keeps the claim on a persist-stage failure.
+  //
+  // So a proactive run falls through to the switch below and keeps its
+  // pre-TAC-397 behaviour exactly. That is also the honest reading of the
+  // ticket: its three cases are about a guest's second MESSAGE, and a run with
+  // no message is not one of them.
+  if (
+    slot === 'conversation' &&
+    input.callerPolicy === 'regen' &&
+    input.conversationDisposition !== null
+  ) {
+    const disposition = input.conversationDisposition
+    if (
+      silencesConversationTurn({
+        slot,
+        callerPolicy: input.callerPolicy,
+        disposition,
+        hasOccupant: occupant !== null,
+      })
+    ) {
+      return { action: 'silence', slot: 'conversation' }
+    }
+    if (occupant !== null && disposition === 'correction') {
+      return {
+        action: 'regen',
+        slot: 'conversation',
+        draftId: occupant.id,
+        captureReplacedDraft: true,
+      }
+    }
+    // own_card, or a disposition whose target vanished between the read that
+    // produced it and this call. Either way: its own card. Falling through to
+    // an insert on a vanished target is deliberate — a fresh read reflects
+    // reality, and inserting is the harmless direction.
+    return { action: 'insert', slot: 'conversation' }
+  }
+
   if (occupant === null) return { action: 'insert', slot }
 
   const drop = (reason: SlotDropReason): SlotDecision => ({
@@ -462,20 +771,25 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
     return drop('obligation_slot_taken')
   }
 
+  // TAC-397: every regen below is a NON-correction, so none captures a
+  // replaced draft. The obligation slot never does either — it is out of this
+  // ticket's scope entirely.
   switch (input.callerPolicy) {
     case 'never_regen':
       return drop('slot_occupied')
     case 'regen_always':
-      return { action: 'regen', slot, draftId: occupant.id }
+      return { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
     case 'regen_gap_card_only':
       return isKnowledgeGapCard(occupant)
-        ? { action: 'regen', slot, draftId: occupant.id }
+        ? { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
         : drop('slot_occupied')
     case 'regen':
+      // Only reachable for the OBLIGATION slot: the conversation branch
+      // returned above. TAC-308's protection and TAC-367's exemption unchanged.
       if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.checkDidNotComplete) {
         return drop('knowledge_gap_card_protected')
       }
-      return { action: 'regen', slot, draftId: occupant.id }
+      return { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
   }
 }
 
@@ -492,16 +806,35 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
 export function anyKnowledgeGapCard(rows: PendingRowsBySlot): boolean {
   return (
     (rows.obligation !== null && isKnowledgeGapCard(rows.obligation)) ||
-    (rows.conversation !== null && isKnowledgeGapCard(rows.conversation))
+    // TAC-397: EVERY conversation card, not just the newest. A guest can hold
+    // several, and the clock is the guest's: one gap card anywhere is enough
+    // to stop a second holding message.
+    rows.conversation.some((row) => isKnowledgeGapCard(row))
   )
 }
 
-/** The card in the slot a draft does NOT land in. For analytics only. */
-export function otherSlotOccupant(
+/**
+ * The card occupying a named slot, or null. TAC-397: the conversation slot is
+ * an array, so "the occupant" is the most recently opened card there — the
+ * same one decideSlotAction and a correction both target. Used by the two drop
+ * reports, which need the protected card's carrier.
+ */
+export function occupantOfSlot(rows: PendingRowsBySlot, slot: PendingSlot): PendingSlotRow | null {
+  return slot === 'obligation' ? rows.obligation : mostRecentlyOpenedConversationCard(rows)
+}
+
+/**
+ * Whether the slot a draft does NOT land in holds anything. For analytics only.
+ *
+ * TAC-397: returns a boolean rather than the row. Both call sites only ever
+ * asked `!== null`, and the conversation slot no longer has "the" row.
+ */
+export function otherSlotOccupied(
   rows: PendingRowsBySlot,
   draftCommitment: CommitmentIdentity | null,
-): PendingSlotRow | null {
-  return rows[otherSlot(pendingSlotOf(draftCommitment))]
+): boolean {
+  const other = otherSlot(pendingSlotOf(draftCommitment))
+  return other === 'obligation' ? rows.obligation !== null : rows.conversation.length > 0
 }
 
 /**

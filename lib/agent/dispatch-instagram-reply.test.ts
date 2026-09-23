@@ -77,7 +77,13 @@ function makeCtx(): RuntimeContext {
     intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
     knowledgeCorpus: null,
-    classification: { category: 'new_question', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false },
+    classification: {
+      category: 'new_question',
+      classifierConfidence: 0.9,
+      reasoning: 'r',
+      crisisSafety: false,
+      correctsPendingReply: false,
+    },
     trace: { id: 'trace-1' } as RuntimeContext['trace'],
   }
 }
@@ -621,7 +627,7 @@ describe('writeInstagramSendFailureCard', () => {
 
   beforeEach(() => {
     guestReadMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
-    loadPendingRowsMock.mockResolvedValue({ obligation: null, conversation: null })
+    loadPendingRowsMock.mockResolvedValue({ obligation: null, conversation: [] })
     persistOrRegenMock.mockResolvedValue({ action: 'inserted', outboundMessageId: 'card-9', priorReviewReason: null })
   })
 
@@ -714,7 +720,7 @@ describe('writeInstagramSendFailureCard', () => {
   it("never overwrites a card already in the slot, such as the operator's knowledge-gap question", async () => {
     loadPendingRowsMock.mockResolvedValue({
       obligation: null,
-      conversation: { id: 'gap-card', pending_commitment: null, pending_until: NOW.toISOString(), review_reason: 'knowledge_gap' },
+      conversation: [{ id: 'gap-card', pending_commitment: null, pending_until: NOW.toISOString(), review_reason: 'knowledge_gap' }],
     })
     expect(await writeInstagramSendFailureCard({ ctx: makeCtx(), generation: gen, carrier: true })).toEqual({
       ok: false,

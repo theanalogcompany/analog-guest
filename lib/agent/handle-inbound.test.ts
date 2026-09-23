@@ -353,7 +353,7 @@ beforeEach(() => {
       secondaryTags: [],
     },
   ])
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
     action: 'inserted',
@@ -508,14 +508,14 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
     // conversation-slot card: the slot the blank crash card would take.
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: {
+      conversation: [{
         id: 'comp-draft',
         body: "the next one's on us",
         pending_until: null,
         review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
         pending_commitment: null,
         created_at: '2026-09-14T16:00:00.000Z',
-      },
+      }],
     })
     const r = await handleInbound(INBOUND_ID)
     expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
@@ -527,14 +527,14 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
   it('updates an existing gap card in place without re-arming its clock', async () => {
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: {
+      conversation: [{
         id: 'gap-card',
         body: '',
         pending_until: new Date(Date.now() + 60_000).toISOString(),
         review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
         pending_commitment: null,
         created_at: '2026-09-14T16:00:00.000Z',
-      },
+      }],
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
@@ -561,7 +561,7 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
         },
         created_at: '2026-09-14T16:00:00.000Z',
       },
-      conversation: null,
+      conversation: [],
     })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'queued', outboundMessageId: 'card-1' })
@@ -635,7 +635,7 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
         },
         created_at: '2026-09-14T16:00:00.000Z',
       },
-      conversation: null,
+      conversation: [],
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
@@ -674,6 +674,22 @@ describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
   // whoever reads it may be reading it mid-incident. toEqual on the payload: an
   // alert that quietly lost the guest's name or one of the offers is the
   // defect, and a partial match would pass it.
+  // TAC-397: the orchestrator half of case 2. tsc covers the shape; this
+  // covers that nothing is written and nothing is sent — the two facts the
+  // guest and the operator actually experience.
+  it('writes nothing and sends nothing on a silenced turn', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'silence' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'silenced' })
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+    log.mockRestore()
+  })
+
   it('reports a gate-time drop with both commitments and the guest, and writes nothing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     applyApprovalPolicyStageMock.mockResolvedValue({
@@ -791,7 +807,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.61.0',
+    promptVersion: 'v1.62.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

@@ -238,6 +238,116 @@ describe('listPendingQueue', () => {
     for (const d of result.drafts) expect(typeof d.guestPhoneFallback).toBe('string')
   })
 
+  // -------------------------------------------------------------------------
+  // TAC-397: replacedDraft, and otherPendingDraftsForGuest losing its bound.
+  //
+  // Contract surface. The shapes below are transcribed from the ticket's
+  // `## Contract` section, not read back out of the projection — an assertion
+  // written by reading the implementation can only confirm the implementation
+  // equals itself, which is how TAC-310 certified a live defect on every green
+  // run (CLAUDE.md, Cross-repo contracts rule 5).
+  // -------------------------------------------------------------------------
+  describe('replacedDraft (TAC-397 Contract)', () => {
+    const base = {
+      draft_id: 'd1',
+      venue_id: 'v1',
+      venue_slug: 'x',
+      guest_id: 'g1',
+      guest_display_name: null,
+      guest_phone: '+15555550005',
+      guest_opted_out_at: null,
+      draft_body: 'hi',
+      category: null,
+      voice_fidelity: null,
+      recognition_state: null,
+      created_at: '2026-05-12T20:00:00.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+      review_reason: 'category_requires_approval',
+    }
+
+    async function draftFor(over: Record<string, unknown>) {
+      rpcMock.mockResolvedValue({ data: [{ ...base, ...over }], error: null })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error('unreachable')
+      return result.drafts[0]!
+    }
+
+    // The acceptance criterion, stated as the Contract states it: always
+    // present, null on every draft a correction did not regenerate.
+    it('is null on a draft with no replaced text, never undefined', async () => {
+      const draft = await draftFor({ replaced_draft_body: null, replaced_draft_at: null })
+      expect(draft.replacedDraft).toBeNull()
+      expect('replacedDraft' in draft).toBe(true)
+    })
+
+    it('is null on a row that predates the migration (both columns absent)', async () => {
+      const draft = await draftFor({})
+      expect(draft.replacedDraft).toBeNull()
+    })
+
+    it('carries the prior body and an ISO timestamp on a corrected draft', async () => {
+      const draft = await draftFor({
+        review_reason: 'previous_pending_held',
+        replaced_draft_body: 'we have oat and whole milk',
+        replaced_draft_at: '2026-09-21T16:10:29.000Z',
+      })
+      expect(draft.replacedDraft).toEqual({
+        body: 'we have oat and whole milk',
+        replacedAt: '2026-09-21T16:10:29.000Z',
+      })
+    })
+
+    // A half-written pair must not reach the client as `{ body, replacedAt:
+    // null }`: the Contract promises a string. The persist layer writes both
+    // or neither, but that guarantee lives in another file.
+    it.each([
+      ['no timestamp', { replaced_draft_body: 'prior text', replaced_draft_at: null }],
+      ['no body', { replaced_draft_body: null, replaced_draft_at: '2026-09-21T16:10:29.000Z' }],
+      ['empty body', { replaced_draft_body: '', replaced_draft_at: '2026-09-21T16:10:29.000Z' }],
+    ])('is null when the pair is incomplete (%s)', async (_label, over) => {
+      const draft = await draftFor(over)
+      expect(draft.replacedDraft).toBeNull()
+    })
+  })
+
+  describe('otherPendingDraftsForGuest may exceed 1 (TAC-397 Contract)', () => {
+    // Migration 054 lets a guest hold one conversation card per unanswered
+    // inbound, so the count is no longer bounded at 1. No code changed for
+    // this — the projection never had a bound — which is exactly why it needs
+    // a test: nothing would have failed if it had acquired one.
+    it('passes a count above 1 through unchanged', async () => {
+      rpcMock.mockResolvedValue({
+        data: [
+          {
+            draft_id: 'd1',
+            venue_id: 'v1',
+            venue_slug: 'x',
+            guest_id: 'g1',
+            guest_display_name: null,
+            guest_phone: '+15555550005',
+            guest_opted_out_at: null,
+            draft_body: 'hi',
+            category: null,
+            voice_fidelity: null,
+            recognition_state: null,
+            created_at: '2026-05-12T20:00:00.000Z',
+            langfuse_trace_id: null,
+            recent_context: null,
+            review_reason: 'category_requires_approval',
+            other_pending_for_guest: 3,
+          },
+        ],
+        error: null,
+      })
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.drafts[0]!.otherPendingDraftsForGuest).toBe(3)
+    })
+  })
+
   describe('reviewReason normalization', () => {
     const baseRow = {
       draft_id: 'd1',
@@ -273,7 +383,10 @@ describe('listPendingQueue', () => {
     // review_state='pending', so neither can reach a card.
     const COPY_TABLE: ReadonlyArray<readonly [string, string]> = [
       // --- Obligation ---
-      ['commitment_type_gated', 'This offers something free. Your call.'],
+      // TAC-397: transcribed from the 2026-09-22 ruling comment on the ticket,
+      // which approved this wording verbatim. Never read back out of
+      // REVIEW_REASON_LABELS.
+      ['commitment_type_gated', 'This commits you to something. Your call.'],
       ['comp_regex_backstop', "This sounds like it's offering something on the house."],
       [
         'complaint_commitment_floor',
@@ -322,7 +435,9 @@ describe('listPendingQueue', () => {
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a
       // welcome reply to "Hi Himanshu!" with no complaint anywhere in it.
-      ['category_requires_approval', 'You chose to review these yourself.'],
+      // TAC-397: transcribed from the same 2026-09-22 ruling. Same discipline
+      // as the row above.
+      ['category_requires_approval', 'Replies like this one always come to you.'],
       // --- The draft came out wrong ---
       ['model_flagged', 'Something felt off about this one.'],
       ['self_talk_detected', 'I was talking about myself instead of to the guest.'],
@@ -358,7 +473,18 @@ describe('listPendingQueue', () => {
       // may have gone through.
       [INSTAGRAM_SEND_FAILED_REVIEW_REASON, "This reply didn't send on Instagram. Check the thread before sending it again."],
       // --- You're mid-thread with this guest ---
-      ['previous_pending_held', 'Held behind an earlier message to this guest.'],
+      // TAC-397: transcribed from the 2026-09-22 ruling comment on the
+      // ticket, which approved this wording verbatim. Never read back out of
+      // REVIEW_REASON_LABELS.
+      //
+      // The 2026-09-15 ruling on this same label is SUPERSEDED: it approved
+      // 'Waiting — this guest has another card open', which described the
+      // trigger's TAC-394 meaning. TAC-397 narrows the trigger to fire only on
+      // a correction, so that wording would be wrong too.
+      [
+        'previous_pending_held',
+        'You updated this after the guest wrote again. Check it still answers everything.',
+      ],
       [
         'operator_decline_initiated',
         "You passed on the last one, so here's another go.",
@@ -486,7 +612,7 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         expect(result.drafts[0]!.reviewReasonCode).toBe('commitment_type_gated')
         expect(result.drafts[0]!.reviewReason).toBe(
-          'This offers something free. Your call.',
+          'This commits you to something. Your call.',
         )
       }
     })
@@ -561,7 +687,7 @@ describe('listPendingQueue', () => {
         const d = result.drafts[0]!
         expect(d.reviewTriggerLabels).toEqual([
           "This doesn't sound enough like you.",
-          'This offers something free. Your call.',
+          'This commits you to something. Your call.',
           // Unrecognized code still renders something rather than leaking a
           // raw identifier at an operator.
           'Needs review',
@@ -572,7 +698,7 @@ describe('listPendingQueue', () => {
         // length check passes any permutation.
         expect(d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]])).toEqual([
           ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
-          ['commitment_type_gated', 'This offers something free. Your call.'],
+          ['commitment_type_gated', 'This commits you to something. Your call.'],
           ['gibberish_unknown_code', 'Needs review'],
         ])
       }

@@ -600,6 +600,32 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
         retrievedKnowledge,
       }
     }
+    // TAC-397: the guest's message needed no answer and a card was already
+    // waiting, so nothing was written.
+    //
+    // It reuses the 'dropped' outcome because `ScenarioOutcome` has no
+    // 'silenced' member and adding one would ripple through every grader and
+    // sheet column for a turn shape the harness's scenarios do not currently
+    // produce (they run one inbound against an empty slot). What distinguishes
+    // it on a Run row is the primary trigger, which is why that is spelled out
+    // rather than left as the drop reason. If the harness ever seeds a pending
+    // card, give this its own outcome.
+    if (decision.action === 'silence') {
+      return {
+        ...base,
+        outcome: 'dropped',
+        replyBody: generated.body,
+        voiceFidelity: generated.voiceFidelity,
+        route: 'drop',
+        triggers: [],
+        primaryTrigger: 'silenced_no_answer_needed',
+        wouldBlankBody: false,
+        errorMessage: null,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
+    }
     // action === 'drop' (TAC-308: knowledge-gap card protection)
     return {
       ...base,

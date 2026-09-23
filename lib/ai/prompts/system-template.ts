@@ -833,6 +833,27 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.62.0 (TAC-397): NO change to any rule, block or wording in this file.
+// The bump is here because the CLASSIFIER imports PROMPT_VERSION from this
+// module (lib/ai/classify-message.ts) and stamps it on its own output, and
+// TAC-397 adds a field and a paragraph to the classifier's prompt. A
+// classifier whose behaviour changed while its provenance stamp stood still
+// would make two genuinely different classifier versions indistinguishable on
+// the row.
+//
+// The new field is `correctsPendingReply`: whether a guest's message amends
+// the question a still-unapproved reply is answering. It routes that message
+// to a regeneration of the waiting reply rather than to a card of its own.
+//
+// Nothing in the generation prompt moved. If you are diffing v1.61.0 against
+// v1.62.0 looking for a wording change here, there isn't one.
+//
+// Built as v1.60.0 and renumbered TWICE on rebases: TAC-423 took v1.60.0 and
+// TAC-520 then took v1.61.0, both while this branch was building. Three
+// tickets bumping one constant in a night is not a merge artefact to resolve
+// by taking the highest — they are different changes, so this takes the next
+// free number and every entry stays. Re-check the constant on main before
+// assuming a number is free; it moved under this branch twice.//
 // READ THE MEASUREMENT RUN LOGS BY GIT SHA, NOT BY PROMPT VERSION. The WIDE
 // draft of R36 — the one that failed and was cut — also carried v1.61.0 while
 // it was in flight, so run logs stamped v1.61.0 may hold either that draft or
@@ -935,8 +956,7 @@ import {
 // Date-adjacent siblings, checked and unchanged: R2 (which answer to give for
 // "now", and the only other rule pointing at ## Right now), R8 (never invent),
 // R9 and R16 (never name a time an answer will arrive), R15 (don't volunteer a
-// past visit's date).
-//
+// past visit's date).//
 // v1.60.0 (TAC-423): the `## What you're hoping to get to` first-visit opener
 // states the situation, asks what the guest just got, and prescribes nothing
 // else. The question is SCAFFOLDING and the block comment at FIRST_TOUCH_OPENER
@@ -1334,7 +1354,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.61.0'
+export const PROMPT_VERSION = 'v1.62.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

@@ -260,6 +260,8 @@ export async function handleHoldingMessage(input: {
       reasoning: 'TAC-308 holding message (system-initiated, not classified)',
       // TAC-348: system-initiated, not a guest message — never applicable.
       crisisSafety: false,
+    // TAC-397: no guest inbound on this path — see handle-followup.ts.
+      correctsPendingReply: false,
     }
 
     // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message
@@ -509,7 +511,15 @@ async function tryGenerateHolding(
   if (approval.action !== 'send') {
     console.warn(
       `[agent] holding message attempt ${attempt} blocked by approval gate (${approval.action}) for guest=${ctx.guest.id}`,
-      { agentRunId, triggers: approval.triggers },
+      {
+        agentRunId,
+        // TAC-397: 'silence' carries no triggers — it is not a gate verdict
+        // about the draft, it is "there was nothing to answer". Structurally
+        // unreachable here anyway (this path synthesizes a classification with
+        // no inbound, so the disposition is always own_card), but the log line
+        // must not assume every non-send decision has a trigger set.
+        triggers: approval.action === 'silence' ? [] : approval.triggers,
+      },
     )
     return null
   }

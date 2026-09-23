@@ -53,7 +53,8 @@ import {
   draftCommitmentIdentity,
   EMPTY_PENDING_ROWS,
   loadPendingRowsBySlot,
-  otherSlotOccupant,
+  occupantOfSlot,
+  otherSlotOccupied,
   type SlotDropReason,
 } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
@@ -214,6 +215,8 @@ export async function handleOperatorDecline(input: {
       reasoning: `Operator-initiated decline of commitment ${input.commitmentId}`,
       // TAC-348: operator-initiated, not a guest message — never applicable.
       crisisSafety: false,
+    // TAC-397: no guest inbound on this path — see handle-followup.ts.
+      correctsPendingReply: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's
@@ -413,6 +416,9 @@ export async function handleOperatorDecline(input: {
         isGapTurn: false,
         checkDidNotComplete: false,
         callerPolicy: 'regen_always',
+        // TAC-397: no guest inbound on this path, so nothing can be
+        // correcting a pending reply. Only the `regen` policy reads this.
+        conversationDisposition: null,
       })
       const liveCtx = ctx
       const reportDrop = async (drop: {
@@ -467,7 +473,7 @@ export async function handleOperatorDecline(input: {
           reason: slotDecision.reason,
           protectedDraftId: slotDecision.protectedDraftId,
           protectedCommitment: commitmentIdentityOf(
-            pendingRows[slotDecision.slot]?.pending_commitment ?? null,
+            occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ?? null,
           ),
           droppedCommitment: draftCommitment,
         })
@@ -481,6 +487,13 @@ export async function handleOperatorDecline(input: {
       )
       if (persistResult.action === 'dropped') {
         return await reportDrop(persistResult)
+      }
+      if (persistResult.action === 'silenced') {
+        // TAC-397: unreachable — the decline is regen_always, which
+        // never silences. Handled because that guarantee lives in
+        // pending-slots.ts and a null id typed `string` is the bug
+        // nobody finds until a card has no id.
+        return { status: 'silenced' }
       }
       const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
       queueSpan.end({
@@ -535,7 +548,7 @@ export async function handleOperatorDecline(input: {
           compRegexMatchedPattern: null,
           hasPreviousPending: slotDecision.action === 'regen',
           slot: slotDecision.slot,
-          otherSlotOccupied: otherSlotOccupant(pendingRows, draftCommitment) !== null,
+          otherSlotOccupied: otherSlotOccupied(pendingRows, draftCommitment),
           kind: 'followup',
           category,
           inboundBody: null,

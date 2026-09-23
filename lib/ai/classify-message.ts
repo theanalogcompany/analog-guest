@@ -57,6 +57,12 @@ const ClassifiedMessageSchema = z.object({
   // fits best. Never `.optional()`, matching the repo's explicit-presence
   // convention for structured-output fields (THE-157 / TAC-212 precedent).
   crisisSafety: z.boolean(),
+  // TAC-397: independent of category, same shape and same reasoning as
+  // crisisSafety above — one boolean on the existing call, never `.optional()`.
+  // True only when this message amends the question a still-unapproved reply
+  // is answering. It is what tells the approval gate to regenerate that reply
+  // in place instead of giving this message its own card.
+  correctsPendingReply: z.boolean(),
 })
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
@@ -83,6 +89,8 @@ Separately from category, set crisisSafety to true when the message expresses ei
   - Self-harm or suicidal ideation: the guest indicates they may hurt themselves, wants to die, doesn't see the point of continuing, or similar. ("I don't really see the point of anything anymore", "I want to end it", "I don't want to be here anymore" used in a self-harm sense.)
   - An immediate medical emergency or physical danger: a severe allergic reaction, difficulty breathing, chest pain, choking, an injury in progress, or a similar statement that someone needs help right now.
 Set crisisSafety to false for everything else, including hyperbole and idiom that merely uses this language ("this coffee is to die for", "dying to try this place", "I'm dying laughing", "this latte is a matter of life and death"). When genuinely ambiguous between hyperbole and a real signal, prefer true — a false positive here costs one unnecessary safety message; a false negative costs missing a guest who needs help.
+
+Separately again, set correctsPendingReply. Recent conversation may include a venue line marked NOT SENT — a reply the venue has drafted but not yet approved. That marker also appears on replies the venue decided not to send; judge only against one that is waiting for the venue to approve it. Set correctsPendingReply to true only when this message clearly corrects, amends, or changes the question that NOT SENT reply is answering ("actually make that oat milk", "wait, I meant tomorrow", "sorry, I meant Friday not Thursday"). If more than one NOT SENT line appears, judge only against the most recent one. Set it to false for everything else, including a new and unrelated question, an acknowledgement, a reaction, and small talk — and false whenever there is no NOT SENT line at all. When genuinely unsure, prefer false: a wrongly-true value rewrites a reply the guest was waiting for, while a wrongly-false one only means they get a second, separate reply.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
@@ -183,6 +191,7 @@ export async function classifyMessage(
         reasoning: object.reasoning,
         promptVersion: PROMPT_VERSION,
         crisisSafety: object.crisisSafety,
+        correctsPendingReply: object.correctsPendingReply,
       },
     }
   } catch (e) {

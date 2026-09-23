@@ -19,7 +19,9 @@ import {
   type CommitmentIdentity,
   commitmentIdentityOf,
   anyKnowledgeGapCard,
+  type ConversationDisposition,
   decideSlotAction,
+  occupantOfSlot,
   resolveDraftCarrier,
   resolveDraftCarrierIdentity,
   gapFlagsFromTriggers,
@@ -90,6 +92,23 @@ export interface PersistQueuedDraftOptions {
    * caller's contract already treats a failed regen as best-effort.
    */
   updateOnly?: boolean
+  /**
+   * TAC-397: capture the body this card held before the UPDATE overwrites it,
+   * into `replaced_draft_body` / `replaced_draft_at`, so the operator can see
+   * what the correction replaced.
+   *
+   * True ONLY on a correction regen. Every other regen writes NULL to both
+   * columns instead of leaving them — see the UPDATE payload for why that
+   * clearing is deliberate rather than an omission.
+   */
+  captureReplacedDraft?: boolean
+  /**
+   * TAC-397: this turn's disposition, so 23505 race recovery decides the card
+   * a unique violation reveals exactly as the gate decided the card it read.
+   * Deciding that second case differently is how an overwrite gets back in
+   * through the race path (TAC-394 AC4).
+   */
+  conversationDisposition?: ConversationDisposition | null
   /**
    * TAC-309: persist the card with NO body, discarding whatever the model
    * wrote.
@@ -253,6 +272,17 @@ export type PersistQueuedDraftResult =
       protectedCommitment: CommitmentIdentity | null
       droppedCommitment: CommitmentIdentity | null
     }
+
+/**
+ * TAC-397: the turn needed no answer and a card was already waiting, so
+ * nothing was written. Distinct from 'dropped' (a draft competed and lost)
+ * and from 'skipped' (an updateOnly caller's target vanished).
+ */
+export type PersistQueuedDraftSilenced = {
+  outboundMessageId: null
+  action: 'silenced'
+  priorReviewReason: null
+}
 
 /** TAC-308: only an `updateOnly` caller can be told this. */
 export type PersistQueuedDraftSkipped = {
@@ -818,10 +848,20 @@ export async function applyInlineCancellation(
  *     `action: 'dropped'` when it must not be overwritten. Before TAC-394 this
  *     path UPDATEd whatever single row an unordered read returned, which is how
  *     a manual followup could overwrite the card the gate had kept it from.
- *   - UPDATE path, unique violation: the UPDATE would move the card into a
- *     slot another card already holds. Unreachable from this code (a regen
- *     target is always in the draft's own slot), so it gets its own red alert
- *     and throws, writing nothing.
+ *   - UPDATE path, unique violation: the UPDATE would move the card onto a
+ *     key another card already holds, so it gets its own red alert and throws,
+ *     writing nothing.
+ *
+ *     TAC-397 CORRECTS what used to be written here. This said "unreachable
+ *     from this code (a regen target is always in the draft's own slot)",
+ *     which was true while migration 041 keyed the conversation index on the
+ *     guest alone: nothing a regen wrote could change the row's key. Migration
+ *     054 keys it on `reply_to_message_id`, so a regen that moved that column
+ *     moved the key — and a proactive regen (the decline, the crash card) used
+ *     to null it onto the shared sentinel, colliding with any other proactive
+ *     card the guest held. It is unreachable again only because the UPDATE now
+ *     leaves the column alone on a run with no inbound; that is what keeps it
+ *     so, not the slot argument this comment used to give.
  *   - UPDATE path: a TOCTOU race vs. dispatchOperatorOutbound can clear the
  *     pending slot between the gate's read and our UPDATE; the conditional
  *     UPDATE gated on `review_state='pending'` returns rowcount=0. We drop
@@ -847,21 +887,29 @@ export async function persistOrRegenQueuedDraft(
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions & { updateOnly: true },
-): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped>
+): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped | PersistQueuedDraftSilenced>
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options?: PersistQueuedDraftOptions & { updateOnly?: false },
-): Promise<PersistQueuedDraftResult>
+  // TAC-397: 'silenced' is in this overload too, and that is deliberate even
+  // though it is unreachable today. Race recovery calls decideSlotAction
+  // again, and a 'no_answer' disposition there would produce it — the gate
+  // returning silence before persist is ever called is what makes that
+  // impossible, and that guarantee lives in ANOTHER FILE. Leaving it out of
+  // the type would make outboundMessageId `string` where the runtime can hand
+  // back null, which is the shape of a bug nobody would find until a queued
+  // card had no id.
+): Promise<PersistQueuedDraftResult | PersistQueuedDraftSilenced>
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions = {},
-): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped> {
+): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped | PersistQueuedDraftSilenced> {
   const supabase = createAdminClient()
   let existingId: string | null = initialExistingPendingDraftId
   // TAC-394: what race recovery needs to decide a card the gate never saw.
@@ -920,7 +968,10 @@ export async function persistOrRegenQueuedDraft(
         if (seenRows !== null) {
           seenRows = {
             obligation: seenRows.obligation?.id === existingId ? null : seenRows.obligation,
-            conversation: seenRows.conversation?.id === existingId ? null : seenRows.conversation,
+            // TAC-397: a filter, not a null-out. The conversation slot holds
+            // many cards now, and only the one that vanished is forgotten;
+            // the rest still withhold the clock.
+            conversation: seenRows.conversation.filter((row) => row.id !== existingId),
           }
         }
         existingId = null
@@ -990,6 +1041,34 @@ export async function persistOrRegenQueuedDraft(
       // decided by each write from the latest read rather than kept from the
       // first.
       if (rows !== null) seenRows = rows
+      // TAC-397: a collision on migration 054's index can only mean the SAME
+      // INBOUND already owns a conversation card, because the index is keyed
+      // on reply_to_message_id. That is a duplicate delivery of one message (a
+      // provider retry, a double webhook), never two different messages.
+      //
+      // Checked BEFORE decideSlotAction, and load-bearing rather than an
+      // optimisation: with a second question now returning `insert`, the
+      // pre-TAC-397 recovery would retry the INSERT, collide on the same
+      // reply_to_message_id again, exhaust RACE_RECOVERY_MAX_ATTEMPTS and fire
+      // a red alert — on every duplicated delivery. Our own draft already
+      // exists; report it and stop.
+      //
+      // Scoped to the `regen` policy, which is the agent's own reply path and
+      // the only one a duplicate delivery can race. The decline, the crash
+      // card and a manual followup keep their own meanings for an occupied
+      // slot — reporting a card THEY did not write as "already ours" would
+      // turn a refusal into a success.
+      const ownInboundId = ctx.currentMessage?.id ?? null
+      const ownDraft =
+        rows === null || ownInboundId === null || callerPolicy !== 'regen'
+          ? null
+          : (rows.conversation.find((row) => row.reply_to_message_id === ownInboundId) ?? null)
+      if (ownDraft !== null) {
+        console.warn(
+          `[agent] persistOrRegenQueuedDraft: 23505 on attempt=${attempt} venue=${ctx.venue.id} guest=${ctx.guest.id}: this message already has a card, reporting it`,
+        )
+        return { outboundMessageId: ownDraft.id, action: 'inserted', priorReviewReason: null }
+      }
       const decision =
         rows === null
           ? null
@@ -998,6 +1077,7 @@ export async function persistOrRegenQueuedDraft(
               draftCommitment,
               ...gapFlagsFromTriggers(options.reviewTriggers),
               callerPolicy,
+              conversationDisposition: options.conversationDisposition ?? null,
             })
       console.warn(
         `[agent] persistOrRegenQueuedDraft: 23505 race on attempt=${attempt} venue=${ctx.venue.id} guest=${ctx.guest.id}: ${decision?.action ?? 'slot read failed'}`,
@@ -1008,6 +1088,9 @@ export async function persistOrRegenQueuedDraft(
         // bounded.
         continue
       }
+      if (decision.action === 'silence') {
+        return { outboundMessageId: null, action: 'silenced', priorReviewReason: null }
+      }
       if (decision.action === 'drop') {
         return {
           outboundMessageId: null,
@@ -1016,7 +1099,8 @@ export async function persistOrRegenQueuedDraft(
           reason: decision.reason,
           protectedDraftId: decision.protectedDraftId,
           protectedCommitment: commitmentIdentityOf(
-            rows?.[decision.slot]?.pending_commitment ?? null,
+            (rows === null ? null : occupantOfSlot(rows, decision.slot))?.pending_commitment ??
+              null,
           ),
           droppedCommitment: draftCommitment,
         }
@@ -1195,7 +1279,12 @@ async function tryRegenUpdate(
     // gone (operator already acted), bail to rowcount_zero.
     const { data: priorRow, error: priorError } = await supabase
       .from('messages')
-      .select('review_reason')
+      // TAC-397: `body` joins the read so a correction can keep the text it
+      // replaces. Reusing this existing fresh read rather than taking the
+      // body from the gate's earlier slot read closes the window between the
+      // two: the gate read the slot before generation, and an operator could
+      // have edited the card since.
+      .select('review_reason, body')
       .eq('id', existingPendingDraftId)
       .eq('review_state', 'pending')
       .maybeSingle()
@@ -1206,6 +1295,7 @@ async function tryRegenUpdate(
       return { kind: 'rowcount_zero' }
     }
     const priorReviewReason = priorRow.review_reason
+    const priorBody = priorRow.body
 
     // Conditional UPDATE gated on review_state='pending'. Mirrors the
     // TAC-258 dispatchOperatorOutbound TOCTOU pattern: optimistic flip,
@@ -1232,7 +1322,6 @@ async function tryRegenUpdate(
       voice_fidelity: blank ? null : generation.voiceFidelity,
       prompt_version: generation.promptVersion,
       category: ctx.classification?.category ?? null,
-      reply_to_message_id: ctx.currentMessage?.id ?? null,
       langfuse_trace_id: ctx.trace.id || null,
       review_reason: primaryTrigger,
       // See the INSERT path: a blank card must not carry an invisible
@@ -1259,6 +1348,42 @@ async function tryRegenUpdate(
         blank || options.renderedIntentions === undefined
           ? null
           : buildRenderedIntentionsPayload(options.renderedIntentions),
+      // TAC-397: OVERWRITE-WHOLESALE, like pending_commitment and
+      // review_triggers above and UNLIKE pending_until below.
+      //
+      // Writing NULL on every non-correction regen is the load-bearing half,
+      // not an omission. The same row can be regenerated later by the operator
+      // decline, the crash card, or a second unanswerable question, and a card
+      // since overwritten for one of those reasons must not still be showing
+      // the text some earlier correction replaced — the operator would read it
+      // as "this is what your guest just amended", which would be false.
+      //
+      // Both columns move together, which is what lets the queue projection
+      // treat a non-null body as a guarantee that the timestamp is there too.
+      replaced_draft_body:
+        options.captureReplacedDraft === true && priorBody.length > 0 ? priorBody : null,
+      replaced_draft_at:
+        options.captureReplacedDraft === true && priorBody.length > 0
+          ? new Date().toISOString()
+          : null,
+    }
+    // TAC-397: `reply_to_message_id` moves only when this run HAS an inbound.
+    //
+    // It used to be set unconditionally to `ctx.currentMessage?.id ?? null`,
+    // which nulled it on every proactive regen. Under migration 054 that
+    // MOVES THE ROW'S INDEX KEY onto the shared sentinel, so an operator
+    // decline regenerating an inbound-keyed card would collide with any other
+    // proactive card the guest holds — a unique violation on the UPDATE,
+    // which is a red alert and a 502 on the decline route. The branch that
+    // catches it still carries a comment calling itself unreachable, and it
+    // was, until a regen could move a key.
+    //
+    // Preserving it is also the more honest value: a decline or a crash card
+    // has no message, so the card it rewrites still answers whatever it
+    // answered before, and `findPendingQuestion` and the holding-message cron
+    // can still find that question.
+    if (ctx.currentMessage !== null) {
+      updatePayload.reply_to_message_id = ctx.currentMessage.id
     }
     // TAC-469: the card belongs to the conversation this draft was written
     // for, so a regeneration names it too (a guest with both identifiers can

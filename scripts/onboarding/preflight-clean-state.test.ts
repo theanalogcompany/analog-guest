@@ -30,10 +30,13 @@ beforeEach(() => {
 })
 
 describe('checkCleanState — pending drafts (TAC-394)', () => {
-  it('reports EVERY pending card for a guest, one per slot', async () => {
+  it('reports EVERY pending card for a guest, including several in the conversation slot', async () => {
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: { id: 'card-a', review_reason: 'commitment_type_gated' },
-      conversation: { id: 'card-conv', review_reason: 'category_requires_approval' },
+      conversation: [
+        { id: 'card-conv', review_reason: 'category_requires_approval' },
+        { id: 'card-conv-2', review_reason: 'knowledge_gap' },
+      ],
     })
 
     const hits = await checkCleanState(VENUE, GUESTS, PHONES)
@@ -54,11 +57,22 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
         kind: 'pending_draft',
         detail: 'message id=card-conv, slot=conversation, review_reason=category_requires_approval',
       },
+      // TAC-397: the second conversation card. With only one seeded,
+      // `pending.conversation.slice(0, 1)` would pass and the new loop would
+      // be untested — and a preflight that showed one card of three reads as
+      // "this guest is nearly clean", which is worse than showing none.
+      {
+        state: 'new',
+        phone: '+15550001000',
+        guestId: 'guest-new',
+        kind: 'pending_draft',
+        detail: 'message id=card-conv-2, slot=conversation, review_reason=knowledge_gap',
+      },
     ])
   })
 
   it('reports nothing for a guest with no pending cards', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
     expect(await checkCleanState(VENUE, GUESTS, PHONES)).toEqual([])
   })
 

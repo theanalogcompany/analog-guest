@@ -781,6 +781,8 @@ export type Database = {
           referral_ref: string | null
           referral_source: string | null
           rendered_intentions: Json | null
+          replaced_draft_at: string | null
+          replaced_draft_body: string | null
           reply_to_message_id: string | null
           response_review: Json | null
           review_reason: string | null
@@ -823,6 +825,8 @@ export type Database = {
           referral_ref?: string | null
           referral_source?: string | null
           rendered_intentions?: Json | null
+          replaced_draft_at?: string | null
+          replaced_draft_body?: string | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
@@ -865,6 +869,8 @@ export type Database = {
           referral_ref?: string | null
           referral_source?: string | null
           rendered_intentions?: Json | null
+          replaced_draft_at?: string | null
+          replaced_draft_body?: string | null
           reply_to_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
@@ -1729,6 +1735,8 @@ export type Database = {
           other_pending_for_guest: number
           recent_context: Json
           recognition_state: string
+          replaced_draft_at: string
+          replaced_draft_body: string
           review_reason: string
           review_triggers: string[]
           ungrounded_claims: string[]

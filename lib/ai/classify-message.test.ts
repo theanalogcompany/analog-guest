@@ -186,7 +186,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.61.0')
+      expect(r.data.promptVersion).toBe('v1.62.0')
     })
   }
 })
@@ -614,5 +614,124 @@ describe('classifyMessage — persona section keeps the SMS copy (TAC-495)', () 
     const prompt = await getCapturedUserPrompt()
     expect(prompt).toContain('You are Sana, staff at the venue, texting as yourself.')
     expect(prompt).not.toContain('messaging as yourself')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-397: correctsPendingReply — does this message amend the question a
+// still-unapproved reply is answering?
+//
+// The assertions below pin CONTIGUOUS clauses rather than disjoint substrings.
+// TAC-409's lesson: a sentence can be reversed while every fragment of it
+// survives, so three mutants that inverted a rule passed a test built from
+// separate `toContain` calls. Each clause here carries its own meaning whole.
+// ---------------------------------------------------------------------------
+
+describe('CLASSIFY_SYSTEM_PROMPT — correctsPendingReply instruction (TAC-397)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: false,
+      },
+    })
+  })
+
+  async function promptFor(body = 'hi'): Promise<string> {
+    await classifyMessage({ inboundBody: body })
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    return callArgs?.system as string
+  }
+
+  it('scopes the judgement to the NOT SENT marker the history already renders', async () => {
+    const prompt = await promptFor()
+    // The marker text is TAC-394's, rendered by formatClassifierRecentConversation.
+    // If that marker is ever reworded, this instruction stops referring to
+    // anything and the field goes quietly dead — which is why it is pinned.
+    expect(prompt).toContain(
+      'Recent conversation may include a venue line marked NOT SENT — a reply the venue has drafted but not yet approved',
+    )
+  })
+
+  // The NOT SENT marker is shared: historyDeliveryMarker uses it for a SKIPPED
+  // draft too (serializers.ts). Without this clause, a skipped draft sitting
+  // newer than a pending card could be read as the thing being corrected, and
+  // a true verdict would regenerate a card the correction was not aimed at.
+  it('says which NOT SENT line to judge against, since the marker is shared with skipped drafts', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'That marker also appears on replies the venue decided not to send; judge only against one that is waiting for the venue to approve it.',
+    )
+  })
+
+  it('sets the bar at clearly amending the pending question, with worked examples', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'Set correctsPendingReply to true only when this message clearly corrects, amends, or changes the question that NOT SENT reply is answering',
+    )
+    expect(prompt).toContain('actually make that oat milk')
+  })
+
+  // Ruled 2026-09-22, question 2: a correction is only ever matched against the
+  // most recently opened conversation card. This is the model-facing half of
+  // that ruling; mostRecentlyOpenedConversationCard is the code half.
+  it('judges against the most recent NOT SENT line only', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'If more than one NOT SENT line appears, judge only against the most recent one',
+    )
+  })
+
+  it('is false when nothing is pending at all', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain('false whenever there is no NOT SENT line at all')
+  })
+
+  // The ticket's "when unsure between case 1 and case 3, choose case 1",
+  // stated to the model doing the judging. Pinned WITH its rationale in one
+  // clause: a mutant flipping the preference to `true` while leaving the
+  // surrounding words intact must fail, and it cannot if the direction and its
+  // reason are asserted separately.
+  it('prefers false when unsure, and says why that is the safe direction', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'When genuinely unsure, prefer false: a wrongly-true value rewrites a reply the guest was waiting for, while a wrongly-false one only means they get a second, separate reply.',
+    )
+  })
+
+  it('names the categories that must NOT set it, so chatter cannot read as a correction', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'including a new and unrelated question, an acknowledgement, a reaction, and small talk',
+    )
+  })
+})
+
+describe('classifyMessage — correctsPendingReply pass-through (TAC-397)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  // The field is only useful if it survives the hop out of lib/ai. Both
+  // directions, because a mapping hardcoded to `false` would satisfy a
+  // one-sided test and silently disable every correction.
+  it.each([true, false])('returns the model’s value unchanged (%s)', async (value) => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: value,
+      },
+    })
+    const r = await classifyMessage({ inboundBody: 'actually make that oat milk' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.correctsPendingReply).toBe(value)
   })
 })

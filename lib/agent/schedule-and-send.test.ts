@@ -24,7 +24,7 @@ import type { GenerateMessageResult } from '@/lib/ai'
 // to mirror Supabase's full PostgrestBuilder semantics — just the chain
 // shape persistOrRegenQueuedDraft actually walks:
 //   - .from('messages').insert(payload).select('id').single() → {data, error}
-//   - .from('messages').select('review_reason').eq('id', _).eq('review_state', _).maybeSingle()
+//   - .from('messages').select('review_reason, body').eq('id', _).eq('review_state', _).maybeSingle()
 //   - .from('messages').update(payload).eq('id', _).eq('review_state', _).select('id').maybeSingle()
 //   - .from('messages').select(PENDING_SLOT_ROW_COLUMNS).eq() x4 .order().limit() (TAC-394)
 //
@@ -37,7 +37,10 @@ interface ScenarioRecorder {
   // Stack-of-responses each builder pops from.
   insertResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
   updateResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
-  priorReasonResponses: Array<{ data: { review_reason: string | null } | null; error: { message: string } | null }>
+  priorReasonResponses: Array<{
+    data: { review_reason: string | null; body?: string } | null
+    error: { message: string } | null
+  }>
   // TAC-394: loadPendingRowsBySlot rows. `data` is one row, an array of rows,
   // or null for none.
   findPendingResponses: Array<{ data: unknown; error: { message: string } | null }>
@@ -70,13 +73,14 @@ vi.mock('@/lib/db/admin', () => ({
       },
       select: (cols: string) => {
         // Three select shapes are exercised:
-        //   - .select('review_reason').eq('id', _).eq('review_state', _).maybeSingle()
-        //     → prior-reason capture before UPDATE
+        //   - .select('review_reason, body').eq('id', _).eq('review_state', _).maybeSingle()
+        //     → prior-reason AND prior-body capture before UPDATE (TAC-397
+        //       added `body`, so a correction can keep what it replaced)
         //   - .select('id').eq('id', _).eq('review_state', _).select('id').maybeSingle()
         //     (chained AFTER an update() — handled in update() below)
         //   - .select(PENDING_SLOT_ROW_COLUMNS).eq() x4 .order().limit()
         //     → loadPendingRowsBySlot after 23505 (TAC-394)
-        if (cols === 'review_reason') {
+        if (cols === 'review_reason, body') {
           return makePriorReasonBuilder()
         }
         return makeFindPendingBuilder()
@@ -309,28 +313,72 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     expect(fireRedAlertMock).not.toHaveBeenCalled()
   })
 
-  // ---- Path 3: no prior pending detected, INSERT races → 23505 → recover ----
-  it('falls back to UPDATE on race-recovery when INSERT hits unique_violation', async () => {
-    // First INSERT loses the race: 23505.
+  // ---- Path 3: INSERT races → 23505 → recover ----
+  //
+  // TAC-397 REWRITES this test, because migration 054 changes what a 23505
+  // MEANS on the conversation slot. The index is keyed on reply_to_message_id,
+  // so a collision can only be the SAME inbound already having a card — a
+  // duplicate delivery of one message — never a different message winning the
+  // slot. The old test queued a racing row with no reply_to_message_id, a
+  // state the new index makes unreachable, and asserted a regen onto it.
+  it('reports our own existing card when the SAME message is processed twice', async () => {
     scenario.insertResponses.push({
       data: null,
       error: { code: '23505', message: 'duplicate key' },
     })
-    // The slot re-read surfaces the racing row.
-    scenario.findPendingResponses.push({ data: { id: 'racing-msg-1' }, error: null })
-    // Prior-reason capture for the regen UPDATE on the racing row.
-    scenario.priorReasonResponses.push({
-      data: { review_reason: 'model_flagged' },
+    // The re-read surfaces the card the concurrent run already wrote for THIS
+    // inbound: same reply_to_message_id as makeCtx()'s currentMessage.
+    scenario.findPendingResponses.push({
+      data: { id: 'racing-msg-1', reply_to_message_id: 'inbound-1' },
       error: null,
     })
-    // UPDATE succeeds.
+
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'fidelity_below_auto_send_floor',
+      null,
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: 'racing-msg-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+    // NOTHING is regenerated: the other run's draft for this message stands.
+    expect(scenario.updates).toHaveLength(0)
+    // And critically, the INSERT is not retried. Without the same-message
+    // branch the loop would retry, collide on the same reply_to_message_id
+    // again, exhaust RACE_RECOVERY_MAX_ATTEMPTS and fire a red alert on every
+    // duplicated webhook delivery.
+    expect(scenario.inserts).toHaveLength(1)
+    expect(fireRedAlertMock).not.toHaveBeenCalled()
+  })
+
+  // The other post-054 recovery shape: the collision is NOT this message's own
+  // card, and the gate had judged this turn a correction. Then recovery
+  // regenerates the card it found, exactly as the gate would have.
+  it('regenerates on race-recovery when the gate judged this turn a correction', async () => {
+    scenario.insertResponses.push({
+      data: null,
+      error: { code: '23505', message: 'duplicate key' },
+    })
+    scenario.findPendingResponses.push({
+      data: { id: 'racing-msg-1', reply_to_message_id: 'some-other-inbound' },
+      error: null,
+    })
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'model_flagged', body: 'the text being replaced' },
+      error: null,
+    })
     scenario.updateResponses.push({ data: { id: 'racing-msg-1' }, error: null })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
       'fidelity_below_auto_send_floor',
-      null, // We didn't know about the racing row.
+      null,
+      { callerPolicy: 'regen', conversationDisposition: 'correction' },
     )
 
     expect(result).toEqual({
@@ -340,6 +388,37 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     })
     expect(scenario.inserts).toHaveLength(1)
     expect(scenario.updates).toHaveLength(1)
+    expect(fireRedAlertMock).not.toHaveBeenCalled()
+  })
+
+  // And the default: an unrelated second question. Recovery inserts its own
+  // card rather than regenerating over the one it found — the whole point of
+  // the ticket, applied on the path the gate never saw.
+  it('inserts its own card on race-recovery for an unrelated turn', async () => {
+    scenario.insertResponses.push({
+      data: null,
+      error: { code: '23505', message: 'duplicate key' },
+    })
+    scenario.findPendingResponses.push({
+      data: { id: 'racing-msg-1', reply_to_message_id: 'some-other-inbound' },
+      error: null,
+    })
+    scenario.insertResponses.push({ data: { id: 'my-own-card' }, error: null })
+
+    const result = await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'fidelity_below_auto_send_floor',
+      null,
+      { callerPolicy: 'regen', conversationDisposition: 'own_card' },
+    )
+
+    expect(result).toEqual({
+      outboundMessageId: 'my-own-card',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+    expect(scenario.updates).toHaveLength(0)
     expect(fireRedAlertMock).not.toHaveBeenCalled()
   })
 
