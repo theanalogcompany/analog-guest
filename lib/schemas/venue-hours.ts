@@ -350,3 +350,58 @@ export function resolveOpenState(
 
   return { state: 'closed', opensAt: findNextOpening(hours, local.dayIndex, local.minutes) }
 }
+
+/**
+ * Today's opening time at this venue, as minutes since venue-local midnight,
+ * together with the venue-local wall clock the caller needs to compare it
+ * against. Null when the venue publishes no readable opening time for today.
+ *
+ * TAC-428 added this for the morning arrival push, which fired at a hardcoded
+ * 07:00 local and so pushed before opening at any venue that opens later, and
+ * after opening at one that opens earlier. It reads the SAME `classifyDay`
+ * every other consumer of this module reads; there is deliberately no second
+ * parser, no second notion of what a day's value means, and no second answer
+ * to "is `Closed` a range". Adding one is how the prompt line, the closed-venue
+ * gate and this push would come to disagree about the same venue.
+ *
+ * NULL HAS THREE CAUSES AND THE CALLER MUST NOT TELL THEM APART:
+ *   - the timezone is unusable, so there is no local clock at all;
+ *   - today's value is absent, blank or unreadable (`classifyDay` → unknown);
+ *   - today positively states a closure (`classifyDay` → closed).
+ * Every one of them means "we could not positively read an opening time", and
+ * the documented caller behaviour is to fall back to a fixed hour rather than
+ * to skip. That is the inherited governing rule of this module — never claim
+ * OPEN or CLOSED on input nobody understood — applied to a different question:
+ * unknown behaves as open, exactly as `venue-open-state.ts` arranges by
+ * testing only for `closed`. A venue whose hours nobody has filled in must not
+ * silently lose its arrival pushes.
+ *
+ * An OVERNIGHT range reports its own `openMin` (a bar opening 17:00 reports
+ * 1020), not the post-midnight tail it inherits from yesterday. The caller is
+ * asking "when does today's service begin", which is when the doors open.
+ */
+export function resolveOpeningMinutes(
+  hours: VenueInfo['hours'],
+  timezone: string,
+  now: Date,
+): { openMin: number; nowMin: number } | null {
+  const local = venueLocalNow(timezone, now)
+  if (!local) return null
+
+  const today = classifyDay(hours[DAY_KEYS[local.dayIndex]])
+  if (today.kind !== 'range') return null
+
+  return { openMin: today.range.openMin, nowMin: local.minutes }
+}
+
+/**
+ * The venue-local wall clock for `now`, as minutes since local midnight.
+ * Null on a timezone this runtime cannot use.
+ *
+ * Exists so a caller that took the fallback opening hour still has a clock to
+ * compare it against: `resolveOpeningMinutes` returns null in exactly that
+ * case and so cannot supply one.
+ */
+export function venueLocalMinutes(timezone: string, now: Date): number | null {
+  return venueLocalNow(timezone, now)?.minutes ?? null
+}

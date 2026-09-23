@@ -37,7 +37,9 @@ export {
   formatMinutes,
   type OpenState,
   parseDayRange,
+  resolveOpeningMinutes,
   resolveOpenState,
+  venueLocalMinutes,
 } from './venue-hours'
 export { parseVisitPrecision, type VisitTimePrecision } from './visit-precision'
 export {
