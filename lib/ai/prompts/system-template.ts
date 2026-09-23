@@ -1378,7 +1378,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.62.0'
+export const PROMPT_VERSION = 'v1.63.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
