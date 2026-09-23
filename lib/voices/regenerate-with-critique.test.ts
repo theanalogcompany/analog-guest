@@ -278,7 +278,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
-        promptVersion: 'v1.63.0',
+        promptVersion: 'v1.64.0',
       },
     })
   })
@@ -323,6 +323,11 @@ describe('regenerateWithCritique — happy path', () => {
         dayOfWeek: 'Friday',
         venueLocalTime: '10:00',
         venueTimezone: 'America/Los_Angeles',
+        calendar: [
+          { weekday: 'Mon', monthDay: 'Jan 5' },
+          { weekday: 'Tue', monthDay: 'Jan 6' },
+          { weekday: 'Wed', monthDay: 'Jan 7' },
+        ],
       },
       recentMessages: [],
       mechanics: [],
@@ -762,6 +767,11 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         dayOfWeek: 'Friday',
         venueLocalTime: '10:00',
         venueTimezone: 'America/Los_Angeles',
+        calendar: [
+          { weekday: 'Mon', monthDay: 'Jan 5' },
+          { weekday: 'Tue', monthDay: 'Jan 6' },
+          { weekday: 'Wed', monthDay: 'Jan 7' },
+        ],
       },
       recentMessages: [],
       mechanics: [],
@@ -944,6 +954,11 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
         dayOfWeek: 'Friday',
         venueLocalTime: '10:00',
         venueTimezone: 'America/Los_Angeles',
+        calendar: [
+          { weekday: 'Mon', monthDay: 'Jan 5' },
+          { weekday: 'Tue', monthDay: 'Jan 6' },
+          { weekday: 'Wed', monthDay: 'Jan 7' },
+        ],
       },
       recentMessages: [],
       mechanics: [],

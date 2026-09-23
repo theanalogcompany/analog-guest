@@ -581,9 +581,16 @@ function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openS
 }
 
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
+  // TAC-522: the calendar sits directly under the date so the two date facts
+  // are together, and the status line stays last where TAC-301's
+  // "do not tell the guest to come by now" copy is easiest to see.
+  const calendar = today.calendar
+    .map((d, i) => `${d.weekday} ${d.monthDay}${i === 0 ? ' (today)' : ''}`)
+    .join(', ')
   const lines = [
     '## Right now',
     `- Date: ${today.dayOfWeek}, ${today.isoDate}`,
+    `- Calendar: ${calendar}`,
     `- Time at venue: ${today.venueLocalTime} (${today.venueTimezone})`,
   ]
 

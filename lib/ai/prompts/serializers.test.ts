@@ -165,6 +165,11 @@ const today: NonNullable<RuntimeContext['today']> = {
   dayOfWeek: 'Wednesday',
   venueLocalTime: '14:30',
   venueTimezone: 'America/New_York',
+  calendar: [
+    { weekday: 'Mon', monthDay: 'Jan 5' },
+    { weekday: 'Tue', monthDay: 'Jan 6' },
+    { weekday: 'Wed', monthDay: 'Jan 7' },
+  ],
 }
 
 const NOW = new Date('2026-04-29T18:30:00Z') // matches today block (14:30 ET)
@@ -183,6 +188,40 @@ describe('runtimeToProse — today block', () => {
     expect(out.startsWith('## Right now\n')).toBe(true)
     expect(out).toContain('- Date: Wednesday, 2026-04-29')
     expect(out).toContain('- Time at venue: 14:30 (America/New_York)')
+  })
+
+  // PINS THE BLOCK WHOLE, and this exists because of what happened without it.
+  //
+  // TAC-522 added an entire new line to `## Right now` and the full suite
+  // stayed green at 5701 tests, because every assertion on this block checked
+  // a SUBSTRING or an ORDERING and `computeToday` had no tests at all. A new
+  // line, a removed line, or a reordering were all invisible. Substring
+  // assertions answer "is this fact present"; only an exact block answers
+  // "is this block what we think it is".
+  it('renders the whole block exactly, so an added or reordered line cannot pass unseen', () => {
+    const out = runtimeToProse({ today }, 'reply', NOW)
+    const block = out.split('\n\n')[0]
+    expect(block).toBe(
+      [
+        '## Right now',
+        '- Date: Wednesday, 2026-04-29',
+        '- Calendar: Mon Jan 5 (today), Tue Jan 6, Wed Jan 7',
+        '- Time at venue: 14:30 (America/New_York)',
+      ].join('\n'),
+    )
+  })
+
+  it('marks only the first calendar entry as today', () => {
+    const out = runtimeToProse({ today }, 'reply', NOW)
+    // The fixture's calendar carries no (today) marker on entries 2 and 3, so
+    // a marker applied to every entry fails here rather than reading fine.
+    expect(out.match(/\(today\)/g) ?? []).toHaveLength(1)
+  })
+
+  it('puts the calendar directly under the date, above the venue time', () => {
+    const out = runtimeToProse({ today }, 'reply', NOW)
+    expect(out.indexOf('- Calendar:')).toBeGreaterThan(out.indexOf('- Date:'))
+    expect(out.indexOf('- Calendar:')).toBeLessThan(out.indexOf('- Time at venue:'))
   })
 
   it('renders today block before the inbound-message line', () => {
@@ -1920,6 +1959,11 @@ describe('runtimeToProse — critique block', () => {
           dayOfWeek: 'Friday',
           venueLocalTime: '10:00',
           venueTimezone: 'America/Los_Angeles',
+          calendar: [
+            { weekday: 'Mon', monthDay: 'Jan 5' },
+            { weekday: 'Tue', monthDay: 'Jan 6' },
+            { weekday: 'Wed', monthDay: 'Jan 7' },
+          ],
         },
       },
       'reply',
@@ -1940,6 +1984,11 @@ describe('runtimeToProse — critique block', () => {
           dayOfWeek: 'Friday',
           venueLocalTime: '10:00',
           venueTimezone: 'America/Los_Angeles',
+          calendar: [
+            { weekday: 'Mon', monthDay: 'Jan 5' },
+            { weekday: 'Tue', monthDay: 'Jan 6' },
+            { weekday: 'Wed', monthDay: 'Jan 7' },
+          ],
         },
       },
       'reply',
@@ -1954,6 +2003,11 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     dayOfWeek: 'Friday',
     venueLocalTime: '10:00',
     venueTimezone: 'America/Los_Angeles',
+    calendar: [
+      { weekday: 'Mon', monthDay: 'Jan 5' },
+      { weekday: 'Tue', monthDay: 'Jan 6' },
+      { weekday: 'Wed', monthDay: 'Jan 7' },
+    ],
   }
 
   it('omits the block entirely when guestContext is undefined', () => {

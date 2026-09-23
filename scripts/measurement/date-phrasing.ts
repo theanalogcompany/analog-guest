@@ -72,6 +72,7 @@ import {
 } from '@/lib/agent/stages'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
+import { computeCalendar } from '@/lib/agent/calendar'
 import { createRunLog } from './run-log'
 import { countByKind, findDateLanguage } from './date-language'
 
@@ -91,6 +92,8 @@ function buildInjectedEntries(now: Date): {
   undated: string
   thisWeek: string
   farOff: string
+  pastRecent: string
+  pastStale: string
   thisWeekWeekday: string
   thisWeekIso: string
 } {
@@ -114,6 +117,38 @@ function buildInjectedEntries(now: Date): {
     year: 'numeric',
     timeZone: 'America/Los_Angeles',
   }).format(thisWeek)
+
+  // TAC-522: two past dates, because the limit on the past-date criterion is
+  // not uniform. The calendar runs FORWARD, so neither of these is in it, and
+  // recognising them is a comparison against `- Date:` rather than a lookup.
+  // 17 days back is usually the same month or the one before, which is an
+  // easy numeric comparison; 90 days back is months stale, which is the weak
+  // case. Measuring both is the point.
+  //
+  // 90 RATHER THAN 120, and the reason is a measurement flaw rather than a
+  // preference. At 120 the date landed in MAY, and `may` is the one month
+  // date-language.ts deliberately under-matches so it cannot fire on the
+  // modal verb. The scenario reported 0/20 numeric dates in BOTH arms while
+  // the replies were plainly stating "May 25" — a clean-looking number nobody
+  // could trust. The offset moved rather than the detector gaining a month
+  // special case (ruled 2026-09-23).
+  //
+  // Which shape this tests still depends on the run date: 90 days back from
+  // a date early in the year crosses into the previous year, and from
+  // mid-year it does not. The cross-year case is therefore not guaranteed by
+  // this scenario and is not claimed by it.
+  const pastRecentLong = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'America/Los_Angeles',
+  }).format(new Date(now.getTime() - 17 * 24 * 60 * 60 * 1000))
+  const pastStaleLong = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'America/Los_Angeles',
+  }).format(new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000))
 
   const farOff = new Date(now.getTime() + 300 * 24 * 60 * 60 * 1000)
   const farOffLong = new Intl.DateTimeFormat('en-US', {
@@ -141,6 +176,11 @@ function buildInjectedEntries(now: Date): {
     // Genuinely far off, where naming the year is the RIGHT answer. This is
     // the case that stops the rule being read as a flat ban on years.
     farOff: `The shop's anniversary party is planned for ${farOffLong}.`,
+    // Written as a forward-looking plan whose date has since gone by, which
+    // is the shape a venue note actually rots into. Le Mil's has a live one:
+    // a changing table "expected to be installed by end of September 2026".
+    pastRecent: `The new pastry case is expected to be installed by ${pastRecentLong}.`,
+    pastStale: `The new pastry case is expected to be installed by ${pastStaleLong}.`,
     thisWeekWeekday,
     thisWeekIso,
   }
@@ -159,7 +199,7 @@ const SCENARIOS: ReadonlyArray<{
   body: string
   why: string
   /** Which injected entry this scenario needs in `## Current context`. */
-  inject: 'undated' | 'thisWeek' | 'farOff' | null
+  inject: 'undated' | 'thisWeek' | 'farOff' | 'pastRecent' | 'pastStale' | null
 }> = [
   {
     id: 'event-undated',
@@ -178,6 +218,18 @@ const SCENARIOS: ReadonlyArray<{
     body: "when's the anniversary party",
     why: 'AC3. Genuinely far off, so the year is CORRECT here. The case that proves the rule permits a year rather than banning one, and the case a flat ban would have failed.',
     inject: 'farOff',
+  },
+  {
+    id: 'event-past-recent',
+    body: 'is the new pastry case in yet',
+    why: "TAC-522 AC. A forward-looking note whose date went by 17 days ago. The agent must not state it as still upcoming. NO DETECTOR CATCHES THIS \u2014 'expected by September 5' scores clean on every kind, because saying a date as a plan is a semantic judgement. Read the bodies.",
+    inject: 'pastRecent',
+  },
+  {
+    id: 'event-past-stale',
+    body: 'is the new pastry case in yet',
+    why: 'TAC-522 AC, the WEAK half of the stated limit. Same note, 90 days stale, so the comparison crosses months. Measured rather than pre-empted by widening the calendar backwards.',
+    inject: 'pastStale',
   },
   {
     id: 'hours-today',
@@ -255,7 +307,7 @@ async function main(): Promise<void> {
   const supabase = createAdminClient()
   const { data: venue } = await supabase
     .from('venues')
-    .select('id, slug')
+    .select('id, slug, timezone')
     .eq('slug', args.venue)
     .maybeSingle()
   if (!venue) {
@@ -386,6 +438,11 @@ async function main(): Promise<void> {
         groundingClaims: grounding?.status === 'flagged' ? grounding.claims : [],
         // Recorded so the weekday case can be read without re-deriving it.
         expectedWeekday: scenario.id === 'event-this-week' ? injected.thisWeekWeekday : null,
+        // The calendar as the model saw it, so a run log explains a lookup
+        // that went wrong without re-deriving the window by hand.
+        calendar: computeCalendar(venue.timezone ?? 'America/Los_Angeles', now).map(
+          (d) => `${d.weekday} ${d.monthDay}`,
+        ),
       })
 
       const flags = [

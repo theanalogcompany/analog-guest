@@ -417,6 +417,11 @@ function buildInput(variant: Variant, ragChunks: VoiceCorpusChunk[]): GenerateMe
         dayOfWeek: 'Friday',
         venueLocalTime: '14:00',
         venueTimezone: 'America/Los_Angeles',
+        calendar: [
+          { weekday: 'Mon', monthDay: 'Jan 5' },
+          { weekday: 'Tue', monthDay: 'Jan 6' },
+          { weekday: 'Wed', monthDay: 'Jan 7' },
+        ],
       },
     },
     channel: CHANNEL,
