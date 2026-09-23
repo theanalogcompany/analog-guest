@@ -161,6 +161,13 @@ export type InstagramEventOutcome =
       status: 'skipped'
       kind: InstagramHandledEvent['kind']
       reason: 'venue_not_found' | 'unknown_guest'
+      /**
+       * TAC-523: null ONLY when the venue itself could not be resolved. For
+       * `unknown_guest` the venue is known, and the ledger row needs it — a
+       * row with a null venue is invisible to the per-venue query, which is
+       * the headline read on `inbound_turn_outcomes`.
+       */
+      venueId: string | null
     }
   | {
       status: 'failed'
@@ -168,6 +175,8 @@ export type InstagramEventOutcome =
       stage: InstagramFailureStage
       error: string
       code: string | null
+      /** TAC-523: null only for a failure at the venue lookup itself. */
+      venueId: string | null
     }
 
 type Failure = { stage: InstagramFailureStage; error: string; code: string | null }
@@ -180,8 +189,12 @@ function fail(stage: InstagramFailureStage, error: { message: string; code?: str
   return { stage, error: error?.message ?? 'no row returned', code: error?.code ?? null }
 }
 
-function failedOutcome(kind: InstagramHandledEvent['kind'], failure: Failure): InstagramEventOutcome {
-  return { status: 'failed', kind, ...failure }
+function failedOutcome(
+  kind: InstagramHandledEvent['kind'],
+  failure: Failure,
+  venueId: string | null,
+): InstagramEventOutcome {
+  return { status: 'failed', kind, ...failure, venueId }
 }
 
 async function findVenue(
@@ -328,7 +341,7 @@ async function insertMessage(
   guest: GuestStep,
 ): Promise<InstagramEventOutcome> {
   const existing = await findMessageId(supabase, event.mid)
-  if (!existing.ok) return failedOutcome(event.kind, existing.failure)
+  if (!existing.ok) return failedOutcome(event.kind, existing.failure, venueId)
   if (existing.value !== null) {
     return { status: 'duplicate', kind: event.kind, venueId, messageId: existing.value }
   }
@@ -342,7 +355,7 @@ async function insertMessage(
     // Meta delivered the same event twice at once; the other copy saved it.
     return { status: 'duplicate', kind: event.kind, venueId, messageId: null }
   }
-  if (error || !data) return failedOutcome(event.kind, fail('message_insert', error))
+  if (error || !data) return failedOutcome(event.kind, fail('message_insert', error), venueId)
 
   return {
     status: 'persisted',
@@ -372,7 +385,7 @@ async function matchRead(
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
     .maybeSingle()
-  if (error) return failedOutcome('read', fail('read_lookup', error))
+  if (error) return failedOutcome('read', fail('read_lookup', error), venueId)
   return { status: 'read', venueId, guestId, messageId: data?.id ?? null }
 }
 
@@ -382,21 +395,23 @@ async function handleEvent(
   venueCache: Map<string, string | null>,
 ): Promise<InstagramEventOutcome> {
   const venue = await findVenue(supabase, event.accountId, venueCache)
-  if (!venue.ok) return failedOutcome(event.kind, venue.failure)
-  if (venue.value === null) return { status: 'skipped', kind: event.kind, reason: 'venue_not_found' }
+  if (!venue.ok) return failedOutcome(event.kind, venue.failure, null)
+  if (venue.value === null)
+    return { status: 'skipped', kind: event.kind, reason: 'venue_not_found', venueId: null }
   const venueId = venue.value
 
   // Only a guest's own action creates a guest.
   if (event.kind === 'message' || event.kind === 'postback') {
     const createdVia = createdViaForReferral(event.referral)
     const guest = await findOrCreateGuest(supabase, venueId, event.guestIgsid, createdVia)
-    if (!guest.ok) return failedOutcome(event.kind, guest.failure)
+    if (!guest.ok) return failedOutcome(event.kind, guest.failure, venueId)
     return insertMessage(supabase, event, venueId, guest.value)
   }
 
   const guest = await findGuest(supabase, venueId, event.guestIgsid)
-  if (!guest.ok) return failedOutcome(event.kind, guest.failure)
-  if (guest.value === null) return { status: 'skipped', kind: event.kind, reason: 'unknown_guest' }
+  if (!guest.ok) return failedOutcome(event.kind, guest.failure, venueId)
+  if (guest.value === null)
+    return { status: 'skipped', kind: event.kind, reason: 'unknown_guest', venueId }
 
   if (event.kind === 'echo') {
     return insertMessage(supabase, event, venueId, { guestId: guest.value, created: false, createdVia: null })
@@ -425,11 +440,19 @@ export async function processInstagramDelivery(
       outcomes.push(await handleEvent(supabase, event, venueCache))
     } catch (e) {
       outcomes.push(
-        failedOutcome(event.kind, {
-          stage: 'unexpected',
-          error: e instanceof Error ? e.message : String(e),
-          code: null,
-        }),
+        failedOutcome(
+          event.kind,
+          {
+            stage: 'unexpected',
+            error: e instanceof Error ? e.message : String(e),
+            code: null,
+          },
+          // NULL, honestly: the throw escaped handleEvent, so whether the venue
+          // was resolved before it is unknown here. Reaching into venueCache
+          // would report a venue that may have had nothing to do with this
+          // event, which is worse for a ledger than an admitted gap.
+          null,
+        ),
       )
     }
   }

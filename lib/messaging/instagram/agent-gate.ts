@@ -36,7 +36,7 @@
 //
 // What the shut gate was hiding, and where each stands (TAC-469):
 //   - A postback saved with no title (body '', no media). HANDLED: the agent is
-//     not run on it (agentMessageIdFor below), and the saved-event log line
+//     not run on it (resolveAgentHandoff below), and the saved-event log line
 //     carries titlelessPostback: true. The row still opens the reply window.
 //     Since TAC-492 it can be a QR guest's opener turn; because the history
 //     query skips empty bodies, the opener then fires on the guest's NEXT
@@ -97,24 +97,115 @@
 // handleFollowup refuses an Instagram conversation, and the Command Center
 // Follow Up button refuses one before generating.
 
+import type { InboundTurnReason } from '@/lib/schemas/inbound-turn-outcome'
 import type { InstagramEventOutcome } from './handle-events'
+import type { InstagramUnhandledReason } from './parse-events'
 
 export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = true
 
 /**
- * The message row to hand to the agent for this outcome, or null. Only a
- * guest message or postback saved by this delivery qualifies, and only while
- * the gate is open. A duplicate is never handed over: its first delivery was.
+ * TAC-523: what this delivery means for the agent AND for the ledger.
+ *
+ * This replaced `agentMessageIdFor`, which returned `string | null`. The null
+ * was the whole problem: the route discarded it, so a delivery the agent never
+ * saw left nothing behind. On 2026-09-20 that was a guest's first message,
+ * dropped because the gate below was still shut, and the only reason the cause
+ * could be named two days later is that Vercel still held the runtime logs.
+ *
+ *   run         hand this message to the agent; it records its own outcome
+ *   record      a turn the agent will never see — the route writes the row
+ *   not_a_turn  not an inbound turn at all, and recording it would inflate
+ *               the denominator the ledger exists to provide
  */
-export function agentMessageIdFor(
+export type InstagramAgentHandoff =
+  | { kind: 'run'; messageId: string }
+  | { kind: 'record'; reason: InboundTurnReason }
+  | { kind: 'not_a_turn' }
+
+/**
+ * Total over `InstagramEventOutcome['status']` BY TYPE. A new outcome shape
+ * fails `tsc` here until someone decides whether it is a turn — which is the
+ * point: `not_a_turn` should be a decision on the record, never an omission.
+ */
+type HandoffResolvers = {
+  [S in InstagramEventOutcome['status']]: (
+    outcome: Extract<InstagramEventOutcome, { status: S }>,
+    enabled: boolean,
+  ) => InstagramAgentHandoff
+}
+
+const HANDOFF_RESOLVERS: HandoffResolvers = {
+  persisted: (outcome, enabled) => {
+    // An echo is the venue's own message coming back. Checked FIRST, so a shut
+    // gate never mislabels one as a dropped guest turn.
+    if (outcome.kind === 'echo') return { kind: 'not_a_turn' }
+    // Ordered above the titleless check deliberately: with the gate shut, the
+    // gate is why nothing happened, whatever else is also true. It is the
+    // systemic answer, and the one the 2026-09-20 incident needed.
+    if (!enabled) return { kind: 'record', reason: 'gate_shut' }
+    // TAC-469: an icebreaker tap with no title is an empty inbound. There is
+    // nothing to reply to, so the agent isn't run; the row still opens the
+    // window.
+    if (outcome.titlelessPostback) return { kind: 'record', reason: 'titleless_postback' }
+    return { kind: 'run', messageId: outcome.messageId }
+  },
+  // The guest's message reached us and we could not file it. A lost turn, and
+  // the most important kind — unless what was lost was an echo or a read.
+  skipped: (outcome) =>
+    isGuestTurnKind(outcome.kind)
+      ? { kind: 'record', reason: 'event_not_persisted' }
+      : { kind: 'not_a_turn' },
+  failed: (outcome) =>
+    isGuestTurnKind(outcome.kind)
+      ? { kind: 'record', reason: 'event_not_persisted' }
+      : { kind: 'not_a_turn' },
+  // A redelivery of an event already saved. The first delivery was the turn.
+  duplicate: () => ({ kind: 'not_a_turn' }),
+  // A read receipt is not a message.
+  read: () => ({ kind: 'not_a_turn' }),
+  // Split by reason, because two of them ARE guest turns. Note which two:
+  // `unhandled_messaging_type` is reactions, edits and handover (see its own
+  // comment in parse-events.ts) and is NOT a message. The guest-content cases
+  // are `message_unsupported` (Meta could not render it — a voice note, a
+  // sticker) and `message_no_content`. Both are messages a guest actually
+  // sent, saved nowhere, answered by nothing; CLAUDE.md notes a STOP sent as a
+  // voice note would have been invisible. Counting them as non-turns would
+  // under-report the denominator in the one case where the guest got silence.
+  unhandled: (outcome) =>
+    GUEST_CONTENT_UNHANDLED_REASONS.has(outcome.reason)
+      ? { kind: 'record', reason: 'message_unrenderable' }
+      : { kind: 'not_a_turn' },
+}
+
+/**
+ * `unhandled` reasons that are a guest message reaching us. Everything else in
+ * that union is either not a message (a reaction, a comment, a standalone
+ * referral, an entry key we don't read) or one the guest withdrew
+ * (`message_deleted`), which needs no reply by the time we see it.
+ */
+const GUEST_CONTENT_UNHANDLED_REASONS: ReadonlySet<InstagramUnhandledReason> = new Set([
+  'message_unsupported',
+  'message_no_content',
+])
+
+function isGuestTurnKind(kind: 'message' | 'echo' | 'postback' | 'read'): boolean {
+  return kind === 'message' || kind === 'postback'
+}
+
+export function resolveAgentHandoff(
   outcome: InstagramEventOutcome,
   enabled: boolean = INSTAGRAM_AGENT_REPLIES_ENABLED,
-): string | null {
-  if (!enabled) return null
-  if (outcome.status !== 'persisted' || outcome.kind === 'echo') return null
-  // TAC-469: an icebreaker tap with no title is an empty inbound. There is
-  // nothing to reply to, so the agent isn't run; the row still opens the
-  // window, and the saved-event log line says it was titleless.
-  if (outcome.titlelessPostback) return null
-  return outcome.messageId
+): InstagramAgentHandoff {
+  // HANDOFF_RESOLVERS is total over the union by its TYPE; TypeScript cannot
+  // carry the per-key narrowing through an index access, so the call is cast.
+  const resolve = HANDOFF_RESOLVERS[outcome.status] as
+    | ((outcome: InstagramEventOutcome, enabled: boolean) => InstagramAgentHandoff)
+    | undefined
+  // The map is tsc-total, so `undefined` needs an `as` cast or a runtime/type
+  // divergence to happen at all. Guarded anyway because the cost is not local:
+  // the route resolves inside a loop over a batched delivery, so a throw here
+  // would abandon every REMAINING outcome in that delivery — no agent run, no
+  // profile refresh, no ledger row. That was impossible before TAC-523.
+  if (resolve === undefined) return { kind: 'not_a_turn' }
+  return resolve(outcome, enabled)
 }
