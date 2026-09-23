@@ -33,6 +33,19 @@ const ALLOWED_IMPORTERS = [
   // totality is the guard: a new kind has to be decided about rather than
   // read as a size refusal, which is the bug that put this entry here.
   join('scripts', 'lib', 'instagram-smoke.ts'),
+  // TAC-473. The operator queue and conversation list expose
+  // `replyWindowExpiresAt`, so one module has to know the window is 24 hours.
+  // It imports INSTAGRAM_WINDOW_MS and nothing else: no send, no send target,
+  // no reply check, and it routes nothing.
+  //
+  // Deliberately ONE entry rather than two. queue.ts and conversations.ts both
+  // need the deadline, and giving each its own import would have widened this
+  // list twice for one reason. The alternative considered and rejected was
+  // computing the 24 hours in SQL inside both RPCs, which needs no entry here
+  // at all but puts the constant in two places bound only by a test — the cost
+  // this repo already pays for DELIVERED_OUTBOUND_STATUSES. One definition of
+  // the window beat one fewer line in this list.
+  join('lib', 'operator', 'instagram-fields.ts'),
 ]
 
 function sourceFiles(): string[] {
