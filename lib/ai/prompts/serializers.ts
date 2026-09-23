@@ -1193,22 +1193,101 @@ function formatMechanicEligibility(
 // "take the one listed first", is what makes that order mean something to the
 // model. Without it the ranking ruled on the ticket (event-armed intentions
 // first, because they perish) would be decorative.
-// TAC-495: the first-visit opener, written out as the SMS copy (TAC-423's
-// wording, unchanged), with an Instagram variant made by swapping two phrases.
-// Only the channel claims move: "on this number" goes, and "texting" becomes
-// "messaging". Every presence phrase (scanned at pickup, already ordered, in
-// hand, coming in, what they got) is identical on both channels by ruling.
+// TAC-423 (2026-09-22). The opener states the SITUATION and then asks one
+// thing: what the guest just got. The question is SCAFFOLDING, not the
+// intended design, and the comment says so because the next reader will
+// otherwise reasonably delete it.
+//
+// The intended design is that the opener states facts and the intention lines
+// below carry the ask. understand_order is first in that list on this turn,
+// ungated, armed by the scan itself, and its line says exactly what this
+// sentence says. Two instructions for one ask is the shape this whole ticket
+// is about. It was built that way and MEASURED, 20 generations per arm on the
+// live config, and the intention line could not carry it:
+//
+//   opener asks        asks something 20/20   asks the ORDER 20/20
+//   opener silent      asks something 20/20   asks the ORDER 11/20
+//
+// The nine misses are worse than the number. Five asked how it was, which is
+// did_they_like_it, an intention NOT open on this turn (it arms on a recorded
+// order and there is none), and an answer naming no item captures nothing and
+// gives reportsTodaysScanVisit nothing to fire on. Four reverted to asking
+// whether this was the guest's first time, which is the behaviour this ticket
+// was filed to delete, with nothing in the prompt asking for it. An opener
+// that reintroduces the original bug half the time is not an improvement on a
+// scripted one (ruled 2026-09-22).
+//
+// SO: the scripted question stays until TAC-519 establishes why intentions are
+// so rarely raised and fixes it. scripts/measurement/first-touch-question.ts is
+// the harness that produced those numbers and is the one that should decide
+// when this sentence comes out. At 55% today the intention line cannot carry
+// the ask on its own.
+//
+// Three things left with it, each ruled:
+//
+//   1. The thank-you is gone. Le Mil's caps replies at "one-liners or two
+//      sentences at most" and ## Length is the only authority on length, so a
+//      four-act prescription into a two-sentence budget means the model drops
+//      one, and the one it dropped was the warmth. Dropped here instead, so
+//      the reply is a hello and one question by design. Warmth is voice.
+//
+//   2. The identity clause is conditional on the guest's own message not
+//      naming a person, and says out loud that it beats the venue's voice
+//      setting. It has to: speakerFramingProse's `owner` branch renders "Do
+//      not name yourself unless the guest asks", this paragraph renders later
+//      in the user prompt, and it was already overriding that silently. Le
+//      Mil's prefill names the venue and not a person, so every ordinary scan
+//      takes the introduce branch.
+//
+//   3. Present tense. "have just ordered and collected it" replaces "have
+//      already ordered and have it in hand ... what it was". The recency sits
+//      on the ORDER, never on the guest's whereabouts, so R1's "without
+//      assuming they're still on-site" carve-out is untouched: that carve-out
+//      exists because the agent once told a guest who had left that the
+//      password was on the board. The tense matters beyond reading well.
+//      extract-reported-order.ts reads a report with no timing cue as one
+//      about today, dates it to venue-local noon and records it loosely, and
+//      a loose visit blocks the post-visit followup ladder outright. This
+//      wording invites an answer that carries a now-cue. It cannot guarantee
+//      one, which is why the same ticket also taught the extractor that a
+//      scan-day report is a receipt.
+//
+// The two CLAUSES that used to sit after the question are still gone, and they
+// are a separate thing from the question itself. The paragraph rendered
+// directly beneath says both: "take the one listed first, and only that one",
+// and "Asking never changes what the reply is about ... the question goes at
+// the end, in one short line, or not at all." The second of them was also the
+// deadlock sentence TAC-436 deleted from that paragraph, surviving here in
+// different words and so invisible to the canary guarding it. Consequence,
+// ruled rather than inherited: a guest who scans AND asks something gets their
+// answer plus one short question, where the old opener held the question back.
+// serializers.test.ts carries a canary on this paragraph's own dropped
+// wording, since the existing one could not see it.
+//
+// Honest note on that rationale, because the measurement did not support it:
+// the deferral clause was expected to SUPPRESS the ask on a turn where the
+// guest asks something of their own, and on that scenario the old opener asked
+// 20/20 anyway. On this turn shape the clause was inert. TAC-436's own
+// measurement was of the restraint paragraph on ordinary turns, a different
+// population, and it stands; this says only that the opener's copy of it was
+// doing nothing here. The clause stays out on the ruling, not on this
+// evidence.
+//
+// TAC-495: the SMS copy is this string with no substitutions, so it is
+// byte-identical by construction; the Instagram variant swaps ONE phrase, down
+// from two. The old second swap existed only to turn "who they're texting"
+// into "who they're messaging", and "who they've reached" is true on both
+// channels, so it is deleted. Every presence phrase (scanned at pickup, just
+// ordered and collected) is identical on both channels by ruling.
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
-// at load, which is what makes TAC-423's pending rewrite of this paragraph
-// break loudly here instead of leaving the two channels out of step.
+// at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [
     { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
-    { from: "let them know who they're texting,", to: "let them know who they're messaging," },
   ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 

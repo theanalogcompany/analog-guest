@@ -833,6 +833,48 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.60.0 (TAC-423): the `## What you're hoping to get to` first-visit opener
+// states the situation, asks what the guest just got, and prescribes nothing
+// else. The question is SCAFFOLDING and the block comment at FIRST_TOUCH_OPENER
+// says so: the intended design is that the intention lines beneath carry the
+// ask, understand_order being first among them on this turn and its line saying
+// exactly what this sentence says. That was built and measured at 20
+// generations per arm, and the intention line could not carry it: with the
+// opener silent the reply still asked SOMETHING 20/20, but asked about the
+// ORDER only 11/20 against 20/20 with the opener asking. Five of the nine
+// misses asked how it was, which is a different intention and is not even open
+// on this turn, and four reverted to asking whether it was the guest's first
+// time, the behaviour this ticket was filed to delete. The question comes out
+// when TAC-519 fixes why intentions are so rarely raised.
+//
+// Three further changes, each ruled on the ticket 2026-09-22:
+//
+//   - The thank-you is gone from the prescription. Le Mil's caps replies at
+//     two sentences and `## Length` is the only authority on length, so asking
+//     for a hello, an introduction, a thank-you and a question meant the model
+//     dropped one, and it dropped the warmth. The reply is now a hello and one
+//     question by design. Warmth is voice, not a clause.
+//
+//   - The identity clause is conditional on the guest's own message not naming
+//     a person, and says explicitly that it outranks the venue's voice setting
+//     on this one turn. Le Mil's speaks as the owner, whose setting is "do not
+//     name yourself unless the guest asks"; this paragraph renders later in the
+//     user prompt and was already overriding it in silence. The live reply that
+//     reopened the ticket named the owner in the third person to a guest whose
+//     own prefill had used that name.
+//
+//   - Present tense. "have just ordered and collected it" replaces "have
+//     already ordered and have it in hand ... what it was". The recency sits on
+//     the order, never on the guest's whereabouts, so R1's "without assuming
+//     they're still on-site" carve-out is untouched.
+//
+// Both clauses that followed the old question are gone, because the paragraph
+// beneath now says both. The second was also the deadlock sentence v1.51.0
+// deleted from that paragraph, surviving here in different words and so
+// invisible to the canary guarding it. Consequence, ruled rather than
+// inherited: a guest who scans AND asks something now gets their answer plus
+// one short question.
+//
 // v1.59.0 (TAC-484): a new R35. When a guest questions or pushes back on
 // something the agent said, correct the record plainly and stop.
 //
@@ -1188,7 +1230,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.59.0'
+export const PROMPT_VERSION = 'v1.60.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

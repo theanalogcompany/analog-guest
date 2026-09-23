@@ -708,51 +708,87 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       NOW,
     )
     const headerIdx = out.indexOf("## What you're hoping to get to")
-    const openerIdx = out.indexOf('sent right after they scanned your sign')
+    const openerIdx = out.indexOf('sent right after they scanned the sign at your pickup counter')
     const intentionLineIdx = out.indexOf("You haven't heard what this guest ordered yet.")
     expect(headerIdx).toBeGreaterThanOrEqual(0)
     expect(openerIdx).toBeGreaterThan(headerIdx)
     expect(intentionLineIdx).toBeGreaterThan(openerIdx)
   })
 
-  // TAC-423: the opener used to ask whether it's the guest's first time — a
-  // second, independently-authored instruction competing with
-  // understand_order's own line in this same block. The QR sign is assumed
-  // to be at the drink pickup counter (ruled; not configurable), so the
-  // opener now asks what they got, agreeing with understand_order instead of
-  // racing it. Also asserts the opener does NOT license current-presence
-  // framing beyond the pickup-order fact itself — R1's carve-out already
-  // warns against assuming the guest is still on-site.
-  it('asks what they got instead of whether it is their first time', () => {
+  // TAC-423 (2026-09-22). The opener STATES THE SITUATION and prescribes no
+  // question at all. It used to script one, first about whether the guest was
+  // new and then about what they got, either way competing with the intention
+  // lines rendered directly beneath it in the same block. The question now
+  // comes from understand_order's own line.
+  //
+  // Present tense is load-bearing rather than cosmetic: extract-reported-order
+  // reads a report carrying no timing cue as one about today, dates it to
+  // venue-local noon and records it loosely, and a loose visit blocks the
+  // post-visit followup ladder. The recency sits on the ORDER, never on the
+  // guest's whereabouts, because R1's carve-out forbids assuming they are
+  // still on-site.
+  // RENAMED AND REWRITTEN, and the old version is why. It was called "states
+  // the situation and prescribes no question" and asserted the ABSENCE of
+  // "ask what they got". When the question came back as "Ask what they just
+  // got", that substring still did not appear, so the test passed while its
+  // name was false and it checked nothing it claimed to. A name is not
+  // evidence of what a test checks. This asserts the question's PRESENCE, in
+  // the tense it has to be in, and keeps the absences that are still true.
+  it('states the situation in the present and asks what they just got', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
     expect(out).toContain(
-      "They've already ordered and have it in hand. You don't know what it was.",
+      'sent right after they scanned the sign at your pickup counter. They have just ordered and collected it.',
     )
-    expect(out).toContain('thank them for coming in')
-    expect(out).toContain('ask what they got')
-    expect(out).toContain('one question, then let their answer lead')
+    // The question is back (ruled 2026-09-22), present tense, and it is the
+    // ORDER question rather than any of the others the opener has carried.
+    expect(out).toContain('Ask what they just got.')
     expect(out).not.toContain("ask whether it's their first time")
+    expect(out).not.toContain('one question, then let their answer lead')
+    // The thank-you stays out of the prescription (ruled: the length cap wins).
+    expect(out).not.toContain('thank them for coming in')
+    // Still no current-presence framing beyond the order itself.
     expect(out).not.toContain('walking up for the first time')
     expect(out).not.toContain('someone present')
+    expect(out).not.toContain('standing')
   })
 
-  // The gate (firstTouchAfterQrScan) is content-blind — it fires on ANY
-  // qr_scan guest's true first message, not just a bare greeting. A real
-  // question deserves an answer, not a scripted first-time question stapled
-  // on top, so the paragraph defers the question (not the greeting) whenever
-  // the guest's own message already asks something.
-  it('defers the first-time question to a real question in the guest\'s own message', () => {
+  // THE OPENER'S OWN CANARY (ruled 2026-09-22). v1.51.0 deleted "If the guest
+  // asks about something else, answer that and let these wait" from the
+  // restraint paragraph as the deadlock that fired on nine of sixteen traced
+  // turns, and guarded that exact sentence with a canary further down this
+  // file. The opener carried the same instruction in different words, four
+  // lines above, where that canary could not see it. Both wordings are pinned
+  // here, so restoring either one fails.
+  it('never holds the question back when the guest asked something (TAC-436 deadlock)', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
-    expect(out).toContain("If their message doesn't ask you anything")
-    expect(out).toContain('If they did ask something, answer that instead')
+    expect(out).not.toContain("If their message doesn't ask you anything")
+    expect(out).not.toContain('If they did ask something, answer that instead')
+    expect(out).not.toContain("isn't worth spending their first reply on")
+    expect(out).not.toContain('answer that and let these wait')
+  })
+
+  // Q1, ruled 2026-09-22: the introduction is conditional on the guest's own
+  // message not naming a person, and it says out loud that it outranks the
+  // venue's voice setting. It has to. speakerFramingProse's `owner` branch
+  // renders "Do not name yourself unless the guest asks", this paragraph
+  // renders later in the user prompt, and it was already winning silently.
+  it('makes the introduction conditional and states that it outranks the voice setting', () => {
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+      'reply',
+      NOW,
+    )
+    expect(out).toContain(
+      "Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back.",
+    )
   })
 
   it('renders byte-identical to the pre-opener shape when firstTouchAfterQrScan is false', () => {
@@ -969,7 +1005,7 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
       )
       expect(out).not.toContain("What you're hoping to get to")
       expectNoOpener(out)
-      expect(out).not.toContain('ask what they got')
+      expect(out).not.toContain('Ask what they just got.')
     }
   })
 
@@ -984,7 +1020,7 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
       )
       expect(out).toContain("## What you're hoping to get to")
       expect(out).toContain(firstTouchOpenerFor(channel))
-      expect(out).toContain('ask what they got')
+      expect(out).toContain('Ask what they just got.')
     }
   })
 })
@@ -1041,17 +1077,19 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
 // TAC-495: the first-visit opener's channel variants.
 // ---------------------------------------------------------------------------
 //
-// The SMS opener is TAC-423's wording, unchanged. The Instagram opener swaps
-// two phrases and nothing else. The literals here are transcribed from the
-// approved wording; the full strings are pinned against the assembled prompt in
-// compose-prompt.test.ts.
+// The SMS opener is TAC-423's wording as approved on 2026-09-22. The Instagram
+// opener swaps ONE phrase and nothing else, down from two: the old second swap
+// turned "who they're texting" into "who they're messaging", and "who they've
+// reached" is true on both channels, so it is gone. The literals here are
+// transcribed from the approved wording; the full strings are pinned against
+// the assembled prompt in compose-prompt.test.ts.
 describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
   const SMS_OPENER =
-    "This is the guest's first message on this number, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're texting, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
   const INSTAGRAM_OPENER =
-    "This is the guest's first message, sent right after they scanned your sign at pickup. They've already ordered and have it in hand. You don't know what it was. Say hello and let them know who they're messaging, in your own words. If their message doesn't ask you anything, this is also the moment to thank them for coming in and ask what they got, one question, then let their answer lead. If they did ask something, answer that instead; the question isn't worth spending their first reply on."
+    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
 
-  it('the SMS opener is unchanged and the Instagram opener is the approved wording', () => {
+  it('the SMS opener is the approved wording and the Instagram opener swaps one phrase', () => {
     expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
     expect(firstTouchOpenerFor('instagram')).toBe(INSTAGRAM_OPENER)
   })
@@ -1060,13 +1098,15 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
     expect(firstTouchOpenerFor(null)).toBe(INSTAGRAM_OPENER)
   })
 
-  // The scope guard for the opener: undo the two approved swaps and the
-  // Instagram opener must be the SMS opener exactly.
-  it('the Instagram opener differs from the SMS one only in its two channel phrases', () => {
+  // The scope guard for the opener: undo the one approved swap and the
+  // Instagram opener must be the SMS opener exactly. Adding a second swap is
+  // adding channel-specific copy, and fails here until it is done on purpose.
+  it('the Instagram opener differs from the SMS one only in its one channel phrase', () => {
     expect(
-      firstTouchOpenerFor('instagram')
-        .replace("This is the guest's first message,", "This is the guest's first message on this number,")
-        .replace("who they're messaging,", "who they're texting,"),
+      firstTouchOpenerFor('instagram').replace(
+        "This is the guest's first message,",
+        "This is the guest's first message on this number,",
+      ),
     ).toBe(firstTouchOpenerFor('text'))
   })
 
@@ -1076,10 +1116,10 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
 
   it('every presence phrase is identical on both channels', () => {
     for (const phrase of [
-      'sent right after they scanned your sign at pickup.',
-      "They've already ordered and have it in hand.",
-      "You don't know what it was.",
-      'thank them for coming in and ask what they got',
+      'sent right after they scanned the sign at your pickup counter.',
+      'They have just ordered and collected it.',
+      "Say hello. If their message doesn't name a person, say who they've reached as well,",
+      'Ask what they just got.',
     ]) {
       expect(firstTouchOpenerFor('text')).toContain(phrase)
       expect(firstTouchOpenerFor('instagram')).toContain(phrase)

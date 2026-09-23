@@ -194,7 +194,18 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
         hours: OPEN_HOURS,
       },
     } as RuntimeContext['venue'],
-    guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
+    // TAC-423: createdVia and createdAt are backfilled rather than left to the
+    // partial cast, because reportsTodaysScanVisit now dereferences both. A
+    // fixture that leaves them undefined reads as "not a scan guest" and the
+    // scan-day branch is unreachable while every test stays green, which is
+    // this repo's signature failure. 'manual' keeps every pre-existing test on
+    // the unchanged branch, which is what it was already exercising.
+    guest: {
+      id: 'guest-1',
+      firstName: 'Sam',
+      createdVia: 'manual',
+      createdAt: new Date('2026-06-04T15:00:00Z'),
+    } as RuntimeContext['guest'],
     currentMessage: {
       id: 'inbound-1',
       body: 'i got a cortado',
@@ -1062,6 +1073,96 @@ describe('extractReportedOrder (orchestration gate)', () => {
       const outcome = await extractReportedOrder(menuCtx())
       expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
       expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+    })
+
+    // ------------------------------------------------------------------
+    // TAC-423, ruled 2026-09-22: a scanning guest's SAME-DAY report is a
+    // receipt whatever tense they used.
+    //
+    // The extractor's own prompt reads a report carrying no timing cue as one
+    // about today, which resolves to venue-local NOON and is recorded
+    // approximate — and an approximate visit blocks detectPostVisitReason
+    // outright. "the blossom tonic" is exactly the answer the opener's
+    // question gets, so the common case was silently losing the followup
+    // ladder. The sign is at the pickup counter, so a guest enrolled by
+    // scanning it today was demonstrably there today.
+    //
+    // Jaipal's two named cases first, then the three boundaries that stop the
+    // rule widening past them.
+    const scanGuest = (createdAt: Date) =>
+      ({
+        id: 'guest-1',
+        firstName: 'Sam',
+        createdVia: 'qr_scan',
+        createdAt,
+      }) as RuntimeContext['guest']
+
+    // Case 1 of 2: scan turn, no timing cue, becomes precise.
+    it('records a scan-day report with no timing cue as pinned at the message time', async () => {
+      ineligibleForEnrollment()
+      // 09:00 PDT the same venue-local day as DURING_SERVICE (10:00 PDT).
+      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-04T16:00:00Z')) }
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const outcome = await extractReportedOrder(ctx)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'pinned' })
+      expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+    })
+
+    // Case 2 of 2: an ordinary turn is untouched. Same report, same day, same
+    // everything except how the guest was created.
+    it('leaves an ordinary guest\'s no-cue report loose at venue-local noon', async () => {
+      ineligibleForEnrollment()
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const outcome = await extractReportedOrder(menuCtx())
+      const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 4, 12 * 60)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
+    })
+
+    // Boundary: scanned, but on an earlier day. This is a returning guest
+    // talking, and the visit they name is not the one the scan witnessed.
+    it('leaves a scan guest enrolled on an earlier day loose at venue-local noon', async () => {
+      ineligibleForEnrollment()
+      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-01T16:00:00Z')) }
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const outcome = await extractReportedOrder(ctx)
+      const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 4, 12 * 60)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
+    })
+
+    // Boundary: scanned today, but telling us about yesterday. The report's own
+    // day is what the guest said, and it is not this visit.
+    it('leaves a scan-day guest\'s report about ANOTHER day loose at that day\'s noon', async () => {
+      ineligibleForEnrollment()
+      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-04T16:00:00Z')) }
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-03' })
+      const outcome = await extractReportedOrder(ctx)
+      const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 3, 12 * 60)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
+    })
+
+    // Boundary: precision is RESOLVED, never asserted. A scan-day report
+    // arriving while the venue reads closed stays approximate, exactly as a
+    // guest writing "just grabbed a cortado" at that hour would. One rule for
+    // what pinned means, not two.
+    it('does not pin a scan-day report that arrives while the venue is closed', async () => {
+      ineligibleForEnrollment()
+      const ctx = {
+        ...menuCtx(),
+        guest: scanGuest(new Date('2026-06-04T16:00:00Z')),
+        currentMessage: {
+          id: 'm2',
+          body: 'i also got a cortado',
+          providerMessageId: 'p2',
+          receivedAt: AFTER_CLOSE,
+        } as RuntimeContext['currentMessage'],
+      }
+      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const outcome = await extractReportedOrder(ctx)
+      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(currentState.insertPayload?.occurred_at).toBe(AFTER_CLOSE.toISOString())
     })
 
     it('still advances last_visit_at when the new report is a different local day than a pinned last visit', async () => {

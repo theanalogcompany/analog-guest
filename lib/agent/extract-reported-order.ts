@@ -381,6 +381,57 @@ function sameVenueLocalDay(aIso: string, bIso: string, timezone: string): boolea
 }
 
 /**
+ * TAC-423, ruled 2026-09-22: a scanning guest's SAME-DAY report is a receipt,
+ * whatever tense they wrote it in.
+ *
+ * The sign is at the pickup counter, so a guest who enrolled by scanning it
+ * today was demonstrably at the counter today. An order they name in that
+ * day's conversation is the visit they just made, and the model's tense read
+ * is not evidence to the contrary: the extractor's own prompt says a report
+ * carrying NO timing cue at all describes today, and "the blossom tonic" is
+ * the answer the opener's question actually gets. Left alone, every such
+ * report lands at venue-local noon marked `approximate`, and an approximate
+ * visit blocks detectPostVisitReason outright (lib/followups/detectors.ts) —
+ * so the whole post-visit followup ladder never fires for the guests we have
+ * the most signal about. Measured at Le Mil's before this: one of five scanned
+ * guests carried a pinned visit.
+ *
+ * THREE conditions, all required, and each is doing work:
+ *   - the guest was created by a scan, so we know where they were standing;
+ *   - they were created TODAY in venue-local terms, so this is still that
+ *     visit and not a returning guest talking about an old one;
+ *   - the report itself resolved to TODAY, so "I came in yesterday" keeps its
+ *     own day and its approximate precision.
+ *
+ * WIDER THAN "no timing cue", deliberately and worth knowing: the model
+ * returns `specific_past_day` for a bare item name AND for "earlier today" /
+ * "this morning", and both resolve to today's date. Both are promoted here.
+ * That is right rather than sloppy — the visit is the same visit either way,
+ * and the ladder it feeds is day-granular, so pinning a 9am drink to a 10am
+ * message is not an error it can see. What is NOT promoted is any report
+ * resolving to a different day, which is every case where the guest is
+ * telling us about a visit other than this one.
+ *
+ * Precision is resolved by resolvePresentPrecision, not asserted: a scan-day
+ * report arriving while the venue reads CLOSED stays approximate, exactly as a
+ * guest who wrote "just grabbed a cortado" at that hour would. One rule for
+ * what `pinned` means, not two.
+ *
+ * Nothing changes for any other turn. A guest who did not enrol by scanning,
+ * or who scanned on an earlier day, or whose report resolves to another day,
+ * takes the unchanged branch below.
+ */
+function reportsTodaysScanVisit(ctx: RuntimeContext, occurredAt: Date, reportedAt: Date): boolean {
+  if (ctx.guest.createdVia !== 'qr_scan') return false
+  const timezone = ctx.venue.timezone
+  const today = venueLocalDayKey(timezone, reportedAt)
+  return (
+    venueLocalDayKey(timezone, ctx.guest.createdAt) === today &&
+    venueLocalDayKey(timezone, occurredAt) === today
+  )
+}
+
+/**
  * Resolve THIS report's occurred_at instant + precision (TAC-325).
  *
  * 'present' is unchanged from TAC-377 — resolvePresentPrecision combines the
@@ -412,6 +463,9 @@ function resolveOccurredAt(
   const instant = venueLocalInstant(ctx.venue.timezone, parsed.year, parsed.month, parsed.day, 12 * 60)
   if (instant === null) {
     return { occurredAt: reportedAt, precision: 'approximate' }
+  }
+  if (reportsTodaysScanVisit(ctx, instant, reportedAt)) {
+    return { occurredAt: reportedAt, precision: resolvePresentPrecision(ctx, reportedAt) }
   }
   return { occurredAt: instant, precision: 'approximate' }
 }
