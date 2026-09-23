@@ -7,7 +7,7 @@ import type { AIResult, VerifyProsePromiseInput, VerifyProsePromiseResult } from
 // — this verifier never touches the classify/generate contract, same
 // independence rationale as VERIFY_GROUNDING_PROMPT_VERSION and
 // VERIFY_MECHANIC_OFFER_PROMPT_VERSION.
-export const VERIFY_PROSE_PROMISE_PROMPT_VERSION = 'v1.0.0'
+export const VERIFY_PROSE_PROMISE_PROMPT_VERSION = 'v1.1.0'
 
 /**
  * TAC-401. 1000, not verify-mechanic-offer's 300.
@@ -46,12 +46,14 @@ const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND 
 
 Judge the reply on its own words. You are not checking whether the venue can afford it, whether the guest deserves it, or whether it was wise to offer. Only whether it was offered.
 
+You may also be shown the guest's message that this reply is answering. Use it for ONE thing: resolving what a short reply refers to. Which item "that one", "that", or "too" points at, and whether the guest reported something was wrong. The promise itself must still be in the assistant's own words. A guest ASKING for something free is not a promise, and a reply that does not accept it is not a promise no matter what the guest asked for.
+
 Something of value means the guest ends up with product, service, or money they did not pay for, because of this reply. A replacement drink, a remake, a free item, an item set aside for them, money off a future purchase, "on us", "the next one's on me", "I'll make it right" about a drink that was wrong. The wording does not matter and the reply does not have to name a price, an item, or a mechanism. "We'll sort you out next time" is a promise; so is "I'll make sure your next one is right".
 
 Do not flag:
 - A promise of INFORMATION or effort only. "Let me find out and get back to you", "I'll look into it", "I'll ask the team". Nothing changes hands.
 - A refusal or a deferral. "I can't do that over text", "that's something the owner handles". Mentioning a thing in order to decline it is not offering it.
-- An apology that gives nothing. "We'll do better next time", "that one's on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free.
+- An apology that gives nothing. "We'll do better next time", "that one's on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free. But when the guest's message names a specific thing that was wrong and the reply accepts it with "that's on us", "that one too", "same for that one" or similar, the venue is promising to make that specific thing good. Name it in commitmentDescription, taking the item from the guest's message.
 - A reply that only describes the regular menu, hours, prices, or policies, including what something costs.
 - Something the guest has already paid for or already ordered: confirming an existing order, or saying a drink they bought will be ready.
 
@@ -64,7 +66,19 @@ When promisesSomething is true, also say WHAT is owed:
 When promisesSomething is false, set commitmentType to "none" and commitmentDescription to an empty string.`
 
 function buildUserPrompt(input: VerifyProsePromiseInput): string {
-  return `Assistant's reply, about to be sent: "${input.replyBody}"\n\nDoes this reply commit the venue to giving this guest something of value?`
+  // TAC-527. The guest's message goes FIRST, so the model reads what was said
+  // before what we are about to say back — the order that makes "too" and
+  // "that one" resolvable.
+  //
+  // A null or blank inbound renders NOTHING, so the prompt is byte-identical
+  // to v1.0.0's on every proactive turn and for every body-only replay. That
+  // identity is what keeps TAC-401's 220-fixture measurement comparable, and
+  // a test pins it.
+  const guestLine =
+    input.guestInboundBody !== null && input.guestInboundBody.trim().length > 0
+      ? `Guest's message, which this reply is answering: "${input.guestInboundBody}"\n\n`
+      : ''
+  return `${guestLine}Assistant's reply, about to be sent: "${input.replyBody}"\n\nDoes this reply commit the venue to giving this guest something of value?`
 }
 
 /**
@@ -85,14 +99,26 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
  * reasons. Ruled 2026-09-15: an independent check becomes the primary
  * control and nothing may depend on the self-flag.
  *
- * INPUT IS THE REPLY BODY AND NOTHING ELSE. Not the prompt, not the retrieved
- * knowledge, not the mechanics list. "Does this text commit the venue to
- * giving this guest something" is answerable from the text alone, and keeping
- * the input to one string is what lets the replay harness measure this check
- * against fixed bodies, and what keeps it robust to venue persona rather than
- * tuned to one venue's voice (see TAC-415 — the same code and prompt produced
- * 27/60 on a synthetic persona reading "quick to make things right" and 4/220
- * at a venue whose persona says the opposite).
+ * INPUT IS THE REPLY BODY AND THE GUEST'S CURRENT MESSAGE, AND NOTHING ELSE.
+ * Not the prompt, not the retrieved knowledge, not the mechanics list, not the
+ * persona, not conversation history. What is kept OUT is what keeps this check
+ * robust to venue persona rather than tuned to one venue's voice (see TAC-415 —
+ * the same code and prompt produced 27/60 on a synthetic persona reading "quick
+ * to make things right" and 4/220 at a venue whose persona says the opposite).
+ *
+ * TAC-527 added the guest's message, and the reason is that the original
+ * premise was wrong in one narrow way. "Does this text commit the venue to
+ * giving this guest something" is NOT always answerable from the reply alone:
+ * an elliptical acceptance ("ugh, that's on us too") is apology-shaped in
+ * isolation, and the word that makes it a second comp points at an item only
+ * the guest named. Measured live at Le Mil's on 2026-09-23, that reply was
+ * held by comp_regex_backstop, cleared by this check, persisted no carrier,
+ * and created nothing when the operator approved it.
+ *
+ * The replay harness still measures body-only, passing guestInboundBody: null,
+ * so TAC-401's numbers stay comparable. Be precise about what that costs: on
+ * the inbound path those fixtures no longer describe the shipped
+ * configuration. The harness carries its own inbound-bearing cases for that.
  *
  * The caller (verifyProsePromiseStage in lib/agent/stages.ts) decides WHEN to
  * call this, retries it once on a transient fault, and FAILS CLOSED on

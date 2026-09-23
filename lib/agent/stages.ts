@@ -1616,21 +1616,39 @@ export type ProsePromiseBackstopResult =
  * it — so failing open returns to nothing at all.
  */
 export async function verifyProsePromiseStage(
-  ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'classification'>,
+  ctx: Pick<
+    RuntimeContext,
+    'agentRunId' | 'guest' | 'venue' | 'classification' | 'currentMessage'
+  >,
   generation: Pick<GenerateMessageResult, 'body' | 'commitment'>,
 ): Promise<ProsePromiseBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (isCommitmentTypeGated(generation)) return { status: 'skipped' }
   if (generation.body.trim().length === 0) return { status: 'skipped' }
 
-  let r = await verifyProsePromise({ replyBody: generation.body })
+  // TAC-527: built once, passed twice. The retry below used to restate this
+  // literal, and TAC-424 removed exactly that shape from verifyGroundingStage
+  // for the reason it applies here too — a duplicated input object is where
+  // the two calls silently diverge, and this is now the function whose input
+  // someone will edit next.
+  //
+  // `currentMessage` is null on every PROACTIVE turn by the inbound-XOR-outbound
+  // invariant (followups, the holding message), so those paths pass null,
+  // buildUserPrompt renders no guest line, and the composed prompt is
+  // byte-identical to v1.0.0's. Their behaviour is unchanged by this ticket.
+  const verifyInput = {
+    replyBody: generation.body,
+    guestInboundBody: ctx.currentMessage?.body ?? null,
+  }
+
+  let r = await verifyProsePromise(verifyInput)
   let retried = false
   // One immediate retry, transient faults only. Truncation is excluded by
   // errorCode rather than by message text, which is provider-formatted and
   // not a contract.
   if (!r.ok && r.errorCode !== VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE) {
     retried = true
-    r = await verifyProsePromise({ replyBody: generation.body })
+    r = await verifyProsePromise(verifyInput)
   }
 
   if (!r.ok) {

@@ -574,7 +574,13 @@ export async function regenerateWithCritique(
   let promisedCommitmentType: string | null = null
   let promisedCommitmentDescription: string | null = null
   if (ctx.guest.isDemo !== true && gen.data.body.trim().length > 0) {
-    const promiseCheck = await verifyProsePromise({ replyBody: gen.data.body })
+    const promiseCheck = await verifyProsePromise({
+      replyBody: gen.data.body,
+      // TAC-527: the same inbound the grounding check above is given. This
+      // path always has one — it regenerates a reply to a specific guest
+      // message — so unlike the proactive orchestrator paths it is never null.
+      guestInboundBody: load.data.inbound.body,
+    })
     if (promiseCheck.ok) {
       promisesSomething = promiseCheck.data.promisesSomething
       promisedCommitmentType = promiseCheck.data.commitmentType

@@ -83,6 +83,7 @@ describe('verifyProsePromise', () => {
 
     const result = await verifyProsePromise({
       replyBody: "sorry about that one. next cortado's on us",
+      guestInboundBody: null,
     })
 
     expect(result.ok).toBe(true)
@@ -105,7 +106,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we're open at 7 tomorrow" })
+    const result = await verifyProsePromise({ replyBody: "we're open at 7 tomorrow", guestInboundBody: null })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -131,7 +132,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we'll sort you out next time" })
+    const result = await verifyProsePromise({ replyBody: "we'll sort you out next time", guestInboundBody: null })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -150,7 +151,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right" })
+    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -169,7 +170,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "I'll set one aside" })
+    const result = await verifyProsePromise({ replyBody: "I'll set one aside", guestInboundBody: null })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -191,7 +192,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    await verifyProsePromise({ replyBody: 'hi' })
+    await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
 
     const call = generateObjectMock.mock.calls[0]?.[0] as { schema: { shape: object } }
     const keys = Object.keys(call.schema.shape)
@@ -199,7 +200,11 @@ describe('verifyProsePromise', () => {
     expect(keys.indexOf('reasoning')).toBeLessThan(keys.indexOf('promisesSomething'))
   })
 
-  it('sends only the reply body, never a prompt or venue context', async () => {
+  // TAC-527. This test was written to force exactly the edit this ticket
+  // made: its predecessor pinned the whole prompt string and said in as many
+  // words that widening the input has to change this line. It still pins the
+  // whole string, so the next widening is a decision rather than a detail.
+  it('sends the reply body alone when there is no guest message', async () => {
     generateObjectMock.mockResolvedValue({
       object: {
         reasoning: 'r',
@@ -209,20 +214,123 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    await verifyProsePromise({ replyBody: "next one's on us" })
+    await verifyProsePromise({ replyBody: "next one's on us", guestInboundBody: null })
 
     const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
-    // Pinned EXACTLY, not by substring. `VerifyProsePromiseInput` has one
-    // field today, so a `not.toContain('## ')` assertion has no venue context
-    // in scope to catch and cannot fail for any implementation of the current
-    // signature — it would describe a guard it does not provide. Pinning the
-    // whole string means widening the input has to change this line, which is
-    // the point: the narrow input is what makes the replay harness possible
-    // and keeps the check robust to venue persona, so widening it is a
-    // decision rather than a detail.
+    // BYTE-IDENTICAL to v1.0.0's prompt. This is the assertion behind the
+    // claim that proactive turns are unchanged and that TAC-401's 220-fixture
+    // replay stays comparable: both pass null, and null must render nothing.
     expect(call.prompt).toBe(
       'Assistant\'s reply, about to be sent: "next one\'s on us"\n\nDoes this reply commit the venue to giving this guest something of value?',
     )
+  })
+
+  it('renders the guest message BEFORE the reply when there is one', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        reasoning: 'r',
+        promisesSomething: true,
+        commitmentType: 'comp',
+        commitmentDescription: 'a replacement gulab jamun',
+      },
+    })
+
+    await verifyProsePromise({
+      replyBody: "ugh, that's on us too. really sorry",
+      guestInboundBody: 'the gulab jamun was stale too',
+    })
+
+    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string }
+    // Pinned whole, and the ORDER is the substance rather than presentation:
+    // the model has to read what the guest said before what we are about to
+    // say back, or "too" has nothing to resolve against.
+    expect(call.prompt).toBe(
+      'Guest\'s message, which this reply is answering: "the gulab jamun was stale too"\n\n' +
+        'Assistant\'s reply, about to be sent: "ugh, that\'s on us too. really sorry"\n\n' +
+        'Does this reply commit the venue to giving this guest something of value?',
+    )
+  })
+
+  // A blank inbound is not a guest message. Without this, a whitespace-only
+  // body would render an empty quoted line and ask the model to resolve "too"
+  // against nothing.
+  it.each(['', '   ', '\n'])('renders no guest line for a blank inbound (%j)', async (blank) => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        reasoning: 'r',
+        promisesSomething: false,
+        commitmentType: 'none',
+        commitmentDescription: '',
+      },
+    })
+
+    await verifyProsePromise({ replyBody: 'hi', guestInboundBody: blank })
+
+    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string }
+    expect(call.prompt).toBe(
+      'Assistant\'s reply, about to be sent: "hi"\n\nDoes this reply commit the venue to giving this guest something of value?',
+    )
+  })
+
+  // TAC-527: the input widened by exactly ONE string and no more. TAC-415
+  // measured this check at 27/60 on one persona and 4/220 at Le Mil's, so
+  // what is kept OUT is what keeps it from being tuned to a venue's voice.
+  it('never sends venue context, persona, mechanics or retrieved knowledge', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        reasoning: 'r',
+        promisesSomething: false,
+        commitmentType: 'none',
+        commitmentDescription: '',
+      },
+    })
+
+    await verifyProsePromise({
+      replyBody: "next one's on us",
+      guestInboundBody: 'my cortado was cold',
+    })
+
+    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
+    // The prompt is pinned whole above, so this asserts the one thing that
+    // assertion cannot: that no prompt SECTION shape reaches either string.
+    expect(call.prompt).not.toContain('## ')
+    expect(call.system).not.toContain('## ')
+    expect(call.prompt).not.toContain('# ')
+  })
+
+  describe('the approved rule (TAC-527)', () => {
+    async function systemPrompt(): Promise<string> {
+      generateObjectMock.mockResolvedValue({
+        object: {
+          reasoning: 'r',
+          promisesSomething: false,
+          commitmentType: 'none',
+          commitmentDescription: '',
+        },
+      })
+      await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
+      return (generateObjectMock.mock.calls[0]?.[0] as { system: string }).system
+    }
+
+    // ONE contiguous literal, not fragments. The TAC-409 lesson: a sentence
+    // can be reversed while every asserted fragment survives, and three
+    // mutants passed a fragment-pinned version of exactly this kind of
+    // assertion. The clause that matters here is the carve-out, so the
+    // carve-out is what is pinned whole.
+    it('carves the accepted-complaint case out of the apology rule, in one piece', async () => {
+      expect(await systemPrompt()).toContain(
+        '"On us" in an apology about responsibility is not "on us" as in free. But when the guest\'s message names a specific thing that was wrong and the reply accepts it with "that\'s on us", "that one too", "same for that one" or similar, the venue is promising to make that specific thing good. Name it in commitmentDescription, taking the item from the guest\'s message.',
+      )
+    })
+
+    // The guard that keeps the widened input from becoming a licence. Without
+    // it, a guest ASKING for something free is one step from reading as a
+    // promise. Pinned whole for the same reason as above.
+    it('scopes what the guest message may be used for, in one piece', async () => {
+      expect(await systemPrompt()).toContain(
+        'Use it for ONE thing: resolving what a short reply refers to. Which item "that one", "that", or "too" points at, and whether the guest reported something was wrong. The promise itself must still be in the assistant\'s own words. A guest ASKING for something free is not a promise, and a reply that does not accept it is not a promise no matter what the guest asked for.',
+      )
+    })
   })
 
   it('pins the output cap', async () => {
@@ -235,7 +343,7 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    await verifyProsePromise({ replyBody: 'hi' })
+    await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
 
     const call = generateObjectMock.mock.calls[0]?.[0] as { maxOutputTokens: number }
     // 1000, not verify-mechanic-offer's 300: unbounded `reasoning` is
@@ -249,7 +357,7 @@ describe('verifyProsePromise', () => {
   it('reports truncation under its own errorCode', async () => {
     generateObjectMock.mockRejectedValue(truncationError())
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right" })
+    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -262,7 +370,7 @@ describe('verifyProsePromise', () => {
   it('does NOT report truncation when the parse failed but finishReason is stop', async () => {
     generateObjectMock.mockRejectedValue(parseErrorThatStopped())
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right" })
+    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -272,7 +380,7 @@ describe('verifyProsePromise', () => {
   it('reports an ordinary transport failure under the generic errorCode', async () => {
     generateObjectMock.mockRejectedValue(new Error('fetch failed'))
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right" })
+    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -281,7 +389,7 @@ describe('verifyProsePromise', () => {
   })
 
   it('refuses an empty body without calling the model', async () => {
-    const result = await verifyProsePromise({ replyBody: '   ' })
+    const result = await verifyProsePromise({ replyBody: '   ', guestInboundBody: null })
 
     expect(result.ok).toBe(false)
     if (result.ok) return

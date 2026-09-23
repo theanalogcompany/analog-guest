@@ -4971,6 +4971,78 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(props.replacedRecommendation).toBe(true)
   })
 
+  // ---- The guest's own message (TAC-527) ----
+
+  it("hands the check the guest's inbound body on a reply turn", async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'the gulab jamun was stale too',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "ugh, that's on us too. really sorry" }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledWith({
+      replyBody: "ugh, that's on us too. really sorry",
+      guestInboundBody: 'the gulab jamun was stale too',
+    })
+  })
+
+  // The proactive half, and it is the assertion behind "followups and the
+  // holding message are unchanged by this ticket". makeCtx defaults
+  // currentMessage to null, which is what those paths hold by the
+  // inbound-XOR-outbound invariant.
+  it('hands the check a NULL inbound on a proactive turn', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(clean)
+    await verifyProsePromiseStage(
+      makeCtx({ currentMessage: null }),
+      makeGenerationResult({ body: 'just checking in' }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledWith({
+      replyBody: 'just checking in',
+      guestInboundBody: null,
+    })
+  })
+
+  // TAC-527 built the input once and passes it twice, the shape TAC-424 gave
+  // verifyGroundingStage. This is the parity guard: a future edit that
+  // restates the literal at the retry can diverge, and the two calls judging
+  // different inputs is invisible in every other assertion here.
+  it('sends IDENTICAL input on the retry', async () => {
+    verifyProsePromiseMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+      .mockResolvedValueOnce(clean)
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'my cortado was cold',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "we'll make it right" }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
+    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toEqual(
+      verifyProsePromiseMock.mock.calls[1]?.[0],
+    )
+    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toEqual({
+      replyBody: "we'll make it right",
+      guestInboundBody: 'my cortado was cold',
+    })
+  })
+
   // ---- Failure posture (ruled 2026-09-21, ruling 1) ----
 
   it('retries ONCE on a transient fault and uses the retry verdict', async () => {
