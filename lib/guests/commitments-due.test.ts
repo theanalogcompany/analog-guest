@@ -14,6 +14,14 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
 }))
 
+// TAC-428: the skip paths Slack-relay. Mocked so tests assert WHICH skip
+// fired without reaching PostHog or Slack.
+const arrivalPushMissedMock = vi.fn<(props: Record<string, unknown>) => Promise<void>>()
+vi.mock('@/lib/analytics/posthog', () => ({
+  captureCommitmentArrivalPushMissed: (props: Record<string, unknown>) =>
+    arrivalPushMissedMock(props),
+}))
+
 // Stub the push module — the processor tests assert which rows trigger the
 // CAS + push fanout; the actual APNs call isn't under test here.
 const sendCommitmentArrivalPushMock = vi.fn<
@@ -25,7 +33,7 @@ vi.mock('@/lib/notifications/send-commitment-push', () => ({
 }))
 
 import { createAdminClient } from '@/lib/db/admin'
-import { MORNING_HOUR_LOCAL, processDueCommitments } from './commitments-due'
+import { FALLBACK_MORNING_HOUR_LOCAL, processDueCommitments } from './commitments-due'
 
 // 14:00 UTC = 07:00 America/Los_Angeles (PDT, UTC-7 in late May) — morning
 // hour for an LA venue. Same instant is 10:00 America/New_York and 23:00
@@ -71,7 +79,29 @@ interface DBState {
   updateReturnByRowId: Map<string, unknown[]>
   updateErrorByRowId: Map<string, { message: string }>
   venues: Array<{ id: string; timezone: string }>
+  /**
+   * venue_configs.venue_info rows. TAC-428: the opening time comes from the
+   * venue's own published hours, so a fixture that omits this is a venue with
+   * no readable opening time and takes the fallback hour — which is a real
+   * state, not a broken fixture, and several tests below rely on it.
+   */
+  venueConfigs: Array<{ venue_id: string; venue_info: unknown }>
   guests: Array<{ id: string; first_name: string | null }>
+}
+
+/** Every day the same range, the shape Le Mil's actually publishes. */
+function hoursOpeningAt(range: string): { hours: Record<string, string> } {
+  return {
+    hours: {
+      monday: range,
+      tuesday: range,
+      wednesday: range,
+      thursday: range,
+      friday: range,
+      saturday: range,
+      sunday: range,
+    },
+  }
 }
 
 function newState(overrides: Partial<DBState> = {}): DBState {
@@ -84,6 +114,13 @@ function newState(overrides: Partial<DBState> = {}): DBState {
       { id: VENUE_LA, timezone: 'America/Los_Angeles' },
       { id: VENUE_NYC, timezone: 'America/New_York' },
       { id: VENUE_TOKYO, timezone: 'Asia/Tokyo' },
+    ],
+    // Le Mil's real hours as of 2026-09-22. TAC-508 moves this venue to
+    // 8:00 AM on 3 October; the test named for that change overrides it.
+    venueConfigs: [
+      { venue_id: VENUE_LA, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
+      { venue_id: VENUE_NYC, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
+      { venue_id: VENUE_TOKYO, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
     ],
     guests: [{ id: GUEST_ID, first_name: 'Jaipal' }],
     ...overrides,
@@ -146,6 +183,18 @@ function makeMockClient(state: DBState) {
           }),
         }
       }
+      if (table === 'venue_configs') {
+        return {
+          select: (_cols: string) => ({
+            in: async (_field: string, values: unknown[]) => ({
+              data: state.venueConfigs.filter((c) =>
+                (values as string[]).includes(c.venue_id),
+              ),
+              error: null,
+            }),
+          }),
+        }
+      }
       if (table === 'guests') {
         return {
           select: (_cols: string) => ({
@@ -162,6 +211,8 @@ function makeMockClient(state: DBState) {
 }
 
 beforeEach(() => {
+  arrivalPushMissedMock.mockReset()
+  arrivalPushMissedMock.mockResolvedValue(undefined)
   waitUntilMock.mockReset()
   sendCommitmentArrivalPushMock.mockReset()
   sendCommitmentArrivalPushMock.mockResolvedValue(undefined)
@@ -172,9 +223,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('MORNING_HOUR_LOCAL', () => {
-  it('is 7 (pilot default; venue_configs override is a follow-up)', () => {
-    expect(MORNING_HOUR_LOCAL).toBe(7)
+describe('FALLBACK_MORNING_HOUR_LOCAL', () => {
+  it('is 7, and is now only the fallback for unreadable hours (TAC-428)', () => {
+    expect(FALLBACK_MORNING_HOUR_LOCAL).toBe(7)
   })
 })
 
@@ -188,7 +239,7 @@ describe('processDueCommitments — empty + zero-counts', () => {
     expect(r.scanned).toBe(0)
     expect(r.transitioned).toBe(0)
     expect(r.pushed).toBe(0)
-    expect(r.notMorningHour).toBe(0)
+    expect(r.beforeOpening).toBe(0)
     expect(r.future).toBe(0)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
     expect(waitUntilMock).not.toHaveBeenCalled()
@@ -210,58 +261,70 @@ describe('processDueCommitments — morning-hour-per-venue gate', () => {
     expect(r.scanned).toBe(1)
     expect(r.transitioned).toBe(1)
     expect(r.pushed).toBe(1)
-    expect(r.notMorningHour).toBe(0)
+    expect(r.beforeOpening).toBe(0)
     expect(sendCommitmentArrivalPushMock).toHaveBeenCalledOnce()
   })
 
-  it('skips a NYC-tz venue at 14:00 UTC (10:00 EDT, not 07:00) — counts as notMorningHour', async () => {
+  // TAC-428 REVERSAL. This venue opens at 07:00 local and the tick lands at
+  // 10:00 local, past opening. Before TAC-428 the gate demanded the tick land
+  // IN the firing hour, so this counted as notMorningHour and the push never
+  // went out; that exact-hour demand is what GitHub's scheduler stopped being
+  // able to satisfy. Now it is the catch-up, and it fires.
+  it('FIRES for a NYC-tz venue at 10:00 EDT — past opening, same day (TAC-428)', async () => {
     const row = makeDueRow('cmt-nyc', { venue_id: VENUE_NYC })
-    const state = newState({ dueRows: [row] })
+    const state = newState({
+      dueRows: [row],
+      updateReturnByRowId: new Map([['cmt-nyc', [{ ...row, status: 'pending_ack' }]]]),
+    })
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )
     const r = await processDueCommitments(NOW)
-    expect(r.scanned).toBe(1)
-    expect(r.notMorningHour).toBe(1)
-    expect(r.transitioned).toBe(0)
-    expect(r.pushed).toBe(0)
-    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+    expect(r.beforeOpening).toBe(0)
   })
 
-  it('skips a Tokyo-tz venue at 14:00 UTC (23:00 JST, not 07:00)', async () => {
+  // TAC-428 REVERSAL, and the same-day bound doing its job. 14:00Z is 23:00
+  // JST, which is past this venue's opening, so clause 1 passes. It is held by
+  // clause 2 instead: the arrival (20:00Z) is 05:00 JST on the FOLLOWING Tokyo
+  // day, so it fires at that day's opening, not tonight. Before TAC-428 this
+  // was held by the hour gate and the date was never reached.
+  it('holds a Tokyo-tz venue at 23:00 JST as FUTURE, not before-opening (TAC-428)', async () => {
     const row = makeDueRow('cmt-tokyo', { venue_id: VENUE_TOKYO })
     const state = newState({ dueRows: [row] })
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )
     const r = await processDueCommitments(NOW)
-    expect(r.scanned).toBe(1)
-    expect(r.notMorningHour).toBe(1)
+    expect(r.future).toBe(1)
+    expect(r.beforeOpening).toBe(0)
     expect(r.transitioned).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
   })
 
-  it('fires the LA row + skips NYC + Tokyo on the same tick', async () => {
-    const laRow = makeDueRow('cmt-la')
-    const nycRow = makeDueRow('cmt-nyc', { venue_id: VENUE_NYC })
-    const tokyoRow = makeDueRow('cmt-tokyo', { venue_id: VENUE_TOKYO })
-    const transitionedLA = { ...laRow, status: 'pending_ack' }
+  // TAC-428 REVERSAL. LA (07:00 local, opening) and NYC (10:00 local, past
+  // opening) both fire now; only Tokyo is held, and by the date rather than
+  // the hour.
+  it('fires LA and NYC on the same tick and holds Tokyo for its own day (TAC-428)', async () => {
+    const la = makeDueRow('cmt-la')
+    const nyc = makeDueRow('cmt-nyc', { venue_id: VENUE_NYC })
+    const tokyo = makeDueRow('cmt-tokyo', { venue_id: VENUE_TOKYO })
     const state = newState({
-      dueRows: [laRow, nycRow, tokyoRow],
-      updateReturnByRowId: new Map([['cmt-la', [transitionedLA]]]),
+      dueRows: [la, nyc, tokyo],
+      updateReturnByRowId: new Map([
+        ['cmt-la', [{ ...la, status: 'pending_ack' }]],
+        ['cmt-nyc', [{ ...nyc, status: 'pending_ack' }]],
+      ]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )
     const r = await processDueCommitments(NOW)
     expect(r.scanned).toBe(3)
-    expect(r.transitioned).toBe(1)
-    expect(r.pushed).toBe(1)
-    expect(r.notMorningHour).toBe(2)
-    expect(sendCommitmentArrivalPushMock).toHaveBeenCalledOnce()
-    const call = sendCommitmentArrivalPushMock.mock.calls[0][0] as {
-      commitmentId: string
-    }
-    expect(call.commitmentId).toBe('cmt-la')
+    expect(r.transitioned).toBe(2)
+    expect(r.pushed).toBe(2)
+    expect(r.future).toBe(1)
   })
 })
 
@@ -284,24 +347,29 @@ describe('processDueCommitments — date-of-expected-arrival gate', () => {
     expect(r.future).toBe(0)
   })
 
-  it('fires CATCH-UP — expected_arrival date in venue tz is in the past', async () => {
-    // expected_arrival 16:00 UTC on 2026-05-27 = 09:00 PDT 2026-05-27 (2 days ago).
-    // Lean catch-up: fires on the next morning tick.
+  // TAC-428 REVERSAL, and the confirmed investigation-2 defect closed.
+  // Before this, the date filter was `expected_date <= today`, so a missed day
+  // fired on a later morning — and buildArrivalContext buckets only the
+  // hour-of-day, so it announced a two-day-old arrival as "this morning".
+  // Catch-up is bounded to the same venue-local day now, per the 2026-09-17
+  // ruling, and this is refused rather than announced late.
+  it('REFUSES a commitment whose arrival day has fully passed (TAC-428)', async () => {
+    // expected_arrival 16:00 UTC on 2026-05-27 = 09:00 PDT, two days before NOW.
     const row = makeDueRow('cmt-pastdue', {
       expected_arrival: '2026-05-27T16:00:00Z',
     })
-    const transitionedRow = { ...row, status: 'pending_ack' }
-    const state = newState({
-      dueRows: [row],
-      updateReturnByRowId: new Map([['cmt-pastdue', [transitionedRow]]]),
-    })
+    const state = newState({ dueRows: [row] })
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )
     const r = await processDueCommitments(NOW)
-    expect(r.transitioned).toBe(1)
-    expect(r.future).toBe(0)
-    expect(r.pushed).toBe(1)
+    expect(r.arrivalDayPassed).toBe(1)
+    expect(r.transitioned).toBe(0)
+    expect(r.pushed).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+    expect(arrivalPushMissedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ commitmentId: 'cmt-pastdue', reason: 'arrival_day_passed' }),
+    )
   })
 
   it('skips FUTURE — expected_arrival date in venue tz is tomorrow', async () => {
@@ -445,3 +513,184 @@ describe('processDueCommitments — defensive belt-and-suspenders', () => {
     expect(r.transitioned).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// TAC-428: the push fires at the venue's OPENING time, not a fixed 07:00.
+//
+// NOW is 14:00 UTC = 07:00 PDT at VENUE_LA. That is deliberately the hour the
+// old constant used, so every assertion here is about the venue's own hours
+// deciding rather than the constant happening to agree with them.
+// ---------------------------------------------------------------------------
+describe('opening time decides when the arrival push fires (TAC-428)', () => {
+  function laRow(id: string, overrides: Record<string, unknown> = {}) {
+    return makeDueRow(id, overrides)
+  }
+
+  function stateWithHours(row: ReturnType<typeof makeDueRow>, range: string | null) {
+    const base = newState({
+      dueRows: [row],
+      updateReturnByRowId: new Map([[row.id, [{ ...row, status: 'pending_ack' }]]]),
+    })
+    return {
+      ...base,
+      venueConfigs:
+        range === null
+          ? base.venueConfigs.filter((c) => c.venue_id !== VENUE_LA)
+          : [
+              { venue_id: VENUE_LA, venue_info: hoursOpeningAt(range) },
+              ...base.venueConfigs.filter((c) => c.venue_id !== VENUE_LA),
+            ],
+    }
+  }
+
+  function run(state: ReturnType<typeof newState>) {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    return processDueCommitments(NOW)
+  }
+
+  it('fires at 07:00 local for a venue that opens at 07:00', async () => {
+    const r = await run(stateWithHours(laRow('cmt-open7'), '7:00 AM – 3:00 PM'))
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+  })
+
+  // TAC-508 moves Le Mil's to 8:00 AM on 3 October. This is the behaviour
+  // change that lands at the live venue within days of this ticket, and the
+  // reason the opening-hour fix was folded in rather than deferred: at 07:00
+  // local the doors are shut, and the old constant pushed anyway.
+  it('does NOT fire at 07:00 local once the venue opens at 08:00 (TAC-508, 3 Oct)', async () => {
+    const r = await run(stateWithHours(laRow('cmt-open8'), '8:00 AM – 3:00 PM'))
+    expect(r.beforeOpening).toBe(1)
+    expect(r.transitioned).toBe(0)
+    expect(r.pushed).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+
+  it('fires at 08:00 local for that same 08:00-opening venue', async () => {
+    const state = stateWithHours(laRow('cmt-open8'), '8:00 AM – 3:00 PM')
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    // 15:00 UTC = 08:00 PDT.
+    const r = await processDueCommitments(new Date('2026-05-29T15:00:00Z'))
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('fires at 07:00 local for a venue that opens EARLIER, at 06:00', async () => {
+    // The old constant was wrong in this direction too: it withheld the push
+    // for an hour after the doors were already open.
+    const r = await run(stateWithHours(laRow('cmt-open6'), '6:00 AM – 3:00 PM'))
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('holds until the half-hour opening is reached, not the hour', async () => {
+    const state = stateWithHours(laRow('cmt-half'), '7:30 AM – 3:00 PM')
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    // 07:00 PDT is before 07:30.
+    expect((await processDueCommitments(NOW)).beforeOpening).toBe(1)
+  })
+
+  // The fallback, per the 2026-09-22 ruling: a push nobody needed costs less
+  // than a guest arriving unannounced, so unreadable hours behave as open and
+  // take the fixed hour rather than skipping.
+  it.each([
+    ['a stated closure', 'Closed'],
+    ['an unparseable value', 'ask at the counter'],
+  ])('falls back to the fixed hour on %s', async (_label, range) => {
+    const r = await run(stateWithHours(laRow('cmt-fallback'), range))
+    expect(r.openingTimeUnreadable).toBe(1)
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('falls back to the fixed hour when the venue has no venue_configs row at all', async () => {
+    const r = await run(stateWithHours(laRow('cmt-noconfig'), null))
+    expect(r.openingTimeUnreadable).toBe(1)
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('still refuses before the FALLBACK hour when hours are unreadable', async () => {
+    const state = stateWithHours(laRow('cmt-fallback-early'), 'Closed')
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    // 13:00 UTC = 06:00 PDT, before the 07:00 fallback.
+    const r = await processDueCommitments(new Date('2026-05-29T13:00:00Z'))
+    expect(r.beforeOpening).toBe(1)
+    expect(r.pushed).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-428: an arrival push never fires after the arrival it announces.
+// ---------------------------------------------------------------------------
+describe('an arrival push never fires after the arrival (TAC-428)', () => {
+  function run(state: ReturnType<typeof newState>, now: Date) {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    return processDueCommitments(now)
+  }
+
+  it('refuses when the arrival was earlier today, at or after opening', async () => {
+    // Arrival 16:00 UTC = 09:00 PDT; the tick is 18:00 UTC = 11:00 PDT.
+    const row = makeDueRow('cmt-gone', { expected_arrival: '2026-05-29T16:00:00Z' })
+    const r = await run(newState({ dueRows: [row] }), new Date('2026-05-29T18:00:00Z'))
+    expect(r.arrivalPassed).toBe(1)
+    expect(r.transitioned).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+    expect(arrivalPushMissedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ commitmentId: 'cmt-gone', reason: 'arrival_passed' }),
+    )
+  })
+
+  it('still fires while the arrival is ahead of the tick', async () => {
+    const row = makeDueRow('cmt-ahead', { expected_arrival: '2026-05-29T20:00:00Z' })
+    const state = newState({
+      dueRows: [row],
+      updateReturnByRowId: new Map([['cmt-ahead', [{ ...row, status: 'pending_ack' }]]]),
+    })
+    const r = await run(state, new Date('2026-05-29T18:00:00Z'))
+    expect(r.transitioned).toBe(1)
+    expect(r.arrivalPassed).toBe(0)
+  })
+
+  // The carve-out, and the reason folding the opening-hour fix in resolved the
+  // gap rather than creating one. An arrival before the doors open is one
+  // nobody could have been ready for, so it is announced AT opening and is
+  // never treated as already past. Without this the guest who says "I'll come
+  // at 6" to a venue opening at 7 produces no push at all.
+  it('ANNOUNCES an arrival earlier than opening, at opening, rather than calling it past', async () => {
+    // Arrival 13:00 UTC = 06:00 PDT, an hour before the 07:00 opening.
+    // The tick is 07:00 PDT, which is already after the arrival instant.
+    const row = makeDueRow('cmt-preopen', { expected_arrival: '2026-05-29T13:00:00Z' })
+    const state = newState({
+      dueRows: [row],
+      updateReturnByRowId: new Map([['cmt-preopen', [{ ...row, status: 'pending_ack' }]]]),
+    })
+    const r = await run(state, NOW)
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+    expect(r.arrivalPassed).toBe(0)
+    expect(arrivalPushMissedMock).not.toHaveBeenCalled()
+  })
+
+  it('does not extend that carve-out to an arrival on a previous day', async () => {
+    // 06:00 PDT the day BEFORE. Before-opening by the clock, but clause 2
+    // holds it first: catch-up never crosses a venue-local day.
+    const row = makeDueRow('cmt-preopen-yesterday', {
+      expected_arrival: '2026-05-28T13:00:00Z',
+    })
+    const r = await run(newState({ dueRows: [row] }), NOW)
+    expect(r.arrivalDayPassed).toBe(1)
+    expect(r.transitioned).toBe(0)
+  })
+})
+
