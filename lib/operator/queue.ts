@@ -133,6 +133,26 @@ export interface QueueDraft {
   instagramUsername: string | null
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
+  // TAC-534, Contract-locked: the guest message this draft is answering, or
+  // null. ALWAYS PRESENT, so the client never branches on presence.
+  //
+  // THE BODY IS HERE, NOT JUST THE ID, and that is the entire point of the
+  // field. `recentContext` below is the last THREE responses, and the message a
+  // draft answers is routinely older than that, so a client handed only an id
+  // holds something it cannot resolve against anything it has. Since TAC-397 a
+  // guest can hold one card per unanswered inbound, so without this every card
+  // but the newest reads as answering whatever the guest said most recently.
+  //
+  // Null EXACTLY when `messages.reply_to_message_id` is null, which is the
+  // proactive cards: manual followups, the operator decline, the crash card,
+  // engine followups. On a CORRECTION regen it names the correcting message,
+  // because migration 054 moves the column onto it. That is intended.
+  //
+  // `body` MAY BE EMPTY and is sent as-is: a media-only inbound is stored with
+  // `body = ''` and is still the message this draft answers, so the client
+  // decides whether there is anything worth quoting. That is the one place this
+  // shape parts company with `replacedDraft` above — see normalizeReplyingTo.
+  replyingTo: { messageId: string; body: string; createdAt: string } | null
   recentContext: QueueRecentContextEntry[]
   langfuseTraceId: string | null
 }
@@ -587,6 +607,49 @@ function normalizeReplacedDraft(
 }
 
 /**
+ * TAC-534: the RPC's three replied-to columns as the Contract's nullable
+ * object. All three present, or null — never a half-written object, for the
+ * reason normalizeReplacedDraft gives just above.
+ *
+ * ONE DELIBERATE DIFFERENCE FROM normalizeReplacedDraft, and copying that
+ * function wholesale gets it wrong: AN EMPTY BODY IS LEGITIMATE HERE and must
+ * pass through. A media-only inbound is stored with `body = ''` and is still
+ * the message this draft answers, so suppressing the object would drop the
+ * quote from a card that has one. The Contract is explicit that the endpoint
+ * sends it as-is and the client decides whether to render it. `messageId` and
+ * `createdAt` still demand a non-empty string: empty there means the row is
+ * not describable, where an empty body means the guest sent a photo.
+ *
+ * The ID is what decides whether there is an object at all, and migration 058
+ * takes all three columns from the same lateral, so they are null together:
+ * a row carrying an id with no body or timestamp means this is running against
+ * a PRE-058 function, which the deploy ordering forbids in production. It is
+ * logged rather than swallowed, the way queueGuestChannel logs its own
+ * degrade, because the symptom on the card — `replyingTo: null` — is
+ * indistinguishable from a proactive card that legitimately has none.
+ */
+function normalizeReplyingTo(
+  messageId: string | null | undefined,
+  body: string | null | undefined,
+  createdAt: string | null | undefined,
+  draftId: string,
+): { messageId: string; body: string; createdAt: string } | null {
+  if (typeof messageId !== 'string' || messageId.length === 0) return null
+  // An EMPTY body is legitimate and must not reach the guards below.
+  if (typeof body === 'string' && typeof createdAt === 'string' && createdAt.length > 0) {
+    return { messageId, body, createdAt }
+  }
+  console.error('[operator] queue draft names a replied-to message it could not resolve', {
+    draftId,
+    // Flags, never the body: this says which column was missing and nothing
+    // about what the guest wrote.
+    hasBody: typeof body === 'string',
+    hasCreatedAt: typeof createdAt === 'string' && createdAt.length > 0,
+  })
+  return null
+}
+
+/**
  * TAC-394: the RPC's `other_pending_for_guest` count, as the Contract's
  * always-present number. `count(*)` is never NULL, but the column is ABSENT when
  * this code runs against a pre-042 function (a local-dev state the deploy
@@ -779,6 +842,14 @@ export async function listPendingQueue(
       instagramUsername: instagramUsername(row.instagram_username as string | null),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
+      // TAC-534. Same cast as the columns above: generated types call every RPC
+      // return column non-null, and all three of these are genuinely nullable.
+      replyingTo: normalizeReplyingTo(
+        row.reply_to_message_id as string | null,
+        row.replying_to_body as string | null,
+        row.replying_to_created_at as string | null,
+        row.draft_id,
+      ),
       recentContext: normalizeRecentContext(row.recent_context),
       langfuseTraceId: row.langfuse_trace_id,
     }
