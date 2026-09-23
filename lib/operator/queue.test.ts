@@ -383,7 +383,10 @@ describe('listPendingQueue', () => {
     // review_state='pending', so neither can reach a card.
     const COPY_TABLE: ReadonlyArray<readonly [string, string]> = [
       // --- Obligation ---
-      ['commitment_type_gated', 'This offers something free. Your call.'],
+      // TAC-397: transcribed from the proposal comment on the ticket, PENDING
+      // approval. If the approved wording differs, this row and the map move
+      // together — never read this back out of REVIEW_REASON_LABELS.
+      ['commitment_type_gated', 'This commits you to something. Your call.'],
       ['comp_regex_backstop', "This sounds like it's offering something on the house."],
       [
         'complaint_commitment_floor',
@@ -432,7 +435,9 @@ describe('listPendingQueue', () => {
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a
       // welcome reply to "Hi Himanshu!" with no complaint anywhere in it.
-      ['category_requires_approval', 'You chose to review these yourself.'],
+      // TAC-397: transcribed from the proposal comment on the ticket, PENDING
+      // approval. Same discipline as the row above.
+      ['category_requires_approval', 'Replies like this one always come to you.'],
       // --- The draft came out wrong ---
       ['model_flagged', 'Something felt off about this one.'],
       ['self_talk_detected', 'I was talking about myself instead of to the guest.'],
@@ -607,7 +612,7 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         expect(result.drafts[0]!.reviewReasonCode).toBe('commitment_type_gated')
         expect(result.drafts[0]!.reviewReason).toBe(
-          'This offers something free. Your call.',
+          'This commits you to something. Your call.',
         )
       }
     })
@@ -682,7 +687,7 @@ describe('listPendingQueue', () => {
         const d = result.drafts[0]!
         expect(d.reviewTriggerLabels).toEqual([
           "This doesn't sound enough like you.",
-          'This offers something free. Your call.',
+          'This commits you to something. Your call.',
           // Unrecognized code still renders something rather than leaking a
           // raw identifier at an operator.
           'Needs review',
@@ -693,7 +698,7 @@ describe('listPendingQueue', () => {
         // length check passes any permutation.
         expect(d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]])).toEqual([
           ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
-          ['commitment_type_gated', 'This offers something free. Your call.'],
+          ['commitment_type_gated', 'This commits you to something. Your call.'],
           ['gibberish_unknown_code', 'Needs review'],
         ])
       }

@@ -170,7 +170,19 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-297: structural commitment-type gate, top of PRIMARY_TRIGGER_PRIORITY.
   // Says what is at stake (something free) and whose call it is, rather than
   // naming the gate.
-  commitment_type_gated: 'This offers something free. Your call.',
+  // TAC-397, proposed 2026-09-22, PENDING Jaipal's approval before merge.
+  //
+  // The old string, 'This offers something free. Your call.', was true for one
+  // of the three types this trigger fires on. A `hold` is an item set aside
+  // and the guest still pays for it; a `discount` is cheaper, not free. Only
+  // `comp` is free, and the card carries no type, so one sentence has to be
+  // true of all three.
+  //
+  // What IS common to the three is that the venue owes something afterwards,
+  // which is also what the operator is being asked to authorise. Pairs with
+  // commitment_cancellation_gated directly below — commits / cancels — and
+  // keeps that entry's 'Your call.'
+  commitment_type_gated: 'This commits you to something. Your call.',
   // TAC-513, copy approved verbatim (2026-09-21). The mirror of the line
   // above, and it closes the same way because it is the same kind of decision
   // in the opposite direction: something the guest was promised is being taken
@@ -263,7 +275,22 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // and the copy never followed, so a welcome reply to "Hi Himanshu!" reached
   // the operator labelled as a complaint. Now it names the only thing that is
   // actually true on every routed category: they chose this.
-  category_requires_approval: 'You chose to review these yourself.',
+  // TAC-397, proposed 2026-09-22, PENDING Jaipal's approval before merge.
+  //
+  // The old string, 'You chose to review these yourself.', is false at a venue
+  // that never chose. The trigger fires whenever resolvePolicyDecision returns
+  // operator_approval, and that includes source 'code_default' — the
+  // fleet-wide comp_complaint route that ships to every venue and which nobody
+  // picked. TAC-361 fixed this entry once already, for a different falsehood
+  // (it used to claim every routed category was a complaint); this is the
+  // second one in the same sentence.
+  //
+  // The new copy says the only thing true on all three sources: it is the KIND
+  // of message that brings it here, not anything wrong with the draft. A
+  // source-aware pair of strings is possible — policyHoldWasExplicit already
+  // makes the distinction for the demo-bypass event — but it needs the source
+  // on the wire, which is a Contract change and its own ticket.
+  category_requires_approval: 'Replies like this one always come to you.',
 
   // --- The draft came out wrong --------------------------------------------
   // The model's own self-flag, which carries a free-text approvalReason we
