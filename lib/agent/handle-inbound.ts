@@ -193,6 +193,9 @@ async function persistGenerationFailureCard(
       isGapTurn: true,
       checkDidNotComplete: false,
       callerPolicy: 'regen_gap_card_only',
+      // TAC-397: no guest inbound on this path, so nothing can be correcting
+      // a pending reply. The `regen` policy is the only one that reads this.
+      conversationDisposition: null,
     })
     if (slotDecision.action === 'drop') {
       console.warn(
@@ -274,6 +277,17 @@ async function persistGenerationFailureCard(
       inboundBody: ctx.currentMessage?.body ?? null,
       generatedBody: '',
     })
+    if (persisted.action === 'silenced' || persisted.outboundMessageId === null) {
+      // TAC-397: unreachable — a crash card uses regen_gap_card_only, which
+      // never silences. Handled because that guarantee lives in
+      // pending-slots.ts and a null id typed `string` is the bug nobody finds
+      // until a card has no id.
+      console.warn('[agent] generation-failure card came back with no id', {
+        agentRunId,
+        guestId: ctx.guest.id,
+      })
+      return { kind: 'skipped' }
+    }
     // shouldSendDraftFlaggedPush fails OPEN on any value outside PUSH_POLICY's
     // total map, so `generation_failed` pushes — which is what this card wants
     // (nobody is coming to look at it otherwise) and is asserted in
@@ -1313,6 +1327,28 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
     //   obligation_slot_taken (TAC-394): the obligation slot holds a DIFFERENT
     //     commitment. The existing card wins, and the alert names both offers
     //     and the guest.
+    // TAC-397 case 2: this message needed no answer and the guest already
+    // holds a conversation card. Nothing is written and nothing is sent, so
+    // the card answering their earlier question is untouched — which is the
+    // whole point. Before this, "haha" regenerated that card into a reply to
+    // "haha" and the earlier question was lost.
+    //
+    // No PostHog event and no Slack relay (2026-09-22 ruling, question 4):
+    // this is the expected outcome on a very common turn shape, not an
+    // incident. The trace still records it, so a single run is explainable.
+    if (approval.action === 'silence') {
+      console.log('[agent] inbound draft silenced: nothing to answer, a card is already waiting', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        category: ctx.classification.category,
+      })
+      trace.update({
+        output: { status: 'silenced', category: ctx.classification.category },
+        content: { silencedDraft: gen.result.body },
+      })
+      return { status: 'silenced' }
+    }
+
     if (approval.action === 'drop') {
       console.warn('[agent] inbound draft dropped: a pending card holds its slot', {
         agentRunId,
@@ -1420,6 +1456,10 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: 'regen',
+            // TAC-397: keep what a correction replaced, and let 23505 recovery
+            // re-decide with the same disposition the gate used.
+            captureReplacedDraft: approval.captureReplacedDraft,
+            conversationDisposition: approval.conversationDisposition,
             // TAC-401: the commitment the prose-promise check named, so the
             // card an operator approves creates a real guest_commitments row.
             // Without this line the check catches the promise and the promise
@@ -1435,6 +1475,17 @@ export async function handleInbound(inboundMessageId: string): Promise<AgentResu
             renderedIntentions,
           },
         )
+        if (persistResult.action === 'silenced') {
+          // TAC-397: unreachable while the gate returns silence before persist
+          // is called, which it does for every 'no_answer' turn. Handled
+          // rather than cast away, because that guarantee lives in stages.ts
+          // and this is where a null id would otherwise be typed `string`.
+          console.warn('[agent] persist returned silenced in race recovery', {
+            agentRunId,
+            guestId: ctx.guest.id,
+          })
+          return { status: 'silenced' }
+        }
         if (persistResult.action === 'dropped') {
           // TAC-394: race recovery found a card in this draft's slot that the
           // gate never saw and that must not be overwritten. Reported exactly

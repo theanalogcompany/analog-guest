@@ -511,7 +511,15 @@ async function tryGenerateHolding(
   if (approval.action !== 'send') {
     console.warn(
       `[agent] holding message attempt ${attempt} blocked by approval gate (${approval.action}) for guest=${ctx.guest.id}`,
-      { agentRunId, triggers: approval.triggers },
+      {
+        agentRunId,
+        // TAC-397: 'silence' carries no triggers — it is not a gate verdict
+        // about the draft, it is "there was nothing to answer". Structurally
+        // unreachable here anyway (this path synthesizes a classification with
+        // no inbound, so the disposition is always own_card), but the log line
+        // must not assume every non-send decision has a trigger set.
+        triggers: approval.action === 'silence' ? [] : approval.triggers,
+      },
     )
     return null
   }

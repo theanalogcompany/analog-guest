@@ -199,6 +199,25 @@ const TEST_VENUE_INFO: RuntimeContext['venue']['venueInfo'] = {
   currentContext: [],
 }
 
+/**
+ * TAC-397: the classification of a turn that amends the question the pending
+ * card is answering. After this ticket that is the ONLY turn that regenerates
+ * a conversation card in place, so every test below asserting a regen or
+ * previous_pending_held has to say it.
+ *
+ * An unrelated second question gets its OWN card instead, which is the point
+ * of the ticket and is covered by its own tests rather than by widening these.
+ */
+function correctingClassification(category = 'new_question'): RuntimeContext['classification'] {
+  return {
+    category,
+    classifierConfidence: 0.95,
+    reasoning: 'test',
+    crisisSafety: false,
+    correctsPendingReply: true,
+  } as RuntimeContext['classification']
+}
+
 function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
   const ctx = {
     agentRunId: 'run-1',
@@ -902,13 +921,16 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
   })
 
-  it('queues with previous_pending_held and existingPendingDraftId when a prior pending draft exists', async () => {
+  // TAC-397: previous_pending_held now fires ONLY on a correction — exactly
+  // when the persist layer is about to overwrite the card, which is what makes
+  // its label true. The unrelated-turn case is the test directly below.
+  it('queues with previous_pending_held and existingPendingDraftId when a correction lands on a pending draft', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
       data: { id: 'existing-pending-id', body: 'earlier draft body' },
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      makeCtx({}),
+      makeCtx({ classification: correctingClassification() }),
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
     expect(decision.action).toBe('queue')
@@ -939,7 +961,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      makeCtx({}),
+      makeCtx({ classification: correctingClassification() }),
       makeGenerationResult({
         voiceFidelity: 0.45,
         body: "the next round's on the house",
@@ -1011,11 +1033,18 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     })
   }
 
-  function classification(category: string): RuntimeContext['classification'] {
+  function classification(
+    category: string,
+    // TAC-397: defaults false (an unrelated turn, which gets its own card).
+    // Tests asserting a regen pass true.
+    correctsPendingReply = false,
+  ): RuntimeContext['classification'] {
     return {
       category,
       classifierConfidence: 0.95,
       reasoning: 'test',
+      crisisSafety: false,
+      correctsPendingReply,
     } as RuntimeContext['classification']
   }
 
@@ -1087,7 +1116,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      holdVenueCtx({ classification: classification('follow_up') }),
+      holdVenueCtx({ classification: classification('follow_up', true) }),
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
     expect(decision.action).toBe('queue')
@@ -1135,6 +1164,11 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
   function demoCtx(): RuntimeContext {
     return makeCtx({
       guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      // TAC-397: these tests assert the full would-have-queued set, which
+      // includes previous_pending_held — and that trigger now fires only on a
+      // correction. Without this the set is one short and the tests would be
+      // asserting the new behaviour under their old names.
+      classification: correctingClassification(),
     })
   }
 
@@ -1270,6 +1304,9 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
           firstName: 'Sam',
           isDemo: false,
         } as RuntimeContext['guest'],
+        // TAC-397: previous_pending_held is one of the four, so the turn has
+        // to be a correction for the set to be complete.
+        classification: correctingClassification(),
       }),
       makeGenerationResult({
         voiceFidelity: 0.45,
@@ -2284,8 +2321,11 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    // Regen in place over the card, and the card's own clock is untouched.
-    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    // TAC-397: its own card now, rather than a regen over the gap card. The
+    // property these tests exist for is unchanged and stronger — the turn is
+    // NOT dropped, and the guest's outstanding question keeps its card, its
+    // text and its clock intact rather than being overwritten.
+    expect(decision.existingPendingDraftId).toBeNull()
     expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
   })
@@ -2325,10 +2365,14 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       makeGenerationResult({ knowledgeGap: false }),
       { status: 'clean' as const },
     )
-    // Not protected => ordinary sticky-pending queue, never a drop.
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    // Not protected, so never a drop — the property this test is named for.
+    //
+    // TAC-397 changes the outcome from queue to SEND, and that is the headline
+    // behaviour change of the ticket: an occupied slot is no longer a trigger
+    // on its own, so a clean high-fidelity reply with nothing else against it
+    // goes to the guest while the earlier card waits. It used to queue on
+    // previous_pending_held alone and regenerate the earlier draft away.
+    expect(decision.action).toBe('send')
   })
 
   // TAC-367, corrected by TAC-424. This comment used to read "'clean' is what
@@ -2416,8 +2460,11 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    // Regen in place over the card, and the card's own clock is untouched.
-    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    // TAC-397: its own card now, rather than a regen over the gap card. The
+    // property these tests exist for is unchanged and stronger — the turn is
+    // NOT dropped, and the guest's outstanding question keeps its card, its
+    // text and its clock intact rather than being overwritten.
+    expect(decision.existingPendingDraftId).toBeNull()
     expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
   })
@@ -2567,9 +2614,12 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    // TAC-397: its own card, so the existing card's clock is preserved by not
+    // being touched at all rather than by omitting the column on a regen. The
+    // guarantee is the same one: one holding message per wait.
+    expect(decision.existingPendingDraftId).toBeNull()
     expect(decision.pendingUntil).toBeUndefined()
-    // TAC-301 part 1.5: backstop path keeps the body on regen too.
+    // TAC-301 part 1.5: the backstop path keeps the body.
     expect(decision.blankBody).toBe(false)
   })
 
@@ -2591,7 +2641,9 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    // TAC-397: its own card. Not dropped, and the self-reported gap card it
+    // sits beside is untouched — which is what this test is named for.
+    expect(decision.existingPendingDraftId).toBeNull()
   })
 })
 
@@ -3391,7 +3443,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
   }
 
-  const inboundCtx = () =>
+  // TAC-397: `corrects` picks which of the ticket's three cases this turn is.
+  // Default false — an unrelated question, which now gets its OWN card rather
+  // than competing with the gap card for one slot.
+  const inboundCtx = (corrects = false) =>
     makeCtx({
       currentMessage: {
         id: 'inbound-2',
@@ -3406,7 +3461,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
-        correctsPendingReply: false,
+        correctsPendingReply: corrects,
       },
     })
 
@@ -3427,22 +3482,30 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     expect(decision.action).toBe('send')
   })
 
-  // CASE 2 — the card wins, the new draft is discarded. The guest is silent
-  // on this turn, which is the accepted cost of not losing the question.
-  // TAC-394: this used to queue for its "other reason" by carrying a COMP
-  // commitment. A comp now lands in the obligation slot, beside the gap card
-  // rather than over it (see the next test), so the drop is exercised with a
-  // reason that stays in the gap card's own slot.
-  it('drops a draft that would queue for some other reason', async () => {
+  // CASE 2 — TAC-397 REVERSES this, on the 2026-09-22 ruling (question 3).
+  //
+  // It used to DROP: the card won and the guest was silent on this turn, which
+  // TAC-308 accepted as the cost of not losing the operator's question. With
+  // one card per inbound there is no such cost — the reply gets its own card
+  // and the gap card is untouched — so the silent drop is removed.
+  //
+  // The test is rewritten rather than deleted because the property it protects
+  // (the gap card survives an unrelated turn) still holds; only the mechanism
+  // changed, from discarding the reply to giving it a card.
+  it('gives a draft that would queue for some other reason its OWN card, never dropping it', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
     )
-    expect(decision.action).toBe('drop')
-    if (decision.action !== 'drop') return
-    expect(decision.reason).toBe('knowledge_gap_card_protected')
-    expect(decision.protectedDraftId).toBe('gap-card-1')
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
+    expect(decision.slot).toBe('conversation')
+    // Nothing is regenerated: the gap card keeps its text and its clock.
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    // And no second clock, so the guest still gets at most one holding message.
+    expect(decision.pendingUntil).toBeUndefined()
   })
 
   // TAC-394 REVERSED this outcome. Before migration 041 a comp competed with
@@ -3466,10 +3529,14 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
   })
 
-  // CASE 3 — a second unanswerable question updates the card in place and
-  // must NOT push the deadline out, or a chatty guest could defer the
-  // holding message indefinitely.
-  it('regenerates in place and preserves the original clock when the new turn also gaps', async () => {
+  // CASE 3 — TAC-397 splits this in two, because "a second unanswerable
+  // question" and "a correction of the first one" are now different turns.
+  //
+  // A second QUESTION is unrelated, so it gets its own card. The deadline
+  // still must not move — the guest gets one holding message per wait, not one
+  // per card — and that now comes from anyKnowledgeGapCard rather than from
+  // preserving the column on a regen.
+  it('a second unanswerable question gets its own card and arms NO second clock', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
@@ -3477,7 +3544,22 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
+    expect(decision.existingPendingDraftId).toBeNull()
+    expect(decision.pendingUntil).toBeUndefined()
+  })
+
+  // A CORRECTION of the stuck question still regenerates the card in place,
+  // and still must not push the deadline out.
+  it('a correction regenerates the gap card in place and preserves its original clock', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(true),
+      makeGenerationResult({ knowledgeGap: true }),
+    )
+    expect(decision.action).toBe('queue')
+    if (decision.action !== 'queue') return
     expect(decision.existingPendingDraftId).toBe('gap-card-1')
+    expect(decision.captureReplacedDraft).toBe(true)
     // undefined = "don't touch the column", which preserves the running clock.
     expect(decision.pendingUntil).toBeUndefined()
   })
@@ -3497,9 +3579,11 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     expect(decision.action).toBe('send')
   })
 
-  // An ORDINARY pending draft keeps pre-TAC-308 behavior exactly: it queues
-  // and regenerates in place. The carve-out must not leak.
-  it('leaves non-gap pending drafts on the old path', async () => {
+  // An ORDINARY pending draft. TAC-397: an unrelated turn beside one now gets
+  // its own card and SENDS if nothing else holds it — the behaviour change the
+  // ticket is named for. It used to queue on previous_pending_held alone and
+  // regenerate the earlier draft out of existence.
+  it('sends beside a non-gap pending draft instead of regenerating it', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({
       data: {
         id: 'ordinary-draft',
@@ -3513,10 +3597,30 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
     )
+    expect(decision.action).toBe('send')
+  })
+
+  // And a CORRECTION of that same draft still regenerates it in place, with
+  // previous_pending_held — which is now true when it renders.
+  it('a correction regenerates a non-gap pending draft in place', async () => {
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: 'ordinary-draft',
+        body: 'earlier draft',
+        pending_until: null,
+        review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+      },
+      error: null,
+    })
+    const decision = await applyApprovalPolicyStage(
+      inboundCtx(true),
+      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+    )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
     expect(decision.existingPendingDraftId).toBe('ordinary-draft')
+    expect(decision.captureReplacedDraft).toBe(true)
   })
 })
 
@@ -4337,7 +4441,9 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   }
   const HELD = { default: 'operator_approval', perCategory: {} }
 
-  function inbound(category: string, policy?: unknown): RuntimeContext {
+  // TAC-397: `corrects` says whether this turn amends the pending card's
+  // question. Default false — an unrelated turn, which gets its own card.
+  function inbound(category: string, policy?: unknown, corrects = false): RuntimeContext {
     return makeCtx({
       venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
       currentMessage: {
@@ -4353,7 +4459,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
         classifierConfidence: 0.9,
         reasoning: 'test',
         crisisSafety: false,
-        correctsPendingReply: false,
+        correctsPendingReply: corrects,
       } as RuntimeContext['classification'],
     })
   }
@@ -4459,13 +4565,17 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
     expect(decision.triggers).toEqual(['category_requires_approval'])
   })
 
-  it('with both cards pending and the comp card listed first, a held reply regenerates the conversation card', async () => {
+  // TAC-397: a CORRECTION, because that is now the only turn that regenerates
+  // the conversation card. The property under test is unchanged and is about
+  // the SLOT: with the comp card listed first, the regen must still land on
+  // the conversation card and never on the comp.
+  it('with both cards pending and the comp card listed first, a correction regenerates the conversation card', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValue({
       data: [compCard, conversationCard],
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      inbound('new_question', HELD),
+      inbound('new_question', HELD, true),
       makeGenerationResult({ body: 'we open at 7 on sundays' }),
     )
     expect(decision.action).toBe('queue')

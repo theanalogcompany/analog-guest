@@ -14,15 +14,23 @@
 //   slot, is handed the wrong card.
 //
 //   INDEX MODES. '020' enforces migration 020 (one pending row per venue and
-//   guest). '041' enforces migration 041 (one per slot). A violation, on INSERT
-//   or on UPDATE, returns `{ code: '23505' }` as PostgREST does and writes
-//   nothing. 'none' enforces nothing.
+//   guest). '041' enforces migration 041 (one per slot). '054' enforces
+//   migration 054: one obligation card per guest, and one CONVERSATION card
+//   per inbound (reply_to_message_id, with NULL folded onto a sentinel exactly
+//   as the SQL coalesce does). A violation, on INSERT or on UPDATE, returns
+//   `{ code: '23505' }` as PostgREST does and writes nothing. 'none' enforces
+//   nothing.
 //
 // The slot condition below is written out from migration 041's SQL on purpose,
 // NOT imported from lib/agent/pending-slots.ts. A fake that reused the code
 // under test would agree with it by construction.
 
-export type PendingIndexMode = '020' | '041' | 'none'
+export type PendingIndexMode = '020' | '041' | '054' | 'none'
+
+// Migration 054's sentinel, written out here rather than imported for the same
+// reason the slot condition is: a fake that reused the code under test would
+// agree with it by construction.
+const NULL_REPLY_SENTINEL_FROM_MIGRATION_054 = '00000000-0000-0000-0000-000000000000'
 
 export interface FakeMessageRow {
   id: string
@@ -35,6 +43,10 @@ export interface FakeMessageRow {
   pending_until: string | null
   pending_commitment: unknown
   created_at: string
+  // TAC-397: migration 054 keys the conversation index on this, and the
+  // persist layer reads it to tell a duplicate delivery of one message from a
+  // different message winning the slot.
+  reply_to_message_id: string | null
   [column: string]: unknown
 }
 
@@ -63,7 +75,15 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
     if (row.review_state !== 'pending') return null
     if (mode === 'none') return null
     const base = `${row.venue_id}|${row.guest_id}`
-    return mode === '020' ? base : `${base}|${slotOfRow(row)}`
+    if (mode === '020') return base
+    const slot = slotOfRow(row)
+    if (mode === '041' || slot === 'obligation') return `${base}|${slot}`
+    // '054', conversation slot: one card per inbound.
+    const reply =
+      typeof row.reply_to_message_id === 'string' && row.reply_to_message_id.length > 0
+        ? row.reply_to_message_id
+        : NULL_REPLY_SENTINEL_FROM_MIGRATION_054
+    return `${base}|${slot}|${reply}`
   }
 
   function violates(candidate: FakeMessageRow[]): boolean {
@@ -124,6 +144,7 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
       pending_until: null,
       pending_commitment: null,
       created_at: new Date(clock).toISOString(),
+      reply_to_message_id: null,
       ...structuredClone(payload),
     } as FakeMessageRow
   }

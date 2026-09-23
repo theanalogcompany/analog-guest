@@ -44,7 +44,13 @@ import {
   isSameCommitment,
   loadPendingRowsBySlot,
   OBLIGATION_SLOT_TYPES,
-  otherSlotOccupant,
+  mostRecentlyOpenedConversationCard,
+  PENDING_ROWS_READ_LIMIT,
+  occupantOfSlot,
+  otherSlotOccupied,
+  resolveConversationDisposition,
+  silencesConversationTurn,
+  type ConversationDisposition,
   partitionPendingRows,
   pendingSlotOf,
   resolveDraftCarrier,
@@ -72,6 +78,10 @@ function pendingRow(over: Partial<PendingSlotRow> & { id: string }): PendingSlot
     review_reason: 'model_flagged',
     pending_commitment: null,
     created_at: '2026-09-14T16:26:34.000Z',
+    // TAC-397: required on the row, so a fixture cannot leave the column
+    // undefined and let a test about the same-message 23505 path pass against
+    // a row that could never match anything.
+    reply_to_message_id: null,
     ...over,
   }
 }
@@ -228,7 +238,7 @@ describe('loadPendingRowsBySlot', () => {
     const rows = await loadPendingRowsBySlot(VENUE, GUEST)
 
     expect(rows?.obligation?.id).toBe('card-a')
-    expect(rows?.conversation?.id).toBe('card-conv')
+    expect(rows?.conversation.map((r) => r.id)).toEqual(['card-conv'])
     // The carrier is selected, or the obligation card would be unreadable.
     expect(rows?.obligation?.pending_commitment).toEqual(compA)
   })
@@ -247,7 +257,7 @@ describe('loadPendingRowsBySlot', () => {
 
     expect(await loadPendingRowsBySlot(VENUE, GUEST)).toEqual({
       obligation: expect.objectContaining({ id: 'card-a' }),
-      conversation: null,
+      conversation: [],
     })
   })
 
@@ -262,11 +272,15 @@ describe('loadPendingRowsBySlot', () => {
     expect(await loadPendingRowsBySlot(VENUE, GUEST)).toEqual(EMPTY_PENDING_ROWS)
   })
 
-  // Unreachable with migration 041 live, and the one signal that the indexes
-  // are gone. The OLDEST card is kept, which needs the read to order: the newer
-  // row is inserted first here, so a read that relied on insertion order would
-  // keep the wrong one.
-  it('keeps the OLDEST card when a slot holds two, and reports the rest loudly', async () => {
+  // TAC-397 REWRITES this test rather than deleting it, and the rewrite is the
+  // point: it used to seed two CONVERSATION rows, which migration 054 makes
+  // normal. Left as it was it would have gone on passing while asserting that
+  // the feature this ticket shipped is a broken invariant.
+  //
+  // The obligation slot still holds at most one, so the invariant moved there.
+  // The OLDEST card is kept, which needs the read to order: the newer row is
+  // seeded first, so a read relying on insertion order would keep the wrong one.
+  it('keeps the OLDEST card when the OBLIGATION slot holds two, and reports the rest loudly', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const fake = createPendingRowsFake('none')
     fake.seed({
@@ -275,6 +289,7 @@ describe('loadPendingRowsBySlot', () => {
       guest_id: GUEST,
       review_state: 'pending',
       created_at: '2026-09-14T17:00:00.000Z',
+      pending_commitment: compA,
     })
     fake.seed({
       id: 'older',
@@ -282,22 +297,111 @@ describe('loadPendingRowsBySlot', () => {
       guest_id: GUEST,
       review_state: 'pending',
       created_at: '2026-09-14T16:00:00.000Z',
+      pending_commitment: compB,
     })
     mockAdmin.client = fake.client
 
     const rows = await loadPendingRowsBySlot(VENUE, GUEST)
 
-    expect(rows?.conversation?.id).toBe('older')
+    expect(rows?.obligation?.id).toBe('older')
     expect(errorSpy).toHaveBeenCalled()
     // The Slack-relayed capture, not a PostHog-only event: this is the one
-    // signal that migration 041's indexes are gone.
+    // signal that migration 041's obligation index is gone.
     expect(captureInvariantBrokenMock).toHaveBeenCalledWith({
       venueId: VENUE,
       guestId: GUEST,
-      keptObligationId: null,
-      keptConversationId: 'older',
+      keptObligationId: 'older',
+      keptConversationId: null,
       extraIds: ['newer'],
     })
+  })
+
+  // The mirror of the test above, and the one that would have caught leaving
+  // it alone: many conversation cards is the shipped behaviour, so it must
+  // produce NO error and NO capture.
+  it('reports nothing when the CONVERSATION slot holds several — that is normal now', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fake = createPendingRowsFake('none')
+    for (const [id, at] of [
+      ['first', '2026-09-14T16:00:00.000Z'],
+      ['second', '2026-09-14T17:00:00.000Z'],
+      ['third', '2026-09-14T18:00:00.000Z'],
+    ] as const) {
+      fake.seed({ id, venue_id: VENUE, guest_id: GUEST, review_state: 'pending', created_at: at })
+    }
+    mockAdmin.client = fake.client
+
+    const rows = await loadPendingRowsBySlot(VENUE, GUEST)
+
+    // Oldest first, so at(-1) is the most recently opened.
+    expect(rows?.conversation.map((r) => r.id)).toEqual(['first', 'second', 'third'])
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(captureInvariantBrokenMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-397: THE ORDERING TEST. The read is DESC-then-reversed, so a guest
+  // over the limit loses their OLDEST cards. With `ascending: true` and a
+  // limit it would lose the NEWEST — which is the card a correction must be
+  // matched against and the card the gate decides against. That is the
+  // TAC-316 truncation bug exactly: `ASC LIMIT 200` in the Command Center's
+  // conversation query kept the oldest 200 and hid everything newer.
+  //
+  // Seeded oldest-first so insertion order alone cannot produce the right
+  // answer, per this fake's adversarial-order contract.
+  it('drops the OLDEST cards when a guest is over the read limit, never the newest', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fake = createPendingRowsFake('none')
+    const total = PENDING_ROWS_READ_LIMIT + 5
+    for (let i = 0; i < total; i++) {
+      fake.seed({
+        id: `card-${String(i).padStart(2, '0')}`,
+        venue_id: VENUE,
+        guest_id: GUEST,
+        review_state: 'pending',
+        // Oldest first.
+        created_at: new Date(Date.UTC(2026, 8, 14, 0, i)).toISOString(),
+      })
+    }
+    mockAdmin.client = fake.client
+
+    const rows = await loadPendingRowsBySlot(VENUE, GUEST)
+    const ids = rows?.conversation.map((r) => r.id) ?? []
+
+    expect(ids).toHaveLength(PENDING_ROWS_READ_LIMIT)
+    // The newest survives, which is what correction-matching depends on.
+    expect(ids.at(-1)).toBe(`card-${String(total - 1).padStart(2, '0')}`)
+    expect(mostRecentlyOpenedConversationCard(rows!)?.id).toBe(
+      `card-${String(total - 1).padStart(2, '0')}`,
+    )
+    // The oldest five are the ones gone.
+    expect(ids).not.toContain('card-00')
+    // Still oldest-first within the window.
+    expect([...ids].sort()).toEqual(ids)
+  })
+
+  // Truncation is REPORTED rather than silent: an obligation card older than
+  // the window would fall outside it and read as an empty obligation slot,
+  // and the gate would then decide against an incomplete picture.
+  it('reports loudly when the read hits its limit', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fake = createPendingRowsFake('none')
+    for (let i = 0; i < PENDING_ROWS_READ_LIMIT; i++) {
+      fake.seed({
+        id: `card-${i}`,
+        venue_id: VENUE,
+        guest_id: GUEST,
+        review_state: 'pending',
+        created_at: new Date(Date.UTC(2026, 8, 14, 0, i)).toISOString(),
+      })
+    }
+    mockAdmin.client = fake.client
+
+    await loadPendingRowsBySlot(VENUE, GUEST)
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('hit its limit'),
+      expect.objectContaining({ limit: PENDING_ROWS_READ_LIMIT }),
+    )
   })
 
   it('fails OPEN (null) when the read returns an error', async () => {
@@ -328,16 +432,202 @@ describe('loadPendingRowsBySlot', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     captureInvariantBrokenMock.mockRejectedValue(new Error('posthog down'))
     const fake = createPendingRowsFake('none')
-    fake.seed({ id: 'a', venue_id: VENUE, guest_id: GUEST, review_state: 'pending' })
-    fake.seed({ id: 'b', venue_id: VENUE, guest_id: GUEST, review_state: 'pending' })
+    // TAC-397: obligations, so the capture this test is about actually fires.
+    // Two conversation rows no longer trip the invariant.
+    fake.seed({
+      id: 'a',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      pending_commitment: compA,
+    })
+    fake.seed({
+      id: 'b',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'pending',
+      pending_commitment: compB,
+    })
     mockAdmin.client = fake.client
-    expect((await loadPendingRowsBySlot(VENUE, GUEST))?.conversation?.id).toBe('a')
+    expect((await loadPendingRowsBySlot(VENUE, GUEST))?.obligation?.id).toBe('a')
   })
 })
 
 // ---------------------------------------------------------------------------
 // The decision
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// TAC-397: the disposition
+// ---------------------------------------------------------------------------
+
+describe('resolveConversationDisposition', () => {
+  const base = {
+    hasConversationOccupant: true,
+    category: 'new_question' as const,
+    correctsPendingReply: false,
+    inboundBody: 'what time do you close?',
+  }
+
+  // THE SAFETY BOUND. Silence is unreachable with nothing pending, so a
+  // misjudged disposition can never be the reason a guest gets no reply at
+  // all — only the reason they get no EXTRA reply while an operator already
+  // holds a card for them. Before TAC-397 that same message overwrote the
+  // card, so even a wrong silence is strictly better than the old behaviour.
+  it('is own_card whenever nothing is pending, whatever the message looks like', () => {
+    for (const over of [
+      { category: 'acknowledgment' as const, inboundBody: 'haha' },
+      { correctsPendingReply: true, inboundBody: 'actually make that oat milk' },
+      { category: 'casual_chatter' as const, inboundBody: 'nice day' },
+    ]) {
+      expect(
+        resolveConversationDisposition({ ...base, ...over, hasConversationOccupant: false }),
+      ).toBe('own_card')
+    }
+  })
+
+  it('is correction when the classifier says the message amends the pending question', () => {
+    expect(
+      resolveConversationDisposition({
+        ...base,
+        correctsPendingReply: true,
+        inboundBody: 'actually make that oat milk',
+      }),
+    ).toBe('correction')
+  })
+
+  // Order matters: a correction phrased casually still corrects. Reading it as
+  // chatter would silence the one message that must not be silenced, because
+  // the guest is waiting on a reply that is now answering the wrong question.
+  it('prefers correction over chatter when a casual message also corrects', () => {
+    expect(
+      resolveConversationDisposition({
+        ...base,
+        category: 'casual_chatter',
+        correctsPendingReply: true,
+        inboundBody: 'oh wait lol, oat milk',
+      }),
+    ).toBe('correction')
+  })
+
+  it.each(['acknowledgment', 'casual_chatter'] as const)(
+    'is no_answer for %s with no question in it',
+    (category) => {
+      expect(
+        resolveConversationDisposition({ ...base, category, inboundBody: 'haha' }),
+      ).toBe('no_answer')
+    },
+  )
+
+  // looksLikeQuestion is the SECOND condition, never the only one. TAC-484
+  // biases it toward precision, so a request phrased as an imperative returns
+  // false — and here a false return argues for SILENCE, the opposite
+  // direction from TAC-484's own use. The category AND is what makes that
+  // safe, and this is the case that proves it: the body would not read as a
+  // question, but the category says it is a real request, so it gets a card.
+  it('does NOT silence an imperative request that the question detector misses', () => {
+    expect(
+      resolveConversationDisposition({
+        ...base,
+        category: 'new_question',
+        inboundBody: 'tell me the wifi password',
+      }),
+    ).toBe('own_card')
+  })
+
+  it('does NOT silence chatter that is actually asking something', () => {
+    expect(
+      resolveConversationDisposition({
+        ...base,
+        category: 'casual_chatter',
+        inboundBody: 'lovely in here, are you open sundays?',
+      }),
+    ).toBe('own_card')
+  })
+
+  // The ticket's "when unsure, choose case 1" as a property: every category
+  // outside the two no-answer ones gets its own card.
+  it.each([
+    'reply',
+    'new_question',
+    'comp_complaint',
+    'mechanic_request',
+    'recommendation_request',
+    'personal_history_question',
+    'perk_inquiry',
+    'event_question',
+    'manual',
+    'unknown',
+    'opt_out',
+  ] as const)('is own_card for %s', (category) => {
+    expect(
+      resolveConversationDisposition({ ...base, category, inboundBody: 'anything at all' }),
+    ).toBe('own_card')
+  })
+
+  it('is own_card when there is no category at all (a run with no inbound)', () => {
+    expect(
+      resolveConversationDisposition({ ...base, category: null, inboundBody: null }),
+    ).toBe('own_card')
+  })
+})
+
+describe('silencesConversationTurn', () => {
+  const base = {
+    slot: 'conversation' as const,
+    callerPolicy: 'regen' as const,
+    disposition: 'no_answer' as ConversationDisposition | null,
+    hasOccupant: true,
+  }
+
+  it('silences a no-answer conversation turn with a card waiting', () => {
+    expect(silencesConversationTurn(base)).toBe(true)
+  })
+
+  // A draft carrying a comp, hold or discount is in the obligation slot and is
+  // never silenced by a judgement about conversational chatter. If the model
+  // answered "haha" with a comp, that is a comp and an operator sees it.
+  it('never silences an obligation draft', () => {
+    expect(silencesConversationTurn({ ...base, slot: 'obligation' })).toBe(false)
+  })
+
+  it.each(['never_regen', 'regen_always', 'regen_gap_card_only'] as const)(
+    'never silences under the %s policy, which has no message to judge',
+    (callerPolicy) => {
+      expect(silencesConversationTurn({ ...base, callerPolicy })).toBe(false)
+    },
+  )
+
+  it('never silences with nothing pending', () => {
+    expect(silencesConversationTurn({ ...base, hasOccupant: false })).toBe(false)
+  })
+
+  it.each(['own_card', 'correction', null] as const)(
+    'never silences on a %s disposition',
+    (disposition) => {
+      expect(silencesConversationTurn({ ...base, disposition })).toBe(false)
+    },
+  )
+})
+
+describe('mostRecentlyOpenedConversationCard / occupantOfSlot', () => {
+  const older = pendingRow({ id: 'older', created_at: '2026-09-14T16:00:00.000Z' })
+  const newer = pendingRow({ id: 'newer', created_at: '2026-09-14T18:00:00.000Z' })
+
+  it('returns the newest conversation card, the only one a correction may target', () => {
+    expect(mostRecentlyOpenedConversationCard(rowsOf(older, newer))?.id).toBe('newer')
+  })
+
+  it('returns null when the guest holds no conversation card', () => {
+    expect(mostRecentlyOpenedConversationCard(EMPTY_PENDING_ROWS)).toBeNull()
+  })
+
+  it('occupantOfSlot reads the obligation row and the newest conversation card', () => {
+    const rows = rowsOf(older, newer, pendingRow({ id: 'comp', pending_commitment: compA }))
+    expect(occupantOfSlot(rows, 'obligation')?.id).toBe('comp')
+    expect(occupantOfSlot(rows, 'conversation')?.id).toBe('newer')
+  })
+})
 
 describe('decideSlotAction', () => {
   const compCardA = pendingRow({ id: 'card-a', review_reason: 'commitment_type_gated', pending_commitment: compA })
@@ -348,7 +638,17 @@ describe('decideSlotAction', () => {
     review_reason: 'knowledge_gap',
     pending_until: '2026-09-14T16:36:34.000Z',
   })
-  const base = { isGapTurn: false, checkDidNotComplete: false, callerPolicy: 'regen' as const }
+  // TAC-397: `conversationDisposition: 'correction'` as the default for this
+  // block, so the pre-existing regen assertions below still describe a regen.
+  // Individual tests override it. A default of 'own_card' would have silently
+  // turned every one of them into an insert and made them assert the opposite
+  // of what their names say.
+  const base = {
+    isGapTurn: false,
+    checkDidNotComplete: false,
+    callerPolicy: 'regen' as const,
+    conversationDisposition: 'correction' as ConversationDisposition | null,
+  }
 
   // THE RULING'S TEST (TAC-394 plan v2 §6, test 2). It fails under the
   // same-type reading of "preserves the obligation", which would regenerate
@@ -378,7 +678,7 @@ describe('decideSlotAction', () => {
         rows: rowsOf(compCardA),
         draftCommitment: { type: 'comp', description: '  A Free Cortado on your next visit ', code: 'ZZ99' },
       }),
-    ).toEqual({ action: 'regen', slot: 'obligation', draftId: 'card-a' })
+    ).toEqual({ action: 'regen', slot: 'obligation', draftId: 'card-a' , captureReplacedDraft: false })
   })
 
   it('control: a hold for the same item is dropped', () => {
@@ -410,7 +710,7 @@ describe('decideSlotAction', () => {
   it('regenerates the conversation card for a conversation draft, never the comp card listed first', () => {
     expect(
       decideSlotAction({ ...base, rows: rowsOf(compCardA, conversationCard), draftCommitment: null }),
-    ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'card-conv' })
+    ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'card-conv' , captureReplacedDraft: true })
   })
 
   it('an obligation card with an unreadable carrier keeps its slot', () => {
@@ -424,32 +724,144 @@ describe('decideSlotAction', () => {
   })
 
   describe("'regen' (the gate's callers)", () => {
-    it('TAC-308: protects a knowledge-gap card from a turn that is not a gap turn', () => {
-      expect(decideSlotAction({ ...base, rows: rowsOf(gapCard), draftCommitment: null })).toEqual({
-        action: 'drop',
+    // TAC-397 REWRITES this block. Three of its four tests described the
+    // conversation slot's pre-054 behaviour, where an occupied slot meant
+    // regenerate-or-drop and the disposition did not exist. Keeping them and
+    // only widening their expected objects would have left them asserting the
+    // behaviour this ticket removed, in tests still named for TAC-308.
+
+    // Ruled 2026-09-22, question 3. TAC-308's protected-card drop existed to
+    // stop an UNRELATED turn overwriting a knowledge-gap card; an unrelated
+    // turn now gets its own card, so there is nothing to protect against and
+    // the guest's question is no longer silently dropped.
+    it('an unrelated turn beside a knowledge-gap card now gets its OWN card, not a drop', () => {
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'own_card',
+          rows: rowsOf(gapCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({ action: 'insert', slot: 'conversation' })
+    })
+
+    // The other half of that ruling: a correction is not an unrelated turn. It
+    // amends the very question the card is stuck on, so it regenerates it and
+    // keeps the replaced text.
+    it('a CORRECTION regenerates a knowledge-gap card and captures what it replaced', () => {
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'correction',
+          rows: rowsOf(gapCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({
+        action: 'regen',
         slot: 'conversation',
-        reason: 'knowledge_gap_card_protected',
-        protectedDraftId: 'gap-card',
+        draftId: 'gap-card',
+        captureReplacedDraft: true,
       })
     })
 
-    it('TAC-308: regenerates a knowledge-gap card on a gap turn', () => {
+    it('a no-answer turn beside a card writes nothing at all', () => {
       expect(
-        decideSlotAction({ ...base, isGapTurn: true, rows: rowsOf(gapCard), draftCommitment: null }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'no_answer',
+          rows: rowsOf(gapCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({ action: 'silence', slot: 'conversation' })
     })
 
-    it('TAC-367: regenerates a knowledge-gap card when only the grounding check truncated', () => {
+    // The safety bound: silence needs an occupant. With an empty slot a
+    // no-answer turn still gets a card, so a misjudged disposition can never
+    // be the reason a guest gets nothing at all.
+    it('a no-answer turn with NOTHING pending still inserts', () => {
       expect(
-        decideSlotAction({ ...base, checkDidNotComplete: true, rows: rowsOf(gapCard), draftCommitment: null }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'no_answer',
+          rows: rowsOf(),
+          draftCommitment: null,
+        }),
+      ).toEqual({ action: 'insert', slot: 'conversation' })
     })
 
-    it('TAC-264: regenerates an ordinary card in place', () => {
-      expect(decideSlotAction({ ...base, rows: rowsOf(conversationCard), draftCommitment: null })).toEqual({
+    // TAC-264's regenerate-in-place, which survives ONLY as the correction
+    // case now. Named for what it is rather than left under TAC-264's name.
+    it('TAC-264: a correction regenerates an ordinary card in place', () => {
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'correction',
+          rows: rowsOf(conversationCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({
         action: 'regen',
         slot: 'conversation',
         draftId: 'card-conv',
+        captureReplacedDraft: true,
+      })
+    })
+
+    // Ruling Q2: only ever the most recently opened card. An older card is
+    // never the target, which is what stops a correction landing on a
+    // question the guest stopped talking about two messages ago.
+    it('a correction targets the MOST RECENTLY OPENED card, never an older one', () => {
+      const older = pendingRow({ id: 'older', created_at: '2026-09-14T16:00:00.000Z' })
+      const newer = pendingRow({ id: 'newer', created_at: '2026-09-14T18:00:00.000Z' })
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: 'correction',
+          rows: rowsOf(older, newer),
+          draftCommitment: null,
+        }),
+      ).toMatchObject({ action: 'regen', draftId: 'newer' })
+    })
+
+    // TAC-308 and TAC-367 still apply to the OBLIGATION slot, where a
+    // backstop-flagged card can carry a commitment and a clock at once. The
+    // drop reason is not dead code; it moved.
+    it('TAC-308: still protects a knowledge-gap card in the OBLIGATION slot', () => {
+      const gapComp = pendingRow({
+        id: 'gap-comp',
+        review_reason: 'knowledge_gap_backstop',
+        pending_until: '2026-09-14T16:36:34.000Z',
+        pending_commitment: compA,
+      })
+      expect(
+        decideSlotAction({ ...base, rows: rowsOf(gapComp), draftCommitment: identity(compA) }),
+      ).toEqual({
+        action: 'drop',
+        slot: 'obligation',
+        reason: 'knowledge_gap_card_protected',
+        protectedDraftId: 'gap-comp',
+      })
+    })
+
+    it('TAC-367: an obligation gap card is regenerated when only a check did not complete', () => {
+      const gapComp = pendingRow({
+        id: 'gap-comp',
+        review_reason: 'knowledge_gap_backstop',
+        pending_until: '2026-09-14T16:36:34.000Z',
+        pending_commitment: compA,
+      })
+      expect(
+        decideSlotAction({
+          ...base,
+          checkDidNotComplete: true,
+          rows: rowsOf(gapComp),
+          draftCommitment: identity(compA),
+        }),
+      ).toEqual({
+        action: 'regen',
+        slot: 'obligation',
+        draftId: 'gap-comp',
+        captureReplacedDraft: false,
       })
     })
   })
@@ -498,7 +910,7 @@ describe('decideSlotAction', () => {
           rows: rowsOf(compCardA, gapCard),
           draftCommitment: null,
         }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
+      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' , captureReplacedDraft: false })
     })
 
     // No path overwrites one obligation with another, the decline included.
@@ -523,7 +935,7 @@ describe('decideSlotAction', () => {
           rows: rowsOf(gapCard),
           draftCommitment: null,
         }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' })
+      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' , captureReplacedDraft: false })
     })
 
     it('never overwrites an ordinary card', () => {
@@ -539,15 +951,15 @@ describe('decideSlotAction', () => {
   })
 })
 
-describe('otherSlotOccupant', () => {
+describe('otherSlotOccupied', () => {
   it('is the card in the slot the draft does not land in', () => {
     const rows = rowsOf(
       pendingRow({ id: 'card-a', pending_commitment: compA }),
       pendingRow({ id: 'card-conv' }),
     )
-    expect(otherSlotOccupant(rows, null)?.id).toBe('card-a')
-    expect(otherSlotOccupant(rows, identity(compB))?.id).toBe('card-conv')
-    expect(otherSlotOccupant(EMPTY_PENDING_ROWS, null)).toBeNull()
+    expect(otherSlotOccupied(rows, null)).toBe(true)
+    expect(otherSlotOccupied(rows, identity(compB))).toBe(true)
+    expect(otherSlotOccupied(EMPTY_PENDING_ROWS, null)).toBe(false)
   })
 })
 

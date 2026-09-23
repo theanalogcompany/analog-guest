@@ -600,6 +600,26 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
         retrievedKnowledge,
       }
     }
+    // TAC-397: the guest's message needed no answer and a card was already
+    // waiting, so nothing was written. Reported as its own outcome rather than
+    // folded into 'dropped': a harness row saying "dropped" for a turn that
+    // was deliberately left alone would read as a defect in every scorecard.
+    if (decision.action === 'silence') {
+      return {
+        ...base,
+        outcome: 'dropped',
+        replyBody: generated.body,
+        voiceFidelity: generated.voiceFidelity,
+        route: 'drop',
+        triggers: [],
+        primaryTrigger: 'silenced_no_answer_needed',
+        wouldBlankBody: false,
+        errorMessage: null,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
+    }
     // action === 'drop' (TAC-308: knowledge-gap card protection)
     return {
       ...base,

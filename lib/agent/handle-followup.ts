@@ -779,6 +779,11 @@ export async function handleFollowup(input: {
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: input.trigger.reason === 'manual' ? 'never_regen' : 'regen',
+            // TAC-397: always false on this path — a followup has no guest
+            // message, so its disposition is never 'correction'. Stated
+            // rather than omitted so the value is a decision, not a default.
+            captureReplacedDraft: approval.captureReplacedDraft,
+            conversationDisposition: approval.conversationDisposition,
           },
         )
         if (persistResult.action === 'dropped') {
@@ -813,6 +818,16 @@ export async function handleFollowup(input: {
             protectedDraftId: persistResult.protectedDraftId,
             triggers: approval.triggers,
           }
+        }
+        if (persistResult.action === 'silenced') {
+          // TAC-397: unreachable — a followup's disposition is always
+          // own_card, having no guest message to judge. Handled because that
+          // guarantee lives in pending-slots.ts, not here.
+          console.warn('[agent] followup persist returned silenced — unexpected', {
+            agentRunId,
+            guestId: ctx.guest.id,
+          })
+          return { status: 'silenced' }
         }
         const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
         queueSpan.end({
@@ -960,6 +975,18 @@ export async function handleFollowup(input: {
         protectedDraftId: approval.protectedDraftId,
         triggers: approval.triggers,
       }
+    }
+    // TAC-397: structurally unreachable on this path. A followup has no guest
+    // message, so resolveConversationDisposition always returns 'own_card' and
+    // silencesConversationTurn is false. Handled rather than cast away so that
+    // if a future change gives followups a disposition, this is a compile
+    // error at the right place instead of a silent send.
+    if (approval.action === 'silence') {
+      console.warn('[agent] followup silenced — unexpected: a followup has no message to judge', {
+        agentRunId,
+        guestId: ctx.guest.id,
+      })
+      return { status: 'silenced' }
     }
     const demoBypassReviewReason: 'demo_bypass' | undefined = approval.reason
 

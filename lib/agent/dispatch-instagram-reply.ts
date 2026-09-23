@@ -250,6 +250,9 @@ export async function writeInstagramSendFailureCard(input: {
       isGapTurn: false,
       checkDidNotComplete: false,
       callerPolicy: 'never_regen',
+      // TAC-397: no guest inbound on this path, so nothing can be correcting
+      // a pending reply. The `regen` policy is the only one that reads this.
+      conversationDisposition: null,
     })
     if (decision.action === 'drop') return { ok: false, skipped: 'slot_occupied' }
 
@@ -259,6 +262,10 @@ export async function writeInstagramSendFailureCard(input: {
       pendingCancellation: cancellation.status === 'resolved' ? cancellation.cancellation : null,
     })
     if (persisted.action === 'dropped') return { ok: false, skipped: 'slot_occupied' }
+    // TAC-397: unreachable — this path is never_regen, which never silences.
+    // Reported as the same skip rather than cast away: either way no card was
+    // written, which is what the caller needs to know.
+    if (persisted.action === 'silenced') return { ok: false, skipped: 'slot_occupied' }
     return { ok: true, cardId: persisted.outboundMessageId }
   } catch (e) {
     return { ok: false, skipped: 'write_failed', error: e instanceof Error ? e.message : String(e) }

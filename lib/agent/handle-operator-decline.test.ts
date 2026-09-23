@@ -308,7 +308,7 @@ beforeEach(() => {
   commitmentIdsSeenByGenerate = null
   ctxSeenByGenerate = null
   loadPendingRowsBySlotMock.mockReset()
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
   captureDraftDroppedMock.mockReset()
   captureDraftDroppedMock.mockResolvedValue(undefined)
   persistOrRegenQueuedDraftMock.mockReset()
@@ -530,7 +530,7 @@ describe('handleOperatorDecline', () => {
   it('passes existingPendingDraftId through to persistOrRegenQueuedDraft when found', async () => {
     loadPendingRowsBySlotMock.mockResolvedValueOnce({
       obligation: null,
-      conversation: pendingRow(EXISTING_PENDING_ID, 'prior draft'),
+      conversation: [pendingRow(EXISTING_PENDING_ID, 'prior draft')],
     })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
@@ -560,7 +560,7 @@ describe('handleOperatorDecline', () => {
   })
 
   it('passes null existingPendingDraftId when neither slot holds a card', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: null })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -582,7 +582,7 @@ describe('handleOperatorDecline', () => {
   })
 
   it('fires captureDraftQueued on INSERT path', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: null })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -607,7 +607,7 @@ describe('handleOperatorDecline', () => {
   it('fires captureDraftRegenerated on UPDATE-in-place path', async () => {
     loadPendingRowsBySlotMock.mockResolvedValueOnce({
       obligation: null,
-      conversation: pendingRow(EXISTING_PENDING_ID, 'prior'),
+      conversation: [pendingRow(EXISTING_PENDING_ID, 'prior')],
     })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
@@ -760,7 +760,7 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
   it('regenerates the conversation card, never the comp card beside it', async () => {
     loadPendingRowsBySlotMock.mockResolvedValueOnce({
       obligation: pendingRow('card-a', "the next one's on us", COMP_A),
-      conversation: pendingRow('card-conv', 'we open at 7'),
+      conversation: [pendingRow('card-conv', 'we open at 7')],
     })
     generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
     persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
@@ -780,7 +780,7 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
   it('records the slot it took and that the comp card holds the other one', async () => {
     loadPendingRowsBySlotMock.mockResolvedValueOnce({
       obligation: pendingRow('card-a', "the next one's on us", COMP_A),
-      conversation: null,
+      conversation: [],
     })
     generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
     persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
@@ -808,7 +808,7 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     loadPendingRowsBySlotMock.mockResolvedValueOnce({
       obligation: pendingRow('card-a', "the next one's on us", COMP_A),
-      conversation: null,
+      conversation: [],
     })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',

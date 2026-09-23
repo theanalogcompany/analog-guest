@@ -307,6 +307,17 @@ export type AgentResult =
       protectedDraftId: string
       triggers: string[]
     }
+  // TAC-397: the guest's message needed no answer ("haha", "thanks") and they
+  // already hold a pending conversation card. Nothing generated into a row,
+  // nothing regenerated, nothing sent — the card before it is untouched.
+  //
+  // Distinct from 'dropped', which means a draft competed for a slot and lost.
+  // Here nothing competed: there was no reply worth keeping. Distinct from
+  // 'superseded', where a reply existed and someone else had already sent one.
+  //
+  // Only handleInbound produces it in practice. A followup cannot: its
+  // disposition is always own_card, having no guest message to judge.
+  | { status: 'silenced' }
   // TAC-469: an Instagram guest's message already had a reply when the agent
   // came to send, usually one staff typed in the Instagram app. Nothing sent,
   // by design (rule 3). Only handleInbound produces it.

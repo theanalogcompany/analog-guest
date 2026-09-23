@@ -33,7 +33,7 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
   it('reports EVERY pending card for a guest, one per slot', async () => {
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: { id: 'card-a', review_reason: 'commitment_type_gated' },
-      conversation: { id: 'card-conv', review_reason: 'category_requires_approval' },
+      conversation: [{ id: 'card-conv', review_reason: 'category_requires_approval' }],
     })
 
     const hits = await checkCleanState(VENUE, GUESTS, PHONES)
@@ -58,7 +58,7 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
   })
 
   it('reports nothing for a guest with no pending cards', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
     expect(await checkCleanState(VENUE, GUESTS, PHONES)).toEqual([])
   })
 

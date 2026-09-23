@@ -353,7 +353,7 @@ beforeEach(() => {
       secondaryTags: [],
     },
   ])
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: null })
+  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
     action: 'inserted',
@@ -508,14 +508,14 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
     // conversation-slot card: the slot the blank crash card would take.
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: {
+      conversation: [{
         id: 'comp-draft',
         body: "the next one's on us",
         pending_until: null,
         review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
         pending_commitment: null,
         created_at: '2026-09-14T16:00:00.000Z',
-      },
+      }],
     })
     const r = await handleInbound(INBOUND_ID)
     expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
@@ -527,14 +527,14 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
   it('updates an existing gap card in place without re-arming its clock', async () => {
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: {
+      conversation: [{
         id: 'gap-card',
         body: '',
         pending_until: new Date(Date.now() + 60_000).toISOString(),
         review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
         pending_commitment: null,
         created_at: '2026-09-14T16:00:00.000Z',
-      },
+      }],
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
@@ -561,7 +561,7 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
         },
         created_at: '2026-09-14T16:00:00.000Z',
       },
-      conversation: null,
+      conversation: [],
     })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'queued', outboundMessageId: 'card-1' })
@@ -635,7 +635,7 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
         },
         created_at: '2026-09-14T16:00:00.000Z',
       },
-      conversation: null,
+      conversation: [],
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
