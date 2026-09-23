@@ -86,10 +86,25 @@ export interface QueueDraft {
   ungroundedClaims: string[]
   // TAC-394, Contract-locked (TAC-394's description, `## Contract`): how many
   // OTHER pending drafts this guest has at this venue. Always present, 0 when
-  // none, never undefined. With migration 041 a guest holds at most one
-  // obligation card and one conversation card, so the server produces 0 or 1;
-  // the client must not rely on that bound.
+  // none, never undefined.
+  //
+  // TAC-397: this MAY NOW EXCEED 1, and the Contract says so explicitly. A
+  // guest holds one obligation card and one conversation card per unanswered
+  // inbound (migration 054), so two questions in a row produce two. No code
+  // change was needed — the count never had a bound — but the note that said
+  // "the server produces 0 or 1" did, because a client could have read it as a
+  // guarantee.
   otherPendingDraftsForGuest: number
+  // TAC-397, Contract-locked: the text this draft held before a CORRECTION
+  // regenerated it, so the operator can check the new one still answers
+  // everything. Always present, null on every draft that was not regenerated
+  // by a correction — which is almost all of them.
+  //
+  // Both halves come from one pair of columns the persist layer writes
+  // together or not at all, so a non-null body always has a timestamp beside
+  // it. A draft corrected more than once carries only the most recent prior
+  // body; the column is overwritten wholesale on every regen.
+  replacedDraft: { body: string; replacedAt: string } | null
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
   recentContext: QueueRecentContextEntry[]
@@ -300,7 +315,23 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // is fine and the copy should not imply otherwise. Verified in production —
   // on 2026-08-09 a perfectly good "Cortado or the Frosty Gandhi" was held
   // behind an unreviewed knowledge-gap card.
-  previous_pending_held: 'Held behind an earlier message to this guest.',
+  // TAC-397, copy approved verbatim (2026-09-22).
+  //
+  // The old string, 'Held behind an earlier message to this guest.', was false
+  // every single time it rendered (TAC-394 QA, 2026-09-21): an occupied slot
+  // forced a regen or a drop, never an insert, so the row carrying the label
+  // was always the row that message had just replaced. The operator was told
+  // to clear something that no longer existed.
+  //
+  // The trigger now fires ONLY on a correction, i.e. exactly when this draft
+  // did replace the one before it — so the new copy can state that as fact.
+  //
+  // NOTE the 2026-09-15 ruling on this label is SUPERSEDED. It approved
+  // 'Waiting — this guest has another card open', which described the
+  // trigger's TAC-394 meaning; TAC-397 narrows the trigger, so that wording
+  // would be wrong too.
+  previous_pending_held:
+    'You updated this after the guest wrote again. Check it still answers everything.',
   // TAC-299: the operator swiped left on a heads-up card and /draft-decline
   // persisted this apology. "You passed on the last one" points at their own
   // action, which is the context that makes the draft make sense.
@@ -399,6 +430,28 @@ function normalizeUngroundedClaims(raw: string[] | null): string[] {
  * ordering forbids in production), and the Contract promises a number, so
  * anything that is not a positive finite number reads as 0.
  */
+/**
+ * TAC-397: the two columns as the Contract's single nullable object.
+ *
+ * Both are read as `string | null` despite the generated types calling every
+ * RPC return column non-null — the same cast `guestPhoneFallback` documents
+ * above, and for the same reason: regenerating the types would put back a
+ * `string` that is not true. They are genuinely null on nearly every row.
+ *
+ * Requires BOTH, rather than trusting the write path to have paired them. The
+ * persist layer does pair them, but that guarantee lives in another file, and
+ * a half-written pair reaching the client as `{ body, replacedAt: null }`
+ * would break a Contract that promises a string.
+ */
+function normalizeReplacedDraft(
+  body: string | null | undefined,
+  replacedAt: string | null | undefined,
+): { body: string; replacedAt: string } | null {
+  if (typeof body !== 'string' || body.length === 0) return null
+  if (typeof replacedAt !== 'string' || replacedAt.length === 0) return null
+  return { body, replacedAt }
+}
+
 function normalizeOtherPendingCount(raw: number | null | undefined): number {
   return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0
 }
@@ -485,6 +538,7 @@ export async function listPendingQueue(
       reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes),
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       otherPendingDraftsForGuest: normalizeOtherPendingCount(row.other_pending_for_guest),
+      replacedDraft: normalizeReplacedDraft(row.replaced_draft_body, row.replaced_draft_at),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),
