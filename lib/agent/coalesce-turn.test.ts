@@ -487,8 +487,12 @@ describe('the shipped constants', () => {
    * can be flipped by a careless edit with nothing failing — and this one
    * decides whether a guest's second message gets its own reply.
    */
-  it('ships with coalescing OFF', () => {
-    expect(INBOUND_COALESCING_ENABLED).toBe(false)
+  it('ships with coalescing ON', () => {
+    // Pinned by VALUE, so a revert is deliberate rather than accidental. Every
+    // behavioural test forces the gate through the `enabled` parameter instead
+    // of reading this constant, which is what keeps the SHUT path covered
+    // after the flip — and the shut path is exactly what a rollback restores.
+    expect(INBOUND_COALESCING_ENABLED).toBe(true)
   })
 
   it('pins the settle window at 8s and the lease at 2 minutes', () => {

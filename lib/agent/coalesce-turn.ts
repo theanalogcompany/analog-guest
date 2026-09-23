@@ -60,7 +60,7 @@ import { createAdminClient } from '@/lib/db/admin'
  * the gate BOTH ways and the shut-gate behaviour stays covered after the flip,
  * which is what a rollback restores.
  */
-export const INBOUND_COALESCING_ENABLED = false
+export const INBOUND_COALESCING_ENABLED = true
 
 /**
  * How long a run waits after `loadInbound` before claiming, so a fragment
