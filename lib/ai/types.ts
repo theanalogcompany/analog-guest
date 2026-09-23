@@ -242,6 +242,18 @@ export type RuntimeContext = {
     dayOfWeek: string
     venueLocalTime: string
     venueTimezone: string
+    // TAC-522: the next CALENDAR_DAYS days as weekday/month-day pairs, so
+    // placing a stored date is a LOOKUP rather than arithmetic. REQUIRED, not
+    // optional, deliberately: an optional field lets every construction site
+    // default to "no calendar" in silence, and a silently absent calendar
+    // returns the model to computing weekdays, which is the failure this
+    // exists to remove. Same discipline as `channel`, `referralSource` and
+    // RecentMessage.delivery.
+    //
+    // Why the model needs it: asked to say "September 25" the way a person
+    // would, it answered "This Thursday" 3 times out of 3 against a Friday,
+    // and the grounding backstop caught none of them.
+    calendar: ReadonlyArray<{ weekday: string; monthDay: string }>
     // TAC-301: whether the venue is open at this moment, resolved in code from
     // venue_info.hours rather than left for the model to derive from the
     // weekly table in the system prompt. Optional, and 'unknown' renders

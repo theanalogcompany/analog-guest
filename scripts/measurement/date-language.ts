@@ -148,6 +148,18 @@ const PATTERNS: readonly Pattern[] = [
     kind: 'month_named',
     re: /\bmay\s+(?:\d{1,2}(?:st|nd|rd|th)?\b|(?:19|20)\d{2}\b)/gi,
   },
+  // The SAME construct also has to report as a written-out date, and its
+  // absence here was a real defect rather than a month special case: the two
+  // kinds disagreed about identical evidence. "March 25" reported both
+  // `numeric_date` and `month_named`; "May 25" reported only the second,
+  // because MONTHS excludes `may`. A scenario whose date landed in May then
+  // showed 0/20 numeric dates in both arms while the replies plainly said
+  // "May 25" (TAC-522). Matching the judgement the month_named rule above
+  // already makes: `may` followed by a day is a month, not a modal verb.
+  {
+    kind: 'numeric_date',
+    re: /\bmay\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
+  },
 
   // --- person_shaped: the positive counter ---------------------------------
   // "soon" is deliberately NOT here. It is vague rather than person-shaped,

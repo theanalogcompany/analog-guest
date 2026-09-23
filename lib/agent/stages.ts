@@ -1,3 +1,4 @@
+import { computeCalendar } from './calendar'
 import {
   captureCancellationCheckUnavailable,
   captureCancellationClaimUnbacked,
@@ -2947,8 +2948,15 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
     hour12: false,
   }).format(now)
 
-  return { isoDate, dayOfWeek, venueLocalTime, venueTimezone: timezone }
+  return {
+    isoDate,
+    dayOfWeek,
+    venueLocalTime,
+    venueTimezone: timezone,
+    calendar: computeCalendar(timezone, now),
+  }
 }
+
 
 // TAC-244 / TAC-123: map the agent's FollowupTrigger.reason to the
 // AI-runtime's FollowupReason. day_* → post_visit_day_*; cold_lapsed and

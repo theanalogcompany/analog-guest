@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.63.0 (TAC-519: the intentions block renders last, after ## Recent conversation)', () => {
-    expect(PROMPT_VERSION).toBe('v1.63.0')
+  it('is v1.64.0 (TAC-522: the calendar, and the weekday clauses as a lookup)', () => {
+    expect(PROMPT_VERSION).toBe('v1.64.0')
   })
 })
 
@@ -245,11 +245,16 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
       'Say a date the way someone in the venue would say it out loud',
     )
     // The anchor the whole rule hangs on. Without naming the block, nothing
-    // connects a date stored in the system prompt to the clock, which is in
-    // the user prompt.
+    // connects a date stored in the system prompt to the calendar, which is in
+    // the user prompt. TAC-522 moved this from "judged against the date in"
+    // to the calendar lookup, and the summary moves with the template.
     expect(r36?.summary).toContain(
-      'judged against the date in the ## Right now block',
+      'Find a real date in the calendar in the ## Right now block and say the weekday it falls on',
     )
+    // The floor, carried in the operator-facing summary too: a rail reader
+    // seeing only "say the weekday" would not know the model is forbidden
+    // from deriving one.
+    expect(r36?.summary).toContain('Never work a weekday out for yourself')
     // The year is PERMITTED, not banned. A flat ban fails the far-off case.
     // THROUGH THE COMMA, deliberately. "which here is almost never" is what
     // calibrates the whole rule, and an earlier version stopped at
@@ -1719,25 +1724,62 @@ describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue woul
     }
   })
 
-  // CANARY. The first version of R36 also prescribed the FORM: "today" or
-  // "tomorrow" one day out, the weekday inside the coming week, "later this
-  // month" beyond that, and told the model to work out where a stored date
-  // falls against today. Measured at 5 generations per arm, that half made
-  // things WORSE: on an event three days out the model prefixed a weekday to
-  // the date and got the weekday wrong 3 times out of 3 (a Friday called
-  // "Thursday"), and the grounding backstop held none of them, so all three
-  // would have auto-sent a guest the wrong day.
+  // TAC-522 DELIBERATELY REMOVED TAC-520's canaries, which is what they were
+  // for: they forbade the weekday and "later this month" clauses until
+  // `## Right now` carried a calendar to look a weekday UP in. It does now, so
+  // the clauses are back — but NOT in their old form, and these assertions are
+  // the replacement.
   //
-  // Placing a stored date against today is arithmetic, and a prompt rule
-  // cannot make a model count days. Restoring any of these clauses without
-  // first giving ## Right now a calendar to look the weekday UP in (TAC-522)
-  // reintroduces a guest-facing wrong date that nothing catches.
+  // The history, because it is the reason the floor below exists: the old
+  // clauses told the model to "work out where that falls against today". On an
+  // event three days out it prefixed a weekday and got it wrong 3 times out of
+  // 3 (a Friday called "Thursday"), and the grounding backstop held none of
+  // them, so all three would have auto-sent a guest the wrong day.
+  it('restores the weekday clause as a LOOKUP against the calendar (TAC-522)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'find that date in the calendar in the ## Right now block and say the weekday it falls on',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A date in the current month that is not in the calendar is "later this month"',
+    )
+  })
+
+  // THE FLOOR, and the single assertion this rule most depends on. Without it
+  // the model is free to compute a weekday for a date outside the window,
+  // which is the 3-of-3 failure with a longer horizon.
+  it('forbids working a weekday out, and gives the out-of-window case somewhere to go (TAC-522)', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Never work a weekday out for yourself.')
+    // A prohibition with no alternative is how R33 would have lost to the
+    // venue's own content, so the alternative is pinned with it.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If a date is not in the calendar, do not name a weekday for it and do not take a different date from the calendar in its place: say the date the way the notes wrote it.',
+    )
+  })
+
+  // The calendar is a list of plausible dates, so it is also something to
+  // reach into. Measured: a note dated months back produced "should be in by
+  // Sunday the 27th", a date lifted from the window. This is the clause that
+  // forbids it, and it is separate from the weekday floor above because the
+  // model obeyed that one while still substituting a date.
+  it('forbids substituting a calendar date for one that is not in the window (TAC-522)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not take a different date from the calendar in its place',
+    )
+  })
+
+  it('tells the model a date that has gone by is not a plan (TAC-522)', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If the calendar shows the date has already gone by, it is not a plan any more',
+    )
+  })
+
+  // CANARY on the arithmetic form specifically. The clauses may be present;
+  // the INSTRUCTION TO COMPUTE may not come back with them.
   it.each([
-    'Inside the coming week it is the weekday',
-    'later this month',
     'work out where that falls against today',
-    'is "today," "tonight," or "tomorrow."',
-  ])('does not prescribe a date form the model has to compute: %s', (clause) => {
+    'Inside the coming week it is the weekday',
+    'one you worked out yourself',
+  ])('never reinstates the arithmetic form of the clause: %s', (clause) => {
     expect(SYSTEM_TEMPLATE).not.toContain(clause)
   })
 

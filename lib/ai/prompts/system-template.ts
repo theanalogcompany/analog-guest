@@ -884,6 +884,63 @@ import {
 // this shipped rule. `createRunLog` records the git sha for exactly this
 // reason and the sha is the authoritative field.
 //
+// v1.64.0 (TAC-522): `## Right now` carries a calendar, and R36's weekday
+// clauses come back as a LOOKUP.
+//
+// TAC-520 cut those clauses because they asked the model to do arithmetic: on
+// an event three days out it prefixed a weekday to the date and got it wrong
+// 3 times out of 3 ("This Thursday" against a Friday), with the grounding
+// backstop catching none, so all three would have auto-sent a guest the wrong
+// day. A prompt rule can require a lookup; it cannot make a model count.
+//
+// So `## Right now` now renders `- Calendar: Tue Sep 22 (today), Wed Sep 23,
+// …` for the next ten days, and the restored clauses point AT it. They are
+// NOT the old text: "work out where that falls against today" is gone, and in
+// its place sits the floor "Never work a weekday out for yourself", with
+// "say the date plainly instead" as the out-of-window branch. A prohibition
+// with no alternative is how R33 would have lost to the venue's own content.
+//
+// Month-day words rather than ISO, because the calendar exists to remove a
+// conversion step and operators write "September 25, 2026" in their notes.
+// Measured on the SHIPPED line against a real Le Mil's prompt:
+// +60 input tokens, 0.44%.
+//
+// ONE SENTENCE HAD TO CHANGE FOR COHERENCE, not for style. R36 used to read
+// "as much for a date you read in the venue's own notes as for one you worked
+// out yourself", which directly contradicts the new floor. It now reads "as
+// for one stated anywhere else in your context". Code review had already
+// flagged the old phrasing for normalising the very capability that measured
+// 0 for 3.
+//
+// A DST BUG WAS FOUND AND FIXED IN THE CALENDAR ITSELF, and it is the most
+// reusable thing in this ticket: the first version added 24 hours to the
+// instant and formatted in the venue's zone, under a comment asserting that
+// was DST-safe "in a way venueLocalInstant is not". It was not. At 23:30 on
+// the evening before a spring-forward transition, Los Angeles produced
+// "Sat Mar 13, Mon Mar 15, …" with Sunday the 14th missing from the calendar
+// entirely. The comment asserted a safety the code did not have, in the
+// function that cited the existing DST lesson. computeCalendar now resolves
+// the venue-local date once and does pure Date.UTC calendar arithmetic,
+// formatted in UTC so no zone can shift a date-only label. The skipped-day
+// case is a named regression test.
+//
+// THE CALENDAR CREATES ONE FAILURE MODE OF ITS OWN, and the out-of-window
+// clause had to grow to close it. A lookup table is also a source of
+// plausible dates to reach for. Measured: against a note dated months in the
+// past, whose date is therefore NOT in the window, one reply came back
+// "should be in by Sunday the 27th" — a date taken straight out of the
+// calendar, correct as a weekday and wrong as an answer. That is a
+// fabrication the calendar enabled, and it reads as more confident than the
+// vagueness it replaced. So the clause forbids substituting a calendar date,
+// not just deriving a weekday: "do not take a different date from the
+// calendar in its place".
+//
+// THE CALENDAR LANDED WITH 5701 TESTS GREEN AND NOTHING ASSERTING IT, which
+// is the finding worth carrying further than this ticket. A whole new line
+// entered `## Right now` and no test failed, because the block was only ever
+// checked by substring and by ordering, and computeToday had no tests at all.
+// Both are now fixed: the block is pinned whole.
+//
 // v1.61.0 (TAC-520): a new R36. Don't name the year, and when the venue's
 // notes give a month with no day, say the date is not set rather than naming
 // the month as if it were the plan.
@@ -1378,7 +1435,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.63.0'
+export const PROMPT_VERSION = 'v1.64.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1553,7 +1610,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - When venue knowledge describes a first-visit order as a sequence or progression, recommend only the first step. Do not relay the whole progression, and do not name items the knowledge marks as unavailable or coming soon. Never name something that already comes included with something else you just recommended in the same message; naming it separately makes one thing sound like two. This is separate from the at-most-two-items cap above; that governs how many, this governs how one is framed.
 - You cannot place, confirm, or take an order. If a guest tells you the specifics of what they want ('a large oat latte, extra hot'), do not accept or acknowledge it as an order ('on it,' 'coming right up'). Acknowledge what they said, and tell them to place it with the venue directly, the way this venue actually takes orders. This does not restrict offering a comp, or setting something aside where # Commitments says that is available at this venue. A made-to-order drink is not held, it is made, so prep instructions like this stay on the order-taking side. It also does not restrict a guest reporting an order they already placed, which the venue-knowledge rule above already covers; a past-tense report is not a request.
 - When a guest questions or pushes back on something you said, like 'what did i ask,' 'that's not right,' or plain confusion about an earlier message, say plainly what is actually true. If the earlier message was wrong, say so and stop: 'sorry, that was my mistake. nothing pending on your end' is the shape. If it was right, restate the fact plainly, without defending it or elaborating on it. Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine. A guest questioning a message is asking you to be straight with them, not to smooth it over. This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record. Correct it and then follow that category's guidance for how the rest of the message reads.
-- Say a date the way someone working in the venue would say it out loud. Name the year only when leaving it out would genuinely be ambiguous, which here is almost never; use the date in the ## Right now block to judge that, and when something really is a year or more out, the year earns its place and you should say it plainly rather than being vague. This holds just as much for a date you read in the venue's own notes as for one you worked out yourself. Restating a documented date in plainer terms invents nothing, and the never-invent rule above does not ask you to repeat a date in the form it happens to be written in. When the notes give only a month or a season and no actual day, the date is not set: say that plainly instead of naming the month as if it were the plan.
+- Say a date the way someone working in the venue would say it out loud. When the venue's notes give a real date, find that date in the calendar in the ## Right now block and say the weekday it falls on: "Friday", or "this Saturday". If it is today or tomorrow, say "today", "tonight" or "tomorrow" instead. A date in the current month that is not in the calendar is "later this month". Never work a weekday out for yourself. If a date is not in the calendar, do not name a weekday for it and do not take a different date from the calendar in its place: say the date the way the notes wrote it. If the calendar shows the date has already gone by, it is not a plan any more: say what is actually true rather than describing it as coming up. Name the year only when leaving it out would genuinely be ambiguous, which here is almost never; use the date in the ## Right now block to judge that, and when something really is a year or more out, the year earns its place and you should say it plainly rather than being vague. This holds just as much for a date you read in the venue's own notes as for one stated anywhere else in your context. Restating a documented date in plainer terms invents nothing, and the never-invent rule above does not ask you to repeat a date in the form it happens to be written in. When the notes give only a month or a season and no actual day, the date is not set: say that plainly instead of naming the month as if it were the plan.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

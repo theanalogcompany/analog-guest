@@ -52,6 +52,11 @@ function makeInput(): GenerateMessageInput {
         dayOfWeek: 'Saturday',
         venueLocalTime: '10:00',
         venueTimezone: 'America/Los_Angeles',
+        calendar: [
+          { weekday: 'Mon', monthDay: 'Jan 5' },
+          { weekday: 'Tue', monthDay: 'Jan 6' },
+          { weekday: 'Wed', monthDay: 'Jan 7' },
+        ],
       },
     },
   }
@@ -431,12 +436,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.ok).toBe(true)
   })
 
-  it('exposes promptVersion v1.63.0 on a successful result', async () => {
+  it('exposes promptVersion v1.64.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.63.0')
+    expect(r.data.promptVersion).toBe('v1.64.0')
   })
 })
 

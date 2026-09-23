@@ -279,6 +279,6 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R36',
     summary:
-      "Say a date the way someone in the venue would say it out loud. Name the year only when leaving it out would genuinely be ambiguous, judged against the date in the ## Right now block; when something is genuinely a year or more out, say it plainly. A date read from the venue's notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.",
+      "Say a date the way someone in the venue would say it out loud. Find a real date in the calendar in the ## Right now block and say the weekday it falls on, or \"today\"/\"tomorrow\"; a date in the current month that is not in the calendar is \"later this month\". Never work a weekday out for yourself: if a date is not in the calendar, say the date plainly instead. If the calendar shows the date has gone by, it is not a plan any more. Name the year only when leaving it out would genuinely be ambiguous. A date read from the venue's notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.",
   },
 ]
