@@ -1315,6 +1315,7 @@ async function runInboundTurn(
             guestId: commitmentRow.guest_id,
             guestFirstName: ctx.guest.firstName,
             type: commitmentRow.type,
+            description: commitmentRow.description,
             code: commitmentRow.code,
             expectedArrival: commitmentRow.expected_arrival,
             arrivalSignal: 'imminent',

@@ -16,18 +16,26 @@
 // custom data fields: commitmentId + guestId + operatorId. TAC-298 routes
 // the tap handler to the heads-up card identified by commitmentId.
 //
-// Body format: "{firstName} arriving {context} — {typeLabel}{ code}"
+// Body format (TAC-532):
+//   "{firstName} arriving {context}, {typeLabel}{ for {description}}{, code XXXX}"
 //   - context: "now" for imminent; "{morning|afternoon|evening}" for scheduled.
 //   - typeLabel: "comp" / "hold" / "discount" / "ready" (for rec).
+//   - description: the commitment's own text, sanitized. Omitted when empty or
+//     when the budget leaves no useful room for it.
 //   - code: ", code XXXX" when populated (comp/hold/discount); omitted for rec.
-// Example: "Jaipal coming now — comp, code 7K2P".
+// Example: "Jaipal arriving now, comp for oat latte, code 7K2P".
 //
-// Note: the commitment description itself is NOT in the payload. The
-// description is operator-chosen content (e.g. "oat latte"), not the guest's
-// inbound text — but TAC-207's privacy invariant ("no message contents") is
-// stricter than necessary here. We keep the body to type + code only so the
-// payload schema stays content-free across BOTH push surfaces; description
-// rendering is the operator-card client's job (TAC-298).
+// TAC-532 added the description and dropped the em dash. The description is
+// what tells two same-type commitments for one guest apart; before this the
+// body carried type and code only, so two recommendations (which carry no
+// code) pushed identically. It is agent or operator chosen text about our own
+// commitment, NOT the guest's words, so it does not carry the lock-screen
+// concern that gates quoting in send.ts. This file's earlier note said the
+// description was withheld only to keep the payload shape uniform across both
+// surfaces and called TAC-207's invariant "stricter than necessary here";
+// ruled 2026-09-23 that the uniformity was not worth the collision.
+//
+// The guest's inbound text still never appears here.
 //
 // Helpers duplicated from lib/notifications/send.ts (loadRecipients,
 // countPendingForOperator, nullOperatorToken). Extraction into a shared
@@ -53,7 +61,28 @@ const APNS_BAD_DEVICE_TOKEN_STATUS = 400
 // {context}"). 80 keeps a typical first-name + scheduled context + code
 // intact while still preventing pathological payloads from a malformed
 // firstName.
-const MAX_PUSH_BODY_CHARS = 80
+const MAX_PUSH_BODY_CHARS = 120
+// Below this a description fragment says nothing useful, so it is dropped
+// whole rather than rendered as a word and an ellipsis.
+const MIN_DESCRIPTION_CHARS = 8
+
+/**
+ * The description is MODEL-WRITTEN text, so it is flattened and capped before
+ * it reaches a notification. Mirrors sanitizeCardDescription in
+ * lib/operator/queue.ts (TAC-527), which does the same job for the operator
+ * card, including stripping em and en dashes: this body is read fast on a
+ * phone mid-shift, the same rule REVIEW_REASON_LABELS follows.
+ *
+ * Deliberately a local copy rather than an import: lib/operator/queue.ts pulls
+ * the operator query layer, which has no business loading on the push path.
+ */
+function sanitizeDescription(raw: string, max: number): string {
+  const flattened = raw.replace(/[\u2014\u2013]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (flattened.length <= max) return flattened
+  const cut = flattened.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
+}
 
 // Categorical labels per commitment type — operator-glance signal for what
 // kind of heads-up this is. Keys MUST stay aligned with
@@ -72,6 +101,13 @@ export interface SendCommitmentArrivalPushInput {
   /** guests.first_name. Null when unknown — falls back to "a guest". */
   guestFirstName: string | null
   type: CommitmentType
+  /**
+   * TAC-532. guest_commitments.description, the thing the venue owes. Required
+   * rather than optional so both call sites decide: an optional field would let
+   * either default to "no description" silently, which is the collision this
+   * ticket removes. Empty string is the honest value when a row has none.
+   */
+  description: string
   code: string | null
   /** ISO string from guest_commitments.expected_arrival. Null = unknown. */
   expectedArrival: string | null
@@ -117,20 +153,32 @@ export function buildCommitmentPushBody(
   type: CommitmentType,
   code: string | null,
   context: string,
+  description: string,
 ): string {
   const trimmed = firstName?.trim() ?? ''
   const namePart = trimmed ? trimmed : 'a guest'
   const typeLabel = TYPE_LABEL[type]
   const codeFragment = code ? `, code ${code}` : ''
-  const full = `${namePart} arriving ${context} — ${typeLabel}${codeFragment}`
-  if (full.length <= MAX_PUSH_BODY_CHARS) return full
-  // Over budget — trim the name first.
-  if (trimmed) {
-    const overhead = ` arriving ${context} — ${typeLabel}${codeFragment}`.length
-    const maxNameChars = Math.max(1, MAX_PUSH_BODY_CHARS - overhead)
-    return `${trimmed.slice(0, maxNameChars).trim()} arriving ${context} — ${typeLabel}${codeFragment}`
+  const withoutDescription = `${namePart} arriving ${context}, ${typeLabel}${codeFragment}`
+
+  // The description is trimmed FIRST and dropped before anything else is
+  // touched: the name, the type and the code are what an operator acts on at
+  // the counter, and the description only distinguishes two commitments of the
+  // same type for the same guest.
+  const room = MAX_PUSH_BODY_CHARS - withoutDescription.length - ' for '.length
+  const shown = room >= MIN_DESCRIPTION_CHARS ? sanitizeDescription(description, room) : ''
+  if (shown.length > 0) {
+    return `${namePart} arriving ${context}, ${typeLabel} for ${shown}${codeFragment}`
   }
-  return full.slice(0, MAX_PUSH_BODY_CHARS)
+
+  if (withoutDescription.length <= MAX_PUSH_BODY_CHARS) return withoutDescription
+  // Still over with no description at all: trim the name, as before TAC-532.
+  if (trimmed) {
+    const overhead = ` arriving ${context}, ${typeLabel}${codeFragment}`.length
+    const maxNameChars = Math.max(1, MAX_PUSH_BODY_CHARS - overhead)
+    return `${trimmed.slice(0, maxNameChars).trim()} arriving ${context}, ${typeLabel}${codeFragment}`
+  }
+  return withoutDescription.slice(0, MAX_PUSH_BODY_CHARS)
 }
 
 // TAC-473: these three moved to ./recipients when a third push surface
@@ -188,6 +236,7 @@ export async function sendCommitmentArrivalPush(
     input.type,
     input.code,
     context,
+    input.description,
   )
 
   for (const recipient of recipients) {
