@@ -240,6 +240,25 @@ const sendCommitmentArrivalPushMock = vi.fn<(...args: unknown[]) => Promise<unkn
 vi.mock('@/lib/notifications/send-commitment-push', () => ({
   sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
 }))
+// TAC-526: the settle is a REAL 8-second wall-clock wait once the flag is on,
+// and every call in this file goes through it — `handleInbound(id)` with no
+// options takes the shipped gate and the default deps. Unmocked, this one file
+// went from ~2s to over two minutes.
+//
+// ONLY `sleep` is replaced. The claim, the adopt and the extension all run for
+// real against this file's mocked admin client, which has no `.insert`, so
+// they fail OPEN exactly as production would when the claims table is
+// unreachable — which is what keeps every assertion below describing today's
+// behaviour rather than a path the mock invented. That fail-open is itself
+// load-bearing: it is why flipping the flag does not change a single
+// expectation in this file.
+vi.mock('./coalesce-turn', async () => {
+  const actual = await vi.importActual<typeof import('./coalesce-turn')>('./coalesce-turn')
+  return {
+    ...actual,
+    defaultCoalesceDeps: () => ({ ...actual.defaultCoalesceDeps(), sleep: async () => {} }),
+  }
+})
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 const traceControl = vi.hoisted(() => ({ flushThrows: false }))
 vi.mock('@/lib/observability', () => ({

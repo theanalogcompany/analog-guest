@@ -805,3 +805,70 @@ describe('findUncoveredInbound tells "nothing" apart from "could not check"', ()
     expect(called).toBe(false)
   })
 })
+
+describe('never throws, which the module claims at the top', () => {
+  /**
+   * The claim was false until the flag was flipped and the existing
+   * orchestrator tests started failing: supabase-js surfaces most failures as
+   * `{ error }` but THROWS on some (an unreachable host, a malformed client),
+   * and an escaping throw lands in `runInboundTurn`'s top-level catch and
+   * fails the whole turn. That is fail-CLOSED — a guest silenced because a
+   * claim table hiccuped — which is the exact inversion this module exists to
+   * avoid.
+   *
+   * Found by flipping the flag, not by any of the 30 mutants. A `satisfies`
+   * or a type cannot express "does not throw"; only a test can.
+   */
+  const throwingStore = {
+    insertClaim: async () => {
+      throw new Error('socket hang up')
+    },
+    readClaim: async () => {
+      throw new Error('socket hang up')
+    },
+    takeOverClaim: async () => {
+      throw new Error('socket hang up')
+    },
+    deleteClaim: async () => {
+      throw new Error('socket hang up')
+    },
+  }
+
+  it('claimInboundTurn reports unavailable instead of throwing', async () => {
+    const deps = makeDeps(createTurnClaimsFake(), { store: throwingStore })
+    const outcome = await claimInboundTurn(
+      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-1', agentRunId: 'run-a' },
+      deps,
+    )
+    // `unavailable`, never `lost`: the caller must proceed as it does today.
+    expect(outcome.status).toBe('unavailable')
+  })
+
+  it('releaseInboundTurn reports the failure instead of throwing', async () => {
+    const r = await releaseInboundTurn(
+      { venueId: VENUE, guestId: GUEST, agentRunId: 'run-a' },
+      { store: throwingStore },
+    )
+    expect(r.ok).toBe(false)
+  })
+
+  it('findUncoveredInbound reports UNREADABLE on a throw, never none', async () => {
+    const r = await findUncoveredInbound(
+      { venueId: VENUE, guestId: GUEST },
+      {
+        claim: { venueId: VENUE, guestId: GUEST },
+        extensionsUsed: 0,
+        answered: { id: 'msg-1', createdAt: T0 },
+        enabled: true,
+      },
+      {
+        findNewerInbound: async () => {
+          throw new Error('socket hang up')
+        },
+      },
+    )
+    // Folding a throw into `none` would reintroduce the silencing blocker by
+    // a different route.
+    expect(r.status).toBe('unreadable')
+  })
+})

@@ -231,6 +231,32 @@ export async function claimInboundTurn(
   },
   deps: CoalesceDeps,
 ): Promise<ClaimOutcome> {
+  try {
+    return await attemptClaim(input, deps)
+  } catch (e) {
+    // NEVER THROWS is a claim this file makes at the top, and it did not hold:
+    // supabase-js surfaces most failures as `{ error }` but THROWS on some
+    // (an unreachable host, a malformed client), and an escaping throw here
+    // lands in runInboundTurn's top-level catch and fails the whole turn.
+    // That is the fail-CLOSED direction — a guest silenced because a claim
+    // table hiccuped — and it is the exact inversion this module exists to
+    // avoid. Caught by flipping the flag, not by a test.
+    return {
+      status: 'unavailable',
+      error: `claimInboundTurn threw: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
+}
+
+async function attemptClaim(
+  input: {
+    venueId: string
+    guestId: string
+    claimedMessageId: string
+    agentRunId: string
+  },
+  deps: CoalesceDeps,
+): Promise<ClaimOutcome> {
   const row = buildClaimRow(input, deps.now())
 
   const inserted = await deps.store.insertClaim(row)
@@ -312,7 +338,16 @@ export async function releaseInboundTurn(
   input: { venueId: string; guestId: string; agentRunId: string },
   deps: Pick<CoalesceDeps, 'store'>,
 ): Promise<DeleteClaimResult> {
-  return deps.store.deleteClaim(input)
+  try {
+    return await deps.store.deleteClaim(input)
+  } catch (e) {
+    // Same reason as the claim: a throw from the store must not become the
+    // turn's outcome. The lease is the backstop for a claim left behind.
+    return {
+      ok: false,
+      error: `releaseInboundTurn threw: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
 }
 
 /**
@@ -592,14 +627,26 @@ export async function findUncoveredInbound(
   deps: Pick<CoalesceDeps, 'findNewerInbound'>,
 ): Promise<UncoveredInbound> {
   if (!turn.enabled || turn.answered === null) return { status: 'none' }
-  const newer = await deps.findNewerInbound({
-    venueId: input.venueId,
-    guestId: input.guestId,
-    afterCreatedAt: turn.answered.createdAt,
-    afterId: turn.answered.id,
-  })
-  if (!newer.ok) return { status: 'unreadable', error: newer.error }
-  return newer.newer === null ? { status: 'none' } : { status: 'found', message: newer.newer }
+  try {
+    const newer = await deps.findNewerInbound({
+      venueId: input.venueId,
+      guestId: input.guestId,
+      afterCreatedAt: turn.answered.createdAt,
+      afterId: turn.answered.id,
+    })
+    if (!newer.ok) return { status: 'unreadable', error: newer.error }
+    return newer.newer === null ? { status: 'none' } : { status: 'found', message: newer.newer }
+  } catch (e) {
+    // A throw is 'unreadable', never 'none'. From the EXTENSION that means
+    // send what you have; from the HANDOFF it is reported rather than
+    // silently treated as nothing to do. Folding it into 'none' here would
+    // reintroduce the blocker the three-state type exists for, by a different
+    // route.
+    return {
+      status: 'unreadable',
+      error: `findUncoveredInbound threw: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
 }
 
 /** Whether this turn may adopt another message rather than send what it has. */
