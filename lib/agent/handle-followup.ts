@@ -301,6 +301,10 @@ export async function handleFollowup(input: {
       // trigger, not a guest message — the crisis signal is never applicable
       // on this path.
       crisisSafety: false,
+    // TAC-397: a followup has no guest inbound, so there is nothing that could
+    // be correcting a pending reply. False here keeps a followup on the
+    // own-card path, which is what resolveConversationDisposition expects.
+      correctsPendingReply: false,
     }
 
     // Retrieve corpus

@@ -206,6 +206,9 @@ export interface Classification {
   // TAC-348: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.crisisSafety for the full contract.
   crisisSafety: boolean
+  // TAC-397: independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.correctsPendingReply for the full contract.
+  correctsPendingReply: boolean
 }
 
 export interface RuntimeContext {

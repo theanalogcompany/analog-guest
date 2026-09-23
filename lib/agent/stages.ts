@@ -799,6 +799,10 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
     // reroute above. A crisis signal should hold even when the category call
     // itself is uncertain.
     crisisSafety: r.data.crisisSafety,
+    // TAC-397: passed through unmodified, for the same reason crisisSafety is.
+    // A correction is a fact about what the guest wrote, not about how
+    // confident the category call was.
+    correctsPendingReply: r.data.correctsPendingReply,
   }
 }
 

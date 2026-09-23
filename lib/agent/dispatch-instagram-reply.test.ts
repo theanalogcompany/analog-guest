@@ -77,7 +77,13 @@ function makeCtx(): RuntimeContext {
     intentionDerivation: { newlyEligible: [], brakeEngaged: false },
     corpus: null,
     knowledgeCorpus: null,
-    classification: { category: 'new_question', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false },
+    classification: {
+      category: 'new_question',
+      classifierConfidence: 0.9,
+      reasoning: 'r',
+      crisisSafety: false,
+      correctsPendingReply: false,
+    },
     trace: { id: 'trace-1' } as RuntimeContext['trace'],
   }
 }

@@ -277,7 +277,8 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         classifierConfidence: 0.8,
         reasoning: 'r',
         crisisSafety: true,
-        promptVersion: 'v1.61.0',
+        correctsPendingReply: false,
+        promptVersion: 'v1.62.0',
       },
     })
   })
@@ -333,6 +334,7 @@ describe('regenerateWithCritique — happy path', () => {
         classifierConfidence: 0.9,
         reasoning: 'r',
         crisisSafety: false,
+        correctsPendingReply: false,
         promptVersion: 'v1.8.0',
       },
     })
@@ -814,6 +816,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         classifierConfidence: 0.9,
         reasoning: 'r',
         crisisSafety: false,
+        correctsPendingReply: false,
         promptVersion: 'v1.13.0',
       },
     })
@@ -848,6 +851,7 @@ describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
         classifierConfidence: 0.9,
         reasoning: 'r',
         crisisSafety: false,
+        correctsPendingReply: false,
         promptVersion: 'v1.13.0',
       },
     })
@@ -880,6 +884,7 @@ describe('regenerateWithCritique — corpus thinness', () => {
         classifierConfidence: 0.9,
         reasoning: 'r',
         crisisSafety: false,
+        correctsPendingReply: false,
         promptVersion: 'v1.8.0',
       },
     })
@@ -990,6 +995,7 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
         classifierConfidence: 0.9,
         reasoning: 'r',
         crisisSafety: false,
+        correctsPendingReply: false,
         promptVersion: 'v1.13.0',
       },
     })

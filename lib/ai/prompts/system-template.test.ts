@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.61.0 (TAC-520: say a date the way a person in the venue would say it)', () => {
-    expect(PROMPT_VERSION).toBe('v1.61.0')
+  it('is v1.62.0 (TAC-397: classifier gains correctsPendingReply; no wording change here)', () => {
+    expect(PROMPT_VERSION).toBe('v1.62.0')
   })
 })
 

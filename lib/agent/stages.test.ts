@@ -439,6 +439,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'too ambiguous',
         promptVersion: 'v1.13.0',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -468,6 +469,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'ambiguous but defensible',
         promptVersion: 'v1.13.0',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -488,6 +490,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'clear',
         promptVersion: 'v1.13.0',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -504,6 +507,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'r',
         promptVersion: 'v1.13.0',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
     const recent = [
@@ -540,6 +544,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'ambiguous',
         promptVersion: 'v1.61.0',
         crisisSafety: true,
+        correctsPendingReply: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -558,6 +563,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         reasoning: 'clear',
         promptVersion: 'v1.61.0',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -1819,6 +1825,7 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
           classifierConfidence: 0.99,
           reasoning: 'stop',
           crisisSafety: false,
+          correctsPendingReply: false,
         },
       }),
     )
@@ -2026,6 +2033,7 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -2126,6 +2134,7 @@ describe('applyApprovalPolicyStage — clock requires an actual question (TAC-48
         classifierConfidence: 0.9,
         reasoning: 'test',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -2174,6 +2183,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -2626,6 +2636,7 @@ describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () =>
         classifierConfidence: 0.9,
         reasoning: 'asks for a phone number',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -3395,6 +3406,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -3572,6 +3584,7 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -4059,6 +4072,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
         classifierConfidence: 0.9,
         reasoning: 'question',
         crisisSafety: false,
+        correctsPendingReply: false,
       },
     })
 
@@ -4339,6 +4353,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
         classifierConfidence: 0.9,
         reasoning: 'test',
         crisisSafety: false,
+        correctsPendingReply: false,
       } as RuntimeContext['classification'],
     })
   }

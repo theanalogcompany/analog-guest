@@ -614,6 +614,12 @@ export type ClassifyMessageResult = {
   // reply (lib/agent/crisis-safety.ts) before retrieval or generation ever
   // run — never suppressed by the 3-tier confidence reroute.
   crisisSafety: boolean
+  // TAC-397: independent of category. True when this message amends the
+  // question a still-unapproved reply is answering, which is what routes it to
+  // a regeneration of that reply rather than to a card of its own. False
+  // whenever nothing is pending — the classifier only ever sees a pending
+  // draft as a NOT SENT line in the recent conversation.
+  correctsPendingReply: boolean
 }
 
 export type AIResult<T> =

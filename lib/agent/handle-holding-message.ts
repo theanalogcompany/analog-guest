@@ -260,6 +260,8 @@ export async function handleHoldingMessage(input: {
       reasoning: 'TAC-308 holding message (system-initiated, not classified)',
       // TAC-348: system-initiated, not a guest message — never applicable.
       crisisSafety: false,
+    // TAC-397: no guest inbound on this path — see handle-followup.ts.
+      correctsPendingReply: false,
     }
 
     // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message
