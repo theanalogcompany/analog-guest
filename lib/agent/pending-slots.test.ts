@@ -566,7 +566,7 @@ function readSql(file: string): string {
     .join('\n')
 }
 
-describe('migration 041 mirrors pendingSlotOf (TAC-394)', () => {
+describe('migration 041 mirrors pendingSlotOf (TAC-394, superseded by 054)', () => {
   const sql = readSql('041_two_pending_slots_per_guest.sql')
 
   it('derives OBLIGATION_SLOT_TYPES from OBLIGATION_TYPES', () => {
@@ -651,6 +651,94 @@ describe('migration 042: list_operator_queue (TAC-394)', () => {
     expect(ctx).toContain("and review_state is distinct from 'pending'")
     expect(ctx).toContain('and id <> m.id')
   })
+
+describe('migration 054 mirrors the per-inbound conversation slot (TAC-397)', () => {
+  const sql = readSql('054_conversation_cards_per_reply.sql')
+
+  // The type list lives in SQL and in OBLIGATION_TYPES, and the SQL cannot
+  // import the constant. 041's block above pins its own copy; this pins 054's,
+  // which is the one that is LIVE. Without this, adding a fourth obligation
+  // type would keep 041's test green (its file is frozen) while 054's index
+  // silently disagreed with pendingSlotOf.
+  it('lists exactly OBLIGATION_SLOT_TYPES in the conversation predicate, as `not in`', () => {
+    const predicates = [
+      ...sql.matchAll(/coalesce\(pending_commitment->>'type', ''\)\s+(not\s+)?in\s+\(([^)]*)\)/g),
+    ]
+    expect(predicates).toHaveLength(1)
+    expect(Boolean(predicates[0]![1])).toBe(true)
+    const types = predicates[0]![2]!
+      .split(',')
+      .map((t) => t.trim().replace(/^'|'$/g, ''))
+      .sort()
+    expect(types).toEqual([...OBLIGATION_SLOT_TYPES])
+  })
+
+  // THE load-bearing line of this migration. NULLs are distinct in a unique
+  // index, so a bare `reply_to_message_id` would give proactive conversation
+  // cards (manual followups, the decline, the crash card) NO uniqueness at
+  // all — protection migration 041 provides today. Folding NULL onto a fixed
+  // sentinel is what keeps "at most one proactive conversation card per
+  // guest" true. Pinned as one contiguous expression rather than as separate
+  // substrings: the parts are individually unremarkable and only mean
+  // something together.
+  it('keys the conversation index on venue, guest and the inbound, folding NULL onto a sentinel', () => {
+    expect(sql).toMatch(
+      /on messages \(\s*venue_id,\s*guest_id,\s*coalesce\(reply_to_message_id, '00000000-0000-0000-0000-000000000000'::uuid\)\s*\)\s*where review_state = 'pending'/,
+    )
+  })
+
+  it('creates the new conversation index before dropping 041’s, in one transaction', () => {
+    const begin = sql.indexOf('begin;')
+    const create = sql.indexOf(
+      'create unique index idx_messages_one_pending_conversation_per_guest_reply',
+    )
+    const drop = sql.indexOf('drop index idx_messages_one_pending_conversation_per_guest;')
+    const commit = sql.indexOf('commit;')
+    for (const position of [begin, create, drop, commit]) {
+      expect(position).toBeGreaterThanOrEqual(0)
+    }
+    expect(begin).toBeLessThan(create)
+    expect(create).toBeLessThan(drop)
+    expect(drop).toBeLessThan(commit)
+    expect(sql).not.toMatch(/concurrently/i)
+  })
+
+  // TAC-394's obligation protection is explicitly out of scope. A migration
+  // that touched it would be changing what this ticket said it would not.
+  it('leaves the obligation index alone', () => {
+    expect(sql).not.toContain('idx_messages_one_pending_obligation_per_guest')
+  })
+
+  it('adds both replaced-draft columns, nullable and with no default', () => {
+    expect(sql).toMatch(
+      /alter table messages\s+add column replaced_draft_body text,\s+add column replaced_draft_at timestamptz;/,
+    )
+    expect(sql).not.toMatch(/replaced_draft_\w+[^;]*\bdefault\b/)
+    expect(sql).not.toMatch(/replaced_draft_\w+[^;]*not null/i)
+  })
+
+  // Adding a return column is a signature change; `create or replace` refuses
+  // it (migration 039's rule). One transaction so no reader sees it missing.
+  it('drops and recreates list_operator_queue inside one transaction', () => {
+    const begin = sql.indexOf('begin;')
+    const drop = sql.indexOf('drop function if exists public.list_operator_queue(uuid[]);')
+    const create = sql.indexOf('create function public.list_operator_queue(')
+    const commit = sql.indexOf('commit;')
+    for (const position of [begin, drop, create, commit]) {
+      expect(position).toBeGreaterThanOrEqual(0)
+    }
+    expect(begin).toBeLessThan(drop)
+    expect(drop).toBeLessThan(create)
+    expect(create).toBeLessThan(commit)
+    expect(sql).not.toMatch(/create or replace function public\.list_operator_queue/)
+  })
+
+  it('returns and selects both replaced-draft columns', () => {
+    expect(sql).toMatch(/replaced_draft_body text,\s*\n\s*replaced_draft_at timestamptz\s*\n\)/)
+    expect(sql).toContain('m.replaced_draft_body')
+    expect(sql).toContain('m.replaced_draft_at')
+  })
+})
 })
 
 // ---------------------------------------------------------------------------
