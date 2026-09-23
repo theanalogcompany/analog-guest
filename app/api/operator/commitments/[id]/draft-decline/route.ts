@@ -56,6 +56,7 @@ import {
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { markCancelled } from '@/lib/guests/commitments'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -82,9 +83,11 @@ export async function POST(
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
-  // Empty allowlist → no commitment matches by definition. 404 uniformly
-  // with not-found / out-of-allowlist; skip the round trip.
-  if (operator.allowedVenueIds.length === 0) {
+  // TAC-530: a bearer principal with zero grants, and a fleet-wide scope
+  // (which the operator API never legitimately receives), both deny. 404
+  // uniformly with not-found / out-of-allowlist; skip the round trip.
+  const venueIds = venueFilterIds(operator.venueScope)
+  if (venueIds === null || venueIds.length === 0) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
@@ -94,7 +97,7 @@ export async function POST(
     .from('guest_commitments')
     .select('id, venue_id, guest_id, status, description, type, created_at')
     .eq('id', commitmentId)
-    .in('venue_id', operator.allowedVenueIds)
+    .in('venue_id', venueIds)
     .maybeSingle()
 
   if (loadError) {
@@ -201,7 +204,7 @@ export async function POST(
   const cancelResult = await markCancelled({
     commitmentId: row.id,
     operatorId: operator.operatorId,
-    allowedVenueIds: operator.allowedVenueIds,
+    venueScope: operator.venueScope,
     now,
   })
   let cancellationRaceLost = false

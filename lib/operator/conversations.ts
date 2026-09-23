@@ -12,6 +12,7 @@ import {
 } from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
+import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 export type { GuestRecognitionState } from './recognition-state'
 
@@ -79,15 +80,29 @@ interface RawConversationRow {
 }
 
 export async function listOperatorConversations(
-  allowedVenueIds: string[],
+  venueScope: VenueScope,
 ): Promise<ListOperatorConversationsResult> {
-  if (allowedVenueIds.length === 0) {
+  if (venueScopeDeniesAll(venueScope)) {
     return { ok: true, conversations: [] }
+  }
+
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds === null) {
+    // TAC-530: a fleet-wide scope is produced only by the analog-admin cookie
+    // path, and this helper is reached only from app/api/operator/* on the
+    // bearer path. Refuse rather than silently widen the query -- making this
+    // path fleet-wide is a decision, not a fallthrough. Deliberately NOT
+    // "skip the filter": that idiom is what this ticket removed.
+    return {
+      ok: false,
+      error:
+        'fleet-wide venue scope is not supported by list_operator_conversations',
+    }
   }
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('list_operator_conversations', {
-    venue_ids: allowedVenueIds,
+    venue_ids: venueIds,
   })
 
   if (error) {

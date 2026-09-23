@@ -60,7 +60,7 @@ export async function GET(
   // ---- load ----
   const result = await loadGuestThread({
     messageId,
-    allowedVenueIds: operator.allowedVenueIds,
+    venueScope: operator.venueScope,
   })
 
   if (!result.ok) {

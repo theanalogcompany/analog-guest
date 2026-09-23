@@ -7,6 +7,7 @@ import {
   verifyAnalogAdminRequest,
 } from './verify-analog-admin'
 import { verifyOperatorRequest } from './verify-jwt'
+import { adminVenueScope, grantedVenues } from './venue-scope'
 
 vi.mock('../db/admin', () => ({
   createAdminClient: vi.fn(),
@@ -94,7 +95,7 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
   it('returns AnalogAdminOperator on the happy path', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'operator-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: grantedVenues(['venue-a', 'venue-b']),
     })
     const mock = makeSupabaseMock({
       adminFlagResult: { data: { is_analog_admin: true }, error: null },
@@ -104,7 +105,7 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
     const out = await verifyAnalogAdminRequest(emptyRequest())
     expect(out).toEqual({
       operatorId: 'operator-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: grantedVenues(['venue-a', 'venue-b']),
       isAnalogAdmin: true,
     })
   })
@@ -122,7 +123,7 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
   it('throws 403 when operator is verified but not is_analog_admin', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'operator-1',
-      allowedVenueIds: [],
+      venueScope: grantedVenues([]),
     })
     const mock = makeSupabaseMock({
       adminFlagResult: { data: { is_analog_admin: false }, error: null },
@@ -138,7 +139,7 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
   it('throws 401 when the admin-flag lookup query errors', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'operator-1',
-      allowedVenueIds: [],
+      venueScope: grantedVenues([]),
     })
     const mock = makeSupabaseMock({
       adminFlagResult: { data: null, error: { message: 'connection refused' } },
@@ -178,7 +179,7 @@ describe('verifyAnalogAdminAccess (session)', () => {
     const out = await verifyAnalogAdminAccess('auth-user-1')
     expect(out).toEqual({
       operatorId: 'operator-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: adminVenueScope(['venue-a', 'venue-b']),
       isAnalogAdmin: true,
     })
   })
@@ -238,7 +239,7 @@ describe('verifyAnalogAdminAccess (session)', () => {
     const out = await verifyAnalogAdminAccess('auth-newly-linked')
     expect(out).toEqual({
       operatorId: 'op-newly-linked',
-      allowedVenueIds: ['venue-x'],
+      venueScope: adminVenueScope(['venue-x']),
       isAnalogAdmin: true,
     })
     expect(linkOperatorByAuthUser).toHaveBeenCalledWith('auth-newly-linked')
@@ -318,7 +319,11 @@ describe('verifyAnalogAdminAccess (session)', () => {
     })
   })
 
-  it('returns success with empty allowedVenueIds when admin has no venues', async () => {
+  // TAC-530 / AC2. An analog admin with no explicit grants is FLEET-WIDE.
+  // Under the old shape this returned `allowedVenueIds: []`, byte-identical
+  // to a grantless operator bearer, and the two were told apart only by which
+  // consumer read it. Now the scope says which it is.
+  it('returns a FLEET-WIDE scope when the admin has no explicit venue grants', async () => {
     const mock = makeSupabaseMock({
       operatorsResult: {
         data: { id: 'operator-1', is_analog_admin: true },
@@ -331,8 +336,10 @@ describe('verifyAnalogAdminAccess (session)', () => {
     const out = await verifyAnalogAdminAccess('auth-user-1')
     expect(out).toEqual({
       operatorId: 'operator-1',
-      allowedVenueIds: [],
+      venueScope: { kind: 'all_venues' },
       isAnalogAdmin: true,
     })
+    // Stated as the contrast, because these were the same value before.
+    expect(out.venueScope).not.toEqual(grantedVenues([]))
   })
 })

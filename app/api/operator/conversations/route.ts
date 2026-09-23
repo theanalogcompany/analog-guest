@@ -22,7 +22,7 @@ export async function GET(request: Request): Promise<Response> {
     throw err
   }
 
-  const result = await listOperatorConversations(operator.allowedVenueIds)
+  const result = await listOperatorConversations(operator.venueScope)
   if (!result.ok) {
     console.warn(
       `[/api/operator/conversations] listOperatorConversations failed error=${result.error}`,

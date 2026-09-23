@@ -18,6 +18,7 @@ import { createAdminClient } from '../db/admin'
 import { linkOperatorByAuthUser } from './link-operator'
 import { type AuthenticatedOperator, AuthError } from './types'
 import { verifyOperatorRequest } from './verify-jwt'
+import { adminVenueScope } from './venue-scope'
 
 export interface AnalogAdminOperator extends AuthenticatedOperator {
   isAnalogAdmin: true
@@ -111,9 +112,13 @@ export async function verifyAnalogAdminAccess(
     throw new AuthError(401, `venue allowlist lookup failed: ${vErr.message}`)
   }
 
+  // TAC-530: this is the ONE place "an analog admin with no explicit grants
+  // sees every venue" is written down. It used to be an empty array plus a
+  // comment repeated at fourteen call sites, which is how it came to be
+  // copied onto bearer data, where empty means the opposite.
   return {
     operatorId,
-    allowedVenueIds: (venueRows ?? []).map((r) => r.venue_id),
+    venueScope: adminVenueScope((venueRows ?? []).map((r) => r.venue_id)),
     isAnalogAdmin: true,
   }
 }

@@ -13,6 +13,7 @@ vi.mock('@/lib/db/admin', () => ({
 
 import { createAdminClient } from '@/lib/db/admin'
 import { listHeadsUpQueue } from './heads-up-queue'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const VENUE_B = '00000000-0000-0000-0000-00000000000b'
@@ -115,7 +116,7 @@ afterEach(() => {
 
 describe('listHeadsUpQueue', () => {
   it('returns empty + no DB round trip when allowedVenueIds is empty', async () => {
-    const r = await listHeadsUpQueue([])
+    const r = await listHeadsUpQueue(grantedVenues([]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments).toEqual([])
     expect(vi.mocked(createAdminClient)).not.toHaveBeenCalled()
@@ -126,7 +127,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments).toEqual([])
     // No commitments → no guest_states query
@@ -141,7 +142,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.commitments).toHaveLength(1)
@@ -156,7 +157,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments[0].sourceMessageId).toBeNull()
   })
@@ -173,7 +174,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments[0].recognitionState).toBe('regular')
   })
@@ -186,7 +187,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments[0].recognitionState).toBeNull()
   })
@@ -201,7 +202,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments[0].recognitionState).toBeNull()
   })
@@ -222,7 +223,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) {
       const byId = new Map(r.commitments.map((c) => [c.id, c.recognitionState]))
@@ -251,7 +252,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.commitments).toHaveLength(1)
@@ -269,7 +270,7 @@ describe('listHeadsUpQueue', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A, VENUE_B])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A, VENUE_B]))
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('connection lost')
   })
@@ -284,7 +285,7 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.commitments[0].venueId).toBe(VENUE_A)
@@ -310,7 +311,7 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const r = await listHeadsUpQueue([VENUE_A, VENUE_B])
+    const r = await listHeadsUpQueue(grantedVenues([VENUE_A, VENUE_B]))
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.commitments.map((c) => c.venueId)).toEqual([VENUE_A, VENUE_B])
@@ -330,7 +331,7 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    await listHeadsUpQueue([VENUE_A])
+    await listHeadsUpQueue(grantedVenues([VENUE_A]))
     expect(state.commitmentSelectCols).toContain('venue_id')
     expect(state.commitmentSelectCols).toContain('guest_id')
   })

@@ -32,6 +32,7 @@ vi.mock('@/lib/operator', async () => {
 })
 
 import { GET } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 
@@ -48,27 +49,27 @@ async function queue(): Promise<{ status: number; body: Record<string, unknown> 
 
 beforeEach(() => {
   vi.clearAllMocks()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
   pendingMock.mockResolvedValue({ ok: true, drafts: [] })
   headsUpMock.mockResolvedValue({ ok: true, commitments: [] })
 })
 
 describe('GET /api/operator/queue — venue scope (TAC-530)', () => {
   it('passes the operator’s allowlist to BOTH lookups unchanged, including when empty', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
     await queue()
-    expect(pendingMock).toHaveBeenCalledWith([])
-    expect(headsUpMock).toHaveBeenCalledWith([])
+    expect(pendingMock).toHaveBeenCalledWith(grantedVenues([]))
+    expect(headsUpMock).toHaveBeenCalledWith(grantedVenues([]))
   })
 
   it('passes a non-empty allowlist to BOTH lookups unchanged', async () => {
     await queue()
-    expect(pendingMock).toHaveBeenCalledWith([VENUE_A])
-    expect(headsUpMock).toHaveBeenCalledWith([VENUE_A])
+    expect(pendingMock).toHaveBeenCalledWith(grantedVenues([VENUE_A]))
+    expect(headsUpMock).toHaveBeenCalledWith(grantedVenues([VENUE_A]))
   })
 
   it('answers a grantless operator with two empty lists, not an error', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
     expect(await queue()).toEqual({ status: 200, body: { drafts: [], commitments: [] } })
   })
 

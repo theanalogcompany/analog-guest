@@ -76,7 +76,7 @@ export const POST = withOperatorAuth<{ id: string }>(
     const result = await dispatchOperatorOutbound({
       messageId,
       operatorId: operator.operatorId,
-      allowedVenueIds: operator.allowedVenueIds,
+      venueScope: operator.venueScope,
       action: 'edit',
       editedBody,
     })

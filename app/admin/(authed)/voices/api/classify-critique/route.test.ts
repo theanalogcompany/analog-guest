@@ -16,6 +16,7 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { classifyCritique } from '@/lib/voices'
 import { POST } from './route'
+import { adminVenueScope } from '@/lib/auth/venue-scope'
 
 const AUTH_USER_ID = '11111111-1111-4111-8111-111111111111'
 const OP_ID = '22222222-2222-4222-8222-222222222222'
@@ -51,7 +52,7 @@ describe('POST /admin/voices/api/classify-critique', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OP_ID,
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
   })

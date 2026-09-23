@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listOperatorConversations } from './conversations'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const rpcMock = vi.fn()
 vi.mock('@/lib/db/admin', () => ({
@@ -53,14 +54,14 @@ const RAW_INSTAGRAM_ROW = {
 
 describe('listOperatorConversations', () => {
   it('returns ok:true with an empty array and skips the RPC when allowedVenueIds is empty', async () => {
-    const result = await listOperatorConversations([])
+    const result = await listOperatorConversations(grantedVenues([]))
     expect(result).toEqual({ ok: true, conversations: [] })
     expect(rpcMock).not.toHaveBeenCalled()
   })
 
   it('calls the RPC with venue_ids and projects rows to camelCase', async () => {
     rpcMock.mockResolvedValueOnce({ data: [RAW_ROW], error: null })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(rpcMock).toHaveBeenCalledWith('list_operator_conversations', {
       venue_ids: ['00000000-0000-0000-0000-00000000000a'],
     })
@@ -95,7 +96,7 @@ describe('listOperatorConversations', () => {
 
   it('projects an Instagram guest with the exact Contract field set', async () => {
     rpcMock.mockResolvedValueOnce({ data: [RAW_INSTAGRAM_ROW], error: null })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     // toEqual, not toMatchObject: "always present" is only enforceable if a
@@ -126,7 +127,7 @@ describe('listOperatorConversations', () => {
     // `phoneFallback: z.string()` and no .catch(), so one null empties the
     // conversations tab for every operator at that venue.
     rpcMock.mockResolvedValueOnce({ data: [RAW_INSTAGRAM_ROW], error: null })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].phoneFallback).toBe('')
@@ -155,7 +156,7 @@ describe('listOperatorConversations', () => {
       ],
       error: null,
     })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('instagram')
@@ -175,7 +176,7 @@ describe('listOperatorConversations', () => {
       ],
       error: null,
     })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('text')
@@ -186,7 +187,7 @@ describe('listOperatorConversations', () => {
       data: [{ ...RAW_INSTAGRAM_ROW, last_guest_action_at: null }],
       error: null,
     })
-    const result = await listOperatorConversations(['00000000-0000-0000-0000-00000000000a'])
+    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('instagram')
@@ -198,7 +199,7 @@ describe('listOperatorConversations', () => {
       data: [{ ...RAW_ROW, guest_first_name: null, guest_last_name: null }],
       error: null,
     })
-    const result = await listOperatorConversations(['v1'])
+    const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.conversations[0].name).toBeNull()
   })
@@ -217,7 +218,7 @@ describe('listOperatorConversations', () => {
       guest_phone: null,
     }
     rpcMock.mockResolvedValueOnce({ data: [phoneless, RAW_ROW], error: null })
-    const result = await listOperatorConversations(['v1'])
+    const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations).toHaveLength(2)
@@ -231,7 +232,7 @@ describe('listOperatorConversations', () => {
       data: [{ ...RAW_ROW, recognition_state: 'something_unexpected' }],
       error: null,
     })
-    const result = await listOperatorConversations(['v1'])
+    const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.conversations[0].recognitionState).toBeNull()
   })
@@ -241,13 +242,13 @@ describe('listOperatorConversations', () => {
       data: [{ ...RAW_ROW, last_message_direction: 'sideways' }],
       error: null,
     })
-    const result = await listOperatorConversations(['v1'])
+    const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result).toEqual({ ok: true, conversations: [] })
   })
 
   it('returns ok:false on RPC error', async () => {
     rpcMock.mockResolvedValueOnce({ data: null, error: { message: 'connection lost' } })
-    const result = await listOperatorConversations(['v1'])
+    const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result).toEqual({ ok: false, error: 'connection lost' })
   })
 })

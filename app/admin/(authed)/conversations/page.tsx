@@ -14,6 +14,7 @@ import type { RecentActivityRow } from './_components/recent-activity'
 import { loadVenueGuestsByActivity } from '../_lib/load-venue-guests'
 import { computeMessageStats } from './lib/compute-message-stats'
 import { type ConversationMessageRow, projectThread, wasDispatched } from './lib/project-thread'
+import { allowsVenue, venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
 
 // Server orchestrator. Fetches everything the client needs in one render path
 // so initial paint is one network round trip. The client is responsible for
@@ -21,7 +22,7 @@ import { type ConversationMessageRow, projectThread, wasDispatched } from './lib
 // (which trigger this server fetch again via router.replace + RSC re-render).
 //
 // Auth: layout already gates the (authed) tree; we re-resolve the operator
-// here only to scope `allowedVenueIds`.
+// here only to resolve the operator's `venueScope`.
 
 export const dynamic = 'force-dynamic'
 
@@ -48,10 +49,10 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   } = await supabaseSession.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
@@ -66,7 +67,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     .select('id, slug, name, timezone, messaging_phone_number, status, is_test')
     .order('name', { ascending: true })
   if (venuesErr) throw new Error(`venues load failed: ${venuesErr.message}`)
-  const venues = (venuesRaw ?? []).filter((v) => allowedVenueIds.length === 0 || allowedVenueIds.includes(v.id))
+  const venues = (venuesRaw ?? []).filter((v) => allowsVenue(venueScope, v.id))
 
   // Validate filter ids against the allowlist — reject foreign IDs cleanly.
   const venueId = params.venue && venues.some((v) => v.id === params.venue) ? params.venue : null
@@ -74,7 +75,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
 
   // Pre-filter / venue-only path: render empty-state with recent activity.
   if (!venueId) {
-    const recent = await loadRecentActivity({ supabase, allowedVenueIds, venueId: null })
+    const recent = await loadRecentActivity({ supabase, venueScope, venueId: null })
     return (
       <FullShell>
         <Filters venues={venues} guests={[]} selectedVenueId={null} selectedGuestId={null} />
@@ -103,7 +104,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   }))
 
   if (!guestId) {
-    const recent = await loadRecentActivity({ supabase, allowedVenueIds, venueId })
+    const recent = await loadRecentActivity({ supabase, venueScope, venueId })
     return (
       <FullShell>
         <Filters venues={venues} guests={guests} selectedVenueId={venueId} selectedGuestId={null} />
@@ -512,13 +513,13 @@ async function loadConversationData({
 
 interface LoadRecentActivityArgs {
   supabase: ReturnType<typeof createAdminClient>
-  allowedVenueIds: string[]
+  venueScope: VenueScope
   venueId: string | null
 }
 
 async function loadRecentActivity({
   supabase,
-  allowedVenueIds,
+  venueScope,
   venueId,
 }: LoadRecentActivityArgs): Promise<RecentActivityRow[]> {
   // No DISTINCT ON in the supabase-js builder; pull the latest 200 messages
@@ -529,10 +530,13 @@ async function loadRecentActivity({
     .neq('body', '')
     .order('created_at', { ascending: false })
     .limit(200)
+  const venueIds = venueFilterIds(venueScope)
   if (venueId) {
     q = q.eq('venue_id', venueId)
-  } else if (allowedVenueIds.length > 0) {
-    q = q.in('venue_id', allowedVenueIds)
+  } else if (venueIds !== null) {
+    // TAC-530: null means fleet-wide, so no filter. An EMPTY list is still
+    // applied and matches nothing -- the two are no longer the same value.
+    q = q.in('venue_id', venueIds)
   }
   const { data, error } = await q
   if (error) {

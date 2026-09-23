@@ -7,6 +7,7 @@ vi.mock('@/lib/db/admin', () => ({
 import { createAdminClient } from '@/lib/db/admin'
 import { INTENTION_KEYS } from '@/lib/agent/intentions/definitions'
 import { loadIntentionPrompts, RECORDED_PROMPTS_LIMIT } from './load-intention-prompts'
+import { adminVenueScope } from '@/lib/auth/venue-scope'
 
 const VENUE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
@@ -53,7 +54,7 @@ describe('loadIntentionPrompts', () => {
   it('projects a recorded prompt with its guest, venue and timestamp', async () => {
     mockQuery({ data: [dbRow()], error: null })
 
-    const { rows, hasMore } = await loadIntentionPrompts([])
+    const { rows, hasMore } = await loadIntentionPrompts(adminVenueScope([]))
 
     // Whole-object assertion, not toMatchObject: a partial match would pass
     // while a field silently went missing.
@@ -76,7 +77,7 @@ describe('loadIntentionPrompts', () => {
   // exists fleet-wide, so most filters return nothing.
   it('returns an empty list when the guest has no recorded prompts', async () => {
     mockQuery({ data: [], error: null })
-    await expect(loadIntentionPrompts([])).resolves.toEqual({ rows: [], hasMore: false })
+    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({ rows: [], hasMore: false })
   })
 
   it('falls back to the phone number when the guest has no name', async () => {
@@ -85,7 +86,7 @@ describe('loadIntentionPrompts', () => {
       error: null,
     })
 
-    const { rows } = await loadIntentionPrompts([])
+    const { rows } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows[0].guestLabel).toBe('+15555550142')
   })
 
@@ -96,14 +97,14 @@ describe('loadIntentionPrompts', () => {
       error: null,
     })
 
-    const { rows } = await loadIntentionPrompts([])
+    const { rows } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows[0].guestLabel).toBe('@maya.oakland')
   })
 
   it('preserves a null message_id rather than inventing one', async () => {
     mockQuery({ data: [dbRow({ message_id: null })], error: null })
 
-    const { rows } = await loadIntentionPrompts([])
+    const { rows } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows[0].messageId).toBeNull()
   })
 
@@ -112,7 +113,7 @@ describe('loadIntentionPrompts', () => {
   it('carries a pessimistic prompt_source through to the row', async () => {
     mockQuery({ data: [dbRow({ prompt_source: 'pessimistic' })], error: null })
 
-    const { rows } = await loadIntentionPrompts([])
+    const { rows } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows[0].promptSource).toBe('pessimistic')
   })
 
@@ -128,7 +129,7 @@ describe('loadIntentionPrompts', () => {
 
     mockQuery({ data: [dbRow({ intention_key: orphanKey })], error: null })
 
-    const { rows } = await loadIntentionPrompts([])
+    const { rows } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows).toHaveLength(1)
     expect(rows[0].intentionKey).toBe(orphanKey)
   })
@@ -136,7 +137,7 @@ describe('loadIntentionPrompts', () => {
   it('scopes to the allowlist when one is present', async () => {
     const { calls } = mockQuery({ data: [], error: null })
 
-    await loadIntentionPrompts([VENUE_ID])
+    await loadIntentionPrompts(adminVenueScope([VENUE_ID]))
 
     expect(calls.filter((c) => c.method === 'in')).toEqual([
       { method: 'in', args: ['venue_id', [VENUE_ID]] },
@@ -149,7 +150,7 @@ describe('loadIntentionPrompts', () => {
   it('applies no venue filter when the allowlist is empty', async () => {
     const { calls } = mockQuery({ data: [], error: null })
 
-    await loadIntentionPrompts([])
+    await loadIntentionPrompts(adminVenueScope([]))
 
     expect(calls.some((c) => c.method === 'in')).toBe(false)
   })
@@ -160,7 +161,7 @@ describe('loadIntentionPrompts', () => {
   it('reads newest-first, bounded, with the guest and venue embeds', async () => {
     const { calls, from } = mockQuery({ data: [], error: null })
 
-    await loadIntentionPrompts([])
+    await loadIntentionPrompts(adminVenueScope([]))
 
     expect(from).toHaveBeenCalledWith('guest_intention_prompts')
     const select = calls.find((c) => c.method === 'select')?.args[0] as string
@@ -184,7 +185,7 @@ describe('loadIntentionPrompts', () => {
   it('reads only rows that were actually prompted (trap 5)', async () => {
     const { calls } = mockQuery({ data: [], error: null })
 
-    await loadIntentionPrompts([])
+    await loadIntentionPrompts(adminVenueScope([]))
 
     expect(calls.filter((c) => c.method === 'not')).toEqual([
       { method: 'not', args: ['prompted_at', 'is', null] },
@@ -199,7 +200,7 @@ describe('loadIntentionPrompts', () => {
     )
     mockQuery({ data: exactly, error: null })
 
-    const { rows, hasMore } = await loadIntentionPrompts([])
+    const { rows, hasMore } = await loadIntentionPrompts(adminVenueScope([]))
     expect(rows).toHaveLength(RECORDED_PROMPTS_LIMIT)
     expect(hasMore).toBe(false)
   })
@@ -210,7 +211,7 @@ describe('loadIntentionPrompts', () => {
     )
     mockQuery({ data: overflowing, error: null })
 
-    const { rows, hasMore } = await loadIntentionPrompts([])
+    const { rows, hasMore } = await loadIntentionPrompts(adminVenueScope([]))
     expect(hasMore).toBe(true)
     // The extra row is a probe, never rendered.
     expect(rows).toHaveLength(RECORDED_PROMPTS_LIMIT)
@@ -221,7 +222,7 @@ describe('loadIntentionPrompts', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockQuery({ data: null, error: { message: 'connection reset' } })
 
-    await expect(loadIntentionPrompts([])).resolves.toEqual({ rows: [], hasMore: false })
+    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({ rows: [], hasMore: false })
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })

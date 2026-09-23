@@ -2,6 +2,7 @@ import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
 import { firstOrNull } from '@/lib/db/postgrest'
 import { BrandPersonaSchema } from '@/lib/schemas'
+import { venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
 
 // THE-237: shared loader for the Voices command-center surface. Used by the
 // authed admin layout (sidebar group) and `/admin/voices` (list page). One
@@ -25,7 +26,7 @@ export interface VoiceListRow {
 /**
  * Load every voice the operator has access to.
  *
- * `allowedVenueIds` empty means analog admin scope (see
+ * A fleet-wide `venueScope` means analog admin scope (see
  * `verifyAnalogAdminAccess`) — return everything. Non-empty: scope to that
  * list. Mirrors the conversations page's allowlist treatment.
  *
@@ -39,14 +40,18 @@ export interface VoiceListRow {
  */
 export const loadVoices = cache(_loadVoices)
 
-async function _loadVoices(allowedVenueIds: string[]): Promise<VoiceListRow[]> {
+async function _loadVoices(venueScope: VenueScope): Promise<VoiceListRow[]> {
   const supabase = createAdminClient()
   let query = supabase
     .from('venues')
     .select('id, slug, name, venue_configs(brand_persona)')
     .order('name', { ascending: true })
-  if (allowedVenueIds.length > 0) {
-    query = query.in('id', allowedVenueIds)
+  // TAC-530: null means fleet-wide (an analog admin with no explicit
+  // grants), so no filter. An EMPTY list is still applied as a filter and
+  // matches nothing -- the two are no longer the same value.
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds !== null) {
+    query = query.in('id', venueIds)
   }
   const { data, error } = await query
   if (error) {

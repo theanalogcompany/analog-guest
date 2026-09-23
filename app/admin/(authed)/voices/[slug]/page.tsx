@@ -3,6 +3,7 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { VoicesClient } from './voices-client'
 import { loadVoicePage } from './_lib/load-voice-page'
+import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // Per-voice workbench. Server orchestrator pulls everything
 // the client needs in one round trip — venue, persona, corpus, threads,
@@ -22,7 +23,7 @@ import { loadVoicePage } from './_lib/load-voice-page'
 // inbound/outbound message inserts.
 //
 // Allowlist enforcement: layout has already verified analog admin and
-// resolved allowedVenueIds. We re-check here against the loaded venue's
+// resolved venue scope. We re-check here against the loaded venue's
 // id since `[slug]` is operator-supplied.
 
 export const dynamic = 'force-dynamic'
@@ -42,10 +43,10 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   } = await supabase.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
@@ -55,8 +56,7 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   if (!data) notFound()
 
   if (
-    allowedVenueIds.length > 0 &&
-    !allowedVenueIds.includes(data.venue.id)
+    !allowsVenue(venueScope, data.venue.id)
   ) {
     notFound()
   }

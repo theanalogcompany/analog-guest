@@ -89,6 +89,7 @@ vi.mock('@/lib/db/admin', () => ({
 }))
 
 import { POST } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -123,14 +124,14 @@ beforeEach(() => {
   claimPatch = {}
   script = {}
   fromCalls = 0
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
 })
 
 describe('POST /api/operator/messages/[id]/skip', () => {
   // The fixture is a card that WOULD match if the filter were skipped. A
   // fixture with no matching row passes whether or not the guard exists.
   it('answers 404 and touches nothing when the operator is allowlisted for no venue', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
     script = { claimed: [PENDING_CARD] }
     expect(await skip()).toEqual({ status: 404, body: { error: 'not found' } })
     expect(fromCalls).toBe(0)
@@ -159,7 +160,7 @@ describe('POST /api/operator/messages/[id]/skip', () => {
   })
 
   it('answers the same 404 for an out-of-allowlist card as for one that does not exist', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_B] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_B]) })
     script = { claimed: [], current: null }
     const outOfScope = await skip()
     script = { claimed: [], current: null }

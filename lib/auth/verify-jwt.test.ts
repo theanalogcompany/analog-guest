@@ -3,6 +3,7 @@ import { createAdminClient } from '../db/admin'
 import { linkOperatorByAuthUser } from './link-operator'
 import { AuthError } from './types'
 import { verifyOperatorRequest } from './verify-jwt'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 vi.mock('../db/admin', () => ({
   createAdminClient: vi.fn(),
@@ -97,7 +98,7 @@ describe('verifyOperatorRequest', () => {
     const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
     expect(out).toEqual({
       operatorId: 'operator-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: grantedVenues(['venue-a', 'venue-b']),
     })
     expect(mock.auth.getUser).toHaveBeenCalledWith('good-jwt')
   })
@@ -186,7 +187,7 @@ describe('verifyOperatorRequest', () => {
     const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
     expect(out).toEqual({
       operatorId: 'op-newly-linked',
-      allowedVenueIds: ['venue-x'],
+      venueScope: grantedVenues(['venue-x']),
     })
     expect(linkOperatorByAuthUser).toHaveBeenCalledWith('auth-newly-linked')
   })
@@ -244,7 +245,7 @@ describe('verifyOperatorRequest', () => {
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
 
     const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
-    expect(out).toEqual({ operatorId: 'operator-1', allowedVenueIds: [] })
+    expect(out).toEqual({ operatorId: 'operator-1', venueScope: grantedVenues([]) })
   })
 
   it('uses AuthError class instances (instanceof check)', async () => {

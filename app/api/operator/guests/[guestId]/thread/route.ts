@@ -34,7 +34,7 @@ export async function GET(
 
   const result = await loadGuestThreadByGuestId({
     guestId,
-    allowedVenueIds: operator.allowedVenueIds,
+    venueScope: operator.venueScope,
   })
 
   if (!result.ok) {

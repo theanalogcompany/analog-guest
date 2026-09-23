@@ -50,13 +50,14 @@ import {
 // does to something a test needs for real.
 import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
 import { recordIntentionPrompts } from '@/lib/agent/intentions/record'
+import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 export type DispatchAction = 'approve' | 'edit'
 
 export interface DispatchOperatorOutboundInput {
   messageId: string
   operatorId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
   action: DispatchAction
   /** Required when action === 'edit'. Becomes messages.body. */
   editedBody?: string
@@ -173,23 +174,12 @@ export async function dispatchOperatorOutbound(
       error: 'message not found',
     }
   }
-  // TAC-530: an EMPTY allowlist means NO venue access on this path, and it is
-  // a deny. verifyOperatorRequest builds allowedVenueIds from the operator's
-  // literal operator_venues rows with no is_analog_admin lookup anywhere, so
-  // empty means "allowlisted for nothing" -- the opposite of the cookie path,
-  // where empty deliberately means analog-admin scope. Guarding the membership
-  // check with `length > 0 &&` let a grantless operator bearer approve or edit
-  // any pending card in the fleet.
-  //
-  // `includes` on an empty array is already false, so the membership check
-  // alone denies. The explicit `length === 0` is kept so a reader does not have
-  // to derive that, and so this reads like the sibling call sites that early
-  // return on it (resolve-external, thread, guest-thread, queue, heads-up-queue,
-  // conversations, markAcknowledged, markCancelled).
-  if (
-    input.allowedVenueIds.length === 0 ||
-    !input.allowedVenueIds.includes(row.venue_id)
-  ) {
+  // TAC-530: allowsVenue is total over VenueScope -- an empty grant list
+  // allows nothing, and fleet-wide allows everything. The old
+  // `allowedVenueIds.length > 0 && !includes(...)` form read an empty
+  // allowlist as "no restriction", which is the cookie path's meaning, and
+  // let a grantless operator bearer approve or edit any card in the fleet.
+  if (!allowsVenue(input.venueScope, row.venue_id)) {
     return {
       ok: false,
       errorCode: 'message_not_found',

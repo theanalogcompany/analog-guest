@@ -16,6 +16,7 @@ import {
 import { VenueHoursSchema } from '@/lib/schemas/venue-info'
 import type { VenueInfo } from '@/lib/schemas/venue-info'
 import { OBLIGATION_TYPES, deriveExpiresAt } from './commitment-expiry'
+import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-297. Mirrors the shape of lib/guests/context.ts: RAGResult-typed, never
 // throws, fail-CLOSED on DB errors, fail-OPEN on malformed payloads. All
@@ -759,7 +760,7 @@ export async function scheduleArrival(opts: {
 
 /**
  * Acknowledge a pending_ack commitment. CAS-gated on status='pending_ack'
- * AND venue_id IN allowedVenueIds — combines the state-machine gate with
+ * AND venue_id IN the operator's granted venues — combines the state-machine gate with
  * the per-operator allowlist enforcement in a single conditional UPDATE
  * (one round trip, no read-then-write race).
  *
@@ -774,13 +775,19 @@ export async function scheduleArrival(opts: {
 export async function markAcknowledged(opts: {
   commitmentId: string
   operatorId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, operatorId, allowedVenueIds, now } = opts
-  if (allowedVenueIds.length === 0) {
-    // Empty allowlist → no row matches by definition. Skip the round trip.
+  const { commitmentId, operatorId, venueScope, now } = opts
+  if (venueScopeDeniesAll(venueScope)) {
+    // No granted venues → no row matches by definition. Skip the round trip.
     return { ok: true, data: { transitioned: false, row: null } }
+  }
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds === null) {
+    // TAC-530: fleet-wide scope comes only from the analog-admin cookie path
+    // and never reaches this operator-API helper. Refuse rather than widen.
+    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'db_write_failed' }
   }
   try {
     const supabase = createAdminClient()
@@ -794,7 +801,7 @@ export async function markAcknowledged(opts: {
       })
       .eq('id', commitmentId)
       .eq('status', 'pending_ack')
-      .in('venue_id', allowedVenueIds)
+      .in('venue_id', venueIds)
       .select()
     if (error) {
       return { ok: false, error: error.message, errorCode: 'db_write_failed' }
@@ -819,7 +826,7 @@ export async function markAcknowledged(opts: {
 
 /**
  * Cancel a pending_ack commitment. CAS-gated on status='pending_ack' AND
- * venue_id IN allowedVenueIds — same single-conditional-UPDATE shape as
+ * venue_id IN the operator's granted venues — same single-conditional-UPDATE shape as
  * markAcknowledged so the auth-allowlist enforcement and the state-machine
  * gate land in one round trip.
  *
@@ -854,12 +861,17 @@ export async function markCancelled(opts: {
    * exists by design (TAC-299: no migration).
    */
   operatorId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, allowedVenueIds, now } = opts
-  if (allowedVenueIds.length === 0) {
+  const { commitmentId, venueScope, now } = opts
+  if (venueScopeDeniesAll(venueScope)) {
     return { ok: true, data: { transitioned: false, row: null } }
+  }
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds === null) {
+    // TAC-530: see markAcknowledged.
+    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'db_write_failed' }
   }
   try {
     const supabase = createAdminClient()
@@ -871,7 +883,7 @@ export async function markCancelled(opts: {
       })
       .eq('id', commitmentId)
       .eq('status', 'pending_ack')
-      .in('venue_id', allowedVenueIds)
+      .in('venue_id', venueIds)
       .select()
     if (error) {
       return { ok: false, error: error.message, errorCode: 'db_write_failed' }

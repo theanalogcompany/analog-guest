@@ -19,6 +19,7 @@ import { z } from 'zod'
 import { withOperatorAuth } from '@/lib/auth'
 import { captureOperatorMessageSkipped } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -39,7 +40,8 @@ export const POST = withOperatorAuth<{ id: string }>(
     // `length > 0` skipped it entirely, letting a grantless operator bearer
     // skip any pending card in the fleet. Deny before touching the database,
     // matching resolve-external.
-    if (operator.allowedVenueIds.length === 0) {
+    const venueIds = venueFilterIds(operator.venueScope)
+    if (venueIds === null || venueIds.length === 0) {
       return NextResponse.json({ error: 'not found' }, { status: 404 })
     }
 
@@ -57,7 +59,7 @@ export const POST = withOperatorAuth<{ id: string }>(
       .eq('id', messageId)
       .eq('review_state', 'pending')
       .eq('direction', 'outbound')
-      .in('venue_id', operator.allowedVenueIds)
+      .in('venue_id', venueIds)
 
     const { data: claimed, error: claimErr } = await claimQuery.select(
       'id, venue_id, guest_id, category, voice_fidelity, created_at',
@@ -77,7 +79,7 @@ export const POST = withOperatorAuth<{ id: string }>(
         .from('messages')
         .select('id, venue_id, review_state, direction')
         .eq('id', messageId)
-        .in('venue_id', operator.allowedVenueIds)
+        .in('venue_id', venueIds)
 
       const { data: current } = await lookupQuery.maybeSingle()
 
