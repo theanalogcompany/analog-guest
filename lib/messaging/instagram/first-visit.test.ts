@@ -189,3 +189,47 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
     )
   })
 })
+
+
+// TAC-518. Two guarantees this ticket must not break, and the second is the
+// shape of its own ruling.
+describe('SMS first touch is untouched by the referral (TAC-518)', () => {
+  function smsFirstTurn(over: Partial<RuntimeContext> = {}): RuntimeContext {
+    return {
+      guest: { createdVia: 'qr_scan', createdAt: new Date(NOW) },
+      currentMessage: { id: 'in-1', body: 'Hi Sana!', channel: 'text', referralSource: null },
+      recentMessages: [],
+      ...over,
+    } as unknown as RuntimeContext
+  }
+
+  // A venue on Sendblue has a dedicated number and no referral will ever
+  // arrive. The opener has to fire on created_via alone, exactly as before.
+  it('fires for a Sendblue QR guest with no referral anywhere', () => {
+    expect(computeFirstTouchAfterQrScan(smsFirstTurn(), new Date(NOW))).toBe(true)
+  })
+
+  // And it is not the referral doing it: the same guest without the qr_scan
+  // label gets nothing, on either channel.
+  it('does not fire for an SMS guest who was not enrolled by the sign', () => {
+    const ctx = smsFirstTurn({ guest: { createdVia: 'inbound_message', createdAt: new Date(NOW) } } as Partial<RuntimeContext>)
+    expect(computeFirstTouchAfterQrScan(ctx, new Date(NOW))).toBe(false)
+  })
+
+  // THE RULING, AS A GUARD (option A, 2026-09-23). This ticket arms the order
+  // question off the turn's referral and adds NO new prompt line, so the
+  // opener gate deliberately still reads created_via and nothing else. Wiring
+  // the referral in here would render "this is the guest's first message" to a
+  // guest who has been messaging the venue for weeks — the thing the ruling
+  // forbids — and the wording for that case is TAC-423's, not this ticket's.
+  it('the opener gate does not read the referral at all', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'agent', 'stages.ts'), 'utf-8')
+    const gate = src.slice(
+      src.indexOf('export function computeFirstTouchAfterQrScan('),
+      src.indexOf('Map orchestrator RuntimeContext'),
+    )
+    expect(gate.length).toBeGreaterThan(0)
+    expect(gate).not.toContain('referralSource')
+    expect(gate).not.toContain('isScanReferral')
+  })
+})
