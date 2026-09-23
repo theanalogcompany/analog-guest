@@ -15,7 +15,7 @@ describe('classifyFirstTouchReply (TAC-423)', () => {
     )
     expect(v.hasQuestion).toBe(true)
     expect(v.isOrderQuestion).toBe(true)
-    expect(v.orderPhrase).toBe('what did you end up')
+    expect(v.orderPhrase).toBe('what did you end up getting')
     expect(v.questionSentences).toEqual(['What did you end up getting?'])
   })
 
@@ -99,5 +99,37 @@ describe('contractions (regression from the 2026-09-22 run)', () => {
     const v = classifyFirstTouchReply(body)
     expect(v.hasQuestion).toBe(true)
     expect(v.isOrderQuestion).toBe(false)
+  })
+})
+
+// SECOND REGRESSION, from the confirmation run of the restored wording, and
+// caused by that wording. The opener now says "Ask what they just got", so the
+// model writes "what did you just grab?" and "what did you just get?" — and an
+// exact-substring list holding "what did you get" matches neither. Asymmetric
+// again, and this time against the SHIPPED arm, because only the shipped
+// opener says "just". Reported at 71% before the fix for a wording that asks
+// the order question every time.
+//
+// The lesson is the same one twice: an exact-phrase list is the wrong shape
+// for a free-text question, and each new opener wording breaks it in a new
+// place. The matcher is a pattern with an optional adverb slot now.
+describe('adverb slot (regression from the 2026-09-23 confirmation run)', () => {
+  it.each([
+    'Hey! Himanshu here 👋 what did you just grab?',
+    "Hey, hi! I'm Himanshu 👋 what did you just get?",
+    'hey! what did you end up getting today?',
+    'what did you already pick up?',
+  ])('reads an order question with an adverb as the order question: %s', (body) => {
+    expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(true)
+  })
+
+  // The control that keeps the pattern from swallowing a different intention.
+  // "whatever you got" must not read as "what you got".
+  it.each([
+    'Hey, welcome! how was whatever you got?',
+    "hope you enjoyed whatever you grabbed. how'd it go?",
+    'how was everything?',
+  ])('still does not read a how-was-it question as the order question: %s', (body) => {
+    expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(false)
   })
 })

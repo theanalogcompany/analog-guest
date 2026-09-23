@@ -33,30 +33,26 @@ export interface FirstTouchVerdict {
 // Phrases that make a question an ORDER question. Matched against the question
 // sentence only, never the whole body, so "what did you get" in a statement
 // elsewhere cannot count. Lowercased, punctuation-insensitive at the edges.
-const ORDER_PHRASES = [
-  'what did you get',
-  'what did you end up',
-  'what you get',
-  'what did you end up with',
-  'what did you settle on',
-  'what did you land on',
-  'what you got',
-  'what did you go with',
-  'what did you order',
-  'what are you picking up',
-  'what did you pick up',
-  'what did you grab',
-  'what are you drinking',
-  'what you drinking',
-  'what did they make you',
-  'what is in your hand',
-  "what's in your hand",
-  'which one did you',
-  'what you end up with',
-  'what did you have',
-  'what are you having',
-  'what did you try',
+// An ORDER question, as a pattern rather than an exact phrase list.
+//
+// The list shape has now broken twice, each time asymmetrically and each time
+// against whichever arm was NOT echoing a script. First contractions, then an
+// adverb: the opener says "Ask what they just got", so the model writes "what
+// did you just grab?" and a list holding "what did you get" misses it. The
+// adverb slot is what stops the next wording breaking it again.
+//
+// Anchored on "what did/do you", never on a loose "what ... got", so
+// "how was whatever you got?" does NOT match: that is did_they_like_it, a
+// different intention, and counting it would inflate the arm instead.
+const ORDER_PATTERNS: readonly RegExp[] = [
+  /\bwhat (?:did|do) you (?:just |already |end up |finally |actually )?(?:get|getting|got|grab|grabbing|order|ordering|pick up|pick|have|try|go with|settle on|land on)\b/,
+  /\bwhat (?:are|were) you (?:picking up|drinking|having|getting)\b/,
+  /\bwhat(?:'s| is| was) (?:in your hand|it)\b/,
+  /\bwhat you (?:got|get|end(?:ed)? up with)\b/,
+  /\bwhich one did you (?:get|go with|pick|grab)\b/,
+  /\bwhat did you end up with\b/,
 ]
+
 
 // An ask with no question mark. Secondary only.
 const IMPLIED_ASK_PHRASES = [
@@ -105,7 +101,9 @@ export function classifyFirstTouchReply(body: string): FirstTouchVerdict {
   const questionSentences = sentences.filter((s) => s.includes('?'))
   const normalizedQuestions = questionSentences.map(normalize)
   const orderPhrase =
-    ORDER_PHRASES.find((p) => normalizedQuestions.some((q) => q.includes(p))) ?? null
+    normalizedQuestions
+      .flatMap((q) => ORDER_PATTERNS.map((re) => re.exec(q)?.[0] ?? null))
+      .find((m): m is string => m !== null) ?? null
   const normalizedBody = normalize(body)
   return {
     hasQuestion: questionSentences.length > 0,
