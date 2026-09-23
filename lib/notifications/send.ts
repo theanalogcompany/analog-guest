@@ -18,9 +18,24 @@
 // custom data fields: draftId + guestId + operatorId. TAC-288's tap handler
 // routes to /conversation/[guestId]; draftId is informational.
 //
-// Privacy: no message contents (guest body, draft body) ever land in the
-// payload. Title is static, body is "Reply to {firstName} — {context}" with
-// context = a categorical trigger label, not free text. Asserted in tests.
+// Privacy (TAC-532 changed this, read it carefully): the DRAFT body still
+// never lands in the payload, and neither does any commitment description. The
+// GUEST'S OWN MESSAGE now does, quoted, in aps.alert.body, ruled 2026-09-23 as
+// the only thing that can tell one card from another when a guest has several
+// waiting and they share a trigger. It is suppressed for comp_complaint and
+// for an unresolved category, AND for a crisis-safety turn (shouldQuoteGuest),
+// so neither a complaint nor a self-harm message is ever rendered on a lock
+// screen. The property is "nothing the guest wrote that we have flagged as
+// sensitive", not "no complaints": crisis is the other thing this codebase
+// flags, and it is a separate boolean from category.
+//
+// The title is categorical APART FROM the guest's first name, which is
+// guest-influenced: guests.first_name is written from the model's
+// contextUpdate, so a guest who offers an arbitrary string as their name puts
+// it there (CLAUDE.md, TAC-380 Probe 1). Bounded to ~23 characters by the
+// title trim, and it was rendered in the body before this too. Called out
+// because on a comp_complaint push the title is the ONLY thing rendered.
+// Asserted in tests against planted guest text, not against key names.
 
 import { loadPushRecipients, countPendingDraftsForOperator, clearOperatorPushToken } from './recipients'
 import {
@@ -32,6 +47,7 @@ import {
   GENERATION_FAILED_REVIEW_REASON,
   type ApprovalTrigger,
 } from '@/lib/agent/stages'
+import type { MessageCategory } from '@/lib/ai/types'
 import { sendApnsRequest } from './apns/client'
 import { shouldSendDraftFlaggedPush } from './push-policy'
 
@@ -44,104 +60,232 @@ export { shouldSendDraftFlaggedPush }
 
 const APNS_TOKEN_INVALID_STATUS = 410
 const APNS_BAD_DEVICE_TOKEN_STATUS = 400
-const MAX_PUSH_BODY_CHARS = 40
+// TAC-532: the title carries guest and reason, the body carries the guest's
+// own question. Two budgets because iOS renders the two differently: the title
+// is one bold line, the body gets about two when collapsed. These are starting
+// values TO BE confirmed on device, which is why the ticket is QA: Device. No
+// test here establishes they are right on a real lock screen.
+const MAX_PUSH_TITLE_CHARS = 40
+const MAX_PUSH_BODY_CHARS = 110
 
-// Categorical labels for the push body's context clause. Deliberately
-// PARTIAL: this map answers "what do we call this?", NOT "do we push?" —
-// that is ./push-policy.ts's job. A trigger with no entry here still pushes,
-// just without the context dash (see buildPushBody). That fallback was
-// unreachable while this map doubled as the fire-set; it is now the designed
-// degradation for a trigger whose copy hasn't been written yet.
+// TAC-532. Written as a literal rather than imported from
+// lib/agent/dispatch-instagram-reply.ts, which would pull Instagram's outbound
+// modules (window, send, send-target, reply-check) into this file
+// transitively. This module is the SHARED draft push and loads on the SMS path
+// too, and TAC-469 rule 1 is "branch by channel, don't converge".
+// lib/operator/queue.ts carries the same literal for the same reason.
+// send.test.ts binds the two so a rename cannot drift them apart.
+const INSTAGRAM_SEND_FAILED_REASON = 'instagram_send_failed'
+
+// TAC-532, ruled 2026-09-23. A complaint gets its own title phrase and NEVER
+// quotes the guest.
 //
-// `satisfies Partial<Record<ApprovalTrigger, string>>` still catches a typo'd
-// or removed trigger key at compile time without forcing a label on every
-// trigger. previous_pending_held is intentionally absent — it never pushes.
-//
-// Values must stay CATEGORICAL. Never interpolate guest text, draft body, or
-// commitment description here — the payload privacy invariant is asserted in
-// send.test.ts.
-const CONTEXT_BY_TRIGGER = {
-  [APPROVAL_TRIGGERS.MODEL_FLAGGED]: 'needs review',
-  [APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP]: 'comp request',
-  [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR]: 'low fidelity',
-  // TAC-297 (ff653be). Specific noun phrase matching the register of
-  // 'comp request' / 'low fidelity' — this trigger carries explicit type
-  // information (comp/hold/discount), so the generic bucket would undersell it.
-  [APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]: 'commitment',
-  // #95 (0c1515c). Venue-wide hold — no per-message signal to name, so the
-  // generic bucket is correct here.
-  [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
-  // TAC-308. Names the thing the operator is being asked for — an answer —
-  // rather than the mechanism. Stays categorical: the guest's actual question
-  // never goes in the payload.
+// Keyed on the CLASSIFICATION CATEGORY, never on the trigger, and that is the
+// load-bearing part. comp_complaint routes to a comp-forward draft by design,
+// so the commonest complaint card's primaryTrigger is commitment_type_gated,
+// which ranks 1st in PRIMARY_TRIGGER_PRIORITY while category_requires_approval
+// ranks 22nd of 23. Suppressing on the trigger would have leaked the quote in
+// exactly the commonest complaint case, which is the opposite of the ruling.
+const COMPLAINT_CATEGORY = 'comp_complaint'
+const COMPLAINT_REASON = 'something went wrong'
+
+const BODY_COMPLAINT = 'Complaint waiting for review'
+const BODY_NO_QUESTION = 'Draft ready to review'
+
+// Used only for a reason this map does not know. The map is total over every
+// value that can reach a push, so this is reachable only if primaryTrigger
+// arrives as something nobody declared.
+const FALLBACK_REASON = 'needs review'
+
+/**
+ * TAC-532. One short phrase per reason, read at a glance on a lock screen.
+ * Approved as a set on 2026-09-23.
+ *
+ * TOTAL, unlike the partial map this replaces. That one was partial by design
+ * and twelve reasons ended up with no label at all, pushing as a bare
+ * "Reply to Alex" with nothing on them to tell one card from another. The
+ * `satisfies Record<...>` clause is what makes a new trigger fail tsc here
+ * rather than silently arrive unlabelled, the same discipline PUSH_POLICY
+ * carries and for the same reason.
+ *
+ * Values stay CATEGORICAL. The guest's own words go in the BODY, gated by
+ * shouldQuoteGuest; nothing in this map is ever built from guest text.
+ */
+export const REASON_BY_REVIEW_REASON = {
+  [APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]: 'offers something',
+  [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED]: 'cancels a promise',
+  [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP]: 'perk offered',
+  [APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP]: 'promises something',
+  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP]: 'claims a cancellation',
+  [APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID]: 'promise not found',
+  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]: 'unverified claim',
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'needs an answer',
-  // TAC-367. The one trigger where the operator genuinely has to be told that
-  // NOTHING was found — the grounding check didn't complete, so the draft is
-  // queued on an absence of information rather than a finding against it.
-  // Without a label this push reads "Reply to Sam" with no hint at all, and
-  // this card carries no timer to surface it later the way KNOWLEDGE_GAP does.
-  // (KNOWLEDGE_GAP_BACKSTOP, SELF_TALK_DETECTED and MECHANIC_OFFER_BACKSTOP
-  // are also unlabelled here — pre-existing, deliberately left alone rather
-  // than swept into this PR.)
-  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
-  // TAC-509. Labelled for the same reason as the line above: the operator has
-  // to look at one specific thing in the draft, and an unlabelled "Reply to
-  // Sam" gives them no idea what. "link" is the whole job of this card.
+  [APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP]: 'comp request',
+  [APPROVAL_TRIGGERS.MODEL_FLAGGED]: 'needs review',
+  // Deliberately identical for the two closed-venue variants. They are the
+  // same thing to an operator: the reply tells a guest to come to a venue that
+  // is shut. Which check caught it is our business, not theirs.
+  [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED]: 'closed, says come by',
+  [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP]: 'closed, says come by',
   [APPROVAL_TRIGGERS.UNVERIFIED_URL]: 'link needs checking',
-  // TAC-401. One word, matching the register of 'commitment' and 'comp
-  // request'. The operator is being told the venue may now owe this guest
-  // something, which is the whole job of the card. Categorical, like every
-  // value here — the promise itself never goes in the payload.
-  [APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP]: 'promise',
-  // TAC-401. Mirrors GROUNDING_CHECK_FAILED's label above, for the same
-  // reason: the operator has to be told that NOTHING was found and the draft
-  // is queued on an absence of information.
+  [APPROVAL_TRIGGERS.SELF_TALK_DETECTED]: 'stray text in the draft',
+  // Shadowed by COMPLAINT_REASON today, since this trigger only fires on a
+  // complaint category. Written out anyway so it is correct the day
+  // FLOOR_CATEGORIES widens beyond comp_complaint.
+  [APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR]: 'promise on a complaint',
+  // Never renders: PUSH_POLICY skips this trigger. Present so the map is total.
+  [APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD]: 'needs review',
+  [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR]: 'might not sound right',
+  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
+  // Never renders: it can never win primary, because it always co-fires below
+  // GROUNDING_CHECK_FAILED. Present so the map is total.
+  [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'unverified, needs a look',
   [APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]: 'unchecked, needs a look',
-  // TAC-364. Not an ApprovalTrigger — the gate can't fire it, a crash never
-  // produced the GenerateMessageResult the gate takes — which is why the
-  // satisfies clause below is widened rather than this key being added to
-  // APPROVAL_TRIGGERS.
-  //
-  // It needs a label for the same reason GROUNDING_CHECK_FAILED does: the card
-  // is BLANK, so an operator who opens it on the strength of an unlabelled
-  // "Reply to Sam" finds nothing to read and no statement of what happened.
-  // Until this ticket the crash card borrowed knowledge_gap's 'needs an
-  // answer', which was at least a hint; splitting the review_reason without
-  // this would have silently made the push less informative than before.
+  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]: 'unchecked, needs a look',
+  // Generic on purpose: the trigger is generic. The complaint case it routes
+  // today is carried by COMPLAINT_REASON instead, off the category.
+  [APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL]: 'held for review',
+  [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
-} as const satisfies Partial<
-  Record<ApprovalTrigger | typeof GENERATION_FAILED_REVIEW_REASON, string>
+  [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
+} as const satisfies Record<
+  | ApprovalTrigger
+  | typeof GENERATION_FAILED_REVIEW_REASON
+  | typeof INSTAGRAM_SEND_FAILED_REASON,
+  string
 >
 
-const CONTEXT_LOOKUP: Record<string, string | undefined> = CONTEXT_BY_TRIGGER
+const REASON_LOOKUP: Record<string, string | undefined> = REASON_BY_REVIEW_REASON
+
+/**
+ * Whether the guest's own words may be quoted in the push body.
+ *
+ * Two cases suppress, and the null one is the safe direction: a null category
+ * means classification did not complete, and we cannot then establish that the
+ * message was not a complaint. The crash-card call site reaches exactly that
+ * state, which is why it is modelled rather than assumed away.
+ */
+export function shouldQuoteGuest(
+  category: MessageCategory | null,
+  guestIsCrisis: boolean,
+): boolean {
+  // TAC-532 code review. crisisSafety is a SEPARATE boolean from category
+  // (lib/ai/classify-message.ts), so a self-harm or medical-emergency message
+  // carries whatever category the classifier picked — 'unknown' in this repo's
+  // own crisis fixture — and a category-only gate quotes it. It reaches a push
+  // for real: handle-inbound.ts routes a crisis turn whose reply did not fully
+  // send into pushSendFailureCard, which passes the guest's message here.
+  //
+  // Jaipal's 2026-09-23 ruling covered comp_complaint and said nothing about
+  // crisis, because the question put to him did not raise it. Suppressing is
+  // the safe direction and is strictly narrower than what was approved: the
+  // argument he gave for complaints ("a cost with no matching benefit") is
+  // stronger here, and every other part of this repo treats a crisis turn as
+  // categorically special.
+  if (guestIsCrisis) return false
+  return category !== null && category !== COMPLAINT_CATEGORY
+}
+
+/** The phrase after the guest's name in the title. Always categorical. */
+export function resolvePushReason(
+  primaryTrigger: string,
+  category: MessageCategory | null,
+): string {
+  if (category === COMPLAINT_CATEGORY) return COMPLAINT_REASON
+  const mapped = REASON_LOOKUP[primaryTrigger]
+  if (mapped !== undefined) return mapped
+  // The map is total over ApprovalTrigger, so tsc catches a new TRIGGER. It
+  // cannot see a review_reason from OUTSIDE that union: generation_failed and
+  // instagram_send_failed were both added by hand, and two more already exist
+  // (crisis_safety_reply, operator_decline_initiated) that do not reach a push
+  // today. A future one would render 'needs review', byte-identical to
+  // model_flagged, with nothing to say it fell through. Hence the log line.
+  console.warn('[apns] no push reason mapped, falling back', { primaryTrigger })
+  return FALLBACK_REASON
+}
+
+/**
+ * Trims to `max` characters INCLUDING the ellipsis, at a word boundary where
+ * one leaves a useful amount of text. A single very long word would otherwise
+ * cut to almost nothing, so the break is only taken past the halfway mark.
+ */
+function truncateAtWord(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max - 1)
+  const lastSpace = cut.lastIndexOf(' ')
+  const base = lastSpace > max / 2 ? cut.slice(0, lastSpace) : cut
+  return `${base.trimEnd()}…`
+}
 
 export interface SendDraftFlaggedPushInput {
   agentRunId: string
   venueId: string
   guestId: string
-  /** guests.first_name. Null when unknown — falls back to "a guest". */
+  /** guests.first_name. Null when unknown, falls back to "A guest". */
   guestFirstName: string | null
   /** messages.id of the pending draft. */
   draftId: string
   /** approval.primaryTrigger from applyApprovalPolicyStage. */
   primaryTrigger: string
+  /**
+   * TAC-532. The guest's own inbound message, or null when there is none (a
+   * followup). REQUIRED rather than optional so all four call sites have to
+   * decide: an optional field would let every one of them default to "no
+   * question" silently, which is the shape this ticket exists to remove.
+   */
+  guestQuestion: string | null
+  /**
+   * TAC-532. The classified category of that inbound, or null when
+   * classification did not complete. Decides whether the guest may be quoted
+   * and whether the title takes the complaint wording. Required for the same
+   * reason as guestQuestion, and null is the safe value rather than an absent
+   * one.
+   */
+  guestCategory: MessageCategory | null
+  /**
+   * TAC-532 code review. classification.crisisSafety for this turn. Required
+   * for the same reason as the two above, and because it is the one sensitive
+   * signal category cannot carry: a crisis message classifies as whatever the
+   * classifier picked, not as a complaint.
+   */
+  guestIsCrisis: boolean
+}
+
+export function buildPushTitle(
+  firstName: string | null,
+  primaryTrigger: string,
+  category: MessageCategory | null,
+): string {
+  const trimmed = firstName?.trim() ?? ''
+  const name = trimmed || 'A guest'
+  const reason = resolvePushReason(primaryTrigger, category)
+  const full = `${name}: ${reason}`
+  if (full.length <= MAX_PUSH_TITLE_CHARS) return full
+  // Over budget: trim the NAME and keep the reason whole. The reason is what
+  // says which card this is; a shortened name is still recognisable beside it.
+  const overhead = `: ${reason}`.length
+  const maxNameChars = Math.max(1, MAX_PUSH_TITLE_CHARS - overhead)
+  return `${name.slice(0, maxNameChars).trimEnd()}: ${reason}`
 }
 
 export function buildPushBody(
-  firstName: string | null,
-  primaryTrigger: string,
+  guestQuestion: string | null,
+  category: MessageCategory | null,
+  guestIsCrisis: boolean,
 ): string {
-  const trimmed = firstName?.trim() ?? ''
-  const namePart = trimmed ? `Reply to ${trimmed}` : 'Reply to a guest'
-  const context = CONTEXT_LOOKUP[primaryTrigger]
-  const full = context ? `${namePart} — ${context}` : namePart
-  if (full.length <= MAX_PUSH_BODY_CHARS) return full
-  if (context && trimmed) {
-    const overhead = 'Reply to  — '.length + context.length
-    const maxNameChars = Math.max(1, MAX_PUSH_BODY_CHARS - overhead)
-    return `Reply to ${trimmed.slice(0, maxNameChars).trim()} — ${context}`
+  if (!shouldQuoteGuest(category, guestIsCrisis)) {
+    // A crisis turn takes the neutral line, not the complaint one: it is not a
+    // complaint, and BODY_COMPLAINT would be a false statement about the card.
+    return category === COMPLAINT_CATEGORY && !guestIsCrisis
+      ? BODY_COMPLAINT
+      : BODY_NO_QUESTION
   }
-  return full.slice(0, MAX_PUSH_BODY_CHARS)
+  // Whitespace collapsed so a multi-line inbound renders as one run of text.
+  const question = (guestQuestion ?? '').replace(/\s+/g, ' ').trim()
+  if (question.length === 0) return BODY_NO_QUESTION
+  // The quotes are deliberate: they mark the text as the guest's words rather
+  // than ours. They cost two of the budget, hence the -2.
+  return `"${truncateAtWord(question, MAX_PUSH_BODY_CHARS - 2)}"`
 }
 
 // TAC-473: these three moved to ./recipients when a third push surface
@@ -199,13 +343,18 @@ export async function sendDraftFlaggedPush(
     recipientIds: recipients.map((r) => r.id),
   })
 
-  const body = buildPushBody(input.guestFirstName, input.primaryTrigger)
+  const title = buildPushTitle(
+    input.guestFirstName,
+    input.primaryTrigger,
+    input.guestCategory,
+  )
+  const body = buildPushBody(input.guestQuestion, input.guestCategory, input.guestIsCrisis)
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)
     const payload = {
       aps: {
-        alert: { title: 'New draft to review', body },
+        alert: { title, body },
         badge,
         sound: 'default',
       },

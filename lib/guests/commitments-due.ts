@@ -395,6 +395,7 @@ export async function processDueCommitments(
         guestId: transitionedRow.guest_id,
         guestFirstName,
         type: transitionedRow.type,
+        description: transitionedRow.description,
         code: transitionedRow.code,
         expectedArrival: transitionedRow.expected_arrival,
         arrivalSignal: 'scheduled',

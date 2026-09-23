@@ -492,8 +492,15 @@ describe('handleInbound — generation-failure fallback (TAC-309)', () => {
   it('pushes so an operator learns the guest is waiting', async () => {
     generateStageMock.mockResolvedValue(GEN_FAILED)
     await handleInbound(INBOUND_ID)
+    // TAC-532: pin the WIRING, not just that a push fired. Before this, reverting
+    // guestQuestion/guestCategory to null at the call site passed 1746 tests -
+    // tsc forces a value, never the right one.
     expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'card-1' }),
+      expect.objectContaining({
+        draftId: 'card-1',
+        guestQuestion: 'is rayan working tomorrow',
+        guestIsCrisis: false,
+      }),
     )
   })
 
@@ -1432,6 +1439,40 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
   })
 })
 
+// TAC-532 code review. The four push assertions in this file all covered CARD
+// paths (crash, Instagram send-failure, split remainder, crisis). None covered
+// the MAIN QUEUE path, which is the one that produced the incident: three
+// knowledge_gap cards for one guest, three identical pushes. So reverting
+// `guestQuestion`/`guestCategory` to null at that call site - a full revert of
+// this ticket's deliverable at the layer that produces the defect - passed
+// 1751 tests. tsc forces a value there, never the right one.
+describe('handleInbound — the queued draft push carries the guest turn (TAC-532)', () => {
+  it('passes the guest question and category from the context, not null', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
+      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      pendingUntil: new Date(),
+      blankBody: true,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+        guestQuestion: 'is rayan working tomorrow',
+        guestCategory: 'new_question',
+        guestIsCrisis: false,
+      }),
+    )
+  })
+})
+
 describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
   it('threads a non-null verifyGroundingStage finding into applyApprovalPolicyStage as the third argument', async () => {
     generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
@@ -1930,7 +1971,12 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
       primaryTrigger: 'instagram_send_failed',
     })
     expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'card-7', primaryTrigger: 'instagram_send_failed' }),
+      expect.objectContaining({
+        draftId: 'card-7',
+        primaryTrigger: 'instagram_send_failed',
+        guestQuestion: 'do you have oat milk?',
+        guestIsCrisis: false,
+      }),
     )
     // Nothing reached the guest, so nothing is recorded as asked.
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
@@ -1949,7 +1995,9 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-row-1' })
-    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-8' }))
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: 'card-8', guestQuestion: 'do you have oat milk?' }),
+    )
   })
 
   // The load-bearing half of the delivered-body fix: the RECORDER decides which
@@ -2021,7 +2069,13 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'crisis-ig' })
-    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'card-crisis' }))
+    // TAC-532 code review, THE BLOCKER: this is the path that routes a crisis
+    // turn into a push. The flag has to arrive true here, or shouldQuoteGuest
+    // sees only category ('unknown' above, not comp_complaint) and the guest's
+    // self-harm message is quoted onto every operator's lock screen.
+    expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: 'card-crisis', guestIsCrisis: true, guestCategory: 'unknown' }),
+    )
   })
 
   it('exempts the crisis-safety reply from the reply check (ruled 2026-09-19)', async () => {
