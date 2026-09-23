@@ -312,6 +312,40 @@ describe('verifyProsePromise', () => {
       return (generateObjectMock.mock.calls[0]?.[0] as { system: string }).system
     }
 
+    // v1.0.0's system prompt, transcribed from lib/ai/verify-prose-promise.ts at
+    // origin/main bc3831b. Long on purpose: it is the only durable way to state
+    // "a turn with no guest message sees exactly what it saw before TAC-527",
+    // and that claim governs what obligations get created on every proactive
+    // path. Rebuilding it from the live constants could only confirm the source
+    // equals itself.
+    const V1_0_0_SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest. Your job is to decide one thing: does this reply commit the venue to giving this guest something of value that the guest has not paid for?
+
+Judge the reply on its own words. You are not checking whether the venue can afford it, whether the guest deserves it, or whether it was wise to offer. Only whether it was offered.
+
+Something of value means the guest ends up with product, service, or money they did not pay for, because of this reply. A replacement drink, a remake, a free item, an item set aside for them, money off a future purchase, "on us", "the next one's on me", "I'll make it right" about a drink that was wrong. The wording does not matter and the reply does not have to name a price, an item, or a mechanism. "We'll sort you out next time" is a promise; so is "I'll make sure your next one is right".
+
+Do not flag:
+- A promise of INFORMATION or effort only. "Let me find out and get back to you", "I'll look into it", "I'll ask the team". Nothing changes hands.
+- A refusal or a deferral. "I can't do that over text", "that's something the owner handles". Mentioning a thing in order to decline it is not offering it.
+- An apology that gives nothing. "We'll do better next time", "that one's on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free.
+- A reply that only describes the regular menu, hours, prices, or policies, including what something costs.
+- Something the guest has already paid for or already ordered: confirming an existing order, or saying a drink they bought will be ready.
+
+Set promisesSomething=true only when a venue owner reading the reply would agree the venue now owes this guest something.
+
+When promisesSomething is true, also say WHAT is owed:
+- commitmentType: "comp" for something free or replaced at no charge, "hold" for an item set aside for them to collect, "discount" for money off a future purchase, "none" if it clearly promises something but you cannot tell which of those three it is.
+- commitmentDescription: a short noun phrase naming what the venue owes, from the guest's side. "a replacement cortado", "a free pastry on their next visit". Not a sentence, not a quote of the reply, and never first person. Leave it empty only if the reply is too vague to name anything.
+
+When promisesSomething is false, set commitmentType to "none" and commitmentDescription to an empty string.`
+
+    // The strongest form of the regression guard: not "the additions are
+    // absent" but "the result IS the old prompt". Verified byte-identical at
+    // 2464 characters when TAC-527 landed.
+    it('composes v1.0.0 EXACTLY, byte for byte, when there is no guest message', async () => {
+      expect(await systemPrompt(null)).toBe(V1_0_0_SYSTEM_PROMPT)
+    })
+
     // THE REGRESSION GUARD, and it is the reason the rule renders conditionally
     // at all. Written unconditionally, it moved TAC-401's apology-idiom rate
     // from a recorded 0/20 to 8/20 on the 220-body replay — which runs

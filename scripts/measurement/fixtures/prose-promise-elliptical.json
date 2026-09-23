@@ -5,7 +5,8 @@
     "elliptical_promise": "The reply accepts a specific thing the guest named as wrong. Resolvable only from the guest's message, so the with_inbound arm SHOULD flag and the body_only arm is expected not to. These are the population TAC-527 exists for.",
     "apology_no_item": "The guest named something wrong that is not a thing the venue can hand over (slow service, noise, a wait). The reply accepts fault and offers nothing. MUST stay clean in both arms. Jaipal's measurement case 1, 2026-09-23.",
     "on_us_unrelated_item": "The reply says 'on us' about something OTHER than the item the guest complained about, usually accepting fault for a delay or a mistake. The item is in the guest's message, so this is precisely where the widened input could invent a comp. MUST stay clean in both arms. Jaipal's measurement case 2, 2026-09-23.",
-    "clean": "No promise on any reading, including a guest ASKING for something free and being declined. MUST stay clean in both arms."
+    "clean": "No promise on any reading, including a guest ASKING for something free and being declined. MUST stay clean in both arms.",
+    "explicit_promise": "The reply promises something readable from its OWN words, so both arms should flag. Measured 2026-09-23: ell-02, ell-03 and ell-05 were first labelled elliptical_promise and the control arm flagged them 10/10, which means the guest's message is not what catches them. Relabelled rather than left reporting a FAIL caused by the label: a harness that reports its own mislabelling as a failure stops being trusted. They are kept because they guard the OTHER direction, that widening the input did not break a plain catch."
   },
   "rows": [
     {
@@ -16,13 +17,13 @@
     },
     {
       "id": "ell-02",
-      "label": "elliptical_promise",
+      "label": "explicit_promise",
       "guestInbound": "my croissant was burnt this morning",
       "body": "oh no. that one's on us"
     },
     {
       "id": "ell-03",
-      "label": "elliptical_promise",
+      "label": "explicit_promise",
       "guestInbound": "the cortado was cold and the pastry was dry",
       "body": "both on us, sorry about that"
     },
@@ -34,7 +35,7 @@
     },
     {
       "id": "ell-05",
-      "label": "elliptical_promise",
+      "label": "explicit_promise",
       "guestInbound": "my tea was lukewarm",
       "body": "that's on me. come grab another whenever you're next in"
     },

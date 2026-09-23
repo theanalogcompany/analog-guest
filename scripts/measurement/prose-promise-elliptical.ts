@@ -56,7 +56,12 @@ import { createRunLog } from './run-log'
 const REPEATS = Number(process.env.REPEATS ?? '10')
 const CONCURRENCY = Number(process.env.CONCURRENCY ?? '4')
 
-type Label = 'elliptical_promise' | 'apology_no_item' | 'on_us_unrelated_item' | 'clean'
+type Label =
+  | 'elliptical_promise'
+  | 'explicit_promise'
+  | 'apology_no_item'
+  | 'on_us_unrelated_item'
+  | 'clean'
 type Arm = 'with_inbound' | 'body_only'
 
 const ARMS: readonly Arm[] = ['with_inbound', 'body_only']
@@ -91,15 +96,26 @@ interface Cell {
 }
 
 /**
- * Should this cell's rows flag? A total map over the four labels, so a fifth
- * label has to decide rather than inherit.
+ * What each arm should do, per label. A total map, so a new label has to state
+ * both arms rather than inherit one flag plus a special case.
+ *
+ *   flag          every repeat flags. The strict criterion.
+ *   clean         every repeat stays clean. Strict, both arms: these test rules
+ *                 that should not depend on chance.
+ *   mostly_clean  the CONTROL criterion for a row the guest's message is
+ *                 supposed to be what catches. It only has to reproduce the
+ *                 defect, because the miss is a probabilistic verdict at
+ *                 temperature 0.2, not a deterministic rule.
  */
-const SHOULD_FLAG = {
-  elliptical_promise: true,
-  apology_no_item: false,
-  on_us_unrelated_item: false,
-  clean: false,
-} satisfies Record<Label, boolean>
+type Expectation = 'flag' | 'clean' | 'mostly_clean'
+
+const EXPECTATION = {
+  elliptical_promise: { with_inbound: 'flag', body_only: 'mostly_clean' },
+  explicit_promise: { with_inbound: 'flag', body_only: 'flag' },
+  apology_no_item: { with_inbound: 'clean', body_only: 'clean' },
+  on_us_unrelated_item: { with_inbound: 'clean', body_only: 'clean' },
+  clean: { with_inbound: 'clean', body_only: 'clean' },
+} satisfies Record<Label, Record<Arm, Expectation>>
 
 /** Reproducing the defect needs most repeats clean, not all of them. */
 const DEFECT_REPRODUCED_FLOOR = 0.7
@@ -143,21 +159,19 @@ function verdictOnCell(cell: Cell): { ok: boolean; why: string } {
   if (cell.failed > 0) {
     return { ok: false, why: `${cell.failed} failed call(s), no verdict` }
   }
-  const shouldFlag = SHOULD_FLAG[cell.row.label]
-  if (cell.arm === 'with_inbound') {
-    return shouldFlag
-      ? { ok: cell.flagged === REPEATS, why: `expected ${REPEATS}/${REPEATS} flagged` }
-      : { ok: cell.flagged === 0, why: `expected 0/${REPEATS} flagged` }
-  }
-  // body_only
-  if (shouldFlag) {
-    const floor = Math.ceil(REPEATS * DEFECT_REPRODUCED_FLOOR)
-    return {
-      ok: REPEATS - cell.flagged >= floor,
-      why: `control: expected at least ${floor}/${REPEATS} CLEAN, reproducing the defect`,
+  switch (EXPECTATION[cell.row.label][cell.arm]) {
+    case 'flag':
+      return { ok: cell.flagged === REPEATS, why: `expected ${REPEATS}/${REPEATS} flagged` }
+    case 'clean':
+      return { ok: cell.flagged === 0, why: `expected 0/${REPEATS} flagged` }
+    case 'mostly_clean': {
+      const floor = Math.ceil(REPEATS * DEFECT_REPRODUCED_FLOOR)
+      return {
+        ok: REPEATS - cell.flagged >= floor,
+        why: `control: expected at least ${floor}/${REPEATS} CLEAN, reproducing the defect`,
+      }
     }
   }
-  return { ok: cell.flagged === 0, why: `expected 0/${REPEATS} flagged` }
 }
 
 async function main(): Promise<void> {
@@ -223,10 +237,13 @@ async function main(): Promise<void> {
 
   let breaches = 0
 
-  for (const label of Object.keys(SHOULD_FLAG) as Label[]) {
+  for (const label of Object.keys(EXPECTATION) as Label[]) {
     const rows = fixture.rows.filter((r) => r.label === label)
     if (rows.length === 0) continue
-    console.log(`\n=== ${label} (${rows.length} rows) — ${SHOULD_FLAG[label] ? 'should flag' : 'MUST stay clean'} ===`)
+    const e = EXPECTATION[label]
+    console.log(
+      `\n=== ${label} (${rows.length} rows) — with_inbound: ${e.with_inbound}, body_only: ${e.body_only} ===`,
+    )
     for (const row of rows) {
       const withI = cellFor(row.id, 'with_inbound')
       const bodyO = cellFor(row.id, 'body_only')
