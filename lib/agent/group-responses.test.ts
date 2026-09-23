@@ -256,6 +256,25 @@ describe('deriveDelivery (TAC-394)', () => {
     expect(deriveDelivery(outbound(status, 'skipped'))).toBe(expected)
   })
 
+  // TAC-473. A card answered from the Instagram app keeps `pending_review`, so
+  // it reaches the catch-all unless named. Before this it read NEVER SENT, and
+  // the prompt told the model a send had failed when staff had simply answered
+  // in the app and the echo was sitting in the same history as delivered.
+  it.each(MESSAGE_STATUSES)(
+    'an externally resolved card at status %s reads answered_outside_app unless delivered',
+    (status) => {
+      const expected =
+        OUTBOUND_BY_STATUS[status] === 'delivered' ? 'delivered' : 'answered_outside_app'
+      expect(deriveDelivery(outbound(status, 'resolved_externally'))).toBe(expected)
+    },
+  )
+
+  it('does NOT read an externally resolved card as never_sent', () => {
+    // The whole point: nothing failed. Pinned separately so a fallthrough to
+    // the catch-all fails here even if the it.each above were ever relaxed.
+    expect(deriveDelivery(outbound('pending_review', 'resolved_externally'))).not.toBe('never_sent')
+  })
+
   it('stranded and failed outbound rows read never_sent, not skipped', () => {
     // The v1 dispatch gap: approved or edited, Sendblue threw, row stranded.
     expect(deriveDelivery(outbound('pending_review', 'approved'))).toBe('never_sent')

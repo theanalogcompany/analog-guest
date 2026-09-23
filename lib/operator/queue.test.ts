@@ -944,6 +944,152 @@ describe('listPendingQueue', () => {
       expect(result.ok && result.drafts[0]!.otherPendingDraftsForGuest).toBe(0)
     })
   })
+  // TAC-473 --------------------------------------------------------------
+  // The three Contract fields. Every expectation is transcribed from the
+  // `## Contract` section of the ticket, never read back out of queue.ts.
+  describe('the Instagram Contract fields', () => {
+    const igRow = {
+      draft_id: 'd-ig',
+      venue_id: 'v1',
+      venue_slug: 'le-mils-coffee',
+      guest_id: 'g-ig',
+      guest_display_name: null,
+      guest_phone: null,
+      guest_opted_out_at: null,
+      draft_body: 'We open at 7 tomorrow.',
+      category: 'reply',
+      voice_fidelity: 0.85,
+      review_reason: 'commitment_type_gated',
+      review_triggers: ['commitment_type_gated'],
+      ungrounded_claims: [],
+      recognition_state: 'returning',
+      created_at: '2026-09-23T10:00:00.000Z',
+      langfuse_trace_id: null,
+      recent_context: null,
+      other_pending_for_guest: 0,
+      replaced_draft_body: null,
+      replaced_draft_at: null,
+      guest_channel: 'instagram',
+      instagram_username: 'hana.brews',
+      last_guest_action_at: '2026-09-23T09:12:03.000Z',
+    }
+
+    async function draftFor(over: Record<string, unknown> = {}) {
+      rpcMock.mockResolvedValue({ data: [{ ...igRow, ...over }], error: null })
+      const result = await listPendingQueue(['v1'], Date.parse('2026-09-23T12:00:00.000Z'))
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error('unreachable')
+      return result.drafts[0]!
+    }
+
+    // toEqual, not toMatchObject. Before this ticket nothing in this file
+    // pinned the projected field SET, so a Contract field dropped from the
+    // projection would have failed no test at all — the defect shape TAC-310
+    // is the recorded case of. A partial match cannot see an absent field.
+    it('projects the exact Contract field set on an Instagram draft', async () => {
+      const draft = await draftFor()
+      expect(draft).toEqual({
+        messageId: 'd-ig',
+        venueId: 'v1',
+        venueSlug: 'le-mils-coffee',
+        guestId: 'g-ig',
+        guestDisplayName: null,
+        guestPhoneFallback: '',
+        draftBody: 'We open at 7 tomorrow.',
+        category: 'reply',
+        voiceFidelity: 0.85,
+        reviewReason: 'This commits you to something. Your call.',
+        reviewReasonCode: 'commitment_type_gated',
+        reviewTriggers: ['commitment_type_gated'],
+        reviewTriggerLabels: ['This commits you to something. Your call.'],
+        ungroundedClaims: [],
+        otherPendingDraftsForGuest: 0,
+        replacedDraft: null,
+        recognitionState: 'returning',
+        pendingSinceMs: 2 * 60 * 60 * 1000,
+        recentContext: [],
+        langfuseTraceId: null,
+        guestChannel: 'instagram',
+        replyWindowExpiresAt: '2026-09-24T09:12:03.000Z',
+        instagramUsername: 'hana.brews',
+      })
+    })
+
+    // The load-bearing one. guestChannel is the CARD's channel, because
+    // dispatchOperatorOutbound routes on the card's channel: a value derived
+    // from the guest could disagree with where approving actually sends.
+    // The guest here HAS a phone number, so a guest-derived channel would say
+    // 'text' and this fixture is the only shape that separates the two.
+    it('reads the DRAFT ROW channel, not one derived from the guest', async () => {
+      const draft = await draftFor({ guest_channel: 'instagram', guest_phone: '+15551110001' })
+      expect(draft.guestChannel).toBe('instagram')
+    })
+
+    it('reports a text draft as text, with no window and no handle', async () => {
+      const draft = await draftFor({
+        guest_channel: 'text',
+        guest_phone: '+15551110001',
+        instagram_username: null,
+        last_guest_action_at: null,
+      })
+      expect(draft.guestChannel).toBe('text')
+      expect(draft.replyWindowExpiresAt).toBeNull()
+      expect(draft.instagramUsername).toBeNull()
+    })
+
+    it('computes the deadline from Meta clock plus 24 hours, with no margin subtracted', async () => {
+      const draft = await draftFor({ last_guest_action_at: '2026-09-23T09:12:03.000Z' })
+      expect(draft.replyWindowExpiresAt).toBe('2026-09-24T09:12:03.000Z')
+    })
+
+    it('reports an UNKNOWN window as null on an Instagram card, not as expired', async () => {
+      const draft = await draftFor({ last_guest_action_at: null })
+      expect(draft.guestChannel).toBe('instagram')
+      expect(draft.replyWindowExpiresAt).toBeNull()
+    })
+
+    it('does not clamp a window that has already closed', async () => {
+      const draft = await draftFor({ last_guest_action_at: '2026-09-20T09:12:03.000Z' })
+      expect(draft.replyWindowExpiresAt).toBe('2026-09-21T09:12:03.000Z')
+    })
+
+    // Always present, never undefined, even against a function that predates
+    // migration 056 and omits all three columns.
+    it('is always present against a pre-056 function that omits the columns', async () => {
+      rpcMock.mockResolvedValue({
+        data: [
+          {
+            ...igRow,
+            guest_channel: undefined,
+            instagram_username: undefined,
+            last_guest_action_at: undefined,
+          },
+        ],
+        error: null,
+      })
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const result = await listPendingQueue(['v1'])
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const draft = result.drafts[0]!
+      expect('guestChannel' in draft).toBe(true)
+      expect('replyWindowExpiresAt' in draft).toBe(true)
+      expect('instagramUsername' in draft).toBe(true)
+      expect(draft.guestChannel).toBe('text')
+      expect(draft.replyWindowExpiresAt).toBeNull()
+      expect(draft.instagramUsername).toBeNull()
+      expect(error).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps guestPhoneFallback as '' for a phoneless guest, never null", async () => {
+      // RULED 2026-09-23. analog-operator parses the drafts array
+      // all-or-nothing with `guestPhoneFallback: z.string()` and no .catch(),
+      // so one null empties the queue for every operator at that venue.
+      const draft = await draftFor({ guest_phone: null })
+      expect(draft.guestPhoneFallback).toBe('')
+      expect(draft.guestPhoneFallback).not.toBeNull()
+    })
+  })
 })
 
 // TAC-527: the card says what approving will create.

@@ -14,6 +14,12 @@ import type { Json } from '@/db/types'
 import type { ApprovalTrigger } from '@/lib/agent/stages'
 import type { ThreadMessage } from '@/lib/schemas'
 import { PendingCommitmentSchema } from '@/lib/schemas/guest-commitment'
+import type { MessageChannel } from '@/lib/schemas/message-channel'
+import {
+  instagramUsername,
+  queueGuestChannel,
+  replyWindowExpiresAt,
+} from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
 
@@ -106,6 +112,25 @@ export interface QueueDraft {
   // it. A draft corrected more than once carries only the most recent prior
   // body; the column is overwritten wholesale on every regen.
   replacedDraft: { body: string; replacedAt: string } | null
+  // TAC-473, Contract-locked. All three ALWAYS PRESENT — the client never
+  // branches on presence.
+  //
+  // THE DRAFT ROW'S OWN CHANNEL, not one re-derived from the guest.
+  // dispatchOperatorOutbound routes on the card's channel, so this is exactly
+  // what approving this card will do. Never null: a value the column's CHECK
+  // forbids degrades to 'text' loudly rather than reaching the client as a
+  // null it cannot parse.
+  guestChannel: MessageChannel
+  // When Instagram's 24-hour window closes, ISO 8601, on META's clock. The
+  // TRUE deadline with no margin subtracted; the client applies its own.
+  //
+  // Null has TWO causes and `guestChannel` separates them: a text card has no
+  // window, while an Instagram card with a null here has an UNKNOWN window,
+  // not an expired one. A value in the past means expired, unclamped.
+  replyWindowExpiresAt: string | null
+  // The guest's handle, without the '@'. Null when never fetched, when the
+  // fetch failed, or on a text card.
+  instagramUsername: string | null
   recognitionState: GuestRecognitionState | null
   pendingSinceMs: number
   recentContext: QueueRecentContextEntry[]
@@ -746,6 +771,12 @@ export async function listPendingQueue(
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       otherPendingDraftsForGuest: normalizeOtherPendingCount(row.other_pending_for_guest),
       replacedDraft: normalizeReplacedDraft(row.replaced_draft_body, row.replaced_draft_at),
+      // TAC-473. Every cast below is the one `guestPhoneFallback` documents
+      // above: generated types call every RPC return column non-null, and
+      // regenerating them would put back a `string` that is not true.
+      guestChannel: queueGuestChannel(row.guest_channel as string | null, row.draft_id),
+      replyWindowExpiresAt: replyWindowExpiresAt(row.last_guest_action_at as string | null),
+      instagramUsername: instagramUsername(row.instagram_username as string | null),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       recentContext: normalizeRecentContext(row.recent_context),

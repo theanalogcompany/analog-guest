@@ -772,6 +772,32 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
     await post(recorded(name))
 
     expect(mocks.handleInbound).not.toHaveBeenCalled()
+  })
+
+  // TAC-473 changed what an echo costs: it is still never handed to the agent
+  // and still never refreshes a profile, but it now hands ONE job to
+  // waitUntil — the external-card resolution. Asserting `waitUntil` is unused
+  // was a proxy for "an echo does nothing", and that proxy stopped being true;
+  // the two assertions below are what it was standing in for.
+  it('hands an echo exactly one job, and it is not the agent', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+
+    await post(recorded('echo'))
+
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
+    expect(mocks.refreshInstagramProfile).not.toHaveBeenCalled()
+    expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+  })
+
+  it('hands a read receipt no jobs at all', async () => {
+    gate.open = true
+    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: [echoRow] })
+
+    await post(recorded('read'))
+
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
     expect(mocks.waitUntil).not.toHaveBeenCalled()
   })
 
@@ -846,8 +872,11 @@ describe('POST /api/webhooks/instagram refreshing the guest profile', () => {
 
     await post(recorded(name))
 
+    // TAC-473: an echo now hands ONE job to waitUntil (external-card
+    // resolution), so a blanket `waitUntil` assertion here would be about that
+    // job rather than about the refresh. The refresh mock is what this test is
+    // named for and is the only thing it should speak to.
     expect(mocks.refreshInstagramProfile).not.toHaveBeenCalled()
-    expect(mocks.waitUntil).not.toHaveBeenCalled()
   })
 
   it('does not refresh again for a redelivered message', async () => {

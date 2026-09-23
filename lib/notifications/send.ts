@@ -22,7 +22,7 @@
 // payload. Title is static, body is "Reply to {firstName} — {context}" with
 // context = a categorical trigger label, not free text. Asserted in tests.
 
-import { createAdminClient } from '@/lib/db/admin'
+import { loadPushRecipients, countPendingDraftsForOperator, clearOperatorPushToken } from './recipients'
 import {
   capturePushSent,
   capturePushTokenInvalid,
@@ -144,96 +144,14 @@ export function buildPushBody(
   return full.slice(0, MAX_PUSH_BODY_CHARS)
 }
 
-interface OperatorRecipient {
-  id: string
-  apnsDeviceToken: string
-}
-
-async function loadRecipients(venueId: string): Promise<OperatorRecipient[]> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('operator_venues')
-    .select('operator:operators!inner(id, apns_device_token)')
-    .eq('venue_id', venueId)
-    .not('operator.apns_device_token', 'is', null)
-  if (error || !data) {
-    console.error('[apns] loadRecipients query failed', {
-      venueId,
-      error: error?.message,
-    })
-    return []
-  }
-  const seen = new Set<string>()
-  const out: OperatorRecipient[] = []
-  for (const row of data) {
-    const op = row.operator
-    if (!op) continue
-    if (!op.apns_device_token) continue
-    if (seen.has(op.id)) continue
-    seen.add(op.id)
-    out.push({ id: op.id, apnsDeviceToken: op.apns_device_token })
-  }
-  // Diagnostic delta: rawRowCount > 0 with recipientCount === 0 means the
-  // operator_venues rows exist but the embedded apns_device_token filter
-  // dropped them all (or row.operator was unexpectedly null/array-shaped).
-  // recipientCount === 0 with rawRowCount === 0 means no operator is
-  // allowlisted for this venue.
-  console.log('[apns] loadRecipients', {
-    venueId,
-    rawRowCount: data.length,
-    recipientCount: out.length,
-  })
-  return out
-}
-
-/**
- * Pending-draft count for the operator's queue. Same predicate as
- * list_operator_queue (db/migrations/018_operator_review_state.sql:218-219)
- * scoped to the operator's allowed venues:
- *   review_state = 'pending' AND venue_id IN (operator's allowedVenueIds)
- *
- * Going through a subquery on operator_venues keeps the predicate the
- * literal same one the queue uses; if the queue's filter ever changes, this
- * needs to change alongside it.
- */
-async function countPendingForOperator(operatorId: string): Promise<number> {
-  const supabase = createAdminClient()
-  const { data: venues, error: venuesError } = await supabase
-    .from('operator_venues')
-    .select('venue_id')
-    .eq('operator_id', operatorId)
-  if (venuesError || !venues || venues.length === 0) {
-    return 0
-  }
-  const venueIds = venues.map((v) => v.venue_id)
-  const { count, error } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('review_state', 'pending')
-    .in('venue_id', venueIds)
-  if (error) {
-    console.error('apns: countPendingForOperator failed', {
-      operatorId,
-      error: error.message,
-    })
-    return 0
-  }
-  return count ?? 0
-}
-
-async function nullOperatorToken(operatorId: string): Promise<void> {
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from('operators')
-    .update({ apns_device_token: null, apns_token_updated_at: null })
-    .eq('id', operatorId)
-  if (error) {
-    console.error('apns: nullOperatorToken failed', {
-      operatorId,
-      error: error.message,
-    })
-  }
-}
+// TAC-473: these three moved to ./recipients when a third push surface
+// arrived. Thin local aliases keep this file's call sites and its log lines
+// exactly as they were; the prefixes are passed in for that reason.
+const loadRecipients = (venueId: string) =>
+  loadPushRecipients(venueId, { logPrefix: '[apns] loadRecipients', verbose: true })
+const countPendingForOperator = countPendingDraftsForOperator
+const nullOperatorToken = (operatorId: string) =>
+  clearOperatorPushToken(operatorId, { logPrefix: 'apns: nullOperatorToken failed' })
 
 /**
  * Top-level push orchestrator. Never throws.

@@ -858,6 +858,7 @@ export type Database = {
           replaced_draft_at: string | null
           replaced_draft_body: string | null
           reply_to_message_id: string | null
+          resolved_by_message_id: string | null
           response_review: Json | null
           review_reason: string | null
           review_state: string | null
@@ -870,6 +871,7 @@ export type Database = {
           updated_at: string
           venue_id: string
           voice_fidelity: number | null
+          window_warning_pushed_at: string | null
         }
         Insert: {
           body?: string
@@ -902,6 +904,7 @@ export type Database = {
           replaced_draft_at?: string | null
           replaced_draft_body?: string | null
           reply_to_message_id?: string | null
+          resolved_by_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
           review_state?: string | null
@@ -914,6 +917,7 @@ export type Database = {
           updated_at?: string
           venue_id: string
           voice_fidelity?: number | null
+          window_warning_pushed_at?: string | null
         }
         Update: {
           body?: string
@@ -946,6 +950,7 @@ export type Database = {
           replaced_draft_at?: string | null
           replaced_draft_body?: string | null
           reply_to_message_id?: string | null
+          resolved_by_message_id?: string | null
           response_review?: Json | null
           review_reason?: string | null
           review_state?: string | null
@@ -958,6 +963,7 @@ export type Database = {
           updated_at?: string
           venue_id?: string
           voice_fidelity?: number | null
+          window_warning_pushed_at?: string | null
         }
         Relationships: [
           {
@@ -1782,9 +1788,13 @@ export type Database = {
           conversation_count: number
           first_conversation_at: string
           guest_first_name: string
+          guest_has_instagram_id: boolean
           guest_id: string
           guest_last_name: string
           guest_phone: string
+          instagram_username: string
+          last_guest_action_at: string
+          last_inbound_channel: string
           last_message_at: string
           last_message_body: string
           last_message_direction: string
@@ -1801,11 +1811,14 @@ export type Database = {
           created_at: string
           draft_body: string
           draft_id: string
+          guest_channel: string
           guest_display_name: string
           guest_id: string
           guest_opted_out_at: string
           guest_phone: string
+          instagram_username: string
           langfuse_trace_id: string
+          last_guest_action_at: string
           other_pending_for_guest: number
           recent_context: Json
           recognition_state: string
