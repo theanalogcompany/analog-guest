@@ -372,6 +372,14 @@ Every new measurement harness should follow four properties, not as aspiration b
 
 A fifth property is not `run-log`'s to give and belongs to whatever reports the run: **a failed unit is not a result.** A model call that errored produces no verdict, and a harness that counts "how many units came back positive" will score it identically to a unit that came back negative — so a wholly broken run reports as a clean one. TAC-502's replay hit this on its first run (all 60 calls failed on a fixture that had been cast rather than parsed, and the report said "as expected" for the two cells carrying the ticket's whole claim). Make a unit's failure disqualify it from meeting any expectation, and print the failure count per unit rather than only in aggregate.
 
+**The sibling of that, from TAC-526, and it is the sharper version because the failure produced its OWN FALSE PASS: A CRASHED OR SKIPPED RUN IS NOT A RESULT EITHER, AND IT READS AS A SURVIVOR.** Mutation-testing an unbounded recursion (the retry with its depth bound removed) made the vitest WORKER die — `Worker exited unexpectedly` — and a crashed worker STILL PRINTS A SUMMARY LINE. So the harness matched `Tests N passed`, parsed `0 failed`, and reported **SURVIVED** on the two mutants the bound exists for. Twice, across two separate runs, before anyone probed one directly. The loop was real, the mutant was live, and the report said the opposite of all of it.
+
+Three rules follow, and the first is the generalisable one:
+
+- **Check for a crash or a skip BEFORE reading any count.** `Worker exited unexpectedly` and `Tests N skipped` both mean the run did not happen; treat them as INVALID, never as evidence either way. A harness that only knows "failed" and "passed" has no way to say "did not run", which is exactly the state a hang or a crash leaves it in.
+- **Make every failing fixture SELF-LIMITING** so a mutant that removes a bound terminates and fails an assertion instead of dying. This repo has now paid for that twice in one ticket: the extension bound (an endless supply of fragments) and the retry bound (an unconditional failure, and a trace-flush control that was a boolean when it needed to be a count). A finite supply turns a hang into a number.
+- **A hang and a crash are BAD KILLS even when they do stop the suite**: the harness times out, prints nothing useful, and — worse — leaves the mutant applied on disk, which the next run then measures against. Restore from a file copy and verify the tree before believing the next result.
+
 **A fifth property, added by TAC-423 after paying for it twice in one ticket: a detector that classifies free text must be checked for ASYMMETRY between the arms, not just for accuracy.**
 
 That harness compared a prompt that SCRIPTED a question against one that left the model to write its own, and scored the replies with an exact-phrase list. It broke twice, and both times in the same direction:
