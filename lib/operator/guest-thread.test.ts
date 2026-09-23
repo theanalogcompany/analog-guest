@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { loadGuestThreadByGuestId } from './guest-thread'
-import { grantedVenues } from '@/lib/auth/venue-scope'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const VENUE_B = '00000000-0000-0000-0000-00000000000b'
@@ -61,7 +61,7 @@ afterEach(() => {
 })
 
 describe('loadGuestThreadByGuestId', () => {
-  it('short-circuits to out_of_allowlist when allowedVenueIds is empty', async () => {
+  it('short-circuits to out_of_allowlist when the operator has no venue grants', async () => {
     const result = await loadGuestThreadByGuestId({ guestId: GUEST_X, venueScope: grantedVenues([]) })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     expect(fromMock).not.toHaveBeenCalled()
@@ -75,6 +75,16 @@ describe('loadGuestThreadByGuestId', () => {
     })
     expect(result).toEqual({ ok: false, errorCode: 'guest_not_found' })
     expect(eqIdMock).toHaveBeenCalledWith('id', GUEST_X)
+  })
+
+
+  // TAC-530, code review. Bearer-only path: a fleet-wide scope is producible
+  // only by the analog-admin cookie path and must not be honoured here. Before
+  // bearerAllowsVenue this GRANTED, returning the thread for any venue.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    nextGuestLookup = { data: { venue_id: VENUE_B }, error: null }
+    const result = await loadGuestThreadByGuestId({ guestId: GUEST_X, venueScope: ALL_VENUES })
+    expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
   })
 
   it('returns out_of_allowlist when the guest exists at a venue outside the allowlist', async () => {

@@ -8,7 +8,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { ThreadMessage } from '@/lib/schemas'
 
 import { fetchThreadMessagesForGuest } from './thread'
-import { allowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 export interface LoadGuestThreadByGuestIdInput {
   guestId: string
@@ -45,7 +45,7 @@ export async function loadGuestThreadByGuestId(
   if (!row) {
     return { ok: false, errorCode: 'guest_not_found' }
   }
-  if (!allowsVenue(input.venueScope, row.venue_id)) {
+  if (!bearerAllowsVenue(input.venueScope, row.venue_id)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 

@@ -51,7 +51,7 @@ describe('listPendingQueue', () => {
     expect(rpcMock).not.toHaveBeenCalled()
   })
 
-  it('passes allowedVenueIds through to the RPC verbatim', async () => {
+  it('passes the granted venue ids through to the RPC verbatim', async () => {
     rpcMock.mockResolvedValue({ data: [], error: null })
     await listPendingQueue(grantedVenues(['venue-a', 'venue-b']))
     expect(rpcMock).toHaveBeenCalledWith('list_operator_queue', {
@@ -1447,7 +1447,7 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
 
   async function draftFor(over: Record<string, unknown> = {}) {
     rpcMock.mockResolvedValue({ data: [{ ...baseRow, ...over }], error: null })
-    const result = await listPendingQueue(['v1'], Date.parse('2026-09-23T18:12:00.000Z'))
+    const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-09-23T18:12:00.000Z'))
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
     return result.drafts[0]!
@@ -1587,7 +1587,7 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
       ],
       error: null,
     })
-    const result = await listPendingQueue(['v1'], Date.parse('2026-09-23T18:12:00.000Z'))
+    const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-09-23T18:12:00.000Z'))
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
     expect(result.drafts.map((d) => [d.messageId, d.replyingTo?.body ?? null])).toEqual([

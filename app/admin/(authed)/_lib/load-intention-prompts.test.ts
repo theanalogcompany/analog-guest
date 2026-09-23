@@ -147,7 +147,7 @@ describe('loadIntentionPrompts', () => {
   // Empty allowlist is analog-admin scope (sees everything), exactly as
   // load-venues.ts treats it. Asserting the ABSENCE of the filter, because an
   // accidental `.in('venue_id', [])` would return nothing at all.
-  it('applies no venue filter when the allowlist is empty', async () => {
+  it('applies no venue filter for a FLEET-WIDE scope (analog admin)', async () => {
     const { calls } = mockQuery({ data: [], error: null })
 
     await loadIntentionPrompts(adminVenueScope([]))

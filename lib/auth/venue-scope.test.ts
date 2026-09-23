@@ -11,6 +11,7 @@ import {
   ALL_VENUES,
   adminVenueScope,
   allowsVenue,
+  bearerAllowsVenue,
   grantedVenues,
   venueFilterIds,
   venueScopeDeniesAll,
@@ -43,6 +44,27 @@ describe('allowsVenue', () => {
     expect(allowsVenue(grantedVenues([]), VENUE_A)).not.toBe(
       allowsVenue(ALL_VENUES, VENUE_A),
     )
+  })
+})
+
+// TAC-530, found in code review. The operator API is bearer-only and never
+// legitimately receives a fleet-wide scope, but allowsVenue returns TRUE for
+// one -- so a bearer helper using it would grant the whole fleet against a
+// scope that only the cookie path can produce. Unreachable today; expressible
+// with no compile error, which is the thing the union exists to stop.
+describe('bearerAllowsVenue', () => {
+  it('agrees with allowsVenue on every scope a bearer can actually hold', () => {
+    for (const scope of [grantedVenues([]), grantedVenues([VENUE_A])]) {
+      for (const venue of [VENUE_A, VENUE_B]) {
+        expect(bearerAllowsVenue(scope, venue)).toBe(allowsVenue(scope, venue))
+      }
+    }
+  })
+
+  // THE DIFFERENCE, and the whole reason the second function exists.
+  it('REFUSES a fleet-wide scope where allowsVenue allows it', () => {
+    expect(allowsVenue(ALL_VENUES, VENUE_A)).toBe(true)
+    expect(bearerAllowsVenue(ALL_VENUES, VENUE_A)).toBe(false)
   })
 })
 
@@ -108,31 +130,53 @@ describe('the union is total', () => {
 // ---------------------------------------------------------------------------
 // SOURCE-LEVEL GUARD.
 //
-// The property this ticket actually bought is a COMPILE-TIME one: the pasted
-// idiom must not typecheck. Verified by mutation at build time -- both of
-// these fail tsc:
+// The property this ticket bought is a COMPILE-TIME one: the pasted idiom must
+// not typecheck. Verified by mutation at build time -- both of these fail tsc:
 //
 //   operator.venueScope.ids.length > 0   TS2339: 'ids' does not exist on VenueScope
 //   operator.allowedVenueIds             TS2339: does not exist on AuthenticatedOperator
 //
-// No runtime assertion can reach that, so what is guarded here instead is the
-// thing a future edit could quietly reintroduce: reaching INTO an arm of the
-// union at a call site rather than going through the helpers. Narrowing on
-// `kind` is legal TypeScript, so tsc would allow
-// `scope.kind === 'venues' && scope.ids.length > 0 && ...` -- the original bug
-// with one extra clause. This is what stops that spreading.
+// But narrowing on `kind` is legal TypeScript, so this typechecks:
+//
+//   if (scope.kind !== 'venues') return
+//   const { ids } = scope
+//   if (ids.length > 0) apply(ids)      // the original bug, one clause later
+//
+// A code reviewer PROVED the first version of this guard missed exactly that,
+// by dropping such a file into lib/operator/ and watching all 15 tests pass
+// and tsc stay clean. It also missed `scope['ids']` and a renamed local. This
+// version bans the property access, the destructure and the bracket form, in
+// any file that handles a scope at all.
+//
+// WHAT IT STILL DOES NOT CATCH, stated rather than left to be discovered: a
+// caller that length-tests venueFilterIds' RESULT before applying the filter --
+//
+//   const ids = venueFilterIds(scope)
+//   if (ids !== null && ids.length > 0) q = q.in('venue_id', ids)
+//
+// -- has no `.ids` in it and typechecks. That restores the fleet grant for a
+// grantless bearer. The bearer-path routes all deny on BOTH branches instead,
+// and the helpers refuse rather than skip, but nothing mechanical enforces it.
+// Per this repo's own rule, a source-level guard catches only the spellings it
+// was written against.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const REPO_ROOT = join(__dirname, '..', '..')
-const SCANNED_DIRS = ['lib', 'app']
+const SCANNED_DIRS = ['lib', 'app', 'scripts']
 /** venue-scope.ts IS the narrowing; it is the one place allowed to read `.ids`. */
 const NARROWING_OWNER = join('lib', 'auth', 'venue-scope.ts')
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === '.next') continue
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (entry === 'node_modules' || entry === '.next' || entry === 'sandbox') continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
       sourceFiles(full, out)
@@ -143,28 +187,49 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out
 }
 
+/**
+ * Files that handle a venue scope at all. Scoped this way rather than
+ * repo-wide because unrelated code legitimately spreads a local `ids` array
+ * (lib/messaging/instagram/refresh-profile.ts, lib/ai/verify-mechanic-offer.ts)
+ * and a blanket ban would flag those.
+ */
+function scopeHandlingFiles(): Array<{ path: string; text: string }> {
+  return SCANNED_DIRS.flatMap((d) => sourceFiles(join(REPO_ROOT, d)))
+    .filter((f) => !f.endsWith(NARROWING_OWNER))
+    .map((path) => ({ path, text: readFileSync(path, 'utf8') }))
+    .filter(({ text }) => /venueScope|VenueScope/.test(text))
+}
+
 describe('venue scope is read through the helpers, not by reaching into an arm', () => {
-  const files = SCANNED_DIRS.flatMap((d) => sourceFiles(join(REPO_ROOT, d)))
+  const files = scopeHandlingFiles()
 
   // Guard the guard: a scan that silently found nothing would pass forever.
-  it('scans a non-trivial set of source files', () => {
-    expect(files.length).toBeGreaterThan(100)
+  it('finds the files that handle a scope', () => {
+    expect(files.length).toBeGreaterThan(20)
   })
 
-  it('no source file outside venue-scope.ts reads `.ids` off a scope', () => {
-    const offenders = files.filter((f) => {
-      if (f.endsWith(NARROWING_OWNER)) return false
-      return /venueScope\s*\.\s*ids|\bscope\s*\.\s*ids/.test(readFileSync(f, 'utf8'))
-    })
-    expect(offenders.map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([])
+  it.each([
+    ['a property access', /\.\s*ids\b/],
+    ['a destructure', /\{[^}\n]*\bids\b[^}\n]*\}\s*=/],
+    ['bracket access', /\[\s*['"]ids['"]\s*\]/],
+  ])('no scope-handling file reads `ids` by %s', (_label, pattern) => {
+    const offenders = files
+      .filter(({ text }) => pattern.test(text))
+      .map(({ path }) => path.slice(REPO_ROOT.length + 1))
+    expect(offenders).toEqual([])
   })
 
   // The old field name must not come back on either auth path. It is still
-  // legal prose in a comment, so only a property access counts.
-  it('no source file accesses `.allowedVenueIds`', () => {
-    const offenders = files.filter((f) =>
-      /\.\s*allowedVenueIds\b/.test(readFileSync(f, 'utf8')),
-    )
-    expect(offenders.map((f) => f.slice(REPO_ROOT.length + 1))).toEqual([])
+  // legal prose in a comment, so only a property access or destructure counts.
+  it.each([
+    ['a property access', /\.\s*allowedVenueIds\b/],
+    ['a destructure', /\{[^}\n]*\ballowedVenueIds\b[^}\n]*\}\s*=/],
+  ])('no source file reads `allowedVenueIds` by %s', (_label, pattern) => {
+    const all = SCANNED_DIRS.flatMap((d) => sourceFiles(join(REPO_ROOT, d)))
+    const offenders = all
+      .filter((f) => !f.endsWith(join('lib', 'notifications', 'recipients.ts')))
+      .filter((f) => pattern.test(readFileSync(f, 'utf8')))
+      .map((f) => f.slice(REPO_ROOT.length + 1))
+    expect(offenders).toEqual([])
   })
 })

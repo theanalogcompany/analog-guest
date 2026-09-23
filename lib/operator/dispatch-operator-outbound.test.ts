@@ -106,7 +106,7 @@ vi.mock('@/lib/schemas', async (importOriginal) => {
 })
 
 import { dispatchOperatorOutbound } from './dispatch-operator-outbound'
-import { grantedVenues } from '@/lib/auth/venue-scope'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const MESSAGE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
@@ -637,6 +637,24 @@ describe('dispatchOperatorOutbound — grantless operator bearer (TAC-530)', () 
       action: 'approve',
     })
     expect(updateSpy).toHaveBeenCalled()
+  })
+
+  // TAC-530, code review. This helper is bearer-only, and a fleet-wide scope
+  // is producible only by the analog-admin cookie path. Before
+  // bearerAllowsVenue it GRANTED here: a future admin surface passing
+  // verifyAnalogAdminAccess's scope into this helper would have dispatched
+  // any card at any venue, with no compile error and no guard hit.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: ALL_VENUES,
+      action: 'approve',
+    })
+    expect(r).toMatchObject({ ok: false, errorCode: 'message_not_found' })
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(sendMessageMock).not.toHaveBeenCalled()
   })
 
   it('refuses an operator granted only some other venue', async () => {

@@ -10,6 +10,16 @@
 // separate (not a single helper that infers source from input) so the two
 // trust paths stay legible and the failure modes don't conflate.
 //
+// TAC-530: they no longer produce the same venueScope VALUE for the same
+// operator, and that is deliberate. For an admin with zero operator_venues
+// rows the cookie path yields `all_venues` (adminVenueScope), while the
+// bearer path inherits verifyOperatorRequest's `grantedVenues([])`, which
+// denies. adminVenueScope is NOT applied to the bearer variant: a bearer
+// token carrying fleet-wide scope is what BearerOperator exists to prevent,
+// and deny is the safe direction. verifyAnalogAdminRequest has zero
+// production callers, so nothing depends on it today; if fleet-wide is ever
+// wanted there it should arrive with a caller and a decision.
+//
 // Same security note as verify-jwt.ts: thrown AuthError messages may contain
 // upstream Supabase / Postgres error text. Don't forward raw to untrusted
 // consumers without sanitization.

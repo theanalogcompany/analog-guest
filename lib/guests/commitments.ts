@@ -787,7 +787,7 @@ export async function markAcknowledged(opts: {
   if (venueIds === null) {
     // TAC-530: fleet-wide scope comes only from the analog-admin cookie path
     // and never reaches this operator-API helper. Refuse rather than widen.
-    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'db_write_failed' }
+    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'unsupported_venue_scope' }
   }
   try {
     const supabase = createAdminClient()
@@ -871,7 +871,7 @@ export async function markCancelled(opts: {
   const venueIds = venueFilterIds(venueScope)
   if (venueIds === null) {
     // TAC-530: see markAcknowledged.
-    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'db_write_failed' }
+    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'unsupported_venue_scope' }
   }
   try {
     const supabase = createAdminClient()

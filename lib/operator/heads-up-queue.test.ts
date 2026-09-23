@@ -115,7 +115,7 @@ afterEach(() => {
 })
 
 describe('listHeadsUpQueue', () => {
-  it('returns empty + no DB round trip when allowedVenueIds is empty', async () => {
+  it('returns empty + no DB round trip when the scope grants no venues', async () => {
     const r = await listHeadsUpQueue(grantedVenues([]))
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.commitments).toEqual([])

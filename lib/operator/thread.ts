@@ -49,7 +49,7 @@
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
 import { THREAD_MESSAGE_LIMIT, type ThreadMessage } from '@/lib/schemas'
-import { allowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
   ...DELIVERED_OUTBOUND_STATUSES,
@@ -149,7 +149,7 @@ export async function loadGuestThread(
   if (!row) {
     return { ok: false, errorCode: 'message_not_found' }
   }
-  if (!allowsVenue(input.venueScope, row.venue_id)) {
+  if (!bearerAllowsVenue(input.venueScope, row.venue_id)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 

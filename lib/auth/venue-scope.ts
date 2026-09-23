@@ -89,6 +89,25 @@ export function allowsVenue(scope: VenueScope, venueId: string): boolean {
 }
 
 /**
+ * Bearer-path membership. IDENTICAL to allowsVenue except that a FLEET-WIDE
+ * scope is refused rather than allowed (TAC-530, found in code review).
+ *
+ * The operator API is bearer-only: verifyOperatorRequest is the only thing
+ * that feeds it and never produces `all_venues`. But `allowsVenue` returns
+ * true for that arm, so a helper using it would DISPATCH against a fleet-wide
+ * scope -- expressible with no compile error, and exactly what a future admin
+ * surface passing verifyAnalogAdminAccess's scope into an operator helper
+ * would do. Unreachable is not the same as impossible, and the union exists
+ * to make this class of asymmetry fail closed rather than open.
+ *
+ * Use this in anything under app/api/operator/* or the helpers it calls.
+ * Use allowsVenue on the analog-admin cookie path, where fleet-wide is real.
+ */
+export function bearerAllowsVenue(scope: VenueScope, venueId: string): boolean {
+  return scope.kind === 'venues' && scope.ids.includes(venueId)
+}
+
+/**
  * True when the scope permits no venue at all — a bearer principal with zero
  * grants. Call sites use this to deny before touching the database, so a
  * query is never issued on behalf of a principal that may act on nothing.

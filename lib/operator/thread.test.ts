@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { loadGuestThread } from './thread'
-import { grantedVenues } from '@/lib/auth/venue-scope'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -86,6 +86,19 @@ describe('loadGuestThread', () => {
     })
     expect(result).toEqual({ ok: false, errorCode: 'message_not_found' })
     expect(eqIdMock).toHaveBeenCalledWith('id', VALID_UUID)
+  })
+
+
+  // TAC-530, code review. Bearer-only path: a fleet-wide scope is producible
+  // only by the analog-admin cookie path and must not be honoured here. Before
+  // bearerAllowsVenue this GRANTED, returning the thread for any venue.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    nextMaybeSingleResponse = {
+      data: { venue_id: VENUE_B, guest_id: GUEST_X },
+      error: null,
+    }
+    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: ALL_VENUES })
+    expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
   })
 
   it('returns out_of_allowlist when the message exists at a venue not in the allowlist', async () => {

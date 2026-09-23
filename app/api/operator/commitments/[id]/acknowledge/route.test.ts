@@ -195,4 +195,21 @@ describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pas
     expect(res.status).toBe(404)
     expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({ venueScope: grantedVenues([]) })
   })
+
+  // The twin. Without it, substituting a deny-all CONSTANT for the operator's
+  // real scope passes -- the empty assertion alone cannot tell "forwards the
+  // scope" from "always sends grantedVenues([])". Found in code review by
+  // exactly that mutant.
+  it('passes a NON-EMPTY allowlist to markAcknowledged unchanged', async () => {
+    verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
+    markAcknowledgedMock.mockResolvedValueOnce({
+      ok: true,
+      data: { transitioned: false, row: null },
+    })
+    probeMock.mockResolvedValueOnce({ data: null, error: null })
+    await POST(makeRequest(), params())
+    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({
+      venueScope: grantedVenues([VENUE_A]),
+    })
+  })
 })

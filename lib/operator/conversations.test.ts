@@ -53,7 +53,7 @@ const RAW_INSTAGRAM_ROW = {
 }
 
 describe('listOperatorConversations', () => {
-  it('returns ok:true with an empty array and skips the RPC when allowedVenueIds is empty', async () => {
+  it('returns ok:true with an empty array and skips the RPC when the scope grants no venues', async () => {
     const result = await listOperatorConversations(grantedVenues([]))
     expect(result).toEqual({ ok: true, conversations: [] })
     expect(rpcMock).not.toHaveBeenCalled()

@@ -236,7 +236,7 @@ describe('verifyOperatorRequest', () => {
     })
   })
 
-  it('returns success with empty allowedVenueIds when operator has no venues yet', async () => {
+  it('returns a granted scope with NO venues when the operator has none yet', async () => {
     const mock = makeSupabaseMock({
       authUserResult: { data: { user: { id: 'auth-user-1' } }, error: null },
       operatorsResult: { data: { id: 'operator-1' }, error: null },

@@ -1134,7 +1134,7 @@ describe('scheduleArrival', () => {
 })
 
 describe('markAcknowledged', () => {
-  it('short-circuits when allowedVenueIds is empty (no round trip)', async () => {
+  it('short-circuits when the scope grants no venues (no round trip)', async () => {
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
@@ -1191,7 +1191,7 @@ describe('markAcknowledged', () => {
 })
 
 describe('markCancelled (TAC-299)', () => {
-  it('short-circuits when allowedVenueIds is empty (no round trip)', async () => {
+  it('short-circuits when the scope grants no venues (no round trip)', async () => {
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
