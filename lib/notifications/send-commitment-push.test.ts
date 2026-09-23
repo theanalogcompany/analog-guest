@@ -184,9 +184,32 @@ describe('buildCommitmentPushBody', () => {
     // Cut at a word boundary, so the kept text is a prefix of the original.
     const shown = out.slice('Jaipal arriving this afternoon, comp for '.length, out.indexOf(', code'))
     expect(longDescription.startsWith(shown)).toBe(true)
+    // startsWith alone is satisfied by a MID-WORD cut, because that is also a
+    // prefix. This is the assertion that actually pins the word boundary, and
+    // it mirrors send.test.ts. Without it, replacing sanitizeDescription's last
+    // two lines with `return cut.trim()` passes all 20 tests.
+    expect(longDescription[shown.length]).toBe(' ')
   })
 
+  // The fixture is sized so `room` is POSITIVE but under MIN_DESCRIPTION_CHARS.
+  // An earlier version used a 75-char name, which gives room = -1, where every
+  // threshold >= 0 produces the same output and the constant the test is named
+  // for is invisible to it: setting MIN_DESCRIPTION_CHARS = 0 passed all 20
+  // tests. 'Bartholomew' x 6 is 66 characters, which gives room = 4, and at
+  // that width sanitizeDescription('oat latte', 4) returns 'oat' - exactly the
+  // useless fragment the constant exists to prevent.
   it('drops the description rather than render a useless fragment of it', () => {
+    const longName = 'Bartholomew'.repeat(6)
+    expect(longName.length).toBe(66)
+    const out = buildCommitmentPushBody(longName, 'discount', '7K2P', 'this afternoon', 'oat latte')
+    expect(out).not.toContain(' for ')
+    expect(out).not.toContain('oat')
+    expect(out).toContain('discount, code 7K2P')
+  })
+
+  // Kept as a separate case: room < 0, where there is no space for a
+  // description at any threshold.
+  it('drops the description when there is no room at all', () => {
     const longName = 'VeryLongFirstNameWayBeyondTheReasonableBudgetForAPushNotificationBodyIndeed'
     const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon', 'oat latte')
     expect(out).not.toContain(' for ')
@@ -255,8 +278,6 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
       response: { status: 200, reason: null, apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
 
-    // Notably: input doesn't include description at all — the function never
-    // accepts it. This test asserts the contract.
     await sendCommitmentArrivalPush(baseInput)
 
     expect(sendApnsRequestMock).toHaveBeenCalledOnce()
@@ -274,10 +295,11 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     expect(payload.aps.badge).toBe(1)
     expect(payload.aps.alert.title).toBe('Guest arriving')
     expect(payload.aps.alert.body).toBe('Jaipal arriving now, comp for oat latte, code 7K2P')
-    // What stays true: the guest's own message has no route into this function
-    // at all, so nothing the guest wrote can reach the payload.
-    expect(Object.keys(baseInput)).not.toContain('guestQuestion')
-    expect(JSON.stringify(payload)).not.toMatch(/inboundBody|guestQuestion|draftBody/i)
+    // What stays true, and the honest way to say it: the guest's own message has
+    // no PARAMETER on this function, so no call can put it here. That is a
+    // property of the signature, checked by tsc, not something an assertion on
+    // the payload can establish - a key-name regex here would be the same
+    // decoration SR-3 removed from send.test.ts, so it is not repeated.
   })
 
   it('fires PostHog with surface=commitment_arrival', async () => {

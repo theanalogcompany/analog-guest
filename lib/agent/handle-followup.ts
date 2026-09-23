@@ -913,6 +913,9 @@ export async function handleFollowup(input: {
               // still feeds the title's reason phrase.
               guestQuestion: null,
               guestCategory: ctx.classification?.category ?? null,
+              // A followup answers no guest message, so there is no guest turn
+              // to have been a crisis. False rather than threaded.
+              guestIsCrisis: false,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,

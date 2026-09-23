@@ -121,6 +121,7 @@ const baseInput = {
   // TAC-532. Required on the input, so every fixture states them too.
   guestQuestion: 'do you have oat milk?' as string | null,
   guestCategory: 'new_question' as MessageCategory | null,
+  guestIsCrisis: false,
 }
 
 describe('shouldSendDraftFlaggedPush', () => {
@@ -165,7 +166,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     expect(buildPushTitle('Alex', 'knowledge_gap', 'new_question')).toBe(
       'Alex: needs an answer',
     )
-    expect(buildPushBody('do you have oat milk for the latte?', 'new_question')).toBe(
+    expect(buildPushBody('do you have oat milk for the latte?', 'new_question', false)).toBe(
       '"do you have oat milk for the latte?"',
     )
   })
@@ -180,7 +181,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       'are you doing anything for november?',
       'do you have a loyalty card?',
     ]
-    const bodies = questions.map((q) => buildPushBody(q, 'new_question'))
+    const bodies = questions.map((q) => buildPushBody(q, 'new_question', false))
     expect(new Set(bodies).size).toBe(3)
     for (const [i, body] of bodies.entries()) {
       expect(body).toContain(questions[i] as string)
@@ -197,7 +198,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).toBe(
         'Alex: something went wrong',
       )
-      expect(buildPushBody('my cortado was cold and the guy was rude', 'comp_complaint')).toBe(
+      expect(buildPushBody('my cortado was cold and the guy was rude', 'comp_complaint', false)).toBe(
         'Complaint waiting for review',
       )
     })
@@ -208,7 +209,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     // ranks 22nd of 23. A suppression keyed on the TRIGGER would leak the quote
     // here, which is exactly backwards.
     it('suppresses on the category even when the trigger is not a complaint trigger', () => {
-      const body = buildPushBody('my cortado was cold', 'comp_complaint')
+      const body = buildPushBody('my cortado was cold', 'comp_complaint', false)
       expect(body).not.toContain('cortado')
       expect(buildPushTitle('Alex', 'commitment_type_gated', 'comp_complaint')).toBe(
         'Alex: something went wrong',
@@ -216,7 +217,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     })
 
     it('still quotes the guest when the same trigger fires on a non-complaint', () => {
-      expect(buildPushBody('my cortado was cold', 'new_question')).toBe(
+      expect(buildPushBody('my cortado was cold', 'new_question', false)).toBe(
         '"my cortado was cold"',
       )
     })
@@ -226,18 +227,18 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
   // establish the message was not a complaint, so the safe direction is to
   // suppress. The crash-card call site reaches exactly this state.
   it('suppresses the quote when the category is unresolved', () => {
-    expect(shouldQuoteGuest(null)).toBe(false)
-    expect(buildPushBody('my cortado was cold', null)).toBe('Draft ready to review')
-    expect(buildPushBody('my cortado was cold', null)).not.toContain('cortado')
+    expect(shouldQuoteGuest(null, false)).toBe(false)
+    expect(buildPushBody('my cortado was cold', null, false)).toBe('Draft ready to review')
+    expect(buildPushBody('my cortado was cold', null, false)).not.toContain('cortado')
   })
 
   it('falls back when there is no guest message (followups)', () => {
-    expect(buildPushBody(null, 'follow_up')).toBe('Draft ready to review')
-    expect(buildPushBody('   ', 'follow_up')).toBe('Draft ready to review')
+    expect(buildPushBody(null, 'follow_up', false)).toBe('Draft ready to review')
+    expect(buildPushBody('   ', 'follow_up', false)).toBe('Draft ready to review')
   })
 
   it('collapses whitespace so a multi-line inbound renders as one run', () => {
-    expect(buildPushBody('do you have\n\noat   milk?', 'new_question')).toBe(
+    expect(buildPushBody('do you have\n\noat   milk?', 'new_question', false)).toBe(
       '"do you have oat milk?"',
     )
   })
@@ -255,7 +256,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     it('trims a long question at a word boundary, inside budget', () => {
       const long =
         'hi there I was wondering whether you happen to have any oat milk left today or whether you have run out again like last week'
-      const body = buildPushBody(long, 'new_question')
+      const body = buildPushBody(long, 'new_question', false)
       expect(body.length).toBeLessThanOrEqual(110)
       expect(body.startsWith('"hi there I was wondering')).toBe(true)
       expect(body.endsWith('…"')).toBe(true)
@@ -270,7 +271,7 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     })
 
     it('still trims a single pathological word rather than emptying the body', () => {
-      const body = buildPushBody('a'.repeat(300), 'new_question')
+      const body = buildPushBody('a'.repeat(300), 'new_question', false)
       expect(body.length).toBeLessThanOrEqual(110)
       expect(body.length).toBeGreaterThan(50)
     })
@@ -302,8 +303,8 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       }
       expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).not.toMatch(/[–—]/)
       for (const body of [
-        buildPushBody(null, 'follow_up'),
-        buildPushBody('x', 'comp_complaint'),
+        buildPushBody(null, 'follow_up', false),
+        buildPushBody('x', 'comp_complaint', false),
       ]) {
         expect(body).not.toMatch(/[–—]/)
       }
@@ -321,6 +322,52 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
         expect(phrase.trim().length, key).toBeGreaterThan(0)
       }
     })
+  })
+
+  // THE BLOCKER, found in code review. crisisSafety is a SEPARATE boolean from
+  // category, so a self-harm message classifies as whatever the classifier
+  // picked (this repo's own crisis fixture in handle-inbound.test.ts uses
+  // 'unknown') and a category-only gate quotes it. It reaches a push for real:
+  // handle-inbound routes a crisis turn whose reply did not fully send into
+  // pushSendFailureCard.
+  //
+  // Jaipal's ruling covered comp_complaint and said nothing about crisis,
+  // because the question put to him did not raise it. Suppressing is the safe
+  // direction and strictly narrower than what was approved.
+  describe('a crisis message is never quoted (TAC-532 code review)', () => {
+    const CRISIS = "i don't want to be here anymore, i've been thinking about ending it"
+
+    it('suppresses the quote whatever the category says', () => {
+      expect(shouldQuoteGuest('unknown', true)).toBe(false)
+      expect(shouldQuoteGuest('new_question', true)).toBe(false)
+      expect(buildPushBody(CRISIS, 'unknown', true)).toBe('Draft ready to review')
+      expect(buildPushBody(CRISIS, 'unknown', true)).not.toContain('ending it')
+    })
+
+    // The category gate alone is what let this through, so the test has to show
+    // the category gate alone does NOT catch it.
+    it('is not caught by the complaint gate, which is why the flag is needed', () => {
+      expect(shouldQuoteGuest('unknown', false)).toBe(true)
+      expect(buildPushBody(CRISIS, 'unknown', false)).toContain('ending it')
+    })
+
+    it('takes the neutral body, not the complaint one', () => {
+      // A crisis turn is not a complaint, so BODY_COMPLAINT would be a false
+      // statement about the card.
+      expect(buildPushBody(CRISIS, 'comp_complaint', true)).toBe('Draft ready to review')
+    })
+  })
+
+  // MINOR from review: the sweep above iterates REASON_BY_REVIEW_REASON, which
+  // contains neither the complaint reason nor the fallback. A reason of 38+
+  // characters would blow the title budget unseen.
+  it('fits the title budget for the two reasons outside the map', () => {
+    for (const title of [
+      buildPushTitle('Christopherbartholomew', 'knowledge_gap', 'comp_complaint'),
+      buildPushTitle('Christopherbartholomew', 'a_reason_nobody_mapped', 'new_question'),
+    ]) {
+      expect(title.length, title).toBeLessThanOrEqual(40)
+    }
   })
 
   // send.ts carries 'instagram_send_failed' as a literal rather than importing

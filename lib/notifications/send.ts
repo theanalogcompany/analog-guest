@@ -23,9 +23,19 @@
 // GUEST'S OWN MESSAGE now does, quoted, in aps.alert.body, ruled 2026-09-23 as
 // the only thing that can tell one card from another when a guest has several
 // waiting and they share a trigger. It is suppressed for comp_complaint and
-// for an unresolved category (shouldQuoteGuest), so a complaint is never
-// rendered on a lock screen. Title is categorical and never carries guest
-// text. Asserted in tests against planted guest text, not against key names.
+// for an unresolved category, AND for a crisis-safety turn (shouldQuoteGuest),
+// so neither a complaint nor a self-harm message is ever rendered on a lock
+// screen. The property is "nothing the guest wrote that we have flagged as
+// sensitive", not "no complaints": crisis is the other thing this codebase
+// flags, and it is a separate boolean from category.
+//
+// The title is categorical APART FROM the guest's first name, which is
+// guest-influenced: guests.first_name is written from the model's
+// contextUpdate, so a guest who offers an arbitrary string as their name puts
+// it there (CLAUDE.md, TAC-380 Probe 1). Bounded to ~23 characters by the
+// title trim, and it was rendered in the body before this too. Called out
+// because on a comp_complaint push the title is the ONLY thing rendered.
+// Asserted in tests against planted guest text, not against key names.
 
 import { loadPushRecipients, countPendingDraftsForOperator, clearOperatorPushToken } from './recipients'
 import {
@@ -53,7 +63,8 @@ const APNS_BAD_DEVICE_TOKEN_STATUS = 400
 // TAC-532: the title carries guest and reason, the body carries the guest's
 // own question. Two budgets because iOS renders the two differently: the title
 // is one bold line, the body gets about two when collapsed. These are starting
-// values confirmed on device (the ticket's QA route), not read off a spec.
+// values TO BE confirmed on device, which is why the ticket is QA: Device. No
+// test here establishes they are right on a real lock screen.
 const MAX_PUSH_TITLE_CHARS = 40
 const MAX_PUSH_BODY_CHARS = 110
 
@@ -154,7 +165,24 @@ const REASON_LOOKUP: Record<string, string | undefined> = REASON_BY_REVIEW_REASO
  * message was not a complaint. The crash-card call site reaches exactly that
  * state, which is why it is modelled rather than assumed away.
  */
-export function shouldQuoteGuest(category: MessageCategory | null): boolean {
+export function shouldQuoteGuest(
+  category: MessageCategory | null,
+  guestIsCrisis: boolean,
+): boolean {
+  // TAC-532 code review. crisisSafety is a SEPARATE boolean from category
+  // (lib/ai/classify-message.ts), so a self-harm or medical-emergency message
+  // carries whatever category the classifier picked — 'unknown' in this repo's
+  // own crisis fixture — and a category-only gate quotes it. It reaches a push
+  // for real: handle-inbound.ts routes a crisis turn whose reply did not fully
+  // send into pushSendFailureCard, which passes the guest's message here.
+  //
+  // Jaipal's 2026-09-23 ruling covered comp_complaint and said nothing about
+  // crisis, because the question put to him did not raise it. Suppressing is
+  // the safe direction and is strictly narrower than what was approved: the
+  // argument he gave for complaints ("a cost with no matching benefit") is
+  // stronger here, and every other part of this repo treats a crisis turn as
+  // categorically special.
+  if (guestIsCrisis) return false
   return category !== null && category !== COMPLAINT_CATEGORY
 }
 
@@ -164,7 +192,16 @@ export function resolvePushReason(
   category: MessageCategory | null,
 ): string {
   if (category === COMPLAINT_CATEGORY) return COMPLAINT_REASON
-  return REASON_LOOKUP[primaryTrigger] ?? FALLBACK_REASON
+  const mapped = REASON_LOOKUP[primaryTrigger]
+  if (mapped !== undefined) return mapped
+  // The map is total over ApprovalTrigger, so tsc catches a new TRIGGER. It
+  // cannot see a review_reason from OUTSIDE that union: generation_failed and
+  // instagram_send_failed were both added by hand, and two more already exist
+  // (crisis_safety_reply, operator_decline_initiated) that do not reach a push
+  // today. A future one would render 'needs review', byte-identical to
+  // model_flagged, with nothing to say it fell through. Hence the log line.
+  console.warn('[apns] no push reason mapped, falling back', { primaryTrigger })
+  return FALLBACK_REASON
 }
 
 /**
@@ -205,6 +242,13 @@ export interface SendDraftFlaggedPushInput {
    * one.
    */
   guestCategory: MessageCategory | null
+  /**
+   * TAC-532 code review. classification.crisisSafety for this turn. Required
+   * for the same reason as the two above, and because it is the one sensitive
+   * signal category cannot carry: a crisis message classifies as whatever the
+   * classifier picked, not as a complaint.
+   */
+  guestIsCrisis: boolean
 }
 
 export function buildPushTitle(
@@ -227,9 +271,14 @@ export function buildPushTitle(
 export function buildPushBody(
   guestQuestion: string | null,
   category: MessageCategory | null,
+  guestIsCrisis: boolean,
 ): string {
-  if (!shouldQuoteGuest(category)) {
-    return category === COMPLAINT_CATEGORY ? BODY_COMPLAINT : BODY_NO_QUESTION
+  if (!shouldQuoteGuest(category, guestIsCrisis)) {
+    // A crisis turn takes the neutral line, not the complaint one: it is not a
+    // complaint, and BODY_COMPLAINT would be a false statement about the card.
+    return category === COMPLAINT_CATEGORY && !guestIsCrisis
+      ? BODY_COMPLAINT
+      : BODY_NO_QUESTION
   }
   // Whitespace collapsed so a multi-line inbound renders as one run of text.
   const question = (guestQuestion ?? '').replace(/\s+/g, ' ').trim()
@@ -299,7 +348,7 @@ export async function sendDraftFlaggedPush(
     input.primaryTrigger,
     input.guestCategory,
   )
-  const body = buildPushBody(input.guestQuestion, input.guestCategory)
+  const body = buildPushBody(input.guestQuestion, input.guestCategory, input.guestIsCrisis)
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

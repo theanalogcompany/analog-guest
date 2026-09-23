@@ -314,12 +314,16 @@ async function persistGenerationFailureCard(
           guestFirstName: ctx.guest.firstName,
           draftId: persisted.outboundMessageId,
           primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
-          // TAC-532. Classification can be null here: this card exists because
-          // generation failed, and if classify itself failed we cannot show the
-          // message was not a complaint. shouldQuoteGuest treats null as
-          // suppress, which is the safe direction.
+          // TAC-532. Classification is non-null on this path in practice:
+          // persistGenerationFailureCard has one call site, after generateStage,
+          // which classification has already succeeded to reach (see the note
+          // above). The `?? null` is defensive only, and null suppresses the
+          // quote, which is the safe direction. An earlier version of this
+          // comment claimed classify itself could have failed here; that is
+          // false for this call site and contradicted the note 30 lines up.
           guestQuestion: ctx.currentMessage?.body ?? null,
           guestCategory: ctx.classification?.category ?? null,
+          guestIsCrisis: ctx.classification?.crisisSafety ?? false,
         }).catch(() => {}),
       )
     }
@@ -385,6 +389,12 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
       primaryTrigger: INSTAGRAM_SEND_FAILED_REVIEW_REASON,
       guestQuestion: ctx.currentMessage?.body ?? null,
       guestCategory: ctx.classification?.category ?? null,
+      // TAC-532 code review: THIS is the path that made the crisis leak real.
+      // handle-inbound routes a crisis turn whose reply did not fully send into
+      // this function, and a crisis message is not a comp_complaint, so the
+      // category gate alone would have quoted it onto every operator's lock
+      // screen.
+      guestIsCrisis: ctx.classification?.crisisSafety ?? false,
     }).catch(() => {}),
   )
 }
@@ -1938,6 +1948,7 @@ async function runInboundTurn(
               primaryTrigger: approval.primaryTrigger,
               guestQuestion: ctx.currentMessage?.body ?? null,
               guestCategory: ctx.classification?.category ?? null,
+              guestIsCrisis: ctx.classification?.crisisSafety ?? false,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,
