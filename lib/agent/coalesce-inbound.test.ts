@@ -959,3 +959,84 @@ describe('TAC-526 — the paths it must not touch', () => {
     expect(store.calls.delete).toBe(0)
   })
 })
+
+/**
+ * AC 6 — the 2026-09-23 Le Mil's incident, replayed with its own timestamps
+ * and its own message bodies.
+ *
+ * What the guest sent, and what they got back:
+ *
+ *   15:32:36Z  guest: nice i'll try that
+ *   15:32:43Z  guest: yeah been here a couple times before        (+7s)
+ *   15:32:51Z  agent: nice, you'll like it. what's your name btw? 😊
+ *   15:32:56Z  agent: nice, you're in good hands then 😊 what's your name?   (+5s)
+ *
+ * The guest was asked their name twice in five seconds. Both runs rendered the
+ * same three intentions and both independently asked — not an intentions
+ * defect: the block behaved correctly in both runs, and once the guest
+ * answered, `learn_name` dropped out and the ladder advanced.
+ *
+ * IT CARRIES ITS OWN CONTROL, and that is the point rather than thoroughness:
+ * a replay that only asserts "one reply now" cannot tell a fix from a fixture
+ * that never reproduced the defect. The second test runs the identical replay
+ * with the gate shut and asserts TWO replies and TWO asks — the incident. If
+ * that ever stops reproducing, the first test is no longer evidence of
+ * anything and both need rewriting.
+ *
+ * Kept in this file rather than a `coalesce-replay.test.ts` of its own,
+ * deliberately: the harness above is a verbatim copy of
+ * handle-inbound.test.ts's, and a third copy of 380 lines of mocks is a
+ * drift hazard that buys only a filename. Named for the incident so it is
+ * greppable either way.
+ */
+describe('TAC-526 — replay: Le Mils, 2026-09-23', () => {
+  const INCIDENT_1 = new Date('2026-09-23T15:32:36.000Z')
+  const INCIDENT_2 = new Date('2026-09-23T15:32:43.000Z')
+
+  function seedIncident(): void {
+    seedInbox(
+      { id: MSG_1, body: "nice i'll try that", createdAt: INCIDENT_1 },
+      { id: MSG_2, body: 'yeah been here a couple times before', createdAt: INCIDENT_2 },
+    )
+    // The three intentions both runs rendered. `learn_name` is the one the
+    // guest was asked twice.
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        openIntentions: [
+          { key: 'understand_order', promptLine: 'you have not heard what they ordered' },
+          { key: 'learn_name', promptLine: 'you do not know their name' },
+          { key: 'are_they_local', promptLine: 'you do not know if they are local' },
+        ],
+      }),
+    )
+    sendSucceeds()
+  }
+
+  it('produces exactly ONE reply, and asks once', async () => {
+    seedIncident()
+    const { deps } = makeDeps()
+
+    const results = await bothInvocations(MSG_1, MSG_2, deps)
+
+    expect(statuses(results)).toEqual(['coalesced', 'sent'])
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    // The ask happens once, which is the harm the incident did.
+    expect(recordIntentionPromptsMock).toHaveBeenCalledTimes(1)
+    // And the reply is generated against the guest's SECOND message, so
+    // "been here a couple times before" is not dropped on the floor.
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as { currentMessage: { id: string } }
+    expect(ctxArg.currentMessage.id).toBe(MSG_2)
+  })
+
+  it('CONTROL: the same replay with the gate shut still reproduces the incident', async () => {
+    seedIncident()
+    const { deps } = makeDeps()
+
+    const results = await bothInvocations(MSG_1, MSG_2, deps, false)
+
+    // Two replies and two asks: exactly what the guest got on 2026-09-23.
+    expect(statuses(results)).toEqual(['sent', 'sent'])
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(2)
+    expect(recordIntentionPromptsMock).toHaveBeenCalledTimes(2)
+  })
+})
