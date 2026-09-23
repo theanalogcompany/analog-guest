@@ -2223,6 +2223,35 @@ export async function captureInstagramSendFailed(props: InstagramSendFailedProps
   )
 }
 
+export interface InstagramCardResolvedExternallyProps {
+  venueId: string
+  guestId: string
+  /** The echo row that answered it. */
+  echoMessageId: string
+  /** The card resolved, or null when none was. */
+  cardId: string | null
+  outcome: 'resolved' | 'window_open' | 'window_unknown' | 'no_card' | 'lost_race' | 'failed'
+  error: string | null
+}
+
+/**
+ * TAC-473: a pending card was answered from the Instagram app.
+ *
+ * PostHog only, no Slack relay. `window_open` and `no_card` are the ordinary
+ * outcomes — every one of our own sends echoes back and lands on the first —
+ * so relaying would post on routine traffic and mean nothing. The question
+ * this answers is "has external resolution ever fired", which is a query, not
+ * an alert.
+ *
+ * Carries no message body: the echo's text is the venue talking to a guest,
+ * and the row id is enough to find it.
+ */
+export async function captureInstagramCardResolvedExternally(
+  props: InstagramCardResolvedExternallyProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_card_resolved_externally', props.guestId, { ...props })
+}
+
 export interface InstagramReplySupersededProps {
   agentRunId: string
   venueId: string

@@ -731,6 +731,10 @@ describe('provider_sent_at', () => {
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),
       join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
+      // TAC-473: names the column in PROSE only, to say where its already-loaded
+      // input came from. It reads no row and writes none — the same reason the
+      // Instagram send arm is on this list. The check is by mention.
+      join('lib', 'operator', 'instagram-fields.ts'),
     ])
   })
 })
