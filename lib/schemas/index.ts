@@ -40,7 +40,6 @@ export {
   resolveOpenState,
 } from './venue-hours'
 export { parseVisitPrecision, type VisitTimePrecision } from './visit-precision'
-export { SCAN_REFERRAL_SOURCE, isScanReferral } from './referral-source'
 export {
   isMessageChannel,
   MESSAGE_CHANNELS,

@@ -237,6 +237,19 @@ export async function POST(request: Request): Promise<Response> {
       // Meta's delivery deadline.
       const unattributed = scanUnattributedReason(outcome)
       if (unattributed !== null && outcome.status === 'persisted') {
+        // Logs AND PostHog, per the ruling. The routine persisted line carries
+        // referralSource but has no discriminator for this condition, and the
+        // Instagram convention is a warn with its own `event:` key
+        // (refresh-profile.ts). No body, no scoped ID.
+        console.warn('instagram: inbound looks like a scan with nothing to prove it', {
+          event: 'instagram_scan_unattributed',
+          reason: unattributed,
+          venueId: outcome.venueId,
+          guestId: outcome.guestId,
+          messageId: outcome.messageId,
+          referralSource: outcome.referralSource,
+          guestCreated: outcome.guestCreated,
+        })
         waitUntil(
           captureInstagramScanUnattributed({
             venueId: outcome.venueId,

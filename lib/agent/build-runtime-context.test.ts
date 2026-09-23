@@ -186,16 +186,24 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
     src.indexOf('// Arms got_the_recommendation'),
   )
 
-  it('reads the turn scan through the shared predicate', () => {
-    expect(resolution).toContain('isScanReferral(input.currentMessage?.referralSource)')
-  })
-
-  // The anchor is the row's own receipt time. `now` would move it later on a
-  // retried or delayed webhook, and the guest was at the counter when the
-  // message arrived, not when we got round to it.
-  it('anchors on the message receipt time, not now', () => {
-    expect(resolution).toContain('input.currentMessage?.receivedAt')
-    expect(resolution).not.toMatch(/scanAt\s*=\s*[^\n]*\bnew Date\(\)/)
+  // ONE CONTIGUOUS LITERAL, not three fragments, and this is the whole reason
+  // the block exists in this shape. The first version pinned the predicate
+  // call, the receipt time and the `??` separately, and THREE mutants survived
+  // the entire suite: the ternary's branches swapped, its condition negated,
+  // and its condition forced true. Every one of them makes visitConfirmedAt
+  // non-null on EVERY inbound turn on BOTH channels — understand_order's gate
+  // is `none`, so it would arm and render "You haven't heard what this guest
+  // ordered yet." to SMS guests who were never at the counter. Guest-facing,
+  // and it would have shipped green. Exactly the TAC-409 lesson this repo
+  // already records: a sentence can be reversed while every fragment survives.
+  it('arms on a scan and only on a scan, anchored to the message receipt time', () => {
+    expect(resolution).toContain(
+      [
+        'const scanAt = isScanReferral(input.currentMessage?.referralSource)',
+        '      ? (input.currentMessage?.receivedAt ?? null)',
+        '      : null',
+      ].join('\n'),
+    )
   })
 
   // The whole point is a LATER anchor than the historical sources, so the scan
@@ -207,6 +215,20 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
     const list = src.slice(src.indexOf('const confirmedVisitTimes = ['), src.indexOf('const earliestConfirmedVisit'))
     expect(list).not.toContain('referralSource')
     expect(list).not.toContain('scanAt')
+  })
+
+  // The POSITIVE half of the open question. Without it a referral that DID
+  // arrive for a returning guest leaves no trace until the model happens to
+  // raise understand_order's line, which this repo has already had a stretch of
+  // never happening. Pinned whole, for the same reason the resolution above is.
+  it('reports the scan that confirmed the visit, flagging the returning case', () => {
+    const emit = src.slice(
+      src.indexOf('if (scanAt !== null && input.currentMessage !== null) {'),
+      src.indexOf('// Arms got_the_recommendation'),
+    )
+    expect(emit).toContain('captureInstagramScanConfirmedVisit({')
+    expect(emit).toContain('returningGuest: recentMessages.length > 0,')
+    expect(emit).toContain('overrodeExistingAnchor: earliestConfirmedVisit !== null,')
   })
 
   // TAC-436's rule for the two historical sources is untouched. A mutant that

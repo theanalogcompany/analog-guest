@@ -867,18 +867,37 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
   it('reports an icebreaker tap that carries no referral', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
     mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    const emitted = Promise.resolve()
+    mocks.captureScanUnattributed.mockReturnValue(emitted)
 
     const res = await post(postbackWithoutReferral())
 
     expect(res.status).toBe(200)
-    expect(mocks.captureScanUnattributed).toHaveBeenCalledWith(
-      expect.objectContaining({
-        venueId: 'venue-1',
-        reason: 'postback_without_referral',
-        referralSource: null,
-        guestCreated: true,
-      }),
-    )
+    const [guest] = db.tables.guests as FakeRow[]
+    const [message] = db.tables.messages as FakeRow[]
+    expect(mocks.captureScanUnattributed).toHaveBeenCalledWith({
+      venueId: 'venue-1',
+      guestId: guest?.id,
+      messageId: message?.id,
+      reason: 'postback_without_referral',
+      referralSource: null,
+      guestCreated: true,
+    })
+    // Handed to waitUntil, never awaited: the emit posts to Slack, and this
+    // route answers 200 inside Meta's delivery deadline or the subscription is
+    // eventually switched off.
+    //
+    // IDENTITY, not toHaveBeenCalledWith. A promise has no own enumerable
+    // properties, so vitest's deep equality reads any two resolved promises as
+    // equal — the first version of this line used toHaveBeenCalledWith and an
+    // `await` in place of waitUntil passed it, because the profile refresh's
+    // promise compared equal to the emit's.
+    expect(mocks.waitUntil.mock.calls.some(([arg]) => arg === emitted)).toBe(true)
+    // And it logs, per the ruling's "logs AND PostHog".
+    expect(findEntry('instagram_scan_unattributed')).toMatchObject({
+      reason: 'postback_without_referral',
+      venueId: 'venue-1',
+    })
   })
 
   // The recorded tap, unmodified: its referral is a real SHORTLINK, so there is

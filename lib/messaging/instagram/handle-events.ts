@@ -80,10 +80,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+// Type-only, so it is erased at compile time and pulls no analytics into this
+// module, which its own tests run against an in-memory store.
+import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
 // agent runtime, and a barrel a test mocks would hand one of the two a stub
 // while the other kept the real thing, which is the drift it exists to stop.
-import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
