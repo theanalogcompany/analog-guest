@@ -104,6 +104,7 @@ import {
   claimInboundTurn,
   defaultCoalesceDeps,
   findUncoveredInbound,
+  shouldRetryTurn,
   pickNewer,
   releaseInboundTurn,
   type CoalesceDeps,
@@ -111,6 +112,7 @@ import {
   type TurnClaimRow,
 } from './coalesce-turn'
 import { createTurnClaimsFake, type TurnClaimsFake } from './testing/turn-claims-fake'
+import type { AgentResult } from './types'
 
 const VENUE = 'venue-1'
 const GUEST = 'guest-1'
@@ -764,6 +766,7 @@ describe('findUncoveredInbound tells "nothing" apart from "could not check"', ()
     extensionsUsed: 0,
     answered,
     enabled,
+    retryDepth: 0,
   })
 
   it('reports none when the read succeeded and found nothing', async () => {
@@ -864,6 +867,7 @@ describe('never throws, which the module claims at the top', () => {
         extensionsUsed: 0,
         answered: { id: 'msg-1', createdAt: T0 },
         enabled: true,
+        retryDepth: 0,
       },
       {
         findNewerInbound: async () => {
@@ -874,5 +878,81 @@ describe('never throws, which the module claims at the top', () => {
     // Folding a throw into `none` would reintroduce the silencing blocker by
     // a different route.
     expect(r.status).toBe('unreadable')
+  })
+})
+
+describe('shouldRetryTurn — the bound, and which outcomes earn a second attempt', () => {
+  /**
+   * Unit-level because the orchestrator path cannot reach all of it, and
+   * because the bound is the ruling: the retry restores the second attempt the
+   * claim removed, and NOTHING more.
+   *
+   * The depth cases especially. An orchestrator test for the bound has to make
+   * the failure self-limiting, or the unbounded build crashes the worker
+   * rather than failing — which reads as SURVIVED. Here it is arithmetic.
+   */
+  const base = (over: Partial<InboundTurnState> = {}): InboundTurnState => ({
+    claim: { venueId: VENUE, guestId: GUEST },
+    extensionsUsed: 0,
+    answered: { id: 'msg-1', createdAt: T0 },
+    enabled: true,
+    retryDepth: 0,
+    ...over,
+  })
+
+  it('retries a failed turn at depth 0', () => {
+    expect(shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base())).toBe(
+      true,
+    )
+  })
+
+  it('does NOT retry at the bound', () => {
+    // MAX_TURN_RETRIES = 1, so depth 1 is the retry itself and gets no second.
+    expect(
+      shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base({ retryDepth: 1 })),
+    ).toBe(false)
+  })
+
+  it('does NOT retry past the bound either', () => {
+    expect(
+      shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base({ retryDepth: 9 })),
+    ).toBe(false)
+  })
+
+  it('retries a THROW, which is the strongest case: no result at all', () => {
+    expect(shouldRetryTurn(null, base())).toBe(true)
+  })
+
+  it('does not retry when coalescing is off', () => {
+    // Unreachable through closeCoalescedTurn today — with the gate shut no
+    // claim is taken, so it returns before asking. Pinned here anyway: this is
+    // the function's own contract, and a caller that acquired a claim some
+    // other way must not get a retry it never earned.
+    expect(shouldRetryTurn(null, base({ enabled: false }))).toBe(false)
+  })
+
+  it('does not retry a turn that never answered anything', () => {
+    expect(shouldRetryTurn(null, base({ answered: null }))).toBe(false)
+  })
+
+  /**
+   * The whole vocabulary, as a literal table. `RETRYABLE_OUTCOME` is a total
+   * map so a new AgentResult member fails `tsc` until someone decides — this
+   * is what pins the decisions it already carries.
+   */
+  it.each([
+    ['sent', { status: 'sent', outboundMessageId: 'o1' }, false],
+    ['queued', { status: 'queued', outboundMessageId: 'c1', triggers: [], primaryTrigger: 'x' }, false],
+    ['skipped_duplicate', { status: 'skipped_duplicate' }, false],
+    ['refused', { status: 'refused', reason: 'low_fidelity', attemptScores: [0.1] }, true],
+    // A draft that lost a slot loses it again: the card that took the slot is
+    // still there, so a retry is a guaranteed-useless second generation.
+    ['dropped', { status: 'dropped', reason: 'slot_occupied', protectedDraftId: 'd', triggers: [] }, false],
+    ['superseded', { status: 'superseded', byMessageId: 'm' }, false],
+    ['coalesced', { status: 'coalesced', intoAgentRunId: 'r', intoMessageId: 'm' }, false],
+    ['silenced', { status: 'silenced' }, false],
+    ['failed', { status: 'failed', stage: 'generation', error: 'x' }, true],
+  ] as const)('%s → %s', (_name, result, expected) => {
+    expect(shouldRetryTurn(result as AgentResult, base())).toBe(expected)
   })
 })

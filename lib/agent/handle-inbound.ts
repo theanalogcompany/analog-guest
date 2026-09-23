@@ -28,6 +28,7 @@ import {
   findUncoveredInbound,
   mayExtend,
   newInboundTurnState,
+  shouldRetryTurn,
   openCoalescedTurn,
   releaseInboundTurn,
   type CoalesceDeps,
@@ -443,12 +444,20 @@ function undeliveredAgentResult(
  */
 export async function handleInbound(
   inboundMessageId: string,
-  options: { coalescing?: boolean; coalesceDeps?: CoalesceDeps } = {},
+  options: {
+    coalescing?: boolean
+    coalesceDeps?: CoalesceDeps
+    /**
+     * How many times this message has already been re-attempted. Set only by
+     * the retry in `closeCoalescedTurn`; a webhook always starts at 0.
+     */
+    retryDepth?: number
+  } = {},
 ): Promise<AgentResult> {
   const agentRunId = randomUUID()
   const enabled = options.coalescing ?? INBOUND_COALESCING_ENABLED
   const coalesceDeps = options.coalesceDeps ?? defaultCoalesceDeps()
-  const turn = newInboundTurnState(enabled)
+  const turn = newInboundTurnState(enabled, options.retryDepth ?? 0)
   let result: AgentResult
   try {
     result = await runInboundTurn(inboundMessageId, agentRunId, turn, coalesceDeps)
@@ -457,11 +466,13 @@ export async function handleInbound(
     // block awaits captureAgentLatencyHigh, which is guarded today but by a
     // guarantee living in another module. The ledger should not depend on it.
     await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
-    await closeCoalescedTurn(turn, agentRunId, coalesceDeps)
+    // `null` is the strongest case for a retry: the turn produced no result
+    // at all, so the guest certainly got nothing.
+    await closeCoalescedTurn(turn, agentRunId, coalesceDeps, null)
     throw unexpected
   }
   await recordSafely({ inboundMessageId, agentRunId, result })
-  await closeCoalescedTurn(turn, agentRunId, coalesceDeps)
+  await closeCoalescedTurn(turn, agentRunId, coalesceDeps, result)
   return result
 }
 
@@ -491,6 +502,8 @@ async function closeCoalescedTurn(
   turn: InboundTurnState,
   agentRunId: string,
   deps: CoalesceDeps,
+  /** `null` when the run threw past its own catch. */
+  result: AgentResult | null,
 ): Promise<void> {
   const claim = turn.claim
   if (claim === null) return
@@ -528,7 +541,51 @@ async function closeCoalescedTurn(
       })
       return
     }
-    if (uncovered.status === 'none') return
+    if (uncovered.status === 'none') {
+      // NOTHING NEWER, so the handoff has nothing to carry — and that is
+      // exactly the case the retry exists for. The winner adopted the newest
+      // message and then failed, so there is no later message to hand off and
+      // the loser has already stood down: without this the guest gets
+      // nothing, where before the claim the loser would have replied about
+      // seven seconds later. Restoring that second attempt, and only that
+      // one, is what keeps the claim from being a robustness regression.
+      //
+      // Bounded by DEPTH, threaded into the re-invocation: this is a fresh
+      // handleInbound, so a local counter could not bound it, and a turn that
+      // fails deterministically would otherwise re-invoke itself forever.
+      if (shouldRetryTurn(result, turn) && turn.answered !== null) {
+        const retryMessageId = turn.answered.id
+        console.warn('[agent] inbound turn failed with nothing newer; retrying once', {
+          agentRunId,
+          retryMessageId,
+          outcome: result === null ? 'threw' : result.status,
+          retryDepth: turn.retryDepth + 1,
+        })
+        await capturePostHogEvent('inbound_turn_retried', agentRunId, {
+          agentRunId,
+          venueId: claim.venueId,
+          guestId: claim.guestId,
+          retryMessageId,
+          outcome: result === null ? 'threw' : result.status,
+          retryDepth: turn.retryDepth + 1,
+        })
+        waitUntil(
+          handleInbound(retryMessageId, {
+            coalescing: turn.enabled,
+            coalesceDeps: deps,
+            // The bound. The retried run cannot retry again.
+            retryDepth: turn.retryDepth + 1,
+          }).catch((e) => {
+            console.error('[agent] inbound turn retry failed', {
+              agentRunId,
+              retryMessageId,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }),
+        )
+      }
+      return
+    }
     console.log('[agent] inbound turn handing off an uncovered message', {
       agentRunId,
       answeredMessageId: turn.answered?.id ?? null,

@@ -15,7 +15,7 @@
 // flip — a rollback restores it, and a file that only tested whatever the
 // constant happens to say would lose that coverage the moment it flipped.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ./stages pulls in @/lib/rag → voyageai, whose ESM build trips vitest's
 // directory-import resolver at module load. See CLAUDE.md "Module split for
@@ -260,7 +260,16 @@ vi.mock('@/lib/notifications/send-commitment-push', () => ({
   sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
-const traceControl = vi.hoisted(() => ({ flushThrows: false }))
+// TAC-526 DIVERGES from the sibling harness here, and it is the second of two
+// deliberate differences (the first is the admin mock capturing its id).
+//
+// A COUNT, not a boolean. The retry re-invokes handleInbound, so a flush that
+// throws unconditionally throws on the retry too — and against a mutant that
+// removes the retry bound that is an infinite loop which kills the vitest
+// WORKER. A crashed worker still prints a summary, so the mutation harness
+// read a real unbounded loop as SURVIVED. Counting down means the retry
+// succeeds, the chain terminates, and the mutant fails an assertion instead.
+const traceControl = vi.hoisted(() => ({ flushThrowsTimes: 0 }))
 vi.mock('@/lib/observability', () => ({
   startAgentTrace: () => ({
     id: '',
@@ -275,7 +284,10 @@ vi.mock('@/lib/observability', () => ({
     // which is the only way the orchestrator can throw past its own top-level
     // catch — and therefore the only way to reach the wrapper's catch.
     flushAsync: async () => {
-      if (traceControl.flushThrows) throw new Error('flush failed')
+      if (traceControl.flushThrowsTimes > 0) {
+        traceControl.flushThrowsTimes -= 1
+        throw new Error('flush failed')
+      }
     },
   }),
 }))
@@ -347,7 +359,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  traceControl.flushThrows = false
+  traceControl.flushThrowsTimes = 0
   // TAC-363: vi.clearAllMocks() wipes the factory's own implementation, so the
   // default has to be restored here or every test gets `undefined` back.
   dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'noop' })
@@ -549,6 +561,21 @@ function sendSucceeds(): void {
 
 beforeEach(() => {
   seedInbox({ id: MSG_1, body: "nice i'll try that", createdAt: T0 })
+})
+
+/**
+ * Drain fire-and-forget work before the next test.
+ *
+ * Handoffs and retries run under a `waitUntil` that this file mocks to
+ * `(p) => p`, so they are deliberately NOT awaited — that is what keeps them
+ * off the response path in production. The cost in tests is that a chain
+ * started in one test can still be running when the next begins, where it
+ * consumes shared mock state: a straggler swallowed the one-shot trace-flush
+ * failure and the test that needed it saw a clean run instead. It passed in
+ * isolation and failed in the file, which is the signature of exactly this.
+ */
+afterEach(async () => {
+  await new Promise((r) => setTimeout(r, 10))
 })
 
 /** The incident's two messages, 7 seconds apart. */
@@ -768,7 +795,7 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
   it('hands off an uncovered message when the run throws', async () => {
     sendSucceeds()
     const { deps } = makeDeps()
-    traceControl.flushThrows = true
+    traceControl.flushThrowsTimes = 1
     scheduleAndSendMock.mockImplementation(async () => {
       seedInbox(
         { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
@@ -1268,5 +1295,214 @@ describe('TAC-526 — a close-time read that fails is never silent', () => {
     // branch that fires on every turn, which would be its own kind of useless.
     const events = capturePostHogEventMock.mock.calls.map((c) => c[0])
     expect(events).not.toContain('inbound_turn_handoff_check_failed')
+  })
+})
+
+/**
+ * Fail the first `n` attempts, then succeed.
+ *
+ * EVERY retry test uses this rather than an unconditional failure, and the
+ * reason is a measurement failure rather than tidiness: with an unconditional
+ * failure, a mutant that removes the retry bound recurses until the vitest
+ * WORKER DIES. A crashed worker still prints a summary, so the mutation
+ * harness read a real infinite loop as SURVIVED — twice, on the two mutants
+ * that are the entire point of the bound.
+ *
+ * Self-limiting, the unbounded build terminates and reports a NUMBER, which is
+ * a fast legible kill. The bounded build stops at 2 either way.
+ */
+function failFirst(n: number): () => number {
+  let attempts = 0
+  buildRuntimeContextMock.mockImplementation(async () => {
+    attempts += 1
+    if (attempts > n) return makeCtx()
+    throw new Error('context build blew up')
+  })
+  scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+  return () => attempts
+}
+
+describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
+  /**
+   * THE REGRESSION THE CLAIM INTRODUCES, and the ruling that closed it.
+   *
+   * Before the claim, two runs were the bug AND the redundancy: if the winner
+   * died the loser still replied, about seven seconds later, with its own
+   * embed, classify and generate calls. The claim removes the loser, so a
+   * transient fault in the winner became a guest receiving nothing — two
+   * chances down to one, on the ~22% of turns that are bursts.
+   *
+   * The retry restores the second attempt and nothing more. It fires only when
+   * there is NOTHING NEWER to hand off, because a newer message already gets a
+   * fresh run that covers the conversation.
+   */
+  it('retries once when the turn FAILED with nothing newer', async () => {
+    const { deps } = makeDeps()
+    const attempts = failFirst(6)
+
+    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(result).toMatchObject({ status: 'failed' })
+    await vi.waitFor(() => {
+      expect(attempts()).toBe(2)
+    })
+  })
+
+  /**
+   * NOT A LOOP. The bound is a DEPTH threaded into the re-invocation, because
+   * the retry is a fresh `handleInbound` and a counter local to a run cannot
+   * bound something that starts a new run.
+   *
+   * THE FAILURE STOPS AFTER A SAFETY LIMIT, and that is the whole reason this
+   * test is shaped like it is. A first version failed EVERY attempt and
+   * asserted a count of 2 — which the unbounded mutant did not fail, it
+   * CRASHED the vitest worker ("Worker exited unexpectedly"), and a crashed
+   * worker still prints a summary, so the harness read it as SURVIVED. The
+   * loop was real and the result said the opposite.
+   *
+   * With the failure self-limiting, the bounded build stops at 2 and the
+   * unbounded one runs to the limit and reports a number — a clean, fast,
+   * legible kill instead of a crash. Same fix the extension bound needed, for
+   * the same reason.
+   */
+  it('does NOT retry the retry: exactly two attempts, ever', async () => {
+    const { deps } = makeDeps()
+    const attempts = failFirst(6)
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    await vi.waitFor(() => {
+      expect(attempts()).toBeGreaterThanOrEqual(2)
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    // A fixed COUNT, not "it terminated": termination is also true of a bound
+    // of fifty, and of no bound at all against a self-limiting failure.
+    expect(attempts()).toBe(2)
+  })
+
+  /**
+   * A run that threw past its own catch is the STRONGEST case for a retry: it
+   * produced no result at all, so the guest certainly got nothing. Driven
+   * through the trace flush, the one way to throw past the orchestrator's own
+   * top-level catch.
+   *
+   * It also exercises the bound on the throw path — the retry throws too, and
+   * stops.
+   */
+  it('retries once when the run THREW, and the retry does not retry', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+    traceControl.flushThrowsTimes = 1
+
+    await expect(
+      handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps }),
+    ).rejects.toThrow('flush failed')
+
+    await vi.waitFor(() => {
+      expect(buildRuntimeContextMock).toHaveBeenCalledTimes(2)
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(buildRuntimeContextMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries after the turn REFUSED: the guest got nothing either way', async () => {
+    const { deps } = makeDeps()
+    // Self-limiting for the same reason `failFirst` is: an unconditional
+    // refusal makes the unbounded mutant crash the worker instead of failing.
+    let refusals = 0
+    generateStageMock.mockImplementation(async () => {
+      refusals += 1
+      if (refusals > 6) return { status: 'success', result: successResult() }
+      return { status: 'refused', reason: 'low_fidelity', attemptScores: [0.2] }
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+
+    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(result).toMatchObject({ status: 'refused' })
+    await vi.waitFor(() => {
+      expect(refusals).toBe(2)
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(refusals).toBe(2)
+  })
+
+  /**
+   * DROPPED is deliberately NOT retryable, and it is the one exclusion worth
+   * arguing: the guest gets nothing there too. But a draft that lost a slot
+   * loses it again on a second attempt, because the card that took the slot is
+   * still sitting there — so the retry is a guaranteed-useless second
+   * generation rather than a second chance.
+   */
+  it('does NOT retry a DROPPED turn, which would only drop again', async () => {
+    const { deps } = makeDeps()
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'drop',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'card-9',
+      triggers: [],
+    })
+
+    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    expect(result).toMatchObject({ status: 'dropped' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(buildRuntimeContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT retry a turn that SENT', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    await new Promise((r) => setTimeout(r, 20))
+    expect(buildRuntimeContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT retry when coalescing is off', async () => {
+    const { deps } = makeDeps()
+    const attempts = failFirst(6)
+
+    await handleInbound(MSG_1, { coalescing: false, coalesceDeps: deps })
+
+    // No claim was taken, so there is no second run to be missing: the second
+    // webhook invocation still exists, exactly as today.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(attempts()).toBe(1)
+  })
+
+  /**
+   * The retry and the handoff are mutually exclusive by construction: a newer
+   * message already gets a fresh run of its own, which covers the conversation
+   * including whatever this turn failed on.
+   */
+  it('hands off rather than retrying when something NEWER exists', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+    let attempts = 0
+    buildRuntimeContextMock.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) {
+        seedInbox(
+          { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
+          { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
+        )
+        throw new Error('context build blew up')
+      }
+      return makeCtx()
+    })
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+
+    await vi.waitFor(() => {
+      expect(buildRuntimeContextMock).toHaveBeenCalledTimes(2)
+    })
+    // The second attempt is the HANDOFF, so it answers MSG_2 — not a retry of
+    // MSG_1. Same count, different message, and only the id tells them apart.
+    const second = buildRuntimeContextMock.mock.calls[1][0] as { currentMessage: { id: string } }
+    expect(second.currentMessage.id).toBe(MSG_2)
   })
 })

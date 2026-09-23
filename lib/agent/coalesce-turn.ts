@@ -50,6 +50,7 @@
  */
 
 import { createAdminClient } from '@/lib/db/admin'
+import type { AgentResult } from './types'
 
 /**
  * The flag. TAC-469 PR C's shape: the flip is its own one-line commit, so a
@@ -110,6 +111,73 @@ export const CLAIM_LEASE_MS = 120_000
  * at the bound the run sends and the post-turn handoff covers the remainder.
  */
 export const MAX_TURN_EXTENSIONS = 2
+
+/**
+ * How many times a FAILED turn may be re-attempted. One.
+ *
+ * WHY IT EXISTS AT ALL. The claim is a robustness regression without it, and
+ * the mechanism is worth stating because it is not obvious: before this
+ * ticket, two runs were the bug AND the redundancy — if the first died the
+ * second still replied, about seven seconds later, with its own embed,
+ * classify and generate calls. The claim removes the second run, so a
+ * transient fault in the winner that the loser would have covered becomes a
+ * guest receiving nothing. Two chances became one on the ~22% of turns that
+ * are bursts.
+ *
+ * WHY ONE, AND WHY A DEPTH RATHER THAN A COUNTER. The old behaviour gave
+ * exactly two attempts, so one retry restores it and no more. The bound is
+ * carried as a DEPTH on the turn state and threaded through the re-invocation,
+ * because the retry is a fresh `handleInbound` — a counter local to a run
+ * cannot bound something that starts a new run, and without the depth a turn
+ * that fails deterministically re-invokes itself forever, spending a model
+ * call each time.
+ */
+export const MAX_TURN_RETRIES = 1
+
+/**
+ * Whether a finished turn's outcome earns a retry.
+ *
+ * A TOTAL MAP over `AgentResult['status']`, not an `includes` on a literal
+ * list, so a new member fails `tsc` here until someone decides whether a guest
+ * left with nothing by that path should get a second attempt. That is the same
+ * discipline `LEDGER_DERIVERS` and `PUSH_POLICY` carry, and for the same
+ * reason: the silent default is the dangerous one.
+ *
+ * `failed` and `refused` retry because on both the guest gets NOTHING, which
+ * is the outcome the retry exists for. `dropped` deliberately does NOT: a
+ * draft that lost a slot loses it again on a second attempt, because the card
+ * that took the slot is still there — so a retry is a guaranteed-useless
+ * second generation, not a second chance. Every other outcome either reached
+ * the guest or is a decision not to reply.
+ */
+const RETRYABLE_OUTCOME = {
+  sent: false,
+  queued: false,
+  skipped_duplicate: false,
+  refused: true,
+  dropped: false,
+  superseded: false,
+  coalesced: false,
+  silenced: false,
+  failed: true,
+} as const satisfies Record<AgentResult['status'], boolean>
+
+/**
+ * `null` means the run threw past its own catch, which is the strongest case
+ * for a retry: it produced no result at all.
+ */
+export function shouldRetryTurn(
+  result: AgentResult | null,
+  turn: InboundTurnState,
+): boolean {
+  if (!turn.enabled) return false
+  if (turn.retryDepth >= MAX_TURN_RETRIES) return false
+  // A turn that never got as far as answering something has nothing to retry
+  // ON — and it never took a claim either, so it cannot reach here.
+  if (turn.answered === null) return false
+  if (result === null) return true
+  return RETRYABLE_OUTCOME[result.status]
+}
 
 /** A row of `inbound_turn_claims` (migration 057). */
 export interface TurnClaimRow {
@@ -492,10 +560,19 @@ export interface InboundTurnState {
   answered: { id: string; createdAt: Date } | null
   /** Whether coalescing ran for this turn. The handoff is part of the feature. */
   enabled: boolean
+  /**
+   * How many times THIS message has already been re-attempted after a failure.
+   * 0 on a fresh webhook invocation, 1 on the one retry it is allowed.
+   *
+   * Threaded through the re-invocation rather than kept as a local counter,
+   * because the retry starts a NEW `handleInbound` and a local counter cannot
+   * bound that.
+   */
+  retryDepth: number
 }
 
-export function newInboundTurnState(enabled: boolean): InboundTurnState {
-  return { claim: null, extensionsUsed: 0, answered: null, enabled }
+export function newInboundTurnState(enabled: boolean, retryDepth = 0): InboundTurnState {
+  return { claim: null, extensionsUsed: 0, answered: null, enabled, retryDepth }
 }
 
 /**
