@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.62.0 (TAC-397: classifier gains correctsPendingReply; no wording change here)', () => {
-    expect(PROMPT_VERSION).toBe('v1.62.0')
+  it('is v1.63.0 (TAC-519: the intentions block renders last, after ## Recent conversation)', () => {
+    expect(PROMPT_VERSION).toBe('v1.63.0')
   })
 })
 

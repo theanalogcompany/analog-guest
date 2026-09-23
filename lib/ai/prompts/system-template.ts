@@ -833,6 +833,30 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.63.0 (TAC-519): `## What you're hoping to get to` moves from 3rd of the
+// user-prompt blocks to LAST of the content blocks, immediately before the
+// emoji directive. Nothing about the block's own text changed.
+//
+// TAC-324 placed it beside who-the-guest-is rather than what-was-recently-said,
+// which reads well and cost the feature its purpose: from there, on an ordinary
+// turn, three blocks rendered after it (## Visit history, ## Active commitments,
+// ## Recent conversation) and intentions were raised on 4 of the 39 real Le
+// Mil's turns that rendered them in 14 days. learn_name was armed for all 7
+// guests and asked 0 times, ever.
+//
+// Replaying those 39 turns with ONLY this move applied: 4/35 -> 13/35 (11% ->
+// 37%), and learn_name raised 4 times. A rewrite of the block's restraint
+// paragraph ran as a separate arm in the same run and was worse on both
+// populations while breaching the two-questions-in-one-reply ceiling, so it was
+// dropped; the position was the defect, not the wording.
+//
+// The opener's scripted question STAYS. The 2026-09-22 ruling made it
+// scaffolding to be removed once the intention line could carry the ask; with
+// this move the line carries it on 28 of 40 first-touch generations against the
+// scripted question's 40 of 40, so the condition is not met.
+//
+// Most-proximate-wins, the class of TAC-314/329/330/338/362. The emoji directive
+// keeps its own last-block position, which is separately measured (TAC-362).
 // v1.62.0 (TAC-397): NO change to any rule, block or wording in this file.
 // The bump is here because the CLASSIFIER imports PROMPT_VERSION from this
 // module (lib/ai/classify-message.ts) and stamps it on its own output, and

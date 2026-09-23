@@ -1493,20 +1493,6 @@ export function runtimeToProse(
   if (runtime.mechanics !== undefined) {
     blocks.push(formatMechanicEligibility(runtime.mechanics, runtime.willBeReviewed === true))
   }
-  // TAC-324: ## What you're hoping to get to sits between mechanics and
-  // follow-up context / visit history — Sana's own goals sit with
-  // who-the-guest-is, not with what-was-recently-said. In practice this only
-  // ever renders on the inbound path (build-runtime-context.ts gates
-  // openIntentions to inbound runs), so it never actually co-renders with
-  // ## Follow-up context, but the position is fixed regardless of that.
-  if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
-    const block = formatOpenIntentions(
-      runtime.openIntentions,
-      runtime.firstTouchAfterQrScan === true,
-      channel,
-    )
-    if (block) blocks.push(block)
-  }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
   // Intent-then-evidence — this block states *why* we're reaching out;
   // Visit history is the supporting detail it draws on. Only set on the
@@ -1563,6 +1549,40 @@ export function runtimeToProse(
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
     const recent = formatRecentConversation(runtime.recentMessages, now)
     if (recent) blocks.push(recent)
+  }
+
+  // TAC-519: ## What you're hoping to get to renders LAST of the content blocks,
+  // after ## Recent conversation and immediately before the emoji directive.
+  //
+  // TAC-324 put it between mechanics and visit history, on the reading that
+  // Sana's own goals sit with who-the-guest-is rather than with
+  // what-was-recently-said. That reading is tidy and it cost the feature its
+  // entire purpose: from there the block was 3rd of 7 on an ordinary turn, with
+  // ## Visit history, ## Active commitments and ## Recent conversation after it,
+  // and intentions were raised on 4 of 39 real Le Mil's turns that rendered them.
+  //
+  // MEASURED, not reasoned. Replaying those same 39 turns with only this move
+  // applied, and everything else byte-for-byte equal, took the raise rate from
+  // 4/35 to 13/35 (11% -> 37%); learn_name, armed for 7 guests and asked 0 times
+  // in production, was raised 4 times. The rewrite of the block's own restraint
+  // paragraph was measured in the same run as a separate arm and was WORSE on
+  // both populations, so it was dropped: the position was the defect, not the
+  // wording. See TAC-519 for the run and the pre-registered bars.
+  //
+  // This is the most-proximate-wins failure class CLAUDE.md records five prior
+  // fixes for (TAC-314/329/330/338/362). Nothing had measured this block's
+  // position since TAC-324 chose it.
+  //
+  // NOT after the emoji directive, which keeps its own last-block position:
+  // that one is measured (TAC-362) and demoting a measured mechanism to promote
+  // this one is not a trade this ticket makes.
+  if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
+    const block = formatOpenIntentions(
+      runtime.openIntentions,
+      runtime.firstTouchAfterQrScan === true,
+      channel,
+    )
+    if (block) blocks.push(block)
   }
 
   // TAC-362: last block in, so it is the most-proximate instruction before

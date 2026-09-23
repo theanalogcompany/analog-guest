@@ -672,12 +672,20 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     })
   })
 
-  it('renders after ## What this guest can access and before ## Follow-up context', () => {
+  // TAC-519 REVERSES this assertion rather than deleting it, because the old
+  // order is exactly what changed and a deleted test records nothing. TAC-324
+  // put the block before ## Follow-up context; from there it was 3rd of 7 on an
+  // ordinary turn and intentions were raised on 4 of 39 real turns. Measured,
+  // the move to last took that to 13/35. See runtimeToProse's own comment.
+  it('renders AFTER ## Follow-up context and ## Recent conversation, not before them', () => {
     const out = runtimeToProse(
       {
         mechanics: [],
         openIntentions: ["You haven't told them to save your number."],
         followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
+        recentMessages: [
+          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 3600_000), delivery: 'delivered' },
+        ],
       },
       'follow_up',
       NOW,
@@ -685,9 +693,64 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     const eligibilityIdx = out.indexOf('## What this guest can access')
     const intentionsIdx = out.indexOf("## What you're hoping to get to")
     const followupIdx = out.indexOf('## Follow-up context')
+    const recentIdx = out.indexOf('## Recent conversation')
     expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
-    expect(intentionsIdx).toBeGreaterThan(eligibilityIdx)
-    expect(followupIdx).toBeGreaterThan(intentionsIdx)
+    expect(followupIdx).toBeGreaterThan(eligibilityIdx)
+    expect(recentIdx).toBeGreaterThan(followupIdx)
+    expect(intentionsIdx).toBeGreaterThan(recentIdx)
+  })
+
+  // TAC-519. Nothing pinned the WHOLE order before this: there were pairwise
+  // indexOf comparisons, which is how a block's position drifts for two years
+  // with no failing test. This asserts the full sequence, so any future move of
+  // any block in the user prompt has to change a test that says what the order is.
+  //
+  // The emoji directive stays LAST (TAC-362, measured). The intentions block
+  // sits immediately before it, which is the change this ticket shipped.
+  it('pins the full user-prompt block order', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        openIntentions: ["You haven't told them to save your number."],
+        followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
+        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        guestContext: { observations: [{ note: 'likes oat', captured_at: NOW.toISOString() }] },
+        activeCommitments: [
+          {
+            id: 'c1',
+            type: 'recommendation',
+            description: 'the cortado',
+            code: null,
+            status: 'open',
+            expected_arrival: null,
+            arrival_signal: null,
+            created_at: new Date(NOW.getTime() - 86_400_000).toISOString(),
+          },
+        ],
+        recentMessages: [
+          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 3600_000), delivery: 'delivered' },
+        ],
+        emojiDirective: 'none',
+      },
+      'follow_up',
+      NOW,
+    )
+    const order = out
+      .split('\n')
+      .filter((l) => l.startsWith('## '))
+      .map((l) => l.trim())
+    expect(order).toEqual([
+      '## Right now',
+      '## What this guest can access',
+      '## Follow-up context',
+      '## Visit history',
+      '## Guest context',
+      '## Active commitments',
+      '## Recent conversation',
+      "## What you're hoping to get to",
+      '## Emoji for this message',
+    ])
   })
 })
 
