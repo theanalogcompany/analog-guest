@@ -848,10 +848,20 @@ export async function applyInlineCancellation(
  *     `action: 'dropped'` when it must not be overwritten. Before TAC-394 this
  *     path UPDATEd whatever single row an unordered read returned, which is how
  *     a manual followup could overwrite the card the gate had kept it from.
- *   - UPDATE path, unique violation: the UPDATE would move the card into a
- *     slot another card already holds. Unreachable from this code (a regen
- *     target is always in the draft's own slot), so it gets its own red alert
- *     and throws, writing nothing.
+ *   - UPDATE path, unique violation: the UPDATE would move the card onto a
+ *     key another card already holds, so it gets its own red alert and throws,
+ *     writing nothing.
+ *
+ *     TAC-397 CORRECTS what used to be written here. This said "unreachable
+ *     from this code (a regen target is always in the draft's own slot)",
+ *     which was true while migration 041 keyed the conversation index on the
+ *     guest alone: nothing a regen wrote could change the row's key. Migration
+ *     054 keys it on `reply_to_message_id`, so a regen that moved that column
+ *     moved the key — and a proactive regen (the decline, the crash card) used
+ *     to null it onto the shared sentinel, colliding with any other proactive
+ *     card the guest held. It is unreachable again only because the UPDATE now
+ *     leaves the column alone on a run with no inbound; that is what keeps it
+ *     so, not the slot argument this comment used to give.
  *   - UPDATE path: a TOCTOU race vs. dispatchOperatorOutbound can clear the
  *     pending slot between the gate's read and our UPDATE; the conditional
  *     UPDATE gated on `review_state='pending'` returns rowcount=0. We drop
@@ -1312,7 +1322,6 @@ async function tryRegenUpdate(
       voice_fidelity: blank ? null : generation.voiceFidelity,
       prompt_version: generation.promptVersion,
       category: ctx.classification?.category ?? null,
-      reply_to_message_id: ctx.currentMessage?.id ?? null,
       langfuse_trace_id: ctx.trace.id || null,
       review_reason: primaryTrigger,
       // See the INSERT path: a blank card must not carry an invisible
@@ -1351,9 +1360,30 @@ async function tryRegenUpdate(
       //
       // Both columns move together, which is what lets the queue projection
       // treat a non-null body as a guarantee that the timestamp is there too.
-      replaced_draft_body: options.captureReplacedDraft === true ? priorBody : null,
+      replaced_draft_body:
+        options.captureReplacedDraft === true && priorBody.length > 0 ? priorBody : null,
       replaced_draft_at:
-        options.captureReplacedDraft === true ? new Date().toISOString() : null,
+        options.captureReplacedDraft === true && priorBody.length > 0
+          ? new Date().toISOString()
+          : null,
+    }
+    // TAC-397: `reply_to_message_id` moves only when this run HAS an inbound.
+    //
+    // It used to be set unconditionally to `ctx.currentMessage?.id ?? null`,
+    // which nulled it on every proactive regen. Under migration 054 that
+    // MOVES THE ROW'S INDEX KEY onto the shared sentinel, so an operator
+    // decline regenerating an inbound-keyed card would collide with any other
+    // proactive card the guest holds — a unique violation on the UPDATE,
+    // which is a red alert and a 502 on the decline route. The branch that
+    // catches it still carries a comment calling itself unreachable, and it
+    // was, until a regen could move a key.
+    //
+    // Preserving it is also the more honest value: a decline or a crash card
+    // has no message, so the card it rewrites still answers whatever it
+    // answered before, and `findPendingQuestion` and the holding-message cron
+    // can still find that question.
+    if (ctx.currentMessage !== null) {
+      updatePayload.reply_to_message_id = ctx.currentMessage.id
     }
     // TAC-469: the card belongs to the conversation this draft was written
     // for, so a regeneration names it too (a guest with both identifiers can

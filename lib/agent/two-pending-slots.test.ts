@@ -1216,6 +1216,17 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   const EVENTS_A = "we've got an open mic on the 24th and a cupping the week after"
   const SOFI_COMPLAINT = 'my sofi was flat'
   const SOFI_A = "sorry about that, that's not how it should taste"
+  // TAC-513's commitment shape, local to this block.
+  const CANCELLED_TONIC = {
+    id: 'cfa37ed7-1041-4679-a258-92062726f4c2',
+    type: 'comp' as const,
+    description: 'replacement blossom tonic',
+    code: 'GWPZ',
+    status: 'open' as const,
+    expected_arrival: null,
+    arrival_signal: null,
+    created_at: '2026-09-21T22:49:02.075Z',
+  }
 
   async function replay() {
     const first = await runTurn(
@@ -1351,7 +1362,16 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     expect(card?.reply_to_message_id).toBe('in-amend')
   })
 
-  it('a message needing no answer leaves the events card byte-identical', async () => {
+  // held: FALSE deliberately. At an auto_send venue nothing else fires, so the
+  // gate's own early return is the only thing that can produce silence —
+  // decideSlotAction is never reached, because `triggers.length === 0` would
+  // have returned `send` first.
+  //
+  // Found by a code-review mutant: deleting that early return passed the
+  // entire suite, because the only silence test then used held: true, where
+  // category_requires_approval fires and decideSlotAction's own silence branch
+  // gives the same answer. The redundancy hid the one case that matters.
+  it('a message needing no answer leaves the events card byte-identical (auto_send venue)', async () => {
     const fake = useFake('054')
     const first = await runTurn(
       ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
@@ -1361,7 +1381,7 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     const before = fake.snapshot(cardId)
 
     const second = await runTurn(
-      ctxFor({ category: 'acknowledgment', held: true, inboundId: 'in-haha', body: 'haha' }),
+      ctxFor({ category: 'acknowledgment', held: false, inboundId: 'in-haha', body: 'haha' }),
       generation({ body: 'glad you think so' }),
     )
 
@@ -1369,5 +1389,98 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     expect(second.persisted).toBeNull()
     expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
     expect(fake.snapshot(cardId)).toEqual(before)
+  })
+
+  // The sibling at a holding venue, so both paths to silence stay covered.
+  it('a message needing no answer is silenced at a holding venue too', async () => {
+    const fake = useFake('054')
+    await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const second = await runTurn(
+      ctxFor({ category: 'acknowledgment', held: true, inboundId: 'in-haha', body: 'haha' }),
+      generation({ body: 'glad you think so' }),
+    )
+    expect(second.decision.action).toBe('silence')
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+  })
+
+  // TAC-397 + TAC-513: a draft that WITHDRAWS a promise is never silenced,
+  // however chatty the guest's message reads. Found in code review: the
+  // silence guard excludes an obligation carrier by slot, and a cancellation
+  // carrier is invisible to that check, so a resolved withdrawal was being
+  // discarded with the draft.
+  it('a cancellation is never silenced, even on a chatter turn', async () => {
+    const fake = useFake('054')
+    await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+
+    const second = await runTurn(
+      ctxFor({
+        category: 'acknowledgment',
+        held: false,
+        inboundId: 'in-nevermind',
+        body: "nah don't worry about it",
+      }),
+      generation({ body: "no problem, that one's off then" }),
+      'regen',
+      { status: 'skipped' },
+      {
+        resolution: {
+          status: 'resolved',
+          cancellation: { commitmentId: CANCELLED_TONIC.id },
+          commitment: CANCELLED_TONIC,
+        },
+        claim: 'skipped',
+      },
+    )
+
+    expect(second.decision.action).not.toBe('silence')
+    expect(second.persisted?.action).toBe('inserted')
+    expect(fake.rows.at(-1)?.pending_cancellation).toEqual({
+      commitmentId: CANCELLED_TONIC.id,
+    })
+  })
+
+  // TAC-397: the replaced text is CLEARED on a regen that is not a correction.
+  // Found by a review mutant: writing priorBody unconditionally passed the
+  // whole suite, so a card corrected once and later rewritten by the operator
+  // decline would keep showing text displaced for an unrelated reason, labelled
+  // as what the guest had just amended.
+  it('a later non-correction regen CLEARS the replaced text', async () => {
+    const fake = useFake('054')
+    const first = await runTurn(
+      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      generation({ body: EVENTS_A }),
+    )
+    const cardId = first.persisted!.outboundMessageId as string
+
+    await runTurn(
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-amend',
+        body: 'sorry i meant this weekend',
+        corrects: true,
+      }),
+      generation({ body: 'nothing this weekend' }),
+    )
+    expect(fake.snapshot(cardId)?.replaced_draft_body).toBe(EVENTS_A)
+
+    // Now the operator declines a commitment, which regenerates the same card
+    // under regen_always — not a correction.
+    await persistOrRegenQueuedDraft(
+      ctxFor({ category: 'manual', held: true, manual: true }),
+      generation({ body: "sorry, we can't do that one after all" }),
+      'operator_decline_initiated',
+      cardId,
+      { callerPolicy: 'regen_always', conversationDisposition: null },
+    )
+
+    expect(fake.snapshot(cardId)?.replaced_draft_body).toBeNull()
+    expect(fake.snapshot(cardId)?.replaced_draft_at).toBeNull()
   })
 })

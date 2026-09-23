@@ -27,8 +27,13 @@
 // Comments are stripped before matching (whole-line, trailing and block), so a
 // clause that survives only in a comment fails.
 //
-// Migrations are append-only, so this reads 043 and 044 BY NAME. A later
-// migration that replaces either function must repoint this test at itself.
+// Migrations are append-only, so this reads each function's CURRENT migration
+// BY NAME. A later migration that replaces either function must repoint this
+// test at itself — reading the superseded file leaves the guard green while
+// the live function goes unchecked.
+//
+// TAC-397 is the third replacement of list_operator_queue (042, 044, 054), so
+// the queue half now reads 054. `list_operator_conversations` is still 043's.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -101,7 +106,11 @@ const REVIEW_STATES: Array<string | null> = (() => {
 })()
 
 const M043 = '043_operator_conversations_reached_guest.sql'
-const M044 = '044_operator_queue_context_reached_guest.sql'
+// The migration that currently defines list_operator_queue. Repoint this when
+// the next migration replaces it; leaving it on 044 would validate frozen text
+// while 054's live body could drop the clause, re-parenthesise it or add a
+// body filter and stay green.
+const M044 = '054_conversation_cards_per_reply.sql'
 
 // Each fragment names the CTE or clause it belongs to. Written with the same
 // line breaks as the migration only for readability; normalizeSql flattens both.
@@ -175,7 +184,7 @@ describe('the reached-guest condition (TAC-395)', () => {
     })
   })
 
-  describe('migration 044 (queue recent_context)', () => {
+  describe('migration 054 (queue recent_context, currently defining the function)', () => {
     const sql = readMigration(M044)
 
     // The whole lateral WHERE, so dropped parentheses, `or` for `and`, or a

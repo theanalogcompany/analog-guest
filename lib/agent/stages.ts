@@ -2021,9 +2021,19 @@ export type ApprovalDecision =
        * it read. Same reason `callerPolicy` is threaded.
        */
       conversationDisposition: ConversationDisposition | null
-      // TAC-394: which of the guest's two pending slots this draft lands in
-      // (migration 041), and whether the OTHER slot already holds a card,
-      // i.e. whether this draft is the guest's second card.
+      // TAC-394: which of the guest's pending slots this draft lands in, and
+      // whether the OTHER slot already holds a card.
+      //
+      // TAC-397 CORRECTS what used to be written here. It read "the guest's
+      // TWO pending slots (migration 041)" and "whether this draft is the
+      // guest's second card"; both are now false. Migration 054 gives the
+      // conversation slot one card per inbound, so a guest can hold several,
+      // and `otherSlotOccupied` is FALSE for a second conversation card
+      // because the other slot is the obligation one. It answers "does this
+      // guest also have an obligation card", not "is this their second card" —
+      // which matters because `draft_queued.otherSlotOccupied` goes to PostHog
+      // under the old reading. `QueueDraft.otherPendingDraftsForGuest` is the
+      // field that counts every other card.
       slot: PendingSlot
       otherSlotOccupied: boolean
       // TAC-308: when set, the persist layer stamps messages.pending_until,
@@ -2554,7 +2564,7 @@ export async function applyApprovalPolicyStage(
   const slot: PendingSlot = pendingSlotOf(draftCommitment)
   const slotOccupant = occupantOfSlot(pendingRows, slot)
   const existingIsKnowledgeGapCard = slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
-  const protectedCardCarveOut = existingIsKnowledgeGapCard && triggers.length === 0
+  const protectedCardCarveOutBase = existingIsKnowledgeGapCard && triggers.length === 0
 
   // TAC-397: which of the three cases this turn is, for the conversation slot.
   // Computed here because `pendingRows` is already read and `ctx.classification`
@@ -2563,12 +2573,35 @@ export async function applyApprovalPolicyStage(
   //
   // The obligation slot never consults it: comps, holds and discounts keep
   // TAC-394's rules exactly.
-  const conversationDisposition = resolveConversationDisposition({
-    hasConversationOccupant: pendingRows.conversation.length > 0,
-    category: ctx.classification?.category ?? null,
-    correctsPendingReply: ctx.classification?.correctsPendingReply ?? false,
-    inboundBody: ctx.currentMessage?.body ?? null,
-  })
+  //
+  // NULL on a run with no guest message. That is not a shorthand for
+  // `own_card`: it keeps the conversation slot on its pre-TAC-397 path,
+  // because every proactive run shares migration 054's sentinel key and a
+  // second card for one would 23505 into a red alert. See decideSlotAction.
+  const rawConversationDisposition =
+    ctx.currentMessage === null
+      ? null
+      : resolveConversationDisposition({
+          hasConversationOccupant: pendingRows.conversation.length > 0,
+          category: ctx.classification?.category ?? null,
+          correctsPendingReply: ctx.classification?.correctsPendingReply ?? false,
+          inboundBody: ctx.currentMessage.body,
+        })
+  // TAC-513 × TAC-397: a draft that WITHDRAWS a promise is never silenced.
+  //
+  // `silencesConversationTurn` excludes an obligation carrier by slot, for the
+  // reason stated there — if the model answered "haha" with a comp, that is a
+  // comp and an operator sees it. A cancellation carrier gets no such
+  // protection from the slot, because `pendingSlotOf` reads the commitment and
+  // never the cancellation, so a resolved withdrawal would be discarded along
+  // with the draft. Overriding the disposition here rather than teaching the
+  // silence predicate about cancellations keeps ONE decision: it threads to
+  // the persist layer and to 23505 recovery, so the gate and decideSlotAction
+  // cannot disagree about this turn.
+  const conversationDisposition =
+    rawConversationDisposition === 'no_answer' && pendingCancellation !== null
+      ? 'own_card'
+      : rawConversationDisposition
 
   // TAC-397: previous_pending_held now fires ONLY on a correction, i.e. exactly
   // when the persist layer is about to overwrite a card in place. That is what
@@ -2589,6 +2622,18 @@ export async function applyApprovalPolicyStage(
     !isManualFollowup &&
     conversationDisposition === 'correction' &&
     slotOccupant !== null
+
+  // TAC-397: a CORRECTION beats TAC-308's protected-card carve-out.
+  //
+  // The carve-out exists so a turn that fires nothing else SENDS rather than
+  // queueing and regenerating over a knowledge-gap card. That is still right
+  // for an unrelated turn — which now gets its own card anyway — but wrong for
+  // a correction, which is BY DEFINITION about the card's own question. Left
+  // in, a correction with an otherwise-clean draft suppressed the only trigger
+  // it would have fired, returned `send`, and never rewrote the card: the
+  // guest's amendment went unanswered while the stale card kept its clock and
+  // an operator approved an answer to a question the guest had changed.
+  const protectedCardCarveOut = protectedCardCarveOutBase && !isCorrectionRegen
 
   if (
     slotOccupant !== null &&

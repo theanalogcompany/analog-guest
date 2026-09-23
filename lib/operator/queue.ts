@@ -424,13 +424,6 @@ function normalizeUngroundedClaims(raw: string[] | null): string[] {
 }
 
 /**
- * TAC-394: the RPC's `other_pending_for_guest` count, as the Contract's
- * always-present number. `count(*)` is never NULL, but the column is ABSENT when
- * this code runs against a pre-042 function (a local-dev state the deploy
- * ordering forbids in production), and the Contract promises a number, so
- * anything that is not a positive finite number reads as 0.
- */
-/**
  * TAC-397: the two columns as the Contract's single nullable object.
  *
  * Both are read as `string | null` despite the generated types calling every
@@ -452,6 +445,13 @@ function normalizeReplacedDraft(
   return { body, replacedAt }
 }
 
+/**
+ * TAC-394: the RPC's `other_pending_for_guest` count, as the Contract's
+ * always-present number. `count(*)` is never NULL, but the column is ABSENT when
+ * this code runs against a pre-042 function (a local-dev state the deploy
+ * ordering forbids in production), and the Contract promises a number, so
+ * anything that is not a positive finite number reads as 0.
+ */
 function normalizeOtherPendingCount(raw: number | null | undefined): number {
   return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0
 }

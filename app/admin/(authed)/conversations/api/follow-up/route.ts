@@ -253,6 +253,23 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 409 },
     )
   }
+  // TAC-397 widened AgentResult with 'silenced'. Named here for the reason the
+  // branch above gives: this tail relabels anything unrecognised as a
+  // duplicate, and a member added later would inherit that silently.
+  //
+  // Structurally unreachable on this path — a manual followup has no guest
+  // message, so its disposition is null and it is never silenced — which is
+  // exactly why it needs naming rather than testing: nothing would fail if it
+  // became reachable and started reporting "duplicate".
+  if (result.status === 'silenced') {
+    return NextResponse.json(
+      {
+        error: 'silenced',
+        detail: 'the pipeline decided this turn needed no reply; nothing was written',
+      },
+      { status: 409 },
+    )
+  }
   // skipped_duplicate — handleFollowup doesn't currently produce this for the
   // manual path (the duplicate guard lives in handleInbound's idempotency
   // check), but AgentResult permits it. Treat as a benign no-op rather than

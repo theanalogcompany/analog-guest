@@ -674,6 +674,22 @@ describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
   // whoever reads it may be reading it mid-incident. toEqual on the payload: an
   // alert that quietly lost the guest's name or one of the offers is the
   // defect, and a partial match would pass it.
+  // TAC-397: the orchestrator half of case 2. tsc covers the shape; this
+  // covers that nothing is written and nothing is sent — the two facts the
+  // guest and the operator actually experience.
+  it('writes nothing and sends nothing on a silenced turn', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'silence' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'silenced' })
+    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+    log.mockRestore()
+  })
+
   it('reports a gate-time drop with both commitments and the guest, and writes nothing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     applyApprovalPolicyStageMock.mockResolvedValue({

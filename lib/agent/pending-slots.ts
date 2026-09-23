@@ -654,8 +654,12 @@ export interface SlotDecisionInput {
    * Required but nullable, so every call site states a value rather than
    * inheriting one by omission. `null` means "no guest inbound to judge" —
    * an engine followup, the decline, the crash card, the Instagram
-   * send-failed card — and the `regen` policy reads it as `own_card`, which
-   * is what a followup beside an occupied slot should get.
+   * send-failed card.
+   *
+   * A `null` disposition keeps the PRE-TAC-397 behaviour for the conversation
+   * slot: regenerate in place. It must not become `own_card`, because every
+   * proactive run shares migration 054's sentinel key and so cannot hold a
+   * second card — see the branch in decideSlotAction for what that costs.
    */
   conversationDisposition: ConversationDisposition | null
 }
@@ -704,8 +708,28 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
   // needs protecting. A CORRECTION reaching a gap card is not unrelated by
   // definition — it amends the very question the card is stuck on — so it is
   // allowed to regenerate it.
-  if (slot === 'conversation' && input.callerPolicy === 'regen') {
-    const disposition = input.conversationDisposition ?? 'own_card'
+  //
+  // `conversationDisposition !== null` is what scopes this to a run that HAS a
+  // guest message, and it is load-bearing rather than defensive. Migration
+  // 054's index folds a NULL `reply_to_message_id` onto one sentinel, so every
+  // proactive run (an engine followup, the decline, the crash card) shares a
+  // single conversation key and CANNOT have a card of its own. Returning
+  // `insert` for one produces a 23505 that recovery cannot converge on — it
+  // has no inbound to match, decides `insert` again, exhausts
+  // RACE_RECOVERY_MAX_ATTEMPTS and throws. For an engine followup that is a
+  // red alert every tick AND a permanently burned dedup claim, because
+  // `followups/engine.ts` keeps the claim on a persist-stage failure.
+  //
+  // So a proactive run falls through to the switch below and keeps its
+  // pre-TAC-397 behaviour exactly. That is also the honest reading of the
+  // ticket: its three cases are about a guest's second MESSAGE, and a run with
+  // no message is not one of them.
+  if (
+    slot === 'conversation' &&
+    input.callerPolicy === 'regen' &&
+    input.conversationDisposition !== null
+  ) {
+    const disposition = input.conversationDisposition
     if (
       silencesConversationTurn({
         slot,

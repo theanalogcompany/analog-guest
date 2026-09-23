@@ -195,9 +195,26 @@
 -- The rollback drops two columns that new code SELECTs, so it is only for
 -- undoing this migration cleanly before that code is live.
 --
+-- ORDER MATTERS, and the first step is the one that is easy to skip.
+--
+-- A SQL-language function's body is a STRING and carries no column
+-- dependencies, so `drop column replaced_draft_body` succeeds while 054's
+-- function is still selecting it. Commit that and every operator queue read
+-- fails at call time — the rollback would leave the queue more broken than
+-- the thing being rolled back. So the function is restored FIRST, and it is
+-- restored by pasting migration 044's body in, not by remembering to.
+--
 --   begin;
 --
---   -- restore migration 041's conversation index
+--   -- STEP 1, FIRST AND NOT OPTIONAL: restore migration 044's function.
+--   -- Copy the whole `drop function ... create function ... $function$;`
+--   -- block verbatim out of
+--   -- db/migrations/044_operator_queue_context_reached_guest.sql and paste it
+--   -- here. It is a DROP + CREATE for the same return-type reason as the
+--   -- forward migration below. Do not hand-edit 054's body down; take 044's.
+--
+--   -- STEP 2: restore migration 041's conversation index, before dropping
+--   -- this migration's, so the table is never unguarded.
 --   create unique index idx_messages_one_pending_conversation_per_guest
 --     on messages (venue_id, guest_id)
 --     where review_state = 'pending'
@@ -205,15 +222,17 @@
 --
 --   drop index idx_messages_one_pending_conversation_per_guest_reply;
 --
+--   -- STEP 3: only now are the columns unreferenced.
 --   alter table messages
 --     drop column replaced_draft_body,
 --     drop column replaced_draft_at;
 --
---   -- and restore migration 044's list_operator_queue verbatim from
---   -- db/migrations/044_operator_queue_context_reached_guest.sql, which is a
---   -- DROP + CREATE for the same return-type reason as below.
---
 --   commit;
+--
+-- Step 2 ABORTS if any guest already holds two pending conversation cards,
+-- which is the detection query's own signal and the reason the precondition
+-- above says to check it first. That abort is harmless: the transaction rolls
+-- back whole and nothing is half-restored.
 --
 -- ============================================================================
 

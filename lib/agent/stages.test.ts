@@ -218,6 +218,29 @@ function correctingClassification(category = 'new_question'): RuntimeContext['cl
   } as RuntimeContext['classification']
 }
 
+/**
+ * TAC-397: the ctx overrides for a turn that CORRECTS the pending card.
+ *
+ * Supplies `currentMessage` as well as the classification, and that pairing is
+ * the point: the gate passes a NULL disposition on a run with no guest
+ * message, so a correcting classification without an inbound is a proactive
+ * run and regenerates by the pre-TAC-397 path rather than as a correction.
+ * A fixture that set only the classification would assert the opposite of its
+ * name.
+ */
+function correctingCtx(category = 'new_question'): Partial<RuntimeContext> {
+  return {
+    classification: correctingClassification(category),
+    currentMessage: {
+      id: 'inbound-correction',
+      body: 'sorry i meant oat',
+      providerMessageId: 'p-corr',
+      receivedAt: new Date(),
+      channel: 'text',
+    } as RuntimeContext['currentMessage'],
+  }
+}
+
 function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
   const ctx = {
     agentRunId: 'run-1',
@@ -588,6 +611,67 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
     const out = await classifyStage(makeClassifyCtx())
     expect(out.crisisSafety).toBe(false)
   })
+
+  // TAC-397: the same pair for correctsPendingReply, and it is the one hop
+  // connecting the classifier to the gate. Found by a code-review mutant:
+  // hardcoding this to `false` passed the ENTIRE suite, 5597 tests, while
+  // switching case 3 off completely — every correction would become its own
+  // card, the pending draft would never be rewritten, and nothing would say
+  // so. classify-message.test.ts covers the hop out of lib/ai; nothing covered
+  // this one.
+  it('passes correctsPendingReply=true through unmodified', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'clear',
+        promptVersion: 'v1.60.0',
+        crisisSafety: false,
+        correctsPendingReply: true,
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.correctsPendingReply).toBe(true)
+  })
+
+  // Both directions: a hop hardcoded to `true` would be just as broken, and
+  // would make every acknowledgement rewrite the pending card.
+  it('passes correctsPendingReply=false through unmodified', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'clear',
+        promptVersion: 'v1.60.0',
+        crisisSafety: false,
+        correctsPendingReply: false,
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.correctsPendingReply).toBe(false)
+  })
+
+  // And it survives the low-confidence reroute, for the same reason
+  // crisisSafety does: a correction is a fact about what the guest wrote, not
+  // about how sure the classifier was of the category.
+  it('passes correctsPendingReply through the unknown reroute', async () => {
+    classifyMessageMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        category: 'casual_chatter',
+        classifierConfidence: 0.2,
+        reasoning: 'ambiguous',
+        promptVersion: 'v1.60.0',
+        crisisSafety: false,
+        correctsPendingReply: true,
+      },
+    })
+    const out = await classifyStage(makeClassifyCtx())
+    expect(out.category).toBe('unknown')
+    expect(out.correctsPendingReply).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -930,7 +1014,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      makeCtx({ classification: correctingClassification() }),
+      makeCtx(correctingCtx()),
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
     expect(decision.action).toBe('queue')
@@ -961,7 +1045,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      makeCtx({ classification: correctingClassification() }),
+      makeCtx(correctingCtx()),
       makeGenerationResult({
         voiceFidelity: 0.45,
         body: "the next round's on the house",
@@ -1116,7 +1200,16 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
       error: null,
     })
     const decision = await applyApprovalPolicyStage(
-      holdVenueCtx({ classification: classification('follow_up', true) }),
+      holdVenueCtx({
+        classification: classification('follow_up', true),
+        currentMessage: {
+          id: 'inbound-correction',
+          body: 'sorry i meant oat',
+          providerMessageId: 'p-corr',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
     expect(decision.action).toBe('queue')
@@ -1168,7 +1261,7 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
       // includes previous_pending_held — and that trigger now fires only on a
       // correction. Without this the set is one short and the tests would be
       // asserting the new behaviour under their old names.
-      classification: correctingClassification(),
+      ...correctingCtx(),
     })
   }
 
@@ -1306,7 +1399,7 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
         } as RuntimeContext['guest'],
         // TAC-397: previous_pending_held is one of the four, so the turn has
         // to be a correction for the set to be complete.
-        classification: correctingClassification(),
+        ...correctingCtx(),
       }),
       makeGenerationResult({
         voiceFidelity: 0.45,

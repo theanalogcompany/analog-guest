@@ -657,6 +657,17 @@ describe('CLASSIFY_SYSTEM_PROMPT — correctsPendingReply instruction (TAC-397)'
     )
   })
 
+  // The NOT SENT marker is shared: historyDeliveryMarker uses it for a SKIPPED
+  // draft too (serializers.ts). Without this clause, a skipped draft sitting
+  // newer than a pending card could be read as the thing being corrected, and
+  // a true verdict would regenerate a card the correction was not aimed at.
+  it('says which NOT SENT line to judge against, since the marker is shared with skipped drafts', async () => {
+    const prompt = await promptFor()
+    expect(prompt).toContain(
+      'That marker also appears on replies the venue decided not to send; judge only against one that is waiting for the venue to approve it.',
+    )
+  })
+
   it('sets the bar at clearly amending the pending question, with worked examples', async () => {
     const prompt = await promptFor()
     expect(prompt).toContain(

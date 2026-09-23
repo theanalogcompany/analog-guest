@@ -44,6 +44,7 @@ import {
   isSameCommitment,
   loadPendingRowsBySlot,
   OBLIGATION_SLOT_TYPES,
+  anyKnowledgeGapCard,
   mostRecentlyOpenedConversationCard,
   PENDING_ROWS_READ_LIMIT,
   occupantOfSlot,
@@ -610,6 +611,38 @@ describe('silencesConversationTurn', () => {
   )
 })
 
+describe('anyKnowledgeGapCard', () => {
+  const gap = pendingRow({
+    id: 'gap',
+    review_reason: 'knowledge_gap',
+    pending_until: '2026-09-14T16:36:34.000Z',
+  })
+  const ordinary = pendingRow({ id: 'ordinary' })
+
+  // TAC-397: the scan must cover EVERY conversation card, not just the newest.
+  // A guest can hold several now, and the clock is the guest's: with a gap
+  // card behind a newer ordinary one, reading only the newest would arm a
+  // SECOND clock and send a second holding message.
+  it('finds a gap card sitting BEHIND a newer ordinary card', () => {
+    expect(anyKnowledgeGapCard(rowsOf(gap, ordinary))).toBe(true)
+  })
+
+  it('finds a gap card in the obligation slot', () => {
+    const gapComp = pendingRow({
+      id: 'gap-comp',
+      review_reason: 'knowledge_gap_backstop',
+      pending_until: '2026-09-14T16:36:34.000Z',
+      pending_commitment: compA,
+    })
+    expect(anyKnowledgeGapCard(rowsOf(gapComp))).toBe(true)
+  })
+
+  it('is false when the guest holds only ordinary cards', () => {
+    expect(anyKnowledgeGapCard(rowsOf(ordinary, pendingRow({ id: 'other' })))).toBe(false)
+    expect(anyKnowledgeGapCard(EMPTY_PENDING_ROWS)).toBe(false)
+  })
+})
+
 describe('mostRecentlyOpenedConversationCard / occupantOfSlot', () => {
   const older = pendingRow({ id: 'older', created_at: '2026-09-14T16:00:00.000Z' })
   const newer = pendingRow({ id: 'newer', created_at: '2026-09-14T18:00:00.000Z' })
@@ -821,6 +854,62 @@ describe('decideSlotAction', () => {
           draftCommitment: null,
         }),
       ).toMatchObject({ action: 'regen', draftId: 'newer' })
+    })
+
+    // TAC-397 BLOCKER, found in code review. A run with NO guest message
+    // shares migration 054's sentinel key with every other proactive run, so
+    // it cannot hold a card of its own: `insert` there produces a 23505 that
+    // recovery cannot converge on (it has no inbound to match), exhausts its
+    // attempts and throws. For an engine followup that is a red alert every
+    // tick AND a burned dedup claim, because the engine keeps the claim on a
+    // persist-stage failure.
+    //
+    // So a null disposition keeps the pre-TAC-397 path: regenerate in place.
+    it('a run with NO inbound regenerates the card rather than taking one of its own', () => {
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: null,
+          rows: rowsOf(conversationCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({
+        action: 'regen',
+        slot: 'conversation',
+        draftId: 'card-conv',
+        captureReplacedDraft: false,
+      })
+    })
+
+    // And it keeps TAC-308's protection, which the disposition path removes for
+    // an inbound run. A proactive run has no question of its own to card, so
+    // dropping is still the right answer beside a gap card — unchanged from
+    // before TAC-397, which is the whole point of routing it down this path.
+    it('a run with NO inbound still drops beside a protected knowledge-gap card', () => {
+      expect(
+        decideSlotAction({
+          ...base,
+          conversationDisposition: null,
+          rows: rowsOf(gapCard),
+          draftCommitment: null,
+        }),
+      ).toEqual({
+        action: 'drop',
+        slot: 'conversation',
+        reason: 'knowledge_gap_card_protected',
+        protectedDraftId: 'gap-card',
+      })
+    })
+
+    it('a run with NO inbound is never silenced', () => {
+      expect(
+        silencesConversationTurn({
+          slot: 'conversation',
+          callerPolicy: 'regen',
+          disposition: null,
+          hasOccupant: true,
+        }),
+      ).toBe(false)
     })
 
     // TAC-308 and TAC-367 still apply to the OBLIGATION slot, where a

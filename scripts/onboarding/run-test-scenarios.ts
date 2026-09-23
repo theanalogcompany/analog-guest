@@ -601,9 +601,15 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
       }
     }
     // TAC-397: the guest's message needed no answer and a card was already
-    // waiting, so nothing was written. Reported as its own outcome rather than
-    // folded into 'dropped': a harness row saying "dropped" for a turn that
-    // was deliberately left alone would read as a defect in every scorecard.
+    // waiting, so nothing was written.
+    //
+    // It reuses the 'dropped' outcome because `ScenarioOutcome` has no
+    // 'silenced' member and adding one would ripple through every grader and
+    // sheet column for a turn shape the harness's scenarios do not currently
+    // produce (they run one inbound against an empty slot). What distinguishes
+    // it on a Run row is the primary trigger, which is why that is spelled out
+    // rather than left as the drop reason. If the harness ever seeds a pending
+    // card, give this its own outcome.
     if (decision.action === 'silence') {
       return {
         ...base,
