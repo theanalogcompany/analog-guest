@@ -189,6 +189,8 @@ async function main(): Promise<void> {
           body: scenario.body,
           receivedAt: new Date(),
           channel: 'instagram',
+          // Synthetic: no Meta referral, so never a scan.
+          referralSource: null,
         },
       })
 

@@ -174,6 +174,71 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
   })
 })
 
+// TAC-518: a scan on THIS TURN is a confirmed visit. Source-level for the same
+// reason as the block above — nothing runs buildRuntimeContext for real — and
+// the behavioural half is already covered: derive.test.ts proves what arming
+// does with a given visitConfirmedAt, so what is untested without these is
+// only whether this file computes the right one.
+describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const resolution = src.slice(
+    src.indexOf('const earliestConfirmedVisit ='),
+    src.indexOf('// Arms got_the_recommendation'),
+  )
+
+  // ONE CONTIGUOUS LITERAL, not three fragments, and this is the whole reason
+  // the block exists in this shape. The first version pinned the predicate
+  // call, the receipt time and the `??` separately, and THREE mutants survived
+  // the entire suite: the ternary's branches swapped, its condition negated,
+  // and its condition forced true. Every one of them makes visitConfirmedAt
+  // non-null on EVERY inbound turn on BOTH channels — understand_order's gate
+  // is `none`, so it would arm and render "You haven't heard what this guest
+  // ordered yet." to SMS guests who were never at the counter. Guest-facing,
+  // and it would have shipped green. Exactly the TAC-409 lesson this repo
+  // already records: a sentence can be reversed while every fragment survives.
+  it('arms on a scan and only on a scan, anchored to the message receipt time', () => {
+    expect(resolution).toContain(
+      [
+        'const scanAt = isScanReferral(input.currentMessage?.referralSource)',
+        '      ? (input.currentMessage?.receivedAt ?? null)',
+        '      : null',
+      ].join('\n'),
+    )
+  })
+
+  // The whole point is a LATER anchor than the historical sources, so the scan
+  // must not be reduced with them. Joining confirmedVisitTimes would put it
+  // through Math.min and a returning scanner would keep their old, expired
+  // anchor — the defect this ticket exists to fix, reintroduced silently.
+  it('overrides the earliest-wins reduction rather than joining it', () => {
+    expect(resolution).toContain('const visitConfirmedAt = scanAt ?? earliestConfirmedVisit')
+    const list = src.slice(src.indexOf('const confirmedVisitTimes = ['), src.indexOf('const earliestConfirmedVisit'))
+    expect(list).not.toContain('referralSource')
+    expect(list).not.toContain('scanAt')
+  })
+
+  // The POSITIVE half of the open question. Without it a referral that DID
+  // arrive for a returning guest leaves no trace until the model happens to
+  // raise understand_order's line, which this repo has already had a stretch of
+  // never happening. Pinned whole, for the same reason the resolution above is.
+  it('reports the scan that confirmed the visit, flagging the returning case', () => {
+    const emit = src.slice(
+      src.indexOf('if (scanAt !== null && input.currentMessage !== null) {'),
+      src.indexOf('// Arms got_the_recommendation'),
+    )
+    expect(emit).toContain('captureInstagramScanConfirmedVisit({')
+    expect(emit).toContain('returningGuest: recentMessages.length > 0,')
+    expect(emit).toContain('overrodeExistingAnchor: earliestConfirmedVisit !== null,')
+  })
+
+  // TAC-436's rule for the two historical sources is untouched. A mutant that
+  // "simplifies" by making the scan just another candidate passes the test
+  // above only if this one still holds too.
+  it('leaves the historical earliest-wins reduction intact', () => {
+    expect(src).toMatch(/new Date\(Math\.min\(\.\.\.confirmedVisitTimes\.map\(/)
+  })
+})
+
 // TAC-495: the conversation's channel, which picks the prompt copy. Source-level
 // for the same reason as the blocks above. The rule itself is tested in
 // conversation-channel.test.ts; these check this file feeds it the right

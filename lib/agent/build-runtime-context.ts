@@ -1,4 +1,7 @@
-import { captureConversationChannelUnresolved } from '@/lib/analytics/posthog'
+import {
+  captureConversationChannelUnresolved,
+  captureInstagramScanConfirmedVisit,
+} from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { AgentTrace } from '@/lib/observability'
 import {
@@ -24,6 +27,7 @@ import {
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
+import { isScanReferral } from '@/lib/schemas/referral-source'
 import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
@@ -526,10 +530,65 @@ export async function buildRuntimeContext(input: {
       guest.createdVia === 'qr_scan' ? guest.createdAt : null,
       acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null,
     ].filter((d): d is Date => d !== null && Number.isFinite(d.getTime()))
-    const visitConfirmedAt =
+    const earliestConfirmedVisit =
       confirmedVisitTimes.length === 0
         ? null
         : new Date(Math.min(...confirmedVisitTimes.map((d) => d.getTime())))
+
+    // TAC-518: a scan on THIS TURN is a confirmed visit, and it wins outright.
+    //
+    // Both sources above are stamped once and never move: enrollment is the
+    // day the guest first appeared, and an acknowledged arrival is a
+    // commitment someone ticked off at the counter. Neither can see a guest
+    // who has messaged this venue before and is standing at the pickup counter
+    // right now, which on Instagram is exactly who the referral identifies.
+    //
+    // It overrides rather than joining confirmedVisitTimes, because that list
+    // is reduced with Math.min and the whole point here is a LATER anchor. The
+    // earliest-wins rule is untouched for the two historical sources, and the
+    // reason TAC-436 gave for it still holds for them: a second visit must not
+    // renew an ask about the first order nobody heard.
+    //
+    // This does NOT re-arm understand_order for a guest who already has a row
+    // for it — rearmsOnNewerEvent is false for visit_confirmed, so derive.ts
+    // skips any intention with an existing row, whatever anchor it is handed.
+    // What it reaches is the guest who never had one: created by an ordinary
+    // DM, so visitConfirmedAt was null every turn until they scanned. Widening
+    // it further means reversing TAC-436 ruling 3 fleet-wide, on both channels,
+    // which is its own decision and not this ticket's.
+    //
+    // receivedAt, not now: the anchor belongs to the TURN, not to when the agent
+    // got round to it. `now` would be today on the Voices regen path, which pins
+    // history to the original inbound, and would drift with agent-run latency
+    // everywhere else.
+    //
+    // It is OUR receipt time (messages.created_at), not Meta's, so a delayed or
+    // retried webhook does move it later — an earlier version of this comment
+    // claimed the opposite, which is simply wrong. Migration 049 added a column
+    // holding Meta's own clock for Instagram rows, which would be strictly more
+    // accurate; against understand_order's 3-day window the difference cannot
+    // matter, so this is not worth a second read of the row. It is deliberately
+    // not NAMED here: handle-events.test.ts pins the set of files that name it
+    // to the Instagram writer and its outbound readers, and this is neither.
+    const scanAt = isScanReferral(input.currentMessage?.referralSource)
+      ? (input.currentMessage?.receivedAt ?? null)
+      : null
+    const visitConfirmedAt = scanAt ?? earliestConfirmedVisit
+
+    // The positive half of TAC-518's open question. Without it, a referral that
+    // DID arrive for a returning guest leaves no trace until the model happens
+    // to raise understand_order's line, and this repo has already had a stretch
+    // where no intention was ever raised in production. Fire and forget, like
+    // every other capture on this path: analytics must never fail a run.
+    if (scanAt !== null && input.currentMessage !== null) {
+      void captureInstagramScanConfirmedVisit({
+        venueId: input.venueId,
+        guestId: input.guestId,
+        messageId: input.currentMessage.id,
+        returningGuest: recentMessages.length > 0,
+        overrodeExistingAnchor: earliestConfirmedVisit !== null,
+      })
+    }
 
     // Arms got_the_recommendation; the derivation picks the newest one that is
     // askable now (ruling 1). activeCommitments is the open + pending_ack set,

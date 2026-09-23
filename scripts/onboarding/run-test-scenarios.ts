@@ -465,6 +465,8 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
         // TAC-495: synthetic guests all have phone numbers, so they are SMS
         // conversations and get the Sendblue copy.
         channel: 'text',
+        // Synthetic: no Meta referral, so never a scan.
+        referralSource: null,
       },
     })
     ctx.classification = await classifyStage(ctx)

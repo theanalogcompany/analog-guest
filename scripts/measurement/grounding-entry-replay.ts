@@ -226,6 +226,8 @@ async function main(): Promise<void> {
         body: target.inbound,
         receivedAt: new Date(),
         channel: 'instagram',
+        // Synthetic: no Meta referral, so never a scan.
+        referralSource: null,
       },
     })
     // The bodies under test are SMS replies, so the reconstruction is the SMS

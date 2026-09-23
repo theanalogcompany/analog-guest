@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   handleInbound: vi.fn(),
   waitUntil: vi.fn(),
   refreshInstagramProfile: vi.fn(),
+  captureScanUnattributed: vi.fn(),
 }))
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
@@ -26,6 +27,13 @@ vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
 // the route hands to waitUntil and never make a Graph call. Which outcomes get
 // one is decided by the REAL profileRefreshTargetFor, so a route that stopped
 // asking it would fail here.
+// TAC-518. The real decision (scanUnattributedReason) still runs; only the
+// emit is a spy, so a route that stopped asking, or asked with the wrong
+// fields, fails here. Partial, so nothing else this module exports is stubbed.
+vi.mock('@/lib/analytics/posthog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/analytics/posthog')>()
+  return { ...actual, captureInstagramScanUnattributed: mocks.captureScanUnattributed }
+})
 vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/messaging/instagram/refresh-profile')>()
   return { ...actual, refreshInstagramProfile: mocks.refreshInstagramProfile }
@@ -156,6 +164,8 @@ beforeEach(() => {
   mocks.waitUntil.mockReset()
   mocks.refreshInstagramProfile.mockReset()
   mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
+  mocks.captureScanUnattributed.mockReset()
+  mocks.captureScanUnattributed.mockResolvedValue(undefined)
   gate.open = null
   useDb()
 })
@@ -826,5 +836,91 @@ describe('POST /api/webhooks/instagram refreshing the guest profile', () => {
       { guestId: 'guest-1', venueId: 'venue-1' },
       { guestId: 'guest-2', venueId: 'venue-1' },
     ])
+  })
+})
+
+
+// TAC-518. An inbound that looks like it came from the venue's link and carries
+// nothing to prove it. This is the signal that tells us whether the returning-
+// guest case delivers a referral at all, so it is wired end to end rather than
+// left to the pure test in handle-events.test.ts.
+describe('POST /api/webhooks/instagram reporting an unattributable scan', () => {
+  const FIXTURES_DIR = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
+
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  /** The recorded icebreaker tap with its referral removed: a returning guest's scan, if Meta drops it. */
+  function postbackWithoutReferral(): string {
+    const payload = JSON.parse(readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'))
+    for (const entry of payload.entry) {
+      for (const item of entry.messaging) {
+        delete item.referral
+        delete item.postback?.referral
+      }
+    }
+    return JSON.stringify(payload)
+  }
+
+  it('reports an icebreaker tap that carries no referral', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    const emitted = Promise.resolve()
+    mocks.captureScanUnattributed.mockReturnValue(emitted)
+
+    const res = await post(postbackWithoutReferral())
+
+    expect(res.status).toBe(200)
+    const [guest] = db.tables.guests as FakeRow[]
+    const [message] = db.tables.messages as FakeRow[]
+    expect(mocks.captureScanUnattributed).toHaveBeenCalledWith({
+      venueId: 'venue-1',
+      guestId: guest?.id,
+      messageId: message?.id,
+      reason: 'postback_without_referral',
+      referralSource: null,
+      guestCreated: true,
+    })
+    // Handed to waitUntil, never awaited: the emit posts to Slack, and this
+    // route answers 200 inside Meta's delivery deadline or the subscription is
+    // eventually switched off.
+    //
+    // IDENTITY, not toHaveBeenCalledWith. A promise has no own enumerable
+    // properties, so vitest's deep equality reads any two resolved promises as
+    // equal — the first version of this line used toHaveBeenCalledWith and an
+    // `await` in place of waitUntil passed it, because the profile refresh's
+    // promise compared equal to the emit's.
+    expect(mocks.waitUntil.mock.calls.some(([arg]) => arg === emitted)).toBe(true)
+    // And it logs, per the ruling's "logs AND PostHog".
+    expect(findEntry('instagram_scan_unattributed')).toMatchObject({
+      reason: 'postback_without_referral',
+      venueId: 'venue-1',
+    })
+  })
+
+  // The recorded tap, unmodified: its referral is a real SHORTLINK, so there is
+  // nothing to report. Without this the test above would pass against a route
+  // that reported every postback.
+  it('reports nothing for the recorded tap that does carry its referral', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    const res = await post(readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.captureScanUnattributed).not.toHaveBeenCalled()
+  })
+
+  // An ordinary DM. If this fired, the signal would mean nothing.
+  it('reports nothing for an ordinary message with no referral', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    const res = await post(readFileSync(join(FIXTURES_DIR, 'message.json'), 'utf8'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.captureScanUnattributed).not.toHaveBeenCalled()
   })
 })

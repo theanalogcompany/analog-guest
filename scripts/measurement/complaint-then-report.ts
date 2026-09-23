@@ -323,6 +323,8 @@ async function main() {
           // number. Saying 'text' here makes resolveConversationChannel warn
           // and fall back, which is a confound worth removing.
           channel: 'instagram',
+          // Synthetic: no Meta referral, so never a scan.
+          referralSource: null,
         },
       })
 

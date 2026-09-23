@@ -2019,6 +2019,7 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -2118,6 +2119,7 @@ describe('applyApprovalPolicyStage — clock requires an actual question (TAC-48
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -2165,6 +2167,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -2616,6 +2619,7 @@ describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () =>
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -2678,6 +2682,7 @@ describe('verifyGroundingStage (TAC-350)', () => {
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       knowledgeCorpus: [],
       ...overrides,
@@ -3383,6 +3388,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         providerMessageId: 'p2',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -3559,6 +3565,7 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -3625,6 +3632,7 @@ describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)
     providerMessageId: 'p1',
     receivedAt: new Date(),
     channel: 'text' as const,
+    referralSource: null,
   }
   const subFloorGap = () => ({
     ok: true,
@@ -4044,6 +4052,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
         providerMessageId: 'p1',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category: 'new_question',
@@ -4323,6 +4332,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
         providerMessageId: 'p2',
         receivedAt: new Date(),
         channel: 'text',
+        referralSource: null,
       },
       classification: {
         category,
@@ -5398,6 +5408,7 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
           providerMessageId: 'p1',
           receivedAt: new Date(),
           channel: 'text',
+          referralSource: null,
         },
       }),
       makeGenerationResult({ knowledgeGap: true, body: "that one's off" }),

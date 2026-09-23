@@ -77,7 +77,7 @@ async function loadInbound(messageId: string): Promise<{
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('messages')
-    .select('id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel')
+    .select('id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source')
     .eq('id', messageId)
     .single()
   if (error || !data) {
@@ -101,6 +101,9 @@ async function loadInbound(messageId: string): Promise<{
       receivedAt: new Date(data.created_at),
       // TAC-495: picks the prompt copy, through resolveConversationChannel.
       channel: parseMessageChannel(data.channel),
+      // TAC-518: this turn's scan signal, read by buildRuntimeContext. Raw, so
+      // isScanReferral stays the single place that decides what counts.
+      referralSource: data.referral_source,
     },
     guestId: data.guest_id,
     venueId: data.venue_id,

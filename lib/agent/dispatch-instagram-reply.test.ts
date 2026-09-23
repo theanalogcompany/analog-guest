@@ -64,7 +64,7 @@ function makeCtx(): RuntimeContext {
     agentRunId: 'run-1',
     venue: { id: 'venue-1' } as RuntimeContext['venue'],
     guest: { id: 'guest-1', firstName: 'Sam', isDemo: false } as RuntimeContext['guest'],
-    currentMessage: { id: 'in-1', providerMessageId: 'mid-in', body: 'hi', receivedAt: NOW, channel: 'instagram' },
+    currentMessage: { id: 'in-1', providerMessageId: 'mid-in', body: 'hi', receivedAt: NOW, channel: 'instagram', referralSource: null },
     followupTrigger: null,
     conversationChannel: 'instagram',
     pendingQuestion: null,
