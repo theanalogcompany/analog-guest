@@ -2223,6 +2223,30 @@ export async function captureInstagramSendFailed(props: InstagramSendFailedProps
   )
 }
 
+export interface OperatorMessageResolvedExternallyProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  /** The card's channel, so the Instagram and text cases are separable. */
+  channel: string | null
+  timeToActionMs: number
+}
+
+/**
+ * TAC-473: an operator said a card was answered outside the app.
+ *
+ * IDs only, matching the TAC-258 operator-action events beside it: the body
+ * lives on the row, and what this answers is how often the echo path failed to
+ * clear a card before a human had to. No Slack relay — it is an ordinary
+ * operator action, not an incident.
+ */
+export async function captureOperatorMessageResolvedExternally(
+  props: OperatorMessageResolvedExternallyProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_resolved_externally', props.guestId, { ...props })
+}
+
 export interface InstagramCardResolvedExternallyProps {
   venueId: string
   guestId: string
