@@ -4,7 +4,7 @@ import {
   classifyDay,
   formatMinutes,
   parseDayRange,
-  resolveOpeningMinutes,
+  resolveOpeningToday,
   resolveOpenState,
   venueLocalMinutes,
 } from './venue-hours'
@@ -379,10 +379,11 @@ describe('resolveOpenState', () => {
 // one — a mutant that reads `monday` unconditionally passes any test whose
 // fixture gives every day the same value, which is why the differing-days
 // fixture exists.
-describe('resolveOpeningMinutes (TAC-428)', () => {
+describe('resolveOpeningToday (TAC-428)', () => {
   it("returns today's opening minutes and the venue-local clock", () => {
     // 2026-09-22T17:30:00Z = 10:30 PDT, Tuesday.
-    expect(resolveOpeningMinutes(LE_MILS, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+    expect(resolveOpeningToday(LE_MILS, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'open',
       openMin: 7 * 60,
       nowMin: 10 * 60 + 30,
     })
@@ -395,9 +396,9 @@ describe('resolveOpeningMinutes (TAC-428)', () => {
       tuesday: '9:00 AM – 3:00 PM',
     }
     // Tuesday in LA, so the Tuesday value wins and Monday's must not.
-    const r = resolveOpeningMinutes(varies, TZ, at('2026-09-22T17:30:00Z'))
-    expect(r?.openMin).toBe(9 * 60)
-    expect(r?.openMin).not.toBe(6 * 60)
+    const r = resolveOpeningToday(varies, TZ, at('2026-09-22T17:30:00Z'))
+    expect(r).toEqual({ state: 'open', openMin: 9 * 60, nowMin: 10 * 60 + 30 })
+    expect(r).not.toEqual(expect.objectContaining({ openMin: 6 * 60 }))
   })
 
   it('reads the day in the VENUE timezone, not the runtime one', () => {
@@ -415,41 +416,70 @@ describe('resolveOpeningMinutes (TAC-428)', () => {
       wednesday: '6:00 AM – 3:00 PM',
     }
     const instant = at('2026-09-23T04:00:00Z')
-    expect(resolveOpeningMinutes(varies, TZ, instant)?.openMin).toBe(9 * 60)
+    expect(resolveOpeningToday(varies, TZ, instant)).toEqual(
+      expect.objectContaining({ state: 'open', openMin: 9 * 60 }),
+    )
     // Same instant, Tokyo: already Wednesday afternoon there.
-    expect(resolveOpeningMinutes(varies, 'Asia/Tokyo', instant)?.openMin).toBe(6 * 60)
+    expect(resolveOpeningToday(varies, 'Asia/Tokyo', instant)).toEqual(
+      expect.objectContaining({ state: 'open', openMin: 6 * 60 }),
+    )
   })
 
   it('carries a half-hour opening through rather than rounding it', () => {
     const half: VenueInfo['hours'] = { ...LE_MILS, tuesday: '7:30 AM – 3:00 PM' }
-    expect(resolveOpeningMinutes(half, TZ, at('2026-09-22T17:30:00Z'))?.openMin).toBe(7 * 60 + 30)
+    expect(resolveOpeningToday(half, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
+      expect.objectContaining({ state: 'open', openMin: 7 * 60 + 30 }),
+    )
   })
 
   it('reports an overnight range by when it OPENS, not its post-midnight tail', () => {
     const bar: VenueInfo['hours'] = { ...LE_MILS, tuesday: '5:00 PM – 2:00 AM' }
-    expect(resolveOpeningMinutes(bar, TZ, at('2026-09-22T17:30:00Z'))?.openMin).toBe(17 * 60)
+    expect(resolveOpeningToday(bar, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
+      expect.objectContaining({ state: 'open', openMin: 17 * 60 }),
+    )
   })
 
-  // The three null causes. The caller must not tell them apart: each one means
-  // "nobody published a readable opening time", and the documented behaviour
-  // is to fall back to a fixed hour, never to skip the push.
-  it('returns null when today states a closure', () => {
+  // A STATED CLOSURE IS ITS OWN STATE, not folded in with the unreadable ones
+  // (ruled 2026-09-23). It is the distinction the whole union exists for: the
+  // caller guesses a fallback hour past `unknown` and refuses outright on
+  // `closed`, so collapsing them would silently announce arrivals on a day the
+  // venue says it is shut.
+  it('reports a stated closure as CLOSED, never as unknown', () => {
     const closed: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'Closed' }
-    expect(resolveOpeningMinutes(closed, TZ, at('2026-09-22T17:30:00Z'))).toBeNull()
+    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'closed',
+    })
   })
 
-  it('returns null when today is absent', () => {
+  it('reports the venue-spec parser\'s own "Closed – Closed" row as CLOSED', () => {
+    // parse-venue-spec.ts writes this shape, so it is the form a real venue
+    // arrives in rather than a hand-typed bare "Closed".
+    const closed: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'Closed – Closed' }
+    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'closed',
+    })
+  })
+
+  // The unknown causes. These the caller MAY guess past, because nobody told
+  // us anything — absence is not a closure (see classifyDay).
+  it('reports an absent day as unknown, not closed', () => {
     const missing: VenueInfo['hours'] = { ...LE_MILS, tuesday: undefined }
-    expect(resolveOpeningMinutes(missing, TZ, at('2026-09-22T17:30:00Z'))).toBeNull()
+    expect(resolveOpeningToday(missing, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'unknown',
+    })
   })
 
-  it('returns null when today is unparseable', () => {
+  it('reports an unparseable day as unknown, not closed', () => {
     const junk: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'ask at the counter' }
-    expect(resolveOpeningMinutes(junk, TZ, at('2026-09-22T17:30:00Z'))).toBeNull()
+    expect(resolveOpeningToday(junk, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'unknown',
+    })
   })
 
-  it('returns null on a timezone this runtime cannot use', () => {
-    expect(resolveOpeningMinutes(LE_MILS, 'Not/AZone', at('2026-09-22T17:30:00Z'))).toBeNull()
+  it('reports a timezone this runtime cannot use as unknown, not closed', () => {
+    expect(resolveOpeningToday(LE_MILS, 'Not/AZone', at('2026-09-22T17:30:00Z'))).toEqual({
+      state: 'unknown',
+    })
   })
 })
 
@@ -468,9 +498,10 @@ describe('venueLocalMinutes (TAC-428)', () => {
   })
 
   it('still answers when the venue publishes no readable hours at all', () => {
-    // This is why it exists: resolveOpeningMinutes returns null for such a
-    // venue and so cannot hand back a clock, but the caller that takes the
-    // fallback opening hour still needs one to compare against.
+    // This is why it exists: resolveOpeningToday carries nowMin only on its
+    // `open` state, so a venue whose hours are unreadable hands the caller no
+    // clock — and the caller taking the fallback opening hour still needs one
+    // to compare against.
     expect(venueLocalMinutes(TZ, at('2026-09-22T14:00:00Z'))).toBe(7 * 60)
   })
 

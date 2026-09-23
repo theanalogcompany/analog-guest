@@ -584,17 +584,49 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
     expect((await processDueCommitments(NOW)).beforeOpening).toBe(1)
   })
 
-  // The fallback, per the 2026-09-22 ruling: a push nobody needed costs less
-  // than a guest arriving unannounced, so unreadable hours behave as open and
-  // take the fixed hour rather than skipping.
+  // UNREADABLE HOURS FALL BACK AND PUSH. Per the 2026-09-22 ruling: we could
+  // not read them, and a push nobody needed costs less than a guest arriving
+  // unannounced.
   it.each([
-    ['a stated closure', 'Closed'],
     ['an unparseable value', 'ask at the counter'],
-  ])('falls back to the fixed hour on %s', async (_label, range) => {
+    ['a value that is only a placeholder dash', '-'],
+  ])('falls back to the fixed hour and pushes on %s', async (_label, range) => {
     const r = await run(stateWithHours(laRow('cmt-fallback'), range))
     expect(r.openingTimeUnreadable).toBe(1)
+    expect(r.venueClosedToday).toBe(0)
     expect(r.transitioned).toBe(1)
     expect(r.pushed).toBe(1)
+  })
+
+  // A STATED CLOSURE PUSHES NOTHING (ruled 2026-09-23, correcting how this
+  // first shipped). It is the opposite case, not the same one: unknown hours
+  // are guessed past because we could not read them, where a closure is a read
+  // fact and guessing 07:00 past it discards the only thing it told us. If a
+  // scheduled arrival is left unannounced on a day the venue says it is shut,
+  // the ARRIVAL is the defect; a "this morning" push makes it worse.
+  it.each([
+    ['a bare Closed', 'Closed'],
+    ["the venue-spec parser's own Closed – Closed row", 'Closed – Closed'],
+  ])('pushes NOTHING when the venue states it is closed today: %s', async (_label, range) => {
+    const r = await run(stateWithHours(laRow('cmt-closed'), range))
+    expect(r.venueClosedToday).toBe(1)
+    expect(r.openingTimeUnreadable).toBe(0)
+    expect(r.transitioned).toBe(0)
+    expect(r.pushed).toBe(0)
+    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+
+  // The two outcomes must stay distinguishable in the summary. Collapsing them
+  // is precisely the change that was ruled against, and a caller reading only
+  // "did it push" cannot tell a venue that was shut from one whose hours
+  // nobody filled in.
+  it('counts a closed venue and an unreadable one under different outcomes', async () => {
+    const closed = await run(stateWithHours(laRow('cmt-c'), 'Closed'))
+    const unreadable = await run(stateWithHours(laRow('cmt-u'), 'ask at the counter'))
+    expect(closed.venueClosedToday).toBe(1)
+    expect(closed.openingTimeUnreadable).toBe(0)
+    expect(unreadable.venueClosedToday).toBe(0)
+    expect(unreadable.openingTimeUnreadable).toBe(1)
   })
 
   it('falls back to the fixed hour when the venue has no venue_configs row at all', async () => {
@@ -605,7 +637,7 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
   })
 
   it('still refuses before the FALLBACK hour when hours are unreadable', async () => {
-    const state = stateWithHours(laRow('cmt-fallback-early'), 'Closed')
+    const state = stateWithHours(laRow('cmt-fallback-early'), 'ask at the counter')
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )

@@ -30,6 +30,8 @@
 // The gate is three clauses, and the two limits the 2026-09-17 ruling set are
 // the second and third:
 //
+//   0. the venue does not state it is closed today — a stated closure is a read
+//      fact and nothing is announced on that day (ruled 2026-09-23);
 //   1. at or after today's opening time, venue-local;
 //   2. expected_arrival's venue-local DATE is today — catch-up is bounded to
 //      the same venue-local day, so a missed day is never announced late;
@@ -64,7 +66,7 @@ import {
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { createAdminClient } from '@/lib/db/admin'
 import {
-  resolveOpeningMinutes,
+  resolveOpeningToday,
   venueLocalMinutes,
   VenueHoursSchema,
   type VenueInfo,
@@ -126,8 +128,19 @@ export interface ProcessDueCommitmentsResult {
    * counted here and is still announced — nobody could have been ready for it.
    */
   arrivalPassed: number
-  /** Number of rows whose venue published no readable opening time, so the fallback hour was used. */
+  /**
+   * Number of rows whose venue published no readable opening time for today —
+   * absent, blank or unparseable — so the fallback hour was used. A stated
+   * closure is NOT counted here; it has its own outcome below.
+   */
   openingTimeUnreadable: number
+  /**
+   * Number of rows at a venue that positively states it is CLOSED today.
+   * Never pushed (ruled 2026-09-23). Distinct from `openingTimeUnreadable`
+   * because the two are opposites: one is a fact we read, the other is the
+   * absence of one.
+   */
+  venueClosedToday: number
   /** Number of rows that failed defensive checks (null signal, malformed timestamp, missing venue timezone). */
   invalid: number
   /** Number of rows that errored during the transition CAS round trip. */
@@ -181,6 +194,7 @@ export async function processDueCommitments(
     arrivalDayPassed: 0,
     arrivalPassed: 0,
     openingTimeUnreadable: 0,
+    venueClosedToday: 0,
     invalid: 0,
     errored: 0,
     pushed: 0,
@@ -260,15 +274,25 @@ export async function processDueCommitments(
 
     // Clause 1: at or after today's opening time, on the venue's own clock.
     //
-    // The opening time comes from the venue's published hours. When there is
-    // none to read we fall back to FALLBACK_MORNING_HOUR_LOCAL rather than
-    // skipping, per the 2026-09-22 ruling. `resolveOpeningMinutes` returns null
-    // in exactly that case and so cannot also hand back a clock, which is why
-    // the fallback path asks `venueLocalMinutes` for one.
-    const opening = resolveOpeningMinutes(venueHours, venueTimezone, now)
+    // THREE STATES, AND A STATED CLOSURE IS NOT THE SAME AS AN UNREADABLE ONE
+    // (ruled 2026-09-23, correcting how this shipped). Unknown hours fall back
+    // to a fixed hour because we could not read them and a push nobody needed
+    // costs less than a guest arriving unannounced. A stated closure is a read
+    // fact, and guessing 07:00 past it discards the only thing it told us. On
+    // a day the venue says it is shut, nothing is announced: if that leaves a
+    // scheduled arrival unannounced, the ARRIVAL is the defect, and a "this
+    // morning" push makes it worse rather than better.
+    const opening = resolveOpeningToday(venueHours, venueTimezone, now)
+    if (opening.state === 'closed') {
+      summary.venueClosedToday += 1
+      console.warn(
+        `[cron commitments-due] venue=${row.venue_id} states it is closed today; not announcing commitment=${row.id}`,
+      )
+      continue
+    }
     let openMin: number
     let nowMin: number
-    if (opening) {
+    if (opening.state === 'open') {
       openMin = opening.openMin
       nowMin = opening.nowMin
     } else {
@@ -286,7 +310,7 @@ export async function processDueCommitments(
       nowMin = fallbackNow
       summary.openingTimeUnreadable += 1
       console.warn(
-        `[cron commitments-due] venue=${row.venue_id} publishes no readable opening time for today; falling back to ${FALLBACK_MORNING_HOUR_LOCAL}:00 local for commitment=${row.id}`,
+        `[cron commitments-due] venue=${row.venue_id} publishes no readable opening time for today (absent or unparseable, NOT a stated closure); falling back to ${FALLBACK_MORNING_HOUR_LOCAL}:00 local for commitment=${row.id}`,
       )
     }
 
