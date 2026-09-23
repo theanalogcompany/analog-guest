@@ -1193,13 +1193,35 @@ function formatMechanicEligibility(
 // "take the one listed first", is what makes that order mean something to the
 // model. Without it the ranking ruled on the ticket (event-armed intentions
 // first, because they perish) would be decorative.
-// TAC-423 (2026-09-22 rewrite, approved). The opener states the SITUATION and
-// stops prescribing a question. What to ask is what the intention lines below
-// are for, and on this turn the first of them is understand_order, whose line
-// says exactly what the old opener's scripted question said. Two independently
-// authored instructions in one block with nothing reconciling them is the bug
-// this ticket is about; it had been fixed by pointing them at the same target
-// and is now fixed by there being one.
+// TAC-423 (2026-09-22). The opener states the SITUATION and then asks one
+// thing: what the guest just got. The question is SCAFFOLDING, not the
+// intended design, and the comment says so because the next reader will
+// otherwise reasonably delete it.
+//
+// The intended design is that the opener states facts and the intention lines
+// below carry the ask. understand_order is first in that list on this turn,
+// ungated, armed by the scan itself, and its line says exactly what this
+// sentence says. Two instructions for one ask is the shape this whole ticket
+// is about. It was built that way and MEASURED, 20 generations per arm on the
+// live config, and the intention line could not carry it:
+//
+//   opener asks        asks something 20/20   asks the ORDER 20/20
+//   opener silent      asks something 20/20   asks the ORDER 11/20
+//
+// The nine misses are worse than the number. Five asked how it was, which is
+// did_they_like_it, an intention NOT open on this turn (it arms on a recorded
+// order and there is none), and an answer naming no item captures nothing and
+// gives reportsTodaysScanVisit nothing to fire on. Four reverted to asking
+// whether this was the guest's first time, which is the behaviour this ticket
+// was filed to delete, with nothing in the prompt asking for it. An opener
+// that reintroduces the original bug half the time is not an improvement on a
+// scripted one (ruled 2026-09-22).
+//
+// SO: the scripted question stays until TAC-519 establishes why intentions are
+// so rarely raised and fixes it. scripts/measurement/first-touch-question.ts is
+// the harness that produced those numbers and is the one that should decide
+// when this sentence comes out. At 55% today the intention line cannot carry
+// the ask on its own.
 //
 // Three things left with it, each ruled:
 //
@@ -1230,17 +1252,26 @@ function formatMechanicEligibility(
 //      one, which is why the same ticket also taught the extractor that a
 //      scan-day report is a receipt.
 //
-// Both clauses that used to sit after the question are gone, because the
-// paragraph rendered directly beneath now says both: "take the one listed
-// first, and only that one", and "Asking never changes what the reply is
-// about ... the question goes at the end, in one short line, or not at all."
-// The second of them was also the deadlock sentence TAC-436 deleted from that
-// paragraph, surviving here in different words and so invisible to the canary
-// guarding it. Consequence, ruled rather than inherited: a guest who scans AND
-// asks something now gets their answer plus one short question, where before
-// the opener held the question back. serializers.test.ts carries a canary on
-// this paragraph's own dropped wording, since the existing one could not see
-// it.
+// The two CLAUSES that used to sit after the question are still gone, and they
+// are a separate thing from the question itself. The paragraph rendered
+// directly beneath says both: "take the one listed first, and only that one",
+// and "Asking never changes what the reply is about ... the question goes at
+// the end, in one short line, or not at all." The second of them was also the
+// deadlock sentence TAC-436 deleted from that paragraph, surviving here in
+// different words and so invisible to the canary guarding it. Consequence,
+// ruled rather than inherited: a guest who scans AND asks something gets their
+// answer plus one short question, where the old opener held the question back.
+// serializers.test.ts carries a canary on this paragraph's own dropped
+// wording, since the existing one could not see it.
+//
+// Honest note on that rationale, because the measurement did not support it:
+// the deferral clause was expected to SUPPRESS the ask on a turn where the
+// guest asks something of their own, and on that scenario the old opener asked
+// 20/20 anyway. On this turn shape the clause was inert. TAC-436's own
+// measurement was of the restraint paragraph on ordinary turns, a different
+// population, and it stands; this says only that the opener's copy of it was
+// doing nothing here. The clause stays out on the ruling, not on this
+// evidence.
 //
 // TAC-495: the SMS copy is this string with no substitutions, so it is
 // byte-identical by construction; the Instagram variant swaps ONE phrase, down
@@ -1251,7 +1282,7 @@ function formatMechanicEligibility(
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
 // at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],

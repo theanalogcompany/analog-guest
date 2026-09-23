@@ -834,12 +834,18 @@ import {
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
 // v1.60.0 (TAC-423): the `## What you're hoping to get to` first-visit opener
-// states the situation and stops prescribing a question. It used to script
-// "ask what they got" on top of the intention lines rendered directly beneath
-// it, and the first of those, understand_order, wants that exact question
-// asked. Two independently authored instructions in one block, with nothing
-// reconciling them, is what this ticket has been about since September: the
-// first fix pointed both at the same target, this one leaves one.
+// states the situation, asks what the guest just got, and prescribes nothing
+// else. The question is SCAFFOLDING and the block comment at FIRST_TOUCH_OPENER
+// says so: the intended design is that the intention lines beneath carry the
+// ask, understand_order being first among them on this turn and its line saying
+// exactly what this sentence says. That was built and measured at 20
+// generations per arm, and the intention line could not carry it: with the
+// opener silent the reply still asked SOMETHING 20/20, but asked about the
+// ORDER only 11/20 against 20/20 with the opener asking. Five of the nine
+// misses asked how it was, which is a different intention and is not even open
+// on this turn, and four reverted to asking whether it was the guest's first
+// time, the behaviour this ticket was filed to delete. The question comes out
+// when TAC-519 fixes why intentions are so rarely raised.
 //
 // Three further changes, each ruled on the ticket 2026-09-22:
 //
