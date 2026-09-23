@@ -58,7 +58,10 @@ import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
 // no-sub-barrel precedent, and a barrel is the thing that lets a future
 // vi.mock hand these tests a stubbed verifier when they need the real one.
-import { captureInstagramScanUnattributed } from '@/lib/analytics/posthog'
+import {
+  captureInstagramCardResolvedExternally,
+  captureInstagramScanUnattributed,
+} from '@/lib/analytics/posthog'
 import { resolveAgentHandoff } from '@/lib/messaging/instagram/agent-gate'
 import {
   logInstagramOutcome,
@@ -69,6 +72,10 @@ import {
   profileRefreshTargetFor,
   refreshInstagramProfile,
 } from '@/lib/messaging/instagram/refresh-profile'
+import {
+  externalResolutionTargetFor,
+  resolveCardAnsweredExternally,
+} from '@/lib/messaging/instagram/resolve-external'
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
@@ -268,6 +275,30 @@ export async function POST(request: Request): Promise<Response> {
             referralSource: outcome.referralSource,
             guestCreated: outcome.guestCreated,
           }),
+        )
+      }
+      // TAC-473: a reply staff typed in the Instagram app clears the card it
+      // answered. Only ever fires on a newly persisted echo, and only resolves
+      // anything once the reply window has CLOSED — which is what proves the
+      // echo is not one of our own sends (see resolve-external.ts's header).
+      // waitUntil, never awaited: two reads and a write must not sit inside
+      // Meta's delivery deadline, and a failure here must not cost the 200.
+      const resolutionTarget = externalResolutionTargetFor(outcome)
+      if (resolutionTarget !== null) {
+        waitUntil(
+          resolveCardAnsweredExternally(supabase, resolutionTarget, new Date()).then((result) =>
+            captureInstagramCardResolvedExternally({
+              venueId: resolutionTarget.venueId,
+              guestId: resolutionTarget.guestId,
+              echoMessageId: resolutionTarget.echoMessageId,
+              cardId:
+                result.status === 'resolved' || result.status === 'lost_race' ? result.cardId : null,
+              outcome: result.status,
+              hadPendingCommitment:
+                result.status === 'resolved' ? result.hadPendingCommitment : null,
+              error: result.status === 'failed' ? result.error : null,
+            }),
+          ),
         )
       }
     }

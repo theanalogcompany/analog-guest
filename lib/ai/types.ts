@@ -108,7 +108,15 @@ export type KnowledgeCorpusChunk = {
 //   skipped_by_operator  a draft the venue decided not to send
 //   never_sent           a failed send, a dispatch that never went out, or an
 //                        outbound status nobody has mapped
-export type MessageDelivery = 'delivered' | 'awaiting_review' | 'skipped_by_operator' | 'never_sent'
+export type MessageDelivery =
+  | 'delivered'
+  | 'awaiting_review'
+  | 'skipped_by_operator'
+  // TAC-473: the venue answered this in the Instagram app instead, so the card
+  // was resolved without being sent. Its own value rather than never_sent,
+  // which would tell the model a send FAILED when nothing did.
+  | 'answered_outside_app'
+  | 'never_sent'
 
 export type RecentMessage = {
   direction: 'inbound' | 'outbound'

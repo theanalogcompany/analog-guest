@@ -4,6 +4,12 @@
 // analog-operator's docs/superpowers/specs/2026-09-05-conversations-tab-design.md.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { parseMessageChannel, type MessageChannel } from '@/lib/schemas/message-channel'
+import {
+  conversationGuestChannel,
+  instagramUsername,
+  replyWindowExpiresAt,
+} from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
 
@@ -23,6 +29,19 @@ export interface ConversationSummary {
   lastMessagePreview: string
   conversationCount: number
   firstConversationAt: string
+  // TAC-473, Contract-locked. All three ALWAYS PRESENT — the client never
+  // branches on presence.
+  //
+  // Resolved from the GUEST by resolveConversationChannel (TAC-495), because a
+  // summary has no draft to read a channel off. Never null: an unresolvable
+  // channel degrades to 'text' loudly rather than failing the client's parse.
+  guestChannel: MessageChannel
+  // When Instagram's 24-hour window closes, ISO 8601, on Meta's clock. The
+  // true deadline; the client applies its own display margin. Null means no
+  // window (a text conversation) or an unknown one — `guestChannel` says which.
+  replyWindowExpiresAt: string | null
+  // The guest's handle, without the '@'. Null when not stored.
+  instagramUsername: string | null
 }
 
 export type ListOperatorConversationsResult =
@@ -50,6 +69,13 @@ interface RawConversationRow {
   last_message_body: string
   conversation_count: number
   first_conversation_at: string
+  // TAC-473. A BOOLEAN, not the scoped ID: resolveConversationChannel needs
+  // only presence, and an IGSID carried into this projection would be one
+  // typo away from the wire, where the Contract does not put it.
+  guest_has_instagram_id: boolean | null
+  instagram_username: string | null
+  last_inbound_channel: string | null
+  last_guest_action_at: string | null
 }
 
 export async function listOperatorConversations(
@@ -93,6 +119,19 @@ export async function listOperatorConversations(
       lastMessagePreview: row.last_message_body,
       conversationCount: row.conversation_count,
       firstConversationAt: row.first_conversation_at,
+      // TAC-473. `hasPhone` is a typeof check, not `!== null`: an undefined
+      // from a row shape that predates this column must not read as a phone
+      // number. Same reasoning conversation-channel.ts documents.
+      guestChannel: conversationGuestChannel(
+        {
+          hasPhone: typeof row.guest_phone === 'string' && row.guest_phone.length > 0,
+          hasInstagramId: row.guest_has_instagram_id === true,
+          lastInboundChannel: parseMessageChannel(row.last_inbound_channel),
+        },
+        row.guest_id,
+      ),
+      replyWindowExpiresAt: replyWindowExpiresAt(row.last_guest_action_at),
+      instagramUsername: instagramUsername(row.instagram_username),
     })
   }
 

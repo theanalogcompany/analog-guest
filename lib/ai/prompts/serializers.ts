@@ -639,6 +639,8 @@ export function historyDeliveryMarker(delivery: MessageDelivery): string | null 
       return 'NOT SENT: waiting for the venue to approve it'
     case 'skipped_by_operator':
       return 'NOT SENT: the venue decided not to send it'
+    case 'answered_outside_app':
+      return 'NOT SENT: the venue answered this in the Instagram app instead'
     case 'never_sent':
       return 'NEVER SENT: it failed to send'
   }

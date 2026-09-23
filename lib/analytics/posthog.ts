@@ -1614,7 +1614,7 @@ export interface PushSentProps {
   /** TAC-297: discriminator so the two push surfaces can be analyzed
    * separately in PostHog. Optional + defaults to 'draft_flagged' so the
    * existing TAC-207 callsite doesn't have to pass it. */
-  surface?: 'draft_flagged' | 'commitment_arrival'
+  surface?: 'draft_flagged' | 'commitment_arrival' | 'instagram_window_warning'
 }
 
 export async function capturePushSent(props: PushSentProps): Promise<void> {
@@ -1637,7 +1637,7 @@ export interface PushTokenInvalidProps {
   /** APNs `reason` field. Null on 410 with empty body. */
   reason: string | null
   /** TAC-297: same discriminator semantics as PushSentProps.surface. */
-  surface?: 'draft_flagged' | 'commitment_arrival'
+  surface?: 'draft_flagged' | 'commitment_arrival' | 'instagram_window_warning'
 }
 
 export async function capturePushTokenInvalid(props: PushTokenInvalidProps): Promise<void> {
@@ -2221,6 +2221,68 @@ export async function captureInstagramSendFailed(props: InstagramSendFailedProps
       .filter(Boolean)
       .join('\n'),
   )
+}
+
+export interface OperatorMessageResolvedExternallyProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  operatorId: string
+  /** The card's channel, so the Instagram and text cases are separable. */
+  channel: string | null
+  timeToActionMs: number
+}
+
+/**
+ * TAC-473: an operator said a card was answered outside the app.
+ *
+ * IDs only, matching the TAC-258 operator-action events beside it: the body
+ * lives on the row, and what this answers is how often the echo path failed to
+ * clear a card before a human had to. No Slack relay — it is an ordinary
+ * operator action, not an incident.
+ */
+export async function captureOperatorMessageResolvedExternally(
+  props: OperatorMessageResolvedExternallyProps,
+): Promise<void> {
+  await capturePostHogEvent('operator_message_resolved_externally', props.guestId, { ...props })
+}
+
+export interface InstagramCardResolvedExternallyProps {
+  venueId: string
+  guestId: string
+  /** The echo row that answered it. */
+  echoMessageId: string
+  /** The card resolved, or null when none was. */
+  cardId: string | null
+  outcome: 'resolved' | 'window_open' | 'window_unknown' | 'no_card' | 'lost_race' | 'failed'
+  /**
+   * TAC-473: whether the resolved card carried a comp, hold or discount.
+   *
+   * FIFO takes the oldest pending card whatever slot it is in, so it can be an
+   * obligation card; resolving one means the commitment is never materialised
+   * and nobody sees the venue promised something. Counted here rather than
+   * ruled on, so the decision has evidence. Null when nothing was resolved.
+   */
+  hadPendingCommitment: boolean | null
+  error: string | null
+}
+
+/**
+ * TAC-473: a pending card was answered from the Instagram app.
+ *
+ * PostHog only, no Slack relay. `window_open` and `no_card` are the ordinary
+ * outcomes — every one of our own sends echoes back and lands on the first —
+ * so relaying would post on routine traffic and mean nothing. The question
+ * this answers is "has external resolution ever fired", which is a query, not
+ * an alert.
+ *
+ * Carries no message body: the echo's text is the venue talking to a guest,
+ * and the row id is enough to find it.
+ */
+export async function captureInstagramCardResolvedExternally(
+  props: InstagramCardResolvedExternallyProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_card_resolved_externally', props.guestId, { ...props })
 }
 
 export interface InstagramReplySupersededProps {

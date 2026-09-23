@@ -26,6 +26,7 @@
 // module can be unit-tested without any SDK init.
 
 import type { MessageDelivery, RecentMessage } from '@/lib/ai'
+import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
 
 /** The `messages` columns the history query selects. */
 export interface HistoryRow {
@@ -79,6 +80,16 @@ export const DELIVERED_OUTBOUND_STATUSES: ReadonlySet<string> = new Set([
  * but only the first was a decision, and a bare "never sent" beside "they have
  * not read them" can nudge the model to raise what an operator rejected.
  *
+ * TAC-473: `resolved_externally` is its own value for the same reason
+ * `skipped` is. Staff answered the guest in the Instagram app, so the card was
+ * never sent BY US and the guest has not read its text — but nothing failed,
+ * and the echo carrying what staff actually said sits in this same history as
+ * a delivered outbound. Falling through to never_sent would have told the
+ * model a send failed on every turn after an external resolution, which is the
+ * kind of false reason the skipped/never_sent split already exists to avoid.
+ * Its status stays `pending_review`, so it does reach the catch-all unless
+ * named here.
+ *
  * Anything else outbound is never_sent: failed, rejected, draft, and the v1
  * dispatch gap (approved, Sendblue threw, row stranded at pending_review).
  * That catch-all is the safe direction: a new status nobody mapped reads as
@@ -92,6 +103,7 @@ export function deriveDelivery(
   if (row.review_state === 'pending') return 'awaiting_review'
   if (DELIVERED_OUTBOUND_STATUSES.has(row.status)) return 'delivered'
   if (row.review_state === 'skipped') return 'skipped_by_operator'
+  if (row.review_state === RESOLVED_EXTERNALLY_REVIEW_STATE) return 'answered_outside_app'
   return 'never_sent'
 }
 

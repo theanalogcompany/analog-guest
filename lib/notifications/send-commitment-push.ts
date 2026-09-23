@@ -38,7 +38,7 @@ import {
   capturePushSent,
   capturePushTokenInvalid,
 } from '@/lib/analytics/posthog'
-import { createAdminClient } from '@/lib/db/admin'
+import { loadPushRecipients, countOperatorBadge, clearOperatorPushToken } from './recipients'
 import type {
   ArrivalSignal,
   CommitmentType,
@@ -133,94 +133,14 @@ export function buildCommitmentPushBody(
   return full.slice(0, MAX_PUSH_BODY_CHARS)
 }
 
-interface OperatorRecipient {
-  id: string
-  apnsDeviceToken: string
-}
-
-async function loadRecipients(venueId: string): Promise<OperatorRecipient[]> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('operator_venues')
-    .select('operator:operators!inner(id, apns_device_token)')
-    .eq('venue_id', venueId)
-    .not('operator.apns_device_token', 'is', null)
-  if (error || !data) {
-    console.error('[apns] commitment loadRecipients query failed', {
-      venueId,
-      error: error?.message,
-    })
-    return []
-  }
-  const seen = new Set<string>()
-  const out: OperatorRecipient[] = []
-  for (const row of data) {
-    const op = row.operator
-    if (!op) continue
-    if (!op.apns_device_token) continue
-    if (seen.has(op.id)) continue
-    seen.add(op.id)
-    out.push({ id: op.id, apnsDeviceToken: op.apns_device_token })
-  }
-  return out
-}
-
-/**
- * Operator-scoped badge count combining pending drafts (review_state='pending')
- * and pending_ack commitments. Single source of truth for the operator app's
- * badge across BOTH push surfaces. Mirrors the predicate in send.ts +
- * extends it with the commitments side.
- */
-async function countBadgeForOperator(operatorId: string): Promise<number> {
-  const supabase = createAdminClient()
-  const { data: venues, error: venuesError } = await supabase
-    .from('operator_venues')
-    .select('venue_id')
-    .eq('operator_id', operatorId)
-  if (venuesError || !venues || venues.length === 0) {
-    return 0
-  }
-  const venueIds = venues.map((v) => v.venue_id)
-  const [draftsResult, commitmentsResult] = await Promise.all([
-    supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('review_state', 'pending')
-      .in('venue_id', venueIds),
-    supabase
-      .from('guest_commitments')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending_ack')
-      .in('venue_id', venueIds),
-  ])
-  if (draftsResult.error) {
-    console.error('[apns] commitment countBadgeForOperator drafts failed', {
-      operatorId,
-      error: draftsResult.error.message,
-    })
-  }
-  if (commitmentsResult.error) {
-    console.error('[apns] commitment countBadgeForOperator commitments failed', {
-      operatorId,
-      error: commitmentsResult.error.message,
-    })
-  }
-  return (draftsResult.count ?? 0) + (commitmentsResult.count ?? 0)
-}
-
-async function nullOperatorToken(operatorId: string): Promise<void> {
-  const supabase = createAdminClient()
-  const { error } = await supabase
-    .from('operators')
-    .update({ apns_device_token: null, apns_token_updated_at: null })
-    .eq('id', operatorId)
-  if (error) {
-    console.error('[apns] commitment nullOperatorToken failed', {
-      operatorId,
-      error: error.message,
-    })
-  }
-}
+// TAC-473: these three moved to ./recipients when a third push surface
+// arrived. Thin local aliases keep this file's call sites and its log lines
+// exactly as they were; the prefixes are passed in for that reason.
+const loadRecipients = (venueId: string) =>
+  loadPushRecipients(venueId, { logPrefix: '[apns] commitment loadRecipients' })
+const countBadgeForOperator = countOperatorBadge
+const nullOperatorToken = (operatorId: string) =>
+  clearOperatorPushToken(operatorId, { logPrefix: '[apns] commitment nullOperatorToken failed' })
 
 /**
  * Top-level commitment-arrival push orchestrator. Never throws.

@@ -1311,7 +1311,16 @@ describe('source guard: every per-guest single-row pending read names its order 
   // either card. The only one left is findPendingQuestion, which cannot be tied
   // to a slot (a gap card can sit in either) and orders explicitly instead.
   // Everything else goes through loadPendingRowsBySlot, which reads both slots.
-  const ALLOWED = 'lib/agent/pending-question.ts'
+  //
+  // TAC-473 adds the second: the Instagram external-card resolver reads one
+  // pending row per guest and, like findPendingQuestion below, NAMES ITS ORDER
+  // (created_at ascending) because which card it gets is the whole decision —
+  // an echo resolves the OLDEST card and no other. It is on this list for the
+  // property the guard is named for, not as an exception to it.
+  const ALLOWED = new Set([
+    'lib/agent/pending-question.ts',
+    'lib/messaging/instagram/resolve-external.ts',
+  ])
 
   const hits = ['lib', 'app', 'scripts'].flatMap((root) =>
     sourceFiles(join(REPO_ROOT, root)).flatMap((file) =>
@@ -1323,15 +1332,21 @@ describe('source guard: every per-guest single-row pending read names its order 
   )
 
   it('finds no such read outside pending-question.ts', () => {
-    expect(hits.filter((h) => h.file !== ALLOWED).map((h) => h.file)).toEqual([])
+    expect(hits.filter((h) => !ALLOWED.has(h.file)).map((h) => h.file)).toEqual([])
   })
 
-  // Guards the guard: the scan has to find the one real read it is supposed to
+  // Guards the guard: the scan has to find the real reads it is supposed to
   // allow, or it is scanning nothing.
-  it('does find findPendingQuestion, and that read orders by created_at', () => {
-    const allowed = hits.filter((h) => h.file === ALLOWED)
-    expect(allowed).toHaveLength(1)
-    expect(allowed[0]!.chain).toContain(".order('created_at', { ascending: true })")
+  //
+  // TAC-473 made this assert the PROPERTY the describe block is named for,
+  // rather than only that one file was found. Every allowed read must name its
+  // order — that is what earns a place on the list, and a file added to
+  // ALLOWED without an ORDER BY now fails here instead of passing silently.
+  it('finds every allowed read, and each one orders by created_at', () => {
+    expect(hits.filter((h) => ALLOWED.has(h.file))).toHaveLength(ALLOWED.size)
+    for (const hit of hits.filter((h) => ALLOWED.has(h.file))) {
+      expect(hit.chain, hit.file).toContain(".order('created_at', { ascending: true })")
+    }
   })
 
   it.each([

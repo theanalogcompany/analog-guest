@@ -1345,7 +1345,8 @@ import {
 //
 // Each unsent line carries a marker saying why (derived in
 // lib/agent/group-responses.ts): NOT SENT while a draft waits for the venue,
-// NOT SENT when the venue decided not to send it, NEVER SENT when a send
+// NOT SENT when the venue decided not to send it, NOT SENT when the venue
+// answered in the Instagram app instead (TAC-473), NEVER SENT when a send
 // failed. One note follows the block when any line is marked, and nothing
 // tells the model what to do about an unsent line. This version was first
 // built with such an instruction (the reply takes the pending draft's place,
