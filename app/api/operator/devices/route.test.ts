@@ -15,6 +15,7 @@ vi.mock('@/lib/db/admin', () => ({
 
 // Import AFTER mocks.
 import { POST } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_TOKEN = 'a'.repeat(64)
 
@@ -28,7 +29,7 @@ function makeRequest(body: unknown): Request {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: ['v1'] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues(['v1']) })
   fromMock.mockClear()
   updateMock.mockClear()
   eqMock.mockClear()

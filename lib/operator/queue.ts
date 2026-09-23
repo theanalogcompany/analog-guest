@@ -22,6 +22,7 @@ import {
 } from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
+import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 export type { GuestRecognitionState } from './recognition-state'
 
@@ -770,19 +771,32 @@ async function loadCardCarriers(
 }
 
 export async function listPendingQueue(
-  allowedVenueIds: string[],
+  venueScope: VenueScope,
   /** Optional override for testing. Defaults to Date.now(). */
   nowMs: number = Date.now(),
 ): Promise<ListPendingQueueResult> {
-  // Empty allowlist → empty queue; an operator with no venue grants isn't
+  // No granted venues → empty queue; an operator with no venue grants isn't
   // an error, they just see nothing.
-  if (allowedVenueIds.length === 0) {
+  if (venueScopeDeniesAll(venueScope)) {
     return { ok: true, drafts: [] }
+  }
+
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds === null) {
+    // TAC-530: a fleet-wide scope is produced only by the analog-admin cookie
+    // path, and this helper is reached only from app/api/operator/* on the
+    // bearer path. Refuse rather than silently widen the query -- making this
+    // path fleet-wide is a decision, not a fallthrough. Deliberately NOT
+    // "skip the filter": that idiom is what this ticket removed.
+    return {
+      ok: false,
+      error: 'fleet-wide venue scope is not supported by list_operator_queue',
+    }
   }
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.rpc('list_operator_queue', {
-    venue_ids: allowedVenueIds,
+    venue_ids: venueIds,
   })
 
   if (error) {

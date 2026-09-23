@@ -16,15 +16,16 @@
 //
 // Throws AuthError(401) on any failure to identify the operator. Never throws
 // 403 — that's reserved for the route handler's own venue-mismatch check
-// against the returned allowedVenueIds.
+// against the returned venueScope.
 
 import { createAdminClient } from '../db/admin'
 import { linkOperatorByAuthUser } from './link-operator'
-import { type AuthenticatedOperator, AuthError } from './types'
+import { type BearerOperator, AuthError } from './types'
+import { grantedVenues } from './venue-scope'
 
 export async function verifyOperatorRequest(
   request: Request,
-): Promise<AuthenticatedOperator> {
+): Promise<BearerOperator> {
   const header = request.headers.get('authorization')
   if (!header) {
     throw new AuthError(401, 'missing Authorization header')
@@ -85,7 +86,10 @@ export async function verifyOperatorRequest(
   if (venuesError) {
     throw new AuthError(401, `venue allowlist lookup failed: ${venuesError.message}`)
   }
-  const allowedVenueIds = (venueRows ?? []).map((r) => r.venue_id)
+  // TAC-530: ALWAYS a `venues` scope, never fleet-wide — this path performs
+  // no is_analog_admin lookup, so zero rows means "allowlisted for nothing".
+  // The BearerOperator return type is what enforces that.
+  const venueScope = grantedVenues((venueRows ?? []).map((r) => r.venue_id))
 
-  return { operatorId, allowedVenueIds }
+  return { operatorId, venueScope }
 }

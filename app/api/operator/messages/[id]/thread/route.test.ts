@@ -29,6 +29,7 @@ vi.mock('@/lib/operator', async () => {
 })
 
 import { GET } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -46,7 +47,7 @@ function params(id = VALID_UUID): { params: Promise<{ id: string }> } {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
   loadMock.mockReset()
 })
 
@@ -154,7 +155,7 @@ describe('GET /api/operator/messages/[id]/thread', () => {
       })
       expect(loadMock).toHaveBeenCalledWith({
         messageId: VALID_UUID,
-        allowedVenueIds: [VENUE_A],
+        venueScope: grantedVenues([VENUE_A]),
       })
     })
 
@@ -186,18 +187,18 @@ describe('GET /api/operator/messages/[id]/thread', () => {
     it('passes the operator allowedVenueIds verbatim into the helper', async () => {
       verifyMock.mockResolvedValueOnce({
         operatorId: 'op-2',
-        allowedVenueIds: ['v1', 'v2', 'v3'],
+        venueScope: grantedVenues(['v1', 'v2', 'v3']),
       })
       loadMock.mockResolvedValueOnce({ ok: true, messages: [] })
       await GET(makeRequest(), params())
       expect(loadMock).toHaveBeenCalledWith({
         messageId: VALID_UUID,
-        allowedVenueIds: ['v1', 'v2', 'v3'],
+        venueScope: grantedVenues(['v1', 'v2', 'v3']),
       })
     })
 
     it('handles an operator with empty allowedVenueIds (helper returns out_of_allowlist)', async () => {
-      verifyMock.mockResolvedValueOnce({ operatorId: 'op-3', allowedVenueIds: [] })
+      verifyMock.mockResolvedValueOnce({ operatorId: 'op-3', venueScope: grantedVenues([]) })
       loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
       const res = await GET(makeRequest(), params())
       expect(res.status).toBe(404)

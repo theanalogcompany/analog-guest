@@ -27,6 +27,7 @@ import { z } from 'zod'
 import { withOperatorAuth } from '@/lib/auth'
 import { captureOperatorMessageActionUndone } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ParamsSchema = z.object({ id: z.string().regex(UUID_RE) })
@@ -43,18 +44,24 @@ export const POST = withOperatorAuth<{ id: string }>(
     }
     const messageId = parsed.data.id
 
+    // TAC-530: an EMPTY allowlist means NO venue access on the bearer path --
+    // see the note on AuthenticatedOperator. Guarding the .in() filter with
+    // `length > 0` skipped it entirely, letting a grantless operator bearer
+    // read and undo any card in the fleet. Deny before touching the database.
+    const venueIds = venueFilterIds(operator.venueScope)
+    if (venueIds === null || venueIds.length === 0) {
+      return NextResponse.json({ error: 'not found' }, { status: 404 })
+    }
+
     const supabase = createAdminClient()
 
-    let readQuery = supabase
+    const readQuery = supabase
       .from('messages')
       .select(
         'id, venue_id, guest_id, review_state, previous_review_state, last_operator_action_at, last_operator_id, direction',
       )
       .eq('id', messageId)
-
-    if (operator.allowedVenueIds.length > 0) {
-      readQuery = readQuery.in('venue_id', operator.allowedVenueIds)
-    }
+      .in('venue_id', venueIds)
 
     const { data: row, error: readErr } = await readQuery.maybeSingle()
     if (readErr) {

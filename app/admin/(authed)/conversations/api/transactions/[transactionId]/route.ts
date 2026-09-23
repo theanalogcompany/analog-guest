@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
+import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // DELETE /admin/conversations/api/transactions/[transactionId] — TAC-323.
 //
@@ -17,7 +18,7 @@ import { createServerClient } from '@/lib/db/server'
 // Auth pattern mirrors the within-surface precedent at
 // conversations/api/review/[messageId]/route.ts exactly: cookie-session auth
 // via createServerClient() + verifyAnalogAdminAccess, then a venue-allowlist
-// check with the same "empty allowedVenueIds ⇒ analog admin sees every
+// check with the same "a fleet-wide scope ⇒ analog admin sees every
 // venue" convention.
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -29,7 +30,7 @@ export async function DELETE(
   { params }: { params: Promise<{ transactionId: string }> },
 ): Promise<NextResponse> {
   // ---- auth ----
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const supabaseSession = await createServerClient()
     const {
@@ -39,7 +40,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status })
@@ -69,9 +70,9 @@ export async function DELETE(
   if (!transaction) {
     return NextResponse.json({ error: 'transaction not found' }, { status: 404 })
   }
-  // Empty allowedVenueIds means analog admin sees every venue (matches the
+  // A fleet-wide scope means analog admin sees every venue (matches the
   // page-level allowlist treatment in conversations/page.tsx).
-  if (allowedVenueIds.length > 0 && !allowedVenueIds.includes(transaction.venue_id)) {
+  if (!allowsVenue(venueScope, transaction.venue_id)) {
     return NextResponse.json({ error: 'venue not allowed' }, { status: 403 })
   }
   if (transaction.source !== 'guest_reported') {

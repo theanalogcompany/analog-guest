@@ -4,6 +4,7 @@ import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { loadVenues } from '../_lib/load-venues'
+import { type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-343 Stage A: /admin/venues list page. Read-only. Mirrors
 // voices/page.tsx's structure — session + allowlist resolved here (the
@@ -19,16 +20,16 @@ export default async function VenuesIndexPage() {
   } = await supabase.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
   }
 
-  const venues = await loadVenues(allowedVenueIds)
+  const venues = await loadVenues(venueScope)
 
   return (
     <div className="flex flex-col gap-8">

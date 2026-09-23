@@ -38,6 +38,7 @@ import { createAdminClient } from '@/lib/db/admin'
 // Instagram-specific, and the value is shared by three callers that must not
 // import each other.
 import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 // Canonical UUID regex, as app/api/operator/messages/[id]/thread/route.ts.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -69,7 +70,7 @@ export async function POST(
 
   // An EMPTY allowlist means NO venue access on this path, and it is a deny.
   //
-  // `verifyOperatorRequest` builds allowedVenueIds from the operator's literal
+  // `verifyOperatorRequest` builds the venue scope from the operator's literal
   // `operator_venues` rows (lib/auth/verify-jwt.ts), so empty means they are
   // allowlisted for nothing. The `if (length > 0)` idiom belongs to the COOKIE
   // path (lib/auth/require-admin.ts), where empty deliberately means
@@ -80,7 +81,8 @@ export async function POST(
   // listOperatorConversations, listHeadsUpQueue, loadGuestThread and the two
   // commitment helpers all do. 404 rather than 403, per the existence-leak rule
   // the rest of app/api/operator/* follows.
-  if (operator.allowedVenueIds.length === 0) {
+  const venueIds = venueFilterIds(operator.venueScope)
+  if (venueIds === null || venueIds.length === 0) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
@@ -111,7 +113,7 @@ export async function POST(
     .eq('id', messageId)
     .eq('review_state', 'pending')
     .eq('direction', 'outbound')
-    .in('venue_id', operator.allowedVenueIds)
+    .in('venue_id', venueIds)
 
   const { data: claimed, error: claimErr } = await claimQuery.select(
     'id, venue_id, guest_id, channel, created_at',
@@ -132,7 +134,7 @@ export async function POST(
       .from('messages')
       .select('id, review_state, direction')
       .eq('id', messageId)
-      .in('venue_id', operator.allowedVenueIds)
+      .in('venue_id', venueIds)
       .maybeSingle()
     if (lookupErr) {
       return NextResponse.json({ error: 'internal_error' }, { status: 500 })

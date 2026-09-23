@@ -50,13 +50,14 @@ import {
 // does to something a test needs for real.
 import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
 import { recordIntentionPrompts } from '@/lib/agent/intentions/record'
+import { bearerAllowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 export type DispatchAction = 'approve' | 'edit'
 
 export interface DispatchOperatorOutboundInput {
   messageId: string
   operatorId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
   action: DispatchAction
   /** Required when action === 'edit'. Becomes messages.body. */
   editedBody?: string
@@ -173,10 +174,13 @@ export async function dispatchOperatorOutbound(
       error: 'message not found',
     }
   }
-  if (
-    input.allowedVenueIds.length > 0 &&
-    !input.allowedVenueIds.includes(row.venue_id)
-  ) {
+  // TAC-530: bearerAllowsVenue is total over VenueScope -- an empty grant
+  // list allows nothing, and a fleet-wide scope is REFUSED here rather than
+  // allowed, because this path is bearer-only and never legitimately sees one. The old
+  // `allowedVenueIds.length > 0 && !includes(...)` form read an empty
+  // allowlist as "no restriction", which is the cookie path's meaning, and
+  // let a grantless operator bearer approve or edit any card in the fleet.
+  if (!bearerAllowsVenue(input.venueScope, row.venue_id)) {
     return {
       ok: false,
       errorCode: 'message_not_found',

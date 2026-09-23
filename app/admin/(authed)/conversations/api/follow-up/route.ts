@@ -6,6 +6,7 @@ import { loadLastInboundChannel } from '@/lib/agent/last-inbound-channel'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
+import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // POST /admin/conversations/api/follow-up — operator-initiated manual outbound
 // from the Command Center conversations surface. Colocated under /admin/* so
@@ -17,7 +18,7 @@ import { createServerClient } from '@/lib/db/server'
 // don't exist in the agent pipeline today:
 //
 //   1. Auth: cookie-session resolved to an analog admin operator.
-//   2. Allowlist: venueId must be in the operator's allowedVenueIds.
+//   2. Allowlist: venueId must be within the operator's venue scope.
 //   3. Venue + messaging_phone_number: surface misconfiguration as a clean
 //      400 here instead of letting the pipeline 502 from a deeper failure
 //      when scheduleAndSend has nothing to dial. Checked only for a text
@@ -66,7 +67,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<NextResponse> {
   // ---- auth ----
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const supabaseSession = await createServerClient()
     const {
@@ -76,7 +77,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status })
@@ -101,9 +102,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // ---- venue allowlist ----
-  // Empty allowedVenueIds means analog admin sees every venue. Non-empty
+  // A fleet-wide scope means analog admin sees every venue. A granted list
   // means we must validate. Matches the page-level allowlist treatment.
-  if (allowedVenueIds.length > 0 && !allowedVenueIds.includes(body.venueId)) {
+  if (!allowsVenue(venueScope, body.venueId)) {
     return NextResponse.json({ error: 'venue not allowed' }, { status: 403 })
   }
 

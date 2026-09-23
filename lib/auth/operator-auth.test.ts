@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type OperatorRouteHandler, withOperatorAuth } from './operator-auth'
 import { AuthError } from './types'
 import { verifyOperatorRequest } from './verify-jwt'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 vi.mock('./verify-jwt', () => ({
   verifyOperatorRequest: vi.fn(),
@@ -24,7 +25,7 @@ describe('withOperatorAuth', () => {
   it('threads { operator, params } into the inner handler on success', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: grantedVenues(['venue-a', 'venue-b']),
     })
     const handler: OperatorRouteHandler<{ id: string }> = vi.fn(async (_req, ctx) => {
       return new Response(JSON.stringify({ ok: true, ...ctx }), { status: 200 })
@@ -39,7 +40,7 @@ describe('withOperatorAuth', () => {
     const ctx = handlerMock.mock.calls[0]![1]
     expect(ctx.operator).toEqual({
       operatorId: 'op-1',
-      allowedVenueIds: ['venue-a', 'venue-b'],
+      venueScope: grantedVenues(['venue-a', 'venue-b']),
     })
     expect(ctx.params).toEqual({ id: 'msg-1' })
   })
@@ -86,7 +87,7 @@ describe('withOperatorAuth', () => {
   it('awaits the Next.js params Promise before invoking the handler', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [],
+      venueScope: grantedVenues([]),
     })
     const handler: OperatorRouteHandler<{ id: string }> = vi.fn(
       async () => new Response(null, { status: 204 }),

@@ -19,6 +19,7 @@ import { z } from 'zod'
 import { withOperatorAuth } from '@/lib/auth'
 import { captureOperatorMessageSkipped } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -34,10 +35,20 @@ export const POST = withOperatorAuth<{ id: string }>(
     }
     const messageId = parsed.data.id
 
+    // TAC-530: an EMPTY allowlist means NO venue access on the bearer path --
+    // see the note on AuthenticatedOperator. Guarding the .in() filter with
+    // `length > 0` skipped it entirely, letting a grantless operator bearer
+    // skip any pending card in the fleet. Deny before touching the database,
+    // matching resolve-external.
+    const venueIds = venueFilterIds(operator.venueScope)
+    if (venueIds === null || venueIds.length === 0) {
+      return NextResponse.json({ error: 'not found' }, { status: 404 })
+    }
+
     const supabase = createAdminClient()
     const now = new Date().toISOString()
 
-    let claimQuery = supabase
+    const claimQuery = supabase
       .from('messages')
       .update({
         review_state: 'skipped',
@@ -48,10 +59,7 @@ export const POST = withOperatorAuth<{ id: string }>(
       .eq('id', messageId)
       .eq('review_state', 'pending')
       .eq('direction', 'outbound')
-
-    if (operator.allowedVenueIds.length > 0) {
-      claimQuery = claimQuery.in('venue_id', operator.allowedVenueIds)
-    }
+      .in('venue_id', venueIds)
 
     const { data: claimed, error: claimErr } = await claimQuery.select(
       'id, venue_id, guest_id, category, voice_fidelity, created_at',
@@ -67,14 +75,11 @@ export const POST = withOperatorAuth<{ id: string }>(
     if (!claimed || claimed.length === 0) {
       // Rowcount=0 — either not found / not allowed, or already acted. Look
       // up the current state to distinguish.
-      let lookupQuery = supabase
+      const lookupQuery = supabase
         .from('messages')
         .select('id, venue_id, review_state, direction')
         .eq('id', messageId)
-
-      if (operator.allowedVenueIds.length > 0) {
-        lookupQuery = lookupQuery.in('venue_id', operator.allowedVenueIds)
-      }
+        .in('venue_id', venueIds)
 
       const { data: current } = await lookupQuery.maybeSingle()
 

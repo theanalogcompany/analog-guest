@@ -18,6 +18,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
 import { captureCommitmentEscalated } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingCommitment } from '@/lib/schemas/guest-commitment'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 import {
   cancelCommitmentForGuest,
   commitmentDedupKey,
@@ -1133,11 +1134,11 @@ describe('scheduleArrival', () => {
 })
 
 describe('markAcknowledged', () => {
-  it('short-circuits when allowedVenueIds is empty (no round trip)', async () => {
+  it('short-circuits when the scope grants no venues (no round trip)', async () => {
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: grantedVenues([]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1161,7 +1162,7 @@ describe('markAcknowledged', () => {
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1181,7 +1182,7 @@ describe('markAcknowledged', () => {
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1190,11 +1191,11 @@ describe('markAcknowledged', () => {
 })
 
 describe('markCancelled (TAC-299)', () => {
-  it('short-circuits when allowedVenueIds is empty (no round trip)', async () => {
+  it('short-circuits when the scope grants no venues (no round trip)', async () => {
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: grantedVenues([]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1212,7 +1213,7 @@ describe('markCancelled (TAC-299)', () => {
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1236,7 +1237,7 @@ describe('markCancelled (TAC-299)', () => {
     await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(state.updatePayload).not.toHaveProperty('cancelled_at')
@@ -1251,7 +1252,7 @@ describe('markCancelled (TAC-299)', () => {
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(r.ok).toBe(true)
@@ -1272,7 +1273,7 @@ describe('markCancelled (TAC-299)', () => {
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(r.ok).toBe(false)
@@ -1978,7 +1979,7 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
     await markCancelled({
       commitmentId: COMMITMENT_ID,
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
     expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })

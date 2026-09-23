@@ -10,13 +10,13 @@
 // expected_arrival, created_at }`.
 //
 // Auth: bearer-token via withOperatorAuth (lib/auth/operator-auth.ts). The
-// HOF resolves to AuthenticatedOperator { operatorId, allowedVenueIds }
+// HOF resolves to AuthenticatedOperator { operatorId, venueScope }
 // and shapes AuthError as 401/403 JSON. The acknowledge endpoint
 // (`/api/operator/commitments/[id]/acknowledge`) uses the inline Contract-
 // bound auth pattern — but this queue route predates that and stays on the
 // HOF; clients tolerate the existing 401 body shape from withOperatorAuth.
 //
-// Empty allowedVenueIds returns 200 with `{ drafts: [], commitments: [] }` —
+// A scope granting no venues returns 200 with `{ drafts: [], commitments: [] }` —
 // an operator with no venue grants isn't an error, they just see nothing.
 // Both queue lookups run in parallel to avoid serial DB latency.
 
@@ -29,8 +29,8 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withOperatorAuth(async (_request, { operator }) => {
   const [draftsResult, commitmentsResult] = await Promise.all([
-    listPendingQueue(operator.allowedVenueIds),
-    listHeadsUpQueue(operator.allowedVenueIds),
+    listPendingQueue(operator.venueScope),
+    listHeadsUpQueue(operator.venueScope),
   ])
   if (!draftsResult.ok) {
     return NextResponse.json(

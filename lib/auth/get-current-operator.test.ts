@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getCurrentOperator } from './get-current-operator'
 import { AuthError } from './types'
 import { verifyOperatorRequest } from './verify-jwt'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 vi.mock('./verify-jwt', () => ({
   verifyOperatorRequest: vi.fn(),
@@ -23,10 +24,10 @@ describe('getCurrentOperator', () => {
   it('returns the AuthenticatedOperator when verifyOperatorRequest resolves', async () => {
     vi.mocked(verifyOperatorRequest).mockResolvedValue({
       operatorId: 'operator-1',
-      allowedVenueIds: ['venue-a'],
+      venueScope: grantedVenues(['venue-a']),
     })
     const out = await getCurrentOperator(emptyRequest())
-    expect(out).toEqual({ operatorId: 'operator-1', allowedVenueIds: ['venue-a'] })
+    expect(out).toEqual({ operatorId: 'operator-1', venueScope: grantedVenues(['venue-a']) })
   })
 
   it('returns a 401 Response when verifyOperatorRequest throws AuthError(401)', async () => {

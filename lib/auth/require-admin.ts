@@ -22,6 +22,7 @@ import { createAdminClient } from '../db/admin'
 import { createServerClient } from '../db/server'
 import { AuthError } from './types'
 import { verifyAnalogAdminAccess } from './verify-analog-admin'
+import { allowsVenue, type VenueScope } from './venue-scope'
 
 const UuidSchema = z.string().uuid()
 
@@ -30,7 +31,7 @@ export type RequireAdminResult<TExtra> =
   | { ok: false; response: NextResponse }
 
 async function authenticateAdmin(): Promise<
-  | { ok: true; operatorId: string; allowedVenueIds: string[] }
+  | { ok: true; operatorId: string; venueScope: VenueScope }
   | { ok: false; response: NextResponse }
 > {
   try {
@@ -48,7 +49,7 @@ async function authenticateAdmin(): Promise<
     return {
       ok: true,
       operatorId: op.operatorId,
-      allowedVenueIds: op.allowedVenueIds,
+      venueScope: op.venueScope,
     }
   } catch (e) {
     if (e instanceof AuthError) {
@@ -67,7 +68,7 @@ async function authenticateAdmin(): Promise<
 /**
  * Resolve cookie-session admin auth and check venueId is in the operator's
  * allowlist (or that the operator is in analog-admin scope, which sees all
- * venues — represented by an empty `allowedVenueIds`).
+ * venues — represented by an `all_venues` scope; see lib/auth/venue-scope.ts).
  */
 export async function requireVenueAdmin(
   venueId: string,
@@ -81,7 +82,7 @@ export async function requireVenueAdmin(
       response: NextResponse.json({ error: 'invalid venueId' }, { status: 400 }),
     }
   }
-  if (auth.allowedVenueIds.length > 0 && !auth.allowedVenueIds.includes(venueId)) {
+  if (!allowsVenue(auth.venueScope, venueId)) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
@@ -132,10 +133,7 @@ export async function requireCorpusEntryAdmin(
       response: NextResponse.json({ error: 'corpus entry not found' }, { status: 404 }),
     }
   }
-  if (
-    auth.allowedVenueIds.length > 0 &&
-    !auth.allowedVenueIds.includes(row.venue_id)
-  ) {
+  if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
@@ -193,10 +191,7 @@ export async function requireKnowledgeEntryAdmin(
       response: NextResponse.json({ error: 'knowledge entry not found' }, { status: 404 }),
     }
   }
-  if (
-    auth.allowedVenueIds.length > 0 &&
-    !auth.allowedVenueIds.includes(row.venue_id)
-  ) {
+  if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
@@ -271,7 +266,7 @@ export async function requireKnowledgeEntriesAdmin(
   }
   const venueId = rows[0].venue_id
 
-  if (auth.allowedVenueIds.length > 0 && !auth.allowedVenueIds.includes(venueId)) {
+  if (!allowsVenue(auth.venueScope, venueId)) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
@@ -329,10 +324,7 @@ export async function requireMechanicAdmin(
       response: NextResponse.json({ error: 'mechanic not found' }, { status: 404 }),
     }
   }
-  if (
-    auth.allowedVenueIds.length > 0 &&
-    !auth.allowedVenueIds.includes(row.venue_id)
-  ) {
+  if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
