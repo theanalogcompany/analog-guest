@@ -4958,6 +4958,37 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(result).toEqual({ status: 'flagged', commitment: null })
   })
 
+  // TAC-527: without the inbound this event cannot tell a correct catch from a
+  // false one, because for an elliptical promise the item in the description
+  // comes from the guest's message and never appears in the reply.
+  it("emits the caught event with the guest's message the verdict was formed against", async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'the gulab jamun was stale too',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "ugh, that's on us too" }),
+    )
+    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBe(
+      'the gulab jamun was stale too',
+    )
+  })
+
+  it('emits a NULL inbound on the caught event for a proactive turn', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    await verifyProsePromiseStage(
+      makeCtx({ currentMessage: null }),
+      makeGenerationResult({ body: "we still owe you a good cortado" }),
+    )
+    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBeNull()
+  })
+
   it('emits the caught event with what is owed and whether it displaced a recommendation', async () => {
     verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
     await verifyProsePromiseStage(
@@ -5034,7 +5065,10 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
       makeGenerationResult({ body: "we'll make it right" }),
     )
     expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
-    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toEqual(
+    // toBe, not toEqual: the two calls are handed the SAME object, so identity
+    // is what the parity claim actually is, and it also catches a restatement
+    // that happens to be deep-equal today.
+    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toBe(
       verifyProsePromiseMock.mock.calls[1]?.[0],
     )
     expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toEqual({

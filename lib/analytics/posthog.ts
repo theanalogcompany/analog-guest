@@ -721,6 +721,25 @@ export interface ProsePromiseCaughtProps {
    * venue owed.
    */
   replacedRecommendation: boolean
+  /**
+   * TAC-527: the guest message the reply was answering, or null on a proactive
+   * turn.
+   *
+   * Without it this event cannot tell a CORRECT catch from a false one, because
+   * for an elliptical promise the item in `commitmentDescription` comes entirely
+   * from the guest's message and never appears in the reply. Guest "the gulab
+   * jamun was stale too" / reply "ugh, that's on us too" naming "a replacement
+   * gulab jamun" is right; guest naming an item while the reply accepts only
+   * FAULT for it and the check mints a comp anyway (measured 8-10/10 on the
+   * ell-11 fixture) is wrong, and the two are indistinguishable from the reply
+   * alone. CLAUDE.md's own rule: distrust any gate whose true-positive history
+   * you cannot produce on demand — sharpened here because a false positive now
+   * MINTS an obligation on approval rather than only holding a draft.
+   *
+   * Precedent for carrying an inbound on an event: captureDraftQueued,
+   * captureDraftRegenerated, captureAgentLatencyHigh.
+   */
+  guestInboundBody: string | null
   // The reply text that was caught. Queued, never sent, and not blanked, so
   // it is safe to log here on the same basis as the mechanic-offer event.
   replyBody: string
@@ -746,6 +765,12 @@ function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
     props.replacedRecommendation
       ? `carrier: from this check, replacing a recommendation the model emitted`
       : `carrier: from this check`,
+    // ABOVE the reply, because resolving the reply is what it is for: for an
+    // elliptical promise the item in `owed` is taken from here and from nowhere
+    // else, so a reader cannot judge the catch without it.
+    props.guestInboundBody === null
+      ? `guest said: (proactive turn, no inbound)`
+      : `guest said: "${truncate(props.guestInboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
     `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
   ]
   return lines.join('\n')

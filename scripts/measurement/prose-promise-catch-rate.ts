@@ -100,8 +100,8 @@ async function judgeOnce(body: string): Promise<Verdict> {
   // TAC-527: body-only, deliberately. These 220 fixtures carry no inbound, so
   // passing null keeps this run byte-comparable with TAC-401's baseline. The
   // cost is stated rather than buried: on the inbound path they no longer
-  // describe the shipped configuration, which is what the inbound-bearing
-  // cases below exist to cover.
+  // describe the shipped configuration. The inbound-bearing cases live in the
+  // sibling scripts/measurement/prose-promise-elliptical.ts, not below.
   const r = await verifyProsePromise({ replyBody: body, guestInboundBody: null })
   if (!r.ok) {
     return {

@@ -1696,6 +1696,9 @@ export async function verifyProsePromiseStage(
     commitmentType: r.data.commitmentType,
     commitmentDescription: r.data.commitmentDescription,
     replacedRecommendation,
+    // TAC-527: the same value handed to the check, so the alert shows what the
+    // verdict was actually formed against rather than what it might have been.
+    guestInboundBody: verifyInput.guestInboundBody,
     replyBody: generation.body,
   })
 

@@ -342,9 +342,24 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
     // The strongest form of the regression guard: not "the additions are
     // absent" but "the result IS the old prompt". Verified byte-identical at
     // 2464 characters when TAC-527 landed.
-    it('composes v1.0.0 EXACTLY, byte for byte, when there is no guest message', async () => {
-      expect(await systemPrompt(null)).toBe(V1_0_0_SYSTEM_PROMPT)
-    })
+    // A BLANK inbound is covered here as well as null, and that half was
+    // missing. Code review mutated the system decision from
+    // `hasGuestMessage(input)` to `input.guestInboundBody !== null` — dropping
+    // only the trim check — and 348 tests passed: a blank inbound composed the
+    // scope paragraph AND the carve-out into the system prompt while the user
+    // prompt rendered no guest line, which is precisely the configuration that
+    // measured 8/20 on apology idioms. The sibling it.each asserts `prompt`
+    // only, and this test asserted `null` only, so the sentence "a blank inbound
+    // is not a guest message" was asserted on one of the two strings it governs.
+    //
+    // Reachable, not hypothetical: a media-only inbound is stored with
+    // `body = ''` and `media` is a live classifier category.
+    it.each([null, '', '   ', '\n', '\t'])(
+      'composes v1.0.0 EXACTLY, byte for byte, when the guest message is %j',
+      async (blank) => {
+        expect(await systemPrompt(blank)).toBe(V1_0_0_SYSTEM_PROMPT)
+      },
+    )
 
     // THE REGRESSION GUARD, and it is the reason the rule renders conditionally
     // at all. Written unconditionally, it moved TAC-401's apology-idiom rate

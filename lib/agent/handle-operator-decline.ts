@@ -403,7 +403,30 @@ export async function handleOperatorDecline(input: {
     // IT DOES NOT GAIN THE GATE. No trigger is pushed, no hold is introduced,
     // the swipe-left is still the approval, and this file's structural
     // invariant is untouched (still no scheduleAndSend, no sendMessage, no
-    // applyApprovalPolicyStage). Only the carrier changes.
+    // applyApprovalPolicyStage).
+    //
+    // BUT IT IS NOT TRUE THAT "ONLY THE CARRIER CHANGES" — an earlier version of
+    // this comment said so and code review caught it. A flagged decline now has
+    // an OBLIGATION identity, so its SLOT can move, with two consequences that
+    // are open questions rather than settled behaviour (raised with Jaipal
+    // 2026-09-23):
+    //
+    //   1. With the obligation slot empty the draft INSERTS there and leaves the
+    //      pending conversation card alone, where 'regen_always' previously
+    //      regenerated it. That is TAC-299 decision #2 ("the operator's decline
+    //      supersedes the pending reply") no longer holding on those turns.
+    //   2. With the obligation slot holding a DIFFERENT comp it drops
+    //      ('obligation_slot_taken'), and the route maps that to 502 WITHOUT
+    //      cancelling the commitment, so the swipe-left is lost and the operator
+    //      gets an error.
+    //
+    // Frequency: this path passes currentMessage: null, so it runs the
+    // body-only check whose post-fix apology-idiom rate measured 1/20, and a
+    // decline draft is by construction a warm apology — roughly the population
+    // that rate was measured on.
+    //
+    // Not "fixed" here because there is no code answer that also keeps the slot
+    // and the carrier in agreement, and disagreeing is the TAC-401 blocker.
     //
     // A failure degrades to NO CARRIER rather than to a hold, and that is the
     // only coherent direction here: the draft is queued unconditionally
@@ -414,16 +437,20 @@ export async function handleOperatorDecline(input: {
     // ctx.currentMessage is null on this path (no guest message is being
     // answered), so the check composes a body-only prompt exactly as it did
     // before TAC-527.
-    let prosePromise: ProsePromiseBackstopResult = { status: 'check_failed' }
-    try {
-      prosePromise = await verifyProsePromiseStage(ctx, gen.result)
-    } catch (err) {
-      console.warn(
-        '[agent] operator decline verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
-        { agentRunId, error: err instanceof Error ? err.message : String(err) },
-      )
-    }
-    const promisedCommitment = prosePromise.status === 'flagged' ? prosePromise.commitment : null
+    // Started here, awaited below, so the Haiku call overlaps the slot read
+    // instead of sitting in front of it. The route awaits this whole function
+    // for its {messageId, body} response, so the call is on the operator's
+    // swipe-left to edit-screen transition — the screen TAC-304 filed a 5-10s
+    // lag on. The two are independent, so overlapping is free.
+    const prosePromisePromise = verifyProsePromiseStage(ctx, gen.result).catch(
+      (err: unknown): ProsePromiseBackstopResult => {
+        console.warn(
+          '[agent] operator decline verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
+          { agentRunId, error: err instanceof Error ? err.message : String(err) },
+        )
+        return { status: 'check_failed' }
+      },
+    )
 
     // Persist as pending. NO approval gate (operator's swipe-left IS the
     // approval). NO scheduleAndSend — persist-only.
@@ -446,8 +473,13 @@ export async function handleOperatorDecline(input: {
       surface: 'operator_decline',
     })
     try {
-      const pendingRows =
-        (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+      const [pendingRowsRaw, prosePromise] = await Promise.all([
+        loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id),
+        prosePromisePromise,
+      ])
+      const pendingRows = pendingRowsRaw ?? EMPTY_PENDING_ROWS
+      const promisedCommitment =
+        prosePromise.status === 'flagged' ? prosePromise.commitment : null
       // TAC-527: resolveDraftCarrierIdentity, NOT draftCommitmentIdentity.
       // The slot the gate decides against and the carrier the row persists
       // have to be the same thing. TAC-401 shipped that divergence once and it

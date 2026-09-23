@@ -1116,6 +1116,86 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
   })
 
+  // Found in code review. The test above uses prose_promise_backstop, where the
+  // fallback wording happens to be true, so it could not see this: under
+  // comp_regex_backstop a recommendation carrier rendered "Approving won't
+  // create anything", and createCommitmentFromPending inserts from the carrier
+  // whatever its type. Under migration 037 a recommendation effectively never
+  // leaves `open`, so the card was false about a row that does create something.
+  it('does NOT claim nothing will be created when the row carries a recommendation', async () => {
+    withCarrier(
+      { type: 'recommendation', description: 'the cortado', code: null, expiresAt: null },
+      'comp_regex_backstop',
+    )
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      "This sounds like it's offering something on the house.",
+    )
+    expect(result.drafts[0]!.reviewReason).not.toContain("won't create anything")
+  })
+
+  // Same reasoning one step further in: an OBLIGATION carrier whose description
+  // sanitizes to nothing cannot be named, but the row still creates a comp.
+  it('does NOT claim nothing will be created when a comp description sanitizes to nothing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    withCarrier(
+      { type: 'comp', description: '\u2014', code: 'G1H2', expiresAt: null },
+      'comp_regex_backstop',
+    )
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      "This sounds like it's offering something on the house.",
+    )
+    warn.mockRestore()
+  })
+
+  // R6's survivor. The blank-description case above uses comp_regex_backstop,
+  // which never reaches the dynamic branch, so it could not see a mutant that
+  // let a blank description through into the sentence — rendering "Approving
+  // this comps . Your call." This is the same trigger the dynamic copy actually
+  // fires on.
+  it('falls back to static copy when a prose-promise description sanitizes to nothing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    withCarrier({ type: 'comp', description: '\u2014 \u2013', code: 'G1H2', expiresAt: null })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This sounds like a promise to the guest. Your call.',
+    )
+    expect(result.drafts[0]!.reviewReason).not.toContain('Approving this comps')
+    warn.mockRestore()
+  })
+
+  // A MALFORMED carrier is different again: dispatchOperatorOutbound skips
+  // materialization on a parse failure, so nothing IS created and the suffix is
+  // true. Pins the boundary between this and the two cases above.
+  it('does claim nothing will be created when the carrier is malformed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    withCarrier({ type: 'comp' }, 'comp_regex_backstop')
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.drafts[0]!.reviewReason).toBe(
+      "This sounds like it's offering something on the house. Approving won't create anything.",
+    )
+    warn.mockRestore()
+  })
+
+  // MINOR from review: a surviving mutant. Every pre-existing empty-queue test
+  // stubs the select to an empty result, so it could not tell "not called" from
+  // "called with []" — which would issue id=in.() to PostgREST on every poll.
+  it('does not query for carriers when the queue is empty', async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null })
+    const result = await listPendingQueue(['v1'])
+    expect(result.ok).toBe(true)
+    expect(carrierSelectMock).not.toHaveBeenCalled()
+  })
+
   // FAILS SOFT. Losing the specific sentence is a worse card; losing the queue
   // is every operator at that venue losing every card, each of which has a
   // clock on it.

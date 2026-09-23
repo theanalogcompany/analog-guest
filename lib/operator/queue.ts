@@ -447,19 +447,27 @@ function sanitizeCardDescription(raw: string): string {
  * the model's own structured emission and works today; widening this to it is
  * a separate decision with its own copy.
  */
-function labelForTrigger(code: string, carrier: CardCarrier | null): string {
-  if (code === 'prose_promise_backstop' && carrier !== null) {
-    return COMMITMENT_SENTENCE[carrier.type](carrier.description)
+function labelForTrigger(code: string, info: CardCarrierInfo | null): string {
+  if (code === 'prose_promise_backstop' && info?.obligation != null) {
+    return COMMITMENT_SENTENCE[info.obligation.type](info.obligation.description)
   }
-  if (code === 'comp_regex_backstop' && carrier === null) {
+  // ONLY when the row carries nothing at all. `info` non-null with a null
+  // `obligation` means the row DOES carry something this sentence cannot name —
+  // a recommendation, or an obligation whose description sanitized to nothing —
+  // and `createCommitmentFromPending` inserts from the carrier whatever its
+  // type, so telling the operator nothing will be created would be false.
+  // Caught in code review: the recommendation case rendered the suffix, and the
+  // existing recommendation test used prose_promise_backstop, where the
+  // fallback wording happens to be true.
+  if (code === 'comp_regex_backstop' && info === null) {
     return "This sounds like it's offering something on the house. Approving won't create anything."
   }
   return (REVIEW_REASON_LABELS as Record<string, string>)[code] ?? REVIEW_REASON_FALLBACK
 }
 
-function normalizeReviewReason(raw: string | null, carrier: CardCarrier | null): string | null {
+function normalizeReviewReason(raw: string | null, info: CardCarrierInfo | null): string | null {
   if (raw === null) return null
-  return labelForTrigger(raw, carrier)
+  return labelForTrigger(raw, info)
 }
 
 /**
@@ -499,8 +507,8 @@ function normalizeReviewTriggers(raw: string[] | null): string[] {
  * already-normalized codes, not the raw column, or the alignment guarantee is
  * theirs to keep rather than this function's.
  */
-function toReviewTriggerLabels(codes: string[], carrier: CardCarrier | null): string[] {
-  return codes.map((t) => labelForTrigger(t, carrier))
+function toReviewTriggerLabels(codes: string[], info: CardCarrierInfo | null): string[] {
+  return codes.map((t) => labelForTrigger(t, info))
 }
 
 /**
@@ -602,6 +610,19 @@ function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
 type CardCarrier = { type: 'comp' | 'hold' | 'discount'; description: string }
 
 /**
+ * TAC-527: what the row carries, which is NOT the same question as what the
+ * card can name.
+ *
+ * Presence in the map means `pending_commitment` held something
+ * `createCommitmentFromPending` will insert from. `obligation` is non-null only
+ * when that something is a comp, hold or discount WITH a nameable description.
+ * The two are distinct because a recommendation carrier still creates a row —
+ * and under migration 037 a recommendation effectively never leaves `open` — so
+ * a card saying "Approving won't create anything" over one would be false.
+ */
+type CardCarrierInfo = { obligation: CardCarrier | null }
+
+/**
  * TAC-527: the carrier for each draft, read in ONE batched query keyed on the
  * ids the RPC just returned.
  *
@@ -620,8 +641,8 @@ type CardCarrier = { type: 'comp' | 'hold' | 'discount'; description: string }
 async function loadCardCarriers(
   supabase: ReturnType<typeof createAdminClient>,
   draftIds: string[],
-): Promise<Map<string, CardCarrier>> {
-  const carriers = new Map<string, CardCarrier>()
+): Promise<Map<string, CardCarrierInfo>> {
+  const carriers = new Map<string, CardCarrierInfo>()
   if (draftIds.length === 0) return carriers
 
   const { data, error } = await supabase
@@ -647,11 +668,14 @@ async function loadCardCarriers(
       )
       continue
     }
+    // A parsed carrier is recorded WHATEVER its type: dispatch will insert from
+    // it, so the row creates something. Only `obligation` is narrowed.
     const { type, description } = parsed.data
-    if (type !== 'comp' && type !== 'hold' && type !== 'discount') continue
     const clean = sanitizeCardDescription(description)
-    if (clean.length === 0) continue
-    carriers.set(row.id, { type, description: clean })
+    const nameable = type === 'comp' || type === 'hold' || type === 'discount'
+    carriers.set(row.id, {
+      obligation: nameable && clean.length > 0 ? { type, description: clean } : null,
+    })
   }
 
   return carriers

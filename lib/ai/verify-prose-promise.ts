@@ -150,7 +150,8 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
  * The replay harness still measures body-only, passing guestInboundBody: null,
  * so TAC-401's numbers stay comparable. Be precise about what that costs: on
  * the inbound path those fixtures no longer describe the shipped
- * configuration. The harness carries its own inbound-bearing cases for that.
+ * configuration. The inbound-bearing cases are a SEPARATE harness,
+ * scripts/measurement/prose-promise-elliptical.ts.
  *
  * The caller (verifyProsePromiseStage in lib/agent/stages.ts) decides WHEN to
  * call this, retries it once on a transient fault, and FAILS CLOSED on

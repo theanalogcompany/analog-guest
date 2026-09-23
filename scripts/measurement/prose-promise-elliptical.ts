@@ -197,6 +197,22 @@ async function main(): Promise<void> {
     },
   })
 
+  // A mislabelled row would otherwise spend its calls, checkpoint to the log,
+  // appear in NO label section and count toward no breach — the run printing
+  // clean. `satisfies Record<Label, …>` guards the code side; the labels are
+  // written in JSON, which is the side that has no compiler. Same family as
+  // this file's own "a failed call is not a result".
+  const known = new Set(Object.keys(EXPECTATION))
+  const unknown = fixture.rows.filter((r) => !known.has(r.label))
+  if (unknown.length > 0) {
+    console.error(
+      `[elliptical] unknown label(s) in the fixture, refusing to spend calls: ${unknown
+        .map((r) => `${r.id}=${r.label}`)
+        .join(', ')}`,
+    )
+    process.exit(1)
+  }
+
   const cellsToRun = fixture.rows.flatMap((row) => ARMS.map((arm) => ({ row, arm })))
   console.log(
     `[elliptical] ${fixture.rows.length} rows x ${ARMS.length} arms x ${REPEATS} repeats = ${cellsToRun.length * REPEATS} calls`,
