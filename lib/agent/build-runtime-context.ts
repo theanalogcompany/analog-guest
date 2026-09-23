@@ -24,6 +24,7 @@ import {
 import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
+import { isScanReferral } from '@/lib/schemas/referral-source'
 import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
@@ -526,10 +527,39 @@ export async function buildRuntimeContext(input: {
       guest.createdVia === 'qr_scan' ? guest.createdAt : null,
       acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null,
     ].filter((d): d is Date => d !== null && Number.isFinite(d.getTime()))
-    const visitConfirmedAt =
+    const earliestConfirmedVisit =
       confirmedVisitTimes.length === 0
         ? null
         : new Date(Math.min(...confirmedVisitTimes.map((d) => d.getTime())))
+
+    // TAC-518: a scan on THIS TURN is a confirmed visit, and it wins outright.
+    //
+    // Both sources above are stamped once and never move: enrollment is the
+    // day the guest first appeared, and an acknowledged arrival is a
+    // commitment someone ticked off at the counter. Neither can see a guest
+    // who has messaged this venue before and is standing at the pickup counter
+    // right now, which on Instagram is exactly who the referral identifies.
+    //
+    // It overrides rather than joining confirmedVisitTimes, because that list
+    // is reduced with Math.min and the whole point here is a LATER anchor. The
+    // earliest-wins rule is untouched for the two historical sources, and the
+    // reason TAC-436 gave for it still holds for them: a second visit must not
+    // renew an ask about the first order nobody heard.
+    //
+    // This does NOT re-arm understand_order for a guest who already has a row
+    // for it — rearmsOnNewerEvent is false for visit_confirmed, so derive.ts
+    // skips any intention with an existing row, whatever anchor it is handed.
+    // What it reaches is the guest who never had one: created by an ordinary
+    // DM, so visitConfirmedAt was null every turn until they scanned. Widening
+    // it further means reversing TAC-436 ruling 3 fleet-wide, on both channels,
+    // which is its own decision and not this ticket's.
+    //
+    // receivedAt, not now: the row's own timestamp is when the guest was at the
+    // counter, and a retried or delayed webhook must not move the anchor later.
+    const scanAt = isScanReferral(input.currentMessage?.referralSource)
+      ? (input.currentMessage?.receivedAt ?? null)
+      : null
+    const visitConfirmedAt = scanAt ?? earliestConfirmedVisit
 
     // Arms got_the_recommendation; the derivation picks the newest one that is
     // askable now (ruling 1). activeCommitments is the open + pending_ack set,

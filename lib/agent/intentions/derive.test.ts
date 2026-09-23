@@ -173,6 +173,41 @@ describe('deriveOpenIntentions — arming', () => {
     expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
   })
 
+  // TAC-518. The whole point of reading the referral on THIS TURN: a guest who
+  // has messaged the venue for weeks, whose enrollment anchor is long expired,
+  // scans at the pickup counter. buildRuntimeContext hands the scan's own time
+  // down as visitConfirmedAt; here that has to arm, engagement and history
+  // notwithstanding, because they are holding the drink right now.
+  it('arms understand_order for an engaged, long-standing guest whose visit was just confirmed', () => {
+    const scanAt = hoursAgo(1)
+    const result = deriveOpenIntentions(
+      input({ ...engaged(40), visitConfirmedAt: scanAt, inboundTimes: [daysAgo(3), NOW] }),
+    )
+    expect(keysOf(result.open)).toContain('understand_order')
+    expect(result.newlyEligible).toContainEqual({
+      key: 'understand_order',
+      eligibleAt: scanAt,
+      rearm: false,
+    })
+  })
+
+  // TAC-518's BOUNDARY, pinned so it is a decision rather than a surprise.
+  // understand_order does not re-arm (rearmsOnNewerEvent is false for
+  // visit_confirmed), so a guest who already has a row for it keeps the answer
+  // they already gave — or the silence they already gave — however many times
+  // they scan afterwards. That is TAC-436 ruling 3 still holding, and reversing
+  // it is a fleet-wide change on both channels, not this ticket's.
+  it('does NOT re-arm understand_order for a guest who already has a row, however fresh the visit', () => {
+    const result = deriveOpenIntentions(
+      input({
+        visitConfirmedAt: hoursAgo(1),
+        rows: { prompted: [promptedRow('understand_order', daysAgo(30))], eligible: [] },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('understand_order')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
+  })
+
   // The ruling's own closure, unchanged: hearing the order closes the ask,
   // whatever confirmed the visit.
   it('never arms understand_order once any transaction exists', () => {

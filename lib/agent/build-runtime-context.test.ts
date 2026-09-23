@@ -174,6 +174,49 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
   })
 })
 
+// TAC-518: a scan on THIS TURN is a confirmed visit. Source-level for the same
+// reason as the block above — nothing runs buildRuntimeContext for real — and
+// the behavioural half is already covered: derive.test.ts proves what arming
+// does with a given visitConfirmedAt, so what is untested without these is
+// only whether this file computes the right one.
+describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+  const resolution = src.slice(
+    src.indexOf('const earliestConfirmedVisit ='),
+    src.indexOf('// Arms got_the_recommendation'),
+  )
+
+  it('reads the turn scan through the shared predicate', () => {
+    expect(resolution).toContain('isScanReferral(input.currentMessage?.referralSource)')
+  })
+
+  // The anchor is the row's own receipt time. `now` would move it later on a
+  // retried or delayed webhook, and the guest was at the counter when the
+  // message arrived, not when we got round to it.
+  it('anchors on the message receipt time, not now', () => {
+    expect(resolution).toContain('input.currentMessage?.receivedAt')
+    expect(resolution).not.toMatch(/scanAt\s*=\s*[^\n]*\bnew Date\(\)/)
+  })
+
+  // The whole point is a LATER anchor than the historical sources, so the scan
+  // must not be reduced with them. Joining confirmedVisitTimes would put it
+  // through Math.min and a returning scanner would keep their old, expired
+  // anchor — the defect this ticket exists to fix, reintroduced silently.
+  it('overrides the earliest-wins reduction rather than joining it', () => {
+    expect(resolution).toContain('const visitConfirmedAt = scanAt ?? earliestConfirmedVisit')
+    const list = src.slice(src.indexOf('const confirmedVisitTimes = ['), src.indexOf('const earliestConfirmedVisit'))
+    expect(list).not.toContain('referralSource')
+    expect(list).not.toContain('scanAt')
+  })
+
+  // TAC-436's rule for the two historical sources is untouched. A mutant that
+  // "simplifies" by making the scan just another candidate passes the test
+  // above only if this one still holds too.
+  it('leaves the historical earliest-wins reduction intact', () => {
+    expect(src).toMatch(/new Date\(Math\.min\(\.\.\.confirmedVisitTimes\.map\(/)
+  })
+})
+
 // TAC-495: the conversation's channel, which picks the prompt copy. Source-level
 // for the same reason as the blocks above. The rule itself is tested in
 // conversation-channel.test.ts; these check this file feeds it the right

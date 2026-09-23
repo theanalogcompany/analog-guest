@@ -60,7 +60,10 @@ describe('isScanReferral', () => {
 // this module is that they cannot answer it differently.
 describe('both callers read the shared predicate, not their own copy', () => {
   const REPO = join(__dirname, '..', '..')
-  const CALLERS = [join('lib', 'messaging', 'instagram', 'handle-events.ts')]
+  const CALLERS = [
+    join('lib', 'messaging', 'instagram', 'handle-events.ts'),
+    join('lib', 'agent', 'build-runtime-context.ts'),
+  ]
 
   it.each(CALLERS)('%s imports isScanReferral', (file) => {
     const src = readFileSync(join(REPO, file), 'utf-8')
