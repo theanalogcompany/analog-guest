@@ -469,10 +469,16 @@ describe('regenerateWithCritique — happy path', () => {
   })
 
   // The admin mock ignores select()'s argument, so only the source shows the
-  // column is loaded at all.
-  it('selects the channel column when loading the triggering inbound', async () => {
+  // column is loaded at all. TAC-518 added referral_source for the same reason
+  // channel is here: this file's standing obligation is to mirror
+  // handle-inbound's loadInbound, and a regen of a scan turn that arms nothing
+  // answers a different question than the generation it is supposed to replay.
+  it('selects the channel and referral columns when loading the triggering inbound', async () => {
     const src = await readFile(new URL('./regenerate-with-critique.ts', import.meta.url), 'utf-8')
-    expect(src).toContain(".select('id, body, created_at, provider_message_id, direction, channel')")
+    expect(src).toContain(
+      ".select('id, body, created_at, provider_message_id, direction, channel, referral_source')",
+    )
+    expect(src).toContain('referralSource: load.data.inbound.referral_source,')
   })
 
   it('threads historyEndIso = inbound.created_at into buildRuntimeContext', async () => {

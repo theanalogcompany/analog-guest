@@ -1288,6 +1288,80 @@ describe('handleInbound — the inbound message carries its channel (TAC-495)', 
   })
 })
 
+// TAC-518: the referral on THIS TURN's row is the only way a returning guest's
+// scan can be seen — created_via is stamped once, at guest creation, and says
+// nothing about a guest who scanned again today. Same two halves as the block
+// above, and for the same reason: the supabase mock ignores its select()
+// argument, so a behavioural test alone would keep passing with the column
+// dropped and every real scan arriving as "no referral".
+describe('handleInbound — the inbound message carries its referral (TAC-518)', () => {
+  function inboundRow(referralSource: string | null) {
+    return {
+      data: {
+        id: INBOUND_ID,
+        body: 'hi',
+        provider_message_id: 'p1',
+        created_at: new Date().toISOString(),
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        direction: 'inbound',
+        channel: 'instagram',
+        referral_source: referralSource,
+      },
+      error: null,
+    }
+  }
+
+  it("hands the row's referral_source to buildRuntimeContext on the current message", async () => {
+    inboundSingleMock.mockResolvedValue(inboundRow('SHORTLINK'))
+    generateStageMock.mockResolvedValue(GEN_FAILED)
+
+    await handleInbound(INBOUND_ID)
+
+    expect(buildRuntimeContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: expect.objectContaining({ referralSource: 'SHORTLINK' }),
+      }),
+    )
+  })
+
+  // Raw, not pre-judged: isScanReferral stays the one place that decides what
+  // counts, so a source Meta adds later is decided in one file rather than
+  // silently collapsed to a boolean here.
+  it('passes a non-scan source through verbatim rather than flattening it', async () => {
+    inboundSingleMock.mockResolvedValue(inboundRow('ADS'))
+    generateStageMock.mockResolvedValue(GEN_FAILED)
+
+    await handleInbound(INBOUND_ID)
+
+    expect(buildRuntimeContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: expect.objectContaining({ referralSource: 'ADS' }),
+      }),
+    )
+  })
+
+  it('carries a null referral through as null', async () => {
+    inboundSingleMock.mockResolvedValue(inboundRow(null))
+    generateStageMock.mockResolvedValue(GEN_FAILED)
+
+    await handleInbound(INBOUND_ID)
+
+    expect(buildRuntimeContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessage: expect.objectContaining({ referralSource: null }),
+      }),
+    )
+  })
+
+  it('selects the referral_source column when loading the inbound row', () => {
+    const src = readFileSync(join(__dirname, 'handle-inbound.ts'), 'utf-8')
+    const load = src.slice(src.indexOf('async function loadInbound('), src.indexOf('async function findExistingReply('))
+    expect(load).toMatch(/\.select\('[^']*\breferral_source\b[^']*'\)/)
+    expect(load).toContain('referralSource: data.referral_source,')
+  })
+})
+
 // TAC-367. The positive half of the pair whose negatives live in
 // handle-holding-message.test.ts and handle-followup.test.ts: inbound SHOULD
 // retrieve, outbound should not. Stating it here makes the distinction a

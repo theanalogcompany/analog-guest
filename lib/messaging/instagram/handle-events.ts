@@ -80,6 +80,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+// By path, not through @/lib/schemas: TAC-518 shares this predicate with the
+// agent runtime, and a barrel a test mocks would hand one of the two a stub
+// while the other kept the real thing, which is the drift it exists to stop.
+import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
   parseInstagramDelivery,
@@ -97,9 +101,6 @@ type MessageInsert = Database['public']['Tables']['messages']['Insert']
 type GuestInsert = Database['public']['Tables']['guests']['Insert']
 
 const UNIQUE_VIOLATION = '23505'
-
-/** Meta's `referral.source` for a thread opened from an ig.me link (TAC-492). */
-const SHORTLINK_SOURCE = 'SHORTLINK'
 
 export type InstagramGuestCreatedVia = 'qr_scan' | 'inbound_message'
 
@@ -216,7 +217,7 @@ async function findGuest(
  * else, a missing referral included, is an ordinary first contact.
  */
 function createdViaForReferral(referral: InstagramReferral | null): InstagramGuestCreatedVia {
-  return referral?.source === SHORTLINK_SOURCE ? 'qr_scan' : 'inbound_message'
+  return isScanReferral(referral?.source) ? 'qr_scan' : 'inbound_message'
 }
 
 async function findOrCreateGuest(

@@ -180,6 +180,7 @@ interface OriginalOutboundLoad {
     created_at: string
     provider_message_id: string | null
     channel: string
+    referral_source: string | null
   }
   guestId: string
 }
@@ -232,7 +233,7 @@ async function loadOriginalOutbound(
 
   const { data: inbound, error: inErr } = await supabase
     .from('messages')
-    .select('id, body, created_at, provider_message_id, direction, channel')
+    .select('id, body, created_at, provider_message_id, direction, channel, referral_source')
     .eq('id', outbound.reply_to_message_id)
     .maybeSingle()
   if (inErr || !inbound) {
@@ -264,6 +265,7 @@ async function loadOriginalOutbound(
         created_at: inbound.created_at,
         provider_message_id: inbound.provider_message_id,
         channel: inbound.channel,
+        referral_source: inbound.referral_source,
       },
       guestId: outbound.guest_id,
     },
@@ -296,6 +298,10 @@ export async function regenerateWithCritique(
         // TAC-495: mirrored from handle-inbound's loadInbound, so the regen
         // gets the same channel copy the original generation did.
         channel: parseMessageChannel(load.data.inbound.channel),
+        // TAC-518: mirrored for the same reason — a regen of a scan turn must
+        // arm what the original did, or the playground answers a different
+        // question than production did.
+        referralSource: load.data.inbound.referral_source,
       },
       historyEndIso: load.data.inbound.created_at,
     })

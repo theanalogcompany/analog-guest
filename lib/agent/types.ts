@@ -119,6 +119,17 @@ export interface InboundMessage {
   // one parseMessageChannel recognizes, which migration 048's CHECK forbids.
   // Read by resolveConversationChannel to pick the prompt copy.
   channel: MessageChannel | null
+  // TAC-518: messages.referral_source, raw. Null on every SMS row (only the
+  // Instagram handler writes it) and on an Instagram message that arrived
+  // without a referral.
+  //
+  // REQUIRED, not optional, deliberately: this is the only signal that a
+  // returning guest is standing at the counter, and an optional field lets
+  // every construction site default silently to "no scan" — which is the
+  // failure this ticket exists to remove, not one to reintroduce in a fixture.
+  // Same discipline as `channel` above, RecentMessage.delivery and
+  // GenerateMessageResult.unverifiedUrls.
+  referralSource: string | null
 }
 
 export interface FollowupTrigger {
