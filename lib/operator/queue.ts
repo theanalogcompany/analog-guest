@@ -458,6 +458,14 @@ function normalizeUngroundedClaims(raw: string[] | null): string[] {
  * above, and for the same reason: regenerating the types would put back a
  * `string` that is not true. They are genuinely null on nearly every row.
  *
+ * So `tsc` can never catch a null here, in either direction: the generated
+ * type says `string`, which makes a null look impossible and a guard look
+ * redundant. It is not. This runtime check is the ONLY thing between a NULL
+ * column and a Contract that promises a string, and the reason it reads as
+ * belt-and-braces is exactly why it must not be tidied into a cast or a
+ * non-null assertion. Re-verified against `npm run db:types` output on
+ * 2026-09-23 (Row nullable, RPC Returns non-null).
+ *
  * Requires BOTH, rather than trusting the write path to have paired them. The
  * persist layer does pair them, but that guarantee lives in another file, and
  * a half-written pair reaching the client as `{ body, replacedAt: null }`
