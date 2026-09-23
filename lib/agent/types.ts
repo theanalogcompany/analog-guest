@@ -339,4 +339,25 @@ export type AgentResult =
   //
   // Only handleInbound produces it. A followup has no competing guest message.
   | { status: 'coalesced'; intoAgentRunId: string; intoMessageId: string }
+  // TAC-529: the venue's own `venues.status` is 'paused' or 'archived', so
+  // the agent did not reply. Ruled 2026-09-23 (question 1: A): pausing a
+  // venue stops inbound replies too, not only the proactive paths — a switch
+  // that leaves the agent talking to guests is a partial stop that reads as
+  // a complete one, and the reply path is where the damage would happen.
+  //
+  // The guest gets silence, decided rather than defaulted: no reply, no
+  // holding message, no queued card. The inbound row is still SAVED by the
+  // webhook, because the history is what you want when the venue is
+  // unpaused; only the reply is withheld.
+  //
+  // A SEPARATE MEMBER for the reason 'coalesced' is one: 'silenced' means the
+  // message needed no answer, and reusing it would make its own docstring
+  // false. It also buys the `tsc` totality LEDGER_DERIVERS is built on.
+  //
+  // Recorded as outcome 'not_run' with reason 'venue_paused'.
+  //
+  // Only handleInbound produces it. The two proactive paths gate earlier, in
+  // their own processors, and never construct an AgentResult for a halted
+  // venue at all.
+  | { status: 'venue_halted'; venueStatus: string }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

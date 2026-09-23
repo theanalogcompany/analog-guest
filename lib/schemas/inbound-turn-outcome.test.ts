@@ -32,9 +32,15 @@ const MIGRATION = readFileSync(
   'utf8',
 )
 
-/** TAC-526 dropped and recreated the `reason` CHECK; 057 is the live one. */
+/**
+ * The `reason` CHECK has been dropped and recreated twice: TAC-526's 057, then
+ * TAC-529's 058, which is the live one. Migrations are append-only, so this
+ * points at a migration BY NAME and the next one to widen this CHECK has to
+ * move it — which is the intended cost, because binding to a superseded
+ * migration would silently compare the constants against a narrower list.
+ */
 const REASON_MIGRATION = readFileSync(
-  join(__dirname, '..', '..', 'db', 'migrations', '057_inbound_turn_coalescing.sql'),
+  join(__dirname, '..', '..', 'db', 'migrations', '058_inbound_turn_venue_paused.sql'),
   'utf8',
 )
 

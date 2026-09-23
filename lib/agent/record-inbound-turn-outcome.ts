@@ -182,6 +182,20 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     outboundMessageId: null,
     detail: {},
   }),
+  // TAC-529. `not_run` is the right outcome: the agent was never invoked for
+  // this turn — the gate sits before context build, so nothing classified,
+  // retrieved or generated. The guest gets silence and this row is what makes
+  // that countable, which is the whole reason this table exists.
+  //
+  // `detail.venueStatus` carries which of the two it was, so 'paused' and
+  // 'archived' stay tellable apart without a second reason value. A venue
+  // status is vocabulary, never guest text.
+  venue_halted: (r) => ({
+    outcome: 'not_run',
+    reason: 'venue_paused',
+    outboundMessageId: null,
+    detail: { venueStatus: r.venueStatus },
+  }),
   failed: (r) => ({
     outcome: 'failed',
     // AlertContext['stage'] overlaps INBOUND_TURN_REASONS for every stage the

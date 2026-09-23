@@ -46,6 +46,7 @@ import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
+import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
 import { dispatchReply, type DispatchReplyOutcome } from './dispatch-reply'
 import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from './dispatch-instagram-reply'
@@ -81,6 +82,38 @@ import { AI_ERROR_TRUNCATED } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult } from '@/lib/ai'
 import type { AgentResult, InboundMessage, RuntimeContext } from './types'
+
+/**
+ * TAC-529: the venue's own `venues.status`, for the halt gate below.
+ *
+ * A read of its own rather than a field on RuntimeContext, because the gate
+ * has to run BEFORE buildRuntimeContext. That is not a preference: context
+ * build calls `computeGuestState`, which writes `guest_states` and an audit
+ * row on a band change. A venue that has been switched off should not still
+ * be accumulating recognition state, so the cheapest correct place is here,
+ * one indexed lookup by primary key, before any of the expensive steps.
+ *
+ * FAILS OPEN. A read that errored has established nothing, and going silent
+ * on a live venue because of a database blip is the worse of the two
+ * failures — the same direction `isVenueProcessingHalted` takes for a value
+ * it cannot read, and for the same reason.
+ */
+async function loadVenueStatus(venueId: string): Promise<string | null> {
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('venues')
+    .select('status')
+    .eq('id', venueId)
+    .maybeSingle()
+  if (error) {
+    console.warn('[agent] venue status read failed, proceeding', {
+      venueId,
+      error: error.message,
+    })
+    return null
+  }
+  return data?.status ?? null
+}
 
 async function loadInbound(messageId: string): Promise<{
   message: InboundMessage
@@ -698,6 +731,33 @@ async function runInboundTurn(
     const invoked = await loadInbound(inboundMessageId)
     knownVenueId = invoked.venueId
     knownGuestId = invoked.guestId
+
+    // TAC-529: the venue is paused or archived, so we do not reply.
+    //
+    // Ruled 2026-09-23 (question 1: A). A venue is paused because something
+    // is wrong, and the reply path is where the damage would happen; a switch
+    // that stops the crons and leaves the agent talking to guests is a
+    // partial stop that reads as a complete one.
+    //
+    // HERE, and the placement is the decision. Before buildRuntimeContext,
+    // which writes `guest_states` and an audit row through computeGuestState
+    // on a band change — a switched-off venue should not still be
+    // accumulating recognition state. Before openCoalescedTurn too, so a
+    // halted venue never takes a conversation claim it would only release.
+    //
+    // The inbound row is already SAVED by the webhook and stays saved: the
+    // history is what you want when the venue is unpaused. Only the reply is
+    // withheld, and the ledger row is what makes that silence countable
+    // rather than indistinguishable from a swallowed reply.
+    const venueStatus = await loadVenueStatus(invoked.venueId)
+    if (isVenueProcessingHalted(venueStatus)) {
+      console.warn('[agent] venue is halted, not replying', {
+        agentRunId,
+        venueId: invoked.venueId,
+        venueStatus,
+      })
+      return { status: 'venue_halted', venueStatus: venueStatus ?? 'unknown' }
+    }
 
     // TAC-526: settle, claim, adopt. Sits here because this is where venue and
     // guest first exist, and before buildRuntimeContext, which is the first

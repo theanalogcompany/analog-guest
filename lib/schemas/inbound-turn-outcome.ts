@@ -136,6 +136,28 @@ export const INBOUND_TURN_REASONS = [
    *     and reason is distinct from 'coalesced_into_turn'
    */
   'coalesced_into_turn',
+
+  // ---- outcome 'not_run' (TAC-529) ----
+  /**
+   * The venue's own `venues.status` is `paused` or `archived`, so the agent
+   * did not reply. Ruled 2026-09-23: pausing a venue stops inbound replies
+   * too, not only the proactive paths, because the reply path is where the
+   * damage would happen at a venue something is wrong with.
+   *
+   * A DECISION, not a failure, and NOT a guest who was ignored: the venue is
+   * switched off. The inbound row is still saved by the webhook — the history
+   * is what you want when it is unpaused — and only the reply is withheld.
+   *
+   * It exists as its own value because silence and a swallowed reply are
+   * indistinguishable from the database otherwise, which is the whole reason
+   * this table exists. `gate_shut` is the nearest candidate and is wrong:
+   * that is INSTAGRAM_AGENT_REPLIES_ENABLED, a global kill switch, and
+   * reusing it would make the 2026-09-20 incident's own metric unanswerable.
+   *
+   *   select count(*) from inbound_turn_outcomes
+   *   where outcome = 'not_run' and reason = 'venue_paused'
+   */
+  'venue_paused',
 ] as const
 
 export type InboundTurnReason = (typeof INBOUND_TURN_REASONS)[number]
