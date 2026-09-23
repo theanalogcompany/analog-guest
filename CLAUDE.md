@@ -358,6 +358,21 @@ Every new measurement harness should follow four properties, not as aspiration b
 
 A fifth property is not `run-log`'s to give and belongs to whatever reports the run: **a failed unit is not a result.** A model call that errored produces no verdict, and a harness that counts "how many units came back positive" will score it identically to a unit that came back negative — so a wholly broken run reports as a clean one. TAC-502's replay hit this on its first run (all 60 calls failed on a fixture that had been cast rather than parsed, and the report said "as expected" for the two cells carrying the ticket's whole claim). Make a unit's failure disqualify it from meeting any expectation, and print the failure count per unit rather than only in aggregate.
 
+**A fifth property, added by TAC-423 after paying for it twice in one ticket: a detector that classifies free text must be checked for ASYMMETRY between the arms, not just for accuracy.**
+
+That harness compared a prompt that SCRIPTED a question against one that left the model to write its own, and scored the replies with an exact-phrase list. It broke twice, and both times in the same direction:
+
+1. The list held `what did you get`. The scripted arm echoed that long form and matched; the unscripted arm wrote `what'd you get?` and did not. Reported 0/3 for an arm that had asked the question twice.
+2. Fixed, the list still held no adverb. The shipped opener then said `Ask what they **just** got`, so the model wrote `what did you just grab?` and the list missed that too. Reported 71% for a wording that asks it every time.
+
+**Both misses landed on whichever arm was not echoing a script, because a script is what makes a model reproduce one exact phrasing.** So the arm being tested is systematically the one a phrase list under-counts, and the error always flatters the scripted control. A detector that misses one arm more than the other does not measure a difference between arms, it manufactures one.
+
+Three things follow, and the first is the cheap one:
+
+- **Read the bodies before believing a rate**, at least a handful per arm. Both bugs were found that way and neither was visible in any number. The run log stores bodies verbatim precisely so this costs nothing and so a detector fix can be applied to data already generated (`first-touch-question-score.ts` re-scores a finished log; no model calls were repeated for either fix).
+- **Prefer a pattern with an optional slot over an exact-phrase list** for anything a model phrases freely. Each new wording breaks a list in a new place.
+- **Re-score the EARLIER runs after fixing a detector**, and say whether their numbers moved. TAC-423's 55% was unchanged by both fixes, which is the only thing that showed the ruling rested on a real difference rather than on a detector gap.
+
 `scripts/measurement/run-log.ts` (documented under "Folder layout" above) gives all four for free — import `createRunLog` from a sandbox harness rather than reimplementing this. Prior art for the same failure in a different medium: `scripts/onboarding/tab-retention.ts` (TAC-347) fixed "a single reused Google Sheets tab destroys the previous run's result set" with timestamped tab names + retention. Different API, same idea — a pointer, not something to import from a local script.
 
 ### Available scripts
