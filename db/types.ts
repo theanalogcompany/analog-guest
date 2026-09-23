@@ -1873,6 +1873,9 @@ export type Database = {
           recognition_state: string
           replaced_draft_at: string
           replaced_draft_body: string
+          reply_to_message_id: string
+          replying_to_body: string
+          replying_to_created_at: string
           review_reason: string
           review_triggers: string[]
           ungrounded_claims: string[]
