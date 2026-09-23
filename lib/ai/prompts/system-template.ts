@@ -833,6 +833,110 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// READ THE MEASUREMENT RUN LOGS BY GIT SHA, NOT BY PROMPT VERSION. The WIDE
+// draft of R36 — the one that failed and was cut — also carried v1.61.0 while
+// it was in flight, so run logs stamped v1.61.0 may hold either that draft or
+// this shipped rule. `createRunLog` records the git sha for exactly this
+// reason and the sha is the authoritative field.
+//
+// v1.61.0 (TAC-520): a new R36. Don't name the year, and when the venue's
+// notes give a month with no day, say the date is not set rather than naming
+// the month as if it were the plan.
+//
+// On 2026-09-22 a guest at Le Mil's asked "did masala mixer start" and the
+// draft came back "not yet, that's planned for September 2026" about something
+// days away. It was held for approval, so no guest read it, but it reads as
+// written by a system rather than by the owner.
+//
+// THE RULE IS THE FIX, NOT A SERIALIZER, and the audit is what decided that.
+// Every date the code formats ITSELF is already person-shaped: formatTimeDelta
+// gives "yesterday" and "3 days ago", and it is what ## Visit history, ##
+// Recent conversation and ## Active commitments ("promised 3 days ago") all
+// use. A commitment's expires_at is not rendered at all. Every absolute date
+// that can reach a guest is venue FREE TEXT passed through verbatim, and there
+// are eight such sites: currentContext (the incident, and the only block with
+// no framing sentence at all), hours and hours.notes, knowledge chunks, menu
+// notes and highlights, eventBeingInvited.date (rendered under a literal
+// "Date:" label), perkBeingUnlocked.rewardDescription, the operator
+// instruction (already governed by R14), and life_context notes, whose
+// expires_at is filtered on but never printed.
+//
+// R8 IS WHY THE LOAD-BEARING CLAUSE EXISTS. The never-invent rule names
+// current_context as a source of truth, so a rule asking the model to re-say a
+// stored date reads as a reason to keep repeating it verbatim, which is what
+// was observed. R14's "the operator's wording is intent, not output" is the
+// precedent, and R36 makes the same move: restating a documented date invents
+// nothing. THE OBSERVED FAILURE WAS FAITHFUL REPETITION, NOT INVENTION.
+//
+// THIS RULE SHIPPED NARROWER THAN IT WAS FIRST WRITTEN, AND THE CUT WAS
+// MEASURED RATHER THAN ARGUED. The first version also prescribed the form:
+// "today"/"tomorrow" for a date one day out, the weekday inside the coming
+// week, "later this month" beyond that, and told the model to work out where a
+// stored date falls against today. Measured at 5 generations per arm per case
+// against Le Mil's live config, that half FAILED and made things worse:
+//
+//   - On an event dated three days out, stored as an absolute, the model
+//     prefixed a weekday to the date and GOT THE WEEKDAY WRONG 3 times out of
+//     3 ("This Thursday, September 25th"; 2026-09-25 was a Friday). None of
+//     those was held by the grounding backstop, so all of them would have
+//     auto-sent a guest the wrong day. That is strictly worse than the robotic
+//     but correct reply it replaced.
+//   - On the incident turn the year did drop, 4/5 to 1/5, but two of the
+//     replacements were false ("sometime next fall", "sometime next month",
+//     when the note said September and it was September), and the backstop
+//     held 4 of 5, the one it let through being the only correct reply.
+//
+// The diagnosis is that placing a stored date against today is ARITHMETIC, and
+// a prompt rule cannot make a model count days: it was off by one. So the
+// prescriptive half is gone and only the two clauses needing no arithmetic
+// remain, the year and the not-set case. The year clause still consults ##
+// Right now, but only to judge whether something is a year or more out, a
+// coarse comparison that measured clean on both arms.
+//
+// TAC-522 is the other half, deliberately separated: give the model the
+// calendar in ## Right now so a weekday becomes a lookup rather than a
+// calculation, then restore these clauses and re-measure. Do not restore them
+// without it. There are canaries in system-template.test.ts on both deleted
+// clauses so they cannot come back quietly.
+//
+// THE WORKED EXAMPLE IS GONE TOO, AND IT FAILED TWICE IN TWO DIFFERENT WAYS.
+// It read: a line reading "planned for September 2026" is the venue telling
+// you when something is, not the words to say back. The first failure was
+// caught in drafting: an earlier version converted it inline ("restating it as
+// 'later this month'"), which is true only in the month it was written. The
+// second was measured. Quoting a concrete month and year puts the exact string
+// we do not want emitted into the prompt on every turn, and because the live
+// month WAS September 2026 the example was indistinguishable from the answer.
+// At n=20 on the incident turn (against a fixture later corrected, but the
+// same fixture in both arms, so the comparison holds), the exact quoted phrase
+// "planned for September 2026" appeared in 12/20 replies with the rule
+// against 6/20 without it, while
+// "in the loft" — the other half of the same stored note, NOT quoted in the
+// rule — went DOWN, 9/20 to 6/20. So the model was not hugging the note; it
+// was echoing the rule. Same class as the venue-name leak TAC-359 had to fix.
+// Post-hoc (p = 0.111) and not on its own conclusive, but the mechanism is
+// clean and the sentence was carrying no weight the two remaining clauses do
+// not carry, so it was cut rather than reworded a third time.
+//
+// A CANARY in system-template.test.ts now forbids any month name or any
+// four-digit year inside this rule's body. A worked example here has to be
+// abstract or not exist.
+//
+// Two further decisions, ruled 2026-09-22:
+//
+//   - THE YEAR IS PERMITTED, NOT BANNED. A guest asking about something
+//     genuinely a year out must still get an unambiguous answer. Measured: an
+//     event dated 2027 was answered "July 19, 2027" on both arms, correctly.
+//
+// Clock time was considered and left out: no instance of the agent saying
+// "19:00" has been observed, R2 already models "10pm tonight", and an
+// unmeasured clause attached to a measured change muddies the result.
+//
+// Date-adjacent siblings, checked and unchanged: R2 (which answer to give for
+// "now", and the only other rule pointing at ## Right now), R8 (never invent),
+// R9 and R16 (never name a time an answer will arrive), R15 (don't volunteer a
+// past visit's date).
+//
 // v1.60.0 (TAC-423): the `## What you're hoping to get to` first-visit opener
 // states the situation, asks what the guest just got, and prescribes nothing
 // else. The question is SCAFFOLDING and the block comment at FIRST_TOUCH_OPENER
@@ -1230,7 +1334,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.60.0'
+export const PROMPT_VERSION = 'v1.61.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1405,6 +1509,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - When venue knowledge describes a first-visit order as a sequence or progression, recommend only the first step. Do not relay the whole progression, and do not name items the knowledge marks as unavailable or coming soon. Never name something that already comes included with something else you just recommended in the same message; naming it separately makes one thing sound like two. This is separate from the at-most-two-items cap above; that governs how many, this governs how one is framed.
 - You cannot place, confirm, or take an order. If a guest tells you the specifics of what they want ('a large oat latte, extra hot'), do not accept or acknowledge it as an order ('on it,' 'coming right up'). Acknowledge what they said, and tell them to place it with the venue directly, the way this venue actually takes orders. This does not restrict offering a comp, or setting something aside where # Commitments says that is available at this venue. A made-to-order drink is not held, it is made, so prep instructions like this stay on the order-taking side. It also does not restrict a guest reporting an order they already placed, which the venue-knowledge rule above already covers; a past-tense report is not a request.
 - When a guest questions or pushes back on something you said, like 'what did i ask,' 'that's not right,' or plain confusion about an earlier message, say plainly what is actually true. If the earlier message was wrong, say so and stop: 'sorry, that was my mistake. nothing pending on your end' is the shape. If it was right, restate the fact plainly, without defending it or elaborating on it. Never invent a reason for what you said, and never tell the guest to disregard it, ignore you, or that everything is fine. A guest questioning a message is asking you to be straight with them, not to smooth it over. This rule is about your own prior message, which is what separates it from the rule against assuming actions the guest didn't take. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record. Correct it and then follow that category's guidance for how the rest of the message reads.
+- Say a date the way someone working in the venue would say it out loud. Name the year only when leaving it out would genuinely be ambiguous, which here is almost never; use the date in the ## Right now block to judge that, and when something really is a year or more out, the year earns its place and you should say it plainly rather than being vague. This holds just as much for a date you read in the venue's own notes as for one you worked out yourself. Restating a documented date in plainer terms invents nothing, and the never-invent rule above does not ask you to repeat a date in the form it happens to be written in. When the notes give only a month or a season and no actual day, the date is not set: say that plainly instead of naming the month as if it were the plan.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

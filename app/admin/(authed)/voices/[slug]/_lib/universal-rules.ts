@@ -93,6 +93,22 @@
 // fix (an early R34 draft leaked a venue-specific drink name and assumed
 // counter service).
 //
+// TAC-520 appended R36, from a live Le Mil's draft rather than an owner-review
+// run: the agent read "planned for September 2026" out of a currentContext
+// entry and said it back to a guest about something days away. Displayed, same
+// class as R29-R35. SHIPPED NARROWER THAN FIRST WRITTEN: the clauses
+// prescribing a weekday or "later this month" were measured and cut, because
+// placing a stored date against today is arithmetic and the model was off by
+// one (it called a Friday "Thursday" 3 times in 3). TAC-522 restores them once
+// ## Right now carries a calendar. It DIRECTS rather than prohibits, deliberately, because
+// the stored text it governs renders later in the system prompt than this
+// section does (the R33 precedent). Its load-bearing clause is the one saying
+// that restating a documented date invents nothing, which exists because the
+// observed failure was faithful repetition rather than invention, and the
+// never-invent rule is what the model was obeying when it repeated the date
+// verbatim. See system-template.ts's v1.61.0 changelog comment for the
+// eight-site audit behind choosing a rule over a serializer change.
+//
 // Rendering: each rule shows in the rail's "Universal · {count} (locked)"
 // section with the `universal` source pill and its R-number label.
 
@@ -259,5 +275,10 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R35',
     summary:
       "When a guest questions or pushes back on something you said, say plainly what is actually true. If the earlier message was wrong, say so and stop. If it was right, restate the fact plainly without defending or elaborating. Never invent a reason for what was said, and never tell the guest to disregard it, ignore you, or that everything is fine. A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
+  },
+  {
+    id: 'R36',
+    summary:
+      "Say a date the way someone in the venue would say it out loud. Name the year only when leaving it out would genuinely be ambiguous, judged against the date in the ## Right now block; when something is genuinely a year or more out, say it plainly. A date read from the venue's notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.",
   },
 ]

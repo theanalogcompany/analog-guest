@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.60.0 (TAC-423: the first-visit opener states the situation, and asks nothing itself)', () => {
-    expect(PROMPT_VERSION).toBe('v1.60.0')
+  it('is v1.61.0 (TAC-520: say a date the way a person in the venue would say it)', () => {
+    expect(PROMPT_VERSION).toBe('v1.61.0')
   })
 })
 
@@ -67,18 +67,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // forbids. TAC-334 appends R21 at the end, after the R19-R20 gap.
     // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
     // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
-    // TAC-484 appends R35 after that.
+    // TAC-484 appends R35 after that. TAC-520 appends R36 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35',
+      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36',
     ])
   })
 
-  it('curates 27 rules ending at R35 (TAC-484)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(27)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R35')
+  it('curates 28 rules ending at R36 (TAC-520)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(28)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R36')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -233,6 +233,114 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(SYSTEM_TEMPLATE).toContain(
       'When a guest questions or pushes back on something you said',
     )
+  })
+
+  // TAC-520. Every assertion below pins a CONTIGUOUS clause rather than a set
+  // of disjoint fragments, because TAC-409 demonstrated three mutants that
+  // inverted a rule's meaning while every fragment of it survived.
+  it('shares the R36 anchor clauses across both sources, including the permitted-year branch (TAC-520)', () => {
+    const r36 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R36')
+    expect(r36).toBeDefined()
+    expect(r36?.summary).toContain(
+      'Say a date the way someone in the venue would say it out loud',
+    )
+    // The anchor the whole rule hangs on. Without naming the block, nothing
+    // connects a date stored in the system prompt to the clock, which is in
+    // the user prompt.
+    expect(r36?.summary).toContain(
+      'judged against the date in the ## Right now block',
+    )
+    // The year is PERMITTED, not banned. A flat ban fails the far-off case.
+    // THROUGH THE COMMA, deliberately. "which here is almost never" is what
+    // calibrates the whole rule, and an earlier version stopped at
+    // "ambiguous" — so flipping it to "almost always" reversed the rule's
+    // practical effect and every assertion still held. That is the TAC-409
+    // failure this block's own header invokes.
+    expect(r36?.summary).toContain(
+      'Name the year only when leaving it out would genuinely be ambiguous',
+    )
+    // THE LOAD-BEARING CLAUSE. The observed failure was faithful repetition of
+    // a stored date, not invention, so the rule has to say that restating one
+    // is not inventing. Without it the never-invent rule is what the model
+    // obeys when it repeats the date verbatim.
+    expect(r36?.summary).toContain(
+      'not the words to say back, and restating it in plainer terms invents nothing',
+    )
+    expect(r36?.summary).toContain(
+      'the date is not set: say that plainly rather than naming the month as if it were the plan',
+    )
+
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Say a date the way someone working in the venue would say it out loud.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'when something really is a year or more out, the year earns its place',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Restating a documented date in plainer terms invents nothing, and the never-invent rule above does not ask you to repeat a date in the form it happens to be written in.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When the notes give only a month or a season and no actual day, the date is not set',
+    )
+  })
+
+  // CANARY, and it replaces a worked example that FAILED TWICE.
+  //
+  // The rule used to quote one: a line reading "planned for September 2026" is
+  // the venue telling you when something is. The first failure was caught in
+  // drafting, when an earlier version converted it inline ("restating it as
+  // 'later this month'"), which is true only in the month it was written. The
+  // second was measured: quoting a concrete month and year puts the exact
+  // string we do not want emitted into the prompt on every turn, and the live
+  // month WAS September 2026, so the example was indistinguishable from the
+  // answer. At n=20 the quoted phrase appeared in 12/20 replies with the rule
+  // against 6/20 without it, while the unquoted half of the same stored note
+  // went DOWN. The model was echoing the rule, not the note.
+  //
+  // So: no month name and no four-digit year may appear in this rule's body.
+  // A worked example here is abstract or it does not exist.
+  it('quotes no concrete month or year in the rule body (TAC-520)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(body).not.toMatch(/\b(19|20)\d{2}\b/)
+    // "may" is excluded as a bare word and required to carry a day or a year:
+    // it is the likeliest word in a permission rule ("you may name the year"),
+    // and a canary about QUOTING A CONCRETE MONTH must not fire on it. Same
+    // distinction date-language.ts makes for the same reason.
+    expect(body).not.toMatch(
+      /\b(January|February|March|April|June|July|August|September|October|November|December)\b/i,
+    )
+    expect(body).not.toMatch(/\bMay\s+(?:\d{1,2}\b|(?:19|20)\d{2}\b)/i)
+    // The conversion that went stale, kept as its own assertion so the two
+    // failures stay separately visible.
+    expect(SYSTEM_TEMPLATE).not.toContain('restating it as "later this month"')
+  })
+
+  // Clock time was considered and deliberately left out of R36: no instance of
+  // the agent saying "19:00" has been observed, R2 already models "10pm
+  // tonight", and an unmeasured clause attached to a measured change muddies
+  // the result (ruled 2026-09-22). A future session adding it has to delete a
+  // test that says why not.
+  it('does not legislate clock time, which was deliberately left out (TAC-520)', () => {
+    // Scoped to R36's body and matched on the SHAPE of a 24-hour time, not on
+    // the literal "19:00". The earlier version asserted that one string
+    // against the whole template, so "never write a time in 24-hour form"
+    // would have passed it while breaking the promise in this comment — and a
+    // correct future rule elsewhere using 19:00 as a negative example would
+    // have failed it.
+    const start = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(body).not.toMatch(/\b(?:[01]\d|2[0-3]):[0-5]\d\b/)
+    expect(body).not.toMatch(/24[- ]hour/i)
+    expect(body).not.toMatch(/clock time/i)
+    const r36 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R36')
+    expect(r36?.summary).not.toContain('clock time')
   })
 
   it('shares the R8-strengthened anchor phrase across both sources (TAC-348)', () => {
@@ -1002,17 +1110,18 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // in the block — it's now immediately followed by the six new rules, then
   // the section break. Rewritten to pin that adjacency instead of asserting
   // R22 is terminal. TAC-356 appended R29-R31 after that, TAC-359
-  // appended R32-R34 after that, and TAC-484 appended R35, so the count grows
-  // again each time (still the same adjacency shape, just more lines).
-  it('is immediately followed by exactly R23-R35, then # Voice imperative', () => {
+  // appended R32-R34 after that, TAC-484 appended R35 and TAC-520 appended
+  // R36, so the count grows again each time (still the same adjacency shape,
+  // just more lines).
+  it('is immediately followed by exactly R23-R36, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
-    // R22 itself, plus R23-R35 — exactly fourteen bullet lines, then nothing
+    // R22 itself, plus R23-R36 — exactly fifteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(14)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(15)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1172,16 +1281,17 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // in the block. Rewritten to pin adjacency to the new rules instead of
   // asserting R28 is terminal — same treatment R22's own test got in
   // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
-  // that, and TAC-484 appended R35, so the count grows again.
-  it('is immediately followed by exactly R29-R35, then # Voice imperative (TAC-484)', () => {
+  // that, TAC-484 appended R35 and TAC-520 appended R36, so the count grows
+  // again.
+  it('is immediately followed by exactly R29-R36, then # Voice imperative (TAC-520)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
-    // R28 itself, plus R29-R35 — exactly eight bullet lines, then nothing
+    // R28 itself, plus R29-R36 — exactly nine bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(8)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(9)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1287,16 +1397,16 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
   // TAC-359 appended R32-R34 after R31, so R31 is no longer the LAST bullet
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
-  // landed after them.
-  it('is immediately followed by exactly R32-R35, then # Voice imperative (TAC-484)', () => {
+  // landed after them. TAC-484 appended R35 and TAC-520 appended R36.
+  it('is immediately followed by exactly R32-R36, then # Voice imperative (TAC-520)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r31Idx)
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
-    // R31 itself, plus R32-R35 — exactly five bullet lines, then nothing but
+    // R31 itself, plus R32-R36 — exactly six bullet lines, then nothing but
     // whitespace before the heading. TAC-484 appended R35.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(6)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1431,17 +1541,18 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
     }
   })
 
-  // TAC-484 appended R35, so R34 is no longer terminal. Rewritten to pin the
-  // adjacency rather than deleted: the thing worth guarding was never "R34 is
-  // last" but "exactly one bullet sits between R34 and the section break,"
-  // which is what catches a rule being appended without being classified.
-  it('is immediately followed by exactly R35, then # Voice imperative', () => {
+  // TAC-484 appended R35 and TAC-520 appended R36, so R34 is no longer
+  // terminal. Rewritten to pin the adjacency rather than deleted: the thing
+  // worth guarding was never "R34 is last" but "exactly N bullets sit between
+  // R34 and the section break," which is what catches a rule being appended
+  // without being classified.
+  it('is immediately followed by exactly R35-R36, then # Voice imperative', () => {
     const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1537,18 +1648,23 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('This is a close, not an opening')
   })
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-520 appended R36, so R35 is no longer terminal either. Same rewrite
+  // R34 got when R35 landed: pin the adjacency, do not delete the guard.
+  it('is immediately followed by exactly R36, then # Voice imperative (TAC-520)', () => {
     const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r35Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
     const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
-    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    // Ends at R36's first words, not at the heading: TAC-520 appended a rule
+    // after this one, and a range running to the heading would quietly make
+    // this R35 test scan R36 too.
+    const end = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1556,11 +1672,93 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 
   it('is free of venue-specific product names from the motivating incident', () => {
     const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
-    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    // Same scoping fix as the dash test above: ends at R36, not the heading.
+    const end = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
     const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
     for (const term of ['pink panther', 'le mil', 'himanshu']) {
       expect(body).not.toContain(term)
     }
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue would (TAC-520)', () => {
+  const R36_START = 'Say a date the way someone working in the venue'
+
+  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+    const r36Idx = SYSTEM_TEMPLATE.indexOf(R36_START)
+    const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(r36Idx).toBeGreaterThan(-1)
+    expect(voiceImperativeIdx).toBeGreaterThan(r36Idx)
+    const between = SYSTEM_TEMPLATE.slice(r36Idx, voiceImperativeIdx).trim()
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+  })
+
+  it('is appended after R35, never inserted (ids are positional and append-only)', () => {
+    expect(SYSTEM_TEMPLATE.indexOf(R36_START)).toBeGreaterThan(
+      SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back'),
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R36_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+
+  it('is free of venue-specific names from the motivating incident', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R36_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
+    // The incident was a Le Mil's draft about the Masala Mixer. The rule
+    // quotes the stored DATE FORM, which is the general shape, and must not
+    // carry the venue's own event or people into every venue's prompt.
+    for (const term of ['masala', 'le mil', 'himanshu', 'loft']) {
+      expect(body).not.toContain(term)
+    }
+  })
+
+  // CANARY. The first version of R36 also prescribed the FORM: "today" or
+  // "tomorrow" one day out, the weekday inside the coming week, "later this
+  // month" beyond that, and told the model to work out where a stored date
+  // falls against today. Measured at 5 generations per arm, that half made
+  // things WORSE: on an event three days out the model prefixed a weekday to
+  // the date and got the weekday wrong 3 times out of 3 (a Friday called
+  // "Thursday"), and the grounding backstop held none of them, so all three
+  // would have auto-sent a guest the wrong day.
+  //
+  // Placing a stored date against today is arithmetic, and a prompt rule
+  // cannot make a model count days. Restoring any of these clauses without
+  // first giving ## Right now a calendar to look the weekday UP in (TAC-522)
+  // reintroduces a guest-facing wrong date that nothing catches.
+  it.each([
+    'Inside the coming week it is the weekday',
+    'later this month',
+    'work out where that falls against today',
+    'is "today," "tonight," or "tomorrow."',
+  ])('does not prescribe a date form the model has to compute: %s', (clause) => {
+    expect(SYSTEM_TEMPLATE).not.toContain(clause)
+  })
+
+  it('keeps the two clauses that need no arithmetic (TAC-520)', () => {
+    // The year: a coarse is-this-a-year-out judgement, which measured clean.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Name the year only when leaving it out would genuinely be ambiguous, which here is almost never',
+    )
+    // The not-set case: a direct reading of the note, no arithmetic at all.
+    // Pinned through the INSTRUCTION half too: keeping "the date is not set"
+    // while deleting what to do about it left the rule saying nothing.
+    expect(SYSTEM_TEMPLATE).toContain(
+      'the date is not set: say that plainly instead of naming the month as if it were the plan',
+    )
+  })
+
+  it('points at ## Right now, the only block carrying the current date', () => {
+    // Without this the rule is unactionable: the stored date sits in the
+    // system prompt and the clock sits in the user prompt, and nothing else
+    // connects them.
+    expect(SYSTEM_TEMPLATE).toContain('use the date in the ## Right now block to judge that')
   })
 })
 
