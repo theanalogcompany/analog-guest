@@ -543,6 +543,55 @@ export type Database = {
           },
         ]
       }
+      inbound_turn_claims: {
+        Row: {
+          agent_run_id: string
+          claimed_at: string
+          claimed_message_id: string
+          expires_at: string
+          guest_id: string
+          venue_id: string
+        }
+        Insert: {
+          agent_run_id: string
+          claimed_at?: string
+          claimed_message_id: string
+          expires_at: string
+          guest_id: string
+          venue_id: string
+        }
+        Update: {
+          agent_run_id?: string
+          claimed_at?: string
+          claimed_message_id?: string
+          expires_at?: string
+          guest_id?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_turn_claims_claimed_message_id_fkey"
+            columns: ["claimed_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_turn_claims_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_turn_claims_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inbound_turn_outcomes: {
         Row: {
           agent_run_id: string | null
