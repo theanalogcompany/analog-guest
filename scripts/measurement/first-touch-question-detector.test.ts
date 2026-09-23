@@ -133,3 +133,40 @@ describe('adverb slot (regression from the 2026-09-23 confirmation run)', () => 
     expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(false)
   })
 })
+
+// TAC-519: the apology ceiling. The real body that prompted it is the first
+// case; the rest fix the boundary so the ceiling stays actionable at n=1 rather
+// than firing on any mention of a problem.
+describe('carriesApology', () => {
+  it('catches the live position-arm body that broke the block restraint', () => {
+    const v = classifyFirstTouchReply(
+      "ah got it, sorry for the mix-up! glad the Blossom Tonic was good. what's your name, by the way?",
+    )
+    expect(v.carriesApology).toBe(true)
+    expect(v.hasQuestion).toBe(true)
+  })
+
+  it.each([
+    ['apologies for the confusion, that was our error', true],
+    ['my bad, the order was wrong', true],
+    // THE CONTRACTION, which is what the pattern matches. This fixture read
+    // 'that should not have happened', which matches on \\bmy bad\\b instead, so
+    // deleting /shouldn't have/ killed nothing. Found in review.
+    ["we shouldn't have let that go out", true],
+    ["that's on us, come back and we'll sort it", true],
+    ['we messed up the order', true],
+    ['sorry about that', true],
+  ])('treats %j as apologetic: %s', (body, expected) => {
+    expect(classifyFirstTouchReply(body as string).carriesApology).toBe(expected)
+  })
+
+  it.each([
+    ['open till 3 on Sundays. you nearby?'],
+    ['the cortado is great, one of our best'],
+    // The GUEST complaining is not the venue apologising. The restraint is about
+    // the reply carrying bad news, and this is matched against the reply only.
+    ['glad you liked it. what did you get?'],
+  ])('does not fire on %j', (body) => {
+    expect(classifyFirstTouchReply(body as string).carriesApology).toBe(false)
+  })
+})
