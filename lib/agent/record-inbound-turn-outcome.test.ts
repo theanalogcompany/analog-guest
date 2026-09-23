@@ -87,6 +87,10 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
       reason: 'obligation_slot_taken',
     },
     { result: { status: 'superseded', byMessageId: 'm1' }, outcome: 'superseded', reason: null },
+    // TAC-397. A decision, not a failure — and the one outcome the ledger most
+    // needs to tell apart, since a deliberate silence and a swallowed reply
+    // are identical from the database without it.
+    { result: { status: 'silenced' }, outcome: 'silenced', reason: null },
     {
       result: { status: 'failed', stage: 'corpus', error: 'thin' },
       outcome: 'failed',
@@ -103,7 +107,9 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
   it('covers every value in INBOUND_TURN_OUTCOMES except the webhook-only one', () => {
     // 'not_run' is layer 1's: no AgentResult exists for it. Everything else
     // must be produced by some case above, or the vocabulary has a value
-    // nothing can ever write.
+    // nothing can ever write. This is what forced 'silenced' to get a case
+    // when TAC-397 added it: the map would not compile, and then this would
+    // not pass.
     const produced = new Set(CASES.map((c) => c.outcome))
     const unreachable = INBOUND_TURN_OUTCOMES.filter((o) => !produced.has(o))
     expect(unreachable).toEqual(['not_run'])

@@ -36,6 +36,11 @@
 -- strict turn count excludes it:
 --   select count(*) from inbound_turn_outcomes where outcome <> 'skipped_duplicate'
 --
+-- THIS IS NOT A FAILURE LOG. 'sent', 'queued' and 'silenced' are all normal
+-- outcomes; 'silenced' in particular is a deliberate decision not to answer.
+-- Reading a raw row count as "things that went wrong" is the misreading this
+-- header exists to prevent.
+--
 -- VOLUME, measured 2026-09-23 so a future reader can re-judge it rather than
 -- re-derive it: Le Mil's took 79 inbound messages in 7 days and 138 in 30
 -- (~11/day, mostly test traffic); Mock Sextant 25 in 30 days; Central Perk
@@ -121,6 +126,15 @@ create table inbound_turn_outcomes (
     'refused',
     'dropped',
     'superseded',
+    -- TAC-397: the guest said "haha" and already holds a pending card, so
+    -- nothing was generated and nothing sent. A DECISION, NOT A FAILURE.
+    -- Recorded because a deliberate silence and a swallowed reply look
+    -- identical from the database otherwise, which is what this table exists
+    -- to fix -- but anyone counting failures must exclude it, the way
+    -- 'sent' and 'queued' are excluded:
+    --   select count(*) from inbound_turn_outcomes
+    --   where outcome not in ('sent','queued','silenced','skipped_duplicate')
+    'silenced',
     'failed'
   )),
 

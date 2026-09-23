@@ -42,6 +42,16 @@ export const INBOUND_TURN_OUTCOMES = [
   'dropped',
   /** already answered by hand before the agent's send (Instagram) */
   'superseded',
+  /**
+   * TAC-397: the guest's message needed no answer ("haha", "thanks") and they
+   * already hold a pending conversation card. Nothing generated, nothing sent.
+   *
+   * A DECISION, not a failure. It is the nineteenth path and the one the
+   * ledger most needs to tell apart: before this table, a deliberate silence
+   * and a swallowed reply looked identical from the database, which is this
+   * ticket's whole subject. Anyone counting failures must exclude it.
+   */
+  'silenced',
   /** a stage threw; `reason` carries the stage */
   'failed',
 ] as const

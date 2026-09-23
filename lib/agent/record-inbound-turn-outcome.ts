@@ -155,6 +155,15 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     outboundMessageId: null,
     detail: { byMessageId: r.byMessageId },
   }),
+  // TAC-397, mapped when the rebase made `tsc` refuse to compile without it —
+  // the total map firing on a real merge rather than on a mutant. A decision,
+  // not a failure: the guest said "haha" and already holds a pending card.
+  silenced: () => ({
+    outcome: 'silenced',
+    reason: null,
+    outboundMessageId: null,
+    detail: {},
+  }),
   failed: (r) => ({
     outcome: 'failed',
     // AlertContext['stage'] overlaps INBOUND_TURN_REASONS for every stage the
