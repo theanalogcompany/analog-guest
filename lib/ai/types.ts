@@ -862,12 +862,35 @@ export type VerifyCancellationClaimResult = {
 }
 
 // TAC-401: independent post-generation check for a promise made in PROSE with
-// no structured commitment behind it. Deliberately takes the reply body and
-// NOTHING else — see lib/ai/verify-prose-promise.ts for why the narrow input
-// is what makes the check replayable against fixed bodies and robust to venue
-// persona.
+// no structured commitment behind it. The input stays deliberately narrow —
+// see lib/ai/verify-prose-promise.ts for why, and for what TAC-527 added and
+// what it pointedly did not.
 export type VerifyProsePromiseInput = {
   replyBody: string
+  /**
+   * TAC-527: the guest message this reply is answering, or null on a proactive
+   * turn (followup, holding message) where there is none.
+   *
+   * REQUIRED, not optional, and that is the point. An optional field lets
+   * every construction site default silently to "no context", which is the
+   * failure class this repo keeps logging — the same reasoning
+   * `RecentMessage.delivery` and `InboundMessage.referralSource` carry. A new
+   * caller has to DECIDE whether it has a guest message rather than inherit
+   * "no" by saying nothing.
+   *
+   * Why it exists: without it the check cannot resolve an elliptical promise.
+   * "ugh, that's on us too" is apology-shaped in isolation, and the word that
+   * makes it a second comp — "too", pointing at an item the guest named — is
+   * in the guest's message, never in the reply. Observed live at Le Mil's on
+   * 2026-09-23: the reply was held by comp_regex_backstop, this check returned
+   * clean, no carrier was persisted, and approving it created nothing.
+   *
+   * This is the guest's CURRENT inbound and nothing else. Not the prompt, not
+   * retrieved knowledge, not the persona, not conversation history. The
+   * sibling grounding check has taken `inboundBody` since TAC-301 part 1.5;
+   * this brings the two into line rather than opening a new door.
+   */
+  guestInboundBody: string | null
 }
 
 /**

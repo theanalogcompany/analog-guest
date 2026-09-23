@@ -4958,6 +4958,37 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(result).toEqual({ status: 'flagged', commitment: null })
   })
 
+  // TAC-527: without the inbound this event cannot tell a correct catch from a
+  // false one, because for an elliptical promise the item in the description
+  // comes from the guest's message and never appears in the reply.
+  it("emits the caught event with the guest's message the verdict was formed against", async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'the gulab jamun was stale too',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "ugh, that's on us too" }),
+    )
+    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBe(
+      'the gulab jamun was stale too',
+    )
+  })
+
+  it('emits a NULL inbound on the caught event for a proactive turn', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    await verifyProsePromiseStage(
+      makeCtx({ currentMessage: null }),
+      makeGenerationResult({ body: "we still owe you a good cortado" }),
+    )
+    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBeNull()
+  })
+
   it('emits the caught event with what is owed and whether it displaced a recommendation', async () => {
     verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
     await verifyProsePromiseStage(
@@ -4969,6 +5000,81 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(props.commitmentType).toBe('comp')
     expect(props.commitmentDescription).toBe('a replacement cortado')
     expect(props.replacedRecommendation).toBe(true)
+  })
+
+  // ---- The guest's own message (TAC-527) ----
+
+  it("hands the check the guest's inbound body on a reply turn", async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'the gulab jamun was stale too',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "ugh, that's on us too. really sorry" }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledWith({
+      replyBody: "ugh, that's on us too. really sorry",
+      guestInboundBody: 'the gulab jamun was stale too',
+    })
+  })
+
+  // The proactive half, and it is the assertion behind "followups and the
+  // holding message are unchanged by this ticket". makeCtx defaults
+  // currentMessage to null, which is what those paths hold by the
+  // inbound-XOR-outbound invariant.
+  it('hands the check a NULL inbound on a proactive turn', async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(clean)
+    await verifyProsePromiseStage(
+      makeCtx({ currentMessage: null }),
+      makeGenerationResult({ body: 'just checking in' }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledWith({
+      replyBody: 'just checking in',
+      guestInboundBody: null,
+    })
+  })
+
+  // TAC-527 built the input once and passes it twice, the shape TAC-424 gave
+  // verifyGroundingStage. This is the parity guard: a future edit that
+  // restates the literal at the retry can diverge, and the two calls judging
+  // different inputs is invisible in every other assertion here.
+  it('sends IDENTICAL input on the retry', async () => {
+    verifyProsePromiseMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+      .mockResolvedValueOnce(clean)
+    await verifyProsePromiseStage(
+      makeCtx({
+        currentMessage: {
+          id: 'inbound-1',
+          body: 'my cortado was cold',
+          providerMessageId: 'p1',
+          receivedAt: new Date(),
+          channel: 'text',
+        } as RuntimeContext['currentMessage'],
+      }),
+      makeGenerationResult({ body: "we'll make it right" }),
+    )
+    expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
+    // toBe, not toEqual: the two calls are handed the SAME object, so identity
+    // is what the parity claim actually is, and it also catches a restatement
+    // that happens to be deep-equal today.
+    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toBe(
+      verifyProsePromiseMock.mock.calls[1]?.[0],
+    )
+    expect(verifyProsePromiseMock.mock.calls[0]?.[0]).toEqual({
+      replyBody: "we'll make it right",
+      guestInboundBody: 'my cortado was cold',
+    })
   })
 
   // ---- Failure posture (ruled 2026-09-21, ruling 1) ----

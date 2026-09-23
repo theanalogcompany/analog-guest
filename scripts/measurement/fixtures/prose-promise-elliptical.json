@@ -1,0 +1,97 @@
+{
+  "source": "TAC-527. Hand-built pairs, not captured traffic.",
+  "note": "SYNTHETIC. Row ell-01's two lines are the shape of the 2026-09-23 device test, which was the operator messaging his own venue account, not a guest; the name in the real reply is removed. Everything else is invented. No third-party guest's message appears here and none may be added: this repo is public, which the sibling prose-promise-replies.json fixture says in the same words.",
+  "labels": {
+    "elliptical_promise": "The reply accepts a specific thing the guest named as wrong. Resolvable only from the guest's message, so the with_inbound arm SHOULD flag and the body_only arm is expected not to. These are the population TAC-527 exists for.",
+    "apology_no_item": "The guest named something wrong that is not a thing the venue can hand over (slow service, noise, a wait). The reply accepts fault and offers nothing. MUST stay clean in both arms. Jaipal's measurement case 1, 2026-09-23.",
+    "on_us_unrelated_item": "The reply says 'on us' about something OTHER than the item the guest complained about, usually accepting fault for a delay or a mistake. The item is in the guest's message, so this is precisely where the widened input could invent a comp. MUST stay clean in both arms. Jaipal's measurement case 2, 2026-09-23.",
+    "clean": "No promise on any reading, including a guest ASKING for something free and being declined. MUST stay clean in both arms.",
+    "explicit_promise": "The reply promises something readable from its OWN words, so both arms should flag. Measured 2026-09-23: ell-02, ell-03 and ell-05 were first labelled elliptical_promise and the control arm flagged them 10/10, which means the guest's message is not what catches them. Relabelled rather than left reporting a FAIL caused by the label: a harness that reports its own mislabelling as a failure stops being trusted. They are kept because they guard the OTHER direction, that widening the input did not break a plain catch."
+  },
+  "rows": [
+    {
+      "id": "ell-01",
+      "label": "elliptical_promise",
+      "guestInbound": "the gulab jamun was stale too",
+      "body": "ugh, that's on us too. really sorry"
+    },
+    {
+      "id": "ell-02",
+      "label": "explicit_promise",
+      "guestInbound": "my croissant was burnt this morning",
+      "body": "oh no. that one's on us"
+    },
+    {
+      "id": "ell-03",
+      "label": "explicit_promise",
+      "guestInbound": "the cortado was cold and the pastry was dry",
+      "body": "both on us, sorry about that"
+    },
+    {
+      "id": "ell-04",
+      "label": "elliptical_promise",
+      "guestInbound": "the second drink was wrong as well",
+      "body": "same for that one"
+    },
+    {
+      "id": "ell-05",
+      "label": "explicit_promise",
+      "guestInbound": "my tea was lukewarm",
+      "body": "that's on me. come grab another whenever you're next in"
+    },
+    {
+      "id": "ell-06",
+      "label": "elliptical_promise",
+      "guestInbound": "the muffin was stale",
+      "body": "ah, that's on us"
+    },
+    {
+      "id": "ell-07",
+      "label": "apology_no_item",
+      "guestInbound": "the service was really slow today",
+      "body": "sorry about that, that's on us. we'll tighten it up"
+    },
+    {
+      "id": "ell-08",
+      "label": "apology_no_item",
+      "guestInbound": "it was so loud in there I couldn't hear anything",
+      "body": "that's on us, we're working on the acoustics"
+    },
+    {
+      "id": "ell-09",
+      "label": "apology_no_item",
+      "guestInbound": "nobody said hi when I walked in",
+      "body": "that's on us. not how we want it to feel"
+    },
+    {
+      "id": "ell-10",
+      "label": "on_us_unrelated_item",
+      "guestInbound": "my cortado was cold",
+      "body": "sorry, the wait was on us today, we were short staffed"
+    },
+    {
+      "id": "ell-11",
+      "label": "on_us_unrelated_item",
+      "guestInbound": "the gulab jamun was stale",
+      "body": "that's on us for not checking the case this morning"
+    },
+    {
+      "id": "ell-12",
+      "label": "on_us_unrelated_item",
+      "guestInbound": "my latte came out as an americano",
+      "body": "the mix-up was on us, I've told the team"
+    },
+    {
+      "id": "ell-13",
+      "label": "clean",
+      "guestInbound": "what time do you open on sundays?",
+      "body": "7am, same as every day"
+    },
+    {
+      "id": "ell-14",
+      "label": "clean",
+      "guestInbound": "can I get a free coffee?",
+      "body": "we don't do freebies, but the drip is 3 dollars and it's good today"
+    }
+  ]
+}

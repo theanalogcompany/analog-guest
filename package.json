@@ -23,6 +23,7 @@
     "prepare": "husky",
     "measure-instagram-copy": "tsx --env-file=.env.local scripts/measurement/instagram-channel-copy.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
+    "measure-prose-promise-elliptical": "tsx --env-file=.env.local scripts/measurement/prose-promise-elliptical.ts",
     "measure-channel-self-reference": "tsx --env-file=.env.local scripts/measurement/channel-self-reference-replay.ts",
     "measure-date-phrasing": "tsx --env-file=.env.local scripts/measurement/date-phrasing.ts"
   },

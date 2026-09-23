@@ -944,6 +944,135 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
 })
 
 
+// TAC-527: the 2026-09-23 incident, replayed end to end.
+//
+// Deliberately in THIS file rather than a new prose-promise-carrier-replay.ts:
+// the harness here runs the REAL gate and the REAL persist layer against an
+// in-memory messages table, so it can assert the persisted row. A new file
+// would have had to duplicate that fake to make a weaker claim.
+describe('the 2026-09-23 gulab jamun exchange (TAC-527)', () => {
+  // Verbatim from the incident. It trips matchComp on "on us", which is why
+  // the reply WAS held; what it did not do was carry anything.
+  const INCIDENT_REPLY = "ugh, that's on us too. really sorry, Jaipal 🙏"
+
+  // What the widened check returns for that reply once it can see the guest's
+  // message. The description comes from the guest's message, which is the only
+  // place the item is ever named.
+  const FLAGGED_GULAB: ProsePromiseBackstopResult = {
+    status: 'flagged',
+    commitment: {
+      type: 'comp',
+      description: 'a replacement gulab jamun',
+      code: 'G1H2',
+      expiresAt: null,
+    },
+  }
+
+  // AC1. Before this ticket the row below carried pending_commitment: null,
+  // the operator approved it, and nothing was created.
+  it('054: approving the held reply now has a comp to create', async () => {
+    const fake = useFake('054')
+
+    const turn = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: INCIDENT_REPLY }),
+      'regen',
+      FLAGGED_GULAB,
+    )
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement gulab jamun',
+      code: 'G1H2',
+      expiresAt: null,
+    })
+  })
+
+  // The incident's own trigger set, plus the one that was missing from it.
+  // comp_regex_backstop still fires — nothing about this ticket removes it —
+  // and prose_promise_backstop outranks it in PRIMARY_TRIGGER_PRIORITY, so the
+  // card's primary label is the one that can name what approving creates.
+  it('054: both detectors fire, and the prose-promise label wins the card', async () => {
+    const fake = useFake('054')
+
+    const turn = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: INCIDENT_REPLY }),
+      'regen',
+      FLAGGED_GULAB,
+    )
+
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.review_triggers).toContain('comp_regex_backstop')
+    expect(row?.review_triggers).toContain('prose_promise_backstop')
+    expect(row?.review_reason).toBe('prose_promise_backstop')
+  })
+
+  // AC2, and the shape of the assertion is the point. The carrier resolution
+  // never reads the trigger set, so the guard varies the ONE input that flips
+  // matchComp — the body — while holding the check's verdict fixed, and
+  // requires the persisted carrier to be identical. A future change that
+  // special-cases either trigger fails here.
+  it('054: the carrier is identical whichever detector fired', async () => {
+    // Trips matchComp ("on us") AND flagged.
+    const bothFake = useFake('054')
+    const both = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: INCIDENT_REPLY }),
+      'regen',
+      FLAGGED_GULAB,
+    )
+    const bothRow = bothFake.rows.find((r) => r.id === both.persisted!.outboundMessageId)
+
+    // Trips NO comp pattern, flagged all the same. This is TAC-401's own
+    // population: a promise the regex cannot see.
+    const proseOnlyFake = useFake('054')
+    const proseOnly = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: 'I want to make that right for you' }),
+      'regen',
+      FLAGGED_GULAB,
+    )
+    const proseRow = proseOnlyFake.rows.find(
+      (r) => r.id === proseOnly.persisted!.outboundMessageId,
+    )
+
+    expect(bothRow?.pending_commitment).toEqual(proseRow?.pending_commitment)
+    expect(bothRow?.pending_commitment).toEqual({
+      type: 'comp',
+      description: 'a replacement gulab jamun',
+      code: 'G1H2',
+      expiresAt: null,
+    })
+    // And the trigger sets genuinely differ, so the equality above is a real
+    // comparison rather than two identical runs.
+    expect(bothRow?.review_triggers).toContain('comp_regex_backstop')
+    expect(proseRow?.review_triggers).not.toContain('comp_regex_backstop')
+  })
+
+  // AC5 on the residual path: the regex fires, the check still says clean, and
+  // NOTHING is minted from the regex alone. That matters because the regex has
+  // fired twice in production and one of those was a false positive on a
+  // refusal ("A refund isn't something I can do over text").
+  it('054: a regex hit with a clean check carries nothing', async () => {
+    const fake = useFake('054')
+
+    const turn = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      generation({ body: INCIDENT_REPLY }),
+      'regen',
+      { status: 'clean' },
+    )
+
+    expect(turn.persisted).toMatchObject({ action: 'inserted' })
+    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    expect(row?.pending_commitment).toBeNull()
+    expect(row?.review_reason).toBe('comp_regex_backstop')
+  })
+})
+
 // TAC-401, and this is the regression the code review caught: a failed
 // prose-promise check must NOT cost the guest a reply.
 //
