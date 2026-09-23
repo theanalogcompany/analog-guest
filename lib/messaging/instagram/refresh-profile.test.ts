@@ -180,8 +180,8 @@ describe('profileRefreshTargetFor', () => {
     ['a saved echo (the venue\'s own message)', persisted('echo')],
     ['a duplicate', { status: 'duplicate', kind: 'message', venueId: VENUE_ID, messageId: 'msg-1' }],
     ['a read receipt', { status: 'read', venueId: VENUE_ID, guestId: GUEST_ID, messageId: 'msg-1' }],
-    ['a skipped event', { status: 'skipped', kind: 'message', reason: 'venue_not_found' }],
-    ['a failed save', { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: null }],
+    ['a skipped event', { status: 'skipped', kind: 'message', reason: 'venue_not_found', venueId: null }],
+    ['a failed save', { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: null, venueId: 'v' }],
     ['an unhandled event', { status: 'unhandled', reason: 'standby', fields: [] }],
   ])('refreshes nobody for %s', (_label, outcome) => {
     expect(profileRefreshTargetFor(outcome)).toBeNull()

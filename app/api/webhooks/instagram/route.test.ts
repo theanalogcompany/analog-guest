@@ -54,8 +54,14 @@ vi.mock('@/lib/messaging/instagram/agent-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/messaging/instagram/agent-gate')>()
   return {
     ...actual,
-    agentMessageIdFor: (outcome: Parameters<typeof actual.agentMessageIdFor>[0], enabled?: boolean) =>
-      actual.agentMessageIdFor(outcome, enabled ?? gate.open ?? actual.INSTAGRAM_AGENT_REPLIES_ENABLED),
+    resolveAgentHandoff: (
+      outcome: Parameters<typeof actual.resolveAgentHandoff>[0],
+      enabled?: boolean,
+    ) =>
+      actual.resolveAgentHandoff(
+        outcome,
+        enabled ?? gate.open ?? actual.INSTAGRAM_AGENT_REPLIES_ENABLED,
+      ),
   }
 })
 
@@ -64,6 +70,12 @@ let db = createInstagramDbFake()
 function useDb(seed: Parameters<typeof createInstagramDbFake>[0] = {}): void {
   db = createInstagramDbFake(seed)
   mocks.createAdminClient.mockReturnValue(db.client)
+}
+
+// The route hands the ledger write (TAC-523) to waitUntil, which is a spy here
+// and does not await it. The insert is already in flight; this lets it settle.
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 const ROUTE_URL = 'https://webhooks.theanalog.company/api/webhooks/instagram'
@@ -611,10 +623,34 @@ describe('POST /api/webhooks/instagram saving events', () => {
       expect(db.inserts('messages')).toMatchObject([{ channel: 'instagram', direction: 'inbound' }])
       expect(findEntry('instagram_event_persisted')).toMatchObject({ guestCreated: true })
       expect(mocks.handleInbound).not.toHaveBeenCalled()
-      // The profile refresh (TAC-479) is the only background work, and it is
-      // not behind the agent gate.
-      expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
+      // TAC-479's profile refresh, plus TAC-523's ledger write. Both are
+      // background work and neither is behind the agent gate.
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(2)
       expect(mocks.waitUntil).toHaveBeenCalledWith(refresh)
+
+      // THE 2026-09-20 INCIDENT, end to end. A guest's first message was saved
+      // and dropped because this gate was false in the deployment serving the
+      // request, and NOTHING recorded it — the cause was nameable two days
+      // later only because Vercel still held the runtime logs. This row is
+      // what makes it a query instead.
+      await flushMicrotasks()
+      expect(db.inserts('inbound_turn_outcomes')).toMatchObject([
+        {
+          layer: 'webhook',
+          outcome: 'not_run',
+          reason: 'gate_shut',
+          channel: 'instagram',
+          venue_id: FIXTURE_VENUE.id,
+          agent_run_id: null,
+        },
+      ])
+      // Tied to the inbound it is about; without that the count is a number
+      // with nothing behind it. Cross-checked against the id the handler's own
+      // saved-event line reported, rather than against the fake's internals.
+      const savedMessageId = (findEntry('instagram_event_persisted') as { messageId: string })
+        .messageId
+      expect(savedMessageId).toBeTruthy()
+      expect(db.inserts('inbound_turn_outcomes')[0].inbound_message_id).toBe(savedMessageId)
     },
   )
 
@@ -661,6 +697,15 @@ describe('POST /api/webhooks/instagram saving events', () => {
 
     expect(res.status).toBe(200)
     expect(findEntry('instagram_event_persist_failed')).toMatchObject({ stage: 'message_insert', code: '08006' })
+
+    // TAC-523: a guest's real message reached us and was not filed. That is the
+    // single most important row this table holds, and before the ledger it was
+    // a console line behind a 200. The gate-shut case got an end-to-end
+    // assertion and this one did not; code review caught the asymmetry.
+    await flushMicrotasks()
+    expect(db.inserts('inbound_turn_outcomes')).toMatchObject([
+      { layer: 'webhook', outcome: 'not_run', reason: 'event_not_persisted', channel: 'instagram' },
+    ])
   })
 
   it('acknowledges when the store cannot be opened', async () => {

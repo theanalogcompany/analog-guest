@@ -59,7 +59,7 @@ import { createAdminClient } from '@/lib/db/admin'
 // no-sub-barrel precedent, and a barrel is the thing that lets a future
 // vi.mock hand these tests a stubbed verifier when they need the real one.
 import { captureInstagramScanUnattributed } from '@/lib/analytics/posthog'
-import { agentMessageIdFor } from '@/lib/messaging/instagram/agent-gate'
+import { resolveAgentHandoff } from '@/lib/messaging/instagram/agent-gate'
 import {
   logInstagramOutcome,
   processInstagramDelivery,
@@ -69,6 +69,7 @@ import {
   profileRefreshTargetFor,
   refreshInstagramProfile,
 } from '@/lib/messaging/instagram/refresh-profile'
+import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -219,9 +220,17 @@ export async function POST(request: Request): Promise<Response> {
     const refreshing = new Set<string>()
     for (const outcome of outcomes) {
       logInstagramOutcome(outcome)
-      // Always null while agent-gate.ts holds the gate shut (until TAC-469).
-      const agentMessageId = agentMessageIdFor(outcome)
-      if (agentMessageId !== null) waitUntil(runInboundAgent(agentMessageId))
+      // TAC-523: a delivery the agent never sees is RECORDED rather than
+      // discarded. An agent run records its own outcome at the end of
+      // handleInbound, so exactly one of these two writes a row.
+      const handoff = resolveAgentHandoff(outcome)
+      if (handoff.kind === 'run') {
+        waitUntil(runInboundAgent(handoff.messageId))
+      } else if (handoff.kind === 'record') {
+        // waitUntil, never awaited: the ledger must not sit inside Meta's
+        // delivery deadline.
+        waitUntil(recordInstagramTurnNotRun(outcome, handoff.reason))
+      }
       // Not behind the agent gate: storing who the guest is doesn't reply to
       // them. Handed to waitUntil, never awaited: awaiting it would put a Graph
       // call inside Meta's delivery deadline.

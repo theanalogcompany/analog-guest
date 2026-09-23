@@ -543,6 +543,80 @@ export type Database = {
           },
         ]
       }
+      inbound_turn_outcomes: {
+        Row: {
+          agent_run_id: string | null
+          channel: string | null
+          created_at: string
+          detail: Json
+          guest_id: string | null
+          id: string
+          inbound_message_id: string | null
+          layer: string
+          outbound_message_id: string | null
+          outcome: string
+          reason: string | null
+          venue_id: string | null
+        }
+        Insert: {
+          agent_run_id?: string | null
+          channel?: string | null
+          created_at?: string
+          detail?: Json
+          guest_id?: string | null
+          id?: string
+          inbound_message_id?: string | null
+          layer: string
+          outbound_message_id?: string | null
+          outcome: string
+          reason?: string | null
+          venue_id?: string | null
+        }
+        Update: {
+          agent_run_id?: string | null
+          channel?: string | null
+          created_at?: string
+          detail?: Json
+          guest_id?: string | null
+          id?: string
+          inbound_message_id?: string | null
+          layer?: string
+          outbound_message_id?: string | null
+          outcome?: string
+          reason?: string | null
+          venue_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_turn_outcomes_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_turn_outcomes_inbound_message_id_fkey"
+            columns: ["inbound_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_turn_outcomes_outbound_message_id_fkey"
+            columns: ["outbound_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_turn_outcomes_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       knowledge_corpus: {
         Row: {
           added_by_operator_id: string | null

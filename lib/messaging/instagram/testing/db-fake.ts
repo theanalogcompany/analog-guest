@@ -28,7 +28,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 
-export type FakeTable = 'venues' | 'guests' | 'messages'
+export type FakeTable = 'venues' | 'guests' | 'messages' | 'inbound_turn_outcomes'
 export type FakeRow = { id: string; [column: string]: unknown }
 /** `details` is PostgREST's, which holds the failing row's values: what a store failure must never log. */
 export type FakeError = { code?: string; message: string; details?: string }
@@ -50,9 +50,20 @@ const UNIQUE_KEYS: Record<FakeTable, string[][]> = {
     ['venue_id', 'instagram_scoped_id'],
   ],
   messages: [['provider_message_id']],
+  // No unique constraint, deliberately (migration 055): a redelivery is a real
+  // second event and the ledger should say so.
+  inbound_turn_outcomes: [],
 }
 
-const TABLES: ReadonlySet<string> = new Set(['venues', 'guests', 'messages'])
+// TAC-523: the route now writes the ledger for a delivery the agent never
+// sees, so this fake answers that shape too — the point of the fake is to
+// answer exactly what the handler and route send, and no more.
+const TABLES: ReadonlySet<string> = new Set([
+  'venues',
+  'guests',
+  'messages',
+  'inbound_turn_outcomes',
+])
 
 function isTable(name: string): name is FakeTable {
   return TABLES.has(name)
@@ -83,6 +94,7 @@ export function createInstagramDbFake(
     venues: [...(seed.venues ?? [])],
     guests: [...(seed.guests ?? [])],
     messages: [...(seed.messages ?? [])],
+    inbound_turn_outcomes: [...(seed.inbound_turn_outcomes ?? [])],
   }
   const calls: FakeCall[] = []
   const queuedErrors: Array<{ table: FakeTable; op: FakeOp; error: FakeError }> = []
@@ -120,26 +132,43 @@ export function createInstagramDbFake(
   }
 
   function insertBuilder(table: FakeTable, row: Record<string, unknown>) {
+    function runInsert(columns: string | null): {
+      data: Record<string, unknown> | null
+      error: FakeError | null
+    } {
+      calls.push({ op: 'insert', table, row })
+      const hookIndex = beforeInsert.findIndex((h) => h.table === table)
+      if (hookIndex !== -1) beforeInsert.splice(hookIndex, 1)[0]?.run()
+      const error = takeError(table, 'insert')
+      if (error) return { data: null, error }
+      if (conflicts(table, tables[table], row)) {
+        return {
+          data: null,
+          error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+        }
+      }
+      const stored: FakeRow = { id: `${table}-${nextId++}`, ...row }
+      tables[table].push(stored)
+      return { data: columns === null ? null : project(stored, columns), error: null }
+    }
+
     return {
       select(columns: string) {
         return {
           async single() {
-            calls.push({ op: 'insert', table, row })
-            const hookIndex = beforeInsert.findIndex((h) => h.table === table)
-            if (hookIndex !== -1) beforeInsert.splice(hookIndex, 1)[0]?.run()
-            const error = takeError(table, 'insert')
-            if (error) return { data: null, error }
-            if (conflicts(table, tables[table], row)) {
-              return {
-                data: null,
-                error: { code: '23505', message: 'duplicate key value violates unique constraint' },
-              }
-            }
-            const stored: FakeRow = { id: `${table}-${nextId++}`, ...row }
-            tables[table].push(stored)
-            return { data: project(stored, columns), error: null }
+            return runInsert(columns)
           },
         }
+      },
+      // TAC-523: the ledger writer awaits the insert directly and wants no row
+      // back. Thenable so `await supabase.from(t).insert(row)` resolves the way
+      // PostgREST does, rather than silently yielding the builder — which is
+      // how a fire-and-forget insert can look like it succeeded and store
+      // nothing at all.
+      then<R>(
+        onFulfilled: (value: { data: Record<string, unknown> | null; error: FakeError | null }) => R,
+      ): Promise<R> {
+        return Promise.resolve(onFulfilled(runInsert(null)))
       },
     }
   }

@@ -33,6 +33,7 @@ import {
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
+import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
 import { dispatchReply, type DispatchReplyOutcome } from './dispatch-reply'
 import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from './dispatch-instagram-reply'
@@ -431,6 +432,57 @@ function undeliveredAgentResult(
  */
 export async function handleInbound(inboundMessageId: string): Promise<AgentResult> {
   const agentRunId = randomUUID()
+  let result: AgentResult
+  try {
+    result = await runInboundTurn(inboundMessageId, agentRunId)
+  } catch (unexpected) {
+    // Not redundant with runInboundTurn's own top-level catch: its `finally`
+    // block awaits captureAgentLatencyHigh, which is guarded today but by a
+    // guarantee living in another module. The ledger should not depend on it.
+    await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
+    throw unexpected
+  }
+  await recordSafely({ inboundMessageId, agentRunId, result })
+  return result
+}
+
+/**
+ * The record call is guarded SEPARATELY from the orchestrator's, and the
+ * structure is the point: recording sits outside the try that wraps the run.
+ *
+ * Inside it, a throwing recorder would be caught by the same catch, recorded a
+ * second time, and rethrown — converting a reply that reached the guest into a
+ * failed request. `recordInboundTurnOutcome` never throws by construction, but
+ * "change no decision" cannot rest on a guarantee that lives in another file;
+ * that is the same reason the catch above exists at all.
+ */
+async function recordSafely(input: {
+  inboundMessageId: string
+  agentRunId: string
+  result: AgentResult | null
+  unexpected?: unknown
+}): Promise<void> {
+  try {
+    await recordInboundTurnOutcome(input)
+  } catch (e) {
+    console.error('[agent] inbound turn outcome recorder threw; outcome not recorded', {
+      agentRunId: input.agentRunId,
+      inboundMessageId: input.inboundMessageId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
+
+/**
+ * The orchestrator itself. Unchanged by TAC-523 apart from its name and
+ * taking `agentRunId` as a parameter — every one of its ~20 return sites is
+ * untouched, which is what makes "no path's decision changed" a property of
+ * the diff rather than a claim in a review.
+ */
+async function runInboundTurn(
+  inboundMessageId: string,
+  agentRunId: string,
+): Promise<AgentResult> {
   const start = Date.now()
   const trace = startAgentTrace({
     name: 'agent.inbound',

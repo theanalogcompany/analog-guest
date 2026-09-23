@@ -432,7 +432,7 @@ describe('an echo', () => {
 
     expect(db.inserts('guests')).toEqual([])
     expect(db.inserts('messages')).toEqual([])
-    expect(outcomes).toEqual([{ status: 'skipped', kind: 'echo', reason: 'unknown_guest' }])
+    expect(outcomes).toEqual([{ status: 'skipped', kind: 'echo', reason: 'unknown_guest', venueId: VENUE_ID }])
   })
 
   // TAC-469's own sends will echo back with the mid its send already saved.
@@ -492,7 +492,7 @@ describe('a read receipt', () => {
     const outcomes = await processInstagramDelivery(fixture('read'), db.client)
 
     expect(db.inserts('guests')).toEqual([])
-    expect(outcomes).toEqual([{ status: 'skipped', kind: 'read', reason: 'unknown_guest' }])
+    expect(outcomes).toEqual([{ status: 'skipped', kind: 'read', reason: 'unknown_guest', venueId: VENUE_ID }])
   })
 })
 
@@ -501,7 +501,7 @@ describe('venues and duplicates', () => {
     const db = createInstagramDbFake()
     const outcomes = await processInstagramDelivery(fixture('message'), db.client)
 
-    expect(outcomes).toEqual([{ status: 'skipped', kind: 'message', reason: 'venue_not_found' }])
+    expect(outcomes).toEqual([{ status: 'skipped', kind: 'message', reason: 'venue_not_found', venueId: null }])
     expect(db.calls.map((c) => c.table)).toEqual(['venues'])
   })
 
@@ -573,7 +573,17 @@ describe('failures', () => {
     db.failNext(table, op, dbError)
     const outcomes = await processInstagramDelivery(fixture('message'), db.client)
     expect(outcomes).toEqual([
-      { status: 'failed', kind: 'message', stage, error: 'connection failure', code: '08006' },
+      {
+        status: 'failed',
+        kind: 'message',
+        stage,
+        error: 'connection failure',
+        code: '08006',
+        // TAC-523: null ONLY when the venue lookup is what failed. Every later
+        // stage knows the venue, and the ledger row needs it or the per-venue
+        // query cannot see the failure.
+        venueId: stage === 'venue_lookup' ? null : VENUE_ID,
+      },
     ])
   })
 
@@ -583,7 +593,7 @@ describe('failures', () => {
     db.failNext('messages', 'select', dbError)
     const outcomes = await processInstagramDelivery(fixture('read'), db.client)
     expect(outcomes).toEqual([
-      { status: 'failed', kind: 'read', stage: 'read_lookup', error: 'connection failure', code: '08006' },
+      { status: 'failed', kind: 'read', stage: 'read_lookup', error: 'connection failure', code: '08006', venueId: VENUE_ID },
     ])
   })
 
@@ -609,7 +619,7 @@ describe('failures', () => {
 
     const outcomes = await processInstagramDelivery(batch('message', 'postback-referral'), db.client)
     expect(outcomes).toEqual([
-      { status: 'failed', kind: 'message', stage: 'unexpected', error: 'boom', code: null },
+      { status: 'failed', kind: 'message', stage: 'unexpected', error: 'boom', code: null, venueId: null },
       expect.objectContaining({ status: 'persisted', kind: 'postback' }),
     ])
   })
@@ -651,11 +661,11 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_read_receipt', venueId: 'v', guestId: 'g', matched: true, messageId: 'm' },
     ],
     [
-      { status: 'skipped', kind: 'message', reason: 'venue_not_found' },
+      { status: 'skipped', kind: 'message', reason: 'venue_not_found', venueId: null },
       { event: 'instagram_event_skipped', kind: 'message', reason: 'venue_not_found' },
     ],
     [
-      { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: '23514' },
+      { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: '23514', venueId: 'v' },
       { event: 'instagram_event_persist_failed', kind: 'message', stage: 'message_insert', error: 'x', code: '23514' },
     ],
   ])('logs %o as one line with exactly these fields', (outcome, expected) => {

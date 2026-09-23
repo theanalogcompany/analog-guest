@@ -155,6 +155,15 @@ vi.mock('./alerts', () => ({
   fireRedAlert: (...a: unknown[]) => fireRedAlertMock(...a),
   capturePostHogEvent: vi.fn(),
 }))
+// TAC-523: the ledger writer, mocked wholesale — its own coverage lives in
+// record-inbound-turn-outcome.test.ts, against a fake that records inserts.
+// NAMED, not a bare vi.fn(): what this file has to prove is that the
+// orchestrator hands it the real AgentResult, and a fixed stub cannot show
+// that. See the 'records the turn's outcome' block at the end of this file.
+const recordInboundTurnOutcomeMock = vi.fn<(...args: unknown[]) => Promise<void>>()
+vi.mock('./record-inbound-turn-outcome', () => ({
+  recordInboundTurnOutcome: (...a: unknown[]) => recordInboundTurnOutcomeMock(...a),
+}))
 // TAC-363: a named handle, because the push fan-out below is the delivery
 // mechanism for "every open obligation is surfaced" and a fixed 'noop' cannot
 // reach it. Reverting the loop to a single row passed every test in this file
@@ -232,6 +241,7 @@ vi.mock('@/lib/notifications/send-commitment-push', () => ({
   sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
+const traceControl = vi.hoisted(() => ({ flushThrows: false }))
 vi.mock('@/lib/observability', () => ({
   startAgentTrace: () => ({
     id: '',
@@ -242,7 +252,12 @@ vi.mock('@/lib/observability', () => ({
       update: () => undefined,
     }),
     update: () => undefined,
-    flushAsync: async () => undefined,
+    // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
+    // which is the only way the orchestrator can throw past its own top-level
+    // catch — and therefore the only way to reach the wrapper's catch.
+    flushAsync: async () => {
+      if (traceControl.flushThrows) throw new Error('flush failed')
+    },
   }),
 }))
 vi.mock('./trace-content', () => ({
@@ -312,6 +327,7 @@ const GEN_FAILED = { status: 'failed' as const, error: 'No object generated' }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  traceControl.flushThrows = false
   // TAC-363: vi.clearAllMocks() wipes the factory's own implementation, so the
   // default has to be restored here or every test gets `undefined` back.
   dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'noop' })
@@ -2227,5 +2243,155 @@ describe('handleInbound — arrival push fan-out (TAC-363)', () => {
     dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'no_open_obligations' })
     await handleInbound(INBOUND_ID)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleInbound — records the turn outcome (TAC-523)', () => {
+  // The recorder is mocked in this file, so these assertions are the ONLY
+  // thing proving the orchestrator hands it the real AgentResult. Without
+  // them the mock would be a fixture agreeing with itself — the TAC-385
+  // mutant, where a carrier was computed, never passed on, and every test
+  // stayed green because the harness supplied the value production didn't.
+  function lastRecordedCall() {
+    const calls = recordInboundTurnOutcomeMock.mock.calls
+    return calls[calls.length - 1]?.[0] as {
+      inboundMessageId: string
+      agentRunId: string
+      result: unknown
+    }
+  }
+
+  it('hands over the SENT result, with the outbound row id', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    expect(recordInboundTurnOutcomeMock).toHaveBeenCalledTimes(1)
+    expect(lastRecordedCall()).toMatchObject({
+      inboundMessageId: INBOUND_ID,
+      result: { status: 'sent', outboundMessageId: 'out-1' },
+    })
+    expect(lastRecordedCall().agentRunId).toEqual(expect.any(String))
+  })
+
+  it('records the RUN\'s agentRunId, not a fresh one', async () => {
+    // The ledger's whole value on a failure is correlating a row with the
+    // PostHog event and the Langfuse trace for the same run. `expect.any(String)`
+    // would pass against a freshly minted uuid, so this pins it against the id
+    // the alert for the SAME turn carries.
+    retrieveCorpusStageMock.mockRejectedValue(new Error('below MIN_STRONG_MATCHES'))
+
+    await handleInbound(INBOUND_ID)
+
+    const alerted = fireRedAlertMock.mock.calls[0][0] as { agentRunId: string }
+    expect(alerted.agentRunId).toBeTruthy()
+    expect(lastRecordedCall().agentRunId).toBe(alerted.agentRunId)
+  })
+
+  it('hands over a REFUSED result — the voice-fidelity floor, known path 1', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'refused',
+      attemptScores: [0.31, 0.28],
+      finalScore: 0.28,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'refused', reason: 'low_fidelity' })
+    expect(lastRecordedCall().result).toMatchObject({
+      status: 'refused',
+      reason: 'low_fidelity',
+    })
+  })
+
+  it('hands over a FAILED result — the fail-closed corpus retrieval, known path 2', async () => {
+    retrieveCorpusStageMock.mockRejectedValue(new Error('below MIN_STRONG_MATCHES'))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'failed', stage: 'corpus' })
+    expect(lastRecordedCall().result).toMatchObject({ status: 'failed', stage: 'corpus' })
+  })
+
+  it('hands over a QUEUED result, so a card is in the ledger too', async () => {
+    // The complete-ledger decision: successes are recorded, or a failure count
+    // has no denominator.
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['model_flagged'],
+      primaryTrigger: 'model_flagged',
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'queued', outboundMessageId: 'card-1' })
+    expect(lastRecordedCall().result).toMatchObject({
+      status: 'queued',
+      outboundMessageId: 'card-1',
+      primaryTrigger: 'model_flagged',
+    })
+  })
+
+  it('records a duplicate turn, which is the one outcome that must not count as a turn', async () => {
+    // Recorded so the redelivery is visible, and excluded from a strict turn
+    // count by `outcome <> 'skipped_duplicate'` — see migration 055's header.
+    existingReplyMaybeSingleMock.mockResolvedValue({ data: { id: 'already' }, error: null })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'skipped_duplicate' })
+    expect(lastRecordedCall().result).toEqual({ status: 'skipped_duplicate' })
+  })
+
+  it('records exactly once per turn', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(recordInboundTurnOutcomeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('RETHROWS when the orchestrator throws, and records it as unexpected', async () => {
+    // The wrapper's catch branch. Code review found it had no test at all:
+    // replacing `throw unexpected` with a `return` passed all 91 tests in this
+    // file, because nothing else in the repo reaches it — both webhook route
+    // tests mock handleInbound. Swallowing there would convert a rejected
+    // promise inside waitUntil into a resolved one, so Vercel stops seeing the
+    // invocation as errored, which is exactly the "swallow an exception that
+    // previously did not exist" the ticket forbids.
+    traceControl.flushThrows = true
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    await expect(handleInbound(INBOUND_ID)).rejects.toThrow('flush failed')
+
+    // Recorded, with no AgentResult, because the run produced none.
+    expect(recordInboundTurnOutcomeMock).toHaveBeenCalledTimes(1)
+    expect(lastRecordedCall()).toMatchObject({ inboundMessageId: INBOUND_ID, result: null })
+  })
+
+  it('a recorder that THROWS does not change what the guest got', async () => {
+    // The wrapper's record call is guarded separately from the run. Inside the
+    // same try, a throwing recorder would be caught, recorded again, and
+    // rethrown — turning a reply that reached the guest into a failed request.
+    // This is the mutant that catches a refactor merging the two.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    recordInboundTurnOutcomeMock.mockRejectedValue(new Error('ledger table is gone'))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
   })
 })
