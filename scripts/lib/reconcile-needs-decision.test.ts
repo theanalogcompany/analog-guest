@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   EXIT,
   USAGE,
-  auditHasOpenQuestions,
   deriveNeedsDecision,
   reconcile,
   run,
@@ -492,32 +491,51 @@ describe('deriveNeedsDecision', () => {
     const shuffled = deriveNeedsDecision([...TAC_396_THREAD].reverse())
     expect(shuffled).toBe(forwards)
   })
-})
 
-describe('auditHasOpenQuestions', () => {
-  it('TAC-396: the real audit with seven numbered questions (B1-B7) is detected as having open questions', () => {
-    const audit = TAC_396_THREAD.find((c) => c.body.includes('[AUDIT] TAC-396'))!
-    expect(auditHasOpenQuestions(audit.body)).toBe(true)
+  // TAC-499: the [AUDIT] branch used to run its own parser
+  // (auditHasOpenQuestions, deleted) rather than comment-provenance.mjs's
+  // auditHasQuestions — the same function pending-question.mjs's selection
+  // gate already used. The two disagreed on the colon-terminated
+  // "**Decided without asking:**" heading most real audits actually render
+  // (confirmed against TAC-471, TAC-493, TAC-490, TAC-487, TAC-483,
+  // TAC-480): the deleted regex required nothing but whitespace before the
+  // closing `**` and so never matched the colon form, silently reading the
+  // numbered "Decided without asking" list beneath it as still-open
+  // questions. These two tests are what deriveNeedsDecision itself does
+  // with that shape now, both via a real audit and a constructed one built
+  // to isolate exactly the difference.
+  it('TAC-499: this ticket\'s own real [AUDIT] comment (colon-form heading) — ends false, not still asking', () => {
+    // Trimmed per this file's own convention above ("never paraphrased"):
+    // the 1. CONFIRMED / 2. WRONG / 5. UNBLOCKED sections are dropped
+    // whole (they don't affect classification), and each bullet under
+    // "Decided without asking:" is cut at its own bold lead sentence — a
+    // natural sentence boundary in the real text, not a paraphrase. The
+    // 4. FINDINGS section is dropped too, for the same reason this file's
+    // header already gives for TAC-396/325/389: only the QUESTIONS section
+    // matters here. Fetched 2026-09-19.
+    const tac499RealAudit = `**[FROM CLAUDE CODE]**
+
+[AUDIT] TAC-499
+
+**3. QUESTIONS**
+
+None.
+
+**Decided without asking:**
+
+- **Which parser is correct where they differ.**
+- **Whether the two gates should be allowed to genuinely disagree.**
+- **Whether TAC-470 is a usable comparison fixture for this ticket's item 1.**`
+    expect(deriveNeedsDecision([{ createdAt: '2026-09-19T21:17:08.849Z', body: tac499RealAudit }])).toBe(false)
   })
 
-  it('TAC-325: the real audit with numbered questions using nested lettered sub-options is detected', () => {
-    const audit = TAC_325_THREAD.find((c) => c.body.includes('[AUDIT] TAC-325'))!
-    expect(auditHasOpenQuestions(audit.body)).toBe(true)
-  })
-
-  it('TAC-389: both real audits, one with a "## 3. QUESTIONS" markdown heading, are detected', () => {
-    for (const audit of TAC_389_THREAD.filter((c) => c.body.includes('[AUDIT] TAC-389'))) {
-      expect(auditHasOpenQuestions(audit.body)).toBe(true)
-    }
-  })
-
-  it('a clean audit — "None" plus a numbered "Decided without asking" list — has no open questions', () => {
-    // Constructed from audit-ticket.md's own template shape: no real
-    // three-named-ticket audit in this fixture set has zero questions, so
-    // this one is written rather than trimmed from a real thread (noted
-    // in the plan). Deliberately numbers the "Decided without asking"
-    // items, so this proves the cutoff does real work — without it, this
-    // fixture would wrongly read as having two open questions.
+  it('TAC-499: a colon-form "**Decided without asking:**" heading followed by a NUMBERED list — the exact shape the deleted regex would have misread as still asking', () => {
+    // Same shape as this file's former "clean audit" fixture (a plain
+    // "Decided without asking" heading, no colon, per audit-ticket.md's
+    // literal template), but with the colon real audits actually render.
+    // Constructed, documented as such, same disclosure convention as that
+    // fixture: no three-named-ticket real thread in this file happens to
+    // pair a colon-form heading with a numbered (not bulleted) list.
     const body = `**[FROM CLAUDE CODE]**
 
 [AUDIT] TAC-999
@@ -526,7 +544,7 @@ describe('auditHasOpenQuestions', () => {
 
 None — every ambiguity found resolves to an implementation detail.
 
-**Decided without asking**
+**Decided without asking:**
 
 1. Reused the existing helper rather than writing a new one — matches the file's own convention.
 2. Named the new file to mirror its sibling — no ambiguity to resolve.
@@ -534,31 +552,7 @@ None — every ambiguity found resolves to an implementation detail.
 **4. FINDINGS**
 
 None.`
-    expect(auditHasOpenQuestions(body)).toBe(false)
-  })
-
-  it('defaults to true — keep the label — when the 3. QUESTIONS heading cannot be found at all', () => {
-    const body = `**[FROM CLAUDE CODE]**
-
-[AUDIT] TAC-999
-
-This audit ran out of turns before it could finish and never posted a QUESTIONS section.`
-    expect(auditHasOpenQuestions(body)).toBe(true)
-  })
-
-  it('never reads a question inside the FINDINGS section', () => {
-    const body = `**[FROM CLAUDE CODE]**
-
-[AUDIT] TAC-999
-
-**3. QUESTIONS**
-
-None.
-
-**4. FINDINGS**
-
-1. A defect unrelated to any decision — this numbered line must not count.`
-    expect(auditHasOpenQuestions(body)).toBe(false)
+    expect(deriveNeedsDecision([{ createdAt: '2026-09-19T21:17:08.849Z', body }])).toBe(false)
   })
 })
 

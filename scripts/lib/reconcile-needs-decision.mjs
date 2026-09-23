@@ -27,7 +27,10 @@
  *   flag.
  * - [AUDIT]: true when its `3. QUESTIONS` section asks at least one
  *   numbered question outside a `Decided without asking` subsection, else
- *   false. See auditHasOpenQuestions.
+ *   false. Delegates to `comment-provenance.mjs`'s `auditHasQuestions` —
+ *   the same parser `pending-question.mjs`'s selection gate already uses
+ *   (TAC-499) — rather than carrying a second, independent implementation
+ *   of the same question.
  * - Any other bot comment — [NEEDS-ACTION] (a different label, Needs
  *   Action, not this one), [FINDING], the [POLLING-*] markers,
  *   [CANCELLED], a PR-link comment with no marker, or a bot comment with no
@@ -52,7 +55,7 @@
  * alone rather than guessing at the right behaviour.
  */
 
-import { commentMarker, isBookkeepingComment, isBotComment, isContextChatComment, unescapeBrackets } from './comment-provenance.mjs';
+import { auditHasQuestions, commentMarker, isBookkeepingComment, isBotComment, isContextChatComment } from './comment-provenance.mjs';
 
 export const EXIT = { OK: 0, USAGE: 2 };
 
@@ -63,40 +66,6 @@ const ALWAYS_LABEL_MARKERS = new Set(['PLAN', 'NEEDS-INPUT', 'BUILD-SKIPPED', 'A
 // A hard-stop plan is approved; the build is Jaipal's own session. Nothing
 // left for the label to flag.
 const NEVER_LABEL_MARKERS = new Set(['HUMAN-REVIEW-REQUIRED']);
-
-function headingPattern(number, word) {
-  // Tolerates both real forms seen in this repo's audits: a bold
-  // `**3. QUESTIONS**` (TAC-396, TAC-325) and a markdown `## 3. QUESTIONS`
-  // (TAC-389). The number's dot, the trailing asterisks and the case are
-  // all optional/insensitive so a minor reformatting doesn't defeat it.
-  return new RegExp(`(?:^|\\n)[ \\t]*(?:#{1,6}|\\*{1,2})[ \\t]*${number}\\.?[ \\t]*${word}[ \\t]*\\*{0,2}[ \\t]*(?=\\n|$)`, 'i');
-}
-
-const QUESTIONS_HEADING = headingPattern(3, 'QUESTIONS');
-const FINDINGS_HEADING = headingPattern(4, 'FINDINGS');
-const DECIDED_WITHOUT_ASKING_HEADING = /\*\*\s*Decided without asking\s*\*\*/i;
-const NUMBERED_QUESTION_LINE = /^[ \t]*\d+\.[ \t]+\S/m;
-
-/**
- * Whether an [AUDIT] comment's `3. QUESTIONS` section asks Jaipal at least
- * one numbered question, outside any `Decided without asking` subsection.
- *
- * Defaults to true — keep or add the label — when the `3. QUESTIONS`
- * heading can't be found at all. A malformed or unparseable audit should
- * fail toward "still needs a look," never toward silently clearing a label
- * that might be covering a real question.
- */
-export function auditHasOpenQuestions(body) {
-  const text = unescapeBrackets(body ?? '');
-  const start = QUESTIONS_HEADING.exec(text);
-  if (!start) return true;
-  const afterHeading = text.slice(start.index + start[0].length);
-  const end = FINDINGS_HEADING.exec(afterHeading);
-  const section = end ? afterHeading.slice(0, end.index) : afterHeading;
-  const decided = DECIDED_WITHOUT_ASKING_HEADING.exec(section);
-  const questionsOnly = decided ? section.slice(0, decided.index) : section;
-  return NUMBERED_QUESTION_LINE.test(questionsOnly);
-}
 
 /**
  * Whether Needs Decision should be on, folded over a ticket's comments in
@@ -119,7 +88,7 @@ export function deriveNeedsDecision(comments) {
       } else if (NEVER_LABEL_MARKERS.has(marker)) {
         state = false;
       } else if (marker === 'AUDIT') {
-        state = auditHasOpenQuestions(body);
+        state = auditHasQuestions(body);
       }
       // any other recognised or unrecognised bot marker: unchanged
       continue;
