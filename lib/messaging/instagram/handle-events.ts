@@ -83,6 +83,7 @@ import type { Database } from '@/db/types'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
 // agent runtime, and a barrel a test mocks would hand one of the two a stub
 // while the other kept the real thing, which is the drift it exists to stop.
+import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -128,6 +129,12 @@ export type InstagramEventOutcome =
       messageId: string
       guestCreated: boolean
       hasReferral: boolean
+      /**
+       * Meta's own `referral.source`, or null when none arrived. TAC-518 reads
+       * it to tell a scan that could not be attributed from an ordinary DM.
+       * A vocabulary constant, never guest content.
+       */
+      referralSource: string | null
       /** False when the item had no millisecond timestamp and provider_sent_at was saved NULL. */
       hasProviderSentAt: boolean
       /**
@@ -343,6 +350,7 @@ async function insertMessage(
     messageId: data.id,
     guestCreated: guest.created,
     hasReferral: event.kind !== 'echo' && event.referral !== null,
+    referralSource: event.kind === 'echo' ? null : (event.referral?.source ?? null),
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback: event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
@@ -432,6 +440,35 @@ export async function processInstagramDelivery(
  * field below is our own row ID, a flag, or a name, except a failed save's
  * error message and code (see fail() for what may never be added to those).
  */
+/**
+ * TAC-518: an inbound that looks like it came from the venue's link and
+ * carries nothing to prove it, or null when there is nothing to report.
+ *
+ * Pure, and deliberately narrow. Two shapes qualify:
+ *
+ *   - A POSTBACK with no referral. Instagram offers icebreakers only in a
+ *     thread with no history, so a tap is the venue's link being opened. This
+ *     is the shape a returning guest's scan takes if Meta declines to repeat
+ *     the referral into a thread that still has messages — the one thing
+ *     TAC-518's recorded fixtures could not settle, and the reason this exists.
+ *   - A referral whose source is not the one meaning "opened from a link".
+ *     Meta documents others, so it is not necessarily wrong; but if Meta ever
+ *     renames the value we match on, every scan silently stops arming and
+ *     nothing else would say so.
+ *
+ * An ordinary MESSAGE with no referral is NOT reported: that is just a DM, and
+ * flagging it would fire on every organic inbound and mean nothing.
+ */
+export function scanUnattributedReason(
+  outcome: InstagramEventOutcome,
+): InstagramScanUnattributedReason | null {
+  if (outcome.status !== 'persisted' || outcome.kind === 'echo') return null
+  if (outcome.referralSource === null) {
+    return outcome.kind === 'postback' ? 'postback_without_referral' : null
+  }
+  return isScanReferral(outcome.referralSource) ? null : 'unrecognized_referral_source'
+}
+
 export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
   switch (outcome.status) {
     case 'unhandled':
@@ -449,6 +486,7 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
         guestId: outcome.guestId,
         messageId: outcome.messageId,
         guestCreated: outcome.guestCreated,
+        referralSource: outcome.referralSource,
         hasReferral: outcome.hasReferral,
         hasProviderSentAt: outcome.hasProviderSentAt,
         titlelessPostback: outcome.titlelessPostback,

@@ -14,6 +14,7 @@ const saved = (kind: 'message' | 'postback' | 'echo'): InstagramEventOutcome => 
   status: 'persisted',
   kind,
   venueId: 'v',
+  referralSource: null,
   guestId: 'g',
   messageId: `msg-${kind}`,
   guestCreated: false,

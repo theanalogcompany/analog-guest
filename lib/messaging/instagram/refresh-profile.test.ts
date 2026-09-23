@@ -166,6 +166,7 @@ describe('profileRefreshTargetFor', () => {
     messageId: 'msg-1',
     guestCreated: true,
     hasReferral: false,
+    referralSource: null,
     hasProviderSentAt: true,
     titlelessPostback: false,
     guestCreatedVia: 'inbound_message',

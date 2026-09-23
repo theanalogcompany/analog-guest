@@ -13,7 +13,12 @@ import { join, relative } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { logInstagramOutcome, processInstagramDelivery, type InstagramEventOutcome } from './handle-events'
+import {
+  logInstagramOutcome,
+  processInstagramDelivery,
+  scanUnattributedReason,
+  type InstagramEventOutcome,
+} from './handle-events'
 import { createInstagramDbFake, type FakeRow } from './testing/db-fake'
 
 const ACCOUNT_ID = '17841400000000001'
@@ -96,6 +101,7 @@ describe('a guest message', () => {
         messageId: db.tables.messages[0]?.id,
         guestCreated: true,
         hasReferral: false,
+        referralSource: null,
         hasProviderSentAt: true,
         titlelessPostback: false,
         guestCreatedVia: 'inbound_message',
@@ -629,12 +635,12 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
     ],
     [
-      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
-      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
+      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
+      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
@@ -716,5 +722,78 @@ describe('provider_sent_at', () => {
       join('lib', 'messaging', 'instagram', 'window.ts'),
       join('lib', 'operator', 'dispatch-instagram-outbound.ts'),
     ])
+  })
+})
+
+
+// TAC-518. The whole visibility half rests on this predicate: it decides when a
+// guest going unrecognised becomes a Slack message instead of silence. Pure, so
+// every shape is covered here rather than through the route.
+describe('scanUnattributedReason (TAC-518)', () => {
+  function persisted(over: Partial<Extract<InstagramEventOutcome, { status: 'persisted' }>> = {}) {
+    return {
+      status: 'persisted' as const,
+      kind: 'message' as 'message' | 'postback' | 'echo',
+      venueId: 'v',
+      guestId: 'g',
+      messageId: 'm',
+      guestCreated: false,
+      hasReferral: false,
+      referralSource: null as string | null,
+      hasProviderSentAt: true,
+      titlelessPostback: false,
+      guestCreatedVia: null,
+      ...over,
+    }
+  }
+
+  // The reason this exists. Icebreakers render only in a thread with no
+  // history, so a tap IS the link being opened; with no referral nothing can
+  // say so, and that is exactly the shape a returning guest's scan would take
+  // if Meta declines to repeat the referral into a thread that still has
+  // messages.
+  it('reports a postback that carries no referral', () => {
+    expect(scanUnattributedReason(persisted({ kind: 'postback' }))).toBe('postback_without_referral')
+  })
+
+  it('reports a referral whose source is not the one meaning "from a link"', () => {
+    expect(scanUnattributedReason(persisted({ hasReferral: true, referralSource: 'ADS' }))).toBe(
+      'unrecognized_referral_source',
+    )
+  })
+
+  // An ordinary DM. Reporting this would fire on every organic inbound and so
+  // report nothing at all — the comp_regex_backstop failure in a new costume.
+  it('does NOT report an ordinary message with no referral', () => {
+    expect(scanUnattributedReason(persisted({ kind: 'message' }))).toBeNull()
+  })
+
+  it('does NOT report a postback that carries a real scan referral', () => {
+    expect(
+      scanUnattributedReason(persisted({ kind: 'postback', hasReferral: true, referralSource: 'SHORTLINK' })),
+    ).toBeNull()
+  })
+
+  // The venue's own outbound. It is not a guest arriving at all.
+  //
+  // The fixture carries a source ON PURPOSE. processInstagramDelivery maps an
+  // echo's referralSource to null unconditionally, so an echo built the way
+  // the handler builds one falls through to null whether or not this guard
+  // exists — a test using that shape passes against its own deletion, which is
+  // how the first version of it survived the mutant. This shape is the only
+  // one that separates the two, and the guard is kept because the mapping that
+  // makes it unreachable is one line in another function.
+  it('does NOT report an echo, even one carrying a source', () => {
+    expect(
+      scanUnattributedReason(persisted({ kind: 'echo', hasReferral: true, referralSource: 'ADS' })),
+    ).toBeNull()
+  })
+
+  it.each([
+    { status: 'unhandled', reason: 'standalone_referral', fields: ['referral'] },
+    { status: 'duplicate', kind: 'postback', venueId: 'v', messageId: null },
+    { status: 'read', venueId: 'v', guestId: 'g', messageId: null },
+  ] as InstagramEventOutcome[])('does NOT report a $status outcome', (outcome) => {
+    expect(scanUnattributedReason(outcome)).toBeNull()
   })
 })

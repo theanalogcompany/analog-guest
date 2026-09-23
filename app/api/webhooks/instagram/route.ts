@@ -58,10 +58,12 @@ import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
 // no-sub-barrel precedent, and a barrel is the thing that lets a future
 // vi.mock hand these tests a stubbed verifier when they need the real one.
+import { captureInstagramScanUnattributed } from '@/lib/analytics/posthog'
 import { agentMessageIdFor } from '@/lib/messaging/instagram/agent-gate'
 import {
   logInstagramOutcome,
   processInstagramDelivery,
+  scanUnattributedReason,
 } from '@/lib/messaging/instagram/handle-events'
 import {
   profileRefreshTargetFor,
@@ -227,6 +229,24 @@ export async function POST(request: Request): Promise<Response> {
       if (refreshTarget !== null && !refreshing.has(refreshTarget.guestId)) {
         refreshing.add(refreshTarget.guestId)
         waitUntil(refreshInstagramProfile(supabase, refreshTarget))
+      }
+      // TAC-518: an inbound that looks like a scan and carries nothing to prove
+      // it. Slack-relayed, because the referral is the only thing that tells us
+      // a returning guest is at the counter, and before this its absence was
+      // invisible. waitUntil, never awaited: analytics must not sit inside
+      // Meta's delivery deadline.
+      const unattributed = scanUnattributedReason(outcome)
+      if (unattributed !== null && outcome.status === 'persisted') {
+        waitUntil(
+          captureInstagramScanUnattributed({
+            venueId: outcome.venueId,
+            guestId: outcome.guestId,
+            messageId: outcome.messageId,
+            reason: unattributed,
+            referralSource: outcome.referralSource,
+            guestCreated: outcome.guestCreated,
+          }),
+        )
       }
     }
 

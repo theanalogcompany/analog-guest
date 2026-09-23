@@ -2239,3 +2239,67 @@ export interface InstagramReplySupersededProps {
 export async function captureInstagramReplySuperseded(props: InstagramReplySupersededProps): Promise<void> {
   await capturePostHogEvent('instagram_reply_superseded', props.guestId, { ...props })
 }
+
+export type InstagramScanUnattributedReason =
+  /**
+   * An icebreaker tap carrying no referral. Instagram only offers icebreakers
+   * in a thread with no history, so a tap IS the venue's link being opened —
+   * and without the referral nothing can say so. This is the shape a returning
+   * guest's scan takes if Meta declines to repeat the referral into a thread
+   * that still has messages, which is the one thing TAC-518's recorded
+   * fixtures could not settle.
+   */
+  | 'postback_without_referral'
+  /**
+   * A referral arrived whose source is not the one that means "opened from a
+   * link". Meta documents others (ads, the customer-chat plugin), so this is
+   * not necessarily wrong — but if Meta ever renames the value we match on,
+   * every scan silently stops arming, and this is the only thing that would
+   * say so.
+   */
+  | 'unrecognized_referral_source'
+
+export interface InstagramScanUnattributedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  reason: InstagramScanUnattributedReason
+  /**
+   * Meta's own `referral.source`, or null when none arrived. A vocabulary
+   * constant, never guest content — the same reasoning that lets the recorded
+   * fixtures keep `source` and `type` unreplaced.
+   */
+  referralSource: string | null
+  /** Whether this event created the guest, i.e. their first message to us. */
+  guestCreated: boolean
+}
+
+/**
+ * An Instagram inbound that looks like it came from the venue's link and
+ * carries nothing to prove it.
+ *
+ * SLACK-RELAYED, deliberately, and it is the point of TAC-518's visibility
+ * half. The referral is the only signal that a returning guest is standing at
+ * the counter; if it stops arriving, every such guest silently goes back to
+ * being treated as an ordinary DM, and before this nothing anywhere said so.
+ * At one venue's volume the relay IS the measurement. If it turns out to fire
+ * on every returning scan, the answer is to say so and stop, not to infer a
+ * scan from something weaker.
+ *
+ * Carries no message body and no scoped ID, per the Instagram logging rule.
+ */
+export async function captureInstagramScanUnattributed(
+  props: InstagramScanUnattributedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_scan_unattributed', props.guestId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram inbound looks like a scan but carries no referral*: \`${props.reason}\``,
+      props.referralSource !== null ? `source Meta sent: \`${props.referralSource}\`` : 'no referral on the event',
+      props.guestCreated ? 'this was the guest\'s first message' : 'the guest has messaged before',
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+      `message: \`${props.messageId}\``,
+    ].join('\n'),
+  )
+}
