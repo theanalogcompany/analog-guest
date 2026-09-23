@@ -908,6 +908,11 @@ export async function handleFollowup(input: {
               guestFirstName: ctx.guest.firstName,
               draftId: outboundMessageId,
               primaryTrigger: approval.primaryTrigger,
+              // TAC-532. A followup answers no guest message, so there is
+              // nothing to quote and the body takes its fallback. The category
+              // still feeds the title's reason phrase.
+              guestQuestion: null,
+              guestCategory: ctx.classification?.category ?? null,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,

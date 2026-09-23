@@ -314,6 +314,12 @@ async function persistGenerationFailureCard(
           guestFirstName: ctx.guest.firstName,
           draftId: persisted.outboundMessageId,
           primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
+          // TAC-532. Classification can be null here: this card exists because
+          // generation failed, and if classify itself failed we cannot show the
+          // message was not a complaint. shouldQuoteGuest treats null as
+          // suppress, which is the safe direction.
+          guestQuestion: ctx.currentMessage?.body ?? null,
+          guestCategory: ctx.classification?.category ?? null,
         }).catch(() => {}),
       )
     }
@@ -377,6 +383,8 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
       guestFirstName: ctx.guest.firstName,
       draftId: cardId,
       primaryTrigger: INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+      guestQuestion: ctx.currentMessage?.body ?? null,
+      guestCategory: ctx.classification?.category ?? null,
     }).catch(() => {}),
   )
 }
@@ -1927,6 +1935,8 @@ async function runInboundTurn(
               guestFirstName: ctx.guest.firstName,
               draftId: outboundMessageId,
               primaryTrigger: approval.primaryTrigger,
+              guestQuestion: ctx.currentMessage?.body ?? null,
+              guestCategory: ctx.classification?.category ?? null,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,
