@@ -126,37 +126,100 @@ describe('buildArrivalContext', () => {
 })
 
 describe('buildCommitmentPushBody', () => {
-  it('renders comp with code', () => {
-    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now')).toBe(
-      'Jaipal arriving now — comp, code 7K2P',
+  it('renders comp with description and code', () => {
+    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', 'oat latte')).toBe(
+      'Jaipal arriving now, comp for oat latte, code 7K2P',
     )
   })
 
-  it('renders hold with code', () => {
-    expect(buildCommitmentPushBody('Sarah', 'hold', 'X3MN', 'this morning')).toBe(
-      'Sarah arriving this morning — hold, code X3MN',
-    )
+  it('renders hold with description and code', () => {
+    expect(
+      buildCommitmentPushBody('Sarah', 'hold', 'X3MN', 'this morning', 'almond croissant'),
+    ).toBe('Sarah arriving this morning, hold for almond croissant, code X3MN')
   })
 
   it('renders recommendation without code', () => {
-    expect(buildCommitmentPushBody('Alex', 'recommendation', null, 'now')).toBe(
-      'Alex arriving now — ready',
+    expect(
+      buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'blossom tonic'),
+    ).toBe('Alex arriving now, ready for blossom tonic')
+  })
+
+  // TAC-532. A recommendation carries no code, so before this the only thing
+  // in the body was the name, the context and 'ready'. Two recommendations for
+  // one guest pushed identically, which is this ticket's collision on the
+  // arrival surface.
+  it('tells two same-type commitments for one guest apart', () => {
+    const a = buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'blossom tonic')
+    const b = buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'pink panther')
+    expect(a).not.toBe(b)
+  })
+
+  it('omits the for-clause entirely when there is no description', () => {
+    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', '')).toBe(
+      'Jaipal arriving now, comp, code 7K2P',
     )
+    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', '   ')).toBe(
+      'Jaipal arriving now, comp, code 7K2P',
+    )
+  })
+
+  it('carries no em dash or en dash, including from the description', () => {
+    const out = buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', 'oat latte \u2014 large')
+    expect(out).not.toMatch(/[\u2013\u2014]/)
   })
 
   it('falls back to "a guest" when firstName is null', () => {
-    expect(buildCommitmentPushBody(null, 'comp', '9XYZ', 'now')).toBe(
-      'a guest arriving now — comp, code 9XYZ',
+    expect(buildCommitmentPushBody(null, 'comp', '9XYZ', 'now', 'oat latte')).toBe(
+      'a guest arriving now, comp for oat latte, code 9XYZ',
     )
   })
 
+  it('trims the DESCRIPTION first, keeping name, type and code intact', () => {
+    const longDescription =
+      'a very long description of the drink that the venue has promised this guest and then some more words'
+    const out = buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'this afternoon', longDescription)
+    expect(out.length).toBeLessThanOrEqual(120)
+    expect(out.startsWith('Jaipal arriving this afternoon, comp for ')).toBe(true)
+    expect(out).toContain('code 7K2P')
+    // Cut at a word boundary, so the kept text is a prefix of the original.
+    const shown = out.slice('Jaipal arriving this afternoon, comp for '.length, out.indexOf(', code'))
+    expect(longDescription.startsWith(shown)).toBe(true)
+    // startsWith alone is satisfied by a MID-WORD cut, because that is also a
+    // prefix. This is the assertion that actually pins the word boundary, and
+    // it mirrors send.test.ts. Without it, replacing sanitizeDescription's last
+    // two lines with `return cut.trim()` passes all 20 tests.
+    expect(longDescription[shown.length]).toBe(' ')
+  })
+
+  // The fixture is sized so `room` is POSITIVE but under MIN_DESCRIPTION_CHARS.
+  // An earlier version used a 75-char name, which gives room = -1, where every
+  // threshold >= 0 produces the same output and the constant the test is named
+  // for is invisible to it: setting MIN_DESCRIPTION_CHARS = 0 passed all 20
+  // tests. 'Bartholomew' x 6 is 66 characters, which gives room = 4, and at
+  // that width sanitizeDescription('oat latte', 4) returns 'oat' - exactly the
+  // useless fragment the constant exists to prevent.
+  it('drops the description rather than render a useless fragment of it', () => {
+    const longName = 'Bartholomew'.repeat(6)
+    expect(longName.length).toBe(66)
+    const out = buildCommitmentPushBody(longName, 'discount', '7K2P', 'this afternoon', 'oat latte')
+    expect(out).not.toContain(' for ')
+    expect(out).not.toContain('oat')
+    expect(out).toContain('discount, code 7K2P')
+  })
+
+  // Kept as a separate case: room < 0, where there is no space for a
+  // description at any threshold.
+  it('drops the description when there is no room at all', () => {
+    const longName = 'VeryLongFirstNameWayBeyondTheReasonableBudgetForAPushNotificationBodyIndeed'
+    const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon', 'oat latte')
+    expect(out).not.toContain(' for ')
+    expect(out).toContain('comp, code 7K2P')
+  })
+
   it('truncates an over-long firstName instead of dropping the type/code', () => {
-    // Budget is 80. Force the over-budget case by stacking a long name
-    // against the longest context label so the assembled body crosses the
-    // line. The type/code segment must survive intact.
-    const longName = 'VeryLongFirstNameWayBeyondTheReasonableBudgetForAPushNotificationBody'
-    const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon')
-    expect(out.length).toBeLessThanOrEqual(80)
+    const longName = 'VeryLongFirstName'.repeat(12)
+    const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon', '')
+    expect(out.length).toBeLessThanOrEqual(120)
     expect(out).toContain('comp, code 7K2P')
   })
 })
@@ -193,13 +256,21 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     guestId: 'guest-1',
     guestFirstName: 'Jaipal',
     type: 'comp' as const,
+    description: 'oat latte',
     code: '7K2P',
     expectedArrival: '2026-05-29T09:00:00Z',
     arrivalSignal: 'imminent' as const,
     venueTimezone: 'America/Los_Angeles',
   }
 
-  it('sends a content-free payload — body never contains the description', async () => {
+  // REVERSED by TAC-532, ruled 2026-09-23. This test asserted the description
+  // never appeared in the payload, and that is exactly what made two
+  // same-type commitments for one guest push identically. The description is
+  // agent or operator chosen text about our OWN commitment, not the guest's
+  // words, so it does not carry the lock-screen concern that gates quoting on
+  // the draft push. Kept and reversed rather than deleted, so the record shows
+  // it was once the other way.
+  it('carries the description, and still no guest message', async () => {
     queueLoadRecipients(['op-1'])
     queueBadge('op-1', 0, 1)
     sendApnsRequestMock.mockResolvedValue({
@@ -207,8 +278,6 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
       response: { status: 200, reason: null, apnsId: null, raw: '' },
     } as unknown as ApnsClientResult)
 
-    // Notably: input doesn't include description at all — the function never
-    // accepts it. This test asserts the contract.
     await sendCommitmentArrivalPush(baseInput)
 
     expect(sendApnsRequestMock).toHaveBeenCalledOnce()
@@ -225,10 +294,12 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     expect(payload.aps.sound).toBe('default')
     expect(payload.aps.badge).toBe(1)
     expect(payload.aps.alert.title).toBe('Guest arriving')
-    expect(payload.aps.alert.body).toBe('Jaipal arriving now — comp, code 7K2P')
-    // Privacy invariant: no description should ever appear in the body.
-    expect(payload.aps.alert.body).not.toMatch(/latte|oat|croissant|description/i)
-    expect(JSON.stringify(payload)).not.toMatch(/oat latte|description/i)
+    expect(payload.aps.alert.body).toBe('Jaipal arriving now, comp for oat latte, code 7K2P')
+    // What stays true, and the honest way to say it: the guest's own message has
+    // no PARAMETER on this function, so no call can put it here. That is a
+    // property of the signature, checked by tsc, not something an assertion on
+    // the payload can establish - a key-name regex here would be the same
+    // decoration SR-3 removed from send.test.ts, so it is not repeated.
   })
 
   it('fires PostHog with surface=commitment_arrival', async () => {

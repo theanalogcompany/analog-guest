@@ -833,6 +833,16 @@ import {
 // Part 2 (the hold contradiction across # Hard rules / # Commitments / R34,
 // plus the venue-services block) lands in a separate PR and will bump again.
 //
+// v1.65.0 (TAC-498): the `# Commitments` recommendation-heads-up worked
+// example used an em dash, the exact punctuation R3 forbids. The model
+// copies worked examples closely (TAC-436 removed a dash from a different
+// piece of prompt text for the same reason), so this one line modeled the
+// pattern the regen loop then had to pay to remove whenever it survived
+// generation. Replaced with a period and a lowercase continuation, R3's own
+// demonstrated pattern. `text me a heads-up if you want it tonight` is
+// untouched, so the Instagram channel substitution keeps matching exactly
+// once.
+//
 // v1.63.0 (TAC-519): `## What you're hoping to get to` moves from 3rd of the
 // user-prompt blocks to LAST of the content blocks, immediately before the
 // emoji directive. Nothing about the block's own text changed.
@@ -1436,7 +1446,7 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.64.0'
+export const PROMPT_VERSION = 'v1.65.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1500,7 +1510,7 @@ The schema is required on every emission; the no-op shape is the empty object {}
 
 Comp, hold, and discount commitments route through operator review BEFORE the guest is told. You do not need to set requiresOperatorApproval=true separately for those types — the structured commitment.type IS the gate. You DO still need requiresOperatorApproval for non-commitment cases (e.g. resource commitments without an explicit type).
 
-When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue's voice. Examples: "comped you an oat latte, give me a heads up when you're heading over" / "next one's on us. text me when you're close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are — text me a heads-up if you want it tonight").
+When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue's voice. Examples: "comped you an oat latte, give me a heads up when you're heading over" / "next one's on us. text me when you're close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are. text me a heads-up if you want it tonight.").
 
 # Cancellations
 The output field "cancelsCommitmentId" records that your reply is TAKING BACK a promise the venue already made. It is the mirror of "commitment": that field records what you are giving, this one records what you are withdrawing.

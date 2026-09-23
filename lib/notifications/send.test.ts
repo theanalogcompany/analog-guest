@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { GENERATION_FAILED_REVIEW_REASON } from '@/lib/agent/stages'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { APPROVAL_TRIGGERS, GENERATION_FAILED_REVIEW_REASON } from '@/lib/agent/stages'
 
 // send.ts now imports APPROVAL_TRIGGERS from @/lib/agent/stages (so the label
 // map is keyed on the source of truth rather than re-listed literals), which
@@ -15,6 +18,8 @@ import type {
   PushSentProps,
   PushTokenInvalidProps,
 } from '@/lib/analytics/posthog'
+
+import type { MessageCategory } from '@/lib/ai/types'
 
 import type { ApnsClientResult, ApnsRequestPayload } from './apns/client'
 
@@ -79,8 +84,11 @@ vi.mock('@/lib/db/admin', () => ({
 
 // Import AFTER mocks are set.
 import {
+  REASON_BY_REVIEW_REASON,
   buildPushBody,
+  buildPushTitle,
   sendDraftFlaggedPush,
+  shouldQuoteGuest,
   shouldSendDraftFlaggedPush,
 } from './send'
 
@@ -110,6 +118,10 @@ const baseInput = {
   guestFirstName: 'Alex',
   draftId: 'draft-1',
   primaryTrigger: 'model_flagged',
+  // TAC-532. Required on the input, so every fixture states them too.
+  guestQuestion: 'do you have oat milk?' as string | null,
+  guestCategory: 'new_question' as MessageCategory | null,
+  guestIsCrisis: false,
 }
 
 describe('shouldSendDraftFlaggedPush', () => {
@@ -149,31 +161,228 @@ describe('shouldSendDraftFlaggedPush', () => {
   })
 })
 
-describe('buildPushBody', () => {
-  it('uses first name + context for known triggers', () => {
-    expect(buildPushBody('Alex', 'model_flagged')).toBe('Reply to Alex — needs review')
-    expect(buildPushBody('Alex', 'comp_regex_backstop')).toBe('Reply to Alex — comp request')
-    expect(buildPushBody('Alex', 'fidelity_below_auto_send_floor')).toBe(
-      'Reply to Alex — low fidelity',
+describe('buildPushTitle / buildPushBody (TAC-532)', () => {
+  it('puts guest and reason in the title and the guest question in the body', () => {
+    expect(buildPushTitle('Alex', 'knowledge_gap', 'new_question')).toBe(
+      'Alex: needs an answer',
+    )
+    expect(buildPushBody('do you have oat milk for the latte?', 'new_question', false)).toBe(
+      '"do you have oat milk for the latte?"',
     )
   })
 
-  it('falls back to "a guest" when first name is null / empty / whitespace', () => {
-    expect(buildPushBody(null, 'model_flagged')).toBe('Reply to a guest — needs review')
-    expect(buildPushBody('', 'model_flagged')).toBe('Reply to a guest — needs review')
-    expect(buildPushBody('   ', 'model_flagged')).toBe('Reply to a guest — needs review')
+  // THE REGRESSION THIS TICKET IS. Three cards were waiting for one guest on
+  // 2026-09-23, all three knowledge_gap, and every push read the identical
+  // "Reply to Alex — needs an answer". The reason cannot tell them apart
+  // because the reason is the thing they share.
+  it('gives three same-trigger cards for one guest three different bodies', () => {
+    const questions = [
+      'do you have oat milk?',
+      'are you doing anything for november?',
+      'do you have a loyalty card?',
+    ]
+    const bodies = questions.map((q) => buildPushBody(q, 'new_question', false))
+    expect(new Set(bodies).size).toBe(3)
+    for (const [i, body] of bodies.entries()) {
+      expect(body).toContain(questions[i] as string)
+    }
+    // The titles are IDENTICAL and that is correct: the title carries the
+    // reason, which genuinely is the same for all three. The body is what
+    // distinguishes them, which is the whole point of the split.
+    const titles = questions.map(() => buildPushTitle('Alex', 'knowledge_gap', 'new_question'))
+    expect(new Set(titles).size).toBe(1)
   })
 
-  it('drops context dash for triggers without a mapping (defensive fallback)', () => {
-    expect(buildPushBody('Alex', 'previous_pending_held')).toBe('Reply to Alex')
-    expect(buildPushBody(null, 'previous_pending_held')).toBe('Reply to a guest')
+  describe('comp_complaint never reaches a lock screen (ruled 2026-09-23)', () => {
+    it('takes the complaint title and drops the quote', () => {
+      expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).toBe(
+        'Alex: something went wrong',
+      )
+      expect(buildPushBody('my cortado was cold and the guy was rude', 'comp_complaint', false)).toBe(
+        'Complaint waiting for review',
+      )
+    })
+
+    // The load-bearing case. comp_complaint routes to a comp-forward draft, so
+    // the commonest complaint card's primaryTrigger is commitment_type_gated,
+    // which ranks 1st in PRIMARY_TRIGGER_PRIORITY while the complaint trigger
+    // ranks 22nd of 23. A suppression keyed on the TRIGGER would leak the quote
+    // here, which is exactly backwards.
+    it('suppresses on the category even when the trigger is not a complaint trigger', () => {
+      const body = buildPushBody('my cortado was cold', 'comp_complaint', false)
+      expect(body).not.toContain('cortado')
+      expect(buildPushTitle('Alex', 'commitment_type_gated', 'comp_complaint')).toBe(
+        'Alex: something went wrong',
+      )
+    })
+
+    it('still quotes the guest when the same trigger fires on a non-complaint', () => {
+      expect(buildPushBody('my cortado was cold', 'new_question', false)).toBe(
+        '"my cortado was cold"',
+      )
+    })
   })
 
-  it('truncates the name when the assembled body exceeds 40 chars', () => {
-    const body = buildPushBody('Christopherbartholomew', 'comp_regex_backstop')
-    expect(body.length).toBeLessThanOrEqual(40)
-    expect(body.startsWith('Reply to ')).toBe(true)
-    expect(body.endsWith('— comp request')).toBe(true)
+  // A null category means classification did not complete. We cannot then
+  // establish the message was not a complaint, so the safe direction is to
+  // suppress. The crash-card call site reaches exactly this state.
+  it('suppresses the quote when the category is unresolved', () => {
+    expect(shouldQuoteGuest(null, false)).toBe(false)
+    expect(buildPushBody('my cortado was cold', null, false)).toBe('Draft ready to review')
+    expect(buildPushBody('my cortado was cold', null, false)).not.toContain('cortado')
+  })
+
+  it('falls back when there is no guest message (followups)', () => {
+    expect(buildPushBody(null, 'follow_up', false)).toBe('Draft ready to review')
+    expect(buildPushBody('   ', 'follow_up', false)).toBe('Draft ready to review')
+  })
+
+  it('collapses whitespace so a multi-line inbound renders as one run', () => {
+    expect(buildPushBody('do you have\n\noat   milk?', 'new_question', false)).toBe(
+      '"do you have oat milk?"',
+    )
+  })
+
+  it('falls back to "A guest" when the first name is missing', () => {
+    expect(buildPushTitle(null, 'knowledge_gap', 'new_question')).toBe(
+      'A guest: needs an answer',
+    )
+    expect(buildPushTitle('   ', 'knowledge_gap', 'new_question')).toBe(
+      'A guest: needs an answer',
+    )
+  })
+
+  describe('truncation keeps the distinguishing part', () => {
+    it('trims a long question at a word boundary, inside budget', () => {
+      const long =
+        'hi there I was wondering whether you happen to have any oat milk left today or whether you have run out again like last week'
+      const body = buildPushBody(long, 'new_question', false)
+      expect(body.length).toBeLessThanOrEqual(110)
+      expect(body.startsWith('"hi there I was wondering')).toBe(true)
+      expect(body.endsWith('…"')).toBe(true)
+      // The real word-boundary property: the kept text is a prefix of the
+      // original that stops exactly where a space follows. (An earlier version
+      // asserted /\w…"$/ did NOT match, which no correct implementation can
+      // satisfy: cutting at a space and trimming always leaves a word
+      // character before the ellipsis.)
+      const inner = body.slice(1, -2)
+      expect(long.startsWith(inner)).toBe(true)
+      expect(long[inner.length]).toBe(' ')
+    })
+
+    it('still trims a single pathological word rather than emptying the body', () => {
+      const body = buildPushBody('a'.repeat(300), 'new_question', false)
+      expect(body.length).toBeLessThanOrEqual(110)
+      expect(body.length).toBeGreaterThan(50)
+    })
+
+    it('trims the NAME and keeps the reason whole when the title is over budget', () => {
+      const title = buildPushTitle('Christopherbartholomew-Fitzwilliam', 'knowledge_gap', 'new_question')
+      expect(title.length).toBeLessThanOrEqual(40)
+      expect(title.endsWith(': needs an answer')).toBe(true)
+    })
+  })
+
+  describe('the approved copy set', () => {
+    // Runs EVERY key rather than naming a few, so a phrase added later cannot
+    // skip these rules. Same shape as queue.test.ts's label-map sweep.
+    const reasons = Object.entries(REASON_BY_REVIEW_REASON)
+
+    it('covers every approval trigger plus the two extra review reasons', () => {
+      for (const trigger of Object.values(APPROVAL_TRIGGERS)) {
+        expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(trigger)
+      }
+      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(GENERATION_FAILED_REVIEW_REASON)
+      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain('instagram_send_failed')
+    })
+
+    it('carries no em dash or en dash in any phrase, title or fallback body', () => {
+      for (const [key, phrase] of reasons) {
+        expect(phrase, key).not.toMatch(/[–—]/)
+        expect(buildPushTitle('Alex', key, 'new_question'), key).not.toMatch(/[–—]/)
+      }
+      expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).not.toMatch(/[–—]/)
+      for (const body of [
+        buildPushBody(null, 'follow_up', false),
+        buildPushBody('x', 'comp_complaint', false),
+      ]) {
+        expect(body).not.toMatch(/[–—]/)
+      }
+    })
+
+    it('fits the title budget for every phrase, with a long name', () => {
+      for (const [key] of reasons) {
+        const title = buildPushTitle('Christopherbartholomew', key, 'new_question')
+        expect(title.length, `${key}: ${title}`).toBeLessThanOrEqual(40)
+      }
+    })
+
+    it('never renders an empty reason', () => {
+      for (const [key, phrase] of reasons) {
+        expect(phrase.trim().length, key).toBeGreaterThan(0)
+      }
+    })
+  })
+
+  // THE BLOCKER, found in code review. crisisSafety is a SEPARATE boolean from
+  // category, so a self-harm message classifies as whatever the classifier
+  // picked (this repo's own crisis fixture in handle-inbound.test.ts uses
+  // 'unknown') and a category-only gate quotes it. It reaches a push for real:
+  // handle-inbound routes a crisis turn whose reply did not fully send into
+  // pushSendFailureCard.
+  //
+  // Jaipal's ruling covered comp_complaint and said nothing about crisis,
+  // because the question put to him did not raise it. Suppressing is the safe
+  // direction and strictly narrower than what was approved.
+  describe('a crisis message is never quoted (TAC-532 code review)', () => {
+    const CRISIS = "i don't want to be here anymore, i've been thinking about ending it"
+
+    it('suppresses the quote whatever the category says', () => {
+      expect(shouldQuoteGuest('unknown', true)).toBe(false)
+      expect(shouldQuoteGuest('new_question', true)).toBe(false)
+      expect(buildPushBody(CRISIS, 'unknown', true)).toBe('Draft ready to review')
+      expect(buildPushBody(CRISIS, 'unknown', true)).not.toContain('ending it')
+    })
+
+    // The category gate alone is what let this through, so the test has to show
+    // the category gate alone does NOT catch it.
+    it('is not caught by the complaint gate, which is why the flag is needed', () => {
+      expect(shouldQuoteGuest('unknown', false)).toBe(true)
+      expect(buildPushBody(CRISIS, 'unknown', false)).toContain('ending it')
+    })
+
+    it('takes the neutral body, not the complaint one', () => {
+      // A crisis turn is not a complaint, so BODY_COMPLAINT would be a false
+      // statement about the card.
+      expect(buildPushBody(CRISIS, 'comp_complaint', true)).toBe('Draft ready to review')
+    })
+  })
+
+  // MINOR from review: the sweep above iterates REASON_BY_REVIEW_REASON, which
+  // contains neither the complaint reason nor the fallback. A reason of 38+
+  // characters would blow the title budget unseen.
+  it('fits the title budget for the two reasons outside the map', () => {
+    for (const title of [
+      buildPushTitle('Christopherbartholomew', 'knowledge_gap', 'comp_complaint'),
+      buildPushTitle('Christopherbartholomew', 'a_reason_nobody_mapped', 'new_question'),
+    ]) {
+      expect(title.length, title).toBeLessThanOrEqual(40)
+    }
+  })
+
+  // send.ts carries 'instagram_send_failed' as a literal rather than importing
+  // the constant, because importing it would pull Instagram's outbound modules
+  // into the SHARED draft push (TAC-469 rule 1). Source-level binding is what
+  // stops the two drifting, the same technique review-state.test.ts uses
+  // against migration 056.
+  it('binds its instagram_send_failed literal to the constant that defines it', () => {
+    const owner = readFileSync(
+      join(__dirname, '..', 'agent', 'dispatch-instagram-reply.ts'),
+      'utf8',
+    )
+    expect(owner).toContain("INSTAGRAM_SEND_FAILED_REVIEW_REASON = 'instagram_send_failed'")
+    const mine = readFileSync(join(__dirname, 'send.ts'), 'utf8')
+    expect(mine).toContain("const INSTAGRAM_SEND_FAILED_REASON = 'instagram_send_failed'")
   })
 })
 
@@ -253,9 +462,12 @@ describe('sendDraftFlaggedPush', () => {
     expect(arg).toBeDefined()
     if (!arg) return
     expect(arg.deviceToken).toBe('tok-1')
+    // TAC-532 changed both strings deliberately: the title carries guest and
+    // reason, the body carries the guest's own question. The custom data
+    // fields are untouched, which is what the operator app actually parses.
     expect(arg.body).toEqual({
       aps: {
-        alert: { title: 'New draft to review', body: 'Reply to Alex — needs review' },
+        alert: { title: 'Alex: needs review', body: '"do you have oat milk?"' },
         badge: 3,
         sound: 'default',
       },
@@ -276,31 +488,81 @@ describe('sendDraftFlaggedPush', () => {
     })
   })
 
-  it('asserts the payload contains NO message-content fields (privacy invariant)', async () => {
-    queue('operator_venues', {
-      data: [{ operator: { id: 'op-1', apns_device_token: 'tok-1' } }],
-      error: null,
-    })
-    queue('operator_venues', { data: [{ venue_id: 'venue-1' }], error: null })
-    queue('messages', { count: 1, error: null })
-    sendApnsRequestMock.mockResolvedValueOnce({
-      ok: true,
-      response: { status: 200, reason: null, apnsId: null },
-    })
+  // TAC-532 rebuilt this test (SR-3). It used to assert that the serialized
+  // payload carried no "inboundBody"/"draftBody" KEYS. It never planted guest
+  // text and checked for its absence, so guest text interpolated into
+  // aps.alert.body as a plain string passed it — which is precisely the change
+  // this ticket makes, and precisely what the test was named to guard. A test
+  // that cannot fail on the thing it is named for is decoration.
+  describe('payload privacy (TAC-532)', () => {
+    const PLANTED = 'zzq-planted-guest-text-zzq'
 
-    await sendDraftFlaggedPush(baseInput)
-
-    const arg = sendApnsRequestMock.mock.calls[0]?.[0]
-    expect(arg).toBeDefined()
-    if (!arg) return
-    const serialized = JSON.stringify(arg.body)
-    const forbiddenKeys = ['inboundBody', 'generatedBody', 'message', 'draftBody']
-    for (const key of forbiddenKeys) {
-      expect(serialized.toLowerCase()).not.toContain(`"${key.toLowerCase()}":`)
+    function arrangeOneOperator(): void {
+      queue('operator_venues', {
+        data: [{ operator: { id: 'op-1', apns_device_token: 'tok-1' } }],
+        error: null,
+      })
+      queue('operator_venues', { data: [{ venue_id: 'venue-1' }], error: null })
+      queue('messages', { count: 1, error: null })
+      sendApnsRequestMock.mockResolvedValueOnce({
+        ok: true,
+        response: { status: 200, reason: null, apnsId: null },
+      })
     }
-    const aps = arg.body.aps as { alert: { title: string; body: string } }
-    expect(aps.alert.title).toBe('New draft to review')
-    expect(aps.alert.body.length).toBeLessThanOrEqual(40)
+
+    function sentPayload(): { aps: { alert: { title: string; body: string } } } {
+      const arg = sendApnsRequestMock.mock.calls[0]?.[0]
+      if (arg === undefined) throw new Error('no push was sent')
+      return arg.body as { aps: { alert: { title: string; body: string } } }
+    }
+
+    it('carries the planted guest question in the body on an ordinary card', async () => {
+      arrangeOneOperator()
+      await sendDraftFlaggedPush({
+        ...baseInput,
+        guestQuestion: PLANTED,
+        guestCategory: 'new_question',
+      })
+      const payload = sentPayload()
+      expect(payload.aps.alert.body).toContain(PLANTED)
+      // The title stays categorical whatever the body does.
+      expect(payload.aps.alert.title).not.toContain(PLANTED)
+      expect(payload.aps.alert.title).toBe('Alex: needs review')
+    })
+
+    it('keeps the planted guest text out of the ENTIRE payload on a complaint', async () => {
+      arrangeOneOperator()
+      await sendDraftFlaggedPush({
+        ...baseInput,
+        guestQuestion: PLANTED,
+        guestCategory: 'comp_complaint',
+      })
+      // The whole serialized payload, not just the fields we remembered to look
+      // at. This is the assertion the old test should have made.
+      expect(JSON.stringify(sentPayload())).not.toContain(PLANTED)
+    })
+
+    it('keeps the planted guest text out of the payload when the category is unresolved', async () => {
+      arrangeOneOperator()
+      await sendDraftFlaggedPush({
+        ...baseInput,
+        guestQuestion: PLANTED,
+        guestCategory: null,
+      })
+      expect(JSON.stringify(sentPayload())).not.toContain(PLANTED)
+    })
+
+    it('never carries a draft body or a message-content field, and stays in budget', async () => {
+      arrangeOneOperator()
+      await sendDraftFlaggedPush(baseInput)
+      const payload = sentPayload()
+      const serialized = JSON.stringify(payload)
+      for (const key of ['inboundBody', 'generatedBody', 'message', 'draftBody']) {
+        expect(serialized.toLowerCase()).not.toContain(`"${key.toLowerCase()}":`)
+      }
+      expect(payload.aps.alert.title.length).toBeLessThanOrEqual(40)
+      expect(payload.aps.alert.body.length).toBeLessThanOrEqual(110)
+    })
   })
 
   it('on 410 Gone nulls the operator token and fires push.token_invalid + push.sent ok=false', async () => {
@@ -438,14 +700,17 @@ describe('sendDraftFlaggedPush — generation_failed context (TAC-364)', () => {
   // Until TAC-364 it borrowed knowledge_gap's 'needs an answer' by borrowing
   // its review_reason; splitting the reason without adding a label here would
   // have made the push quietly less informative than before.
-  it("labels the push rather than degrading to a bare 'Reply to <name>'", async () => {
-    const body = buildPushBody('Sam', GENERATION_FAILED_REVIEW_REASON)
-    expect(body).toContain("couldn't write it")
-    expect(body).not.toBe('Reply to Sam')
+  it("labels the push rather than degrading to a bare name", () => {
+    const title = buildPushTitle('Sam', GENERATION_FAILED_REVIEW_REASON, 'new_question')
+    expect(title).toContain("couldn't write it")
+    expect(title).not.toBe('Sam')
   })
 
-  it('stays categorical — no guest text, no draft body', () => {
-    const body = buildPushBody('Sam', GENERATION_FAILED_REVIEW_REASON)
-    expect(body).toBe("Reply to Sam — couldn't write it")
+  // TAC-532: the title is categorical. The BODY may now carry the guest's own
+  // question, which is the point of the ticket, so the guarantee moved from
+  // "the whole push is categorical" to "the title is, and the body is gated".
+  it('keeps the title categorical, with no guest text and no draft body', () => {
+    const title = buildPushTitle('Sam', GENERATION_FAILED_REVIEW_REASON, 'new_question')
+    expect(title).toBe("Sam: couldn't write it")
   })
 })
