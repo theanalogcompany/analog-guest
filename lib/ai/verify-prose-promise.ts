@@ -42,18 +42,16 @@ export const VERIFY_PROSE_PROMISE_MAX_OUTPUT_TOKENS = 1000
  */
 export const VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE = 'ai_verify_prose_promise_truncated'
 
-const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest. Your job is to decide one thing: does this reply commit the venue to giving this guest something of value that the guest has not paid for?
+const SYSTEM_PROMPT_TEMPLATE = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest. Your job is to decide one thing: does this reply commit the venue to giving this guest something of value that the guest has not paid for?
 
-Judge the reply on its own words. You are not checking whether the venue can afford it, whether the guest deserves it, or whether it was wise to offer. Only whether it was offered.
-
-You may also be shown the guest's message that this reply is answering. Use it for ONE thing: resolving what a short reply refers to. Which item "that one", "that", or "too" points at, and whether the guest reported something was wrong. The promise itself must still be in the assistant's own words. A guest ASKING for something free is not a promise, and a reply that does not accept it is not a promise no matter what the guest asked for.
+Judge the reply on its own words. You are not checking whether the venue can afford it, whether the guest deserves it, or whether it was wise to offer. Only whether it was offered.{{GUEST_MESSAGE_SCOPE}}
 
 Something of value means the guest ends up with product, service, or money they did not pay for, because of this reply. A replacement drink, a remake, a free item, an item set aside for them, money off a future purchase, "on us", "the next one's on me", "I'll make it right" about a drink that was wrong. The wording does not matter and the reply does not have to name a price, an item, or a mechanism. "We'll sort you out next time" is a promise; so is "I'll make sure your next one is right".
 
 Do not flag:
 - A promise of INFORMATION or effort only. "Let me find out and get back to you", "I'll look into it", "I'll ask the team". Nothing changes hands.
 - A refusal or a deferral. "I can't do that over text", "that's something the owner handles". Mentioning a thing in order to decline it is not offering it.
-- An apology that gives nothing. "We'll do better next time", "that one's on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free. But when the guest's message names a specific thing that was wrong and the reply accepts it with "that's on us", "that one too", "same for that one" or similar, the venue is promising to make that specific thing good. Name it in commitmentDescription, taking the item from the guest's message.
+- An apology that gives nothing. "We'll do better next time", "that one's on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free.{{ELLIPTICAL_CARVE_OUT}}
 - A reply that only describes the regular menu, hours, prices, or policies, including what something costs.
 - Something the guest has already paid for or already ordered: confirming an existing order, or saying a drink they bought will be ready.
 
@@ -65,6 +63,41 @@ When promisesSomething is true, also say WHAT is owed:
 
 When promisesSomething is false, set commitmentType to "none" and commitmentDescription to an empty string.`
 
+/**
+ * TAC-527: the paragraph and the carve-out render ONLY when a guest message is
+ * actually supplied, and that conditionality is not tidiness — it is the fix
+ * for a MEASURED regression.
+ *
+ * The carve-out was first written unconditionally, and the 220-body replay
+ * (body-only, the configuration every proactive turn runs) moved apology idioms
+ * from TAC-401's recorded 0/20 to 8/20. Both offending bodies were A4 engine
+ * followups: "sorry again about the cortado the other day, that's on us." With
+ * no guest message the rule's own condition has no referent, so the model
+ * applied its spirit rather than its condition and started reading a plain
+ * apology as a comp.
+ *
+ * Rendering conditionally makes the no-inbound system prompt BYTE-IDENTICAL to
+ * v1.0.0's, so TAC-401's baseline is preserved by construction rather than by
+ * re-measurement, and every proactive path behaves exactly as it did. A test
+ * pins that identity against the transcribed v1.0.0 text.
+ */
+const GUEST_MESSAGE_SCOPE = `
+
+You may also be shown the guest's message that this reply is answering. Use it for ONE thing: resolving what a short reply refers to. Which item "that one", "that", or "too" points at, and whether the guest reported something was wrong. The promise itself must still be in the assistant's own words. A guest ASKING for something free is not a promise, and a reply that does not accept it is not a promise no matter what the guest asked for.`
+
+const ELLIPTICAL_CARVE_OUT = ` But when the guest's message names a specific thing that was wrong and the reply accepts it with "that's on us", "that one too", "same for that one" or similar, the venue is promising to make that specific thing good. Name it in commitmentDescription, taking the item from the guest's message.`
+
+function buildSystemPrompt(hasGuestMessage: boolean): string {
+  return SYSTEM_PROMPT_TEMPLATE.replace(
+    '{{GUEST_MESSAGE_SCOPE}}',
+    hasGuestMessage ? GUEST_MESSAGE_SCOPE : '',
+  ).replace('{{ELLIPTICAL_CARVE_OUT}}', hasGuestMessage ? ELLIPTICAL_CARVE_OUT : '')
+}
+
+function hasGuestMessage(input: VerifyProsePromiseInput): boolean {
+  return input.guestInboundBody !== null && input.guestInboundBody.trim().length > 0
+}
+
 function buildUserPrompt(input: VerifyProsePromiseInput): string {
   // TAC-527. The guest's message goes FIRST, so the model reads what was said
   // before what we are about to say back — the order that makes "too" and
@@ -74,10 +107,9 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
   // to v1.0.0's on every proactive turn and for every body-only replay. That
   // identity is what keeps TAC-401's 220-fixture measurement comparable, and
   // a test pins it.
-  const guestLine =
-    input.guestInboundBody !== null && input.guestInboundBody.trim().length > 0
-      ? `Guest's message, which this reply is answering: "${input.guestInboundBody}"\n\n`
-      : ''
+  const guestLine = hasGuestMessage(input)
+    ? `Guest's message, which this reply is answering: "${input.guestInboundBody}"\n\n`
+    : ''
   return `${guestLine}Assistant's reply, about to be sent: "${input.replyBody}"\n\nDoes this reply commit the venue to giving this guest something of value?`
 }
 
@@ -146,7 +178,7 @@ export async function verifyProsePromise(
   try {
     const { object } = await generateObject({
       model: getClassificationModel(),
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(hasGuestMessage(input)),
       prompt: buildUserPrompt(input),
       schema,
       // Analytical task — keep determinism high, same as both siblings.

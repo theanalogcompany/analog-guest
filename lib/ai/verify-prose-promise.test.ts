@@ -299,7 +299,7 @@ describe('verifyProsePromise', () => {
   })
 
   describe('the approved rule (TAC-527)', () => {
-    async function systemPrompt(): Promise<string> {
+    async function systemPrompt(guestInboundBody: string | null): Promise<string> {
       generateObjectMock.mockResolvedValue({
         object: {
           reasoning: 'r',
@@ -308,9 +308,32 @@ describe('verifyProsePromise', () => {
           commitmentDescription: '',
         },
       })
-      await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
+      await verifyProsePromise({ replyBody: 'hi', guestInboundBody })
       return (generateObjectMock.mock.calls[0]?.[0] as { system: string }).system
     }
+
+    // THE REGRESSION GUARD, and it is the reason the rule renders conditionally
+    // at all. Written unconditionally, it moved TAC-401's apology-idiom rate
+    // from a recorded 0/20 to 8/20 on the 220-body replay — which runs
+    // body-only, the configuration EVERY proactive turn uses. Both offending
+    // bodies were engine followups apologising about a past drink.
+    //
+    // Transcribed from v1.0.0 rather than built from the live constants: a test
+    // that assembled the expected string the same way the source does could
+    // only confirm the source equals itself.
+    it('composes the v1.0.0 system prompt EXACTLY when there is no guest message', async () => {
+      const prompt = await systemPrompt(null)
+      expect(prompt).toContain(
+        '- An apology that gives nothing. "We\'ll do better next time", "that one\'s on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free.\n',
+      )
+      expect(prompt).not.toContain('But when the guest\'s message names a specific thing')
+      expect(prompt).not.toContain('You may also be shown')
+      // The sentence the base prompt ends that paragraph with, immediately
+      // followed by the next one, so an inserted paragraph fails here too.
+      expect(prompt).toContain(
+        'Only whether it was offered.\n\nSomething of value means the guest ends up with product',
+      )
+    })
 
     // ONE contiguous literal, not fragments. The TAC-409 lesson: a sentence
     // can be reversed while every asserted fragment survives, and three
@@ -318,7 +341,7 @@ describe('verifyProsePromise', () => {
     // assertion. The clause that matters here is the carve-out, so the
     // carve-out is what is pinned whole.
     it('carves the accepted-complaint case out of the apology rule, in one piece', async () => {
-      expect(await systemPrompt()).toContain(
+      expect(await systemPrompt('the gulab jamun was stale')).toContain(
         '"On us" in an apology about responsibility is not "on us" as in free. But when the guest\'s message names a specific thing that was wrong and the reply accepts it with "that\'s on us", "that one too", "same for that one" or similar, the venue is promising to make that specific thing good. Name it in commitmentDescription, taking the item from the guest\'s message.',
       )
     })
@@ -327,7 +350,7 @@ describe('verifyProsePromise', () => {
     // it, a guest ASKING for something free is one step from reading as a
     // promise. Pinned whole for the same reason as above.
     it('scopes what the guest message may be used for, in one piece', async () => {
-      expect(await systemPrompt()).toContain(
+      expect(await systemPrompt('the gulab jamun was stale')).toContain(
         'Use it for ONE thing: resolving what a short reply refers to. Which item "that one", "that", or "too" points at, and whether the guest reported something was wrong. The promise itself must still be in the assistant\'s own words. A guest ASKING for something free is not a promise, and a reply that does not accept it is not a promise no matter what the guest asked for.',
       )
     })
