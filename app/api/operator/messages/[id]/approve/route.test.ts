@@ -56,3 +56,27 @@ describe('POST /api/operator/messages/[id]/approve — guest with no phone (TAC-
     expect(noPhone).toEqual({ status: 502, body: { error: 'dispatch failed', detail: 'X' } })
   })
 })
+
+
+// TAC-530. Per-endpoint half of "a grantless operator bearer is refused at
+// every operator endpoint". dispatchOperatorOutbound is mocked here, so the
+// refusal itself is asserted where it lives, in
+// lib/operator/dispatch-operator-outbound.test.ts. What this route owns, and
+// what this asserts, is that it hands the operator's scope through VERBATIM:
+// a route that dropped or substituted it would make that helper's deny
+// unreachable while every test stayed green.
+describe('POST /api/operator/messages/[id]/approve \u2014 venue scope pass-through (TAC-530)', () => {
+  it('passes the operator\u2019s allowlist to the dispatcher unchanged, including when empty', async () => {
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    dispatchMock.mockResolvedValueOnce({ ok: false, errorCode: 'message_not_found', error: 'X' })
+    await approve()
+    expect(dispatchMock).toHaveBeenCalledTimes(1)
+    expect(dispatchMock.mock.calls[0]![0]).toMatchObject({ allowedVenueIds: [] })
+  })
+
+  it('passes a non-empty allowlist through unchanged', async () => {
+    dispatchMock.mockResolvedValueOnce({ ok: false, errorCode: 'message_not_found', error: 'X' })
+    await approve()
+    expect(dispatchMock.mock.calls[0]![0]).toMatchObject({ allowedVenueIds: [VENUE_A] })
+  })
+})

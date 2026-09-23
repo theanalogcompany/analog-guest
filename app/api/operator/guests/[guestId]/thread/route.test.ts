@@ -118,3 +118,16 @@ describe('GET /api/operator/guests/[guestId]/thread', () => {
     })
   })
 })
+
+
+// TAC-530. loadGuestThreadByGuestId is mocked here and denies on an empty
+// allowlist in lib/operator/guest-thread.test.ts. What this route owns is
+// forwarding the scope verbatim.
+describe('GET /api/operator/guests/[guestId]/thread \u2014 venue scope pass-through (TAC-530)', () => {
+  it('passes the operator\u2019s allowlist to the loader unchanged, including when empty', async () => {
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+    await GET(makeRequest(), params())
+    expect(loadMock.mock.calls[0]![0]).toMatchObject({ allowedVenueIds: [] })
+  })
+})

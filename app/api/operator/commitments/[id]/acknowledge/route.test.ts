@@ -177,3 +177,21 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
     })
   })
 })
+
+
+// TAC-530. markAcknowledged is mocked here and denies on an empty allowlist
+// in lib/guests/commitments.test.ts. What this route owns is forwarding the
+// scope verbatim, which no test asserted before.
+describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pass-through (TAC-530)', () => {
+  it('passes the operator\u2019s allowlist to markAcknowledged unchanged, including when empty', async () => {
+    verifyMock.mockResolvedValue({ operatorId: OP_ID, allowedVenueIds: [] })
+    markAcknowledgedMock.mockResolvedValueOnce({
+      ok: true,
+      data: { transitioned: false, row: null },
+    })
+    probeMock.mockResolvedValueOnce({ data: null, error: null })
+    const res = await POST(makeRequest(), params())
+    expect(res.status).toBe(404)
+    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({ allowedVenueIds: [] })
+  })
+})

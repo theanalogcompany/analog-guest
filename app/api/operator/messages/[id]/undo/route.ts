@@ -43,18 +43,23 @@ export const POST = withOperatorAuth<{ id: string }>(
     }
     const messageId = parsed.data.id
 
+    // TAC-530: an EMPTY allowlist means NO venue access on the bearer path --
+    // see the note on AuthenticatedOperator. Guarding the .in() filter with
+    // `length > 0` skipped it entirely, letting a grantless operator bearer
+    // read and undo any card in the fleet. Deny before touching the database.
+    if (operator.allowedVenueIds.length === 0) {
+      return NextResponse.json({ error: 'not found' }, { status: 404 })
+    }
+
     const supabase = createAdminClient()
 
-    let readQuery = supabase
+    const readQuery = supabase
       .from('messages')
       .select(
         'id, venue_id, guest_id, review_state, previous_review_state, last_operator_action_at, last_operator_id, direction',
       )
       .eq('id', messageId)
-
-    if (operator.allowedVenueIds.length > 0) {
-      readQuery = readQuery.in('venue_id', operator.allowedVenueIds)
-    }
+      .in('venue_id', operator.allowedVenueIds)
 
     const { data: row, error: readErr } = await readQuery.maybeSingle()
     if (readErr) {

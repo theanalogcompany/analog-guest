@@ -173,8 +173,21 @@ export async function dispatchOperatorOutbound(
       error: 'message not found',
     }
   }
+  // TAC-530: an EMPTY allowlist means NO venue access on this path, and it is
+  // a deny. verifyOperatorRequest builds allowedVenueIds from the operator's
+  // literal operator_venues rows with no is_analog_admin lookup anywhere, so
+  // empty means "allowlisted for nothing" -- the opposite of the cookie path,
+  // where empty deliberately means analog-admin scope. Guarding the membership
+  // check with `length > 0 &&` let a grantless operator bearer approve or edit
+  // any pending card in the fleet.
+  //
+  // `includes` on an empty array is already false, so the membership check
+  // alone denies. The explicit `length === 0` is kept so a reader does not have
+  // to derive that, and so this reads like the sibling call sites that early
+  // return on it (resolve-external, thread, guest-thread, queue, heads-up-queue,
+  // conversations, markAcknowledged, markCancelled).
   if (
-    input.allowedVenueIds.length > 0 &&
+    input.allowedVenueIds.length === 0 ||
     !input.allowedVenueIds.includes(row.venue_id)
   ) {
     return {
