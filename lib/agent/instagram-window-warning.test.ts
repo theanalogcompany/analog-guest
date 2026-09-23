@@ -14,7 +14,7 @@ interface DraftRow {
   id: string
   venue_id: string
   guest_id: string
-  guests: { first_name: string | null } | null
+  guest: { first_name: string | null } | null
   window_warning_pushed_at?: string | null
 }
 
@@ -122,7 +122,7 @@ function anchorLeaving(remainingMs: number): string {
 }
 
 function draft(id: string, over: Partial<DraftRow> = {}): DraftRow {
-  return { id, venue_id: VENUE, guest_id: GUEST, guests: { first_name: 'Ana' }, ...over }
+  return { id, venue_id: VENUE, guest_id: GUEST, guest: { first_name: 'Ana' }, ...over }
 }
 
 beforeEach(() => {

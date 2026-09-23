@@ -80,7 +80,7 @@ interface PendingInstagramDraft {
   id: string
   venue_id: string
   guest_id: string
-  guests: { first_name: string | null } | null
+  guest: { first_name: string | null } | null
 }
 
 function emptySummary(): ProcessInstagramWindowWarningsResult {
@@ -111,7 +111,7 @@ export async function processInstagramWindowWarnings(
   // every-minute tick safe, and filtering on it here keeps the scan small.
   const { data: drafts, error } = await supabase
     .from('messages')
-    .select('id, venue_id, guest_id, guests(first_name)')
+    .select('id, venue_id, guest_id, guest:guests!inner(first_name)')
     .eq('review_state', 'pending')
     .eq('channel', 'instagram')
     .is('window_warning_pushed_at', null)
@@ -185,7 +185,7 @@ export async function processInstagramWindowWarnings(
         draftId: draft.id,
         venueId: draft.venue_id,
         guestId: draft.guest_id,
-        guestFirstName: draft.guests?.first_name ?? null,
+        guestFirstName: draft.guest?.first_name ?? null,
         remainingMs,
       })
       summary.pushed += 1
