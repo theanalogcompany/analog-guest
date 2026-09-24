@@ -42,6 +42,7 @@ vi.mock('@/lib/db/admin', () => ({
 }))
 
 import { POST } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -63,7 +64,7 @@ function params(id = VALID_UUID): { params: Promise<{ id: string }> } {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: OP_ID, allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
   markAcknowledgedMock.mockReset()
   capturePostHogMock.mockReset()
   capturePostHogMock.mockResolvedValue(undefined)
@@ -174,6 +175,41 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
       expect(props.operatorId).toBe(OP_ID)
       expect(props.venueId).toBe(VENUE_A)
       expect(props.type).toBe('comp')
+    })
+  })
+})
+
+
+// TAC-530. markAcknowledged is mocked here and denies on an empty allowlist
+// in lib/guests/commitments.test.ts. What this route owns is forwarding the
+// scope verbatim, which no test asserted before.
+describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pass-through (TAC-530)', () => {
+  it('passes the operator\u2019s allowlist to markAcknowledged unchanged, including when empty', async () => {
+    verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([]) })
+    markAcknowledgedMock.mockResolvedValueOnce({
+      ok: true,
+      data: { transitioned: false, row: null },
+    })
+    probeMock.mockResolvedValueOnce({ data: null, error: null })
+    const res = await POST(makeRequest(), params())
+    expect(res.status).toBe(404)
+    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({ venueScope: grantedVenues([]) })
+  })
+
+  // The twin. Without it, substituting a deny-all CONSTANT for the operator's
+  // real scope passes -- the empty assertion alone cannot tell "forwards the
+  // scope" from "always sends grantedVenues([])". Found in code review by
+  // exactly that mutant.
+  it('passes a NON-EMPTY allowlist to markAcknowledged unchanged', async () => {
+    verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
+    markAcknowledgedMock.mockResolvedValueOnce({
+      ok: true,
+      data: { transitioned: false, row: null },
+    })
+    probeMock.mockResolvedValueOnce({ data: null, error: null })
+    await POST(makeRequest(), params())
+    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({
+      venueScope: grantedVenues([VENUE_A]),
     })
   })
 })

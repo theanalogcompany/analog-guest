@@ -88,6 +88,7 @@ vi.mock('@/lib/db/admin', () => ({
 import { AuthError } from '@/lib/auth'
 
 import { POST } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -120,7 +121,7 @@ beforeEach(() => {
   lookupFilters.length = 0
   updatePatch = {}
   script = {}
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
 })
 
 describe('POST /api/operator/messages/[id]/resolve-external', () => {
@@ -201,10 +202,10 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
   it('answers 404 for a card outside the venue allowlist, leaking no existence', async () => {
     // The allowlist is applied to the lookup too, so an out-of-allowlist card
     // comes back as absent and is indistinguishable from one that never existed.
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: ['other-venue'] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues(['other-venue']) })
     script = { claimed: [], current: null }
     const outOfScope = await resolveExternal()
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
     script = { claimed: [], current: null }
     const absent = await resolveExternal()
     expect(outOfScope).toEqual(absent)
@@ -216,7 +217,7 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
   // the `if (length > 0)` idiom from the COOKIE path, where empty means
   // analog-admin scope. Same field name, opposite meaning.
   it('answers 404 and touches nothing when the operator is allowlisted for no venue', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [] })
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
     script = { claimed: [PENDING_CARD] }
     expect(await resolveExternal()).toEqual({ status: 404, body: { error: 'not_found' } })
     expect(updateFilters).toHaveLength(0)

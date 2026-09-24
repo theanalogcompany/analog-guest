@@ -106,6 +106,7 @@ vi.mock('@/lib/schemas', async (importOriginal) => {
 })
 
 import { dispatchOperatorOutbound } from './dispatch-operator-outbound'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const MESSAGE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
@@ -152,7 +153,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r).toMatchObject({ ok: false, errorCode: 'empty_body' })
@@ -165,7 +166,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(updateSpy).not.toHaveBeenCalled()
@@ -176,7 +177,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(sendMessageMock).not.toHaveBeenCalled()
@@ -189,7 +190,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r).toMatchObject({ ok: false, errorCode: 'empty_body' })
@@ -207,7 +208,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: '   ',
     })
@@ -225,7 +226,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: 'ceremonial grade, from Ippodo',
     })
@@ -238,7 +239,7 @@ describe('dispatchOperatorOutbound — empty-body refusal (TAC-309)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r.ok === false && r.errorCode === 'empty_body').toBe(false)
@@ -263,7 +264,7 @@ describe('dispatchOperatorOutbound — guest with no phone (TAC-467)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r).toMatchObject({ ok: false, errorCode: 'no_phone_number' })
@@ -273,7 +274,7 @@ describe('dispatchOperatorOutbound — guest with no phone (TAC-467)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: 'we open at 7',
     })
@@ -289,7 +290,7 @@ describe('dispatchOperatorOutbound — guest with no phone (TAC-467)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r).toMatchObject({ ok: false, errorCode: 'opted_out' })
@@ -306,7 +307,7 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     return { ...r, data: { ...r.data, channel: 'instagram' } }
   }
   const approve = () =>
-    dispatchOperatorOutbound({ messageId: MESSAGE_ID, operatorId: 'op-1', allowedVenueIds: [VENUE_ID], action: 'approve' })
+    dispatchOperatorOutbound({ messageId: MESSAGE_ID, operatorId: 'op-1', venueScope: grantedVenues([VENUE_ID]), action: 'approve' })
 
   beforeEach(() => {
     claimResultMock.mockReturnValue({ data: [{ id: MESSAGE_ID, review_state: 'approved' }], error: null })
@@ -348,7 +349,7 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: '  Open until 4 today  ',
     })
@@ -444,7 +445,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(cancelCommitmentMock).toHaveBeenCalledTimes(1)
@@ -475,7 +476,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(order).toEqual(['send', 'cancel'])
@@ -486,7 +487,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(cancelCommitmentMock).not.toHaveBeenCalled()
@@ -499,7 +500,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(cancelCommitmentMock).not.toHaveBeenCalled()
@@ -514,7 +515,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r.ok).toBe(true)
@@ -533,7 +534,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     expect(r.ok).toBe(true)
@@ -546,7 +547,7 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: 'that one is off, sorry for the mix up',
     })
@@ -561,10 +562,110 @@ describe('dispatchOperatorOutbound — cancellation on approval (TAC-513)', () =
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     const selected = rowSelectMock.mock.calls.map((c) => String(c[0])).join(' ')
     expect(selected).toContain('pending_cancellation')
+  })
+})
+
+// TAC-530. An EMPTY allowlist is NO venue access on the operator bearer path,
+// not every venue.
+//
+// This helper serves BOTH /approve and /edit, and it guarded its venue check
+// with the COOKIE path's `length > 0 &&` idiom — where empty deliberately
+// means analog-admin scope. On bearer data that inverted the meaning: an
+// operator with a valid JWT and zero venue grants fell straight through to
+// approve or edit any pending card in the fleet.
+//
+// Nothing in this file could catch it: all 21 pre-existing fixtures pass
+// `[VENUE_ID]`, so the empty case was never constructed.
+//
+// The assertion is `updateSpy`, for this file's own reason — the refusal has
+// to land BEFORE the state flip, or the card is already gone from the queue.
+describe('dispatchOperatorOutbound — grantless operator bearer (TAC-530)', () => {
+  // The fixture is a row that EXISTS, is outbound, is pending and has a real
+  // body — i.e. one that would dispatch if the check were skipped. A missing
+  // row would 404 either way and prove nothing.
+  it.each(['approve', 'edit'] as const)(
+    'refuses to %s when the operator is allowlisted for no venue',
+    async (action) => {
+      rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+      const r = await dispatchOperatorOutbound({
+        messageId: MESSAGE_ID,
+        operatorId: 'op-1',
+        venueScope: grantedVenues([]),
+        action,
+        ...(action === 'edit' ? { editedBody: 'we open at 7 tomorrow.' } : {}),
+      })
+      expect(r).toMatchObject({ ok: false, errorCode: 'message_not_found' })
+      expect(updateSpy).not.toHaveBeenCalled()
+      expect(sendMessageMock).not.toHaveBeenCalled()
+    },
+  )
+
+  // The existence-leak invariant: an out-of-allowlist card and one that does
+  // not exist must be indistinguishable, and a grantless operator must not be
+  // able to tell those apart either.
+  it('answers a grantless operator exactly as it answers a missing row', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+    const grantless = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+      action: 'approve',
+    })
+    rowMaybeSingleMock.mockResolvedValue({ data: null, error: null })
+    const missing = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: grantedVenues([VENUE_ID]),
+      action: 'approve',
+    })
+    expect(grantless).toEqual(missing)
+  })
+
+  // The neighbouring case, so the fix is not "deny everyone": a granted
+  // operator still dispatches, and one granted a DIFFERENT venue does not.
+  it('still dispatches for an operator granted the card’s venue', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+    await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: grantedVenues([VENUE_ID]),
+      action: 'approve',
+    })
+    expect(updateSpy).toHaveBeenCalled()
+  })
+
+  // TAC-530, code review. This helper is bearer-only, and a fleet-wide scope
+  // is producible only by the analog-admin cookie path. Before
+  // bearerAllowsVenue it GRANTED here: a future admin surface passing
+  // verifyAnalogAdminAccess's scope into this helper would have dispatched
+  // any card at any venue, with no compile error and no guard hit.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: ALL_VENUES,
+      action: 'approve',
+    })
+    expect(r).toMatchObject({ ok: false, errorCode: 'message_not_found' })
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(sendMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses an operator granted only some other venue', async () => {
+    rowMaybeSingleMock.mockResolvedValue(row('sure, we open at 7 tomorrow.'))
+    const r = await dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: grantedVenues(['00000000-0000-0000-0000-0000000000ff']),
+      action: 'approve',
+    })
+    expect(r).toMatchObject({ ok: false, errorCode: 'message_not_found' })
+    expect(updateSpy).not.toHaveBeenCalled()
   })
 })

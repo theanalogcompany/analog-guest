@@ -16,7 +16,7 @@
 // ACL: both "commitment does not exist" and "commitment exists at a venue
 // outside the operator's allowlist" return 404 with `{"error":"not_found"}` —
 // uniform, indistinguishable to the client. markAcknowledged's CAS gates on
-// BOTH `status='pending_ack'` AND `venue_id IN (allowedVenueIds)`, so a
+// BOTH `status='pending_ack'` AND `venue_id IN (granted venues)`, so a
 // transitioned=false response could mean any of:
 //   - row doesn't exist
 //   - row is in a venue outside the allowlist
@@ -36,6 +36,7 @@ import {
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { markAcknowledged } from '@/lib/guests/commitments'
+import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -67,7 +68,7 @@ export async function POST(
   const result = await markAcknowledged({
     commitmentId,
     operatorId: operator.operatorId,
-    allowedVenueIds: operator.allowedVenueIds,
+    venueScope: operator.venueScope,
     now,
   })
 
@@ -97,14 +98,20 @@ export async function POST(
   // allowlist row reads as "not found" — preserving the existence-leak
   // invariant.
   const supabase = createAdminClient()
+  // TAC-530: this used to read
+  //   .in('venue_id', allowedVenueIds.length === 0 ? [''] : allowedVenueIds)
+  // -- a fake uuid standing in for "match nothing", because an empty array
+  // could not be passed to .in() and an empty allowlist could not be told
+  // apart from fleet-wide. With an explicit scope the deny is just a deny.
+  const venueIds = venueFilterIds(operator.venueScope)
+  if (venueIds === null || venueIds.length === 0) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
   const probe = await supabase
     .from('guest_commitments')
     .select('id')
     .eq('id', commitmentId)
-    .in(
-      'venue_id',
-      operator.allowedVenueIds.length === 0 ? [''] : operator.allowedVenueIds,
-    )
+    .in('venue_id', venueIds)
     .maybeSingle()
   if (probe.error || !probe.data) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })

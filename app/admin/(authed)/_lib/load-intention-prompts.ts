@@ -1,10 +1,11 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
 import { guestNameWithPhone } from './guest-name'
+import { venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-379: recorded intention prompts for the read-only /admin/intentions
 // viewer. Mirrors load-venues.ts's shape — one query, allowlist-scoped the
-// same way (an empty allowedVenueIds means analog-admin scope and sees
+// same way (a fleet-wide venueScope means analog-admin scope and sees
 // everything), degrade-gracefully to [] with a console.warn rather than
 // throwing, so a DB hiccup costs the recorded-prompts half of the page and
 // leaves the definitions half (a static import) intact.
@@ -85,7 +86,7 @@ function firstOrNull<T>(raw: T | T[] | null): T | null {
 
 export const loadIntentionPrompts = cache(_loadIntentionPrompts)
 
-async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<IntentionPromptsPage> {
+async function _loadIntentionPrompts(venueScope: VenueScope): Promise<IntentionPromptsPage> {
   const supabase = createAdminClient()
   let query = supabase
     .from('guest_intention_prompts')
@@ -98,8 +99,12 @@ async function _loadIntentionPrompts(allowedVenueIds: string[]): Promise<Intenti
     .not('prompted_at', 'is', null)
     .order('prompted_at', { ascending: false })
     .limit(RECORDED_PROMPTS_LIMIT + 1)
-  if (allowedVenueIds.length > 0) {
-    query = query.in('venue_id', allowedVenueIds)
+  // TAC-530: null means fleet-wide (an analog admin with no explicit
+  // grants), so no filter. An EMPTY list is still applied as a filter and
+  // matches nothing -- the two are no longer the same value.
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds !== null) {
+    query = query.in('venue_id', venueIds)
   }
 
   const { data, error } = await query

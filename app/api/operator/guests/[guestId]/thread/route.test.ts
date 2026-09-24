@@ -25,6 +25,7 @@ vi.mock('@/lib/operator', async () => {
 })
 
 import { GET } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_GUEST_ID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -42,7 +43,7 @@ function params(guestId = VALID_GUEST_ID): { params: Promise<{ guestId: string }
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
   loadMock.mockReset()
 })
 
@@ -114,7 +115,20 @@ describe('GET /api/operator/guests/[guestId]/thread', () => {
     })
     expect(loadMock).toHaveBeenCalledWith({
       guestId: VALID_GUEST_ID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
+  })
+})
+
+
+// TAC-530. loadGuestThreadByGuestId is mocked here and denies on an empty
+// allowlist in lib/operator/guest-thread.test.ts. What this route owns is
+// forwarding the scope verbatim.
+describe('GET /api/operator/guests/[guestId]/thread \u2014 venue scope pass-through (TAC-530)', () => {
+  it('passes the operator\u2019s allowlist to the loader unchanged, including when empty', async () => {
+    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
+    loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+    await GET(makeRequest(), params())
+    expect(loadMock.mock.calls[0]![0]).toMatchObject({ venueScope: grantedVenues([]) })
   })
 })

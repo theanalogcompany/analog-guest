@@ -30,6 +30,7 @@ import { TeamSection } from './_components/team-section'
 import { TheStorySection } from './_components/the-story-section'
 import { VenueFactsSection } from './_components/venue-facts-section'
 import { VoiceLinkSection } from './_components/voice-link-section'
+import { allowsVenue, grantedVenues, type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-343: /admin/venues/[slug] — the per-venue page. This component itself
 // stays a server component that only loads and computes; all editing lives
@@ -56,10 +57,10 @@ export default async function VenueDetailPage({ params }: PageProps) {
   } = await supabase.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
@@ -71,7 +72,11 @@ export default async function VenueDetailPage({ params }: PageProps) {
   // [slug] is operator-supplied — re-check against the loaded venue's id
   // since the layout only confirmed analog-admin status, not which venues
   // this operator can reach. Mirrors voices/[slug]/page.tsx.
-  if (allowedVenueIds.length > 0 && !allowedVenueIds.includes(data.venue.id)) {
+  // A fleet-wide scope means an analog admin with no explicit grants, and
+  // allowsVenue answers true for it. TAC-530: this used to be
+  // `allowedVenueIds.length > 0 && !includes(...)`, an idiom that is correct
+  // here and was the wrong one to copy onto the operator bearer path.
+  if (!allowsVenue(venueScope, data.venue.id)) {
     notFound()
   }
 
@@ -85,9 +90,9 @@ export default async function VenueDetailPage({ params }: PageProps) {
   const [commitments, openIntentions, raisedIntentions] = await Promise.all([
     loadVenueCommitments(data.venue.id),
     loadVenueOpenIntentions(data.venue.id, now),
-    // Reuses TAC-379's fleet-wide loader unchanged; a single-element allowlist
-    // scopes it to this venue and can only ever narrow, never widen.
-    loadIntentionPrompts([data.venue.id]),
+    // Reuses TAC-379's fleet-wide loader unchanged; a single-venue scope
+    // narrows it to this venue and can only ever narrow, never widen.
+    loadIntentionPrompts(grantedVenues([data.venue.id])),
   ])
   const { bySection, unclaimed: unclaimedKnowledge } = groupKnowledgeByTag(
     data.knowledgeEntries,

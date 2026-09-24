@@ -49,6 +49,7 @@
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
 import { THREAD_MESSAGE_LIMIT, type ThreadMessage } from '@/lib/schemas'
+import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
   ...DELIVERED_OUTBOUND_STATUSES,
@@ -56,7 +57,7 @@ const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
 
 export interface LoadGuestThreadInput {
   messageId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
 }
 
 export type LoadGuestThreadErrorCode =
@@ -127,7 +128,7 @@ export async function loadGuestThread(
   // hitting the DB. Mirrors `listPendingQueue`'s empty-allowlist
   // short-circuit, but maps to a failure (the route will flatten to 404),
   // not a success-with-empty-array — there's no neutral "no thread" answer.
-  if (input.allowedVenueIds.length === 0) {
+  if (venueScopeDeniesAll(input.venueScope)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 
@@ -148,7 +149,7 @@ export async function loadGuestThread(
   if (!row) {
     return { ok: false, errorCode: 'message_not_found' }
   }
-  if (!input.allowedVenueIds.includes(row.venue_id)) {
+  if (!bearerAllowsVenue(input.venueScope, row.venue_id)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 

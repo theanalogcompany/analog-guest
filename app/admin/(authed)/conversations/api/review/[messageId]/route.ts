@@ -9,6 +9,7 @@ import {
   type MessageReview,
 } from '@/lib/schemas'
 import { dedupeAndAppendAntiPatterns, upsertCorpusEdit } from '@/lib/voice-training'
+import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // PUT /admin/conversations/api/review/[messageId] — capture a per-message
 // response review from the Command Center conversation viewer (THE-235).
@@ -56,7 +57,7 @@ export async function PUT(
 ): Promise<NextResponse> {
   // ---- auth ----
   let operatorId: string
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const supabaseSession = await createServerClient()
     const {
@@ -67,7 +68,7 @@ export async function PUT(
     }
     const op = await verifyAnalogAdminAccess(session.user.id)
     operatorId = op.operatorId
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status })
@@ -118,9 +119,9 @@ export async function PUT(
       { status: 400 },
     )
   }
-  // Empty allowedVenueIds means analog admin sees every venue (matches the
+  // A fleet-wide scope means analog admin sees every venue (matches the
   // page-level allowlist treatment in conversations/page.tsx).
-  if (allowedVenueIds.length > 0 && !allowedVenueIds.includes(message.venue_id)) {
+  if (!allowsVenue(venueScope, message.venue_id)) {
     return NextResponse.json({ error: 'venue not allowed' }, { status: 403 })
   }
 

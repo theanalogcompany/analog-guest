@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { loadGuestThreadByGuestId } from './guest-thread'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 const VENUE_B = '00000000-0000-0000-0000-00000000000b'
@@ -60,8 +61,8 @@ afterEach(() => {
 })
 
 describe('loadGuestThreadByGuestId', () => {
-  it('short-circuits to out_of_allowlist when allowedVenueIds is empty', async () => {
-    const result = await loadGuestThreadByGuestId({ guestId: GUEST_X, allowedVenueIds: [] })
+  it('short-circuits to out_of_allowlist when the operator has no venue grants', async () => {
+    const result = await loadGuestThreadByGuestId({ guestId: GUEST_X, venueScope: grantedVenues([]) })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     expect(fromMock).not.toHaveBeenCalled()
   })
@@ -70,17 +71,27 @@ describe('loadGuestThreadByGuestId', () => {
     nextGuestLookup = { data: null, error: null }
     const result = await loadGuestThreadByGuestId({
       guestId: GUEST_X,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({ ok: false, errorCode: 'guest_not_found' })
     expect(eqIdMock).toHaveBeenCalledWith('id', GUEST_X)
+  })
+
+
+  // TAC-530, code review. Bearer-only path: a fleet-wide scope is producible
+  // only by the analog-admin cookie path and must not be honoured here. Before
+  // bearerAllowsVenue this GRANTED, returning the thread for any venue.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    nextGuestLookup = { data: { venue_id: VENUE_B }, error: null }
+    const result = await loadGuestThreadByGuestId({ guestId: GUEST_X, venueScope: ALL_VENUES })
+    expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
   })
 
   it('returns out_of_allowlist when the guest exists at a venue outside the allowlist', async () => {
     nextGuestLookup = { data: { venue_id: VENUE_B }, error: null }
     const result = await loadGuestThreadByGuestId({
       guestId: GUEST_X,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     expect(eqVenueMock).not.toHaveBeenCalled()
@@ -101,7 +112,7 @@ describe('loadGuestThreadByGuestId', () => {
     }
     const result = await loadGuestThreadByGuestId({
       guestId: GUEST_X,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({
       ok: true,
@@ -122,7 +133,7 @@ describe('loadGuestThreadByGuestId', () => {
   // identical response contract.
   it('filters the thread query with the Contract condition, exactly once (TAC-395)', async () => {
     nextGuestLookup = { data: { venue_id: VENUE_A }, error: null }
-    await loadGuestThreadByGuestId({ guestId: GUEST_X, allowedVenueIds: [VENUE_A] })
+    await loadGuestThreadByGuestId({ guestId: GUEST_X, venueScope: grantedVenues([VENUE_A]) })
     expect(orMock).toHaveBeenCalledTimes(1)
     expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
   })
@@ -131,7 +142,7 @@ describe('loadGuestThreadByGuestId', () => {
     nextGuestLookup = { data: null, error: { message: 'connection lost' } }
     const result = await loadGuestThreadByGuestId({
       guestId: GUEST_X,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({ ok: false, errorCode: 'db_error', error: 'connection lost' })
   })

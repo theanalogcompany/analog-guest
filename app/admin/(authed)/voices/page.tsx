@@ -4,6 +4,7 @@ import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { loadVoices } from '../_lib/load-voices'
+import { type VenueScope } from '@/lib/auth/venue-scope'
 
 // Voices list page. Header + alphabetical list of voices.
 //
@@ -22,16 +23,16 @@ export default async function VoicesIndexPage() {
   } = await supabase.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
   }
 
-  const voices = await loadVoices(allowedVenueIds)
+  const voices = await loadVoices(venueScope)
 
   return (
     // Full-bleed fixed wrapper escapes admin-shell's max-w-5xl. `left` tracks

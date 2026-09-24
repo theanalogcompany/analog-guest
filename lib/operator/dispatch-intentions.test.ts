@@ -109,6 +109,7 @@ vi.mock('@vercel/functions', () => ({
 }))
 
 import { dispatchOperatorOutbound } from './dispatch-operator-outbound'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const MESSAGE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
@@ -172,7 +173,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -198,7 +199,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
 
@@ -216,7 +217,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -234,7 +235,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: `   ${EDITED}   `,
     })
@@ -258,7 +259,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -280,7 +281,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-2',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -305,7 +306,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
 
@@ -330,7 +331,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: EDITED,
     })
@@ -356,7 +357,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -375,7 +376,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -403,7 +404,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: EDITED,
     })
@@ -434,7 +435,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -454,7 +455,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -472,7 +473,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -486,7 +487,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -499,7 +500,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: EDITED,
     })
@@ -518,7 +519,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'edit',
       editedBody: EDITED,
     })
@@ -534,7 +535,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -550,7 +551,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -564,7 +565,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -584,7 +585,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -604,7 +605,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -625,7 +626,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -639,7 +640,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -656,7 +657,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()
@@ -671,7 +672,7 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: grantedVenues([VENUE_ID]),
       action: 'approve',
     })
     await settle()

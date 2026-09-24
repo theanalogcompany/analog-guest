@@ -8,6 +8,7 @@ import { loadIntentionPrompts, RECORDED_PROMPTS_LIMIT } from '../_lib/load-inten
 import { DefinitionsList } from './_components/definitions-list'
 import { GatingConditions } from './_components/gating-conditions'
 import { RecordedPromptsList } from './_components/recorded-prompts-list'
+import { type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-379: read-only viewer for intentions (TAC-324, redefined by TAC-380). Nothing here
 // creates, edits or retires anything — authoring was cut, because `isSatisfied`
@@ -28,10 +29,10 @@ export default async function IntentionsPage() {
   } = await supabase.auth.getSession()
   if (!session) redirect('/admin/sign-in')
 
-  let allowedVenueIds: string[]
+  let venueScope: VenueScope
   try {
     const op = await verifyAnalogAdminAccess(session.user.id)
-    allowedVenueIds = op.allowedVenueIds
+    venueScope = op.venueScope
   } catch (e) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
@@ -39,7 +40,7 @@ export default async function IntentionsPage() {
 
   // Degrades to [] on a query failure. The definitions half is a static
   // import and renders regardless.
-  const { rows, hasMore } = await loadIntentionPrompts(allowedVenueIds)
+  const { rows, hasMore } = await loadIntentionPrompts(venueScope)
 
   return (
     <div className="flex flex-col gap-8">

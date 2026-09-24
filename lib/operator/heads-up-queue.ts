@@ -5,7 +5,7 @@
 // created_at, recognitionState, sourceMessageId }`.
 //
 // Mirrors the lib/operator/queue.ts shape (RAGResult-style, app-layer venue
-// scoping via the `in()` filter on allowedVenueIds). Joins the guest name
+// scoping via the `in()` filter on the operator's granted venues). Joins the guest name
 // in a single round trip via PostgREST's embedded relations rather than an
 // N+1 lookup per commitment.
 //
@@ -23,6 +23,7 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import { GUEST_STATES, type GuestState } from '@/lib/recognition/types'
+import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 import type {
   CommitmentType,
   HeadsUpCommitment,
@@ -53,10 +54,23 @@ function normalizeRecognitionState(s: string | null): GuestState | null {
  * Empty allowlist → empty array, no DB round trip (mirrors listPendingQueue).
  */
 export async function listHeadsUpQueue(
-  allowedVenueIds: string[],
+  venueScope: VenueScope,
 ): Promise<ListHeadsUpQueueResult> {
-  if (allowedVenueIds.length === 0) {
+  if (venueScopeDeniesAll(venueScope)) {
     return { ok: true, commitments: [] }
+  }
+
+  const venueIds = venueFilterIds(venueScope)
+  if (venueIds === null) {
+    // TAC-530: a fleet-wide scope is produced only by the analog-admin cookie
+    // path, and this helper is reached only from app/api/operator/* on the
+    // bearer path. Refuse rather than silently widen the query -- making this
+    // path fleet-wide is a decision, not a fallthrough. Deliberately NOT
+    // "skip the filter": that idiom is what this ticket removed.
+    return {
+      ok: false,
+      error: 'fleet-wide venue scope is not supported by the heads-up queue',
+    }
   }
 
   const supabase = createAdminClient()
@@ -66,7 +80,7 @@ export async function listHeadsUpQueue(
       'id, venue_id, type, description, code, expected_arrival, created_at, source_message_id, guest_id, guest:guests!inner(first_name)',
     )
     .eq('status', 'pending_ack')
-    .in('venue_id', allowedVenueIds)
+    .in('venue_id', venueIds)
     .order('created_at', { ascending: true })
     .limit(200)
 
@@ -94,7 +108,7 @@ export async function listHeadsUpQueue(
       .from('guest_states')
       .select('guest_id, state, entered_at')
       .in('guest_id', guestIds)
-      .in('venue_id', allowedVenueIds)
+      .in('venue_id', venueIds)
       .is('exited_at', null)
       .order('entered_at', { ascending: false })
     if (stateError) {

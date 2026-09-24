@@ -15,6 +15,7 @@ vi.mock('@/lib/operator', async () => {
 })
 
 import { GET } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 
@@ -27,7 +28,7 @@ function makeRequest(): Request {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
   listMock.mockReset()
 })
 
@@ -52,7 +53,7 @@ describe('GET /api/operator/conversations', () => {
     expect(await res.json()).toEqual({ error: 'internal_error' })
   })
 
-  it('returns {conversations: [...]} threading allowedVenueIds into the helper', async () => {
+  it('returns {conversations: [...]} threading the venue scope into the helper', async () => {
     listMock.mockResolvedValueOnce({
       ok: true,
       conversations: [
@@ -78,15 +79,15 @@ describe('GET /api/operator/conversations', () => {
     const body = await res.json()
     expect(body.conversations).toHaveLength(1)
     expect(body.conversations[0].guestId).toBe('g1')
-    expect(listMock).toHaveBeenCalledWith([VENUE_A])
+    expect(listMock).toHaveBeenCalledWith(grantedVenues([VENUE_A]))
   })
 
   it('returns {conversations: []} for an operator with no venue grants', async () => {
-    verifyMock.mockResolvedValueOnce({ operatorId: 'op-2', allowedVenueIds: [] })
+    verifyMock.mockResolvedValueOnce({ operatorId: 'op-2', venueScope: grantedVenues([]) })
     listMock.mockResolvedValueOnce({ ok: true, conversations: [] })
     const res = await GET(makeRequest())
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ conversations: [] })
-    expect(listMock).toHaveBeenCalledWith([])
+    expect(listMock).toHaveBeenCalledWith(grantedVenues([]))
   })
 })

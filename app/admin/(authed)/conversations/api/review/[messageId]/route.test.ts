@@ -32,6 +32,7 @@ import {
   upsertCorpusEdit,
 } from '@/lib/voice-training'
 import { PUT } from './route'
+import { adminVenueScope } from '@/lib/auth/venue-scope'
 
 const MESSAGE_ID = '11111111-1111-4111-8111-111111111111'
 const VENUE_ID = '22222222-2222-4222-8222-222222222222'
@@ -138,7 +139,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — validation', () =>
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
   })
@@ -177,7 +178,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — message guards', (
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
   })
@@ -210,7 +211,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — message guards', (
   it('returns 403 when venue not in allowedVenueIds', async () => {
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OPERATOR_ID,
-      allowedVenueIds: ['some-other-venue-id'],
+      venueScope: adminVenueScope(['some-other-venue-id']),
       isAnalogAdmin: true,
     })
     const state = newAdminState()
@@ -232,7 +233,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
   })
@@ -401,7 +402,7 @@ describe('PUT /admin/conversations/api/review/[messageId] — failure paths', ()
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: OPERATOR_ID,
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
   })

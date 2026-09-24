@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { loadGuestThread } from './thread'
+import { ALL_VENUES, grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
@@ -72,7 +73,7 @@ afterEach(() => {
 
 describe('loadGuestThread', () => {
   it('short-circuits to out_of_allowlist when the operator has no venue grants', async () => {
-    const result = await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [] })
+    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([]) })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     expect(fromMock).not.toHaveBeenCalled()
   })
@@ -81,10 +82,23 @@ describe('loadGuestThread', () => {
     nextMaybeSingleResponse = { data: null, error: null }
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({ ok: false, errorCode: 'message_not_found' })
     expect(eqIdMock).toHaveBeenCalledWith('id', VALID_UUID)
+  })
+
+
+  // TAC-530, code review. Bearer-only path: a fleet-wide scope is producible
+  // only by the analog-admin cookie path and must not be honoured here. Before
+  // bearerAllowsVenue this GRANTED, returning the thread for any venue.
+  it('refuses a FLEET-WIDE scope, which this bearer-only path must never honour', async () => {
+    nextMaybeSingleResponse = {
+      data: { venue_id: VENUE_B, guest_id: GUEST_X },
+      error: null,
+    }
+    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: ALL_VENUES })
+    expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
   })
 
   it('returns out_of_allowlist when the message exists at a venue not in the allowlist', async () => {
@@ -94,7 +108,7 @@ describe('loadGuestThread', () => {
     }
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     // Critically: the second SELECT must NOT have fired. Verify by checking
@@ -122,7 +136,7 @@ describe('loadGuestThread', () => {
     ]
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -157,7 +171,7 @@ describe('loadGuestThread', () => {
     nextSelectResponses = [{ data: desc, error: null }]
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -186,7 +200,7 @@ describe('loadGuestThread', () => {
     ]
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -198,7 +212,7 @@ describe('loadGuestThread', () => {
     nextMaybeSingleResponse = { data: null, error: { message: 'connection lost' } }
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({
       ok: false,
@@ -216,7 +230,7 @@ describe('loadGuestThread', () => {
     nextSelectResponses = [{ data: null, error: { message: 'rpc timed out' } }]
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result).toEqual({
       ok: false,
@@ -234,7 +248,7 @@ describe('loadGuestThread', () => {
     nextSelectResponses = [{ data: [], error: null }]
     const result = await loadGuestThread({
       messageId: VALID_UUID,
-      allowedVenueIds: [VENUE_A],
+      venueScope: grantedVenues([VENUE_A]),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -250,7 +264,7 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
       error: null,
     }
     nextSelectResponses = [{ data: [], error: null }]
-    await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
     expect(orMock).toHaveBeenCalledTimes(1)
     expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
   })
@@ -270,7 +284,7 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
         error: null,
       },
     ]
-    const result = await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
     expect(result).toEqual({
       ok: true,
       messages: [
@@ -301,7 +315,7 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
         error: null,
       },
     ]
-    const result = await loadGuestThread({ messageId: VALID_UUID, allowedVenueIds: [VENUE_A] })
+    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])

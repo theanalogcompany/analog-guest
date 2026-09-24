@@ -69,6 +69,7 @@ vi.mock('@/lib/db/admin', () => ({
 }))
 
 import { POST } from './route'
+import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const COMMITMENT_ID = '11111111-1111-4111-8111-111111111111'
@@ -111,7 +112,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: OP_ID, allowedVenueIds: [VENUE_A] })
+  verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
   handleDeclineMock.mockReset()
   markCancelledMock.mockReset()
   markCancelledMock.mockResolvedValue({
@@ -162,7 +163,7 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
     })
 
     it("returns 404 not_found when allowedVenueIds is empty (short-circuit)", async () => {
-      verifyMock.mockResolvedValueOnce({ operatorId: OP_ID, allowedVenueIds: [] })
+      verifyMock.mockResolvedValueOnce({ operatorId: OP_ID, venueScope: grantedVenues([]) })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ error: 'not_found' })

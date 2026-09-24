@@ -8,10 +8,11 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { ThreadMessage } from '@/lib/schemas'
 
 import { fetchThreadMessagesForGuest } from './thread'
+import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
 
 export interface LoadGuestThreadByGuestIdInput {
   guestId: string
-  allowedVenueIds: string[]
+  venueScope: VenueScope
 }
 
 export type LoadGuestThreadByGuestIdErrorCode =
@@ -26,7 +27,7 @@ export type LoadGuestThreadByGuestIdResult =
 export async function loadGuestThreadByGuestId(
   input: LoadGuestThreadByGuestIdInput,
 ): Promise<LoadGuestThreadByGuestIdResult> {
-  if (input.allowedVenueIds.length === 0) {
+  if (venueScopeDeniesAll(input.venueScope)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 
@@ -44,7 +45,7 @@ export async function loadGuestThreadByGuestId(
   if (!row) {
     return { ok: false, errorCode: 'guest_not_found' }
   }
-  if (!input.allowedVenueIds.includes(row.venue_id)) {
+  if (!bearerAllowsVenue(input.venueScope, row.venue_id)) {
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 

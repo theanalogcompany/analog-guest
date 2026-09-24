@@ -4,6 +4,7 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { POST } from './route'
+import { adminVenueScope } from '@/lib/auth/venue-scope'
 
 vi.mock('@/lib/agent', () => ({
   handleFollowup: vi.fn(),
@@ -176,7 +177,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
 
@@ -191,7 +192,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
 
@@ -211,7 +212,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
 
@@ -228,7 +229,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [OTHER_VENUE_ID],
+      venueScope: adminVenueScope([OTHER_VENUE_ID]),
       isAnalogAdmin: true,
     })
 
@@ -246,7 +247,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(makeAdminMock({ guestRow: null }) as never)
@@ -265,7 +266,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -287,7 +288,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -312,7 +313,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -341,7 +342,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -363,7 +364,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -384,7 +385,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -412,7 +413,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -447,7 +448,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -479,7 +480,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [],
+      venueScope: adminVenueScope([]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -524,7 +525,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -550,7 +551,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -580,7 +581,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -609,7 +610,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
       operatorId: 'op-1',
-      allowedVenueIds: [VENUE_ID],
+      venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
