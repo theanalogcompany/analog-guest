@@ -2555,3 +2555,38 @@ export async function captureInstagramConnectSubscribeFailed(
     ].join('\n'),
   )
 }
+
+export interface InstagramDeletionUnmatchedAccountProps {
+  confirmationCode: string
+}
+
+/**
+ * A data-deletion request arrived for an Instagram account no venue owns.
+ *
+ * Legitimate on its own: Meta can send one for an account that never finished
+ * connecting, or one already disconnected and cleared.
+ *
+ * It is ALSO what a wrong id-matching assumption looks like. Whether
+ * signed_request's `user_id` equals what we store in
+ * venues.instagram_account_id is a Meta-side fact this repo cannot verify,
+ * and CLAUDE.md records that Meta distinguishes an app-scoped `id` from
+ * `user_id`. If those differ, every deletion request would match nothing,
+ * redact nothing, and still answer Meta correctly — a silent failure of the
+ * one callback Meta tests directly. Alerting turns an unverifiable assumption
+ * into a visible signal.
+ *
+ * Carries the confirmation code only: never the account id, which belongs to
+ * someone who has just asked us to erase their data.
+ */
+export async function captureInstagramDeletionUnmatchedAccount(
+  props: InstagramDeletionUnmatchedAccountProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_deletion_unmatched_account', props.confirmationCode, { ...props })
+  await postToSlack(
+    [
+      `*Instagram data-deletion request matched no venue*`,
+      `confirmation: \`${props.confirmationCode}\``,
+      `_Normal for a stale or already-disconnected account. If EVERY deletion request looks like this, the signed_request user_id does not match venues.instagram_account_id and nothing is being erased._`,
+    ].join('\n'),
+  )
+}
