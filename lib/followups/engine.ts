@@ -383,8 +383,18 @@ function projectVenueScanContext(venueRow: {
     // Presence, not the value: nothing here sends, and a number in a scan
     // context is one more place it could be read from instead of
     // lib/messaging/venue-lookup.ts, which is the one lookup every send uses.
-    hasPhone: venueRow.messaging_phone_number !== null,
-    hasInstagramAccount: venueRow.instagram_account_id !== null,
+    //
+    // `typeof === 'string'` and a trim, NOT `!== null`, matching the guest
+    // rows below. An absent key is `undefined` and `undefined !== null` is
+    // TRUE, so a column dropped from the SELECT would read as "this venue HAS
+    // a channel" and make both gates inert in the flattering direction.
+    // `messaging_phone_number` is CHECK-constrained by migration 001 so it
+    // cannot be blank, but `instagram_account_id` has only a UNIQUE
+    // constraint and is set BY HAND in Studio, so `''` is reachable and would
+    // otherwise suppress the venuesNoChannel signal.
+    hasPhone: typeof venueRow.messaging_phone_number === 'string' && venueRow.messaging_phone_number.trim() !== '',
+    hasInstagramAccount:
+      typeof venueRow.instagram_account_id === 'string' && venueRow.instagram_account_id.trim() !== '',
     rules,
     cadence: cadenceParsed,
     // Filled in scanVenue (per-venue mechanic load) — typed here so the

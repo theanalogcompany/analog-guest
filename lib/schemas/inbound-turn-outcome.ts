@@ -31,15 +31,31 @@
 /**
  * What came of the turn.
  *
- * `not_run` is the layer-1 answer: the agent was never invoked, so there is
- * no AgentResult at all. Every other value maps from one.
+ * `not_run` means NO STAGE RAN — nothing was classified, retrieved or
+ * generated. It reaches the table from two layers, and `layer` is the
+ * discriminator:
+ *
+ *   - `layer = 'webhook'`: the agent was never invoked at all, so there is no
+ *     AgentResult. The Instagram and Sendblue bail reasons.
+ *   - `layer = 'agent'`: the run WAS invoked and decided not to reply before
+ *     any stage ran. Today that is `venue_paused` alone (TAC-529), where the
+ *     venue's own status is 'paused' or 'archived'.
+ *
+ * **`not_run` no longer implies `layer = 'webhook'`, and a query that assumes
+ * it does is wrong.** It did until TAC-529, and the sentence saying so lived
+ * here; this is the corrected version. Every other outcome maps from an
+ * AgentResult.
  */
 export const INBOUND_TURN_OUTCOMES = [
   /** a reply reached the guest */
   'sent',
   /** a card was created for an operator to answer */
   'queued',
-  /** the agent was never invoked; `reason` says why */
+  /**
+   * No stage ran; `reason` says why, and `layer` says whether the agent was
+   * invoked at all (`webhook`) or was invoked and declined before any stage
+   * (`agent`, i.e. `venue_paused`). See the note above the list.
+   */
   'not_run',
   /** the agent ran but a reply to this inbound already existed */
   'skipped_duplicate',

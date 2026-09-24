@@ -34,13 +34,18 @@ const MIGRATION = readFileSync(
 
 /**
  * The `reason` CHECK has been dropped and recreated twice: TAC-526's 057, then
- * TAC-529's 058, which is the live one. Migrations are append-only, so this
+ * TAC-529's 059, which is the live one. Migrations are append-only, so this
  * points at a migration BY NAME and the next one to widen this CHECK has to
  * move it — which is the intended cost, because binding to a superseded
  * migration would silently compare the constants against a narrower list.
+ *
+ * 059 and not 058: TAC-534 took 058 for an unrelated RPC while TAC-529 was
+ * open, and because the two touch different objects git merged them cleanly
+ * into two files numbered 058. This path is one of the few things that fails
+ * loudly on that, which is why it is worth keeping by name.
  */
 const REASON_MIGRATION = readFileSync(
-  join(__dirname, '..', '..', 'db', 'migrations', '058_inbound_turn_venue_paused.sql'),
+  join(__dirname, '..', '..', 'db', 'migrations', '059_inbound_turn_venue_paused.sql'),
   'utf8',
 )
 
@@ -115,8 +120,13 @@ describe('migration 055 CHECK constraints match the TS vocabulary', () => {
    * So: assert the LIVE list carries the new value, and assert the raw file
    * still carries the old one. Together those say the stripping is doing work.
    */
-  it('reads the LIVE reason list from 057, not the rollback block', () => {
-    expect(checkListFor('reason')).toContain('coalesced_into_turn')
+  it('reads the LIVE reason list from 059, not the rollback block', () => {
+    // `venue_paused`, not `coalesced_into_turn`: 059's rollback block restores
+    // 057's list, which CONTAINS `coalesced_into_turn`, so that value no
+    // longer discriminates the live list from the rollback one. The newest
+    // value is the only one that appears in the live list alone, and it has
+    // to be updated with every widening for this assertion to keep working.
+    expect(checkListFor('reason')).toContain('venue_paused')
     // The rollback block is still in the file, and must not be what we read.
     expect(REASON_MIGRATION).toContain('-- rollback:')
     expect(REASON_SQL_WITHOUT_COMMENTS).not.toContain('rollback')

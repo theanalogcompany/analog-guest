@@ -271,6 +271,25 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 409 },
     )
   }
+  // TAC-529 widened AgentResult with 'venue_halted'. Named here for the reason
+  // the two branches above give: this tail relabels anything unrecognised as a
+  // duplicate, and a member added later would inherit that silently.
+  //
+  // Structurally unreachable on this path — only handleInbound produces it,
+  // and this route calls handleFollowup — which is precisely why it is named
+  // rather than tested. Note the BEHAVIOUR here is unchanged and deliberate:
+  // this button is the one outbound path TAC-529 leaves ungated, so an
+  // operator can still fire a manual follow-up at a paused venue. If that is
+  // ever gated, the gate goes in handleFollowup and this branch becomes live.
+  if (result.status === 'venue_halted') {
+    return NextResponse.json(
+      {
+        error: 'venue_halted',
+        detail: `the venue's status is "${result.venueStatus}", so the agent did not send`,
+      },
+      { status: 409 },
+    )
+  }
   // skipped_duplicate — handleFollowup doesn't currently produce this for the
   // manual path (the duplicate guard lives in handleInbound's idempotency
   // check), but AgentResult permits it. Treat as a benign no-op rather than

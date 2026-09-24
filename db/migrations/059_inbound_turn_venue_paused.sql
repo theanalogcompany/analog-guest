@@ -1,4 +1,4 @@
--- 058_inbound_turn_venue_paused.sql
+-- 059_inbound_turn_venue_paused.sql
 -- TAC-529: a paused venue does not reply, and the turn says so.
 --
 -- WHY THIS EXISTS. `venues.status` had no behavioural reader anywhere in the
@@ -51,6 +51,14 @@
 --   select conname, pg_get_constraintdef(oid)
 --   from pg_constraint
 --   where conrelid = 'inbound_turn_outcomes'::regclass and contype = 'c';
+--
+-- NUMBERED 059, NOT 058. This shipped as 058 and was renumbered on the rebase:
+-- TAC-534 took 058 (`058_operator_queue_replying_to.sql`) while this branch was
+-- open. The two touch different objects -- that one recreates
+-- `list_operator_queue`, this one widens a CHECK on `inbound_turn_outcomes` --
+-- so git merged them with NO conflict and left two files numbered 058, which
+-- only the migration log made visible. The number is the apply-order key, so a
+-- silent duplicate is worth the rename.
 --
 -- ORDERING: additive -- a CHECK that only gains a value -- but deployed code
 -- writes the new `reason` on the very next inbound at a paused venue, and a

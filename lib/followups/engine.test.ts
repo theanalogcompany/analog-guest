@@ -1079,6 +1079,33 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
     expect(result.venuesHalted).toBe(1)
   })
 
+  // Gate 2 inherits gate 1's placement above the hour gate, and the reason is
+  // gate 1's own: reversed, `venuesNoChannel` would hide the venue on every
+  // tick before its cron hour and report it on every tick after, so the count
+  // would depend on when the tick landed. Mock Central Perk is the motivating
+  // venue and runs America/Los_Angeles with cron_hour_local 10, so this is its
+  // count that would go tick-dependent.
+  it('counts a channelless venue even before its cron hour', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // 04:00 in Los Angeles, well before the default cron_hour_local of 10.
+    const beforeCronHour = new Date('2026-01-15T12:00:00.000Z')
+    useVenue({ messaging_phone_number: null, instagram_account_id: null })
+    const result = await processDueFollowups(beforeCronHour)
+    expect(result.venuesNoChannel).toBe(1)
+    warn.mockRestore()
+  })
+
+  // An empty string is not a channel. instagram_account_id carries only a
+  // UNIQUE constraint and is set by hand in Studio, so '' is reachable, and
+  // `!== null` would read it as "this venue has Instagram".
+  it('treats a blank instagram_account_id as no channel', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    useVenue({ messaging_phone_number: null, instagram_account_id: '  ' })
+    const result = await processDueFollowups(NOW)
+    expect(result.venuesNoChannel).toBe(1)
+    warn.mockRestore()
+  })
+
   it('asks for status and both channel columns', async () => {
     useVenue({})
     await processDueFollowups(NOW)

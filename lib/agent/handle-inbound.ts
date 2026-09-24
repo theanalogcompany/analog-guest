@@ -93,26 +93,43 @@ import type { AgentResult, InboundMessage, RuntimeContext } from './types'
  * be accumulating recognition state, so the cheapest correct place is here,
  * one indexed lookup by primary key, before any of the expensive steps.
  *
- * FAILS OPEN. A read that errored has established nothing, and going silent
- * on a live venue because of a database blip is the worse of the two
- * failures — the same direction `isVenueProcessingHalted` takes for a value
- * it cannot read, and for the same reason.
+ * FAILS OPEN, ON BOTH FAILURE SHAPES. A read that did not complete has
+ * established nothing, and going silent on a live venue because of a database
+ * blip is the worse of the two failures — the same direction
+ * `isVenueProcessingHalted` takes for a value it cannot read.
+ *
+ * THE TRY/CATCH IS THE HALF THAT WAS MISSING, and the docstring claimed it
+ * before the code did. supabase-js returns most failures as `{ error }`, but a
+ * socket reset, an aborted fetch or `createAdminClient()` throwing on a
+ * missing env var THROWS — and an unguarded throw here propagates to
+ * `runInboundTurn`'s catch, which red-alerts and returns `failed`, leaving the
+ * guest with nothing. Measured, not reasoned about: a rejecting mock produced
+ * `{status:'failed', stage:'context_build'}` before this was added. Same shape
+ * and same fix as `loadInboundIdentity` in `record-inbound-turn-outcome.ts`.
  */
 async function loadVenueStatus(venueId: string): Promise<string | null> {
-  const supabase = createAdminClient()
-  const { data, error } = await supabase
-    .from('venues')
-    .select('status')
-    .eq('id', venueId)
-    .maybeSingle()
-  if (error) {
-    console.warn('[agent] venue status read failed, proceeding', {
+  try {
+    const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from('venues')
+      .select('status')
+      .eq('id', venueId)
+      .maybeSingle()
+    if (error) {
+      console.warn('[agent] venue status read failed, proceeding', {
+        venueId,
+        error: error.message,
+      })
+      return null
+    }
+    return data?.status ?? null
+  } catch (e) {
+    console.warn('[agent] venue status read threw, proceeding', {
       venueId,
-      error: error.message,
+      error: e instanceof Error ? e.message : String(e),
     })
     return null
   }
-  return data?.status ?? null
 }
 
 async function loadInbound(messageId: string): Promise<{
