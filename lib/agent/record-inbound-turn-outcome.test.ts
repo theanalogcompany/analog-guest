@@ -113,6 +113,15 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
       outcome: 'failed',
       reason: 'corpus',
     },
+    // TAC-529: the venue is paused or archived. `not_run` because the agent
+    // was never invoked — the gate sits before context build — and this row
+    // is what makes the guest's silence countable rather than
+    // indistinguishable from a swallowed reply.
+    {
+      result: { status: 'venue_halted', venueStatus: 'paused' },
+      outcome: 'not_run',
+      reason: 'venue_paused',
+    },
   ]
 
   it.each(CASES)('$outcome / $reason', ({ result, outcome, reason }) => {
@@ -136,29 +145,46 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
     const covered = new Set(CASES.map((c) => c.result.status))
     // Written out, not derived from CASES: a list built from the thing under
     // test agrees with it by construction.
-    const everyStatus = [
-      'sent',
-      'queued',
-      'skipped_duplicate',
-      'refused',
-      'dropped',
-      'superseded',
-      'coalesced',
-      'silenced',
-      'failed',
-    ] as const satisfies readonly AgentResult['status'][]
+    //
+    // A TOTAL MAP, not an array with `satisfies readonly ...[]`. TAC-529
+    // found that annotation checks only that each element IS a status; it
+    // cannot check the list is COMPLETE, so the guard this block's docstring
+    // describes did not exist. A tenth member (`venue_halted`) was added to
+    // the union, mapped in LEDGER_DERIVERS, and walked straight past here
+    // with every test green. `satisfies Record<…>` is exhaustiveness-checked,
+    // so an eleventh fails `tsc` on this line instead.
+    const EVERY_STATUS = {
+      sent: true,
+      queued: true,
+      skipped_duplicate: true,
+      refused: true,
+      dropped: true,
+      superseded: true,
+      coalesced: true,
+      silenced: true,
+      venue_halted: true,
+      failed: true,
+    } as const satisfies Record<AgentResult['status'], true>
+    const everyStatus = Object.keys(EVERY_STATUS) as AgentResult['status'][]
     expect([...everyStatus].filter((s) => !covered.has(s))).toEqual([])
   })
 
-  it('covers every value in INBOUND_TURN_OUTCOMES except the webhook-only one', () => {
-    // 'not_run' is layer 1's: no AgentResult exists for it. Everything else
-    // must be produced by some case above, or the vocabulary has a value
-    // nothing can ever write. This is what forced 'silenced' to get a case
-    // when TAC-397 added it: the map would not compile, and then this would
-    // not pass.
+  it('covers every value in INBOUND_TURN_OUTCOMES', () => {
+    // Every outcome must be produced by some case above, or the vocabulary
+    // has a value nothing can ever write. This is what forced 'silenced' to
+    // get a case when TAC-397 added it: the map would not compile, and then
+    // this would not pass.
+    //
+    // TAC-529 EMPTIED THE EXCEPTION. 'not_run' used to be layer 1's alone —
+    // no AgentResult existed for it — and this asserted exactly that. The
+    // venue-status gate is an agent-layer decision taken before any stage
+    // runs, so `venue_halted` now derives `not_run` and the list is fully
+    // reachable. The assertion is an empty array rather than a deleted test:
+    // a vocabulary value nothing can write is still worth catching, and that
+    // is what this keeps checking.
     const produced = new Set(CASES.map((c) => c.outcome))
     const unreachable = INBOUND_TURN_OUTCOMES.filter((o) => !produced.has(o))
-    expect(unreachable).toEqual(['not_run'])
+    expect(unreachable).toEqual([])
   })
 
   it('only ever produces reasons that are in the vocabulary', () => {

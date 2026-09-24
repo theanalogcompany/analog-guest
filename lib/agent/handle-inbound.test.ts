@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
+import type { CoalesceDeps } from './coalesce-turn'
 
 // ./stages pulls in @/lib/rag → voyageai, whose ESM build trips vitest's
 // directory-import resolver at module load. See CLAUDE.md "Module split for
@@ -61,18 +62,31 @@ const sendDraftFlaggedPushMock = vi.fn()
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
 const existingReplyMaybeSingleMock = vi.fn()
+// TAC-529: the venues read behind the halt gate. It needs its OWN mock, not
+// the shape-dispatch default: `loadVenueStatus` is select().eq().maybeSingle(),
+// the same shape as the existing-reply probe, so without a `venues` branch
+// below it was answered by existingReplyMaybeSingleMock — which returns
+// `{ data: null }`, reads as "no status", and leaves the gate unreachable
+// while every test in this file passes. The third instance of this trap in
+// this ticket alone.
+const venueStatusMaybeSingleMock = vi.fn()
 
-// The orchestrator makes three distinct DB reads directly: the inbound row
-// (.single()), the duplicate-reply check (.limit().maybeSingle()), and
-// TAC-309's opt-out probe (.eq().maybeSingle()). Dispatch on shape.
+// The orchestrator makes four distinct DB reads directly: the inbound row
+// (.single()), the duplicate-reply check (.limit().maybeSingle()), TAC-309's
+// opt-out probe (.eq().maybeSingle()), and TAC-529's venue-status read
+// (.eq().maybeSingle()). Dispatch on shape, then on table where two reads
+// share a shape.
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => ({
       select: () => ({
         eq: () => ({
           single: () => inboundSingleMock(),
-          maybeSingle: () =>
-            table === 'guests' ? guestMaybeSingleMock() : existingReplyMaybeSingleMock(),
+          maybeSingle: () => {
+            if (table === 'guests') return guestMaybeSingleMock()
+            if (table === 'venues') return venueStatusMaybeSingleMock()
+            return existingReplyMaybeSingleMock()
+          },
           eq: () => ({
             limit: () => ({ maybeSingle: () => existingReplyMaybeSingleMock() }),
           }),
@@ -366,6 +380,8 @@ beforeEach(() => {
   })
   existingReplyMaybeSingleMock.mockResolvedValue({ data: null, error: null })
   guestMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
+  // An ordinary live venue. Every test that needs another status says so.
+  venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'active' }, error: null })
   buildRuntimeContextMock.mockResolvedValue(makeCtx())
   classifyStageMock.mockResolvedValue({
     category: 'new_question',
@@ -2466,5 +2482,166 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
     expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()
+  })
+})
+
+// TAC-529, ruled 2026-09-23 (question 1: A). A venue is paused because
+// something is wrong, and the reply path is where the damage would happen.
+//
+// The load-bearing assertion in most of these is that buildRuntimeContext was
+// never called. It is not a proxy for "cheaper": context build runs
+// computeGuestState, which WRITES guest_states and an audit row on a band
+// change, so a gate placed after it would leave a switched-off venue still
+// accumulating recognition state. A `status === 'venue_halted'` assertion
+// alone would pass for a gate in the wrong place.
+describe('handleInbound — paused and archived venues (TAC-529)', () => {
+  it.each(['paused', 'archived'])('does not reply at a %s venue', async (status) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status }, error: null })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'venue_halted', venueStatus: status })
+    // Before context build, so nothing was classified, retrieved, generated
+    // or written — including guest_states.
+    expect(buildRuntimeContextMock).not.toHaveBeenCalled()
+    expect(generateStageMock).not.toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // The silence has to be countable, or it is indistinguishable from a
+  // swallowed reply — which is the whole reason TAC-523's ledger exists.
+  it('records the turn so the silence is countable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'paused' }, error: null })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(recordInboundTurnOutcomeMock).toHaveBeenCalledTimes(1)
+    const call = recordInboundTurnOutcomeMock.mock.calls[0]?.[0] as {
+      inboundMessageId: string
+      result: unknown
+    }
+    expect(call).toMatchObject({
+      inboundMessageId: INBOUND_ID,
+      result: { status: 'venue_halted', venueStatus: 'paused' },
+    })
+    warn.mockRestore()
+  })
+
+  // The OTHER half of the placement claim. The comment at the gate says it
+  // sits before openCoalescedTurn "so a halted venue never takes a
+  // conversation claim it would only release" — and nothing tested that: the
+  // buildRuntimeContext assertion above covers only the context-build half,
+  // so moving the gate below the coalescing block passed all 101 tests.
+  //
+  // It matters because COALESCE_SETTLE_MS is 8_000 and coalescing is on: a
+  // gate one block later would put an 8-second sleep plus a claim insert,
+  // release and hand-off on EVERY inbound at a paused venue, which is exactly
+  // the churn the placement exists to avoid.
+  //
+  // Asserted through the injected deps rather than behaviourally, the same
+  // technique handle-operator-decline.test.ts uses for its persist-not-send
+  // invariant: these spies are the only way to see that a step did not run.
+  it('takes no conversation claim and does not settle, at a halted venue', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'paused' }, error: null })
+    const insertClaim = vi.fn()
+    const readClaim = vi.fn()
+    const sleep = vi.fn()
+    const findNewerInbound = vi.fn()
+    const deps = {
+      store: {
+        insertClaim,
+        readClaim,
+        takeOverClaim: vi.fn(),
+        deleteClaim: vi.fn(),
+      },
+      findNewerInbound,
+      now: () => new Date(),
+      sleep,
+    } as unknown as CoalesceDeps
+
+    const r = await handleInbound(INBOUND_ID, { coalescing: true, coalesceDeps: deps })
+
+    expect(r).toEqual({ status: 'venue_halted', venueStatus: 'paused' })
+    expect(insertClaim).not.toHaveBeenCalled()
+    expect(readClaim).not.toHaveBeenCalled()
+    expect(sleep).not.toHaveBeenCalled()
+    expect(findNewerInbound).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // The live-data test. Le Mil's is 'pending' in production and replies to
+  // guests today; an allow-list on 'active' would have stopped it.
+  it('DOES reply at a pending venue, because the live venue is pending', async () => {
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'pending' }, error: null })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    expect(buildRuntimeContextMock).toHaveBeenCalled()
+  })
+
+  it('replies at an active venue', async () => {
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'active' }, error: null })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+  })
+
+  it('replies when the status is one it cannot read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'suspended' }, error: null })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    warn.mockRestore()
+  })
+
+  // Fails OPEN. A read that errored has established nothing, and going silent
+  // on a live venue over a database blip is the worse of the two failures.
+  // Both failure shapes, because they take different code paths and only one
+  // of them was handled when this gate first shipped. supabase-js returns most
+  // failures as `{ error }`, but a socket reset or an aborted fetch THROWS,
+  // and an unguarded throw reached runInboundTurn's catch: a red alert and no
+  // reply, which is what the docstring called the worse of the two failures.
+  it('replies when the venue status read THROWS', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockRejectedValue(new Error('socket hang up'))
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    warn.mockRestore()
+  })
+
+  it('replies when the venue status read FAILS', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: null,
+      error: { message: 'connection reset' },
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
+    warn.mockRestore()
   })
 })

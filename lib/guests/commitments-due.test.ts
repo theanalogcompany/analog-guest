@@ -64,6 +64,10 @@ function makeDueRow(id: string, overrides: Record<string, unknown> = {}) {
   }
 }
 
+// TAC-529: the venues SELECT string, so a test can assert `status` is
+// actually requested. See the note on DBState.venues.
+let capturedVenueSelect: string | null = null
+
 // State for the supabase mock — handles guest_commitments (select+update),
 // venues (select), guests (select).
 interface DBState {
@@ -71,7 +75,14 @@ interface DBState {
   selectError: { message: string } | null
   updateReturnByRowId: Map<string, unknown[]>
   updateErrorByRowId: Map<string, { message: string }>
-  venues: Array<{ id: string; timezone: string }>
+  /**
+   * TAC-529: `status` is REQUIRED, not optional. The mock's select() ignores
+   * its argument and returns these rows whatever the query asked for, so a
+   * fixture omitting the field reads `undefined`, the halt gate never fires,
+   * and every test stays green while the gate is unreachable. Required is
+   * what forces each fixture to say which venue it is describing.
+   */
+  venues: Array<{ id: string; timezone: string; status: string | null }>
   /**
    * venue_configs.venue_info rows. TAC-428: the opening time comes from the
    * venue's own published hours, so a fixture that omits this is a venue with
@@ -104,9 +115,9 @@ function newState(overrides: Partial<DBState> = {}): DBState {
     updateReturnByRowId: new Map(),
     updateErrorByRowId: new Map(),
     venues: [
-      { id: VENUE_LA, timezone: 'America/Los_Angeles' },
-      { id: VENUE_NYC, timezone: 'America/New_York' },
-      { id: VENUE_TOKYO, timezone: 'Asia/Tokyo' },
+      { id: VENUE_LA, timezone: 'America/Los_Angeles', status: 'active' },
+      { id: VENUE_NYC, timezone: 'America/New_York', status: 'active' },
+      { id: VENUE_TOKYO, timezone: 'Asia/Tokyo', status: 'active' },
     ],
     // Le Mil's real hours as of 2026-09-22. TAC-508 moves this venue to
     // 8:00 AM on 3 October; the test named for that change overrides it.
@@ -166,13 +177,19 @@ function makeMockClient(state: DBState) {
       }
       if (table === 'venues') {
         return {
-          select: (_cols: string) => ({
-            in: async (_field: string, values: unknown[]) => ({
-              data: state.venues.filter((v) =>
-                (values as string[]).includes(v.id),
-              ),
-              error: null,
-            }),
+          select: (cols: string) => ({
+            in: async (_field: string, values: unknown[]) => {
+              // TAC-529: dropping `status` from the query makes the gate read
+              // `undefined` and go inert, which no behavioural test can see
+              // because this mock ignores `cols`.
+              capturedVenueSelect = cols
+              return {
+                data: state.venues.filter((v) =>
+                  (values as string[]).includes(v.id),
+                ),
+                error: null,
+              }
+            },
           }),
         }
       }
@@ -204,6 +221,7 @@ function makeMockClient(state: DBState) {
 }
 
 beforeEach(() => {
+  capturedVenueSelect = null
   waitUntilMock.mockReset()
   sendCommitmentArrivalPushMock.mockReset()
   sendCommitmentArrivalPushMock.mockResolvedValue(undefined)
@@ -844,3 +862,99 @@ describe('TAC-428 review: gaps the first pass left', () => {
   })
 })
 
+
+// TAC-529. Pausing a venue has to stop the arrival heads-up too, or it is a
+// switch that does not do what its name says.
+//
+// The load-bearing assertion in most of these is that the UPDATE never ran:
+// transitionToPendingAck is a CAS, and flipping a commitment to `pending_ack`
+// and then not pushing would leave the row marked "guest arriving" with
+// nobody told. A `pushed === 0` assertion alone would pass for a gate placed
+// after the CAS, which is the worst of the three possible placements.
+describe('processDueCommitments — venue status gate (TAC-529)', () => {
+  function stateWithStatus(status: string | null) {
+    const row = makeDueRow('cmt-la')
+    const transitionedRow = { ...row, status: 'pending_ack' }
+    return newState({
+      dueRows: [row],
+      updateReturnByRowId: new Map([['cmt-la', [transitionedRow]]]),
+      venues: [{ id: VENUE_LA, timezone: 'America/Los_Angeles', status }],
+    })
+  }
+
+  function run(status: string | null) {
+    const state = stateWithStatus(status)
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    return processDueCommitments(NOW)
+  }
+
+  it.each(['paused', 'archived'])(
+    'does not announce an arrival at a %s venue, and does not transition it',
+    async (status) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const r = await run(status)
+      expect(r.venueHalted).toBe(1)
+      expect(r.transitioned).toBe(0)
+      expect(r.pushed).toBe(0)
+      expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+      // The CAS never ran, so no row is left saying "guest arriving".
+      expect(waitUntilMock).not.toHaveBeenCalled()
+      warn.mockRestore()
+    },
+  )
+
+  // The live-data test, same as the engine's. Le Mil's is 'pending' in
+  // production and both mocks are 'active', so an allow-list on 'active'
+  // would have stopped arrival pushes at the only real venue.
+  it('DOES announce at a pending venue, because the live venue is pending', async () => {
+    const r = await run('pending')
+    expect(r.venueHalted).toBe(0)
+    expect(r.transitioned).toBe(1)
+    expect(r.pushed).toBe(1)
+    expect(sendCommitmentArrivalPushMock).toHaveBeenCalledOnce()
+  })
+
+  it('announces at an active venue', async () => {
+    const r = await run('active')
+    expect(r.venueHalted).toBe(0)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('announces at a venue whose status it cannot read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const r = await run('suspended')
+    expect(r.venueHalted).toBe(0)
+    expect(r.pushed).toBe(1)
+    warn.mockRestore()
+  })
+
+  it('announces at a venue whose status is null', async () => {
+    const r = await run(null)
+    expect(r.venueHalted).toBe(0)
+    expect(r.pushed).toBe(1)
+  })
+
+  it('asks for status in the venue read', async () => {
+    await run('active')
+    expect(capturedVenueSelect).toContain('status')
+  })
+
+  // A halted venue must not also spend the clock counters, which describe
+  // rows we were never going to act on. This pins the gate ahead of them.
+  it('counts a paused venue as halted rather than beforeOpening', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // 04:00 LA: before the 7am opening, so without the status gate this row
+    // would land in `beforeOpening`.
+    const beforeOpening = new Date('2026-05-29T11:00:00Z')
+    const state = stateWithStatus('paused')
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
+    )
+    const r = await processDueCommitments(beforeOpening)
+    expect(r.venueHalted).toBe(1)
+    expect(r.beforeOpening).toBe(0)
+    warn.mockRestore()
+  })
+})

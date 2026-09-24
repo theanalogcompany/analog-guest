@@ -1407,6 +1407,13 @@ export interface FollowupVenueBreakdown {
   venueId: string
   guestsEvaluated: number
   guestsDue: number
+  /**
+   * TAC-529: due, but this venue cannot reach them on the channel they
+   * resolve to (a phone guest at a venue with no number). Per venue, because
+   * the cause is a venue-level misconfiguration even though the count is per
+   * guest.
+   */
+  guestsUnservable: number
   /** Recorded as tasks rather than sent (TAC-469). */
   guestsTasked: number
   guestsDispatched: number
@@ -1420,7 +1427,13 @@ export interface FollowupScanCompleteProps {
   now: string
   summary: {
     venuesScanned: number
+    /** TAC-529: skipped because `venues.status` is paused or archived. */
+    venuesHalted: number
+    /** TAC-529: skipped because the venue has neither a phone nor Instagram. */
+    venuesNoChannel: number
     venuesDispatching: number
+    /** TAC-529: guests this venue cannot reach. See FollowupVenueBreakdown. */
+    guestsUnservable: number
     guestsEvaluated: number
     guestsDue: number
     guestsDispatched: number

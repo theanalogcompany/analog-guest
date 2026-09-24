@@ -31,15 +31,31 @@
 /**
  * What came of the turn.
  *
- * `not_run` is the layer-1 answer: the agent was never invoked, so there is
- * no AgentResult at all. Every other value maps from one.
+ * `not_run` means NO STAGE RAN — nothing was classified, retrieved or
+ * generated. It reaches the table from two layers, and `layer` is the
+ * discriminator:
+ *
+ *   - `layer = 'webhook'`: the agent was never invoked at all, so there is no
+ *     AgentResult. The Instagram and Sendblue bail reasons.
+ *   - `layer = 'agent'`: the run WAS invoked and decided not to reply before
+ *     any stage ran. Today that is `venue_paused` alone (TAC-529), where the
+ *     venue's own status is 'paused' or 'archived'.
+ *
+ * **`not_run` no longer implies `layer = 'webhook'`, and a query that assumes
+ * it does is wrong.** It did until TAC-529, and the sentence saying so lived
+ * here; this is the corrected version. Every other outcome maps from an
+ * AgentResult.
  */
 export const INBOUND_TURN_OUTCOMES = [
   /** a reply reached the guest */
   'sent',
   /** a card was created for an operator to answer */
   'queued',
-  /** the agent was never invoked; `reason` says why */
+  /**
+   * No stage ran; `reason` says why, and `layer` says whether the agent was
+   * invoked at all (`webhook`) or was invoked and declined before any stage
+   * (`agent`, i.e. `venue_paused`). See the note above the list.
+   */
   'not_run',
   /** the agent ran but a reply to this inbound already existed */
   'skipped_duplicate',
@@ -136,6 +152,28 @@ export const INBOUND_TURN_REASONS = [
    *     and reason is distinct from 'coalesced_into_turn'
    */
   'coalesced_into_turn',
+
+  // ---- outcome 'not_run' (TAC-529) ----
+  /**
+   * The venue's own `venues.status` is `paused` or `archived`, so the agent
+   * did not reply. Ruled 2026-09-23: pausing a venue stops inbound replies
+   * too, not only the proactive paths, because the reply path is where the
+   * damage would happen at a venue something is wrong with.
+   *
+   * A DECISION, not a failure, and NOT a guest who was ignored: the venue is
+   * switched off. The inbound row is still saved by the webhook — the history
+   * is what you want when it is unpaused — and only the reply is withheld.
+   *
+   * It exists as its own value because silence and a swallowed reply are
+   * indistinguishable from the database otherwise, which is the whole reason
+   * this table exists. `gate_shut` is the nearest candidate and is wrong:
+   * that is INSTAGRAM_AGENT_REPLIES_ENABLED, a global kill switch, and
+   * reusing it would make the 2026-09-20 incident's own metric unanswerable.
+   *
+   *   select count(*) from inbound_turn_outcomes
+   *   where outcome = 'not_run' and reason = 'venue_paused'
+   */
+  'venue_paused',
 ] as const
 
 export type InboundTurnReason = (typeof INBOUND_TURN_REASONS)[number]

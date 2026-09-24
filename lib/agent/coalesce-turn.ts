@@ -162,6 +162,11 @@ const RETRYABLE_OUTCOME = {
   superseded: false,
   coalesced: false,
   silenced: false,
+  // TAC-529: a decision not to reply, so a retry would reach the same
+  // decision. Also unreachable in practice — the status gate sits before
+  // openCoalescedTurn, so a halted venue never takes a claim and
+  // `turn.answered` is still null when shouldRetryTurn returns above.
+  venue_halted: false,
   failed: true,
 } as const satisfies Record<AgentResult['status'], boolean>
 

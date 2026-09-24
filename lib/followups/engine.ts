@@ -67,7 +67,11 @@ import {
   type FollowupSuppressionReason,
 } from '@/lib/agent/followup-rules'
 import { handleFollowup } from '@/lib/agent/handle-followup'
-import { resolveConversationChannel } from '@/lib/agent/conversation-channel'
+import {
+  resolveConversationChannel,
+  venueMessagingNumberRequired,
+} from '@/lib/agent/conversation-channel'
+import { isVenueProcessingHalted } from '@/lib/venues/status'
 import type { FollowupTrigger } from '@/lib/agent/types'
 import {
   dedupKeyForReason,
@@ -96,6 +100,27 @@ export interface ProcessDueFollowupsResult {
    * midnight, not only the one inside the hour itself.
    */
   venuesDispatching: number
+  /**
+   * TAC-529. Venues skipped because `venues.status` is `paused` or
+   * `archived`. Counted once per run per venue, never per guest: three
+   * identical Slack lines an hour for one venue-level condition is how alerts
+   * get muted, which is the noise this ticket removes.
+   */
+  venuesHalted: number
+  /**
+   * TAC-529. Venues skipped because they have neither a
+   * `messaging_phone_number` nor an `instagram_account_id`, so there is no
+   * channel any guest there could be reached on. Before this they reached
+   * `buildRuntimeContext`, which throws, and the throw red-alerted per guest.
+   */
+  venuesNoChannel: number
+  /**
+   * TAC-529. Guests skipped because this venue cannot reach them on the
+   * channel they resolve to — a phone guest at a venue with no number. Per
+   * guest, but counted rather than alerted: it is still a venue-level
+   * misconfiguration, and the per-venue breakdown is where it is readable.
+   */
+  guestsUnservable: number
   /** Total enrolled guests evaluated across dispatching venues. */
   guestsEvaluated: number
   /** Guests with at least one detected reason. */
@@ -168,6 +193,20 @@ function primaryReasonToTriggerReason(
 interface VenueScanContext {
   id: string
   timezone: string
+  /**
+   * TAC-529: raw `venues.status`. Kept as the raw string rather than a parsed
+   * VenueStatus so an unrecognised value reaches `isVenueProcessingHalted`,
+   * which decides what one means (it processes, and warns). Parsing here would
+   * put that decision in two places.
+   */
+  status: string | null
+  /**
+   * TAC-529: the venue's own channels. A venue with neither can reach nobody,
+   * and a phone guest at a venue with no number is the exact condition
+   * `buildRuntimeContext` throws on.
+   */
+  hasPhone: boolean
+  hasInstagramAccount: boolean
   rules: FollowupRules
   cadence: MessagingCadence
   mechanicCandidates: EligibilityCandidate[]
@@ -214,7 +253,10 @@ export async function processDueFollowups(
 ): Promise<ProcessDueFollowupsResult> {
   const summary: ProcessDueFollowupsResult = {
     venuesScanned: 0,
+    venuesHalted: 0,
+    venuesNoChannel: 0,
     venuesDispatching: 0,
+    guestsUnservable: 0,
     guestsEvaluated: 0,
     guestsDue: 0,
     guestsDispatched: 0,
@@ -235,7 +277,14 @@ export async function processDueFollowups(
   const supabase = createAdminClient()
   const venuesResult = await supabase
     .from('venues')
-    .select('id, timezone, venue_configs(followup_rules, messaging_cadence)')
+    .select(
+      // TAC-529: status and both channel columns. Dropping any of them from
+      // this string makes the corresponding gate read `undefined` and go
+      // inert, which no behavioural test can see because the test double
+      // ignores its select argument — engine.test.ts captures this string for
+      // exactly that reason.
+      'id, timezone, status, messaging_phone_number, instagram_account_id, venue_configs(followup_rules, messaging_cadence)',
+    )
   if (venuesResult.error || !venuesResult.data) {
     console.error('[followup-engine] venues load failed', {
       error: venuesResult.error?.message,
@@ -247,6 +296,36 @@ export async function processDueFollowups(
   for (const venueRow of venuesResult.data) {
     const ctx = projectVenueScanContext(venueRow)
     if (!ctx) continue
+
+    // TAC-529 gate 1: the venue is paused or archived.
+    //
+    // Before the hour gate, so a halted venue is counted once per run whatever
+    // its local clock says — `venuesDispatching` would otherwise hide it on
+    // every tick before its cron hour and report it on every tick after.
+    if (isVenueProcessingHalted(ctx.status)) {
+      summary.venuesHalted += 1
+      console.warn(
+        `[followup-engine] venue ${ctx.id} is "${ctx.status}", not dispatching follow-ups`,
+      )
+      continue
+    }
+
+    // TAC-529 gate 2: the venue can reach nobody.
+    //
+    // AC2's "skipped before context build, recorded once per run". A venue
+    // with neither channel fails for EVERY guest, at buildRuntimeContext,
+    // which throws and red-alerts per guest; and because context_build is a
+    // pre-persist stage the engine releases the claim, so the dedup never
+    // burns and the same guests are re-detected on the next tick. That is the
+    // hourly loop with no exit, and this is where it ends.
+    if (!ctx.hasPhone && !ctx.hasInstagramAccount) {
+      summary.venuesNoChannel += 1
+      console.warn(
+        `[followup-engine] venue ${ctx.id} has no messaging_phone_number and no instagram_account_id, skipping`,
+      )
+      continue
+    }
+
     if (!isVenueDispatchingNow(ctx, now)) continue
     summary.venuesDispatching += 1
     const breakdown = await scanVenue(ctx, now, summary)
@@ -257,7 +336,10 @@ export async function processDueFollowups(
     now: now.toISOString(),
     summary: {
       venuesScanned: summary.venuesScanned,
+      venuesHalted: summary.venuesHalted,
+      venuesNoChannel: summary.venuesNoChannel,
       venuesDispatching: summary.venuesDispatching,
+      guestsUnservable: summary.guestsUnservable,
       guestsEvaluated: summary.guestsEvaluated,
       guestsDue: summary.guestsDue,
       guestsDispatched: summary.guestsDispatched,
@@ -276,6 +358,9 @@ export async function processDueFollowups(
 function projectVenueScanContext(venueRow: {
   id: string
   timezone: string
+  status: string | null
+  messaging_phone_number: string | null
+  instagram_account_id: string | null
   venue_configs:
     | { followup_rules: unknown; messaging_cadence: unknown }
     | Array<{ followup_rules: unknown; messaging_cadence: unknown }>
@@ -294,6 +379,22 @@ function projectVenueScanContext(venueRow: {
   return {
     id: venueRow.id,
     timezone: venueRow.timezone,
+    status: venueRow.status,
+    // Presence, not the value: nothing here sends, and a number in a scan
+    // context is one more place it could be read from instead of
+    // lib/messaging/venue-lookup.ts, which is the one lookup every send uses.
+    //
+    // `typeof === 'string'` and a trim, NOT `!== null`, matching the guest
+    // rows below. An absent key is `undefined` and `undefined !== null` is
+    // TRUE, so a column dropped from the SELECT would read as "this venue HAS
+    // a channel" and make both gates inert in the flattering direction.
+    // `messaging_phone_number` is CHECK-constrained by migration 001 so it
+    // cannot be blank, but `instagram_account_id` has only a UNIQUE
+    // constraint and is set BY HAND in Studio, so `''` is reachable and would
+    // otherwise suppress the venuesNoChannel signal.
+    hasPhone: typeof venueRow.messaging_phone_number === 'string' && venueRow.messaging_phone_number.trim() !== '',
+    hasInstagramAccount:
+      typeof venueRow.instagram_account_id === 'string' && venueRow.instagram_account_id.trim() !== '',
     rules,
     cadence: cadenceParsed,
     // Filled in scanVenue (per-venue mechanic load) — typed here so the
@@ -386,6 +487,7 @@ async function scanVenue(
     venueId: ctx.id,
     guestsEvaluated: 0,
     guestsDue: 0,
+    guestsUnservable: 0,
     guestsDispatched: 0,
     guestsTasked: 0,
     guestsSuppressed: 0,
@@ -628,6 +730,34 @@ async function scanVenue(
     const perkMechanicAfterFilter =
       allowedReasons.includes('perk_unlock') ? detected.perkMechanic : undefined
 
+    // TAC-529 gate 3: this venue cannot reach THIS guest.
+    //
+    // Gate 2 above catches a venue that can reach nobody. This catches the
+    // narrower case it leaves: a phone guest at a venue that has an Instagram
+    // account but no number. `buildRuntimeContext` throws on exactly that
+    // condition, so this reuses `venueMessagingNumberRequired`, the predicate
+    // it throws on, rather than restating it — two copies of a rule agree
+    // until one of them changes.
+    //
+    // NOT hypothetical, and it is why gate 2 alone is not enough: CLAUDE.md
+    // records that Le Mil's number is to be deleted once Instagram works,
+    // making it the first Instagram-only venue. Its phone guests would then
+    // throw hourly exactly as Mock Central Perk does now, at the live venue.
+    //
+    // Before claimFollowupLogRows, so no claim is taken and released. An
+    // Instagram guest is untouched here: rule 2 records them as a task below,
+    // which needs no channel on our side.
+    const guestChannel = resolveConversationChannel({
+      inboundChannel: undefined,
+      hasPhone: guest.hasPhone,
+      hasInstagramId: guest.hasInstagramId,
+    }).channel
+    if (venueMessagingNumberRequired(guestChannel) && !ctx.hasPhone) {
+      breakdown.guestsUnservable += 1
+      summary.guestsUnservable += 1
+      continue
+    }
+
     const claimRows: FollowupClaimRow[] = allowedReasons.map((reason) => ({
       venueId: ctx.id,
       guestId: guest.id,
@@ -660,15 +790,11 @@ async function scanVenue(
     // happens to be open right now — it becomes a task for a human. The claim
     // is KEPT, so the dedup burns exactly as a send would and this guest is not
     // re-detected tomorrow for the same visit.
-    const channel = resolveConversationChannel({
-      // No inbound message: a follow-up is proactive. A guest with both
-      // identifiers resolves phone-first, which is what every proactive send
-      // does today; the 0 such guests on file make it moot for now.
-      inboundChannel: undefined,
-      hasPhone: guest.hasPhone,
-      hasInstagramId: guest.hasInstagramId,
-    }).channel
-    if (channel === 'instagram') {
+    // Resolved once above, for TAC-529's gate 3. A follow-up is proactive, so
+    // there is no inbound message: a guest with both identifiers resolves
+    // phone-first, which is what every proactive send does today; the 0 such
+    // guests on file make it moot for now.
+    if (guestChannel === 'instagram') {
       const recorded = await recordManualFollowupTask(claimIds, now)
       if (!recorded.ok) {
         // The claim is already written and cannot be released safely: releasing
