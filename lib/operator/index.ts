@@ -44,3 +44,12 @@ export {
   type LoadGuestThreadByGuestIdResult,
   loadGuestThreadByGuestId,
 } from './guest-thread'
+
+export {
+  type InstagramConnectionStatus,
+  type LoadVenueConnectionResult,
+  type VenueConnectionState,
+  type VenueInstagramConnection,
+  INSTAGRAM_EXPIRING_WINDOW_MS,
+  loadVenueConnectionState,
+} from './venue-connection'
