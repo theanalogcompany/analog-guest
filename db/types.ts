@@ -666,6 +666,72 @@ export type Database = {
           },
         ]
       }
+      instagram_credentials: {
+        Row: {
+          access_token_enc: string
+          connected_at: string
+          connected_by_operator_id: string | null
+          created_at: string
+          deauthorized_at: string | null
+          id: string
+          instagram_username: string | null
+          is_active: boolean
+          last_refresh_error: string | null
+          last_refresh_error_at: string | null
+          last_refreshed_at: string | null
+          token_expires_at: string
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          access_token_enc: string
+          connected_at?: string
+          connected_by_operator_id?: string | null
+          created_at?: string
+          deauthorized_at?: string | null
+          id?: string
+          instagram_username?: string | null
+          is_active?: boolean
+          last_refresh_error?: string | null
+          last_refresh_error_at?: string | null
+          last_refreshed_at?: string | null
+          token_expires_at: string
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          access_token_enc?: string
+          connected_at?: string
+          connected_by_operator_id?: string | null
+          created_at?: string
+          deauthorized_at?: string | null
+          id?: string
+          instagram_username?: string | null
+          is_active?: boolean
+          last_refresh_error?: string | null
+          last_refresh_error_at?: string | null
+          last_refreshed_at?: string | null
+          token_expires_at?: string
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instagram_credentials_connected_by_operator_id_fkey"
+            columns: ["connected_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instagram_credentials_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: true
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       knowledge_corpus: {
         Row: {
           added_by_operator_id: string | null
