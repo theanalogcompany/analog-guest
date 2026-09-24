@@ -37,7 +37,7 @@ export function queryRecorder(script: Record<string, ScriptedAnswer[]>): {
       query.calls.push([name, ...args])
       return builder
     }
-    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'limit', 'update', 'insert', 'delete']) {
+    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'limit', 'update', 'insert', 'upsert', 'delete']) {
       builder[name] = chain(name)
     }
     builder.maybeSingle = () => {
