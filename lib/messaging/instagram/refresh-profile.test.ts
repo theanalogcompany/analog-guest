@@ -18,6 +18,7 @@ import {
   type RefreshDeps,
 } from './refresh-profile'
 import { createInstagramDbFake, type FakeRow } from './testing/db-fake'
+import { failResolveToken, stubResolveToken } from './testing/token-stub'
 
 const NOW = '2026-09-18T12:00:00.000Z'
 const NOW_MS = Date.parse(NOW)
@@ -77,9 +78,18 @@ function graph(replies: { me?: GraphReply; profile?: GraphReply } = {}) {
   }
 }
 
-/** Pass `{}` for an unset token: a defaulted parameter would read undefined as TOKEN. */
+/**
+ * Pass `{}` for an unset token: a defaulted parameter would read undefined as
+ * TOKEN.
+ *
+ * TAC-516: the dep resolves the venue's own credential now, falling back to
+ * the env var. These tests only care that a token arrives, so the stub
+ * reports source 'env' — the pre-TAC-516 world, which is exactly what a venue
+ * with no credential row still gets.
+ */
 function deps(fetchImpl: RefreshDeps['fetch'], env: { token?: string } = { token: TOKEN }): RefreshDeps {
-  return { fetch: fetchImpl, now: () => new Date(NOW), readToken: () => env.token }
+  const token = typeof env.token === 'string' && env.token !== '' ? env.token : null
+  return { fetch: fetchImpl, now: () => new Date(NOW), resolveToken: stubResolveToken(token) }
 }
 
 // A Graph error as Meta formats it. Its message names the guest's scoped ID.
@@ -403,6 +413,29 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
     expect(g.fetchImpl).not.toHaveBeenCalled()
     expect(db.updates('guests')).toEqual([])
     expect(logLevel.error).toEqual(['instagram_profile_token_missing'])
+  })
+
+  // TAC-516. A venue that HAS connected but whose stored credential cannot be
+  // read is a fourth configuration failure, and it must not read as the third:
+  // token_missing waits for someone to connect, this one needs
+  // INSTAGRAM_TOKEN_ENC_KEY looked at. Claims nothing either, so the first
+  // message after the key is fixed still fetches.
+  it('logs an unreadable stored credential under its own event, distinct from a missing token', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const g = graph()
+    const outcome = await refreshInstagramProfile(db.client, TARGET, {
+      fetch: g.fetchImpl,
+      now: () => new Date(NOW),
+      resolveToken: failResolveToken('could not decrypt the stored Instagram token: Error'),
+    })
+
+    expect(outcome).toEqual({
+      status: 'token_unreadable',
+      error: 'could not decrypt the stored Instagram token: Error',
+    })
+    expect(g.fetchImpl).not.toHaveBeenCalled()
+    expect(db.updates('guests')).toEqual([])
+    expect(logLevel.error).toEqual(['instagram_profile_token_unreadable'])
   })
 
   it('logs a token for another account as wrong_account, and never asks for the profile', async () => {

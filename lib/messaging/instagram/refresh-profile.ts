@@ -64,6 +64,8 @@ import {
   type GraphFailure,
 } from './fetch-profile'
 import type { InstagramEventOutcome } from './handle-events'
+import { resolveInstagramAccessToken } from './credentials-store'
+import type { ResolveInstagramTokenFn } from './send-target'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -89,14 +91,19 @@ export type RefreshTarget = { guestId: string; venueId: string }
 export type RefreshDeps = {
   fetch: FetchLike
   now: () => Date
-  /** Read at call time, never at module load (CLAUDE.md, "Environment variables"). */
-  readToken: () => string | undefined
+  /**
+   * TAC-516: the venue's OWN token when it has connected, falling back to
+   * INSTAGRAM_ACCESS_TOKEN when it has not — so this path is unchanged for a
+   * venue with no credential row. Resolved at call time, never at module load
+   * (CLAUDE.md, "Environment variables").
+   */
+  resolveToken: ResolveInstagramTokenFn
 }
 
 const DEFAULT_DEPS: RefreshDeps = {
   fetch: (input, init) => fetch(input, init),
   now: () => new Date(),
-  readToken: () => process.env.INSTAGRAM_ACCESS_TOKEN,
+  resolveToken: resolveInstagramAccessToken,
 }
 
 export type ProfileRefreshStoreStage = 'guest_lookup' | 'venue_lookup' | 'claim' | 'write'
@@ -109,6 +116,13 @@ export type ProfileRefreshOutcome =
   /** The guest has no scoped ID. Unreachable from the Instagram route. */
   | { status: 'not_instagram' }
   | { status: 'token_missing' }
+  /**
+   * The venue HAS a stored credential that could not be decrypted, or the
+   * credential read itself failed. Distinct from `token_missing` (nobody has
+   * connected and there is no env var): that one waits for a connect, this
+   * one needs INSTAGRAM_TOKEN_ENC_KEY looked at.
+   */
+  | { status: 'token_unreadable'; error: string }
   | { status: 'token_rejected'; step: 'token_account' | 'profile'; failure: GraphFailure }
   /** The token belongs to a different Instagram account than this venue's. */
   | { status: 'wrong_account'; venueAccountMissing: boolean }
@@ -186,8 +200,10 @@ async function refresh(
   if (!isProfileRefreshDue(times, deps.now())) return { status: 'not_due' }
 
   // 2
-  const token = deps.readToken()
-  if (!token) return { status: 'token_missing' }
+  const tokenResult = await deps.resolveToken(supabase, venueId)
+  if (!tokenResult.ok) return { status: 'token_unreadable', error: tokenResult.error }
+  if (tokenResult.resolved === null) return { status: 'token_missing' }
+  const token = tokenResult.resolved.token
 
   // 3
   const venue = await supabase.from('venues').select('instagram_account_id').eq('id', venueId).maybeSingle()
@@ -286,9 +302,20 @@ export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefresh
       })
       return
     case 'token_missing':
-      console.error('instagram profile: INSTAGRAM_ACCESS_TOKEN not set; no profile fetched', {
+      console.error('instagram profile: no venue credential and INSTAGRAM_ACCESS_TOKEN not set; no profile fetched', {
         event: 'instagram_profile_token_missing',
         ...ids,
+      })
+      return
+    // TAC-516. Its own event, not folded into token_missing: that one waits
+    // for a venue to connect, this one means a credential EXISTS and could
+    // not be read, which needs INSTAGRAM_TOKEN_ENC_KEY looked at. The error
+    // names the failure kind and never the ciphertext or the key.
+    case 'token_unreadable':
+      console.error('instagram profile: stored venue credential could not be read; no profile fetched', {
+        event: 'instagram_profile_token_unreadable',
+        ...ids,
+        error: outcome.error,
       })
       return
     case 'token_rejected':
