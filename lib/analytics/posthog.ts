@@ -2458,3 +2458,68 @@ export async function captureInstagramScanUnattributed(
     ].join('\n'),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Instagram per-venue tokens (TAC-516 / TAC-460)
+// ---------------------------------------------------------------------------
+
+export interface InstagramTokenRefreshFailedProps {
+  venueId: string
+  /** Meta's code and subcode, or our own failure kind. NEVER Meta's message. */
+  reason: string
+  expiresAt?: string
+}
+
+/**
+ * A refresh attempt failed and the old token was left in place. Recoverable:
+ * the job runs daily against a ten-day margin, so there are many more
+ * attempts before the window closes.
+ *
+ * Slack-relayed because the AC asks for a failed refresh to be visible rather
+ * than silent, and at pilot volume (one connected venue) the relay IS the
+ * visibility. The passive channel is the operator app's own `expiring` state.
+ */
+export async function captureInstagramTokenRefreshFailed(
+  props: InstagramTokenRefreshFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_token_refresh_failed', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram token refresh failed*`,
+      `venue: \`${props.venueId}\``,
+      `why: ${props.reason}`,
+      props.expiresAt !== undefined ? `token expires: ${props.expiresAt}` : null,
+      `_The existing token is untouched and still works. This retries daily._`,
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n'),
+  )
+}
+
+export interface InstagramTokenExpiredUnrecoverableProps {
+  venueId: string
+  expiredAt: string
+}
+
+/**
+ * The token passed its expiry without being refreshed. Meta cannot refresh an
+ * expired token at all, so this is the one failure here that no retry fixes:
+ * that venue's Instagram messaging is down until a human re-authorizes it.
+ *
+ * Its OWN event rather than one more refresh failure, per TAC-460's note that
+ * this path "should alert distinctly" — the action it needs is different, and
+ * folding it in would bury the only one that needs a person today.
+ */
+export async function captureInstagramTokenExpiredUnrecoverable(
+  props: InstagramTokenExpiredUnrecoverableProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_token_expired_unrecoverable', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram token EXPIRED and cannot be refreshed*`,
+      `venue: \`${props.venueId}\``,
+      `expired: ${props.expiredAt}`,
+      `_Meta cannot refresh an expired token. This venue's Instagram messaging is down until someone reconnects it._`,
+    ].join('\n'),
+  )
+}
