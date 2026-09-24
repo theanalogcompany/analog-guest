@@ -159,9 +159,16 @@ export async function resolveInstagramAccessToken(
       token = decryptInstagramToken(credential.accessTokenEnc)
     } catch (err) {
       // Never fall back to the env token here — see this file's header.
+      //
+      // err.message, not err.name, and the same on the encrypt side below:
+      // `name` is "Error" for every crypto failure, which tells whoever is
+      // on call nothing. The message is safe because neither this module nor
+      // token-crypto ever puts key or token material into one — node's own
+      // text is "Unsupported state or unable to authenticate data", and
+      // readKey names a byte LENGTH, never a value.
       return {
         ok: false,
-        error: `could not decrypt the stored Instagram token: ${err instanceof Error ? err.name : 'unknown error'}`,
+        error: `could not decrypt the stored Instagram token: ${err instanceof Error ? err.message : 'unknown error'}`,
       }
     }
     return { ok: true, resolved: { token, source: 'venue', expiresAt: credential.tokenExpiresAt } }

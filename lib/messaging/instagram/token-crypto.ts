@@ -47,8 +47,14 @@ function getKey(env: NodeJS.ProcessEnv = process.env): Buffer {
 }
 
 /**
- * Shape check for /admin/health and for a first-call guard, without
- * encrypting anything and without ever returning key material.
+ * First-call guard: checks the key's SHAPE without encrypting anything and
+ * without ever returning key material.
+ *
+ * THERE IS NO /admin/health ROW FOR THIS, deliberately. A shape check can
+ * see a missing or mis-sized key and cannot see a key that is the wrong 32
+ * bytes, which is the failure that actually strands a venue's credential —
+ * so a green row would assert more than it checked. CLAUDE.md makes the same
+ * call for the Meta secrets. The callers below are the detection.
  *
  * Deliberately returns the DEFECT, not the value: "missing" and "wrong
  * length" have different fixes and a caller that only learns "bad key"

@@ -21,6 +21,26 @@
 //      passing '' would verify a forgery. Refusing in both places means
 //      removing either guard still fails closed, which is why each has its
 //      own test.
+//
+// REPLAY IS OPEN, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT (found in
+// code review). `issued_at` is parsed and carried through; nothing refuses a
+// payload for being old, so a captured genuine request stays valid until the
+// secret rotates. Meta signs no nonce, so the only available check is an age
+// window — and on THESE two callbacks the refusal is worse than the replay:
+//
+//   - Refusing a genuine deauthorize keeps a token the venue revoked, which
+//     is the credential-storage failure this whole ticket exists to avoid.
+//   - Refusing a genuine deletion is a compliance failure with a deadline.
+//
+// Both refusals are reachable by ordinary clock skew or a delayed Meta
+// retry, where the replays are bounded: deauthorizing an already-revoked
+// venue is idempotent, and re-running a deletion re-redacts rows that are
+// already redacted. The one real exposure is narrow and worth stating — a
+// guest who messages the venue AFTER a deletion, whose new rows a replayed
+// request would then redact too.
+//
+// So the window is deliberately left open. Closing it needs something other
+// than a clock (deduping the request itself), which is its own decision.
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 

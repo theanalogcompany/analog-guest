@@ -216,6 +216,69 @@ export async function exchangeForLongLivedToken(
 }
 
 /**
+ * Keeping a long-lived token alive. Same host, same shape and same deviation
+ * as the exchange above, which is why it lives here rather than beside the
+ * refresh job that calls it.
+ *
+ * IT USES THE GRAPH ROOT, NOT THE VERSIONED BASE. Meta documents
+ * `refresh_access_token` at `graph.instagram.com/refresh_access_token`, and
+ * this file's own constant says so. It went through `graphRequest` at first,
+ * which prefixes `/v25.0`, so the code contradicted the comment stating the
+ * fact — on the one call that has to run unattended for sixty days. Caught in
+ * code review. Both tests now pin the full URL.
+ */
+export async function refreshInstagramLongLivedToken(
+  token: string,
+  fetchImpl: FetchLike,
+  now: Date,
+): Promise<GraphResult<LongLivedToken>> {
+  const query = new URLSearchParams({ grant_type: 'ig_refresh_token' })
+
+  let response: Response
+  try {
+    response = await fetchImpl(`${INSTAGRAM_GRAPH_ROOT_URL}/refresh_access_token?${query.toString()}`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
+    })
+  } catch (e) {
+    return { ok: false, failure: networkFailure(e) }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = await response.json()
+  } catch {
+    return malformed(response.status)
+  }
+  if (!response.ok || !isRecord(parsed)) {
+    const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : {}
+    return {
+      ok: false,
+      failure: {
+        reason: 'graph_error',
+        httpStatus: response.status,
+        code: typeof error.code === 'number' ? error.code : null,
+        subcode: typeof error.error_subcode === 'number' ? error.error_subcode : null,
+        type: stringOrNull(error.type),
+        fbtraceId: stringOrNull(error.fbtrace_id),
+      },
+    }
+  }
+
+  const refreshed = stringOrNull(parsed.access_token)
+  if (refreshed === null) return malformed(response.status)
+  const seconds = typeof parsed.expires_in === 'number' && parsed.expires_in > 0 ? parsed.expires_in : null
+  return {
+    ok: true,
+    value: {
+      token: refreshed,
+      expiresAt: new Date(now.getTime() + (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000)),
+    },
+  }
+}
+
+/**
  * Step 3: who this token belongs to.
  *
  * `user_id`, NOT `id` — CLAUDE.md records that `id` is app-scoped and is the

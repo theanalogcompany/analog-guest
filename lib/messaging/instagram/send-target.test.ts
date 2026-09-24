@@ -61,6 +61,19 @@ describe('loadInstagramSendTarget', () => {
     expect(await loadInstagramSendTarget(client, INPUT, stubResolveToken(null))).toEqual({ ok: false, problem: 'token_missing' })
   })
 
+  // THE CALL SITE'S ONE ARGUMENT. Passing input.guestId here instead of
+  // input.venueId resolved no credential, fell back to the shared env token
+  // for EVERY venue, and passed all 2156 tests across 63 files — the whole
+  // per-venue feature inert, green (found in code review). The stub records
+  // its arguments so this can be asserted at all.
+  it('asks the resolver about the VENUE, not the guest', async () => {
+    const { client } = recorder({ instagram_account_id: 'acct' }, { instagram_scoped_id: 'igsid' })
+    const resolve = stubResolveToken('token')
+    await loadInstagramSendTarget(client, INPUT, resolve)
+    expect(resolve).toHaveBeenCalledWith(client, INPUT.venueId)
+    expect(resolve).not.toHaveBeenCalledWith(client, INPUT.guestId)
+  })
+
   // TAC-516. The source is what proves a send used the venue's OWN credential
   // rather than silently riding the shared env fallback, which is how the Le
   // Mil's cutover is verified.

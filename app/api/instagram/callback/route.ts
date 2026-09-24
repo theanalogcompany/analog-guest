@@ -234,10 +234,27 @@ export async function GET(request: Request): Promise<Response> {
     // authority. Other failures are storage failures.
     const isConflict =
       pointed.error.code === '23505' || pointed.error.message.includes(VENUE_ACCOUNT_UNIQUE_CONSTRAINT)
+
+    // COMPENSATE, so both failure pages tell the truth. Both say "Nothing was
+    // changed", and until code review that was FALSE here: the credential at
+    // step 7 is already written. Leaving it produced a venue holding a
+    // credential its pointer does not match — which the operator endpoint
+    // reported as `connected` while every send refused with
+    // `venue_has_no_instagram_account` and every inbound was skipped as
+    // `venue_not_found`. Told nothing changed and shown connected, an
+    // operator has no reason to retry.
+    //
+    // Deleting rather than deactivating: this credential was never usable, so
+    // there is nothing to keep a record of, and a reconnect writes a fresh
+    // row anyway.
+    const undo = await supabase.from('instagram_credentials').delete().eq('venue_id', venueId)
     console.error('[instagram callback] could not point the venue at the account', {
       event: isConflict ? 'instagram_callback_account_taken' : 'instagram_callback_storage_failed',
       venueId,
       error: pointed.error.message,
+      // If the compensation ALSO failed the venue is in the state described
+      // above, and that is worth seeing rather than inferring.
+      credentialRolledBack: !undo.error,
     })
     return fail(isConflict ? 'account_already_connected' : 'storage_failed')
   }

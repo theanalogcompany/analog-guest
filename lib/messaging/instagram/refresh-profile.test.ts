@@ -420,18 +420,34 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
   // token_missing waits for someone to connect, this one needs
   // INSTAGRAM_TOKEN_ENC_KEY looked at. Claims nothing either, so the first
   // message after the key is fixed still fetches.
+  // Same call-site argument as send-target's: venueId, never guestId. That
+  // swap passed all 40 tests in this file before code review, with the
+  // profile refresh silently on the shared env token for every venue.
+  it('asks the resolver about the VENUE, not the guest', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const g = graph()
+    const resolve = stubResolveToken(TOKEN)
+    await refreshInstagramProfile(db.client, TARGET, {
+      fetch: g.fetchImpl,
+      now: () => new Date(NOW),
+      resolveToken: resolve,
+    })
+    expect(resolve).toHaveBeenCalledWith(db.client, VENUE_ID)
+    expect(resolve).not.toHaveBeenCalledWith(db.client, GUEST_ID)
+  })
+
   it('logs an unreadable stored credential under its own event, distinct from a missing token', async () => {
     const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
     const g = graph()
     const outcome = await refreshInstagramProfile(db.client, TARGET, {
       fetch: g.fetchImpl,
       now: () => new Date(NOW),
-      resolveToken: failResolveToken('could not decrypt the stored Instagram token: Error'),
+      resolveToken: failResolveToken('could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data'),
     })
 
     expect(outcome).toEqual({
       status: 'token_unreadable',
-      error: 'could not decrypt the stored Instagram token: Error',
+      error: 'could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data',
     })
     expect(g.fetchImpl).not.toHaveBeenCalled()
     expect(db.updates('guests')).toEqual([])

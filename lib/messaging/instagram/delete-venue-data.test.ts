@@ -28,6 +28,8 @@ function scripted(guestIds: string[]) {
       ...guestIds.map(() => ({ data: null, error: null })),
     ],
     messages: [{ data: null, error: null }],
+    guest_card_fingerprints: [{ data: null, error: null }],
+    inbound_turn_outcomes: [{ data: null, error: null }],
     instagram_credentials: [{ data: null, error: null }],
   })
 }
@@ -73,6 +75,38 @@ describe('deleteInstagramVenueData', () => {
     expect(patch.first_name).toBeNull()
     expect(patch.instagram_username).toBeNull()
     expect(patch.context).toEqual({})
+
+    // PER ROW. Dropping `.eq('id', ...)` would redact EVERY guest at the
+    // venue, including SMS-only guests with no Instagram relationship, and
+    // null their phone so they can never be messaged again. The sibling
+    // message update pins its filters; this one did not until code review.
+    expect(callsNamed(guestUpdate, 'eq')).toEqual([
+      ['id', 'guest-1'],
+      ['venue_id', VENUE_ID],
+    ])
+  })
+
+  it('deletes the card fingerprints, which re-identify the shell on the next tap', async () => {
+    const { client, queries } = scripted(['guest-1'])
+    await deleteInstagramVenueData(client, ACCOUNT_ID)
+
+    const fingerprints = queries.find((q) => q.table === 'guest_card_fingerprints')!
+    expect(callsNamed(fingerprints, 'delete')).toHaveLength(1)
+    expect(callsNamed(fingerprints, 'eq')).toEqual([['venue_id', VENUE_ID]])
+    expect(callsNamed(fingerprints, 'in')).toEqual([['guest_id', ['guest-1']]])
+  })
+
+  // TAC-523 put a phone's last four in `detail`. The rest of the row is
+  // outcome vocabulary, so the ledger's counts stay honest.
+  it("clears the turn ledger's detail without deleting the rows", async () => {
+    const { client, queries } = scripted(['guest-1'])
+    await deleteInstagramVenueData(client, ACCOUNT_ID)
+
+    const ledger = queries.find((q) => q.table === 'inbound_turn_outcomes')!
+    expect(callsNamed(ledger, 'delete')).toHaveLength(0)
+    const [[patch]] = callsNamed(ledger, 'update') as [[Record<string, unknown>]]
+    expect(patch).toEqual({ detail: {} })
+    expect(callsNamed(ledger, 'in')).toEqual([['guest_id', ['guest-1']]])
   })
 
   // THE CONSTRAINT THE PLAN MISSED. Nulling the scoped id as well as the
@@ -115,6 +149,11 @@ describe('deleteInstagramVenueData', () => {
       response_review: null,
       replaced_draft_body: null,
       provider_message_id: null,
+      // ungrounded_claims holds VERBATIM excerpts of the body. Leaving it
+      // would keep the exact sentences the redaction is for.
+      ungrounded_claims: null,
+      pending_commitment: null,
+      pending_cancellation: null,
     })
     // Scoped to this venue AND these guests: one venue's deletion must never
     // reach another's rows.

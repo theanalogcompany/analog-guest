@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   INSTAGRAM_WEBHOOK_SUBSCRIBED_FIELDS,
+  refreshInstagramLongLivedToken,
   exchangeForLongLivedToken,
   exchangeInstagramCode,
   fetchConnectedAccount,
@@ -125,7 +126,11 @@ describe('exchangeForLongLivedToken', () => {
     await exchangeForLongLivedToken(input, fetchImpl)
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toContain('grant_type=ig_exchange_token')
+    // The Graph ROOT, like its refresh sibling, and never the versioned base.
+    expect(url).toBe(
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${APP_SECRET}`,
+    )
+    expect(url).not.toContain('/v25.0/')
     expect(url).not.toContain(SHORT_TOKEN)
     expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${SHORT_TOKEN}`)
   })
@@ -235,5 +240,41 @@ describe('subscribeInstagramWebhooks', () => {
       respond(body),
     )
     expect(result.ok).toBe(false)
+  })
+})
+
+describe('refreshInstagramLongLivedToken', () => {
+  // Meta documents this at the Graph ROOT. Pinned whole, because the versioned
+  // base is what it used before code review and nothing recorded the
+  // difference — on the one call that runs unattended for sixty days.
+  it('calls the documented root endpoint with the token in the header', async () => {
+    const fetchImpl = respond({ access_token: LONG_TOKEN, expires_in: 60 * 24 * 60 * 60 })
+    const result = await refreshInstagramLongLivedToken(LONG_TOKEN, fetchImpl, NOW)
+    expect(result).toEqual({
+      ok: true,
+      value: { token: LONG_TOKEN, expiresAt: new Date(NOW.getTime() + 60 * DAY) },
+    })
+
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token')
+    expect(url).not.toContain('/v25.0/')
+    expect(url).not.toContain(LONG_TOKEN)
+    expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${LONG_TOKEN}`)
+  })
+
+  it('falls back to 60 days when Meta omits expires_in', async () => {
+    const fetchImpl = respond({ access_token: LONG_TOKEN })
+    const result = await refreshInstagramLongLivedToken(LONG_TOKEN, fetchImpl, NOW)
+    expect(result).toMatchObject({ ok: true, value: { expiresAt: new Date(NOW.getTime() + 60 * DAY) } })
+  })
+
+  it("carries Meta's code but never its message", async () => {
+    const fetchImpl = respond(
+      { error: { message: `token ${LONG_TOKEN} is invalid`, code: 190, error_subcode: 463, type: 'OAuthException' } },
+      400,
+    )
+    const result = await refreshInstagramLongLivedToken(LONG_TOKEN, fetchImpl, NOW)
+    expect(result).toMatchObject({ ok: false, failure: { reason: 'graph_error', code: 190 } })
+    expect(JSON.stringify(result)).not.toContain(LONG_TOKEN)
   })
 })

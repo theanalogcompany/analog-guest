@@ -46,11 +46,13 @@ vi.mock('@/lib/analytics/posthog', () => ({
 
 const venueSelectMock = vi.fn()
 const venueUpdateMock = vi.fn()
+const credentialDeleteMock = vi.fn()
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
-    from: () => ({
+    from: (table: string) => ({
       select: () => ({ eq: () => ({ maybeSingle: () => venueSelectMock() }) }),
       update: (patch: unknown) => ({ eq: (_c: string, v: string) => venueUpdateMock(patch, v) }),
+      delete: () => ({ eq: (_c: string, v: string) => credentialDeleteMock(table, v) }),
     }),
   }),
 }))
@@ -125,6 +127,7 @@ beforeEach(() => {
   upsertMock.mockResolvedValue({ ok: true })
   venueSelectMock.mockResolvedValue({ data: null, error: null })
   venueUpdateMock.mockResolvedValue({ error: null })
+  credentialDeleteMock.mockResolvedValue({ error: null })
 
   for (const level of ['log', 'warn', 'error'] as const) {
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -247,18 +250,30 @@ describe('GET /api/instagram/callback: the cross-venue refusal', () => {
     expect(upsertMock).toHaveBeenCalled()
   })
 
-  // The unique constraint is the authority when the check loses a race.
-  it('treats a unique violation on the venue write as the same refusal', async () => {
+  // The unique constraint is the authority when the check loses a race. Both
+  // this and the storage path reach it AFTER the credential is written, so
+  // both must undo it — the page says "Nothing here was changed", and until
+  // code review that was false on exactly these two branches.
+  it('treats a unique violation on the venue write as the same refusal, and undoes the credential', async () => {
     venueUpdateMock.mockResolvedValue({ error: { code: '23505', message: 'duplicate key' } })
     const res = await call({ code: CODE, state: validState() })
     expect(res.status).toBe(409)
     expect(await res.text()).toContain('already connected')
+    // The write DID happen on this path, which is why the undo has to.
+    expect(upsertMock).toHaveBeenCalled()
+    expect(credentialDeleteMock).toHaveBeenCalled()
   })
 
-  it('treats any other venue-write failure as storage, not as a conflict', async () => {
+  it('treats any other venue-write failure as storage, not as a conflict, and undoes the credential', async () => {
     venueUpdateMock.mockResolvedValue({ error: { code: '08006', message: 'connection failure' } })
     const res = await call({ code: CODE, state: validState() })
     expect(res.status).toBe(500)
+    expect(credentialDeleteMock).toHaveBeenCalled()
+  })
+
+  it('leaves the credential alone when the venue write succeeds', async () => {
+    await call({ code: CODE, state: validState() })
+    expect(credentialDeleteMock).not.toHaveBeenCalled()
   })
 
   it('refuses when the conflict check itself fails, rather than guessing', async () => {

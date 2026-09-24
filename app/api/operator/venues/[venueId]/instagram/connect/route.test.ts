@@ -48,7 +48,13 @@ const ORIGINAL = {
   appId: process.env.INSTAGRAM_APP_ID,
   redirect: process.env.INSTAGRAM_OAUTH_REDIRECT_URL,
   key: process.env.INSTAGRAM_TOKEN_ENC_KEY,
+  secret: process.env.INSTAGRAM_APP_SECRET,
 }
+
+// Set so the leak assertion below has something to look for. Unset, it
+// checked the response for a placeholder that could never be in it, so it
+// passed against every implementation (found in code review).
+const APP_SECRET = 'app-secret-SHOULD-NEVER-REACH-A-BROWSER'
 
 function req(): Request {
   return new Request('http://localhost/api/operator/venues/x/instagram/connect', {
@@ -66,6 +72,7 @@ beforeEach(() => {
   process.env.INSTAGRAM_APP_ID = 'app-1227804829539686'
   process.env.INSTAGRAM_OAUTH_REDIRECT_URL = 'https://webhooks.theanalog.company/api/instagram/callback'
   process.env.INSTAGRAM_TOKEN_ENC_KEY = ENC_KEY
+  process.env.INSTAGRAM_APP_SECRET = APP_SECRET
   verifyOperatorRequestMock.mockResolvedValue({
     operatorId: OPERATOR_ID,
     venueScope: grantedVenues([VENUE_ID]),
@@ -79,6 +86,7 @@ afterEach(() => {
     ['INSTAGRAM_APP_ID', ORIGINAL.appId],
     ['INSTAGRAM_OAUTH_REDIRECT_URL', ORIGINAL.redirect],
     ['INSTAGRAM_TOKEN_ENC_KEY', ORIGINAL.key],
+    ['INSTAGRAM_APP_SECRET', ORIGINAL.secret],
   ] as const) {
     if (v === undefined) delete process.env[k]
     else process.env[k] = v
@@ -208,6 +216,6 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
     const res = await call()
     const text = await res.text()
     expect(text).not.toContain(ENC_KEY)
-    expect(text).not.toContain(process.env.INSTAGRAM_APP_SECRET ?? 'app-secret-never-set')
+    expect(text).not.toContain(APP_SECRET)
   })
 })

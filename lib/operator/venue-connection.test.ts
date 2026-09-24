@@ -36,8 +36,11 @@ function credential(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function load(row: unknown) {
-  const { client } = queryRecorder({ instagram_credentials: [{ data: row, error: null }] })
+function load(row: unknown, accountId: string | null = '17841479626987104') {
+  const { client } = queryRecorder({
+    instagram_credentials: [{ data: row, error: null }],
+    venues: [{ data: { instagram_account_id: accountId }, error: null }],
+  })
   return loadVenueConnectionState(client, VENUE_ID, NOW)
 }
 
@@ -119,13 +122,44 @@ describe('loadVenueConnectionState', () => {
   // A failed read must NOT report "disconnected": that would tell an operator
   // their Instagram is down when it is working, and send them to reconnect a
   // connection that is fine.
+  // A credential with no venue pointer is a venue that CANNOT send: the
+  // callback writes the credential first, so any failure on the pointer write
+  // leaves exactly this. Reporting `connected` told an operator their
+  // Instagram worked while every send refused (found in code review).
+  it('reports disconnected when the venue has a credential but no account pointer', async () => {
+    const result = await load(credential(), null)
+    expect(result).toEqual({
+      ok: true,
+      state: { instagram: { status: 'disconnected', username: null, expiresAt: null } },
+    })
+  })
+
+  it('treats a blank account pointer the same as a missing one', async () => {
+    expect(await load(credential(), '   ')).toMatchObject({
+      ok: true,
+      state: { instagram: { status: 'disconnected' } },
+    })
+  })
+
   it('reports a read failure as a failure, never as disconnected', async () => {
     const { client } = queryRecorder({
       instagram_credentials: [{ data: null, error: { message: 'timeout' } }],
+      venues: [{ data: { instagram_account_id: 'acct' }, error: null }],
     })
     expect(await loadVenueConnectionState(client, VENUE_ID, NOW)).toEqual({
       ok: false,
       error: 'timeout',
+    })
+  })
+
+  it('reports a failed venue read as a failure too', async () => {
+    const { client } = queryRecorder({
+      instagram_credentials: [{ data: credential(), error: null }],
+      venues: [{ data: null, error: { message: 'venue timeout' } }],
+    })
+    expect(await loadVenueConnectionState(client, VENUE_ID, NOW)).toEqual({
+      ok: false,
+      error: 'venue timeout',
     })
   })
 

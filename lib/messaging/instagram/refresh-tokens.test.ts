@@ -161,7 +161,11 @@ describe('processInstagramTokenRefresh', () => {
     await processInstagramTokenRefresh(NOW, { fetch: fetchImpl, now: () => NOW }, client)
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toContain('grant_type=ig_refresh_token')
+    // THE FULL URL, not just the grant type. Meta documents this endpoint at
+    // the Graph ROOT; it went through graphRequest at first, which prefixes
+    // /v25.0, and nothing recorded the difference (found in code review).
+    expect(url).toBe('https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token')
+    expect(url).not.toContain('/v25.0/')
     expect(url).not.toContain(OLD_TOKEN)
     expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${OLD_TOKEN}`)
   })

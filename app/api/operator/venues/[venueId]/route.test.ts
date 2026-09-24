@@ -58,6 +58,17 @@ describe('GET /api/operator/venues/[venueId]', () => {
     expect(await res.json()).toEqual(CONNECTED)
   })
 
+  // The allowlist check is correct, and on its own it proves nothing about
+  // WHICH venue then gets read: passing operator.operatorId here instead of
+  // venueId passed all 21 tests, because the mock answers regardless of its
+  // arguments (found in code review). The authorized id and the read id have
+  // to be the same id.
+  it('reads the venue it just authorized, not some other id', async () => {
+    await call()
+    expect(loadMock).toHaveBeenCalledWith(expect.anything(), VENUE_ID)
+    expect(loadMock).not.toHaveBeenCalledWith(expect.anything(), OPERATOR_ID)
+  })
+
   it('returns 401 with the Contract body, never AuthError.message', async () => {
     verifyOperatorRequestMock.mockRejectedValue(new AuthError(401, 'JWT expired'))
     const res = await call()

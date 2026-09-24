@@ -5,6 +5,8 @@
 
 import { createHmac } from 'node:crypto'
 
+import { formatWithOptions } from 'node:util'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const deauthorizeMock = vi.fn()
@@ -38,6 +40,19 @@ function call(body: string | null): Promise<Response> {
 }
 
 const logged: unknown[][] = []
+// JSON.stringify renders a Headers, an Error or a URLSearchParams as {},
+// so it would report a leak through any of them as clean (TAC-458). This
+// renders what console actually prints, with every limit lifted.
+function loggedText(): string {
+  return logged
+    .map((args) =>
+      formatWithOptions(
+        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        ...args,
+      ),
+    )
+    .join('\n')
+}
 beforeEach(() => {
   vi.clearAllMocks()
   logged.length = 0
@@ -102,7 +117,7 @@ describe('POST /api/instagram/deauthorize', () => {
     deauthorizeMock.mockResolvedValue({ ok: false, error: 'connection reset' })
     const res = await call(signedRequest({ user_id: ACCOUNT_ID }))
     expect(res.status).toBe(200)
-    expect(JSON.stringify(logged)).toContain('instagram_deauthorize_failed')
+    expect(loggedText()).toContain('instagram_deauthorize_failed')
   })
 
   // Meta can send this for an account we never finished connecting.
@@ -115,7 +130,7 @@ describe('POST /api/instagram/deauthorize', () => {
   it('never logs the signed request, the payload or the secret', async () => {
     const signed = signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret')
     await call(signed)
-    const rendered = JSON.stringify(logged)
+    const rendered = loggedText()
     expect(rendered).not.toContain(signed)
     expect(rendered).not.toContain(SECRET)
   })

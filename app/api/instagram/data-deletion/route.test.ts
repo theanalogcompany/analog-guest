@@ -3,6 +3,8 @@
 
 import { createHmac } from 'node:crypto'
 
+import { formatWithOptions } from 'node:util'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const deleteMock = vi.fn()
@@ -46,6 +48,19 @@ function call(body: string | null): Promise<Response> {
 }
 
 const logged: unknown[][] = []
+// JSON.stringify renders a Headers, an Error or a URLSearchParams as {},
+// so it would report a leak through any of them as clean (TAC-458). This
+// renders what console actually prints, with every limit lifted.
+function loggedText(): string {
+  return logged
+    .map((args) =>
+      formatWithOptions(
+        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        ...args,
+      ),
+    )
+    .join('\n')
+}
 beforeEach(() => {
   vi.clearAllMocks()
   logged.length = 0
@@ -112,7 +127,7 @@ describe('POST /api/instagram/data-deletion', () => {
 
     const [row] = insertMock.mock.calls[0] as [Record<string, unknown>]
     expect(row.completed_at).toBeNull()
-    expect(JSON.stringify(logged)).toContain('instagram_data_deletion_failed')
+    expect(loggedText()).toContain('instagram_data_deletion_failed')
   })
 
   // Legitimate on its own, and also what a wrong id assumption looks like.
@@ -151,13 +166,13 @@ describe('POST /api/instagram/data-deletion', () => {
     const res = await call(signedRequest({ user_id: ACCOUNT_ID }))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ confirmation_code: CODE })
-    expect(JSON.stringify(logged)).toContain('instagram_data_deletion_unrecorded')
+    expect(loggedText()).toContain('instagram_data_deletion_unrecorded')
   })
 
   it('never logs the signed request or the secret', async () => {
     const signed = signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret')
     await call(signed)
-    const rendered = JSON.stringify(logged)
+    const rendered = loggedText()
     expect(rendered).not.toContain(signed)
     expect(rendered).not.toContain(SECRET)
   })

@@ -313,11 +313,17 @@ describe('deauthorizeInstagramCredential', () => {
     const credentialUpdate = queries.find((q) => q.table === 'instagram_credentials')!
     const [[patch]] = callsNamed(credentialUpdate, 'update') as [[Record<string, unknown>]]
     expect(patch).toEqual({ is_active: false, deauthorized_at: now.toISOString() })
+    // THE FILTER, not just the patch. Both were unasserted until code review,
+    // and the nastier mutant leaves the credential active while clearing the
+    // venue's account id: loadVenueConnectionState then reports `connected`
+    // after a revocation, and the refresh cron keeps refreshing a dead token.
+    expect(callsNamed(credentialUpdate, 'eq')).toEqual([['venue_id', VENUE_ID]])
 
     // Clearing the account id is what frees it to be connected again.
     const venueUpdate = queries.filter((q) => q.table === 'venues')[1]
     const [[venuePatch]] = callsNamed(venueUpdate, 'update') as [[Record<string, unknown>]]
     expect(venuePatch).toEqual({ instagram_account_id: null })
+    expect(callsNamed(venueUpdate, 'eq')).toEqual([['id', VENUE_ID]])
   })
 
   // Revocation stops future traffic. What to do with past data is the

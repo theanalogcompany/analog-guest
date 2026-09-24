@@ -32,6 +32,13 @@
 // a ten-day margin tolerates that drift easily, which is why the GH workflow
 // stays as a redundant net rather than the primary.
 //
+// THE GRAPH CALL ITSELF lives in oauth-exchange.ts beside the long-lived
+// exchange: same host, same shape, and the same documented deviation about
+// header auth. It uses the Graph ROOT, not the versioned base, because that
+// is where Meta documents `refresh_access_token` — going through graphRequest
+// prefixed /v25.0 and contradicted the comment stating the fact, on the one
+// call that runs unattended for sixty days (found in code review).
+//
 // Nothing here logs a token, a ciphertext or Meta's error message.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -43,7 +50,8 @@ import {
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 
-import { graphRequest, isRecord, type FetchLike, type GraphFailure } from './graph'
+import type { FetchLike } from './graph'
+import { refreshInstagramLongLivedToken } from './oauth-exchange'
 import { encryptInstagramToken, decryptInstagramToken } from './token-crypto'
 
 type AdminSupabaseClient = SupabaseClient<Database>
@@ -99,38 +107,6 @@ export function tokenAcquiredAt(row: {
   const refreshed = row.last_refreshed_at === null ? null : new Date(row.last_refreshed_at)
   if (refreshed === null || Number.isNaN(refreshed.getTime())) return connected
   return refreshed.getTime() > connected.getTime() ? refreshed : connected
-}
-
-export type RefreshedToken = { token: string; expiresAt: Date }
-
-/**
- * Exchange a live long-lived token for a new one. The token rides in the
- * Authorization header via graphRequest, never the query string, so it cannot
- * reach a request log (graph.ts's rule).
- */
-export async function refreshInstagramLongLivedToken(
-  token: string,
-  fetchImpl: FetchLike,
-  now: Date,
-): Promise<{ ok: true; value: RefreshedToken } | { ok: false; failure: GraphFailure }> {
-  const result = await graphRequest(
-    'GET',
-    '/refresh_access_token?grant_type=ig_refresh_token',
-    token,
-    fetchImpl,
-  )
-  if (!result.ok) return result
-
-  const body = result.value
-  if (!isRecord(body) || typeof body.access_token !== 'string' || body.access_token === '') {
-    return { ok: false, failure: { reason: 'malformed_response', httpStatus: 200 } }
-  }
-  // expires_in is seconds. Meta has always sent it, but a missing or
-  // nonsensical value must not produce an expiry in the past, which would
-  // make the credential look permanently unrecoverable on the next tick.
-  const seconds = typeof body.expires_in === 'number' && body.expires_in > 0 ? body.expires_in : null
-  const expiresAt = new Date(now.getTime() + (seconds === null ? INSTAGRAM_LONG_LIVED_TOKEN_MS : seconds * 1000))
-  return { ok: true, value: { token: body.access_token, expiresAt } }
 }
 
 async function recordFailure(

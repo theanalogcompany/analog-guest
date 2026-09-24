@@ -12,6 +12,16 @@
 // failing for three days, so "expiring" means "something is wrong" rather
 // than "this is routine". Retuning either number should preserve that order.
 //
+// `connected` REQUIRES THE VENUE POINTER, not just a credential. A venue can
+// hold an active credential while `venues.instagram_account_id` is null — the
+// callback writes the credential first, so any failure on the pointer write
+// leaves exactly that. Reporting `connected` there told an operator their
+// Instagram was working while every send refused with
+// `venue_has_no_instagram_account` and every inbound was skipped as
+// `venue_not_found` (found in code review). The callback now compensates that
+// write, so this is the second of two independent guards rather than the only
+// one; it also covers any other route to the same split state.
+//
 // DEAUTHORIZED IS `disconnected`, NOT ABSENT. A venue that was connected and
 // had access revoked is a different thing from one that never connected, and
 // the operator app says different things about them — but the STATUS is the
@@ -67,14 +77,21 @@ export async function loadVenueConnectionState(
   venueId: string,
   now: Date = new Date(),
 ): Promise<LoadVenueConnectionResult> {
-  const loaded = await loadInstagramCredential(supabase, venueId)
+  const [loaded, venue] = await Promise.all([
+    loadInstagramCredential(supabase, venueId),
+    supabase.from('venues').select('instagram_account_id').eq('id', venueId).maybeSingle(),
+  ])
   // A failed read is a failure, never "disconnected". Reporting a venue as
   // disconnected because a query timed out would tell an operator their
   // Instagram is down when it is working.
   if (!loaded.ok) return { ok: false, error: loaded.error }
+  if (venue.error) return { ok: false, error: venue.error.message }
+
+  const accountId = venue.data?.instagram_account_id ?? null
+  const hasAccount = typeof accountId === 'string' && accountId.trim() !== ''
 
   const credential = loaded.credential
-  if (credential === null || !credential.isActive || credential.deauthorizedAt !== null) {
+  if (credential === null || !credential.isActive || credential.deauthorizedAt !== null || !hasAccount) {
     return { ok: true, state: { instagram: DISCONNECTED } }
   }
 
