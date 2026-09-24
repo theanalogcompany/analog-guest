@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import {
+  deauthorizeInstagramCredential,
   loadInstagramCredential,
   readInstagramAccessToken,
   resolveInstagramAccessToken,
@@ -294,5 +295,67 @@ describe('readInstagramAccessToken', () => {
     expect(readInstagramAccessToken({ INSTAGRAM_ACCESS_TOKEN: ' abc ' } as unknown as NodeJS.ProcessEnv)).toBe('abc')
     expect(readInstagramAccessToken({ INSTAGRAM_ACCESS_TOKEN: '  ' } as unknown as NodeJS.ProcessEnv)).toBeNull()
     expect(readInstagramAccessToken({} as unknown as NodeJS.ProcessEnv)).toBeNull()
+  })
+})
+
+describe('deauthorizeInstagramCredential', () => {
+  it('marks the credential inactive and frees the account id', async () => {
+    const { client, queries } = queryRecorder({
+      venues: [{ data: { id: VENUE_ID }, error: null }, { data: null, error: null }],
+      instagram_credentials: [{ data: null, error: null }],
+    })
+    const now = new Date('2026-10-01T12:00:00.000Z')
+    expect(await deauthorizeInstagramCredential(client, 'acct-1', now)).toEqual({
+      ok: true,
+      venueId: VENUE_ID,
+    })
+
+    const credentialUpdate = queries.find((q) => q.table === 'instagram_credentials')!
+    const [[patch]] = callsNamed(credentialUpdate, 'update') as [[Record<string, unknown>]]
+    expect(patch).toEqual({ is_active: false, deauthorized_at: now.toISOString() })
+
+    // Clearing the account id is what frees it to be connected again.
+    const venueUpdate = queries.filter((q) => q.table === 'venues')[1]
+    const [[venuePatch]] = callsNamed(venueUpdate, 'update') as [[Record<string, unknown>]]
+    expect(venuePatch).toEqual({ instagram_account_id: null })
+  })
+
+  // Revocation stops future traffic. What to do with past data is the
+  // deletion callback's question, with its own ruling.
+  it('touches no table but venues and instagram_credentials', async () => {
+    const { client, queries } = queryRecorder({
+      venues: [{ data: { id: VENUE_ID }, error: null }, { data: null, error: null }],
+      instagram_credentials: [{ data: null, error: null }],
+    })
+    await deauthorizeInstagramCredential(client, 'acct-1', new Date())
+    expect(new Set(queries.map((q) => q.table))).toEqual(new Set(['venues', 'instagram_credentials']))
+  })
+
+  // Meta can send this for an account we never finished connecting, or one
+  // already disconnected. Not an error.
+  it('is a no-op for an account no venue owns', async () => {
+    const { client, queries } = queryRecorder({ venues: [{ data: null, error: null }] })
+    expect(await deauthorizeInstagramCredential(client, 'unknown', new Date())).toEqual({
+      ok: true,
+      venueId: null,
+    })
+    expect(queries).toHaveLength(1)
+  })
+
+  it('reports a lookup or write failure rather than claiming success', async () => {
+    const lookupFailed = queryRecorder({ venues: [{ data: null, error: { message: 'timeout' } }] })
+    expect(await deauthorizeInstagramCredential(lookupFailed.client, 'acct-1', new Date())).toEqual({
+      ok: false,
+      error: 'timeout',
+    })
+
+    const writeFailed = queryRecorder({
+      venues: [{ data: { id: VENUE_ID }, error: null }],
+      instagram_credentials: [{ data: null, error: { message: 'write conflict' } }],
+    })
+    expect(await deauthorizeInstagramCredential(writeFailed.client, 'acct-1', new Date())).toEqual({
+      ok: false,
+      error: 'write conflict',
+    })
   })
 })

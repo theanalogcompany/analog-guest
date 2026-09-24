@@ -226,3 +226,62 @@ export async function upsertInstagramCredential(
   if (error) return { ok: false, error: error.message }
   return { ok: true }
 }
+
+export type DeauthorizeResult =
+  | { ok: true; venueId: string | null }
+  | { ok: false; error: string }
+
+/**
+ * Meta says this account revoked our access, or a venue disconnected.
+ *
+ * Marks the credential inactive and clears `venues.instagram_account_id`,
+ * which frees that account to be connected again, by this venue or another.
+ *
+ * NOTHING ABOUT GUESTS OR MESSAGES IS TOUCHED. Revocation stops future
+ * traffic; it says nothing about what to do with past data, which is a
+ * separate signal (the deletion callback) with a separate ruling behind it.
+ * The Contract's own "What this doesn't settle" says so explicitly.
+ *
+ * KNOWN CONSEQUENCE, stated because it is not obvious from here: clearing
+ * that column also removes the venue from the follow-up engine's scan, which
+ * treats a venue with neither a phone number nor an Instagram account as
+ * having no channel at all (lib/followups/engine.ts). That is correct — a
+ * disconnected venue has no way to send — but it is a second effect of this
+ * one write.
+ *
+ * Idempotent: a second delivery for an account with no venue finds nothing,
+ * reports venueId null, and is not an error.
+ */
+export async function deauthorizeInstagramCredential(
+  supabase: AdminSupabaseClient,
+  instagramAccountId: string,
+  now: Date,
+): Promise<DeauthorizeResult> {
+  const venue = await supabase
+    .from('venues')
+    .select('id')
+    .eq('instagram_account_id', instagramAccountId)
+    .maybeSingle()
+  if (venue.error) return { ok: false, error: venue.error.message }
+  if (!venue.data) return { ok: true, venueId: null }
+
+  const venueId = venue.data.id
+
+  const credential = await supabase
+    .from('instagram_credentials')
+    .update({ is_active: false, deauthorized_at: now.toISOString() })
+    .eq('venue_id', venueId)
+  if (credential.error) return { ok: false, error: credential.error.message }
+
+  // Cleared AFTER the credential is marked inactive. The reverse order would
+  // leave a window where the venue has no account id but an active-looking
+  // credential, which reads as connected on the operator endpoint while
+  // nothing can send.
+  const cleared = await supabase
+    .from('venues')
+    .update({ instagram_account_id: null })
+    .eq('id', venueId)
+  if (cleared.error) return { ok: false, error: cleared.error.message }
+
+  return { ok: true, venueId }
+}
