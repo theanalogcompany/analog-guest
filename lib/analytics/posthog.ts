@@ -2523,3 +2523,35 @@ export async function captureInstagramTokenExpiredUnrecoverable(
     ].join('\n'),
   )
 }
+
+export interface InstagramConnectSubscribeFailedProps {
+  venueId: string
+  failureReason: string
+  graphCode: number | null
+}
+
+/**
+ * A venue connected, but subscribing its account to our webhooks failed.
+ *
+ * ITS OWN EVENT rather than part of a generic connect failure, because this
+ * is the one outcome in the connect flow where the operator sees success and
+ * nothing works: the credential is stored, the venue looks connected, and no
+ * guest message ever arrives. Every other failure in that flow renders a
+ * failure page, so the operator already knows.
+ *
+ * Recoverable by reconnecting, which is why the callback treats it as a
+ * warning rather than failing a connection that is otherwise complete.
+ */
+export async function captureInstagramConnectSubscribeFailed(
+  props: InstagramConnectSubscribeFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_connect_subscribe_failed', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram connected but NOT subscribed to webhooks*`,
+      `venue: \`${props.venueId}\``,
+      `why: ${props.failureReason}${props.graphCode === null ? '' : ` (code ${props.graphCode})`}`,
+      `_This venue looks connected and will receive no messages. Reconnecting fixes it._`,
+    ].join('\n'),
+  )
+}
