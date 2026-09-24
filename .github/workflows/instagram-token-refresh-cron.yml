@@ -1,0 +1,54 @@
+# TAC-516 / TAC-460 Instagram token refresh, scheduled runner.
+#
+# The route handler at `app/api/cron/instagram-token-refresh/route.ts`
+# refreshes every venue's Instagram token before it expires. A long-lived
+# token lasts ~60 days and refreshes itself; an EXPIRED one cannot be
+# refreshed at all, so a missed window costs that venue a manual
+# re-authorization.
+#
+# THIS IS NOT THE PRIMARY TRIGGER (TAC-428). A daily external cron on
+# cron-job.org calls the same endpoint with EXTERNAL_CRON_SECRET; this
+# workflow is a REDUNDANT NET so that service is not a single point of
+# failure. Both are safe together: the processor only touches credentials
+# inside the refresh window and a second run the same day finds nothing left
+# to do, so an extra tick costs one no-op scan.
+#
+# DAILY is deliberate, and it is why GH's drift is tolerable here where it was
+# not for the hourly jobs. The refresh margin is ten days, so a run landing
+# hours late, or a day skipped entirely, still leaves many attempts before the
+# window closes. Do not respond to a missed run by shortening the cron below:
+# TAC-428 measured */5, */15 and hourly all producing 7-9 runs in 33 hours.
+
+name: cron / instagram-token-refresh
+
+on:
+  schedule:
+    # 09:00 UTC daily. Nothing depends on the hour: the job acts on a
+    # ten-day window, not on a venue-local moment.
+    - cron: '0 9 * * *'
+  # manual trigger for ad-hoc testing — useful after hand-inserting a
+  # credential row to confirm the refresh path end to end.
+  workflow_dispatch:
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    # don't run on fork PRs — schedule/dispatch are repo-internal only
+    if: github.repository == 'theanalogcompany/analog-guest'
+    steps:
+      - name: hit /api/cron/instagram-token-refresh
+        env:
+          PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$PROD_BASE_URL" ]; then
+            echo "::error::PROD_BASE_URL repo variable is unset"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is unset"
+            exit 1
+          fi
+          curl -fsS -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${PROD_BASE_URL}/api/cron/instagram-token-refresh"

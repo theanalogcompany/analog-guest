@@ -42,7 +42,11 @@ import {
   sendResultOutcomeUnknown,
   type InstagramSendResult,
 } from '@/lib/messaging/instagram/send'
-import { loadInstagramSendTarget, type InstagramSendTarget } from '@/lib/messaging/instagram/send-target'
+import {
+  loadInstagramSendTarget,
+  type InstagramSendTarget,
+  type ResolveInstagramTokenFn,
+} from '@/lib/messaging/instagram/send-target'
 import { instagramWindowState, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
 
 type AdminSupabaseClient = SupabaseClient<Database>
@@ -63,7 +67,7 @@ export type InstagramOperatorRefusal = {
 export async function prepareInstagramOperatorSend(
   supabase: AdminSupabaseClient,
   input: { venueId: string; guestId: string; body: string; now: Date },
-  readToken?: () => string | null,
+  resolveToken?: ResolveInstagramTokenFn,
 ): Promise<{ ok: true; target: InstagramSendTarget } | ({ ok: false } & InstagramOperatorRefusal)> {
   if (!fitsInstagramTextCap(input.body)) {
     return {
@@ -73,7 +77,11 @@ export async function prepareInstagramOperatorSend(
     }
   }
 
-  const target = await loadInstagramSendTarget(supabase, { venueId: input.venueId, guestId: input.guestId }, readToken)
+  const target = await loadInstagramSendTarget(
+    supabase,
+    { venueId: input.venueId, guestId: input.guestId },
+    resolveToken,
+  )
   if (!target.ok) {
     switch (target.problem) {
       case 'guest_has_no_instagram_id':
@@ -82,6 +90,17 @@ export async function prepareInstagramOperatorSend(
         return { ok: false, errorCode: 'venue_misconfigured', error: 'This venue has no Instagram account connected.' }
       case 'token_missing':
         return { ok: false, errorCode: 'venue_misconfigured', error: 'The Instagram access token is not set.' }
+      // The venue IS connected but its stored token could not be decrypted,
+      // which is an encryption-key problem on our side rather than anything
+      // the operator did wrong. Reconnecting replaces the stored credential
+      // with one encrypted under the current key, so it is a real fix and
+      // worth saying, but it stays distinct from "not set".
+      case 'token_unreadable':
+        return {
+          ok: false,
+          errorCode: 'venue_misconfigured',
+          error: "This venue's stored Instagram credential could not be read. Reconnecting Instagram replaces it.",
+        }
       case 'lookup_failed':
         return { ok: false, errorCode: 'db_error', error: target.error ?? 'Instagram send target lookup failed' }
     }

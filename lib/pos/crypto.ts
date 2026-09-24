@@ -2,6 +2,11 @@
 // refresh tokens). AES-256-GCM with POS_TOKEN_ENC_KEY (a base64 32-byte key).
 // Stored format: "<ivB64>.<tagB64>.<ciphertextB64>".
 //
+// lib/messaging/instagram/token-crypto.ts is the same algorithm and the same
+// stored format under a different env var, for a different provider (TAC-516).
+// The duplication is deliberate — see that file's header for why it was not
+// extracted into a shared module. If a third consumer appears, extract then.
+//
 // Key is read lazily (per call) so importing this module never requires env —
 // keeps it vitest-safe. The key is parsed + length-checked on every use so a
 // malformed key fails loudly at the call site rather than producing garbage.

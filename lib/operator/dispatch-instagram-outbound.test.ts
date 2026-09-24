@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { callsNamed, queryRecorder } from '@/lib/messaging/instagram/testing/query-recorder'
+import { stubResolveToken } from '@/lib/messaging/instagram/testing/token-stub'
 import {
   prepareInstagramOperatorSend,
   restoreCardAfterRefusedSend,
@@ -25,9 +26,9 @@ describe('prepareInstagramOperatorSend: checked before the card leaves the queue
       ...target(),
       messages: [{ data: { provider_sent_at: new Date(NOW.getTime() - HOUR).toISOString() }, error: null }],
     })
-    expect(await prepareInstagramOperatorSend(client, INPUT, () => 'tok')).toEqual({
+    expect(await prepareInstagramOperatorSend(client, INPUT, stubResolveToken('tok'))).toEqual({
       ok: true,
-      target: { accountId: '17841400000000001', recipientId: '1000000000000001', token: 'tok' },
+      target: { accountId: '17841400000000001', recipientId: '1000000000000001', token: 'tok', tokenSource: 'env' },
     })
   })
 
@@ -36,38 +37,38 @@ describe('prepareInstagramOperatorSend: checked before the card leaves the queue
       ...target(),
       messages: [{ data: { provider_sent_at: new Date(NOW.getTime() - 25 * HOUR).toISOString() }, error: null }],
     })
-    const result = await prepareInstagramOperatorSend(client, INPUT, () => 'tok')
+    const result = await prepareInstagramOperatorSend(client, INPUT, stubResolveToken('tok'))
     expect(result).toMatchObject({ ok: false, errorCode: 'instagram_window_closed' })
     expect(!result.ok && result.error).toContain('Instagram app')
   })
 
   it('refuses an over-cap card rather than splitting what the operator approved', async () => {
     const { client, queries } = queryRecorder({})
-    const result = await prepareInstagramOperatorSend(client, { ...INPUT, body: 'a'.repeat(1001) }, () => 'tok')
+    const result = await prepareInstagramOperatorSend(client, { ...INPUT, body: 'a'.repeat(1001) }, stubResolveToken('tok'))
     expect(result).toMatchObject({ ok: false, errorCode: 'over_byte_cap' })
     expect(queries).toHaveLength(0)
   })
 
   it('refuses a guest with no Instagram ID', async () => {
     const { client } = queryRecorder(target('acct', null))
-    expect(await prepareInstagramOperatorSend(client, INPUT, () => 'tok')).toMatchObject({
+    expect(await prepareInstagramOperatorSend(client, INPUT, stubResolveToken('tok'))).toMatchObject({
       ok: false,
       errorCode: 'no_instagram_id',
     })
   })
 
   it('refuses a venue with no Instagram account, and a missing token, as misconfiguration', async () => {
-    expect(await prepareInstagramOperatorSend(queryRecorder(target(null)).client, INPUT, () => 'tok')).toMatchObject({
+    expect(await prepareInstagramOperatorSend(queryRecorder(target(null)).client, INPUT, stubResolveToken('tok'))).toMatchObject({
       errorCode: 'venue_misconfigured',
     })
-    expect(await prepareInstagramOperatorSend(queryRecorder(target()).client, INPUT, () => null)).toMatchObject({
+    expect(await prepareInstagramOperatorSend(queryRecorder(target()).client, INPUT, stubResolveToken(null))).toMatchObject({
       errorCode: 'venue_misconfigured',
     })
   })
 
   it('does not refuse when the window cannot be read: Meta decides', async () => {
     const { client } = queryRecorder({ ...target(), messages: [{ data: null, error: { message: 'boom' } }] })
-    expect((await prepareInstagramOperatorSend(client, INPUT, () => 'tok')).ok).toBe(true)
+    expect((await prepareInstagramOperatorSend(client, INPUT, stubResolveToken('tok'))).ok).toBe(true)
   })
 })
 

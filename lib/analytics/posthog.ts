@@ -2458,3 +2458,135 @@ export async function captureInstagramScanUnattributed(
     ].join('\n'),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Instagram per-venue tokens (TAC-516 / TAC-460)
+// ---------------------------------------------------------------------------
+
+export interface InstagramTokenRefreshFailedProps {
+  venueId: string
+  /** Meta's code and subcode, or our own failure kind. NEVER Meta's message. */
+  reason: string
+  expiresAt?: string
+}
+
+/**
+ * A refresh attempt failed and the old token was left in place. Recoverable:
+ * the job runs daily against a ten-day margin, so there are many more
+ * attempts before the window closes.
+ *
+ * Slack-relayed because the AC asks for a failed refresh to be visible rather
+ * than silent, and at pilot volume (one connected venue) the relay IS the
+ * visibility. The passive channel is the operator app's own `expiring` state.
+ */
+export async function captureInstagramTokenRefreshFailed(
+  props: InstagramTokenRefreshFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_token_refresh_failed', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram token refresh failed*`,
+      `venue: \`${props.venueId}\``,
+      `why: ${props.reason}`,
+      props.expiresAt !== undefined ? `token expires: ${props.expiresAt}` : null,
+      `_The existing token is untouched and still works. This retries daily._`,
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n'),
+  )
+}
+
+export interface InstagramTokenExpiredUnrecoverableProps {
+  venueId: string
+  expiredAt: string
+}
+
+/**
+ * The token passed its expiry without being refreshed. Meta cannot refresh an
+ * expired token at all, so this is the one failure here that no retry fixes:
+ * that venue's Instagram messaging is down until a human re-authorizes it.
+ *
+ * Its OWN event rather than one more refresh failure, per TAC-460's note that
+ * this path "should alert distinctly" — the action it needs is different, and
+ * folding it in would bury the only one that needs a person today.
+ */
+export async function captureInstagramTokenExpiredUnrecoverable(
+  props: InstagramTokenExpiredUnrecoverableProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_token_expired_unrecoverable', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram token EXPIRED and cannot be refreshed*`,
+      `venue: \`${props.venueId}\``,
+      `expired: ${props.expiredAt}`,
+      `_Meta cannot refresh an expired token. This venue's Instagram messaging is down until someone reconnects it._`,
+    ].join('\n'),
+  )
+}
+
+export interface InstagramConnectSubscribeFailedProps {
+  venueId: string
+  failureReason: string
+  graphCode: number | null
+}
+
+/**
+ * A venue connected, but subscribing its account to our webhooks failed.
+ *
+ * ITS OWN EVENT rather than part of a generic connect failure, because this
+ * is the one outcome in the connect flow where the operator sees success and
+ * nothing works: the credential is stored, the venue looks connected, and no
+ * guest message ever arrives. Every other failure in that flow renders a
+ * failure page, so the operator already knows.
+ *
+ * Recoverable by reconnecting, which is why the callback treats it as a
+ * warning rather than failing a connection that is otherwise complete.
+ */
+export async function captureInstagramConnectSubscribeFailed(
+  props: InstagramConnectSubscribeFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_connect_subscribe_failed', props.venueId, { ...props })
+  await postToSlack(
+    [
+      `*Instagram connected but NOT subscribed to webhooks*`,
+      `venue: \`${props.venueId}\``,
+      `why: ${props.failureReason}${props.graphCode === null ? '' : ` (code ${props.graphCode})`}`,
+      `_This venue looks connected and will receive no messages. Reconnecting fixes it._`,
+    ].join('\n'),
+  )
+}
+
+export interface InstagramDeletionUnmatchedAccountProps {
+  confirmationCode: string
+}
+
+/**
+ * A data-deletion request arrived for an Instagram account no venue owns.
+ *
+ * Legitimate on its own: Meta can send one for an account that never finished
+ * connecting, or one already disconnected and cleared.
+ *
+ * It is ALSO what a wrong id-matching assumption looks like. Whether
+ * signed_request's `user_id` equals what we store in
+ * venues.instagram_account_id is a Meta-side fact this repo cannot verify,
+ * and CLAUDE.md records that Meta distinguishes an app-scoped `id` from
+ * `user_id`. If those differ, every deletion request would match nothing,
+ * redact nothing, and still answer Meta correctly — a silent failure of the
+ * one callback Meta tests directly. Alerting turns an unverifiable assumption
+ * into a visible signal.
+ *
+ * Carries the confirmation code only: never the account id, which belongs to
+ * someone who has just asked us to erase their data.
+ */
+export async function captureInstagramDeletionUnmatchedAccount(
+  props: InstagramDeletionUnmatchedAccountProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_deletion_unmatched_account', props.confirmationCode, { ...props })
+  await postToSlack(
+    [
+      `*Instagram data-deletion request matched no venue*`,
+      `confirmation: \`${props.confirmationCode}\``,
+      `_Normal for a stale or already-disconnected account. If EVERY deletion request looks like this, the signed_request user_id does not match venues.instagram_account_id and nothing is being erased._`,
+    ].join('\n'),
+  )
+}
