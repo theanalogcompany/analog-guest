@@ -236,7 +236,17 @@ Ask. Do not guess product behavior. The plan-first rule exists so questions surf
 
 - Branch protection on `main` is active. Direct pushes to `main` are rejected.
 - All changes go through a pull request.
-- Branch naming: `jaipal/the-XXX-short-description` (keep it short — Linear's auto-generated branch names are often too long).
+- Branch naming: `jaipal/the-XXX-short-description` (keep it short — Linear's auto-generated branch names are often too long). **`jaipal/` here is a PROTOCOL TOKEN, not a personal namespace — use it whoever you are.** It reads like a username and is not one: five executable places match on that exact literal, so a branch under your own name is invisible to all of them.
+
+  - `scripts/lib/claims.mjs:150` — `isTicketBranch` is `^jaipal/<ticket>-.+$`. **This is the load-bearing one:** it is how a session claims a ticket, so a differently-prefixed branch does not register as a claim and a build run will happily start the same ticket. That is exactly the 2026-09-17 incident recorded below, where a build run resumed TAC-396 while a local session was building it.
+  - `scripts/lib/run-report.mjs:131` — the same regex over `refs/heads` and `refs/remotes/origin`.
+  - `scripts/lib/reconcile-status.mjs` — a matching branch is what moves a ticket to In Progress; no match, no move.
+  - `.claude/commands/work-ticket.md:24` — `branchExists` greps `*jaipal/tac-xxx-*`, so a session would not find your branch and would create a second one for the same ticket.
+  - The `Bash(git checkout jaipal/:*)` permission rule (see "Common gotchas") — a branch under another prefix is not covered by it.
+
+  This bit a session on 2026-09-25: authenticated as `claudechen95`, it read this line as a template, and the ambiguity is real — the sentence gave no way to tell a placeholder from a literal. It happened to push a `jaipal/` branch and was right by accident, then nearly "corrected" it to its own username, which would have silently broken claim detection.
+
+  **The proper fix is to generalise the matchers** to `^[\w.-]+/<ticket>-` so the prefix becomes a genuine personal namespace. Until someone does that in all five places at once, do not change it in one.
 - Open PR with `gh pr create`. Title format: `THE-XXX: <imperative subject>`.
 - Merge style: `gh pr merge <num> --squash --delete-branch`. Squash matches the linear single-commit-per-change history of `main`.
 - **STACKED PRs DO NOT SURVIVE THE MERGE OF THEIR BASE. Expect the child to be auto-CLOSED, not retargeted.** Happened three times on 2026-09-13: #157 was stacked on #156's branch, #156 merged, #157 closed unmerged and had to be replaced by #158 from the same head branch five minutes later; TAC-367's #161 was stacked on #160 the same way and closed the instant #160 merged, replaced by #162. **Reopening is refused, not merely awkward** — `gh pr reopen 161` returns `GraphQL: Could not open the pull request. (reopenPullRequest)`. Budget a replacement PR; there is no recovering the original. **Retargeting wouldn't help even where GitHub offers it**, and that is the part worth understanding: `--squash` puts a NEW commit on `main` that is not an ancestor of the child branch, so the merge base stays at the pre-fork commit and the child's diff still contains the parent's changes — it will conflict on any file both touched. **A rebase is mandatory regardless of what happens to the PR object.** **Recover with the parent's COMMIT SHA, never its branch name**, because `--delete-branch` deletes the local branch too and the name is gone by the time you need it (a local session's or Jaipal's recovery: a CI build session has no `git rebase`, its deny list refuses the force push below as written, TAC-471, and it never stacks, since it branches from `main`):
