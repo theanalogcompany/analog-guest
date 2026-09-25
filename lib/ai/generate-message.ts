@@ -386,6 +386,10 @@ export async function generateMessage(
     // null on the first attempt — the parent userPrompt is sent verbatim.
     let regenFeedback: string | null = null
     let selfTalkConstraintActive = false
+    // Summed over every attempt in this call, so a regen that re-reads the
+    // same prefix shows up as two reads rather than being averaged away.
+    let cacheReadTokens = 0
+    let cacheWriteTokens = 0
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -395,7 +399,7 @@ export async function generateMessage(
       const userPromptForAttempt = regenFeedback
         ? `${userPrompt}\n\n${regenFeedback}`
         : userPrompt
-      const { object: rawObject } = await generateObject({
+      const { object: rawObject, usage, providerMetadata } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
         // maps each to its own Anthropic system text block and honours a
@@ -439,6 +443,22 @@ export async function generateMessage(
         schema: GeneratedMessageSchema,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       })
+      // Prompt-cache accounting, summed across attempts.
+      //
+      // Without this the cache is INVISIBLE: a cache hit and a fast uncached
+      // call look identical on the latency graph, and the failure mode that
+      // actually matters — a breakpoint that silently never reads, because
+      // the prefix drifted or the TTL expired — produces no error at all,
+      // just cacheRead stuck at 0 forever. Latency alone cannot distinguish
+      // "the cache is working" from "the model was quick today".
+      //
+      // cachedInputTokens is the AI SDK's provider-independent read count;
+      // cacheCreationInputTokens is Anthropic-specific and only on
+      // providerMetadata. Both are optional at the type level and absent on
+      // a provider that does not cache, hence the ?? 0.
+      cacheReadTokens += usage?.cachedInputTokens ?? 0
+      cacheWriteTokens +=
+        (providerMetadata?.anthropic?.cacheCreationInputTokens as number | null | undefined) ?? 0
       // Dashes are substituted, never regenerated. Done HERE rather than at
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
@@ -530,6 +550,8 @@ export async function generateMessage(
         systemPrompt: augmentedSystemPrompt,
         userPrompt,
         promptVersion: PROMPT_VERSION,
+        cacheReadTokens,
+        cacheWriteTokens,
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
         //

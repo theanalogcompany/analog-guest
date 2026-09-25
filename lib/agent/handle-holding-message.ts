@@ -646,6 +646,8 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // Stamped so the row is attributable to the release that produced this
     // behavior, even though no prompt built the body.
     promptVersion: PROMPT_VERSION,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

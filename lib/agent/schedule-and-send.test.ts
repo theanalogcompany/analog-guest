@@ -225,6 +225,8 @@ function makeGeneration(): GenerateMessageResult {
     systemPrompt: '',
     userPrompt: '',
     promptVersion: 'v1.16.0',
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

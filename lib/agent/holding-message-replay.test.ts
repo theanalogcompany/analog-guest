@@ -184,6 +184,8 @@ function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageR
     systemPrompt: '',
     userPrompt: '',
     promptVersion: 'v1.66.0',
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
