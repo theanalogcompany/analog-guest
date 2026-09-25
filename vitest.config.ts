@@ -61,5 +61,33 @@ export default defineConfig({
       '**/.worktrees/**',
       '**/.claude/**',
     ],
+    // REPORT-ONLY, and deliberately no thresholds (2026-09-25).
+    //
+    // There was no coverage measurement in this repo at all, which made 6,200
+    // tests a number nobody could point at a risk. A gate added in the same
+    // change would have been worse than none: a threshold set before anyone
+    // has read the report becomes a number people write tests to satisfy, and
+    // the tests written to satisfy it are the least useful ones. Read the
+    // report for a while, find where a floor is genuinely earned, then add it.
+    //
+    // Opt-in via `--coverage`, so the ordinary run stays fast and CI's
+    // existing `npx vitest run` step is unchanged.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'html'],
+      // Test files, fixtures and the config itself are not subjects. Without
+      // this they inflate the number with code that cannot regress.
+      exclude: [
+        '**/node_modules/**',
+        '**/*.test.ts',
+        '**/*.test.tsx',
+        '**/testing/**',
+        '**/fixtures/**',
+        '**/.next/**',
+        '*.config.ts',
+        'vitest.node-version.ts',
+        'db/types.ts',
+      ],
+    },
   },
 })
