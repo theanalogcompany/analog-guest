@@ -29,6 +29,24 @@
 //             messages_status_check has no 'read'), so the receipt is matched
 //             to its row and logged (ruled 2026-09-18, option C). Never creates
 //             a guest either.
+//   referral  TAC-536. A standalone referral: the guest opened the venue's
+//             ig.me link into a thread Instagram already had, so no icebreaker
+//             was shown and no message came with it. Saved as an inbound row
+//             with body '' and provider_message_id NULL, which is what opens
+//             Meta's 24-hour window in OUR computation as well as Meta's.
+//             CREATES the guest (ruled 2026-09-25): whichever event reaches us
+//             first makes the record, and this one only ever arrives into a
+//             thread Instagram considers pre-existing, so it means "has talked
+//             to this venue, probably before we connected". That is most of
+//             Le Mil's regulars on day one.
+//
+// A SCAN ROW IS THE ONLY INBOUND INSTAGRAM ROW WITH A NULL provider_message_id,
+// and several readers depend on that. Every other kind carries Meta's `mid`;
+// a standalone referral structurally has none, because Meta's payload for it
+// holds only sender, recipient, timestamp and referral. That absence is the
+// discriminator the greeting processor uses to ask "has a real message arrived
+// since this scan", and it is why insertReferralMessage cannot dedupe on the
+// unique constraint every other kind relies on.
 //
 // Every insert names `channel: 'instagram'`. messages.channel defaults to
 // 'text' (migration 048) until TAC-472 removes the default, so an Instagram row
@@ -96,6 +114,7 @@ import {
   type InstagramPostbackEvent,
   type InstagramReadEvent,
   type InstagramReferral,
+  type InstagramReferralEvent,
   type InstagramUnhandledReason,
 } from './parse-events'
 
@@ -125,7 +144,7 @@ export type InstagramEventOutcome =
   | { status: 'unhandled'; reason: InstagramUnhandledReason; fields: string[] }
   | {
       status: 'persisted'
-      kind: 'message' | 'postback' | 'echo'
+      kind: 'message' | 'postback' | 'echo' | 'referral'
       venueId: string
       guestId: string
       messageId: string
@@ -147,10 +166,25 @@ export type InstagramEventOutcome =
       titlelessPostback: boolean
       /** The new guest's created_via, or null when the guest already existed. */
       guestCreatedVia: InstagramGuestCreatedVia | null
+      /**
+       * TAC-536, `referral` only; NULL for every other kind, which is the
+       * convention titlelessPostback and guestCreatedVia already follow here.
+       *
+       * Whether this guest had any message on OUR record before this scan row
+       * was written. Read before the insert, so it can never count itself.
+       *
+       * It decides which greeting instruction renders, and the two say
+       * opposite things about introducing yourself, so a wrong value is
+       * guest-facing. It is NOT "have they ever messaged the shop": a
+       * standalone referral only arrives into a thread Instagram already had,
+       * so a guest with no record here has very likely messaged before we
+       * connected. The copy on that branch says exactly that.
+       */
+      hadPriorConversation: boolean | null
     }
   | {
       status: 'duplicate'
-      kind: 'message' | 'postback' | 'echo'
+      kind: 'message' | 'postback' | 'echo' | 'referral'
       venueId: string
       /** The row already saved, or null when only a 23505 said so. */
       messageId: string | null
@@ -369,6 +403,118 @@ async function insertMessage(
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback: event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
+    // `referral` only; insertReferralMessage is the one writer.
+    hadPriorConversation: null,
+  }
+}
+
+/**
+ * TAC-536: has this guest any message on our record, ignoring scan rows?
+ *
+ * Called BEFORE the scan's own row is inserted, so it can never count itself.
+ *
+ * `body <> ''` is the same filter buildRuntimeContext's history query uses,
+ * and for the same reason: a scan row and a blank knowledge-gap card both
+ * carry an empty body and neither is a conversation. It under-counts a guest
+ * whose only message was media with no caption, which reads as "no record".
+ * That is the SAFE direction: the no-record branch's copy says only that
+ * there is nothing on file and explicitly does not claim a first contact,
+ * whereas the other branch tells the model not to introduce itself.
+ *
+ * A failed read is an error, not a false: false chooses a guest-facing
+ * instruction, and a read that failed has established nothing.
+ */
+async function hadPriorConversation(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<Step<boolean>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .neq('body', '')
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, failure: fail('message_lookup', error) }
+  return { ok: true, value: data !== null }
+}
+
+/**
+ * TAC-536: save a standalone referral as an inbound row.
+ *
+ * Separate from insertMessage because there is no `mid`: the unique constraint
+ * on provider_message_id that dedupes every other kind cannot see this row.
+ *
+ * The duplicate guard is therefore BEST EFFORT, and read-then-write rather
+ * than atomic: an identical redelivery is spotted by matching Meta's own
+ * timestamp on a previous scan row for the same guest. Meta redelivers only
+ * after a non-2xx and this route always answers 200, so a redelivery should be
+ * rare. Two deliveries genuinely in flight at once could still produce two
+ * rows; the greeting's own per-day unique index means that still sends at most
+ * one greeting, which is the consequence that would have mattered.
+ */
+async function insertReferralMessage(
+  supabase: AdminSupabaseClient,
+  event: InstagramReferralEvent,
+  venueId: string,
+  guest: GuestStep,
+): Promise<InstagramEventOutcome> {
+  const prior = await hadPriorConversation(supabase, venueId, guest.guestId)
+  if (!prior.ok) return failedOutcome('referral', prior.failure, venueId)
+
+  if (event.providerSentAt !== null) {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guest.guestId)
+      .eq('direction', 'inbound')
+      .eq('channel', 'instagram')
+      .is('provider_message_id', null)
+      .eq('provider_sent_at', event.providerSentAt)
+      .limit(1)
+      .maybeSingle()
+    if (error) return failedOutcome('referral', fail('message_lookup', error), venueId)
+    if (data !== null) {
+      return { status: 'duplicate', kind: 'referral', venueId, messageId: data.id }
+    }
+  }
+
+  const row: MessageInsert = {
+    venue_id: venueId,
+    guest_id: guest.guestId,
+    channel: 'instagram',
+    direction: 'inbound',
+    status: 'received',
+    // Legal only through the TAC-309 quirk the titleless postback already
+    // relies on: array_length('{}', 1) is NULL and messages_has_content is a
+    // CHECK, which passes on NULL.
+    body: '',
+    media_urls: [],
+    // No mid exists. See the file header: this NULL is the discriminator.
+    provider_message_id: null,
+    provider_sent_at: event.providerSentAt,
+    referral_ref: event.referral.ref,
+    referral_source: event.referral.source,
+  }
+  const { data, error } = await supabase.from('messages').insert(row).select('id').single()
+  if (error || !data) return failedOutcome('referral', fail('message_insert', error), venueId)
+
+  return {
+    status: 'persisted',
+    kind: 'referral',
+    venueId,
+    guestId: guest.guestId,
+    messageId: data.id,
+    guestCreated: guest.created,
+    hasReferral: true,
+    referralSource: event.referral.source,
+    hasProviderSentAt: event.providerSentAt !== null,
+    titlelessPostback: false,
+    guestCreatedVia: guest.createdVia,
+    hadPriorConversation: prior.value,
   }
 }
 
@@ -400,7 +546,23 @@ async function handleEvent(
     return { status: 'skipped', kind: event.kind, reason: 'venue_not_found', venueId: null }
   const venueId = venue.value
 
-  // Only a guest's own action creates a guest.
+  // Only a guest's own action creates a guest. TAC-536 added the third: a
+  // standalone referral is a guest opening the venue's link, and the ruling of
+  // 2026-09-25 is that whichever event reaches us first makes the record.
+  // findOrCreateGuest is reused unchanged, so the insert still keys on
+  // (venue_id, instagram_scoped_id) and still re-reads the winner on 23505 —
+  // which is the upsert behaviour TAC-515's later history import needs in
+  // order to merge onto these rows rather than duplicate them.
+  if (event.kind === 'referral') {
+    const guest = await findOrCreateGuest(
+      supabase,
+      venueId,
+      event.guestIgsid,
+      createdViaForReferral(event.referral),
+    )
+    if (!guest.ok) return failedOutcome(event.kind, guest.failure, venueId)
+    return insertReferralMessage(supabase, event, venueId, guest.value)
+  }
   if (event.kind === 'message' || event.kind === 'postback') {
     const createdVia = createdViaForReferral(event.referral)
     const guest = await findOrCreateGuest(supabase, venueId, event.guestIgsid, createdVia)
@@ -516,6 +678,9 @@ export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
         hasProviderSentAt: outcome.hasProviderSentAt,
         titlelessPostback: outcome.titlelessPostback,
         guestCreatedVia: outcome.guestCreatedVia,
+        // TAC-536. A boolean, never guest content, and the one field that
+        // decides which greeting instruction a scan renders.
+        hadPriorConversation: outcome.hadPriorConversation,
       })
       return
     case 'duplicate':

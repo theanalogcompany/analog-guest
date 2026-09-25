@@ -302,9 +302,9 @@ describe('parseInstagramDelivery on fields this handler does not handle (synthet
     ['a reaction', { ...fromGuest, reaction: { mid: 'm1', action: 'react' } }, { kind: 'unhandled', reason: 'unhandled_messaging_type', fields: ['reaction'] }],
     ['an edit', { ...fromGuest, message_edit: { mid: 'm1', text: 'x' } }, { kind: 'unhandled', reason: 'unhandled_messaging_type', fields: ['message_edit'] }],
     ['a handover', { ...fromGuest, pass_thread_control: { new_owner_app_id: '1' } }, { kind: 'unhandled', reason: 'unhandled_messaging_type', fields: ['pass_thread_control'] }],
-    // A guest following an ig.me link into a thread that already has messages.
-    // Its own reason, because its ref is lost and that loss should be countable.
-    ['a referral with no message', { ...fromGuest, referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' } }, { kind: 'unhandled', reason: 'standalone_referral', fields: ['referral'] }],
+    // TAC-536 made an ordinary standalone referral a handled kind; the reason
+    // now names only the case with nothing usable in it.
+    ['a referral carrying neither ref nor source', { ...fromGuest, referral: { type: 'OPEN_THREAD' } }, { kind: 'unhandled', reason: 'standalone_referral', fields: ['referral'] }],
   ])('names %s by its keys', (_name, item, expected) => {
     expect(parseInstagramDelivery(delivery(item))).toEqual([expected])
   })
@@ -429,5 +429,82 @@ describe('parseInstagramDelivery never throws and never carries content in an un
     expect(event).toMatchObject({ kind: 'unhandled', reason: 'unhandled_messaging_type' })
     const fields = event?.kind === 'unhandled' ? event.fields : []
     expect(fields).toEqual(Array.from({ length: 12 }, (_, i) => `k${String(i).padStart(2, '0')}`))
+  })
+})
+
+// TAC-536. SYNTHETIC: no standalone referral has ever been captured from Meta.
+// The shape follows Meta's documentation and the two production log lines of
+// 2026-09-20, which recorded `fields: ['referral']` and nothing else. The
+// referral's own contents are the ones the recorded POSTBACK fixture carries,
+// since that is the same ig.me link arriving by the other path.
+describe('parseInstagramDelivery on a standalone referral (synthetic, TAC-536)', () => {
+  const referralItem = {
+    ...fromGuest,
+    referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+  }
+
+  it('parses it as its own kind, with the guest taken from the sender', () => {
+    expect(parseInstagramDelivery(delivery(referralItem))).toEqual([
+      {
+        kind: 'referral',
+        accountId: ACCOUNT_ID,
+        guestIgsid: GUEST_IGSID,
+        providerSentAt: null,
+        referral: { ref: 'QR1', source: 'SHORTLINK' },
+      },
+    ])
+  })
+
+  // The whole point of handling it: without a real timestamp the row it
+  // becomes carries no provider_sent_at, and TAC-469's window gate would not
+  // see the scan reopen Meta's window.
+  it('carries Meta own clock from the item timestamp, not entry.time', () => {
+    const events = parseInstagramDelivery(
+      // 2026-09-20T20:18:08Z: the first of the two standalone referrals the
+      // ticket reports, to the second.
+      delivery({ ...referralItem, timestamp: 1789935488000 }, { time: 1789935489 }),
+    )
+    expect(events).toEqual([expect.objectContaining({ providerSentAt: '2026-09-20T20:18:08.000Z' })])
+  })
+
+  // A referral whose only usable field is `source` still identifies the link.
+  // TAC-492 already rules that `ref` is not required.
+  it('accepts a source with no ref', () => {
+    const events = parseInstagramDelivery(
+      delivery({ ...fromGuest, referral: { source: 'SHORTLINK' } }),
+    )
+    expect(events).toEqual([
+      expect.objectContaining({ kind: 'referral', referral: { ref: null, source: 'SHORTLINK' } }),
+    ])
+  })
+
+  // The account never sends itself a referral. Without this the sender would
+  // be read as the guest and the event filed against the venue's own ID.
+  it('refuses an item addressed the wrong way round', () => {
+    const events = parseInstagramDelivery(
+      delivery({ ...fromVenue, referral: { ref: 'QR1', source: 'SHORTLINK' } }),
+    )
+    expect(events).toEqual([
+      { kind: 'unhandled', reason: 'account_mismatch', fields: ['referral'] },
+    ])
+  })
+
+  // A referral BESIDE a message is the message's own referral (TAC-492) and
+  // must not become a second, separate event: the message branch is checked
+  // first and carries it.
+  it('leaves a referral that arrives beside a message to the message', () => {
+    const events = parseInstagramDelivery(
+      delivery({
+        ...fromGuest,
+        message: { mid: 'mid-1', text: 'hey' },
+        referral: { ref: 'QR1', source: 'SHORTLINK' },
+      }),
+    )
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: 'message',
+        referral: { ref: 'QR1', source: 'SHORTLINK' },
+      }),
+    ])
   })
 })

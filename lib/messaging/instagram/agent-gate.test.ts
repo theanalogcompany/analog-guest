@@ -18,6 +18,7 @@ const saved = (kind: 'message' | 'postback' | 'echo'): InstagramEventOutcome => 
   kind,
   venueId: 'v',
   referralSource: null,
+  hadPriorConversation: null,
   guestId: 'g',
   messageId: `msg-${kind}`,
   guestCreated: false,
@@ -41,7 +42,9 @@ const notATurn: Array<[string, InstagramEventOutcome]> = [
   // NOT a guest message. Named here because a code review read this reason as
   // the one carrying voice notes; it is not, `message_unsupported` is.
   ['a reaction or an edit', { status: 'unhandled', reason: 'unhandled_messaging_type', fields: [] }],
-  ['a standalone referral', { status: 'unhandled', reason: 'standalone_referral', fields: [] }],
+  // TAC-536 narrowed this reason to a referral carrying neither ref nor
+  // source; the ordinary standalone referral is its own handled kind now.
+  ['a referral with nothing usable in it', { status: 'unhandled', reason: 'standalone_referral', fields: [] }],
   // The guest withdrew it, so nothing is owed by the time we see it.
   ['a message the guest unsent', { status: 'unhandled', reason: 'message_deleted', fields: [] }],
   ['a failed echo save', { status: 'failed', kind: 'echo', stage: 'message_insert', error: 'x', code: null, venueId: 'v' }],
@@ -147,5 +150,78 @@ describe('a shut gate is recorded, not silent (TAC-523)', () => {
     // Reachable only via a cast today; the cost is what makes it worth a line.
     const bogus = { status: 'invented_later' } as unknown as InstagramEventOutcome
     expect(resolveAgentHandoff(bogus, true)).toEqual({ kind: 'not_a_turn' })
+  })
+})
+
+// TAC-536. A scan with no message does not run the agent and does not record a
+// ledger row here: the turn is still open for five minutes, and the cron that
+// resolves it writes the row. What the gate decides is only whether a pending
+// greeting is scheduled at all.
+describe('resolveAgentHandoff on a standalone referral (TAC-536)', () => {
+  const scan = (over: Partial<Extract<InstagramEventOutcome, { status: 'persisted' }>> = {}) =>
+    ({
+      status: 'persisted',
+      kind: 'referral',
+      venueId: 'v',
+      guestId: 'g',
+      messageId: 'scan-1',
+      guestCreated: false,
+      hasReferral: true,
+      referralSource: 'SHORTLINK',
+      hasProviderSentAt: true,
+      titlelessPostback: false,
+      guestCreatedVia: null,
+      hadPriorConversation: true,
+      ...over,
+    }) as InstagramEventOutcome
+
+  it('schedules a greeting, carrying what the instruction branch needs', () => {
+    expect(resolveAgentHandoff(scan(), true)).toEqual({
+      kind: 'schedule_arrival',
+      messageId: 'scan-1',
+      venueId: 'v',
+      guestId: 'g',
+      hadPriorConversation: true,
+    })
+  })
+
+  it('carries hadPriorConversation false through unchanged', () => {
+    expect(resolveAgentHandoff(scan({ hadPriorConversation: false }), true)).toMatchObject({
+      hadPriorConversation: false,
+    })
+  })
+
+  // The ordering rule the file already holds for the titleless postback: with
+  // the gate shut, the gate is the reason, whatever else is also true.
+  // Reversed, a rollback would silently keep scheduling greetings.
+  it('reports the shut gate rather than scheduling anything', () => {
+    expect(resolveAgentHandoff(scan(), false)).toEqual({ kind: 'record', reason: 'gate_shut' })
+  })
+
+  // Meta documents referral sources other than the one meaning "from a link".
+  // The greeting says the guest scanned the code at the counter, so a
+  // different source is not evidence for what the message would assert.
+  it('schedules nothing for a referral whose source is not a scan', () => {
+    expect(resolveAgentHandoff(scan({ referralSource: 'ADS' }), true)).toEqual({ kind: 'not_a_turn' })
+    expect(resolveAgentHandoff(scan({ referralSource: null }), true)).toEqual({ kind: 'not_a_turn' })
+  })
+
+  // A scan is a guest action, so one we could not file is a lost turn in the
+  // same way a lost message is. Before TAC-536 every one of these was silent.
+  it.each<[string, InstagramEventOutcome]>([
+    ['no venue', { status: 'skipped', kind: 'referral', reason: 'venue_not_found', venueId: null }],
+    ['a failed save', { status: 'failed', kind: 'referral', stage: 'message_insert', error: 'x', code: null, venueId: 'v' }],
+  ])('records a scan lost to %s', (_name, outcome) => {
+    expect(resolveAgentHandoff(outcome, true)).toEqual({
+      kind: 'record',
+      reason: 'event_not_persisted',
+    })
+  })
+
+  // A redelivery is not a second arrival.
+  it('does not schedule a greeting for a redelivered scan', () => {
+    expect(
+      resolveAgentHandoff({ status: 'duplicate', kind: 'referral', venueId: 'v', messageId: 'scan-1' }, true),
+    ).toEqual({ kind: 'not_a_turn' })
   })
 })

@@ -159,7 +159,13 @@ export function isProfileRefreshDue(times: ProfileTimes, now: Date): boolean {
  */
 export function profileRefreshTargetFor(outcome: InstagramEventOutcome): RefreshTarget | null {
   if (outcome.status !== 'persisted') return null
-  if (outcome.kind !== 'message' && outcome.kind !== 'postback') return null
+  // TAC-536 added 'referral'. A scan can CREATE the guest, so it is the first
+  // and sometimes only chance to learn their handle, and the Command Center
+  // shows @handle where it would otherwise show nothing at all for an
+  // Instagram guest. An echo and a read stay out: neither is the guest acting.
+  if (outcome.kind !== 'message' && outcome.kind !== 'postback' && outcome.kind !== 'referral') {
+    return null
+  }
   return { guestId: outcome.guestId, venueId: outcome.venueId }
 }
 
