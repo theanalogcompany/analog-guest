@@ -29,6 +29,7 @@ function scripted(guestIds: string[]) {
     ],
     messages: [{ data: null, error: null }],
     guest_card_fingerprints: [{ data: null, error: null }],
+    instagram_scan_arrivals: [{ data: null, error: null }],
     inbound_turn_outcomes: [{ data: null, error: null }],
     instagram_credentials: [{ data: null, error: null }],
   })
@@ -94,6 +95,24 @@ describe('deleteInstagramVenueData', () => {
     expect(callsNamed(fingerprints, 'delete')).toHaveLength(1)
     expect(callsNamed(fingerprints, 'eq')).toEqual([['venue_id', VENUE_ID]])
     expect(callsNamed(fingerprints, 'in')).toEqual([['guest_id', ['guest-1']]])
+  })
+
+  // TAC-536. DELETED, not redacted, and the reason is behavioural rather than
+  // about identifiers: the row carries none, but an UNRESOLVED one is a
+  // pending greeting the every-minute cron would still claim and generate for
+  // a guest who asked to be erased.
+  //
+  // `on delete cascade` never fires on this path, because the guest row
+  // survives anonymised rather than being deleted. That is why the table has
+  // to be named here at all.
+  it('deletes the pending scan greetings, which cascade would never reach', async () => {
+    const { client, queries } = scripted(['guest-1'])
+    await deleteInstagramVenueData(client, ACCOUNT_ID)
+
+    const arrivals = queries.find((q) => q.table === 'instagram_scan_arrivals')!
+    expect(callsNamed(arrivals, 'delete')).toHaveLength(1)
+    expect(callsNamed(arrivals, 'eq')).toEqual([['venue_id', VENUE_ID]])
+    expect(callsNamed(arrivals, 'in')).toEqual([['guest_id', ['guest-1']]])
   })
 
   // TAC-523 put a phone's last four in `detail`. The rest of the row is

@@ -38,8 +38,9 @@
  *   - `layer = 'webhook'`: the agent was never invoked at all, so there is no
  *     AgentResult. The Instagram and Sendblue bail reasons.
  *   - `layer = 'agent'`: the run WAS invoked and decided not to reply before
- *     any stage ran. Today that is `venue_paused` alone (TAC-529), where the
- *     venue's own status is 'paused' or 'archived'.
+ *     any stage ran. `venue_paused` (TAC-529), where the venue's own status is
+ *     'paused' or 'archived', and TAC-536's five scan-greeting reasons, where
+ *     a bare Instagram scan did not become a greeting.
  *
  * **`not_run` no longer implies `layer = 'webhook'`, and a query that assumes
  * it does is wrong.** It did until TAC-529, and the sentence saying so lived
@@ -174,6 +175,49 @@ export const INBOUND_TURN_REASONS = [
    *   where outcome = 'not_run' and reason = 'venue_paused'
    */
   'venue_paused',
+
+  // ---- outcome 'not_run' (TAC-536): a scan that did not become a greeting ----
+  /**
+   * The guest wrote within the five minutes the scan started, so their own
+   * message was the turn and this scan needed no greeting of its own.
+   *
+   * A DECISION and the commonest of these five, not a miss: it is the flow
+   * working. `understand_order` arms on that message's turn through the
+   * carry-forward, which is the whole point of treating the scan as an
+   * at-counter signal rather than a message to answer.
+   */
+  'inbound_during_window',
+  /**
+   * The cron was late enough that the greeting would have been a guess. It
+   * says the guest is in the shop right now, and the code is at the pickup
+   * counter, so a to-go guest is gone well before the bound.
+   *
+   * Only reachable when the cron misses ticks, so a run of these is a signal
+   * about the cron, not about guests.
+   */
+  'scan_too_stale',
+  /**
+   * The venue's own hours positively say it is shut. `unknown` hours proceed,
+   * per TAC-363's rule that unknown behaves as open.
+   *
+   * Distinct from `venue_paused`: that is the venue switched off, this is the
+   * middle of the night at a venue that is fine.
+   */
+  'venue_closed',
+  /**
+   * `guests.opted_out_at` is set. Its own value rather than folded into any
+   * other: an unprompted send is exactly where the difference between "the
+   * venue is off" and "this person asked us to stop" matters.
+   */
+  'guest_opted_out',
+  /**
+   * Another scan already greeted this guest on this venue-local day. The
+   * repeat guard firing, which is a decision working rather than a failure.
+   *
+   *   select count(*) from inbound_turn_outcomes
+   *   where outcome = 'not_run' and reason = 'already_greeted_today'
+   */
+  'already_greeted_today',
 ] as const
 
 export type InboundTurnReason = (typeof INBOUND_TURN_REASONS)[number]

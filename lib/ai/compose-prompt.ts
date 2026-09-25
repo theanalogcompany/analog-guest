@@ -44,7 +44,13 @@ export function composePrompt(input: GenerateMessageInput): {
     sections.push(knowledgeChunksToProse(knowledgeChunks))
   }
 
-  sections.push(`## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel)}`)
+  // TAC-536: the scan-arrival fact picks between the two greeting
+  // instructions. Threaded from the runtime rather than folded into the
+  // category, because ONE category is what the storage layer, the
+  // approval-policy UI and the operator queue all want.
+  sections.push(
+    `## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel, runtime.scanArrival ?? null)}`,
+  )
 
   return {
     systemPrompt: sections.join('\n\n'),

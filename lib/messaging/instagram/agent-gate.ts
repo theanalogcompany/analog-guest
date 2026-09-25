@@ -98,6 +98,10 @@
 // Follow Up button refuses one before generating.
 
 import type { InboundTurnReason } from '@/lib/schemas/inbound-turn-outcome'
+// By path, not through @/lib/schemas, for the reason handle-events.ts gives at
+// the same import: a barrel a test mocks would hand one of the two a stub
+// while the other kept the real thing.
+import { isScanReferral } from '@/lib/schemas/referral-source'
 import type { InstagramEventOutcome } from './handle-events'
 import type { InstagramUnhandledReason } from './parse-events'
 
@@ -112,13 +116,26 @@ export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = true
  * dropped because the gate below was still shut, and the only reason the cause
  * could be named two days later is that Vercel still held the runtime logs.
  *
- *   run         hand this message to the agent; it records its own outcome
- *   record      a turn the agent will never see — the route writes the row
- *   not_a_turn  not an inbound turn at all, and recording it would inflate
- *               the denominator the ledger exists to provide
+ *   run               hand this message to the agent; it records its own outcome
+ *   schedule_arrival  TAC-536: a scan with no message. Nothing is generated
+ *                     now; a pending row is written and the cron decides five
+ *                     minutes later. The LEDGER ROW IS WRITTEN THEN, not here,
+ *                     because the turn is still open — a guest who writes
+ *                     within those five minutes is answered by that message's
+ *                     own turn, and a greeting for this one never happens.
+ *   record            a turn the agent will never see — the route writes the row
+ *   not_a_turn        not an inbound turn at all, and recording it would inflate
+ *                     the denominator the ledger exists to provide
  */
 export type InstagramAgentHandoff =
   | { kind: 'run'; messageId: string }
+  | {
+      kind: 'schedule_arrival'
+      messageId: string
+      venueId: string
+      guestId: string
+      hadPriorConversation: boolean
+    }
   | { kind: 'record'; reason: InboundTurnReason }
   | { kind: 'not_a_turn' }
 
@@ -143,6 +160,32 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
     // gate is why nothing happened, whatever else is also true. It is the
     // systemic answer, and the one the 2026-09-20 incident needed.
     if (!enabled) return { kind: 'record', reason: 'gate_shut' }
+    // TAC-536: a standalone referral. Below the gate check deliberately, so a
+    // shut gate still reports itself as the reason; above the titleless check
+    // only because a referral is never a postback and the most specific kind
+    // check reads first.
+    //
+    // ONLY A SCAN SCHEDULES A GREETING. Meta documents referral sources other
+    // than the one meaning "opened from a link", and the greeting's own copy
+    // says the guest scanned the code at the counter, so a different source is
+    // not evidence for the thing the message would assert. It is saved and it
+    // is reported (scanUnattributedReason raises it to PostHog and Slack as
+    // `unrecognized_referral_source`), and it is not a turn anyone replies to.
+    if (outcome.kind === 'referral') {
+      if (!isScanReferral(outcome.referralSource)) return { kind: 'not_a_turn' }
+      return {
+        kind: 'schedule_arrival',
+        messageId: outcome.messageId,
+        venueId: outcome.venueId,
+        guestId: outcome.guestId,
+        // Null cannot happen: insertReferralMessage is the only writer of a
+        // `referral` outcome and it always sets this. Defaulted rather than
+        // asserted, and to the value whose instruction introduces itself,
+        // because telling a stranger "you have talked before" is the worse
+        // of the two failures.
+        hadPriorConversation: outcome.hadPriorConversation ?? false,
+      }
+    }
     // TAC-469: an icebreaker tap with no title is an empty inbound. There is
     // nothing to reply to, so the agent isn't run; the row still opens the
     // window.
@@ -188,8 +231,11 @@ const GUEST_CONTENT_UNHANDLED_REASONS: ReadonlySet<InstagramUnhandledReason> = n
   'message_no_content',
 ])
 
-function isGuestTurnKind(kind: 'message' | 'echo' | 'postback' | 'read'): boolean {
-  return kind === 'message' || kind === 'postback'
+// TAC-536 added 'referral': a scan is a guest action, so a scan we could not
+// file is a lost turn in the same way a lost message is. An echo and a read
+// stay out, for the reasons the file header gives.
+function isGuestTurnKind(kind: 'message' | 'echo' | 'postback' | 'read' | 'referral'): boolean {
+  return kind === 'message' || kind === 'postback' || kind === 'referral'
 }
 
 export function resolveAgentHandoff(

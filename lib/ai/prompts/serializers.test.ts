@@ -892,6 +892,106 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       '## Emoji for this message',
     ])
   })
+
+  // TAC-536. The POSITION is a choice, not a measurement: TAC-519 found block
+  // order moves behaviour and nothing has measured this one. The test exists
+  // so moving it is deliberate rather than accidental, which is the same
+  // reason the two above exist.
+  it('pins the full block order on a scan-greeting turn', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        scanArrival: { hadPriorConversation: true, hasRecordedVisit: false },
+        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        emojiDirective: 'none',
+      },
+      'guest_arrived',
+      NOW,
+    )
+    const order = out
+      .split('\n')
+      .filter((l) => l.startsWith('## '))
+      .map((l) => l.trim())
+    expect(order).toEqual([
+      '## Right now',
+      '## Guest just arrived',
+      '## What this guest can access',
+      '## Visit history',
+      '## Emoji for this message',
+    ])
+  })
+})
+
+// TAC-536: the two axes a scan greeting may state, and the one line whose
+// wording the 2026-09-25 ruling corrected.
+describe('runtimeToProse — ## Guest just arrived (TAC-536)', () => {
+  const render = (hadPriorConversation: boolean, hasRecordedVisit: boolean): string =>
+    runtimeToProse(
+      { mechanics: [], scanArrival: { hadPriorConversation, hasRecordedVisit } },
+      'guest_arrived',
+      NOW,
+    )
+
+  it('omits the block entirely on every other turn', () => {
+    expect(runtimeToProse({ mechanics: [] }, 'reply', NOW)).not.toContain('## Guest just arrived')
+    expect(runtimeToProse({ mechanics: [], scanArrival: null }, 'guest_arrived', NOW)).not.toContain(
+      '## Guest just arrived',
+    )
+  })
+
+  it('states that the venue has talked with this guest', () => {
+    expect(render(true, false)).toContain('You have talked with this guest before.')
+  })
+
+  // THE CORRECTION THAT MATTERS, ruled 2026-09-25. A standalone referral only
+  // arrives into a thread Instagram already has, so a guest with nothing on
+  // file has very likely messaged the shop before we connected. "This guest
+  // has not messaged you before" would be false in exactly the case this
+  // branch exists for, which is why the line says "on record" and says so
+  // explicitly.
+  it('says there is no record rather than claiming the guest never messaged', () => {
+    const out = render(false, false)
+    expect(out).toContain(
+      "There are no past messages with this guest on record, though they may have messaged the shop before. Don't treat this as their first time reaching out, and don't reference past conversations.",
+    )
+    expect(out).not.toContain('has not messaged you before')
+  })
+
+  it('states a recorded visit when there is one', () => {
+    expect(render(true, true)).toContain(
+      'There is a recorded visit on file, so you can speak to them as someone who has been in before.',
+    )
+  })
+
+  // AC4: nothing claims a visit that was never recorded.
+  it('forbids welcome back when no visit is on file', () => {
+    const out = render(true, false)
+    expect(out).toContain(
+      'There is no recorded visit on file. Don\'t say "welcome back" and don\'t mention a past visit.',
+    )
+    expect(out).not.toContain('recorded visit on file, so you can speak')
+  })
+
+  // The two axes are INDEPENDENT, which is the whole point of the block. All
+  // four combinations render, and no combination borrows the other axis's line.
+  it.each([
+    [true, true],
+    [true, false],
+    [false, true],
+    [false, false],
+  ])('renders both axes for hadPriorConversation=%s hasRecordedVisit=%s', (talked, visited) => {
+    const out = render(talked, visited)
+    expect(out).toContain(talked ? 'You have talked with this guest before.' : 'on record')
+    expect(out).toContain(visited ? 'so you can speak to them' : 'There is no recorded visit')
+  })
+
+  it('carries no em dash', () => {
+    for (const [a, b] of [[true, true], [true, false], [false, true], [false, false]] as const) {
+      const block = render(a, b).split('## Guest just arrived')[1]?.split('\n\n')[0] ?? ''
+      expect(block).not.toMatch(/[—–]/)
+    }
+  })
 })
 
 // TAC-329: the first-touch opener paragraph. Fixes the one turn TAC-324's

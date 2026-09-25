@@ -2,7 +2,7 @@
 // Instagram handler's tests.
 //
 // It implements ONLY the query shapes handle-events.ts sends:
-//   from(t).select(cols).eq(...)...maybeSingle()
+//   from(t).select(cols).eq(...).neq(...).is(...).limit(n)...maybeSingle()
 //   from(t).insert(row).select(cols).single()
 // Anything else (update, delete, upsert, order, a table it doesn't know) is not
 // defined on it and throws, so a write the handler must never make, such as an
@@ -34,7 +34,18 @@ export type FakeRow = { id: string; [column: string]: unknown }
 export type FakeError = { code?: string; message: string; details?: string }
 
 export type FakeCall =
-  | { op: 'select'; table: FakeTable; columns: string; filters: Array<[string, unknown]> }
+  | {
+      op: 'select'
+      table: FakeTable
+      columns: string
+      /**
+       * TAC-536 widened this from [column, value] to carry the operator.
+       * insertReferralMessage asks with neq and is as well as eq, and a
+       * recorded filter that did not say which operator ran would let a test
+       * pass against the wrong question.
+       */
+      filters: Array<[string, 'eq' | 'neq' | 'is', unknown]>
+    }
   | { op: 'insert'; table: FakeTable; row: Record<string, unknown> }
   | {
       op: 'update'
@@ -110,17 +121,43 @@ export function createInstagramDbFake(
   }
 
   function selectBuilder(table: FakeTable, columns: string) {
-    const filters: Array<[string, unknown]> = []
+    const filters: Array<[string, 'eq' | 'neq' | 'is', unknown]> = []
+    // TAC-536: `.limit(1)` on a read that expects at most one row. Recorded so
+    // a test can see it, and honoured, so a fake row set with two matches
+    // behaves as PostgREST does rather than as the PGRST116 error below.
+    let limit: number | null = null
     const builder = {
       eq(column: string, value: unknown) {
-        filters.push([column, value])
+        filters.push([column, 'eq', value])
+        return builder
+      },
+      neq(column: string, value: unknown) {
+        filters.push([column, 'neq', value])
+        return builder
+      },
+      is(column: string, value: unknown) {
+        filters.push([column, 'is', value])
+        return builder
+      },
+      limit(count: number) {
+        limit = count
         return builder
       },
       async maybeSingle() {
         calls.push({ op: 'select', table, columns, filters: [...filters] })
         const error = takeError(table, 'select')
         if (error) return { data: null, error }
-        const matches = tables[table].filter((row) => filters.every(([c, v]) => row[c] === v))
+        const all = tables[table].filter((row) =>
+          filters.every(([c, op, v]) => {
+            // `.is(col, null)` is Postgres's IS NULL. A column the row was
+            // seeded without reads as null, as project() also treats it.
+            const actual = row[c] ?? null
+            if (op === 'eq') return actual === v
+            if (op === 'neq') return actual !== v
+            return actual === v
+          }),
+        )
+        const matches = limit === null ? all : all.slice(0, limit)
         if (matches.length > 1) {
           return { data: null, error: { code: 'PGRST116', message: 'multiple rows returned' } }
         }

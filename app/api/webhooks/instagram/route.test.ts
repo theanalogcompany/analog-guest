@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   waitUntil: vi.fn(),
   refreshInstagramProfile: vi.fn(),
   captureScanUnattributed: vi.fn(),
+  scheduleScanArrival: vi.fn(),
 }))
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
@@ -37,6 +38,14 @@ vi.mock('@/lib/analytics/posthog', async (importOriginal) => {
 vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/messaging/instagram/refresh-profile')>()
   return { ...actual, refreshInstagramProfile: mocks.refreshInstagramProfile }
+})
+// TAC-536: the write is a spy, so a test sees exactly what the route schedules
+// without needing an instagram_scan_arrivals table in the fake. The DECISION
+// is still the real resolveAgentHandoff, so a route that stopped scheduling,
+// or scheduled the wrong thing, fails here.
+vi.mock('@/lib/agent/scan-arrival-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/agent/scan-arrival-store')>()
+  return { ...actual, scheduleScanArrival: mocks.scheduleScanArrival }
 })
 
 // The real gate, except that a test can open it. That is the one thing
@@ -173,6 +182,8 @@ beforeEach(() => {
   delete process.env.INSTAGRAM_LOG_RAW_INBOUND
   mocks.createAdminClient.mockReset()
   mocks.handleInbound.mockReset()
+  mocks.scheduleScanArrival.mockReset()
+  mocks.scheduleScanArrival.mockResolvedValue({ ok: true, data: 'scan-arrival-1' })
   mocks.waitUntil.mockReset()
   mocks.refreshInstagramProfile.mockReset()
   mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
@@ -996,5 +1007,134 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
 
     expect(res.status).toBe(200)
     expect(mocks.captureScanUnattributed).not.toHaveBeenCalled()
+  })
+})
+
+// TAC-536. AC5's replay, as close as a replay can be: the original bodies of
+// the two 2026-09-20 deliveries were never captured, because an `unhandled`
+// event logs field NAMES only and TAC-458 had already removed the raw-body
+// capture. What is reconstructed here is the SHAPE those log lines recorded
+// (`fields: ['referral']`, an account, a sender, a timestamp) with the
+// referral contents the recorded postback fixture carries, since that is the
+// same ig.me link arriving by the other path.
+describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', () => {
+  const SCAN_MS = 1789935488000
+
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function scanDelivery(): string {
+    return JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: FIXTURE_ACCOUNT_ID,
+          time: Math.floor(SCAN_MS / 1000),
+          messaging: [
+            {
+              sender: { id: FIXTURE_GUEST_IGSID },
+              recipient: { id: FIXTURE_ACCOUNT_ID },
+              timestamp: SCAN_MS,
+              referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+            },
+          ],
+        },
+      ],
+    })
+  }
+
+  it('saves the scan and schedules a greeting instead of discarding it', async () => {
+    useDb({
+      venues: [FIXTURE_VENUE],
+      guests: [FIXTURE_GUEST],
+      messages: [{ id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' }],
+    })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    const res = await post(scanDelivery())
+    await flushMicrotasks()
+
+    expect(res.status).toBe(200)
+    const saved = (db.tables.messages as FakeRow[]).at(-1)
+    expect(saved).toMatchObject({
+      channel: 'instagram',
+      direction: 'inbound',
+      provider_message_id: null,
+      referral_source: 'SHORTLINK',
+    })
+    expect(mocks.scheduleScanArrival).toHaveBeenCalledWith(db.client, {
+      messageId: saved?.id,
+      venueId: 'venue-1',
+      guestId: 'guest-1',
+      // The guest has a prior message, so the greeting will not introduce itself.
+      hadPriorConversation: true,
+    })
+    // The agent is NOT run: the scan waits five minutes, and a guest who
+    // writes inside them is answered by that message's own turn.
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
+    expect(loggedText()).toContain('instagram_event_persisted')
+    expect(loggedText()).not.toContain('standalone_referral')
+  })
+
+  // The ledger row is written by the cron that resolves the scan, not here:
+  // the turn is still open for five minutes. Recording it now would claim an
+  // outcome nothing has decided yet.
+  it('writes no ledger row at the webhook', async () => {
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    await post(scanDelivery())
+    await flushMicrotasks()
+
+    expect(db.tables.inbound_turn_outcomes).toEqual([])
+  })
+
+  // The ruling of 2026-09-25, reversing the plan's own narrowing. Before it, a
+  // scan from an IGSID with no row was skipped and vanished.
+  it('creates a guest it has never seen and still schedules', async () => {
+    useDb({ venues: [FIXTURE_VENUE] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    await post(scanDelivery())
+    await flushMicrotasks()
+
+    expect(db.tables.guests).toHaveLength(1)
+    expect((db.tables.guests as FakeRow[])[0]).toMatchObject({ created_via: 'qr_scan' })
+    expect(mocks.scheduleScanArrival).toHaveBeenCalledWith(
+      db.client,
+      expect.objectContaining({ hadPriorConversation: false }),
+    )
+  })
+
+  // A rollback is a one-line revert of the gate constant, and it must switch
+  // this off too. Reversed, a rolled-back deploy would go on greeting guests.
+  it('schedules nothing while the agent gate is shut', async () => {
+    gate.open = false
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+
+    await post(scanDelivery())
+    await flushMicrotasks()
+
+    expect(mocks.scheduleScanArrival).not.toHaveBeenCalled()
+    // Still SAVED, so the row still opens Meta's window and the history is
+    // there when the gate is reopened.
+    expect(db.tables.messages).toHaveLength(1)
+  })
+
+  // A failure to schedule must not cost the 200: Meta disables a subscription
+  // after repeated non-2xx, and the scan itself is already saved.
+  it('still acknowledges when the greeting cannot be scheduled', async () => {
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.scheduleScanArrival.mockResolvedValue({ ok: false, error: 'boom' })
+
+    const res = await post(scanDelivery())
+    await flushMicrotasks()
+
+    expect(res.status).toBe(200)
+    expect(loggedText()).toContain('instagram_scan_arrival_not_scheduled')
   })
 })

@@ -702,3 +702,71 @@ describe('comp_complaint — the TAC-513 paragraph stays out (TAC-514)', () => {
     )
   })
 })
+
+// TAC-536. The two variants say OPPOSITE things about introducing yourself, so
+// picking the wrong one either greets a regular as a stranger or skips an
+// introduction for someone who has never heard from the venue.
+describe('the scan-greeting instruction (TAC-536)', () => {
+  it('tells a returning guest not to introduce itself', () => {
+    const text = categoryInstructionsFor('guest_arrived', 'instagram', {
+      hadPriorConversation: true,
+    })
+    expect(text).toBe(
+      "The guest just scanned the code at the counter, so they are in the shop right now. Greet them the way you would someone walking up, and ask what they got. One short line. You have talked before, so don't introduce yourself. Say only what the facts below say about past visits.",
+    )
+  })
+
+  it('tells a guest with no record on file who they have reached', () => {
+    const text = categoryInstructionsFor('guest_arrived', 'instagram', {
+      hadPriorConversation: false,
+    })
+    expect(text).toBe(
+      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached, even where your voice guidance would otherwise have you hold your name back. Ask what they just got. One short line. Say only what the facts below say about past visits.',
+    )
+  })
+
+  // A wiring bug, not a reachable state. It falls to the variant that
+  // introduces itself, because an introduction nobody needed is odd and
+  // telling a stranger "you have talked before" is false.
+  it.each([null, undefined])('falls back to the new-guest variant on %s', (missing) => {
+    expect(categoryInstructionsFor('guest_arrived', 'instagram', missing ?? null)).toContain(
+      'say who they have reached',
+    )
+  })
+
+  // Inverting the branch is the mutant that matters, and these two together
+  // are what kill it: each asserts the OTHER variant's distinctive clause is
+  // absent, which a single positive assertion would not.
+  it('never tells a returning guest to introduce itself', () => {
+    expect(
+      categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: true }),
+    ).not.toContain('say who they have reached')
+  })
+
+  it('never tells a new guest it has talked to them before', () => {
+    expect(
+      categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: false }),
+    ).not.toContain('You have talked before')
+  })
+
+  // The copy names no channel, so it takes no substitution and both channels
+  // read the same. The scope guard above is what fails if a channel claim is
+  // ever introduced into it.
+  it('reads identically on both channels', () => {
+    for (const had of [true, false]) {
+      expect(categoryInstructionsFor('guest_arrived', 'text', { hadPriorConversation: had })).toBe(
+        categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: had }),
+      )
+    }
+  })
+
+  // R3 bans an em dash in output and the regen loop pays for every one that
+  // survives, so the prompt must not model one.
+  it('carries no em dash', () => {
+    for (const had of [true, false]) {
+      expect(
+        categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: had }),
+      ).not.toMatch(/[—–]/)
+    }
+  })
+})

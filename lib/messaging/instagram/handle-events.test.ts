@@ -105,6 +105,7 @@ describe('a guest message', () => {
         hasProviderSentAt: true,
         titlelessPostback: false,
         guestCreatedVia: 'inbound_message',
+        hadPriorConversation: null,
       },
     ])
   })
@@ -474,9 +475,9 @@ describe('a read receipt', () => {
       table: 'messages',
       columns: 'id',
       filters: [
-        ['provider_message_id', midOf('read', 'read')],
-        ['venue_id', VENUE_ID],
-        ['guest_id', GUEST_ID],
+        ['provider_message_id', 'eq', midOf('read', 'read')],
+        ['venue_id', 'eq', VENUE_ID],
+        ['guest_id', 'eq', GUEST_ID],
       ],
     })
   })
@@ -645,12 +646,12 @@ describe('logInstagramOutcome', () => {
       { event: 'instagram_event_unhandled', reason: 'changes_field', fields: ['comments'] },
     ],
     [
-      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
-      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan' },
+      { status: 'persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan', hadPriorConversation: null },
+      { event: 'instagram_event_persisted', kind: 'postback', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: true, hasReferral: true, referralSource: 'SHORTLINK', hasProviderSentAt: false, titlelessPostback: false, guestCreatedVia: 'qr_scan', hadPriorConversation: null },
     ],
     [
-      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
-      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null },
+      { status: 'persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null, hadPriorConversation: null },
+      { event: 'instagram_event_persisted', kind: 'echo', venueId: 'v', guestId: 'g', messageId: 'm', guestCreated: false, hasReferral: false, referralSource: null, hasProviderSentAt: true, titlelessPostback: false, guestCreatedVia: null, hadPriorConversation: null },
     ],
     [
       { status: 'duplicate', kind: 'echo', venueId: 'v', messageId: null },
@@ -727,6 +728,11 @@ describe('provider_sent_at', () => {
 
     expect(writers.sort()).toEqual([
       join('lib', 'agent', 'dispatch-instagram-reply.ts'),
+      // TAC-536: a READER, and never of a Sendblue row. It copies the scan
+      // row's Meta time onto the pending greeting so the five-minute timer and
+      // the staleness bound run on the same clock the guest's action happened
+      // on, falling back to created_at when the delivery carried none.
+      join('lib', 'agent', 'scan-arrival-store.ts'),
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),
@@ -757,6 +763,7 @@ describe('scanUnattributedReason (TAC-518)', () => {
       hasProviderSentAt: true,
       titlelessPostback: false,
       guestCreatedVia: null,
+      hadPriorConversation: null as boolean | null,
       ...over,
     }
   }
@@ -809,5 +816,197 @@ describe('scanUnattributedReason (TAC-518)', () => {
     { status: 'read', venueId: 'v', guestId: 'g', messageId: null },
   ] as InstagramEventOutcome[])('does NOT report a $status outcome', (outcome) => {
     expect(scanUnattributedReason(outcome)).toBeNull()
+  })
+})
+
+// TAC-536. SYNTHETIC: no standalone referral has ever been captured from Meta.
+// The shape is Meta's documented one, and its timestamp is the first of the
+// two `instagram_event_unhandled` lines of 2026-09-20 that the ticket reports,
+// which is as close to a replay of those as is possible: an `unhandled` event
+// logs field NAMES only, so the original bodies were never recorded.
+describe('a standalone referral (TAC-536)', () => {
+  const SCAN_MS = 1789935488000
+  const SCAN_ISO = '2026-09-20T20:18:08.000Z'
+
+  function scanDelivery(referral: Record<string, unknown> = { ref: 'QR1', source: 'SHORTLINK' }): unknown {
+    return {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: Math.floor(SCAN_MS / 1000),
+          messaging: [
+            {
+              sender: { id: GUEST_IGSID },
+              recipient: { id: ACCOUNT_ID },
+              timestamp: SCAN_MS,
+              referral,
+            },
+          ],
+        },
+      ],
+    }
+  }
+
+  // The whole shape is pinned, not matched: provider_message_id being NULL is
+  // the discriminator the greeting processor keys on, and body being '' is
+  // what makes the row legal at all. A partial match would pass without either.
+  it('saves an inbound row with no mid, carrying Meta own clock and the referral', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+
+    expect(db.inserts('messages')).toEqual([
+      {
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        channel: 'instagram',
+        direction: 'inbound',
+        status: 'received',
+        body: '',
+        media_urls: [],
+        provider_message_id: null,
+        provider_sent_at: SCAN_ISO,
+        referral_ref: 'QR1',
+        referral_source: 'SHORTLINK',
+      },
+    ])
+    expect(outcomes).toEqual([
+      {
+        status: 'persisted',
+        kind: 'referral',
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        messageId: db.tables.messages[0]?.id,
+        guestCreated: false,
+        hasReferral: true,
+        referralSource: 'SHORTLINK',
+        hasProviderSentAt: true,
+        titlelessPostback: false,
+        guestCreatedVia: null,
+        hadPriorConversation: false,
+      },
+    ])
+  })
+
+  // The ruling of 2026-09-25, reversing the plan's own narrowing. Before it,
+  // an IGSID with no row was skipped and the scan vanished.
+  it('CREATES a guest it has never seen, as a QR scan', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE] })
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+
+    expect(db.inserts('guests')).toMatchObject([
+      {
+        venue_id: VENUE_ID,
+        instagram_scoped_id: GUEST_IGSID,
+        created_via: 'qr_scan',
+      },
+    ])
+    expect(outcomes).toMatchObject([
+      { status: 'persisted', kind: 'referral', guestCreated: true, guestCreatedVia: 'qr_scan' },
+    ])
+  })
+
+  // The promise TAC-515's later history import relies on: these rows merge
+  // rather than duplicate, because the insert keys on the same unique index.
+  it('files a second scan under the guest the first one created', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE] })
+    await processInstagramDelivery(scanDelivery(), db.client)
+    const created = db.tables.guests[0]?.id
+
+    await processInstagramDelivery(scanDelivery({ ref: 'QR1', source: 'SHORTLINK' }), db.client)
+
+    expect(db.tables.guests).toHaveLength(1)
+    expect(db.inserts('messages').at(-1)).toMatchObject({ guest_id: created })
+  })
+
+  // Reads BEFORE the insert, so it can never count the scan's own row. A
+  // wrong value here picks the other greeting instruction, and the two say
+  // opposite things about introducing yourself.
+  it('reports hadPriorConversation true when the guest has a message on record', async () => {
+    const db = createInstagramDbFake({
+      venues: [VENUE],
+      guests: [GUEST],
+      messages: [{ id: 'old', venue_id: VENUE_ID, guest_id: GUEST_ID, body: 'hey' }],
+    })
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+    expect(outcomes).toMatchObject([{ hadPriorConversation: true }])
+  })
+
+  // A previous scan row is not a conversation. Without the body filter the
+  // second scan of a guest we have never spoken to would read as "we have
+  // talked" and the greeting would skip its introduction.
+  it('does not count an earlier scan row as a prior conversation', async () => {
+    const db = createInstagramDbFake({
+      venues: [VENUE],
+      guests: [GUEST],
+      messages: [{ id: 'scan', venue_id: VENUE_ID, guest_id: GUEST_ID, body: '' }],
+    })
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+    expect(outcomes).toMatchObject([{ hadPriorConversation: false }])
+  })
+
+  // Best effort, and the only duplicate guard this kind can have: there is no
+  // mid, so messages_provider_message_id_unique cannot see these rows.
+  it('treats a redelivery with the same Meta timestamp as a duplicate', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    await processInstagramDelivery(scanDelivery(), db.client)
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+
+    expect(db.inserts('messages')).toHaveLength(1)
+    expect(outcomes).toEqual([
+      { status: 'duplicate', kind: 'referral', venueId: VENUE_ID, messageId: db.tables.messages[0]?.id },
+    ])
+  })
+
+  // A scan an hour later is a second arrival, not a redelivery.
+  it('saves a second scan with a different Meta timestamp', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    await processInstagramDelivery(scanDelivery(), db.client)
+
+    const later = {
+      object: 'instagram',
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [
+            {
+              sender: { id: GUEST_IGSID },
+              recipient: { id: ACCOUNT_ID },
+              timestamp: SCAN_MS + 3600_000,
+              referral: { ref: 'QR1', source: 'SHORTLINK' },
+            },
+          ],
+        },
+      ],
+    }
+    const outcomes = await processInstagramDelivery(later, db.client)
+
+    expect(db.inserts('messages')).toHaveLength(2)
+    expect(outcomes).toMatchObject([{ status: 'persisted', kind: 'referral' }])
+  })
+
+  // A guest at another venue's account must never be filed under this one.
+  it('skips a delivery whose account maps to no venue', async () => {
+    const db = createInstagramDbFake({})
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+
+    expect(db.inserts('messages')).toEqual([])
+    expect(outcomes).toEqual([
+      { status: 'skipped', kind: 'referral', reason: 'venue_not_found', venueId: null },
+    ])
+  })
+
+  // A read that failed has established nothing, and false would pick a
+  // guest-facing instruction on the strength of it.
+  it('fails the event rather than guessing when the prior-conversation read errors', async () => {
+    const db = createInstagramDbFake({ venues: [VENUE], guests: [GUEST] })
+    db.failNext('messages', 'select', { message: 'boom', code: 'XX000' })
+    const outcomes = await processInstagramDelivery(scanDelivery(), db.client)
+
+    expect(db.inserts('messages')).toEqual([])
+    expect(outcomes).toMatchObject([
+      { status: 'failed', kind: 'referral', stage: 'message_lookup', venueId: VENUE_ID },
+    ])
   })
 })

@@ -15,6 +15,10 @@ import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
 import { EVENT_INVITE_INSTRUCTIONS } from './event-invite'
 import { EVENT_QUESTION_INSTRUCTIONS } from './event-question'
 import { FOLLOW_UP_INSTRUCTIONS } from './follow-up'
+import {
+  GUEST_ARRIVED_INSTRUCTIONS_NEW,
+  guestArrivedInstructionsFor,
+} from './guest-arrived'
 import { MANUAL_INSTRUCTIONS } from './manual'
 import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
@@ -63,6 +67,16 @@ export function getCategoryInstructions(category: MessageCategory): string {
       return PERSONAL_HISTORY_QUESTION_INSTRUCTIONS
     case 'unknown':
       return UNKNOWN_INSTRUCTIONS
+    // TAC-536. This category has TWO variants and the switch cannot choose
+    // between them: it sees only the category, and the choice is a per-turn
+    // fact. categoryInstructionsFor below is what picks, and it is the only
+    // production caller. The value here is the safe default for anything that
+    // reaches this switch directly (the channel-variant precompute, a test),
+    // for the reason guestArrivedInstructionsFor documents: an introduction
+    // nobody needed is odd, and claiming a conversation that never happened
+    // is false.
+    case 'guest_arrived':
+      return GUEST_ARRIVED_INSTRUCTIONS_NEW
   }
 }
 
@@ -98,7 +112,26 @@ const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<MessageChannel, Partial<Record<Me
 /**
  * The category instructions for a conversation's channel; null gets the
  * Instagram copy (copyVariantFor). composePrompt is the only caller.
+ *
+ * `scanArrival` is TAC-536's one exception to "the category decides the
+ * copy": a scan greeting has two variants and the choice is a per-turn fact,
+ * not a property of the category. It is threaded rather than folded into the
+ * category because ONE category is what the storage layer, the approval-policy
+ * UI and the operator queue all want; two would be two checkboxes for one
+ * thing. The parameter is optional so every other call site is unchanged, and
+ * omitting it on a guest_arrived turn is the wiring bug guestArrivedInstructionsFor
+ * falls safe on.
+ *
+ * The scan greeting takes NO channel substitution: its copy names no channel
+ * (it says the guest scanned the code at the counter and is in the shop), so
+ * there is nothing to swap. The scope guard in index.test.ts is what fails if
+ * a channel claim is ever introduced into it.
  */
-export function categoryInstructionsFor(category: MessageCategory, channel: MessageChannel | null): string {
+export function categoryInstructionsFor(
+  category: MessageCategory,
+  channel: MessageChannel | null,
+  scanArrival: { hadPriorConversation: boolean } | null = null,
+): string {
+  if (category === 'guest_arrived') return guestArrivedInstructionsFor(scanArrival)
   return CATEGORY_INSTRUCTIONS_BY_CHANNEL[copyVariantFor(channel)][category] ?? getCategoryInstructions(category)
 }

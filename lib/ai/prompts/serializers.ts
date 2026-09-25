@@ -580,6 +580,38 @@ function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openS
   return null
 }
 
+/**
+ * TAC-536: what is known about a guest who just scanned the counter code.
+ *
+ * TWO INDEPENDENT AXES, and the whole point of the block is that neither is
+ * derived from the other. Whether we have talked is knowable exactly: the
+ * thread either has messages on our record or it does not. Whether they have
+ * VISITED is not, because there is no till and a visit exists only if someone
+ * reported one.
+ *
+ * WHAT THE FALSE CONVERSATION LINE MUST NOT SAY, and the correction that
+ * matters most here (ruled 2026-09-25): "no messages on record" is not "never
+ * messaged". A standalone referral only ever arrives into a thread Instagram
+ * considers pre-existing, so a guest with nothing on file has very likely been
+ * messaging the shop since before we connected. Saying "this guest has not
+ * messaged you before" would be false in exactly the case this branch exists
+ * for, and TAC-515's history import is what will eventually fill the gap.
+ *
+ * Every line is Jaipal's wording. No em dash: R3 bans them in output and the
+ * prompt should not model one.
+ */
+function formatScanArrival(scanArrival: NonNullable<RuntimeContext['scanArrival']>): string {
+  return [
+    '## Guest just arrived',
+    scanArrival.hadPriorConversation
+      ? 'You have talked with this guest before.'
+      : "There are no past messages with this guest on record, though they may have messaged the shop before. Don't treat this as their first time reaching out, and don't reference past conversations.",
+    scanArrival.hasRecordedVisit
+      ? 'There is a recorded visit on file, so you can speak to them as someone who has been in before.'
+      : 'There is no recorded visit on file. Don\'t say "welcome back" and don\'t mention a past visit.',
+  ].join('\n')
+}
+
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
@@ -1494,6 +1526,17 @@ export function runtimeToProse(
   }
   if (runtime.today) {
     blocks.push(formatRightNow(runtime.today))
+  }
+  // TAC-536: immediately after `## Right now`, because both are facts about
+  // this moment. The category instruction says "say only what the facts below
+  // say about past visits", and this is those facts.
+  //
+  // The POSITION is a choice, not a measurement. TAC-519 found block order
+  // moves behaviour, and nothing has measured this one; the full-order test in
+  // serializers.test.ts exists so moving it is deliberate rather than
+  // accidental.
+  if (runtime.scanArrival) {
+    blocks.push(formatScanArrival(runtime.scanArrival))
   }
   // THE-232: Operator instruction block sits above runtime context
   // (mechanics, last visit, recent conversation) so Sonnet treats it as the

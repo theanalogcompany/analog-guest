@@ -201,9 +201,36 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
       [
         'const scanAt = isScanReferral(input.currentMessage?.referralSource)',
         '      ? (input.currentMessage?.receivedAt ?? null)',
-        '      : null',
+        '      : carriedScanAt',
       ].join('\n'),
     )
+  })
+
+  // TAC-536's second source, pinned the same way and for the same reason. A
+  // standalone referral carries no message, so the ternary above cannot see
+  // it; the carry-forward is what does. Negate or drop either half of this
+  // condition and every Instagram inbound pays for an arrivals read, or worse,
+  // a Sendblue turn gets an anchor from a table that has nothing to do with
+  // it. `scanCarryForwardAt` owns the window rule and is tested on its own.
+  it('reads the carry-forward only for an Instagram turn with no scan of its own', () => {
+    expect(resolution).toContain(
+      [
+        '    if (',
+        '      !isScanReferral(input.currentMessage?.referralSource) &&',
+        "      input.currentMessage?.channel === 'instagram'",
+        '    ) {',
+        '      const carry = await loadScanCarryForward(supabase, input.venueId, input.guestId)',
+        '      carriedScanAt = scanCarryForwardAt({',
+      ].join('\n'),
+    )
+  })
+
+  // The anchor a carried scan produces must be the SCAN's time. Returning the
+  // greeting's would date the visit to when the venue spoke rather than when
+  // the guest arrived, and understand_order's window runs from it.
+  it('anchors a carried scan to the scan, never to the greeting', () => {
+    expect(resolution).toContain('inboundAt: input.currentMessage.receivedAt,')
+    expect(resolution).not.toContain('lastGreetingAt: carry.lastScanAt')
   })
 
   // The whole point is a LATER anchor than the historical sources, so the scan

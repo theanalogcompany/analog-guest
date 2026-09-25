@@ -2408,6 +2408,12 @@ export interface InstagramScanConfirmedVisitProps {
   returningGuest: boolean
   /** True when a confirmed visit was already on record and this scan moved the anchor later. */
   overrodeExistingAnchor: boolean
+  /**
+   * TAC-536: true when the anchor came from a STANDALONE scan carried forward
+   * rather than from a referral on this message. Two different mechanisms, and
+   * a rate for one must not be read as the other's.
+   */
+  carriedForward?: boolean
 }
 
 /**
@@ -2439,6 +2445,58 @@ export async function captureInstagramScanConfirmedVisit(
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,
       `message: \`${props.messageId}\``,
+    ].join('\n'),
+  )
+}
+
+/**
+ * TAC-536: what became of a bare Instagram scan.
+ *
+ * Fires once per resolved scan, whichever way it went, so a greeting rate has
+ * a denominator: before this the whole flow was invisible unless a message
+ * appeared in the thread. Carries no message body and no scoped ID, per the
+ * Instagram logging rule.
+ */
+export interface InstagramScanGreetingProps {
+  venueId: string
+  guestId: string
+  /** The scan's own inbound row. Null when it has since been deleted. */
+  scanMessageId: string | null
+  /** The vocabulary of instagram_scan_arrivals.outcome. */
+  outcome: string
+  /**
+   * Which greeting instruction rendered. Null on a suppressed scan, where
+   * nothing was generated and the question did not arise.
+   */
+  hadPriorConversation: boolean | null
+  /** The AgentResult status, on a scan that was actually greeted. */
+  agentStatus?: string
+}
+
+/**
+ * Slack-relayed ONLY on a greeting that was actually generated.
+ *
+ * This is the one scheduled path in the repo that messages a guest with no
+ * operator and no inbound behind it, and at pilot volume the relay IS the
+ * answer to "has it ever fired". The suppressions are PostHog only: they are
+ * the common case (a guest who writes within five minutes suppresses their
+ * own greeting, which is the flow working) and relaying them would drown the
+ * signal.
+ */
+export async function captureInstagramScanGreeting(
+  props: InstagramScanGreetingProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_scan_greeting', props.guestId, { ...props })
+  if (props.outcome !== 'greeted') return
+  await postToSlack(
+    [
+      '*An Instagram guest scanned the counter code and was greeted*: no message from them, five minutes of silence.',
+      props.hadPriorConversation === true
+        ? 'they have messaged this venue before, so the greeting does not introduce itself'
+        : 'no messages with them on record, so the greeting says who they have reached',
+      `agent outcome: \`${props.agentStatus ?? 'unknown'}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
     ].join('\n'),
   )
 }

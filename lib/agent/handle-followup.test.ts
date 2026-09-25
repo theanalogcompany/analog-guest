@@ -41,6 +41,7 @@ const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
 const captureManualFollowupSlotOccupiedMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
+const dispatchReplyMock = vi.fn()
 
 vi.mock('./build-runtime-context', () => ({
   buildRuntimeContext: (...a: unknown[]) => buildRuntimeContextMock(...a),
@@ -101,6 +102,12 @@ vi.mock('./alerts', () => ({
   fireRedAlert: vi.fn(),
   capturePostHogEvent: vi.fn(),
 }))
+// TAC-536: the scan greeting is the one reason that reaches the Instagram
+// transport, and only dispatchReply gets there.
+vi.mock('./dispatch-reply', () => ({
+  dispatchReply: (...a: unknown[]) => dispatchReplyMock(...a),
+}))
+
 vi.mock('./dispatch-arrival-capture', () => ({
   dispatchArrivalCapture: vi.fn(async () => ({ kind: 'noop' })),
 }))
@@ -141,7 +148,7 @@ vi.mock('./trace-content', () => ({
 
 import { handleFollowup } from './handle-followup'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
-import type { RuntimeContext } from './types'
+import type { FollowupTrigger, RuntimeContext } from './types'
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const GUEST_ID = '22222222-2222-4222-8222-222222222222'
@@ -156,6 +163,7 @@ function makeCtx(followupTrigger: RuntimeContext['followupTrigger']): RuntimeCon
     // invariant) unless followupTrigger is non-null here — buildRuntimeContext
     // is mocked, so this has to be set to whatever the test's own trigger is.
     followupTrigger,
+    scanArrival: null,
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
@@ -193,7 +201,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.65.0',
+    promptVersion: 'v1.66.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -213,6 +221,16 @@ beforeEach(() => {
   verifyMechanicOfferStageMock.mockReset()
   persistOrRegenQueuedDraftMock.mockReset()
   scheduleAndSendMock.mockReset()
+  dispatchReplyMock.mockReset()
+  dispatchReplyMock.mockResolvedValue({
+    kind: 'sent',
+    outboundMessageId: 'out-ig',
+    providerMessageId: 'mid-ig',
+    generationId: 'gen-ig',
+    bubbleCount: 1,
+    deliveredBody: 'hey',
+    undelivered: null,
+  })
   captureDraftDroppedMock.mockReset()
   captureManualFollowupSlotOccupiedMock.mockReset()
 
@@ -796,6 +814,121 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(result.status).not.toBe('refused')
+  })
+
+  // TAC-536: the ONE carve-out. The reversed half of the it.each above, which
+  // is why both live in this block: the pair is what says the refusal was
+  // narrowed rather than removed.
+  describe('the scan-greeting carve-out', () => {
+    const scanTrigger = (): FollowupTrigger => ({
+      reason: 'instagram_scan_arrival',
+      triggeredAt: new Date(),
+      instagramScanArrival: { scanMessageId: 'scan-msg-1', hadPriorConversation: true },
+    })
+
+    beforeEach(() => {
+      buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'instagram',
+      }))
+      // These two are RESET by the file's own beforeEach and never given a
+      // default, because every pre-existing Instagram test refuses before
+      // generating and never reaches them. This block is the first that does,
+      // so a bare vi.fn() resolves undefined and the orchestrator throws on
+      // `.status` — CLAUDE.md records exactly this trap in this exact file.
+      verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+      applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    })
+
+    it('generates and sends on Instagram where every other reason is refused', async () => {
+      const result = await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
+      expect(result).toMatchObject({ status: 'sent' })
+      expect(generateStageMock).toHaveBeenCalledTimes(1)
+    })
+
+    // Only dispatchReply reaches the Instagram transport. Routing this through
+    // scheduleAndSend would try to send an Instagram greeting over Sendblue.
+    it('sends through dispatchReply, never scheduleAndSend', async () => {
+      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      expect(dispatchReplyMock).toHaveBeenCalledTimes(1)
+      expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    })
+
+    // NOT OPTIONAL. A reply naming no inbound is read by the reply check as
+    // answering everything before it, so a greeting that named nothing would
+    // silence the agent's own reply to whatever the guest says next. Dropping
+    // this is the mutant that matters most on this path.
+    it('names the scan row it answers', async () => {
+      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+        answersInboundId: 'scan-msg-1',
+        replyCheck: { inboundMessageId: 'scan-msg-1' },
+      })
+    })
+
+    // scan_message_id is ON DELETE SET NULL, so a scan whose row was removed
+    // still produces a greeting with nothing to name. Exempting the check is
+    // right there; pointing it at a row that does not exist is not.
+    it('exempts the reply check when the scan row is gone', async () => {
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: {
+          reason: 'instagram_scan_arrival',
+          triggeredAt: new Date(),
+          instagramScanArrival: { scanMessageId: null, hadPriorConversation: false },
+        },
+      })
+      expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+        answersInboundId: undefined,
+        replyCheck: 'exempt',
+      })
+    })
+
+    it('records it as guest_arrived, not follow_up', async () => {
+      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      expect(generateStageMock.mock.calls[0]?.[1]).toBe('guest_arrived')
+    })
+
+    // The Instagram arm can decline. The text arm throws instead, so these are
+    // reachable only here, and they must not read as a clean send.
+    it('reports a reply staff already sent as superseded, not sent', async () => {
+      dispatchReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'staff-1' })
+      const result = await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
+      expect(result).toEqual({ status: 'superseded', byMessageId: 'staff-1' })
+    })
+
+    it('reports a carded greeting as queued', async () => {
+      dispatchReplyMock.mockResolvedValue({ kind: 'carded', reason: 'window_closed', cardId: 'card-9' })
+      const result = await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
+      expect(result).toMatchObject({ status: 'queued', outboundMessageId: 'card-9' })
+    })
+
+    // The caller's run id has to reach the trace, or the ledger row it writes
+    // afterwards points at a trace that does not exist.
+    it('uses the caller agentRunId when one is given', async () => {
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        agentRunId: 'run-from-the-cron',
+        trigger: scanTrigger(),
+      })
+      expect(buildRuntimeContextMock.mock.calls[0]?.[0]).toMatchObject({
+        agentRunId: 'run-from-the-cron',
+      })
+    })
   })
 })
 

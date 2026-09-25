@@ -58,6 +58,10 @@ export const MESSAGE_CATEGORIES = [
   'follow_up',
   'perk_unlock',
   'event_invite',
+  // TAC-536: the greeting sent after a guest scans the counter code and says
+  // nothing for five minutes. Outbound only. Widening messages_category_check
+  // is a SEPARATE gate (migration 063), and without it the first insert fails.
+  'guest_arrived',
 ] as const
 
 export type MessageCategory = (typeof MESSAGE_CATEGORIES)[number]
@@ -245,6 +249,26 @@ export type RuntimeContext = {
   // would ship straight to a real phone. Demo guests keep the restrictive
   // prompt precisely because nothing downstream will catch them.
   willBeReviewed?: boolean
+  /**
+   * TAC-536: the two independent facts a scan greeting may state.
+   *
+   * Set only on the `instagram_scan_arrival` trigger, and the whole reason
+   * both are here rather than one being derived from the other: relationship
+   * is knowable exactly (the thread has messages on our record or it does
+   * not) and visit is not (there is no till, so a visit exists only if it was
+   * reported). Collapsing them is what would make the agent greet someone who
+   * has messaged for weeks as new, or someone who has never been in as a
+   * regular.
+   *
+   * It also picks which of the two greeting instructions renders, which is why
+   * it reaches composePrompt rather than only the serializer.
+   */
+  scanArrival?: {
+    /** Any message with this guest on OUR record, which is not "have they ever messaged". */
+    hadPriorConversation: boolean
+    /** A transaction in the visit-history window, or a commitment marked arrived. */
+    hasRecordedVisit: boolean
+  } | null
   today?: {
     isoDate: string
     dayOfWeek: string

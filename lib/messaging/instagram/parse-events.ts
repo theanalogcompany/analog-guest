@@ -19,6 +19,13 @@
 //   postback  `postback`: an icebreaker tap. Its `mid` is INSIDE `postback`.
 //   read      `read`: a read receipt. The key is `read`; `messaging_seen` is
 //             only the webhook subscription field's name. It names one `mid`.
+//   referral  `referral` ALONE, with no message, postback or read beside it
+//             (TAC-536): the guest followed the venue's ig.me link into a
+//             thread Instagram already had. It is the ONLY kind with no
+//             `mid`, because Meta's standalone-referral item carries only
+//             sender, recipient, timestamp and referral. Everything else
+//             dedupes on messages.provider_message_id's unique constraint;
+//             this one structurally cannot.
 //
 // Everything else becomes an `unhandled` event carrying a reason and the NAMES
 // of what arrived, never values, so the route can log it and acknowledge it.
@@ -75,11 +82,31 @@ export type InstagramPostbackEvent = EventBase & {
 
 export type InstagramReadEvent = EventBase & { kind: 'read' }
 
+/**
+ * TAC-536: a standalone referral. The guest opened the venue's ig.me link into
+ * a thread that already had messages, so Instagram showed no icebreaker and
+ * sent this instead of a postback.
+ *
+ * Deliberately NOT extending EventBase: there is no `mid` on this shape, and
+ * inheriting one as a lie would give the handler a duplicate key that is
+ * always undefined. The absence is the reason handle-events.ts writes this row
+ * with `provider_message_id: null`, which in turn is what tells a scan row
+ * apart from every other inbound Instagram row.
+ */
+export type InstagramReferralEvent = {
+  kind: 'referral'
+  accountId: string
+  guestIgsid: string
+  providerSentAt: string | null
+  referral: InstagramReferral
+}
+
 export type InstagramHandledEvent =
   | InstagramMessageEvent
   | InstagramEchoEvent
   | InstagramPostbackEvent
   | InstagramReadEvent
+  | InstagramReferralEvent
 
 export type InstagramUnhandledReason =
   /** Top-level `object` is not `instagram`. `fields` holds the object's value. */
@@ -93,9 +120,11 @@ export type InstagramUnhandledReason =
   /** An entry key other than id, time, messaging, changes and standby. */
   | 'unrecognized_entry_field'
   /**
-   * An item carrying only a `referral`: a guest following an ig.me link into a
-   * thread that already has messages. There is no message to save it on, so its
-   * ref is lost. Its own reason so that loss can be counted.
+   * A referral-shaped item with nothing usable in it: no `ref` and no
+   * `source`. RARE since TAC-536, which made the ordinary standalone referral
+   * its own handled kind. Until then this was the normal outcome for a guest
+   * following an ig.me link into a thread that already had messages, and every
+   * one of them was discarded.
    */
   | 'standalone_referral'
   /** A `messaging[]` item of any other kind: reaction, message_edit, handover... */
@@ -291,7 +320,27 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
     return { kind: 'read', accountId, guestIgsid: senderId, mid, providerSentAt: providerSentAtOf(item) }
   }
 
-  if (isRecord(item.referral)) return unhandled('standalone_referral', itemFieldNames(item))
+  // TAC-536: a referral with nothing else beside it. Handled rather than
+  // discarded, because following an ig.me link into an existing thread reopens
+  // Meta's 24-hour window on its own, so the venue may reply to it.
+  //
+  // `fromGuest` is checked for the same reason the postback and read branches
+  // check it: the account never sends itself a referral, and an item that does
+  // not fit is refused rather than guessed at.
+  if (isRecord(item.referral)) {
+    if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
+    const referral = parseReferral(item.referral)
+    // No ref and no source. There is nothing to record and nothing to act on,
+    // so it keeps the reason the whole shape used to carry.
+    if (referral === null) return unhandled('standalone_referral', itemFieldNames(item))
+    return {
+      kind: 'referral',
+      accountId,
+      guestIgsid: senderId,
+      providerSentAt: providerSentAtOf(item),
+      referral,
+    }
+  }
 
   return unhandled('unhandled_messaging_type', itemFieldNames(item))
 }

@@ -168,9 +168,10 @@ describe('isProfileRefreshDue', () => {
 })
 
 describe('profileRefreshTargetFor', () => {
-  const persisted = (kind: 'message' | 'postback' | 'echo'): InstagramEventOutcome => ({
+  const persisted = (kind: 'message' | 'postback' | 'echo' | 'referral'): InstagramEventOutcome => ({
     status: 'persisted',
     kind,
+    hadPriorConversation: kind === 'referral' ? false : null,
     venueId: VENUE_ID,
     guestId: GUEST_ID,
     messageId: 'msg-1',
@@ -182,9 +183,14 @@ describe('profileRefreshTargetFor', () => {
     guestCreatedVia: 'inbound_message',
   })
 
-  it.each(['message', 'postback'] as const)('refreshes the guest behind a saved %s', (kind) => {
-    expect(profileRefreshTargetFor(persisted(kind))).toEqual(TARGET)
-  })
+  // TAC-536 added 'referral': a scan can CREATE the guest, so it is the first
+  // and sometimes the only chance to learn their handle.
+  it.each(['message', 'postback', 'referral'] as const)(
+    'refreshes the guest behind a saved %s',
+    (kind) => {
+      expect(profileRefreshTargetFor(persisted(kind))).toEqual(TARGET)
+    },
+  )
 
   it.each<[string, InstagramEventOutcome]>([
     ['a saved echo (the venue\'s own message)', persisted('echo')],

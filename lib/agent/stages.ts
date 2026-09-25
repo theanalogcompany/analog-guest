@@ -3005,6 +3005,11 @@ function triggerReasonToFollowupReason(
       return 'perk_unlock'
     case 'event':
     case 'manual':
+    // TAC-536: a scan greeting renders `## Guest just arrived` instead, which
+    // states what is known about this guest's conversation and visits. The
+    // follow-up block's framing (days since a visit, a re-engagement reason)
+    // has nothing to say about someone standing at the counter now.
+    case 'instagram_scan_arrival':
       return null
   }
 }
@@ -3345,6 +3350,9 @@ export function buildAiRuntime(
     // ordinary Command Center manual follow-up) leaves it false, so the
     // `## Active commitments` intro is unchanged everywhere else.
     isOperatorDecline: ctx.followupTrigger?.isOperatorDecline === true,
+    // TAC-536: mapped straight through, never re-derived. Null on every turn
+    // but a scan greeting, and the serializer omits the block on null.
+    scanArrival: ctx.scanArrival,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

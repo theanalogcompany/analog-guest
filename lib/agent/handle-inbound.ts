@@ -461,7 +461,11 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
  *                    event carries the text
  *   sent_unrecorded  it went out, but no row saved; its echo will record it
  */
-function undeliveredAgentResult(
+// Exported for handle-followup.ts, which since TAC-536 reaches the same
+// Instagram transport for one trigger reason and must map its outcomes the
+// same way. Shared rather than mirrored: four outcomes each needing a
+// deliberate AgentResult is exactly the shape two copies drift on.
+export function undeliveredAgentResult(
   ctx: RuntimeContext,
   outcome: Exclude<DispatchReplyOutcome, { kind: 'sent' }>,
 ): AgentResult {

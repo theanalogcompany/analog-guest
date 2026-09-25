@@ -77,6 +77,7 @@ import {
   resolveCardAnsweredExternally,
 } from '@/lib/messaging/instagram/resolve-external'
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
+import { scheduleScanArrival } from '@/lib/agent/scan-arrival-store'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -233,6 +234,32 @@ export async function POST(request: Request): Promise<Response> {
       const handoff = resolveAgentHandoff(outcome)
       if (handoff.kind === 'run') {
         waitUntil(runInboundAgent(handoff.messageId))
+      } else if (handoff.kind === 'schedule_arrival') {
+        // TAC-536: a scan with no message. Nothing is generated now and no
+        // ledger row is written here: the turn stays open for five minutes,
+        // and whichever way it resolves, the cron that resolves it records
+        // the row. A guest who writes inside those five minutes is answered
+        // by that message's own turn.
+        //
+        // waitUntil, never awaited: two writes must not sit inside Meta's
+        // delivery deadline.
+        waitUntil(
+          scheduleScanArrival(supabase, {
+            messageId: handoff.messageId,
+            venueId: handoff.venueId,
+            guestId: handoff.guestId,
+            hadPriorConversation: handoff.hadPriorConversation,
+          }).then((scheduled) => {
+            if (scheduled.ok) return
+            console.error('instagram webhook: scan greeting could not be scheduled', {
+              event: 'instagram_scan_arrival_not_scheduled',
+              venueId: handoff.venueId,
+              guestId: handoff.guestId,
+              messageId: handoff.messageId,
+              error: scheduled.error,
+            })
+          }),
+        )
       } else if (handoff.kind === 'record') {
         // waitUntil, never awaited: the ledger must not sit inside Meta's
         // delivery deadline.

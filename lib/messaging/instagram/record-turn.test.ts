@@ -23,6 +23,7 @@ function written(): Record<string, unknown> {
 const persisted: InstagramEventOutcome = {
   status: 'persisted',
   kind: 'message',
+  hadPriorConversation: null,
   venueId: 'venue-1',
   guestId: 'guest-1',
   messageId: 'msg-1',

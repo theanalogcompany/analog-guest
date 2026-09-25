@@ -99,6 +99,25 @@
 //     guest_id, so it re-identifies the shell on their next tap.
 //   - `inbound_turn_outcomes.detail` is reset to {}. TAC-523 put a phone's
 //     last four digits there.
+//   - `instagram_scan_arrivals` rows are DELETED (TAC-536). Enumerated from
+//     the schema rather than waved through: venue_id, guest_id,
+//     scan_message_id, scanned_at, had_prior_conversation, claimed_at,
+//     venue_local_date, outcome, resolved_at, created_at. None of it is free
+//     text and none of it identifies anybody, so redaction has nothing to
+//     redact. They are deleted for a different reason, and it is BEHAVIOURAL:
+//     an UNRESOLVED row is a pending greeting, and the every-minute cron would
+//     claim it and generate an unprompted message for a guest who asked to be
+//     erased. The send would fail at the tombstoned scoped id, but it would
+//     spend a model call and could leave an operator card for a person who is
+//     no longer there. Deleting is also what `on delete cascade` would have
+//     done if this path deleted guests, which is the point of the next
+//     paragraph.
+//
+// CASCADE NEVER FIRES ON THIS PATH, and that is why every guest-keyed table
+// has to be named here by hand. The guest ROW survives, anonymised, so a
+// foreign key with `on delete cascade` is never triggered. Any table added
+// later with a guest_id needs a line in this function; the schema is the list
+// to check, not this comment.
 //
 // NAMED RESIDUAL, not silently skipped: guest_commitments.description,
 // transactions.raw_data, engagement_events.data and follow-up log rows can
@@ -233,6 +252,20 @@ export async function deleteInstagramVenueData(
         .in('guest_id', guestIds)
       if (fingerprints.error) {
         return { ok: false, error: fingerprints.error.message, confirmationCode }
+      }
+
+      // TAC-536's pending scan greetings. Deleted rather than redacted: the
+      // row carries no free text and identifies nobody, but an unresolved one
+      // is a greeting the cron would still send. `on delete cascade` never
+      // fires here, because the guest row survives anonymised rather than
+      // being deleted.
+      const scanArrivals = await supabase
+        .from('instagram_scan_arrivals')
+        .delete()
+        .eq('venue_id', venueId)
+        .in('guest_id', guestIds)
+      if (scanArrivals.error) {
+        return { ok: false, error: scanArrivals.error.message, confirmationCode }
       }
 
       // TAC-523's ledger. `detail` carries a phone's last four digits, which
