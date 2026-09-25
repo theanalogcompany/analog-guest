@@ -26,8 +26,13 @@
 
 import { captureInstagramDeletionUnmatchedAccount } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { findEarlierDelivery } from '@/lib/messaging/instagram/callback-receipts'
 import { deleteInstagramVenueData } from '@/lib/messaging/instagram/delete-venue-data'
-import { parseSignedRequest } from '@/lib/messaging/instagram/signed-request'
+import {
+  parseSignedRequest,
+  signedRequestPayloadFingerprint,
+} from '@/lib/messaging/instagram/signed-request'
+import { writeCallbackReceipt } from '@/lib/messaging/instagram/write-callback-receipt'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,6 +83,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const now = new Date()
   const supabase = createAdminClient()
+
+  // Read BEFORE the redaction, so the answer describes the state this
+  // delivery arrived into rather than the one it created.
+  const fingerprint = signedRequestPayloadFingerprint(signed)
+  const earlier = fingerprint === null ? null : await findEarlierDelivery(supabase, fingerprint)
+
   const result = await deleteInstagramVenueData(supabase, parsed.payload.userId)
 
   // The receipt is written whether or not the redaction succeeded, so a
@@ -94,6 +105,29 @@ export async function POST(request: Request): Promise<Response> {
     console.error('[instagram data-deletion] could not record the request', {
       event: 'instagram_data_deletion_unrecorded',
       error: recorded.error.message,
+    })
+  }
+
+  // Guarded, not merely awaited: the receipt is an audit row, and Meta
+  // disables a callback after repeated non-2xx. A throw in here must never
+  // be the reason a delivery fails.
+  try {
+    await writeCallbackReceipt(supabase, {
+      callback: 'data_deletion',
+      fingerprint,
+      earlier,
+      payload: parsed.payload,
+      venueId: result.ok ? result.venueId : null,
+      outcome: !result.ok ? 'failed' : result.venueId === null ? 'no_match' : 'applied',
+      rowsAffected: result.ok ? result.guestsAffected : null,
+      confirmationCode: result.confirmationCode,
+      now,
+      logPrefix: '[instagram data-deletion]',
+    })
+  } catch (err) {
+    console.error('[instagram data-deletion] could not write the callback receipt', {
+      event: 'instagram_callback_receipt_threw',
+      error: err instanceof Error ? err.message : 'unknown error',
     })
   }
 

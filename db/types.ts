@@ -666,6 +666,66 @@ export type Database = {
           },
         ]
       }
+      instagram_callback_receipts: {
+        Row: {
+          callback: string
+          confirmation_code: string | null
+          id: string
+          instagram_account_id: string
+          outcome: string
+          payload_issued_at: string | null
+          received_at: string
+          repeat_checked: boolean
+          repeat_of_receipt_id: string | null
+          rows_affected: number | null
+          signed_request_fingerprint: string
+          venue_id: string | null
+        }
+        Insert: {
+          callback: string
+          confirmation_code?: string | null
+          id?: string
+          instagram_account_id: string
+          outcome: string
+          payload_issued_at?: string | null
+          received_at?: string
+          repeat_checked?: boolean
+          repeat_of_receipt_id?: string | null
+          rows_affected?: number | null
+          signed_request_fingerprint: string
+          venue_id?: string | null
+        }
+        Update: {
+          callback?: string
+          confirmation_code?: string | null
+          id?: string
+          instagram_account_id?: string
+          outcome?: string
+          payload_issued_at?: string | null
+          received_at?: string
+          repeat_checked?: boolean
+          repeat_of_receipt_id?: string | null
+          rows_affected?: number | null
+          signed_request_fingerprint?: string
+          venue_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instagram_callback_receipts_repeat_of_receipt_id_fkey"
+            columns: ["repeat_of_receipt_id"]
+            isOneToOne: false
+            referencedRelation: "instagram_callback_receipts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instagram_callback_receipts_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       instagram_credentials: {
         Row: {
           access_token_enc: string
