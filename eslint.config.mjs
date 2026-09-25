@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Local scratch dir (see tsconfig.json + .gitignore for symmetry).
     "scripts/sandbox/**",
+    // A worktree parked here would otherwise be linted as part of this
+    // checkout, the same hazard vitest.config.ts excludes it for.
+    ".worktrees/**",
+    ".claude/**",
   ]),
 ]);
 

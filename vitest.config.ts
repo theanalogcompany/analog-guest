@@ -39,5 +39,21 @@ export default defineConfig({
     // Those stay: they document at the call site that the cost is intentional,
     // and they survive a future change to this number.
     testTimeout: 15_000,
+    // A leftover git worktree under either of these makes vitest collect a
+    // SECOND full copy of the repo — recorded in CLAUDE.md as having doubled
+    // the test count twice. The workaround was to remember
+    // `--exclude '.claude/**'` on the command line, which only protects the
+    // person who remembers it. Config holds for every invocation, CI included.
+    //
+    // vitest's own defaults have to be restated here: supplying `exclude`
+    // REPLACES the default list rather than extending it, so dropping
+    // node_modules/dist from this array would start collecting those too.
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.next/**',
+      '**/.worktrees/**',
+      '**/.claude/**',
+    ],
   },
 })
