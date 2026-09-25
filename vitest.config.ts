@@ -16,6 +16,12 @@ export default defineConfig({
     },
   },
   test: {
+    // Refuses to run on a Node major other than .nvmrc's. See that file's
+    // header for why — in short, CI pinned 20 while local ran 24 and nothing
+    // noticed. globalSetup runs once per run, before any test file loads, so
+    // the mismatch is reported in the first second rather than as a confusing
+    // failure somewhere in the suite.
+    globalSetup: ['./vitest.node-version.ts'],
     // 15s, up from vitest's implicit 5000ms default (2026-09-25).
     //
     // Until this block existed the file carried ONLY the alias above, so every
