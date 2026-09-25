@@ -526,6 +526,57 @@ Vitest is the test runner. Tests are colocated with source files (`module.test.t
 - Run all: `npx vitest run`
 - Run single file: `npx vitest run path/to/file.test.ts`
 - Watch mode for development: `npx vitest`
+- Coverage (opt-in): `npx vitest run --coverage`
+
+### Runner configuration (2026-09-25)
+
+`vitest.config.ts` carried ONLY a `resolve.alias` until this date, so every other
+setting was vitest's implicit default. Three things now live there, each for a reason
+that cost time to find:
+
+- **`testTimeout: 15_000`**, up from the implicit 5000ms. Three intermittent failures
+  that read as three unrelated bugs were one: vitest runs the forks pool at CPU count,
+  so on a loaded machine a fork can be denied CPU long enough to blow a budget the test
+  itself comes nowhere near. Measured: `lib/agent/handle-operator-decline.test.ts` failed
+  two runs in three while three heavy processes saturated the machine, then passed five
+  for five on the same commit once they finished. **Do not raise this further to silence
+  a hang** — a couple of tests use a timeout as the SIGNAL that a `sleep` was
+  reintroduced, and the budget has to stay small enough that a genuinely stuck test still
+  fails the run. Per-test overrides remain where the work is honestly seconds long
+  (`scripts/lib/build-workflow.test.ts`, `scripts/lib/run-report.test.ts`,
+  `scripts/lib/linear-cli.test.ts` — all spawn real subprocesses).
+- **`exclude` covering `.worktrees/**` and `.claude/**`.** This was previously the
+  remembered CLI flag `--exclude '.claude/**'` (the TAC-395 gotcha), which only protected
+  whoever remembered it. Verified: a worktree containing 268 test files is now collected
+  as zero with no flags. Note `exclude` REPLACES vitest's default list rather than
+  extending it, so `node_modules`/`dist` are restated there and must stay.
+- **`globalSetup: vitest.node-version.ts`**, which refuses to run on a Node major other
+  than `.nvmrc`'s. See below.
+
+### Node version
+
+**`.nvmrc` is the single source of truth: `24`.** `nvm use` reads it, CI reads it via
+`node-version-file`, and `vitest.node-version.ts` asserts it before any test file loads.
+
+Before this, the repo had no `.nvmrc` and no `engines` field, `ci.yml` hardcoded
+`node-version: 20`, and local development ran v24 — a three-way skew with nothing
+detecting it, on a runtime that went end-of-life in April 2026. The pattern is ported from
+`analog-operator/jest.node-version.js`, written after TAC-427 when a test hung on CI's Node
+and passed locally: CI sat in its Test step for six hours a day for three days. Major only,
+deliberately — a patch pin would fail everyone whose nvm is a fortnight stale, and the
+differences this guards against are major-version ones. Changing version is a one-line edit
+to `.nvmrc`.
+
+### Coverage
+
+`@vitest/coverage-v8`, **report-only and deliberately ungated**. First measurement,
+2026-09-25: **statements 85.08%, branches 76.59%, functions 85.17%, lines 86.06%.**
+
+No thresholds, on purpose. A gate set before anyone has read the report becomes a number
+people write tests to satisfy, and those are the least useful tests. Read the report for a
+while, find where a floor is genuinely earned, then add it. `coverage/` is gitignored and
+eslint-ignored (eslint walks the working tree, not the index, so without the ignore a local
+coverage run puts warnings on the next person's branch).
 
 
 Test count baseline: **6693 tests across 293 files as of 2026-09-25** — most recent (TAC-536, a scan with no message is handled and greets five minutes later: **+109 tests / +3 files** over **6584/290**, measured on clean `origin/main` d0d8074 in a `.worktrees/baseline` worktree, removed BEFORE the after-count so the run could not collect both copies. **The line this replaces was ACCURATE**, matching the measured baseline exactly, which is worth recording only because several recent entries found it stale and a run of accuracy is the reason measuring stays cheap. The delta reconciles per file, every number measured on both trees: the three new files are `lib/agent/scan-arrival.test.ts` 25, `lib/agent/instagram-scan-greeting.test.ts` 19 and `app/api/cron/instagram-scan-greetings/route.test.ts` 6; plus `serializers.test.ts` 269 → 282, `handle-events.test.ts` 62 → 71, `categories/index.test.ts` 132 → 140, `handle-followup.test.ts` 30 → 38, `agent-gate.test.ts` 20 → 27, `parse-events.test.ts` 53 → 58, the Instagram `route.test.ts` 57 → 62, `build-runtime-context.test.ts` 27 → 29, `refresh-profile.test.ts` 41 → 42, `delete-venue-data.test.ts` 14 → 15. **Mutation-verified against 23 mutants, each killed by the test named for it.** Six on the webhook half: guest creation reverted to find-only, the body filter dropped from the prior-conversation read, the duplicate guard disabled, the referral branch moved above the gate check (so a rollback would go on scheduling greetings), the `SHORTLINK` check removed, and `'referral'` dropped from `isGuestTurnKind`. Four on the timing: the greeting anchor removed — **the one the ruling asked for by name, and it kills the eight-minute-reply scenario** — a greeting predating its scan accepted, a future scan accepted, and the due predicate tightened off the boundary. **Nine on the processor, and the two that matter most are the repeat guard's**: the date key dropped from the claim, and the 23505 branch deleted. Both die, and they die because **`testing/scan-arrivals-fake.ts` MODELS MIGRATION 064'S PARTIAL UNIQUE INDEX** rather than trusting the code's own opinion of it — the guard is Postgres, so a fake without the index would let it be deleted with every test still green. The key is written out longhand there rather than imported, the reason `pending-rows-fake.ts` gives about migration 054's sentinel. Plus each of the five suppressions deleted one at a time, the `provider_message_id` filter dropped (so a second scan reads as the guest having written), and resolve burning the claim. Four on `handleFollowup`: the carve-out removed, the send routed back through `scheduleAndSend`, `answersInboundId` dropped, and the caller's `agentRunId` ignored. Four on the prompt layer: the visit branch inverted, the block removed from the assembly, the instruction branch inverted, and the null fallback flipped to the returning variant. Two on the route branch, one on the deletion step. **TAC-518's own source guard caught the ternary change, which is the point of it**, and was updated to pin the new shape plus two more contiguous literals: the carry-forward's gate, and that a carried scan anchors to the scan rather than to the greeting. **Two documented traps were walked into anyway.** `handle-followup.test.ts` resets `verifyMechanicOfferStageMock` and `applyApprovalPolicyStageMock` without defaulting them, because every pre-existing Instagram test refuses BEFORE generating and never reaches them; the carve-out block is the first that generates, so a bare `vi.fn()` resolved `undefined` and the orchestrator threw on `.status` — this file records that trap in this exact file. And the `provider_sent_at` mention list rejected `scan-arrival-store.ts` until it was added deliberately with its reason, which is what that guard is for. **The `PROMPT_VERSION` bump to v1.66.0 hit 16 live sites across 10 files**, found by `grep -rn "v1\.65\.0" --include='*.ts' .` rather than by reading any list — and **two of them are in no list this file carries**, `lib/agent/holding-message-replay.test.ts` and `lib/agent/coalesce-inbound.test.ts`, which is the grep argument restated by one more ticket. The seventeenth hit must NOT change: `system-template.ts`'s own changelog entry for v1.65.0 is history. **`SYSTEM_TEMPLATE` itself is untouched**; the version moves because the composed prompt does, which is what every category and block addition here has done. **No test here can show that the model OBEYS either greeting instruction**, which is why the ticket's gate is `QA: Device`.) Prior entry (TAC-516, Instagram business login: **+263 tests / +17 files** over **6321/273**, both ends measured against clean `origin/main` 33469d0 in the ticket's own sibling worktree (`../analog-guest-516`), the baseline re-measured AFTER the code-review remediation rather than carried: the first reading was +236/+16, the review added 12 across five files, and the hand-insert script added 15 in one more (`scripts/lib/insert-instagram-credential.test.ts`). The delta reconciles per file, every number measured on both trees: the 17 new files hold 258 — eight in `lib/messaging/instagram/` (`oauth-exchange` 26, `oauth-state` 25, `credentials-store` 22, `signed-request` 17, `refresh-tokens` 15, `delete-venue-data` 14, `token-crypto` 10, `oauth-state-store` 9), one in `lib/operator/` (`venue-connection` 16), one in `scripts/lib/` (`insert-instagram-credential` 15), and seven routes (`instagram/callback` 33, `operator/venues/[venueId]/instagram/connect` 14, `instagram/data-deletion` 11, `instagram/deauthorize` 9, `instagram/data-deletion/status` 8, `operator/venues/[venueId]` 8, `cron/instagram-token-refresh` 6) — plus `refresh-profile.test.ts` 39 → 41 and `send-target.test.ts` 9 → 12. `dispatch-instagram-outbound.test.ts` is UNCHANGED at 21 although its source moved, which is the tell that the rename there was a rename and not a behaviour change. **The prior line was 251 tests and 7 files STALE** (it read 6070/266), because TAC-529 and TAC-530 merged after it was written without updating it — measure, never subtract, and re-read the file in the tree you are measuring rather than the copy loaded at session start.
