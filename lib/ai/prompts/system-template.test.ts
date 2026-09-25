@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.66.0 (TAC-536: the guest_arrived category and the scan-arrival block)', () => {
-    expect(PROMPT_VERSION).toBe('v1.66.0')
+  it('is v1.67.0 (the two-block system prompt for the cache breakpoint)', () => {
+    expect(PROMPT_VERSION).toBe('v1.67.0')
   })
 })
 
