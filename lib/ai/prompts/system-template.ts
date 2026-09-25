@@ -1446,7 +1446,35 @@ import {
 // `VenueServicesSchema` → `formatVenueServices`). A venue states what it does
 // and does not do; absence states nothing, and the conditional above then
 // correctly resolves to "not available".
-export const PROMPT_VERSION = 'v1.65.0'
+// v1.66.0 (TAC-536): a guest who scans the counter code and says nothing gets
+// greeted, and the prompt gains the two things that turn requires.
+//
+// A new outbound-only category, `guest_arrived`, with TWO instruction variants
+// chosen by whether the guest has any message on our record. They say opposite
+// things about introducing yourself, so the choice is guest-facing rather than
+// stylistic: one greets a regular without an introduction, the other says who
+// they have reached. See lib/ai/prompts/categories/guest-arrived.ts for why the
+// second is NOT TAC-423's opener character for character, which is what a first
+// reading of the ruling asks for and is impossible on a turn with no message.
+//
+// And `## Guest just arrived`, rendered immediately after `## Right now`. It
+// states TWO INDEPENDENT AXES and the whole point is that neither is derived
+// from the other: whether the venue has talked to this guest is knowable
+// exactly, whether they have VISITED is not, because there is no till and a
+// visit exists only if someone reported one. Collapsing them is what would
+// greet someone who has messaged for weeks as new, or someone who has never
+// been in as a regular.
+//
+// The correction that matters most is in the false conversation line. "No
+// messages on record" is not "never messaged": a standalone referral only
+// arrives into a thread Instagram already has, so a guest with nothing on file
+// has very likely been messaging the shop since before we connected. The line
+// says so, and TAC-515's history import is what will eventually fill the gap.
+//
+// SYSTEM_TEMPLATE itself is UNCHANGED. The version moves because the composed
+// prompt does, which is the convention every category and block addition here
+// has followed.
+export const PROMPT_VERSION = 'v1.66.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
