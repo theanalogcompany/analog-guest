@@ -415,6 +415,8 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     systemPrompt: '',
     userPrompt: '',
     promptVersion: PROMPT_VERSION,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1316,6 +1318,14 @@ async function runInboundTurn(
         attempts: gen.result.attempts,
         attemptScores: gen.result.attemptScores,
         promptVersion: gen.result.promptVersion,
+        // Prompt-cache accounting. This span is the ONLY surface the cache is
+        // visible on: a hit and a fast uncached call have identical latency,
+        // and a breakpoint that quietly stops reading raises no error. Query
+        // these in Langfuse alongside the latency percentiles — see CLAUDE.md
+        // "Latency and cost". A busy venue sitting at cacheReadTokens 0 means
+        // the prefix is drifting per message or the TTL is too short.
+        cacheReadTokens: gen.result.cacheReadTokens,
+        cacheWriteTokens: gen.result.cacheWriteTokens,
         bodyLength: gen.result.body.length,
       },
       content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,

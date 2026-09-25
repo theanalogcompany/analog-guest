@@ -1474,7 +1474,23 @@ import {
 // SYSTEM_TEMPLATE itself is UNCHANGED. The version moves because the composed
 // prompt does, which is the convention every category and block addition here
 // has followed.
-export const PROMPT_VERSION = 'v1.66.0'
+//
+// v1.67.0: the composed system prompt is sent as TWO blocks rather than one,
+// so a prompt-cache breakpoint can sit between them (lib/ai/compose-prompt.ts
+// `cacheableSystemPrefix` / `volatileSystemSuffix`, applied in
+// generate-message.ts).
+//
+// NOTHING IN THE TEXT CHANGED. The bytes are identical and a test asserts it:
+// `systemPrompt === `${cacheableSystemPrefix}\n\n${volatileSystemSuffix}``
+// holds for every category, and the voice-fidelity instruction stays last
+// where it has always been. What moved is the ENVELOPE — one system text
+// block became two, with cache_control on the first.
+//
+// The version moves for the same reason TAC-367's did when only the
+// generation envelope changed: the two populations have to be separable in
+// analytics. A cached run and an uncached one are otherwise indistinguishable
+// in a trace, which is exactly the comparison this change exists to enable.
+export const PROMPT_VERSION = 'v1.67.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

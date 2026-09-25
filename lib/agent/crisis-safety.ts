@@ -98,6 +98,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     systemPrompt: '',
     userPrompt: '',
     promptVersion: PROMPT_VERSION,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

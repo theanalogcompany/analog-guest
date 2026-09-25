@@ -109,6 +109,8 @@ function generation(body: string, overrides: Partial<GenerateMessageResult> = {}
     systemPrompt: '',
     userPrompt: '',
     promptVersion: 'v-test',
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

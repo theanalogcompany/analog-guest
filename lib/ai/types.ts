@@ -602,6 +602,18 @@ export type GenerateMessageResult = {
   systemPrompt: string
   userPrompt: string
   promptVersion: string
+  // Anthropic prompt-cache accounting for this call, summed across attempts.
+  //
+  // cacheReadTokens > 0 means the venue-stable system prefix was served from
+  // cache; cacheWriteTokens > 0 means this call populated it. The orchestrator
+  // puts both on the `generate` Langfuse span, which is the ONLY place the
+  // cache is observable — a breakpoint that silently stops reading throws no
+  // error and shows up nowhere else. A sustained cacheReadTokens of 0 across
+  // a busy venue means the prefix is drifting per message (something
+  // per-message leaked into composePrompt's first three sections) or the TTL
+  // is expiring before the next message arrives.
+  cacheReadTokens: number
+  cacheWriteTokens: number
   // True when the final shipped body still contains an em dash (—) or en dash
   // (–) after MAX_ATTEMPTS regenerations — the dash regex check (THE-225) was
   // unable to coax a clean reply but we ship anyway rather than refuse. The

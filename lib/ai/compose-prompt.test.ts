@@ -590,3 +590,105 @@ describe('composePrompt — R35 governs a challenge turn whatever category it la
     expect(systemPromptFor('acknowledgment')).toContain('This is a close, not an opening')
   })
 })
+
+describe('composePrompt — cacheable system split', () => {
+  // The split exists so a prompt-cache breakpoint can sit between the
+  // venue-stable and per-message halves of the system prompt. Two properties
+  // have to hold for that to be both SAFE (no functional drift) and USEFUL
+  // (the prefix actually repeats, so the cache reads instead of writing).
+
+  it('NO DRIFT: the two halves rejoin to exactly the old single system string', () => {
+    // This is the anti-drift assertion. The split must be a split — the same
+    // bytes, in the same order, cut at a boundary — and never a rewrite. If
+    // someone reorders sections or changes a separator, this fails before the
+    // behaviour reaches a model.
+    for (const category of MESSAGE_CATEGORIES) {
+      const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } = composePrompt(
+        makeInput({ category, knowledgeChunks: [exampleChunk] }),
+      )
+      expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(systemPrompt)
+    }
+  })
+
+  it('NO DRIFT: holds when the optional RAG and knowledge blocks are both absent', () => {
+    // The suffix is built by slicing off the first N sections, so an input
+    // that omits the two optional blocks is the case where an off-by-one in
+    // that slice would show up as a prefix swallowing the category block.
+    const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } = composePrompt(
+      makeInput({ ragChunks: [], knowledgeChunks: undefined }),
+    )
+    expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(systemPrompt)
+    expect(volatileSystemSuffix).toContain('## Category-specific instructions')
+  })
+
+  it('the prefix carries the venue-stable blocks and nothing per-message', () => {
+    const { cacheableSystemPrefix } = composePrompt(
+      makeInput({
+        ragChunks: [{ id: 'c1', text: 'RAG_MARKER_TEXT', sourceType: 'sample_text' }],
+        knowledgeChunks: [exampleChunk],
+      }),
+    )
+    // Venue-stable content is present.
+    expect(cacheableSystemPrefix).toContain(systemTemplateFor('text'))
+    expect(cacheableSystemPrefix).toContain('warm and direct')
+    expect(cacheableSystemPrefix).toContain('1 Test St')
+    // Per-message content is NOT. Any of these inside the breakpoint would
+    // invalidate the cache on every message and make the feature a pure cost.
+    expect(cacheableSystemPrefix).not.toContain('RAG_MARKER_TEXT')
+    expect(cacheableSystemPrefix).not.toContain('flagship blend story')
+    expect(cacheableSystemPrefix).not.toContain('## Category-specific instructions')
+  })
+
+  it('CACHE HITS: the prefix is byte-identical across messages to the same venue', () => {
+    // The actual precondition for a cache read. Two different messages to the
+    // same venue on the same channel — different category, different retrieved
+    // chunks, different runtime — must produce the identical prefix.
+    const a = composePrompt(
+      makeInput({
+        category: 'reply',
+        ragChunks: [{ id: 'c1', text: 'first chunk', sourceType: 'sample_text' }],
+        knowledgeChunks: [exampleChunk],
+        runtime: { inboundMessage: 'are you open' },
+      }),
+    )
+    const b = composePrompt(
+      makeInput({
+        category: 'acknowledgment',
+        ragChunks: [{ id: 'c2', text: 'a completely different chunk', sourceType: 'sample_text' }],
+        knowledgeChunks: undefined,
+        runtime: { inboundMessage: 'thanks!' },
+      }),
+    )
+    expect(a.cacheableSystemPrefix).toBe(b.cacheableSystemPrefix)
+    // Sanity: the halves that SHOULD differ do, so this isn't passing because
+    // the two inputs collapsed to the same prompt.
+    expect(a.volatileSystemSuffix).not.toBe(b.volatileSystemSuffix)
+  })
+
+  it('CACHE KEYING: the prefix changes when the venue or channel changes', () => {
+    // The flip side. A shared prefix across venues would serve one venue's
+    // voice from another's cache entry, which the "every venue is its own
+    // isolated block" principle forbids.
+    const base = composePrompt(makeInput())
+    const otherVenue = composePrompt(
+      makeInput({
+        venueInfo: VenueInfoSchema.parse({
+          address: { line1: '999 Other Ave', city: 'Elsewhere', region: 'NY', postalCode: '10001' },
+        }),
+      }),
+    )
+    const otherChannel = composePrompt(makeInput({ channel: 'instagram' }))
+    expect(otherVenue.cacheableSystemPrefix).not.toBe(base.cacheableSystemPrefix)
+    expect(otherChannel.cacheableSystemPrefix).not.toBe(base.cacheableSystemPrefix)
+  })
+
+  it('the prefix clears Sonnet 4.6\'s 1024-token cacheable minimum', () => {
+    // A prefix under the model's minimum silently does not cache: no error,
+    // just cache_creation_input_tokens: 0 forever. The system template alone
+    // is ~37k characters, so this has enormous headroom — the assertion exists
+    // to catch someone shrinking the prefix past the cliff, not to be tight.
+    const { cacheableSystemPrefix } = composePrompt(makeInput())
+    const conservativeTokenEstimate = cacheableSystemPrefix.length / 4
+    expect(conservativeTokenEstimate).toBeGreaterThan(1024)
+  })
+})

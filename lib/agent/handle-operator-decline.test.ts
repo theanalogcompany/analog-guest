@@ -65,14 +65,49 @@ describe('handle-operator-decline structural invariants (TAC-299)', () => {
 
 // ---- behavior tests ----
 
-// The end-to-end binding test below importActual's ./stages for the real
-// buildAiRuntime. stages.ts reaches Voyage at module load, whose ESM build
-// trips vitest's directory-import resolver — the documented trap. Mock the SDK
-// leaf only, exactly as lib/tunables/manifest.test.ts does; buildAiRuntime is
-// pure and never touches it.
+// The end-to-end binding test below needs the real buildAiRuntime. stages.ts
+// reaches Voyage at module load, whose ESM build trips vitest's
+// directory-import resolver — the documented trap. Mock the SDK leaf only,
+// exactly as lib/tunables/manifest.test.ts does; buildAiRuntime is pure and
+// never touches it.
 vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
+
+// HOISTED OUT OF THE TEST BODY ON PURPOSE (2026-09-25), to widen a margin —
+// NOT because the import was the root cause. Both halves matter, and the
+// first draft of this comment got it wrong, so the measurements are recorded
+// here rather than the conclusion alone.
+//
+// `importActual` deliberately bypasses the `./stages` mock below, so it loads
+// the REAL stages.ts and its whole transitive graph — ~3,000 lines pulling the
+// @/lib/ai barrel, @/lib/rag and posthog. Measured on this file, same machine,
+// warm cache, only the position of these two lines changing:
+//
+//   inside the test body   tests 757ms, import 146ms
+//   at module scope        tests  11ms, import 787ms
+//
+// So the cost is real and it IS charged to the test when called from inside
+// one — but ~750ms against a 5,000ms budget is not a failure on its own. It
+// needs a ~6.6x slowdown. At module scope the same work happens during
+// collection, which testTimeout does not govern, and the margin becomes ~450x.
+//
+// THE ACTUAL TRIGGER IS CPU STARVATION. This file was observed failing two
+// runs in three in isolation while three other heavy processes saturated the
+// machine, and passing five for five on the same commit once they finished.
+// vitest runs the forks pool at CPU count, so a fork can simply be denied CPU
+// for five seconds; the test body itself is trivial. That is why
+// vitest.config.ts now sets an explicit `testTimeout` — this hoist widens one
+// margin, the config covers the class.
+//
+// Three sibling orchestrator tests carry the same pattern — handle-inbound,
+// handle-followup and coalesce-inbound all importActual './stages'. Worth
+// hoisting there too if any of them ever starts flaking.
+const { buildAiRuntime } = await vi.importActual<typeof import('./stages')>('./stages')
+const { runtimeToProse } =
+  await vi.importActual<typeof import('@/lib/ai/prompts/serializers')>(
+    '@/lib/ai/prompts/serializers',
+  )
 
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
@@ -503,11 +538,8 @@ describe('handleOperatorDecline', () => {
       commitmentDescription: 'cortado replacement',
     })
 
-    const { buildAiRuntime } =
-      await vi.importActual<typeof import('./stages')>('./stages')
-    const { runtimeToProse } = await vi.importActual<
-      typeof import('@/lib/ai/prompts/serializers')
-    >('@/lib/ai/prompts/serializers')
+    // buildAiRuntime and runtimeToProse are imported at module scope — see the
+    // comment on that import for why they must not be loaded from in here.
 
     // The SNAPSHOT, not the live ctx: this test is sensitive to the filter
     // running late as well as to it filtering wrongly.
