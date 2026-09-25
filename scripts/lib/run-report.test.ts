@@ -223,7 +223,19 @@ describe('readGitState', () => {
   })
 })
 
-describe('readGitState against a real repository', () => {
+// 20s, not the 5000ms default (2026-09-25). Every test in this block shells
+// out to real git, and the beforeAll below builds an entire repository —
+// init bare, clone, branch, commits, a worktree. Unloaded that is ~500ms for
+// the whole file, but vitest runs on the forks pool at CPU count and under a
+// full-suite run these spawns compete with every other fork; this block
+// failed intermittently in the full suite while passing every time alone.
+//
+// The budget is raised rather than the work reduced because the real git IS
+// the test: the fake above answers only the argument lists this module sends,
+// so it cannot tell a wrong revision range from a right one. Same reasoning
+// and same number as scripts/lib/linear-cli.test.ts and the claim-check test
+// in build-workflow.test.ts.
+describe('readGitState against a real repository', { timeout: 20_000 }, () => {
   // The fake above answers only the argument lists this module sends, so it
   // cannot tell a wrong range from a right one. This runs the same calls
   // against real git.

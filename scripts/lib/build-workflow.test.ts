@@ -230,6 +230,21 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
       expect(candidates([]).map((x: { identifier: string }) => x.identifier)).toContain('TAC-448')
     })
 
+    // 20s, not the 5000ms default (2026-09-25). This test spawns FIVE real
+    // subprocesses — jq for the candidates, three gits to build a repository,
+    // and a cold `node scripts/claims.mjs`. Unloaded the whole file's tests
+    // take well under a second, but vitest runs on the forks pool at CPU
+    // count, and under a full-suite run those spawns compete with every other
+    // fork: measured, it blew the 5s budget intermittently while passing every
+    // time in isolation.
+    //
+    // This is NOT the handle-operator-decline fix in disguise. There the cost
+    // was an avoidable lazy import and raising the timeout would have hidden
+    // it; here the subprocesses ARE the test — the whole point is running the
+    // real jq program and the real claim check rather than a fake that cannot
+    // tell a wrong argument list from a right one. The budget was simply never
+    // sized for that. Same reasoning and same number as the precedent at
+    // scripts/lib/linear-cli.test.ts.
     it('hands the claim check what it needs, and the claim check skips TAC-396', () => {
       const dir = mkdtempSync(join(tmpdir(), 'queue-claims-'))
       try {
@@ -262,7 +277,7 @@ describe('build-ready.yml skips a ticket another session has (TAC-448)', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
-    })
+    }, 20_000)
   })
 })
 
