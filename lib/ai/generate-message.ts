@@ -13,7 +13,7 @@ import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
-import { findUnverifiedUrls } from './url-detector'
+import { findUnverifiedUrls, URL_TOKEN_SPLITTER } from './url-detector'
 import type {
   AIResult,
   GenerateMessageAttempt,
@@ -64,12 +64,70 @@ export const MAX_OUTPUT_TOKENS = 1500
  */
 export const AI_ERROR_TRUNCATED = 'ai_generation_truncated'
 // THE-225: hard-block regex companion to the R3 voice rule. Em dash (U+2014)
-// or en dash (U+2013) anywhere in the body forces a regen even if voice
-// fidelity passes. Sonnet still occasionally emits dashes despite the rule
-// text; this is the deterministic backstop.
+// or en dash (U+2013) anywhere in the body is a violation. Sonnet still
+// occasionally emits dashes despite the rule text; this is the deterministic
+// backstop.
 const DASH_REGEX = /[—–]/
-const DASH_CONSTRAINT =
-  'Constraint: do not use a dash character (— or –) anywhere in your reply. Use a period or a comma instead.'
+
+/**
+ * Dash replacement, not regeneration (2026-09-23).
+ *
+ * THE-225 originally spent a whole extra generation call on a dash: the body
+ * was thrown away and Sonnet was asked again with a standing constraint. That
+ * is ~6s (p50) of guest-facing latency to fix a single character, on a path
+ * that auto-sends by default. Regenerating also re-rolls the ENTIRE body, so a
+ * draft that was good apart from one dash could come back worse on an axis
+ * nothing was checking.
+ *
+ * The substitution is what the constraint text asked the model for anyway
+ * ("use a period or a comma instead"), applied deterministically.
+ *
+ * Whitespace around the dash is absorbed so both dash idioms land on the same
+ * shape — ` — ` and `—` alike become `, `:
+ *
+ *   "dandelion root — in tonic"  ->  "dandelion root, in tonic"
+ *   "dandelion root—in tonic"    ->  "dandelion root, in tonic"
+ *
+ * A dash that ends the body would otherwise leave a trailing ", ", so the
+ * result is trimmed. A dash landing directly after existing comma punctuation
+ * would otherwise double it, so ", ," collapses back to ", ".
+ *
+ * THREE EDGE CASES, each found by probing this function rather than reasoned
+ * about, and each a real guest-facing defect:
+ *
+ *   1. URLs are left alone. `https://x.com/a—b` is one token, and rewriting
+ *      the dash inside it produces a broken link. Worse than broken: the
+ *      substitution runs BEFORE findUnverifiedUrls, so the mangled URL is
+ *      what gets checked, fails the allowlist it would otherwise have passed,
+ *      and queues a draft for a link the model got RIGHT.
+ *   2. A leading dash would produce a body opening on ", ".
+ *   3. A body that is ONLY a dash empties out completely. An empty body is
+ *      refused downstream by sendMessage's `message_must_have_content` guard,
+ *      so it cannot ship blank — but the guest gets silence and a red alert
+ *      instead of a reply, which is a worse outcome than the dash. So an
+ *      emptying substitution is REFUSED: the original body is returned and
+ *      `dashViolationPersisted` fires, which is exactly the backstop that
+ *      flag exists to be.
+ */
+export function replaceDashes(body: string): string {
+  // Split on URL tokens and substitute only in the gaps between them. Reuses
+  // url-detector's pattern rather than inventing a second one — two URL
+  // regexes in one file would drift, and this one already encodes the
+  // bare-domain and trailing-noise rules TAC-509 tuned.
+  const substituted = body
+    .split(URL_TOKEN_SPLITTER)
+    .map((segment, i) =>
+      // Odd indices are the captured URL tokens; leave them verbatim.
+      i % 2 === 1 ? segment : segment.replace(/\s*[—–]\s*/g, ', '),
+    )
+    .join('')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*$/, '')
+    .replace(/^\s*,\s*/, '')
+    .trim()
+  // Refuse a substitution that would empty a non-empty body (case 3 above).
+  return substituted === '' && body.trim() !== '' ? body : substituted
+}
 
 // TAC-355: deterministic backstop for reasoning/self-correction leaking into
 // a guest-facing body ("...dandelion root — actually wait, no dashes."). Runs
@@ -327,7 +385,6 @@ export async function generateMessage(
     //
     // null on the first attempt — the parent userPrompt is sent verbatim.
     let regenFeedback: string | null = null
-    let dashConstraintActive = false
     let selfTalkConstraintActive = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
@@ -338,7 +395,7 @@ export async function generateMessage(
       const userPromptForAttempt = regenFeedback
         ? `${userPrompt}\n\n${regenFeedback}`
         : userPrompt
-      const { object } = await generateObject({
+      const { object: rawObject } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
         // maps each to its own Anthropic system text block and honours a
@@ -382,6 +439,11 @@ export async function generateMessage(
         schema: GeneratedMessageSchema,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       })
+      // Dashes are substituted, never regenerated. Done HERE rather than at
+      // return so every downstream read — the break condition below, the
+      // attempt history, the shipped body — sees one body, and so a dash can
+      // never be the reason another generation call is spent.
+      const object = { ...rawObject, body: replaceDashes(rawObject.body) }
       lastResult = object
       attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
@@ -399,21 +461,21 @@ export async function generateMessage(
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
-      const hasDash = DASH_REGEX.test(object.body)
+      // No dash check here on purpose: replaceDashes already ran on this body,
+      // so there is nothing left to catch and nothing a further attempt could
+      // fix. The two checks below still gate the loop.
       const hasSelfTalk = matchSelfTalk(object.body).matched
       const badUrls = findUnverifiedUrls(object.body, allowedUrls)
       const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
-      if (fidelityPass && !hasDash && !hasSelfTalk && badUrls.length === 0) break
-      // Accumulate, never reset. All three compose (a body can trip more than
+      if (fidelityPass && !hasSelfTalk && badUrls.length === 0) break
+      // Accumulate, never reset. Both compose (a body can trip more than
       // one at once — the motivating incident tripped two) rather than one
       // winning over the other, and each stays set for the rest of the call.
-      if (hasDash) dashConstraintActive = true
       if (hasSelfTalk) selfTalkConstraintActive = true
       for (const url of badUrls) {
         if (!unverifiedUrlsSeen.includes(url)) unverifiedUrlsSeen.push(url)
       }
       const feedbackParts: string[] = []
-      if (dashConstraintActive) feedbackParts.push(DASH_CONSTRAINT)
       if (selfTalkConstraintActive) feedbackParts.push(SELF_TALK_CONSTRAINT)
       if (unverifiedUrlsSeen.length > 0) {
         feedbackParts.push(unverifiedUrlConstraint(unverifiedUrlsSeen))
@@ -470,6 +532,15 @@ export async function generateMessage(
         promptVersion: PROMPT_VERSION,
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
+        //
+        // Since replaceDashes runs on every attempt this is now expected to be
+        // false on every call, and the PostHog event it feeds
+        // (captureDashViolationPersisted, lib/agent/stages.ts) should go quiet
+        // rather than disappear. Kept deliberately: it is the only thing that
+        // would notice replaceDashes failing to hold — a new dash-like
+        // codepoint the regex does not cover, or a caller that reintroduces a
+        // dash downstream of this function. An alarm that never fires is the
+        // point; delete it only alongside the substitution itself.
         dashViolationPersisted: DASH_REGEX.test(lastResult.body),
         // TAC-355: same recompute-on-final-body pattern as dashViolationPersisted.
         // Unlike the dash case, a true here means the draft must NOT ship —

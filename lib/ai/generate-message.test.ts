@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
 import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '../schemas'
-import { generateMessage, VOICE_FIDELITY_INSTRUCTION } from './generate-message'
+import { generateMessage, replaceDashes, VOICE_FIDELITY_INSTRUCTION } from './generate-message'
 import type { GenerateMessageInput } from './types'
 
 // Mock the AI SDK + the model client so no real Anthropic call goes out.
@@ -154,51 +154,93 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(generateObjectMock).toHaveBeenCalledTimes(1)
   })
 
-  it('regenerates when a body with an em dash passes fidelity', async () => {
-    queueResponses(
-      {
-        body: 'we close at 11 — come by anytime',
-        voiceFidelity: 0.9,
-        reasoning: 'first try',
-      },
-      {
-        body: 'we close at 11. come by anytime.',
-        voiceFidelity: 0.88,
-        reasoning: 'rewritten without dash',
-      },
-    )
+  it('substitutes an em dash in place, spending no extra attempt', async () => {
+    queueResponses({
+      body: 'we close at 11 — come by anytime',
+      voiceFidelity: 0.9,
+      reasoning: 'first try',
+    })
 
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
 
-    expect(r.data.attempts).toBe(2)
-    expect(r.data.body).toBe('we close at 11. come by anytime.')
+    // The whole point of the substitution: one generation call, not two.
+    expect(r.data.attempts).toBe(1)
+    expect(generateObjectMock).toHaveBeenCalledTimes(1)
+    expect(r.data.body).toBe('we close at 11, come by anytime')
     expect(r.data.dashViolationPersisted).toBe(false)
-
-    // Second attempt's prompt should carry the dash-rewrite directive
-    // appended to the parent userPrompt.
-    const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).toContain(
-      'do not use a dash character (— or –)',
-    )
-
-    // The override should be recorded on attempt 2 only.
+    // Nothing was fed back, so no per-attempt prompt override was recorded.
     expect(r.data.attemptHistory[0].userPromptOverride).toBeUndefined()
-    expect(r.data.attemptHistory[1].userPromptOverride).toBe(secondCallPrompt)
   })
 
-  it('regenerates when a body with an en dash passes fidelity', async () => {
+  it('substitutes an en dash in place, spending no extra attempt', async () => {
+    queueResponses({
+      body: 'iced isn\'t on the menu – only hot',
+      voiceFidelity: 0.9,
+      reasoning: 'first try',
+    })
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(1)
+    expect(r.data.body).toBe('iced isn\'t on the menu, only hot')
+    expect(r.data.dashViolationPersisted).toBe(false)
+  })
+
+  it('substitutes an unspaced dash to the same shape as a spaced one', async () => {
+    queueResponses({
+      body: 'dandelion root—in tonic',
+      voiceFidelity: 0.9,
+      reasoning: 'first try',
+    })
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).toBe('dandelion root, in tonic')
+  })
+
+  it('leaves no trailing comma when the dash ends the body', async () => {
+    queueResponses({
+      body: 'we close at 11 —',
+      voiceFidelity: 0.9,
+      reasoning: 'first try',
+    })
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).toBe('we close at 11')
+  })
+
+  it('does not double the comma when a dash follows existing comma punctuation', async () => {
+    queueResponses({
+      body: 'sure, — we close at 11',
+      voiceFidelity: 0.9,
+      reasoning: 'first try',
+    })
+
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).toBe('sure, we close at 11')
+  })
+
+  it('still regenerates on low fidelity even when a dash was substituted', async () => {
+    // The substitution removes the dash as a REASON to retry; it must not
+    // suppress a retry the other checks would have caused anyway.
     queueResponses(
       {
-        body: 'iced isn\'t on the menu – only hot',
-        voiceFidelity: 0.9,
-        reasoning: 'first try',
+        body: 'sure thing — yeah',
+        voiceFidelity: 0.4,
+        reasoning: 'too generic',
       },
       {
-        body: 'iced isn\'t on the menu. only hot.',
+        body: 'yeah, of course',
         voiceFidelity: 0.85,
-        reasoning: 'rewritten',
+        reasoning: 'better',
       },
     )
 
@@ -206,7 +248,9 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.attempts).toBe(2)
-    expect(r.data.dashViolationPersisted).toBe(false)
+    // Attempt 1's recorded body is the substituted one, not the raw model text.
+    expect(r.data.attemptHistory[0].body).toBe('sure thing, yeah')
+    expect(r.data.body).toBe('yeah, of course')
   })
 
   it('does NOT include dash feedback when fidelity-only retry happens', async () => {
@@ -239,14 +283,18 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
   })
 
-  it('ships final body anyway when MAX_ATTEMPTS exhausted with persistent dash', async () => {
-    // All three attempts return em-dash bodies. Loop runs to completion;
-    // the final body is returned with dashViolationPersisted=true so the
-    // orchestrator can fire the PostHog event without blocking the send.
+  it('never lets a dash persist, however many attempts the other checks cost', async () => {
+    // REPLACES 'ships final body anyway when MAX_ATTEMPTS exhausted with
+    // persistent dash'. A persistent dash is no longer reachable: every
+    // attempt's body is substituted as it arrives, so the loop can run to
+    // MAX_ATTEMPTS for OTHER reasons and still ship a dash-free body.
+    //
+    // All three attempts here come back with a dash AND low fidelity, so
+    // fidelity is what drives the loop to exhaustion.
     queueResponses(
-      { body: 'a — b', voiceFidelity: 0.85, reasoning: '1' },
-      { body: 'c — d', voiceFidelity: 0.86, reasoning: '2' },
-      { body: 'e — f', voiceFidelity: 0.87, reasoning: '3' },
+      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
+      { body: 'c — d', voiceFidelity: 0.4, reasoning: '2' },
+      { body: 'e — f', voiceFidelity: 0.4, reasoning: '3' },
     )
 
     const r = await generateMessage(makeInput())
@@ -254,34 +302,17 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     if (!r.ok) return
 
     expect(r.data.attempts).toBe(3)
-    expect(r.data.body).toBe('e — f')
-    expect(r.data.dashViolationPersisted).toBe(true)
-    // All three attempts should be in history. Attempts 2 and 3 carry the
-    // override (because the prior attempt tripped the dash check).
-    expect(r.data.attemptHistory).toHaveLength(3)
-    expect(r.data.attemptHistory[0].userPromptOverride).toBeUndefined()
-    expect(r.data.attemptHistory[1].userPromptOverride).toContain(
-      'do not use a dash character',
-    )
-    expect(r.data.attemptHistory[2].userPromptOverride).toContain(
-      'do not use a dash character',
-    )
+    expect(r.data.body).toBe('e, f')
+    expect(r.data.dashViolationPersisted).toBe(false)
+    // Every recorded attempt is substituted, not just the shipped one.
+    expect(r.data.attemptHistory.map((a) => a.body)).toEqual(['a, b', 'c, d', 'e, f'])
   })
 
-  it('KEEPS the dash constraint after a clean attempt, for the rest of the call', async () => {
-    // REVERSAL of 'clears dash feedback after a clean attempt', which pinned
-    // the pre-TAC-509-follow-up behaviour. Ruled 2026-09-21: the constraint is
-    // sticky for the whole generateMessage call.
-    //
-    // Attempt 1: dash, low fidelity.
-    // Attempt 2: dash-clean, low fidelity — the loop continues for FIDELITY.
-    // Attempt 3: clean, high fidelity.
-    //
-    // The old behaviour dropped the dash constraint for attempt 3 the moment
-    // attempt 2 came back clean. That was safe only while a dash-clean,
-    // fidelity-passing attempt necessarily ENDED the loop; it does not hold on
-    // a fidelity retry, and TAC-355 and TAC-509 added two more reasons to keep
-    // looping past a clean body.
+  it('never puts a dash constraint in a regen prompt', async () => {
+    // REPLACES 'KEEPS the dash constraint after a clean attempt'. The sticky
+    // mechanism it pinned is still live and still tested — by the self-talk
+    // and unverified-URL cases below, which remain regeneration-driven. The
+    // dash is simply no longer one of its inputs, so it must never appear.
     queueResponses(
       { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
       { body: 'a b', voiceFidelity: 0.5, reasoning: '2' },
@@ -295,11 +326,12 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.attempts).toBe(3)
     expect(r.data.dashViolationPersisted).toBe(false)
 
-    const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).toContain('do not use a dash character')
-    const thirdCallPrompt = userPromptOnCall(2)
-    expect(thirdCallPrompt).toContain('do not use a dash character')
-    expect(r.data.attemptHistory[2].userPromptOverride).toContain('do not use a dash character')
+    for (let i = 0; i < generateObjectMock.mock.calls.length; i++) {
+      expect(userPromptOnCall(i)).not.toContain('dash character')
+    }
+    for (const attempt of r.data.attemptHistory) {
+      expect(attempt.userPromptOverride ?? '').not.toContain('dash character')
+    }
   })
 
   it('states every retained constraint as a standing rule, never as a report on the last attempt', async () => {
@@ -411,7 +443,11 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.selfTalkViolationPersisted).toBe(true)
   })
 
-  it('composes dash AND self-talk feedback when a single attempt trips both (shared attempt budget)', async () => {
+  it('substitutes the dash and regenerates for the self-talk, when one attempt trips both', async () => {
+    // The motivating incident for TAC-355 tripped both at once. They are now
+    // handled by different mechanisms in the same pass: the dash is rewritten
+    // in place, the self-talk still costs an attempt. Only the self-talk
+    // constraint reaches the retry prompt.
     queueResponses(
       {
         body: 'chicory — actually wait, no dashes',
@@ -432,9 +468,11 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.attempts).toBe(2)
     expect(r.data.dashViolationPersisted).toBe(false)
     expect(r.data.selfTalkViolationPersisted).toBe(false)
+    // Attempt 1's dash was substituted before the self-talk check read it.
+    expect(r.data.attemptHistory[0].body).toBe('chicory, actually wait, no dashes')
 
     const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).toContain('do not use a dash character')
+    expect(secondCallPrompt).not.toContain('dash character')
     expect(secondCallPrompt).toContain('any reference to your own instructions')
   })
 })
@@ -608,9 +646,12 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   // every attempt shares the same directive — a flip re-drawn per attempt
   // would let a retry silently change the rules mid-message.
   it('applies one directive across every regen attempt', async () => {
+    // Low fidelity on attempt 1 is what drives the retry here. It used to be a
+    // dash, which no longer costs an attempt — the directive this test is
+    // about is unaffected either way, it just needs the loop to run twice.
     queueResponses(
-      { body: 'we close at 11 — come by 😊', voiceFidelity: 0.9, reasoning: 'has a dash' },
-      { body: 'we close at 11. come by 😊', voiceFidelity: 0.88, reasoning: 'dash removed' },
+      { body: 'we close at 11, come by 😊', voiceFidelity: 0.4, reasoning: 'too generic' },
+      { body: 'we close at 11. come by 😊', voiceFidelity: 0.88, reasoning: 'better' },
     )
     const r = await generateMessage(inputWithDirective('none'))
     expect(r.ok).toBe(true)
@@ -745,19 +786,18 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     expect(r.data.unverifiedUrls).toEqual([])
   })
 
-  it('keeps the dash constraint on attempt 3 when only the link kept the loop going', async () => {
+  it('keeps the link constraint on attempt 3, and a dash never reopens the loop', async () => {
     // THE DEVICE FAILURE, 2026-09-21. Le Mil's draft 6a047b0c was held with
     // `unverified_url` AND shipped an em dash in the same body.
     //
-    // Attempt 1: dash + an unlisted link.
-    // Attempt 2: dash fixed, link still wrong — the loop continues for the
-    //            LINK, and the old code dropped the dash directive here
-    //            because the body it had just seen was dash-clean.
-    // Attempt 3: generated with no dash constraint, put a dash back, and that
-    //            body is what the loop returns.
+    // The dash half of that incident is now structurally impossible: every
+    // body is substituted on arrival, so attempt 3 cannot "put a dash back".
+    // What still needs pinning is the other half — the LINK constraint has to
+    // stay sticky across an attempt that did not re-trip it.
     //
-    // The assertion that matters is on attempt 3's prompt. Dropping stickiness
-    // fails it.
+    // Attempt 1: dash + an unlisted link.
+    // Attempt 2: no dash, link still wrong — the loop continues for the LINK.
+    // Attempt 3: same link, still wrong.
     const off = 'https://lemils.com/products/invented'
     queueResponses(
       { body: `Try ${off} — it is great.`, voiceFidelity: 0.9, reasoning: '1' },
@@ -768,17 +808,17 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.attempts).toBe(3)
+    expect(r.data.dashViolationPersisted).toBe(false)
 
     const prompts = generateObjectMock.mock.calls.map(
       (_c: unknown[], i: number) => userPromptOnCall(i),
     )
-    // Attempt 2 carries both, as it always did.
-    expect(prompts[1]).toContain('do not use a dash character')
+    // The link constraint is carried on both retries, including attempt 3.
     expect(prompts[1]).toContain(off)
-    // Attempt 3 carries the dash constraint even though attempt 2 was
-    // dash-clean, because the loop is still running.
-    expect(prompts[2]).toContain('do not use a dash character')
     expect(prompts[2]).toContain(off)
+    // The dash never becomes a directive on any attempt.
+    expect(prompts[1]).not.toContain('dash character')
+    expect(prompts[2]).not.toContain('dash character')
   })
 
   it('names a link flagged on an earlier attempt alongside one invented later', async () => {
@@ -797,7 +837,7 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     expect(thirdPrompt).toContain(second)
   })
 
-  it('composes URL feedback alongside dash and self-talk on one attempt', async () => {
+  it('composes URL feedback alongside self-talk on one attempt, with the dash substituted', async () => {
     const off = 'https://lemils.com/products/nope'
     queueResponses(
       { body: `Try ${off} — actually wait, no dashes.`, voiceFidelity: 0.9, reasoning: 'r' },
@@ -805,9 +845,11 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     )
     await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
     const secondPrompt = userPromptOnCall(1)
-    expect(secondPrompt).toContain('dash character')
+    // The two regeneration-driven checks still compose.
     expect(secondPrompt).toContain('self-correction')
     expect(secondPrompt).toContain(off)
+    // The dash is not one of them any more.
+    expect(secondPrompt).not.toContain('dash character')
   })
 
   it('reconciles a single trailing slash against the stored list', async () => {
@@ -980,5 +1022,72 @@ describe('generateMessage — prompt cache breakpoint', () => {
     const [stable, volatile] = systemBlocksOnCall(0)
     expect(volatile.content.endsWith(VOICE_FIDELITY_INSTRUCTION)).toBe(true)
     expect(stable.content).not.toContain(VOICE_FIDELITY_INSTRUCTION)
+  })
+})
+
+describe('replaceDashes — the edge cases probing found', () => {
+  // These are unit tests on the pure function rather than loop tests, because
+  // each is about the SUBSTITUTION itself and none needs a generation. Every
+  // one was found by running the function over adversarial inputs, not by
+  // reading it — the first version passed every loop test above while getting
+  // all three of these wrong.
+
+  it('leaves a dash INSIDE a url alone', () => {
+    // The dangerous one. replaceDashes runs BEFORE findUnverifiedUrls, so a
+    // mangled URL is what gets allowlist-checked: the model would be blamed,
+    // and the draft queued, for a link it got right.
+    const body = 'grab it at https://example.com/beans/a—b today'
+    expect(replaceDashes(body)).toBe(body)
+  })
+
+  it('still substitutes prose on either side of a url', () => {
+    // The inverse of the above — skipping URLs must not disable the whole
+    // substitution for any body that happens to contain a link.
+    expect(replaceDashes('yes — see https://example.com/x — anytime')).toBe(
+      'yes, see https://example.com/x, anytime',
+    )
+  })
+
+  it('never opens a body on a comma', () => {
+    expect(replaceDashes('— leading')).toBe('leading')
+    expect(replaceDashes('—a')).toBe('a')
+  })
+
+  it('REFUSES to empty a non-empty body', () => {
+    // A body that is only a dash would substitute to nothing. An empty body is
+    // refused downstream by sendMessage's message_must_have_content guard, so
+    // it cannot ship blank — but the guest would get silence and a red alert
+    // instead of a reply, which is strictly worse than the dash. Keeping the
+    // original lets dashViolationPersisted fire, which is what that flag is
+    // for.
+    expect(replaceDashes('—')).toBe('—')
+    expect(replaceDashes(' — ')).toBe(' — ')
+    expect(replaceDashes('–')).toBe('–')
+  })
+
+  it('handles several dashes in one body', () => {
+    expect(replaceDashes('a — b — c')).toBe('a, b, c')
+  })
+
+  it('leaves an ascii double-hyphen alone', () => {
+    // Not in DASH_REGEX's set and never was. Pinned so a future "tidy up the
+    // dash handling" edit does not quietly widen the substitution to prose
+    // the R3 voice rule permits.
+    expect(replaceDashes('--')).toBe('--')
+  })
+
+  it('is idempotent', () => {
+    // The loop applies it once per attempt and the final body is recomputed
+    // by dashViolationPersisted. A non-idempotent transform would drift a
+    // body that survived more than one pass.
+    const once = replaceDashes('we close at 11 — come by anytime')
+    expect(replaceDashes(once)).toBe(once)
+  })
+
+  it('leaves a clean body byte-identical', () => {
+    // The overwhelmingly common case: ~99% of bodies have no dash at all, and
+    // this function runs on every one of them.
+    const clean = "we close at 11. come by anytime, we'd love to see you!"
+    expect(replaceDashes(clean)).toBe(clean)
   })
 })

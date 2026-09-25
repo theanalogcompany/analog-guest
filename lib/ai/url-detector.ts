@@ -56,6 +56,23 @@ const TRAILING_NOISE = new Set(['.', ',', '!', '?', ';', ':', ')', ']', '}', '>'
 const URL_TOKEN =
   /https?:\/\/[^\s]+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:\/[^\s]*)?/gi
 
+/**
+ * The same token pattern wrapped in ONE capture group, for
+ * `String.prototype.split`.
+ *
+ * split() with a capturing delimiter retains the matches, so the result
+ * alternates: even indices are the prose between URLs, odd indices are the
+ * URLs themselves. That lets a caller transform prose while leaving links
+ * byte-identical — see `replaceDashes` in generate-message.ts, where rewriting
+ * a dash inside a URL would both break the link and then fail the allowlist
+ * check that the untouched URL would have passed.
+ *
+ * Derived from URL_TOKEN's own source rather than retyped, so the two cannot
+ * drift apart. Adding a capture group to URL_TOKEN itself would change the
+ * shape of every `matchAll` result that already reads it.
+ */
+export const URL_TOKEN_SPLITTER = new RegExp(`(${URL_TOKEN.source})`, 'gi')
+
 const SCHEME = /^https?:\/\//i
 
 /** Strip trailing sentence punctuation and closing brackets, repeatedly. */
