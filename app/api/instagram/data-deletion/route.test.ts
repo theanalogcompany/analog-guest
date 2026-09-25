@@ -22,6 +22,18 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({ from: () => ({ insert: (row: unknown) => insertMock(row) }) }),
 }))
 
+// The receipt layer has its own tests (lib/messaging/instagram/*receipt*).
+// Mocked here so these stay about the ROUTE: what it hands the writer, and
+// that a receipt failure never changes the response Meta gets.
+const findEarlierMock = vi.fn()
+vi.mock('@/lib/messaging/instagram/callback-receipts', () => ({
+  findEarlierDelivery: (...a: unknown[]) => findEarlierMock(...a),
+}))
+const writeReceiptMock = vi.fn()
+vi.mock('@/lib/messaging/instagram/write-callback-receipt', () => ({
+  writeCallbackReceipt: (...a: unknown[]) => writeReceiptMock(...a),
+}))
+
 import { POST } from './route'
 
 const SECRET = 'app-secret-value'
@@ -63,6 +75,8 @@ function loggedText(): string {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  findEarlierMock.mockResolvedValue({ ok: true, earlier: null })
+  writeReceiptMock.mockResolvedValue(undefined)
   logged.length = 0
   process.env.INSTAGRAM_APP_SECRET = SECRET
   process.env.INSTAGRAM_OAUTH_REDIRECT_URL = 'https://webhooks.theanalog.company/api/instagram/callback'
@@ -177,3 +191,60 @@ describe('POST /api/instagram/data-deletion', () => {
     expect(rendered).not.toContain(SECRET)
   })
 })
+
+describe('POST /api/instagram/data-deletion: the replay trail', () => {
+  // The lookup describes the state the delivery ARRIVED INTO. Run after the
+  // redaction it would still be correct here, but run after the receipt is
+  // written it would match the row just written and every delivery would
+  // read as a repeat of itself.
+  it('checks for an earlier delivery BEFORE redacting anything', async () => {
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(findEarlierMock).toHaveBeenCalled()
+    expect(findEarlierMock.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteMock.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('hands the writer what this delivery actually touched', async () => {
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        callback: 'data_deletion',
+        outcome: 'applied',
+        rowsAffected: 3,
+        confirmationCode: CODE,
+      }),
+    )
+  })
+
+  // `no_match` is not a failure: Meta legitimately sends this for an account
+  // no venue owns. Recording it as `failed` would make the one genuinely
+  // diagnostic signal indistinguishable from a database problem.
+  it('records an unmatched account as no_match, not as a failure', async () => {
+    deleteMock.mockResolvedValue({ ok: true, venueId: null, guestsAffected: 0, confirmationCode: CODE })
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: 'no_match', rowsAffected: 0 }),
+    )
+  })
+
+  it('records a failed redaction as failed, with no row count to claim', async () => {
+    deleteMock.mockResolvedValue({ ok: false, error: 'boom', confirmationCode: CODE })
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: 'failed', rowsAffected: null }),
+    )
+  })
+
+  // Meta disables a callback after repeated non-2xx, so an audit row that
+  // cannot be written must never change the answer.
+  it('still answers in Meta\'s shape when the receipt writer throws', async () => {
+    writeReceiptMock.mockRejectedValue(new Error('receipt exploded'))
+    const res = await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(res.status).toBe(200)
+  })
+})
+

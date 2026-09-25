@@ -21,11 +21,16 @@
 // An UNMATCHED account is a 200 and not an error: Meta can send this for an
 // account we never finished connecting, or one already disconnected.
 
+import { findEarlierDelivery } from '@/lib/messaging/instagram/callback-receipts'
 import {
   deauthorizeInstagramCredential,
 } from '@/lib/messaging/instagram/credentials-store'
-import { parseSignedRequest } from '@/lib/messaging/instagram/signed-request'
+import {
+  parseSignedRequest,
+  signedRequestPayloadFingerprint,
+} from '@/lib/messaging/instagram/signed-request'
 import { createAdminClient } from '@/lib/db/admin'
+import { writeCallbackReceipt } from '@/lib/messaging/instagram/write-callback-receipt'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,11 +70,41 @@ export async function POST(request: Request): Promise<Response> {
     return new Response(null, { status: 403 })
   }
 
-  const result = await deauthorizeInstagramCredential(
-    createAdminClient(),
-    parsed.payload.userId,
-    new Date(),
-  )
+  const now = new Date()
+  const supabase = createAdminClient()
+
+  // Read BEFORE the work, so the answer describes the state this delivery
+  // arrived into rather than the one it created.
+  const fingerprint = signedRequestPayloadFingerprint(signed)
+  const earlier = fingerprint === null ? null : await findEarlierDelivery(supabase, fingerprint)
+
+  const result = await deauthorizeInstagramCredential(supabase, parsed.payload.userId, now)
+
+  // Guarded, not merely awaited: the receipt is an audit row, and Meta
+  // disables a callback after repeated non-2xx. A throw in here must never
+  // be the reason a delivery fails.
+  try {
+    await writeCallbackReceipt(supabase, {
+      callback: 'deauthorize',
+      fingerprint,
+      earlier,
+      payload: parsed.payload,
+      venueId: result.ok ? result.venueId : null,
+      outcome: !result.ok ? 'failed' : result.venueId === null ? 'no_match' : 'applied',
+      // Deauthorize touches no guest data at all, by design: revocation stops
+      // future traffic and says nothing about past data.
+      rowsAffected: null,
+      confirmationCode: null,
+      now,
+      logPrefix: '[instagram deauthorize]',
+    })
+  } catch (err) {
+    console.error('[instagram deauthorize] could not write the callback receipt', {
+      event: 'instagram_callback_receipt_threw',
+      error: err instanceof Error ? err.message : 'unknown error',
+    })
+  }
+
   if (!result.ok) {
     console.error('[instagram deauthorize] could not mark the venue disconnected', {
       event: 'instagram_deauthorize_failed',

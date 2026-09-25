@@ -42,7 +42,7 @@
 // So the window is deliberately left open. Closing it needs something other
 // than a clock (deduping the request itself), which is its own decision.
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 /**
  * Why a signed request was refused. Safe to log: none carries anything from
@@ -124,4 +124,27 @@ export function parseSignedRequest(raw: string, secret: string): ParseSignedRequ
 
   const issuedAt = typeof record.issued_at === 'number' ? record.issued_at : null
   return { ok: true, payload: { userId, issuedAt } }
+}
+
+/**
+ * A stable identifier for THIS EXACT PAYLOAD, for the callback receipt trail.
+ *
+ * sha256 of the PAYLOAD half only, hex. The signature half is deliberately
+ * excluded, and that is rule 1 above rather than tidiness: our digest of a
+ * payload is a valid signature for that payload until the secret rotates, so
+ * storing it anywhere — a log, a column — hands out a forgery. A hash of the
+ * payload cannot be turned back into one, and identifies a repeat just as
+ * well, since the same payload means the same `user_id` and `issued_at`.
+ *
+ * Two different signatures over one payload therefore fingerprint the same,
+ * which is correct: that is the same request.
+ *
+ * Returns null for anything that is not the two-part shape, so a caller cannot
+ * fingerprint a malformed string into something that looks like a real one.
+ * Callers run this only AFTER verification.
+ */
+export function signedRequestPayloadFingerprint(raw: string): string | null {
+  const parts = raw.split('.')
+  if (parts.length !== 2 || parts[1] === '') return null
+  return createHash('sha256').update(parts[1]).digest('hex')
 }

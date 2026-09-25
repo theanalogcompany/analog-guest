@@ -15,6 +15,18 @@ vi.mock('@/lib/messaging/instagram/credentials-store', () => ({
 }))
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: () => ({}) }))
 
+// The receipt layer has its own tests (lib/messaging/instagram/*receipt*).
+// Mocked here so these stay about the ROUTE: what it hands the writer, and
+// that a receipt failure never changes the response Meta gets.
+const findEarlierMock = vi.fn()
+vi.mock('@/lib/messaging/instagram/callback-receipts', () => ({
+  findEarlierDelivery: (...a: unknown[]) => findEarlierMock(...a),
+}))
+const writeReceiptMock = vi.fn()
+vi.mock('@/lib/messaging/instagram/write-callback-receipt', () => ({
+  writeCallbackReceipt: (...a: unknown[]) => writeReceiptMock(...a),
+}))
+
 import { POST } from './route'
 
 const SECRET = 'app-secret-value'
@@ -55,6 +67,8 @@ function loggedText(): string {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  findEarlierMock.mockResolvedValue({ ok: true, earlier: null })
+  writeReceiptMock.mockResolvedValue(undefined)
   logged.length = 0
   process.env.INSTAGRAM_APP_SECRET = SECRET
   deauthorizeMock.mockResolvedValue({ ok: true, venueId: VENUE_ID })
@@ -135,3 +149,47 @@ describe('POST /api/instagram/deauthorize', () => {
     expect(rendered).not.toContain(SECRET)
   })
 })
+
+describe('POST /api/instagram/deauthorize: the replay trail', () => {
+  it('checks for an earlier delivery BEFORE disconnecting anything', async () => {
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(findEarlierMock.mock.invocationCallOrder[0]).toBeLessThan(
+      deauthorizeMock.mock.invocationCallOrder[0],
+    )
+  })
+
+  // Deauthorize touches no guest data at all — revocation stops future
+  // traffic and says nothing about past data. A row count here would be a
+  // claim about something this callback never looked at.
+  it('records no row count, because it redacts nothing', async () => {
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ callback: 'deauthorize', rowsAffected: null, confirmationCode: null }),
+    )
+  })
+
+  it('records an unmatched account as no_match, not as a failure', async () => {
+    deauthorizeMock.mockResolvedValue({ ok: true, venueId: null })
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: 'no_match' }),
+    )
+  })
+
+  it('records a failed disconnect as failed', async () => {
+    deauthorizeMock.mockResolvedValue({ ok: false, error: 'boom' })
+    await call(signedRequest({ user_id: ACCOUNT_ID }))
+    expect(writeReceiptMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: 'failed' }),
+    )
+  })
+
+  it('still answers 200 when the receipt writer throws', async () => {
+    writeReceiptMock.mockRejectedValue(new Error('receipt exploded'))
+    expect((await call(signedRequest({ user_id: ACCOUNT_ID }))).status).toBe(200)
+  })
+})
+

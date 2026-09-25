@@ -2578,6 +2578,51 @@ export interface InstagramDeletionUnmatchedAccountProps {
  * Carries the confirmation code only: never the account id, which belongs to
  * someone who has just asked us to erase their data.
  */
+type InstagramCallbackReplayedProps = {
+  callback: 'deauthorize' | 'data_deletion'
+  instagramAccountId: string
+  /** The receipt this one repeats. */
+  earlierReceiptId: string
+  earlierReceivedAt: string
+  rowsAffected: number | null
+  confirmationCode: string | null
+}
+
+/**
+ * A verified callback arrived carrying a payload we have already processed.
+ *
+ * Replay is ACCEPTED rather than refused (ruled 2026-09-24), so this is not an
+ * error — it is the trail that ruling asked for. It Slack-relays only for the
+ * CONSEQUENTIAL case (`isConsequentialRepeat`): a deletion replay that
+ * actually redacted rows, which can only be rows created after the original
+ * request was honoured. A repeated deauthorize, or a deletion replay that
+ * found nothing left, is idempotent and would be pure noise.
+ *
+ * NOTHING FROM THE PAYLOAD BEYOND THE ACCOUNT ID, and no fingerprint: the
+ * fingerprint is a database-side join key, and putting it in Slack invites
+ * someone to treat it as a token-shaped secret it is not, while adding
+ * nothing a person reading an alert can act on.
+ */
+export async function captureInstagramCallbackReplayed(
+  props: InstagramCallbackReplayedProps,
+  options: { relayToSlack: boolean },
+): Promise<void> {
+  await capturePostHogEvent('instagram_callback_replayed', props.instagramAccountId, { ...props })
+  if (!options.relayToSlack) return
+  await postToSlack(
+    [
+      `*Instagram data-deletion REPLAY redacted live guest data*`,
+      `account: \`${props.instagramAccountId}\``,
+      `rows redacted by the replay: *${props.rowsAffected ?? 0}*`,
+      props.confirmationCode ? `confirmation: \`${props.confirmationCode}\`` : null,
+      `first seen: ${props.earlierReceivedAt} (receipt \`${props.earlierReceiptId}\`)`,
+      `_A deletion we had already honoured arrived again and found NEW rows to redact, so those rows were created after the original request. Replay is accepted by design (signed_request carries no nonce and refusing a genuine deletion is a compliance failure), which is why this is recorded rather than blocked._`,
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n'),
+  )
+}
+
 export async function captureInstagramDeletionUnmatchedAccount(
   props: InstagramDeletionUnmatchedAccountProps,
 ): Promise<void> {
