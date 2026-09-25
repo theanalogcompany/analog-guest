@@ -590,6 +590,34 @@ Three layers, each filling a different gap. Don't conflate them.
   - `flushAsync` is awaited in the `finally` block of each handler. Both handlers run inside a `waitUntil` keep-alive window from their callers (webhook route, cron) so the flush completes before the function returns.
   - `/admin/health` reports four states via `app/admin/(authed)/health/check-langfuse.ts`: **Active** (all keys + known host, green), **Disabled** (`LANGFUSE_ENABLED=false` set explicitly, neutral), **Misconfigured** (some keys present but not all, or unrecognized host — red, with the specific reason in the detail line), **Not configured** (no `LANGFUSE_*` vars set, neutral — local-dev / no-op is appropriate). The check does not actively probe Langfuse — the SDK has no synchronous ping, and probing on every health-page load would pollute the trace stream.
 
+### Latency and cost: where the numbers already live
+
+**Do not add a `duration_ms` column or reach for SQL to answer a latency question.** Langfuse already stores every stage as a timed span, and its metrics API aggregates them into exactly the per-stage, per-percentile timeseries you want. This was rediscovered the hard way on 2026-09-23; the query is written down here so nobody re-derives it.
+
+Per-stage p50/p90/p99 across a window, grouped by span name:
+
+```bash
+PK=$LANGFUSE_PUBLIC_KEY; SK=$LANGFUSE_SECRET_KEY
+Q='{"view":"observations",
+    "metrics":[{"measure":"latency","aggregation":"p50"},
+               {"measure":"latency","aggregation":"p90"},
+               {"measure":"latency","aggregation":"p99"}],
+    "dimensions":[{"field":"name"}],
+    "fromTimestamp":"2026-09-16T00:00:00Z","toTimestamp":"2026-09-24T00:00:00Z"}'
+curl -s -u "$PK:$SK" -G "$LANGFUSE_BASE_URL/api/public/v2/metrics" --data-urlencode "query=$Q"
+```
+
+Add `"timeDimension":{"granularity":"day"}` for a daily series (this is how you show a change landing), and a `filters` array to scope to one span, e.g. `[{"column":"name","operator":"=","value":"generate","type":"string"}]`.
+
+- **Use `/api/public/v2/metrics`.** The v1/v3 path still answers but returns a deprecation notice: removed **2026-11-16**, after which "all other public APIs may have data delays of several minutes" and OpenTelemetry ingestion becomes the only live path. Anything still on the old endpoint needs moving before that date.
+- **Baseline, measured 2026-09-23** over the prior week, seconds, p50 / p90 / p99: `generate` 6.24 / 13.28 / 22.66 · `verify_prose_promise` 5.08 / 7.97 / 12.87 · `verify_grounding` and `verify_mechanic_offer` 4.99 / 7.88 / 15.43 · `classify` 1.93 / 3.10 / 4.17 · `send` 1.02 / 6.72 / 11.62 · `retrieve` 0.29 · `context_build` 0.23 · `retrieve_knowledge` 0.17 · `queue` 0.08. End-to-end `agent.inbound` p50 17.8s, p90 27.6s. Everything non-LLM totals under a second — the time is in two model calls, and the five verifiers already run in parallel (`Promise.allSettled` in `handle-inbound.ts`), so that block costs the slowest verifier, not their sum.
+- **`generate.attempt_N` spans are not timed.** They are synthesized post-hoc from `attemptScores` and read 0.00s at every percentile, so they count retries but cannot price one. Real per-attempt timing is THE-215.
+- **The coalesce settle is not in the trace.** `COALESCE_SETTLE_MS` (8s) elapses before the trace opens, so Langfuse `agent.inbound` latency is generation time only. `captureAgentLatencyHigh`'s `totalElapsedMs` *does* include the settle. Two different numbers; don't compare them.
+- **Prompt-cache hit rate is on the `generate` span**, as `cacheReadTokens` / `cacheWriteTokens` (see the AI agent runtime contract). Latency alone cannot tell a cache hit from a fast call, and a breakpoint that silently stops reading raises no error — a busy venue sitting at `cacheReadTokens` 0 is the signal that the cached prefix has drifted per-message or the TTL is too short for the traffic.
+- **`agent_latency_high` is not a useful alarm today.** `AGENT_LATENCY_HIGH_THRESHOLD_MS` is 10_000 and p50 is ~17.8s, so it fires on ~98% of inbound turns — and `captureAgentLatencyHigh` posts to **Slack as well as PostHog**, so the alerts channel gets a message on nearly every reply. Either raise the threshold to something above p90 or drop the Slack relay; as written it trains people to ignore the channel.
+
+To re-derive the cache TTL decision, the inter-message gap distribution per venue comes from `messages` (`direction=inbound`, grouped by `venue_id`, consecutive `created_at` deltas). Measured 2026-09-23: median gap 0.8–4.1 min, 52–69% of gaps under 5 min, 78–82% under 60 min — which is why the generation breakpoint uses `ttl: '1h'` rather than the 5m default.
+
 ---
 
 ## AI agent runtime contract

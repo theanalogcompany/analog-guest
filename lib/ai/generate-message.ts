@@ -268,8 +268,14 @@ export async function generateMessage(
   // may be sent at all.
   const allowedUrls = parseVenueLinks(input.venueInfo.links).map((l) => l.url)
 
-  const { systemPrompt, userPrompt } = composePrompt(input)
+  const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix, userPrompt } =
+    composePrompt(input)
   const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+  // Same bytes as augmentedSystemPrompt, split at the stability boundary so a
+  // cache breakpoint can sit between them. The voice-fidelity instruction
+  // stays where it has always been — last, after the category block — so the
+  // rendered content is unchanged; only the block count is.
+  const volatileSystemBlock = `${volatileSystemSuffix}\n\n${VOICE_FIDELITY_INSTRUCTION}`
 
   // Hoisted out of the try so the catch's diagnostic log can include which
   // attempt was in-flight when generateObject threw.
@@ -334,8 +340,45 @@ export async function generateMessage(
         : userPrompt
       const { object } = await generateObject({
         model: getGenerationModel(),
-        system: augmentedSystemPrompt,
-        prompt: userPromptForAttempt,
+        // Two adjacent system messages, not one `system` string: the provider
+        // maps each to its own Anthropic system text block and honours a
+        // per-block cache_control (see @ai-sdk/anthropic's convert step). The
+        // breakpoint goes on the first — template + persona + venue info,
+        // stable for the (venue, channel) pair and ~10k tokens on its own,
+        // comfortably over Sonnet 4.6's 1024-token cacheable minimum.
+        //
+        // The second block is deliberately UNCACHED: it carries the retrieved
+        // RAG and knowledge chunks plus the category instructions, all of
+        // which change per message. Marking it too would write a fresh entry
+        // every call and read none, paying the write premium for nothing.
+        //
+        // ttl '1h', not the 5m default, CHOSEN FROM THE TRAFFIC (measured
+        // 2026-09-23 over the last 500 inbound rows). A cache entry only pays
+        // off if the next message to the same venue lands inside the window,
+        // and pilot traffic is bursty with long quiet stretches:
+        //
+        //   venue           gap <= 5min     gap <= 60min
+        //   4c523772           61%              82%
+        //   5cd8231f           69%              82%
+        //   a17e75d6           52%              78%
+        //
+        // A 5m window misses roughly a third of messages and pays the write
+        // premium on each miss. 1h doubles the write premium (2x vs 1.25x)
+        // but lifts the hit rate to ~82%, which is cheaper on net at these
+        // volumes AND is the difference between the cache helping most
+        // replies and helping half of them. Re-derive this if traffic shape
+        // changes — the query is in CLAUDE.md under "Latency and cost".
+        messages: [
+          {
+            role: 'system',
+            content: cacheableSystemPrefix,
+            providerOptions: {
+              anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
+            },
+          },
+          { role: 'system', content: volatileSystemBlock },
+          { role: 'user', content: userPromptForAttempt },
+        ],
         schema: GeneratedMessageSchema,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       })

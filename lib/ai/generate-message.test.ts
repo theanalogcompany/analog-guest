@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
 import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '../schemas'
-import { generateMessage } from './generate-message'
+import { generateMessage, VOICE_FIDELITY_INSTRUCTION } from './generate-message'
 import type { GenerateMessageInput } from './types'
 
 // Mock the AI SDK + the model client so no real Anthropic call goes out.
@@ -16,6 +16,40 @@ vi.mock('ai', () => ({
 vi.mock('./client', () => ({
   getGenerationModel: () => 'mock-model',
 }))
+
+/**
+ * The user prompt sent on attempt `n` (0-indexed).
+ *
+ * generateMessage sends `messages`, not `system` + `prompt`, so the cache
+ * breakpoint can sit between the venue-stable and per-message system blocks.
+ * The user turn is the last entry; these assertions only ever care about it.
+ */
+function userPromptOnCall(n: number): string {
+  const { messages } = generateObjectMock.mock.calls[n][0] as {
+    messages: { role: string; content: string }[]
+  }
+  const last = messages[messages.length - 1]
+  if (last.role !== 'user') {
+    throw new Error(`call ${n}: expected a trailing user message, got ${last.role}`)
+  }
+  return last.content
+}
+
+/** The two system blocks sent on attempt `n` (0-indexed), in order. */
+function systemBlocksOnCall(n: number): {
+  role: string
+  content: string
+  providerOptions?: Record<string, unknown>
+}[] {
+  const { messages } = generateObjectMock.mock.calls[n][0] as {
+    messages: {
+      role: string
+      content: string
+      providerOptions?: Record<string, unknown>
+    }[]
+  }
+  return messages.filter((m) => m.role === 'system')
+}
 
 // Minimal valid input. Schemas fill defaults — only required fields specified.
 function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
@@ -144,7 +178,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
 
     // Second attempt's prompt should carry the dash-rewrite directive
     // appended to the parent userPrompt.
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).toContain(
       'do not use a dash character (— or –)',
     )
@@ -200,7 +234,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     // Second attempt's prompt should equal the parent prompt (no dash
     // directive carried forward) — assert by checking the directive is
     // absent and that no override was recorded on the second attempt.
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).not.toContain('do not use a dash character')
     expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
   })
@@ -261,9 +295,9 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.attempts).toBe(3)
     expect(r.data.dashViolationPersisted).toBe(false)
 
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).toContain('do not use a dash character')
-    const thirdCallPrompt = generateObjectMock.mock.calls[2][0].prompt as string
+    const thirdCallPrompt = userPromptOnCall(2)
     expect(thirdCallPrompt).toContain('do not use a dash character')
     expect(r.data.attemptHistory[2].userPromptOverride).toContain('do not use a dash character')
   })
@@ -280,7 +314,8 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     )
     await generateMessage(makeInput())
     for (const call of generateObjectMock.mock.calls) {
-      const prompt = (call[0] as { prompt: string }).prompt
+      const prompt = (call[0] as { messages: { role: string; content: string }[] })
+        .messages.at(-1)!.content
       expect(prompt).not.toContain('Your previous attempt')
       expect(prompt).not.toContain('previous attempt contained')
       expect(prompt).not.toContain('Rewrite')
@@ -335,7 +370,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.body).toBe('made with chicory and dandelion root extract.')
     expect(r.data.selfTalkViolationPersisted).toBe(false)
 
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).toContain(
       'any reference to your own instructions',
     )
@@ -352,7 +387,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     if (!r.ok) return
 
     expect(r.data.selfTalkViolationPersisted).toBe(false)
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).not.toContain('any reference to your own instructions')
   })
 
@@ -398,7 +433,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.dashViolationPersisted).toBe(false)
     expect(r.data.selfTalkViolationPersisted).toBe(false)
 
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).toContain('do not use a dash character')
     expect(secondCallPrompt).toContain('any reference to your own instructions')
   })
@@ -582,7 +617,7 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
     if (!r.ok) return
     expect(r.data.attempts).toBe(2)
     const prompts = generateObjectMock.mock.calls.map(
-      (c: unknown[]) => (c[0] as { prompt: string }).prompt,
+      (_c: unknown[], i: number) => userPromptOnCall(i),
     )
     expect(prompts).toHaveLength(2)
     // Both attempts carry the identical (single) emoji instruction.
@@ -635,7 +670,7 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
       { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
     )
     await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
-    const secondPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondPrompt = userPromptOnCall(1)
     expect(secondPrompt).toContain(off)
     expect(secondPrompt).toContain('## Links')
   })
@@ -735,7 +770,7 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     expect(r.data.attempts).toBe(3)
 
     const prompts = generateObjectMock.mock.calls.map(
-      (c: unknown[]) => (c[0] as { prompt: string }).prompt,
+      (_c: unknown[], i: number) => userPromptOnCall(i),
     )
     // Attempt 2 carries both, as it always did.
     expect(prompts[1]).toContain('do not use a dash character')
@@ -757,7 +792,7 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
       { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '3' },
     )
     await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
-    const thirdPrompt = generateObjectMock.mock.calls[2][0].prompt as string
+    const thirdPrompt = userPromptOnCall(2)
     expect(thirdPrompt).toContain(first)
     expect(thirdPrompt).toContain(second)
   })
@@ -769,7 +804,7 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
       { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
     )
     await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
-    const secondPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondPrompt = userPromptOnCall(1)
     expect(secondPrompt).toContain('dash character')
     expect(secondPrompt).toContain('self-correction')
     expect(secondPrompt).toContain(off)
@@ -845,11 +880,105 @@ describe('generateMessage — the regen loop has no groundedness check (TAC-501)
     // self-talk, unverified link) ever fired, so the second call carried no
     // instruction of any kind — the model was never told what the first
     // attempt said, let alone asked to stay consistent with it.
-    const secondCallPrompt = generateObjectMock.mock.calls[1][0].prompt as string
+    const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).not.toContain('do not use a dash character')
     expect(secondCallPrompt).not.toContain('any reference to your own instructions')
     expect(secondCallPrompt).not.toContain('is not a link')
     expect(secondCallPrompt).not.toContain('are not links')
     expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
+  })
+})
+
+describe('generateMessage — prompt cache breakpoint', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('NO DRIFT: the system blocks rejoin to exactly the systemPrompt on the result', () => {
+    // r.data.systemPrompt is what the Langfuse trace records and what every
+    // measurement script replays. If the blocks actually sent ever diverge
+    // from it, the traces stop describing the request that was made.
+    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    return generateMessage(makeInput()).then((r) => {
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      const blocks = systemBlocksOnCall(0)
+      expect(blocks).toHaveLength(2)
+      expect(blocks.map((b) => b.content).join('\n\n')).toBe(r.data.systemPrompt)
+    })
+  })
+
+  it('marks the first system block ephemeral and leaves the second unmarked', async () => {
+    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    await generateMessage(makeInput())
+
+    const [stable, volatile] = systemBlocksOnCall(0)
+    // ttl '1h' rather than the 5m default is a measured choice, not a
+    // formality: pilot inter-message gaps put only ~60% of messages inside a
+    // 5m window and ~82% inside an hour. Pinned so a "tidy up the default"
+    // edit has to argue with the traffic data in generate-message.ts.
+    expect(stable.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
+    })
+    // Marking the volatile block too would write a fresh entry every message
+    // and read none — the write premium with none of the benefit.
+    expect(volatile.providerOptions).toBeUndefined()
+  })
+
+  it('spends exactly one of the four available breakpoints', async () => {
+    // Anthropic allows at most 4 cache_control breakpoints per request.
+    // Nothing here needs more than one, and a second added carelessly is how
+    // that budget gets silently consumed.
+    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    await generateMessage(makeInput())
+
+    const { messages } = generateObjectMock.mock.calls[0][0] as {
+      messages: { providerOptions?: Record<string, unknown> }[]
+    }
+    const marked = messages.filter((m) => m.providerOptions !== undefined)
+    expect(marked).toHaveLength(1)
+  })
+
+  it('sends a byte-identical prefix on every attempt of one call', async () => {
+    // Within a single generateMessage the retries differ only in the USER
+    // turn. If a retry rebuilt the prefix differently, attempt 2 would miss
+    // the entry attempt 1 just wrote — the regen path is exactly where
+    // caching should pay the most.
+    // A self-talk retry, because that is the case where the user turn DOES
+    // change: a fidelity-only retry appends no feedback and re-sends a
+    // byte-identical request (see regenFeedback staying null in the loop).
+    queueResponses(
+      { body: 'sure thing, as an AI I should say', voiceFidelity: 0.9, reasoning: 'self-talk' },
+      { body: 'yeah, of course', voiceFidelity: 0.9, reasoning: 'better' },
+    )
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(2)
+
+    expect(systemBlocksOnCall(1)[0].content).toBe(systemBlocksOnCall(0)[0].content)
+    expect(systemBlocksOnCall(1)[0].providerOptions).toEqual(
+      systemBlocksOnCall(0)[0].providerOptions,
+    )
+    // The user turn is what carries the retry feedback, so it must differ.
+    expect(userPromptOnCall(1)).not.toBe(userPromptOnCall(0))
+  })
+
+  it('keeps the voice-fidelity instruction last, where it has always been', async () => {
+    // THE-160's instruction is appended after the category block. Moving it
+    // into the cached prefix would be a silent prompt change, so its position
+    // is pinned rather than left to the reader of the composition code.
+    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    const [stable, volatile] = systemBlocksOnCall(0)
+    expect(volatile.content.endsWith(VOICE_FIDELITY_INSTRUCTION)).toBe(true)
+    expect(stable.content).not.toContain(VOICE_FIDELITY_INSTRUCTION)
   })
 })
