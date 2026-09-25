@@ -33,19 +33,20 @@ const MIGRATION = readFileSync(
 )
 
 /**
- * The `reason` CHECK has been dropped and recreated twice: TAC-526's 057, then
- * TAC-529's 059, which is the live one. Migrations are append-only, so this
- * points at a migration BY NAME and the next one to widen this CHECK has to
- * move it — which is the intended cost, because binding to a superseded
- * migration would silently compare the constants against a narrower list.
+ * The `reason` CHECK has been dropped and recreated three times: TAC-526's
+ * 057, TAC-529's 059, and TAC-536's 064, which is the live one. Migrations are
+ * append-only, so this points at a migration BY NAME and the next one to widen
+ * this CHECK has to move it — which is the intended cost, because binding to a
+ * superseded migration would silently compare the constants against a narrower
+ * list.
  *
- * 059 and not 058: TAC-534 took 058 for an unrelated RPC while TAC-529 was
- * open, and because the two touch different objects git merged them cleanly
- * into two files numbered 058. This path is one of the few things that fails
- * loudly on that, which is why it is worth keeping by name.
+ * 059 was itself not 058: TAC-534 took 058 for an unrelated RPC while TAC-529
+ * was open, and because the two touch different objects git merged them
+ * cleanly into two files numbered 058. This path is one of the few things that
+ * fails loudly on that, which is why it is worth keeping by name.
  */
 const REASON_MIGRATION = readFileSync(
-  join(__dirname, '..', '..', 'db', 'migrations', '059_inbound_turn_venue_paused.sql'),
+  join(__dirname, '..', '..', 'db', 'migrations', '064_instagram_scan_arrivals.sql'),
   'utf8',
 )
 
@@ -120,13 +121,14 @@ describe('migration 055 CHECK constraints match the TS vocabulary', () => {
    * So: assert the LIVE list carries the new value, and assert the raw file
    * still carries the old one. Together those say the stripping is doing work.
    */
-  it('reads the LIVE reason list from 059, not the rollback block', () => {
-    // `venue_paused`, not `coalesced_into_turn`: 059's rollback block restores
-    // 057's list, which CONTAINS `coalesced_into_turn`, so that value no
+  it('reads the LIVE reason list from 064, not the rollback block', () => {
+    // One of TAC-536's own values, not `venue_paused`: 064's rollback block
+    // restores 059's list, which CONTAINS `venue_paused`, so that value no
     // longer discriminates the live list from the rollback one. The newest
-    // value is the only one that appears in the live list alone, and it has
-    // to be updated with every widening for this assertion to keep working.
-    expect(checkListFor('reason')).toContain('venue_paused')
+    // values are the only ones that appear in the live list alone, and one of
+    // them has to be named here with every widening for this assertion to keep
+    // working.
+    expect(checkListFor('reason')).toContain('already_greeted_today')
     // The rollback block is still in the file, and must not be what we read.
     expect(REASON_MIGRATION).toContain('-- rollback:')
     expect(REASON_SQL_WITHOUT_COMMENTS).not.toContain('rollback')

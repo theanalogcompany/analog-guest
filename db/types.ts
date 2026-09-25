@@ -815,6 +815,67 @@ export type Database = {
           },
         ]
       }
+      instagram_scan_arrivals: {
+        Row: {
+          claimed_at: string | null
+          created_at: string
+          guest_id: string
+          id: string
+          outcome: string | null
+          resolved_at: string | null
+          scan_message_id: string | null
+          scanned_at: string
+          venue_id: string
+          venue_local_date: string | null
+        }
+        Insert: {
+          claimed_at?: string | null
+          created_at?: string
+          guest_id: string
+          id?: string
+          outcome?: string | null
+          resolved_at?: string | null
+          scan_message_id?: string | null
+          scanned_at: string
+          venue_id: string
+          venue_local_date?: string | null
+        }
+        Update: {
+          claimed_at?: string | null
+          created_at?: string
+          guest_id?: string
+          id?: string
+          outcome?: string | null
+          resolved_at?: string | null
+          scan_message_id?: string | null
+          scanned_at?: string
+          venue_id?: string
+          venue_local_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instagram_scan_arrivals_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instagram_scan_arrivals_scan_message_id_fkey"
+            columns: ["scan_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instagram_scan_arrivals_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       knowledge_corpus: {
         Row: {
           added_by_operator_id: string | null
