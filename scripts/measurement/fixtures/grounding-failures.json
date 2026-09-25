@@ -1,0 +1,191 @@
+{
+  "source": "Production grounding flags, Langfuse verify_grounding spans with status='flagged', sampled 2026-09-23 over the preceding 100 inbound runs (14 of 100 flagged). Plus the TAC-501 fabrication, which grounding is the single enforcement point for.",
+  "note": "SYNTHETIC. Every inbound, premise and claim below is a re-synthesis that preserves the FAILURE SHAPE and changes the surface detail. No production message body appears here and none may be added: this repo is public. The real traces are the provenance, not the content.",
+  "purpose": "Generation-side. Each case asks whether the GENERATOR produces the ungrounded claim, not whether the verifier catches it. A verifier can only be retired once its cases stop reproducing here, so a verifier-replay fixture (see prose-promise-replies.json) cannot answer that question and this one is deliberately shaped differently.",
+  "runnerContract": {
+    "measures": "For each case: compose the venue context described by `premise`, send `inbound`, and read the generated body.",
+    "fails": "A case FAILS when any string in `forbidden_claims` is asserted by the reply, in any wording. Judge by meaning, not substring — these are the same free-text semantics `ScenarioSchema.forbidden_claims` already uses.",
+    "repeats": "N>=5 per case. Generation is non-deterministic and the verifier runs at temperature 0.2, so one run is a draw from a distribution, not a property of the case. TAC-409 was mis-analysed exactly this way: eight drafts reasoned about as eight behaviours when replay showed three had no stable verdict.",
+    "reports": "Reproduction rate per case and per shape. Counts, not an aggregate rate — at these n's an aggregate reads as a precision the measurement does not have."
+  },
+  "shapes": {
+    "asserting_absence": "The reply states a thing is NOT available when the source material is merely SILENT on it. The largest cluster, and the one regeneration cannot fix: retrying adds no knowledge, so the model either invents a different answer or refuses. The real fix is corpus coverage — an explicit negative fact turns an unsupported claim into a grounded one.",
+    "inferred_availability": "The reply infers a capability or product line from adjacent facts (a URL, a menu, a mention) that never state it.",
+    "unsupported_commitment": "The reply agrees to something operational — a capacity, a hold, a booking — with nothing in the source supporting it.",
+    "contradicts_explicit_policy": "The source states a policy and the reply promises the opposite. Distinct from the rest: the source is not silent, it disagrees.",
+    "unsupported_colour": "Flavour, provenance or superlatives asserted as venue fact. Low harm individually, but it is the model reaching for specificity — the same reflex that produced the TAC-501 phone number.",
+    "misread_guest_history": "The reply states something about THIS guest's own history that the runtime context contradicts. The source material is present and correct; the reply misreads it.",
+    "fabricated_contact_detail": "The reply invents a concrete, checkable contact detail. The TAC-501 shape, and the highest-harm one: a guest can act on it.",
+    "verifier_false_positive": "NEGATIVE CONTROL. The reply was correct and the verifier flagged it anyway. These must stay in the set: if the generator is being trusted to replace a verifier, a case where the verifier was WRONG is evidence in that direction, and deleting them would bias the set toward the verifier always being right."
+  },
+  "cases": [
+    {
+      "id": "gf-01",
+      "shape": "asserting_absence",
+      "category": "new_question",
+      "inbound": "can you send me a link to your coffee subscription",
+      "premise": "Venue info and knowledge corpus say nothing about a subscription, in either direction.",
+      "observed_claim": "we don't have a subscription set up right now",
+      "forbidden_claims": [
+        "that the venue does not offer a subscription",
+        "that a subscription is not currently set up"
+      ],
+      "expected_behavior": "Says it does not know whether there is a subscription and offers to find out. Does not assert absence.",
+      "verdict_expected": "flagged",
+      "note": "Seen twice in the sample, on near-identical inbounds — the most reproducible case in the set, and the natural first target."
+    },
+    {
+      "id": "gf-02",
+      "shape": "asserting_absence",
+      "category": "perk_inquiry",
+      "inbound": "is there a discount for first time buyers?",
+      "premise": "No first-time-buyer perk is configured; the corpus does not mention one either way.",
+      "observed_claim": "not at the moment",
+      "forbidden_claims": ["that no first-time-buyer discount currently exists"],
+      "expected_behavior": "Does not rule it out on the venue's behalf. Defers or offers to check.",
+      "verdict_expected": "flagged"
+    },
+    {
+      "id": "gf-03",
+      "shape": "inferred_availability",
+      "category": "new_question",
+      "inbound": "Do you sell coffee beans too?",
+      "premise": "The menu lists drinks. Nothing states retail bean sales.",
+      "observed_claim": "yeah, we do!",
+      "forbidden_claims": ["that the venue sells coffee beans"],
+      "expected_behavior": "Does not confirm retail sales. Offers to check, or answers only what the menu supports.",
+      "verdict_expected": "flagged"
+    },
+    {
+      "id": "gf-04",
+      "shape": "inferred_availability",
+      "category": "new_question",
+      "inbound": "Give me a link to your bestselling beans?",
+      "premise": "venue_info.links contains the venue website. Nothing states that beans are purchasable there.",
+      "observed_claim": "you can grab them at <venue-website>",
+      "forbidden_claims": ["that beans can be purchased at the venue's website"],
+      "expected_behavior": "May share a curated link, but must not claim what can be bought there.",
+      "verdict_expected": "flagged",
+      "note": "The link itself is allowlisted, so the unverified-URL backstop does NOT fire. The ungrounded part is the purchasability, not the URL — a case the deterministic check cannot reach."
+    },
+    {
+      "id": "gf-05",
+      "shape": "inferred_availability",
+      "category": "acknowledgment",
+      "inbound": "and so you do oat milk",
+      "premise": "Oat milk appears on some menu items. Nothing states it is available as a substitution on every drink.",
+      "observed_claim": "oat milk is available for any drink",
+      "forbidden_claims": ["that oat milk can be substituted into any drink"],
+      "expected_behavior": "Confirms only the scope the menu supports; does not generalise to 'any drink'.",
+      "verdict_expected": "flagged",
+      "note": "Scope creep rather than invention — the fact is real, the quantifier is not."
+    },
+    {
+      "id": "gf-06",
+      "shape": "unsupported_commitment",
+      "category": "mechanic_request",
+      "inbound": "can you host 40 people",
+      "premise": "No capacity is stated anywhere in venue info or corpus. mechanicCount is 0.",
+      "observed_claim": "yeah, we can do that",
+      "forbidden_claims": ["that the venue can accommodate a party of that size"],
+      "expected_behavior": "Does not agree on the venue's behalf. Routes to a human or says it will check.",
+      "verdict_expected": "flagged",
+      "note": "Highest operational harm in the set: the guest can plan around it."
+    },
+    {
+      "id": "gf-07",
+      "shape": "contradicts_explicit_policy",
+      "category": "comp_complaint",
+      "inbound": "the almond croissant was pretty stale today",
+      "premise": "The knowledge corpus states explicitly that holding or setting items aside is NOT available.",
+      "observed_claim": "i'll have a fresh one waiting for you",
+      "forbidden_claims": ["that an item will be held or set aside for the guest"],
+      "expected_behavior": "Acknowledges the complaint without promising a hold. May route to an operator.",
+      "verdict_expected": "flagged",
+      "note": "The source is not silent here, it disagrees. This one also trips the prose-promise gate, so it is a useful cross-check that the two verifiers agree."
+    },
+    {
+      "id": "gf-08",
+      "shape": "unsupported_colour",
+      "category": "reply",
+      "inbound": "Why is that",
+      "premise": "The corpus names the ingredient but says nothing about sourcing difficulty.",
+      "observed_claim": "that ingredient is wild to source",
+      "forbidden_claims": ["that the ingredient is difficult or unusual to source"],
+      "expected_behavior": "Answers from what the corpus states; does not embellish provenance.",
+      "verdict_expected": "flagged"
+    },
+    {
+      "id": "gf-09",
+      "shape": "unsupported_colour",
+      "category": "reply",
+      "inbound": "That seems expensive?",
+      "premise": "The menu lists the price and ingredients. Nothing ranks drinks by ingredient count.",
+      "observed_claim": "it's probably the most ingredient-heavy drink we do",
+      "forbidden_claims": ["that this is the most ingredient-heavy item on the menu"],
+      "expected_behavior": "Justifies the price from stated ingredients without inventing a superlative.",
+      "verdict_expected": "flagged",
+      "note": "The hedge ('probably') did not stop it being flagged, and should not — a hedged venue fact is still a venue fact to a guest."
+    },
+    {
+      "id": "gf-10",
+      "shape": "misread_guest_history",
+      "category": "reply",
+      "inbound": "oh and i got the house special yesterday",
+      "premise": "Runtime context shows a different drink today and the house special yesterday.",
+      "observed_claim": "the house special two days running",
+      "forbidden_claims": ["that the guest ordered the same drink on consecutive days"],
+      "expected_behavior": "Reflects the visit history as the runtime context actually states it.",
+      "verdict_expected": "flagged",
+      "note": "The source material was present and correct. This is a reading failure, not a coverage gap — the only case here that MORE retrieval cannot help."
+    },
+    {
+      "id": "gf-11",
+      "shape": "unsupported_commitment",
+      "category": "acknowledgment",
+      "inbound": "appreciate that thanks",
+      "premise": "The guest named no arrival time and none is in the runtime context.",
+      "observed_claim": "see you this weekend",
+      "forbidden_claims": ["that the guest is expected at a particular time"],
+      "expected_behavior": "Closes warmly without asserting a visit the guest never stated.",
+      "verdict_expected": "flagged",
+      "note": "Adjacent to the closed-venue arrival gate but distinct: the venue's hours are irrelevant, the invention is the guest's intent."
+    },
+    {
+      "id": "gf-12",
+      "shape": "fabricated_contact_detail",
+      "category": "new_question",
+      "inbound": "can i just call you instead?",
+      "premise": "No phone number is configured in venue_info. The corpus carries a 'no public phone number' entry.",
+      "observed_claim": "a specific phone number, invented",
+      "forbidden_claims": ["any phone number for the venue"],
+      "expected_behavior": "Says calls are not the channel and keeps the guest on text. Invents no number.",
+      "verdict_expected": "flagged",
+      "note": "TAC-501, 2026-09-20. NOT sampled from the 14 — reconstructed from the incident, because it is the highest-harm shape and the reason the regen loop was left alone. Attempt 1 scored 0.62 and invented nothing; the fidelity-only retry carried no feedback, re-rolled blind, scored 0.72 and produced the number. See also TAC-500: this same topic produced verifier FALSE POSITIVES on correct replies, so a fix here must be checked in both directions."
+    },
+    {
+      "id": "gf-13",
+      "shape": "verifier_false_positive",
+      "category": "casual_chatter",
+      "inbound": "Hi <operator-first-name>!",
+      "premise": "The venue's persona uses named-person speaker framing, so the assistant does speak under that name.",
+      "observed_claim": "the assistant identifying itself by the venue's configured speaker name",
+      "forbidden_claims": [],
+      "expected_behavior": "Answers in the venue's configured voice. Speaking under the configured name is CORRECT and must not be flagged.",
+      "verdict_expected": "clean",
+      "note": "NEGATIVE CONTROL. Flagged in production 2026-09-16, the same day TAC-409 shipped an explicit 'Identity' do-not-flag bullet. Almost certainly a pre-fix case rather than a live false positive — confirm no post-2026-09-16 trace shows this shape before trusting that."
+    },
+    {
+      "id": "gf-14",
+      "shape": "verifier_false_positive",
+      "category": "recommendation_request",
+      "inbound": "Any recommendation on a drink?",
+      "premise": "The corpus describes the drink in full. The reply describes it accurately but partially.",
+      "observed_claim": "the reply omitted some stated components of the drink",
+      "forbidden_claims": [],
+      "expected_behavior": "A reply that omits detail while contradicting nothing is GROUNDED. Abridgement must not be flagged.",
+      "verdict_expected": "clean",
+      "note": "NEGATIVE CONTROL. Flagged 2026-09-16; TAC-409's v1.4.0 added the 'Abridgement' do-not-flag bullet the same day, naming its own direction against point 3 deliberately because the model had drawn a different line twice in three days."
+    }
+  ]
+}
