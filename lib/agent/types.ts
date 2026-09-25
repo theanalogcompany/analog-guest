@@ -150,6 +150,12 @@ export interface FollowupTrigger {
     | 'perk_unlock'
     | 'event'
     | 'manual'
+    // TAC-536: a guest scanned the counter code, said nothing for five
+    // minutes, and is being greeted. The ONE trigger reason allowed on an
+    // Instagram conversation (handle-followup.ts refuses every other), and the
+    // one that routes its send through dispatchReply rather than
+    // scheduleAndSend.
+    | 'instagram_scan_arrival'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -173,6 +179,23 @@ export interface FollowupTrigger {
   // `reason: 'manual'` cannot carry this on its own. Ordinary Command Center
   // follow-ups (THE-232) use the same reason and must keep the ordinary intro.
   isOperatorDecline?: boolean
+  /**
+   * TAC-536: set only when `reason === 'instagram_scan_arrival'`. Typed
+   * channel rather than metadata, for the reason perkMechanic and
+   * isOperatorDecline are: it drives rendering and routing, so the schema is
+   * structural.
+   *
+   * `hadPriorConversation` picks which of the two greeting instructions
+   * renders, and they say opposite things about introducing yourself.
+   * `scanMessageId` is the inbound row the greeting answers, written to
+   * reply_to_message_id: without it the reply check reads the greeting as
+   * answering everything before it and would silence the agent's reply to
+   * whatever the guest says next.
+   */
+  instagramScanArrival?: {
+    scanMessageId: string | null
+    hadPriorConversation: boolean
+  }
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
@@ -217,6 +240,13 @@ export interface RuntimeContext {
   guest: GuestContext
   currentMessage: InboundMessage | null
   followupTrigger: FollowupTrigger | null
+  /**
+   * TAC-536: the two facts a scan greeting may state, or null on every other
+   * turn. Computed in build-runtime-context.ts and mapped straight through by
+   * buildAiRuntime; see the AI-side field for why both axes are carried rather
+   * than one derived from the other.
+   */
+  scanArrival: { hadPriorConversation: boolean; hasRecordedVisit: boolean } | null
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks

@@ -156,6 +156,7 @@ function makeCtx(followupTrigger: RuntimeContext['followupTrigger']): RuntimeCon
     // invariant) unless followupTrigger is non-null here — buildRuntimeContext
     // is mocked, so this has to be set to whatever the test's own trigger is.
     followupTrigger,
+    scanArrival: null,
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],

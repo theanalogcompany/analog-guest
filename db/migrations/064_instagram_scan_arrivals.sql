@@ -83,6 +83,17 @@ create table instagram_scan_arrivals (
   -- Meta's own clock for the scan when the delivery carried one, else our
   -- receipt time. The five minutes and the staleness bound both run from it.
   scanned_at timestamptz not null,
+  -- Whether this guest had any message on our record when the scan arrived,
+  -- read BEFORE the scan's own row was written so it can never count itself.
+  --
+  -- A CARRIER, in the shape messages.pending_commitment and
+  -- messages.rendered_intentions already use: a value settled at one moment
+  -- and acted on later. It decides which of the two greeting instructions
+  -- renders, and the two say opposite things about introducing yourself, so
+  -- recomputing it at fire time would put a guest-facing decision on a second
+  -- copy of the predicate. NOT NULL, so a row cannot reach the greeting
+  -- without an answer.
+  had_prior_conversation boolean not null,
   -- The CAS claim. Non-null means a tick owns this row's greeting.
   claimed_at timestamptz,
   -- YYYY-MM-DD in the venue's timezone, written AT CLAIM TIME. Text rather

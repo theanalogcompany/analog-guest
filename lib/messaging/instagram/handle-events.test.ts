@@ -728,6 +728,11 @@ describe('provider_sent_at', () => {
 
     expect(writers.sort()).toEqual([
       join('lib', 'agent', 'dispatch-instagram-reply.ts'),
+      // TAC-536: a READER, and never of a Sendblue row. It copies the scan
+      // row's Meta time onto the pending greeting so the five-minute timer and
+      // the staleness bound run on the same clock the guest's action happened
+      // on, falling back to created_at when the delivery carried none.
+      join('lib', 'agent', 'scan-arrival-store.ts'),
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),

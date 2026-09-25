@@ -66,6 +66,7 @@ function makeCtx(): RuntimeContext {
     guest: { id: 'guest-1', firstName: 'Sam', isDemo: false } as RuntimeContext['guest'],
     currentMessage: { id: 'in-1', providerMessageId: 'mid-in', body: 'hi', receivedAt: NOW, channel: 'instagram', referralSource: null },
     followupTrigger: null,
+    scanArrival: null,
     conversationChannel: 'instagram',
     pendingQuestion: null,
     recentMessages: [],

@@ -820,6 +820,7 @@ export type Database = {
           claimed_at: string | null
           created_at: string
           guest_id: string
+          had_prior_conversation: boolean
           id: string
           outcome: string | null
           resolved_at: string | null
@@ -832,6 +833,7 @@ export type Database = {
           claimed_at?: string | null
           created_at?: string
           guest_id: string
+          had_prior_conversation: boolean
           id?: string
           outcome?: string | null
           resolved_at?: string | null
@@ -844,6 +846,7 @@ export type Database = {
           claimed_at?: string | null
           created_at?: string
           guest_id?: string
+          had_prior_conversation?: boolean
           id?: string
           outcome?: string | null
           resolved_at?: string | null

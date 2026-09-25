@@ -39,6 +39,7 @@ export {
   parseDayRange,
   resolveOpeningToday,
   resolveOpenState,
+  venueLocalDate,
   venueLocalMinutes,
   type VenueOpeningToday,
 } from './venue-hours'

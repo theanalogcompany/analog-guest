@@ -187,6 +187,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
     currentMessage: { id: 'inbound-1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
     followupTrigger: null,
+    scanArrival: null,
     conversationChannel: 'text',
     recentMessages: [],
     recognition: {} as RuntimeContext['recognition'],

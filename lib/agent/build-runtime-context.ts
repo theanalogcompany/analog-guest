@@ -28,6 +28,8 @@ import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
+import { scanCarryForwardAt } from './scan-arrival'
+import { loadScanCarryForward } from './scan-arrival-store'
 import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
@@ -570,9 +572,36 @@ export async function buildRuntimeContext(input: {
     // matter, so this is not worth a second read of the row. It is deliberately
     // not NAMED here: handle-events.test.ts pins the set of files that name it
     // to the Instagram writer and its outbound readers, and this is neither.
+    // TAC-536: a standalone referral carries no message, so it never reaches
+    // `currentMessage.referralSource` and the line above cannot see it. The
+    // carry-forward is the second source: the guest's most recent scan, if it
+    // is recent enough that they are still at the counter.
+    //
+    // TWO ANCHORS (ruled 2026-09-25), and the second is what makes the flow
+    // pay off. The greeting waits five minutes and then asks what the guest
+    // got, so their answer necessarily lands OUTSIDE the five-minute window; a
+    // single anchor would leave understand_order unarmed on exactly the turn
+    // the whole mechanism exists to capture. scanCarryForwardAt owns the rule.
+    //
+    // Read only when the current message is Instagram and carries no scan
+    // referral of its own: zero cost on Sendblue and on a turn that already
+    // has the answer.
+    let carriedScanAt: Date | null = null
+    if (
+      !isScanReferral(input.currentMessage?.referralSource) &&
+      input.currentMessage?.channel === 'instagram'
+    ) {
+      const carry = await loadScanCarryForward(supabase, input.venueId, input.guestId)
+      carriedScanAt = scanCarryForwardAt({
+        lastScanAt: carry.lastScanAt,
+        lastGreetingAt: carry.lastGreetingAt,
+        inboundAt: input.currentMessage.receivedAt,
+      })
+    }
+
     const scanAt = isScanReferral(input.currentMessage?.referralSource)
       ? (input.currentMessage?.receivedAt ?? null)
-      : null
+      : carriedScanAt
     const visitConfirmedAt = scanAt ?? earliestConfirmedVisit
 
     // The positive half of TAC-518's open question. Without it, a referral that
@@ -587,6 +616,11 @@ export async function buildRuntimeContext(input: {
         messageId: input.currentMessage.id,
         returningGuest: recentMessages.length > 0,
         overrodeExistingAnchor: earliestConfirmedVisit !== null,
+        // TAC-536: whether the anchor came from a standalone scan carried
+        // forward rather than from a referral on this message. The two are
+        // different mechanisms and a rate for one should not be read as the
+        // other's.
+        carriedForward: carriedScanAt !== null,
       })
     }
 
@@ -676,12 +710,42 @@ export async function buildRuntimeContext(input: {
     }
   }
 
+  // TAC-536: the two facts a scan greeting may state. Computed only on that
+  // trigger, so no other turn pays for the arrival read.
+  //
+  // hadPriorConversation is CARRIED, not recomputed: it was settled at scan
+  // time, before the scan's own row existed, and it picks which of two
+  // greeting instructions renders.
+  //
+  // hasRecordedVisit is two signals. The transaction half is free, because the
+  // visit-history query runs unconditionally in the Promise.all above. The
+  // acknowledged-arrival half needs its own call, which is why it is gated
+  // here rather than reusing the one inside the inbound branch.
+  //
+  // NOTE THE WINDOW: visitHistoryResult is the 90-day query, so a guest whose
+  // only recorded visit is older reads as false. That UNDERSTATES rather than
+  // overstates, which is the direction AC4 wants, and the false line says only
+  // that nothing is on file.
+  let scanArrival: RuntimeContext['scanArrival'] = null
+  if (input.followupTrigger?.reason === 'instagram_scan_arrival') {
+    const arrival = await findEarliestAcknowledgedArrival({
+      venueId: input.venueId,
+      guestId: input.guestId,
+    })
+    scanArrival = {
+      hadPriorConversation: input.followupTrigger.instagramScanArrival?.hadPriorConversation === true,
+      hasRecordedVisit:
+        (visitHistoryResult.data?.length ?? 0) > 0 || (arrival.ok && arrival.data !== null),
+    }
+  }
+
   return {
     agentRunId: input.agentRunId,
     venue,
     guest,
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
+    scanArrival,
     conversationChannel: channelResolution.channel,
     recentMessages,
     recognition,

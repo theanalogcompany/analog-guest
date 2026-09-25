@@ -18,6 +18,8 @@ import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
+import { dispatchReply } from './dispatch-reply'
+import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import {
   applyApprovalPolicyStage,
@@ -119,6 +121,23 @@ async function reportFollowupDrop(args: {
   })
 }
 
+/**
+ * TAC-536: the scan row a greeting answers, or null.
+ *
+ * Null is reachable: `instagram_scan_arrivals.scan_message_id` is ON DELETE
+ * SET NULL, so a scan whose message row was removed still produces a greeting
+ * with nothing to name. The reply check is exempted in that case rather than
+ * pointed at a row that no longer exists.
+ */
+function scanMessageIdOf(trigger: FollowupTrigger): string | null {
+  return trigger.instagramScanArrival?.scanMessageId ?? null
+}
+
+function scanReplyCheckFor(trigger: FollowupTrigger): { inboundMessageId: string } | 'exempt' {
+  const id = scanMessageIdOf(trigger)
+  return id === null ? 'exempt' : { inboundMessageId: id }
+}
+
 function triggerToCategory(reason: FollowupTrigger['reason']): Classification['category'] {
   switch (reason) {
     case 'day_1':
@@ -143,6 +162,14 @@ function triggerToCategory(reason: FollowupTrigger['reason']): Classification['c
       return 'event_invite'
     case 'manual':
       return 'manual'
+    // TAC-536. Its own category rather than follow_up: the follow_up
+    // instructions are written for a message days after a visit and tell the
+    // model to check in, where this one greets someone standing at the
+    // counter. `welcome` is the other near miss and is worse, since its own
+    // text says "the first message the venue is sending to a NEW guest",
+    // which is false for the common case here.
+    case 'instagram_scan_arrival':
+      return 'guest_arrived'
   }
 }
 
@@ -183,8 +210,14 @@ export async function handleFollowup(input: {
    * way. What it still decides is whether the typing beats fire at all.
    */
   skipHumanFeelDelay?: boolean
+  /**
+   * TAC-536: the caller's own run id, so the Langfuse trace and the ledger row
+   * it writes afterwards carry the same value. Additive and defaulted, so
+   * every existing caller is unchanged.
+   */
+  agentRunId?: string
 }): Promise<AgentResult> {
-  const agentRunId = randomUUID()
+  const agentRunId = input.agentRunId ?? randomUUID()
   const start = Date.now()
   const trace = startAgentTrace({
     name: 'agent.followup',
@@ -276,7 +309,16 @@ export async function handleFollowup(input: {
     // caller can reach an Instagram send by this path. Pre-persist, so the
     // engine releases its claim. An unresolved channel is refused the same
     // way: nothing routes on null.
-    if (ctx.conversationChannel !== 'text') {
+    //
+    // TAC-536 carves out ONE reason, and only that one: a scan greeting. The
+    // premise above does not hold for it. It fires five minutes after the
+    // guest opened the venue's own link, which reopens Meta's window on its
+    // own, so the window is open rather than almost always shut. The send
+    // still re-derives it immediately before going out
+    // (dispatch-instagram-reply.ts), so nothing here is trusting the window
+    // rather than checking it.
+    const isInstagramScanArrival = input.trigger.reason === 'instagram_scan_arrival'
+    if (ctx.conversationChannel !== 'text' && !isInstagramScanArrival) {
       const reason =
         ctx.conversationChannel === 'instagram' ? 'instagram_followups_are_manual' : 'channel_unresolved'
       console.warn('[agent] followup refused: not a text conversation', {
@@ -1004,12 +1046,56 @@ export async function handleFollowup(input: {
     // TAC-421 removed the pre-send sleep, so neither skip saves time now.
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
-      const { outboundMessageId, providerMessageId, generationId, bubbleCount } =
-        await scheduleAndSend(ctx, gen.result, {
-          skipHumanFeelDelay:
-            input.skipHumanFeelDelay === true || ctx.guest.isDemo === true,
-          reviewReason: demoBypassReviewReason,
+      // TAC-536: the ONE reason that reaches a non-text transport goes through
+      // dispatchReply, which owns Instagram's window gate, the byte cap and
+      // the reply check. Every other reason calls scheduleAndSend exactly as
+      // before.
+      //
+      // BRANCHED ON THE TRIGGER REASON, NOT THE CHANNEL, deliberately. The
+      // channel is the real discriminator in principle, but the refusal above
+      // means only this reason can be here on Instagram at all, and branching
+      // on the reason makes the blast radius on the follow-up cron and the
+      // Command Center button provably zero rather than argued. A test pins
+      // that every other reason still calls scheduleAndSend.
+      const dispatched = isInstagramScanArrival
+        ? await dispatchReply(ctx, gen.result, {
+            skipHumanFeelDelay: true,
+            reviewReason: demoBypassReviewReason,
+            // The scan row. NOT OPTIONAL: a reply naming no inbound is read by
+            // the reply check as answering everything before it, so a greeting
+            // that named nothing would silence the agent's own reply to
+            // whatever the guest says next. Same reason the holding message
+            // passes it.
+            answersInboundId: scanMessageIdOf(input.trigger) ?? undefined,
+            replyCheck: scanReplyCheckFor(input.trigger),
+            onUndelivered: 'card',
+          })
+        : {
+            kind: 'sent' as const,
+            ...(await scheduleAndSend(ctx, gen.result, {
+              skipHumanFeelDelay:
+                input.skipHumanFeelDelay === true || ctx.guest.isDemo === true,
+              reviewReason: demoBypassReviewReason,
+            })),
+            deliveredBody: gen.result.body,
+            undelivered: null,
+          }
+
+      // The Instagram arm can decline to send, or card the reply. The text arm
+      // sends or throws, so these branches are reachable only for a scan
+      // greeting. undeliveredAgentResult is handle-inbound's own total map
+      // over the four, imported rather than mirrored.
+      if (dispatched.kind !== 'sent') {
+        sendSpan.end({ output: { status: dispatched.kind } })
+        trace.update({ output: { status: dispatched.kind } })
+        console.warn('[agent] followup reply did not simply send', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          kind: dispatched.kind,
         })
+        return undeliveredAgentResult(ctx, dispatched)
+      }
+      const { outboundMessageId, providerMessageId, generationId, bubbleCount } = dispatched
       sendSpan.end({
         output: {
           outboundMessageId,

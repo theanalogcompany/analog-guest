@@ -68,6 +68,7 @@ import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   resolveOpeningToday,
+  venueLocalDate,
   venueLocalMinutes,
   VenueHoursSchema,
   type VenueInfo,
@@ -158,22 +159,16 @@ export interface ProcessDueCommitmentsResult {
 }
 
 /**
- * Compute the YYYY-MM-DD date string of `instant` in `venueTimezone`.
- * Returns null on invalid timezone. en-CA renders YYYY-MM-DD which is
- * lexicographically comparable as a date.
+ * The YYYY-MM-DD date string of `instant` in `venueTimezone`, or null on a
+ * timezone this runtime cannot use.
+ *
+ * MOVED to lib/schemas/venue-hours.ts by TAC-536, which needed the same answer
+ * for its once-per-venue-day greeting guard. Kept as a local alias so the call
+ * sites below read as they did; the derivation has one definition now, because
+ * two copies of a DST-sensitive date computation is how the two stop agreeing
+ * about which day it is.
  */
-function dateInVenueTz(instant: Date, venueTimezone: string): string | null {
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: venueTimezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(instant)
-  } catch {
-    return null
-  }
-}
+const dateInVenueTz = venueLocalDate
 
 /**
  * Process all open scheduled commitments. Fire-and-forget per-row at the

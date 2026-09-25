@@ -248,6 +248,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
     currentMessage: null,
     followupTrigger: null,
+    scanArrival: null,
     conversationChannel: 'text' as const,
     pendingQuestion: null,
     recentMessages: [],

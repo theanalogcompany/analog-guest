@@ -413,3 +413,31 @@ export function resolveOpeningToday(
 export function venueLocalMinutes(timezone: string, now: Date): number | null {
   return venueLocalNow(timezone, now)?.minutes ?? null
 }
+
+/**
+ * The venue-local calendar day of `instant`, as `YYYY-MM-DD`. Null on a
+ * timezone this runtime cannot use.
+ *
+ * `en-CA` is what renders `YYYY-MM-DD`, which is lexicographically comparable
+ * as a date and is the shape `guests.last_visit_at`-adjacent code already
+ * compares. Text rather than a Date, because the only two consumers compare it
+ * for equality: the commitments cron asks "is the expected arrival today", and
+ * TAC-536's repeat guard asks "has this guest been greeted on this venue day".
+ *
+ * SHARED, not copied. It lived privately in lib/guests/commitments-due.ts
+ * until TAC-536 needed the same answer for the scan-greeting guard, and two
+ * copies of a DST-sensitive date derivation is how the two stop agreeing about
+ * which day it is.
+ */
+export function venueLocalDate(instant: Date, timezone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(instant)
+  } catch {
+    return null
+  }
+}
