@@ -11,7 +11,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { CoalesceDeps } from './coalesce-turn'
 
@@ -2804,21 +2804,42 @@ function typingSignals(): string[] {
 }
 
 /**
- * Let the exit's fire-and-forget typing_off run.
+ * Wait for the exit's fire-and-forget typing_off.
  *
  * It is handed to `waitUntil` rather than awaited (code review: awaiting it
  * put two Graph calls in front of the claim release and the retry), and
- * `waitUntil` is `(p) => p` here, so `handleInbound` can return before the
- * `off` is sent. Two macrotasks is ample for mocks that resolve immediately.
+ * `waitUntil` is `(p) => p` here, so `handleInbound` returns before the `off`
+ * is sent.
+ *
+ * WAITS FOR THE CONDITION, NOT A TICK COUNT, and the first version did the
+ * latter. Two macrotasks happened to be enough, which is the same
+ * coincidence the tests using it were added to remove: probing with one
+ * extra `setTimeout` inside `stopTypingUnlessSent` broke it, and production
+ * spends three supabase queries there before the POST. A fixed number of
+ * ticks is a guess about an implementation; this is the property.
  */
 async function flushTyping(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await vi.waitFor(() => {
+    expect(typingSignals()).toContain('off')
+  })
 }
 
 describe('TAC-540 — typing dots on the auto-send path', () => {
   beforeEach(() => {
     buildRuntimeContextMock.mockResolvedValue(typingCtx())
+  })
+
+  /**
+   * Drain fire-and-forget work before the next test, the same reason
+   * coalesce-inbound.test.ts carries one: `waitUntil` is `(p) => p` here, so
+   * a typing_off (and the handoff behind it) started in one test can still be
+   * in flight when the next begins, where it lands in the shared
+   * signalTypingMock and makes a `toEqual` on the signal sequence read
+   * another test's work. Not reachable on the un-probed suite, which is
+   * deterministic; it shows up the moment anything delays the exit.
+   */
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
   })
 
   /**
@@ -2891,6 +2912,14 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     })
 
     const r = await handleInbound(INBOUND_ID)
+    // Code review: this is the headline test for the whole typing_off
+    // mechanism and it was the one that had no flush. It passed by about one
+    // microtask, because the mocked signalTyping resolves without ever
+    // yielding to the macrotask queue — where production does a
+    // loadInstagramSendTarget (three supabase queries) before the POST.
+    // Verified by probe: one setTimeout inside stopTypingUnlessSent and it
+    // failed with ['on','on'].
+    await flushTyping()
 
     expect(r).toMatchObject({ status: 'queued' })
     expect(typingSignals()).toEqual(['on', 'on', 'off'])
@@ -3206,6 +3235,31 @@ describe('TAC-540 — a sender action can never change the reply', () => {
   }, 2000)
 
   /**
+   * The same property on the CATCH path, which is where it matters most.
+   *
+   * `closeCoalescedTurn(..., null)`'s own comment calls a throw "the
+   * strongest case for a retry": the turn produced no result at all, so the
+   * guest certainly got nothing. An `await` there would delay exactly that
+   * retry. The happy path was pinned and this one was not — found in code
+   * review, and reverting only this call to an `await` passed all 170 tests.
+   *
+   * `flushThrows` makes `trace.flushAsync()` throw from runInboundTurn's
+   * `finally`, which is the only way to escape its own top-level catch and
+   * reach the wrapper's.
+   */
+  it('returns without waiting for typing_off when the turn throws past its own catch', async () => {
+    traceControl.flushThrows = true
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
+      signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
+    )
+
+    await expect(handleInbound(INBOUND_ID)).rejects.toThrow('flush failed')
+  }, 2000)
+
+  /**
    * THE ORDERING GUARD, and the test the ruling asked for specifically.
    *
    * typing_on is fire-and-forget, so a turn that fails fast can reach its
@@ -3220,7 +3274,14 @@ describe('TAC-540 — a sender action can never change the reply', () => {
    * detects.
    *
    * FAILS WHEN THE AWAIT IS REMOVED: without it, `off` is recorded while
-   * `onResolved` is still false.
+   * the `on` promise is still pending.
+   *
+   * KNOWN SENSITIVITY, recorded rather than chased. This is the most
+   * timing-sensitive test in the file, and inserting an extra macrotask into
+   * the very statement it pins breaks it while leaving every other TAC-540
+   * test green. That is a probe perturbing the line under test, not a
+   * defect — but if it ever goes flaky, this is why, and the fixture's 20ms
+   * release is the knob.
    */
   it('waits for an in-flight typing_on before sending typing_off', async () => {
     const completed: string[] = []

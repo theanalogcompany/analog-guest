@@ -727,10 +727,20 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
 
 describe('TAC-540 — the gap the shortened settle no longer catches', () => {
   /**
-   * THE CASE THE TICKET NAMES. At COALESCE_SETTLE_MS = 8_000 a second message
-   * five seconds behind the first landed inside the settle, so the first run
-   * adopted it before spending a model call. At 3_000 it does not, and the
-   * pre-dispatch extension check is what has to catch it instead.
+   * THE CASE THE TICKET NAMES: a second message five seconds behind the
+   * first. At COALESCE_SETTLE_MS = 8_000 that landed inside the settle and
+   * the run adopted it before spending a model call; at 3_000 it does not,
+   * and the pre-dispatch extension check is what has to catch it instead.
+   *
+   * WHAT THIS TEST IS AND IS NOT, stated because the fixture cannot tell the
+   * two constants apart and a docstring that implied otherwise would be this
+   * repo's most-recorded failure — a test whose stated rationale was never
+   * true. `makeDeps` injects `sleep: async () => {}` and a frozen `now`, so
+   * the settle is inert in this whole file and `T_PLUS_5S` is only a
+   * plausible timestamp to `findNewerInbound`. This is an EXTENSION-PATH
+   * test: it pins that the path the shortened settle now relies on produces
+   * one reply covering both messages. The constant itself is pinned in
+   * `coalesce-turn.test.ts`, and that pin is the only guard on its value.
    *
    * The sequence this models, which is why the seeding is where it is:
    *
