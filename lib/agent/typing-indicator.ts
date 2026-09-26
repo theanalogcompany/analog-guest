@@ -33,8 +33,15 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
-import { sendInstagramSenderAction } from '@/lib/messaging/instagram/sender-actions'
-import { loadInstagramSendTarget } from '@/lib/messaging/instagram/send-target'
+import {
+  sendInstagramSenderAction,
+  type InstagramSenderAction,
+  type InstagramSenderActionResult,
+} from '@/lib/messaging/instagram/sender-actions'
+import {
+  loadInstagramSendTarget,
+  type InstagramSendTargetResult,
+} from '@/lib/messaging/instagram/send-target'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 
 /** Dots on, or dots off. */
@@ -55,6 +62,29 @@ export interface TypingIndicatorTarget {
 }
 
 /**
+ * Injected so a test asserts on the calls this makes rather than on a mock's
+ * opinion of them — `dispatch-instagram-reply.ts`'s shape. In particular
+ * `loadTarget` records WHICH venue and guest were asked about, which is the
+ * thing a stub that ignored its arguments would let a call site get wrong.
+ */
+export interface TypingIndicatorDeps {
+  loadTarget: (input: { venueId: string; guestId: string }) => Promise<InstagramSendTargetResult>
+  sendAction: (input: {
+    accountId: string
+    recipientId: string
+    token: string
+    action: InstagramSenderAction
+  }) => Promise<InstagramSenderActionResult>
+}
+
+function defaultDeps(): TypingIndicatorDeps {
+  return {
+    loadTarget: (input) => loadInstagramSendTarget(createAdminClient(), input),
+    sendAction: (input) => sendInstagramSenderAction({ ...input, fetchImpl: fetch }),
+  }
+}
+
+/**
  * Show or hide the typing indicator for this conversation.
  *
  * Never throws. Returns a value on every path so a caller can log one, and no
@@ -63,10 +93,7 @@ export interface TypingIndicatorTarget {
 export async function signalTyping(
   target: TypingIndicatorTarget,
   signal: TypingSignal,
-  deps: {
-    supabase?: ReturnType<typeof createAdminClient>
-    fetchImpl?: typeof fetch
-  } = {},
+  injected: Partial<TypingIndicatorDeps> = {},
 ): Promise<TypingIndicatorOutcome> {
   const channel = target.channel
   switch (channel) {
@@ -76,7 +103,7 @@ export async function signalTyping(
     case null:
       return { status: 'not_applicable', channel }
     case 'instagram':
-      return sendInstagramTyping(target, signal, deps)
+      return sendInstagramTyping(target, signal, { ...defaultDeps(), ...injected })
     default: {
       const unreachable: never = channel
       throw new Error(`signalTyping: unhandled channel ${String(unreachable)}`)
@@ -87,12 +114,11 @@ export async function signalTyping(
 async function sendInstagramTyping(
   target: TypingIndicatorTarget,
   signal: TypingSignal,
-  deps: { supabase?: ReturnType<typeof createAdminClient>; fetchImpl?: typeof fetch },
+  deps: TypingIndicatorDeps,
 ): Promise<TypingIndicatorOutcome> {
-  const action = signal === 'on' ? 'typing_on' : 'typing_off'
+  const action: InstagramSenderAction = signal === 'on' ? 'typing_on' : 'typing_off'
   try {
-    const supabase = deps.supabase ?? createAdminClient()
-    const targetResult = await loadInstagramSendTarget(supabase, {
+    const targetResult = await deps.loadTarget({
       venueId: target.venueId,
       guestId: target.guestId,
     })
@@ -106,12 +132,11 @@ async function sendInstagramTyping(
       })
       return { status: 'no_send_target', problem: targetResult.problem }
     }
-    const sent = await sendInstagramSenderAction({
+    const sent = await deps.sendAction({
       accountId: targetResult.target.accountId,
       recipientId: targetResult.target.recipientId,
-      action,
       token: targetResult.target.token,
-      fetchImpl: deps.fetchImpl ?? fetch,
+      action,
     })
     if (!sent.ok) {
       console.warn('[agent] typing indicator failed (cosmetic)', {

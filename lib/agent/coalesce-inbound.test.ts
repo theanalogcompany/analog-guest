@@ -130,6 +130,13 @@ vi.mock('./stages', async () => {
     // defect found in one sitting; see CLAUDE.md's rule on mocked behaviour
     // flags. Flipping it broke nothing — the branch simply had no coverage.
     shouldRetrieveKnowledge: () => true,
+    // TAC-540. Passed through REAL via importOriginal rather than stubbed:
+    // it is a pure predicate over the context these tests already build, and
+    // a stub would be this file asserting on its own opinion of when the
+    // typing dots appear. A missing entry here arrives `undefined` and throws
+    // the whole turn into `failed` — which is how the allow-list announced
+    // itself when this landed.
+    mayAutoSendAfterClassification: actual.mayAutoSendAfterClassification,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
@@ -316,7 +323,14 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       id: VENUE_ID,
       slug: 'v',
       brandPersona: {},
-      venueInfo: {},
+      // TAC-540: `hours` is non-optional on VenueInfo (the schema defaults it
+      // to {}), so `venueInfo: {}` was a fixture lying about a state the type
+      // forbids. It went unnoticed while every real reader of it — the gate's
+      // closed-venue triggers — was mocked out in this file;
+      // mayAutoSendAfterClassification is the first one that actually runs
+      // here. Backfilled rather than making the source defensive, the call
+      // TAC-301, TAC-362 and TAC-377 each made on the same kind of helper.
+      venueInfo: { hours: {} },
       timezone: 'UTC',
       sendblueNumber: '+1',
       holdAllOutbound: false,
@@ -456,6 +470,8 @@ const MSG_3 = '44444444-4444-4444-8444-444444444444'
 const T0 = new Date('2026-09-23T15:32:36.000Z')
 /** The incident's real gap: 7 seconds. */
 const T_PLUS_7S = new Date('2026-09-23T15:32:43.000Z')
+/** TAC-540's case: inside the old 8s settle, outside the new 3s one. */
+const T_PLUS_5S = new Date('2026-09-23T15:32:41.000Z')
 const T_PLUS_10M = new Date('2026-09-23T15:42:36.000Z')
 
 interface FakeInbound {
@@ -706,6 +722,92 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
       (c) => (c[0] as { currentMessage: { id: string } }).currentMessage.id,
     )
     expect(answered.sort()).toEqual([MSG_1, MSG_2].sort())
+  })
+})
+
+describe('TAC-540 — the gap the shortened settle no longer catches', () => {
+  /**
+   * THE CASE THE TICKET NAMES. At COALESCE_SETTLE_MS = 8_000 a second message
+   * five seconds behind the first landed inside the settle, so the first run
+   * adopted it before spending a model call. At 3_000 it does not, and the
+   * pre-dispatch extension check is what has to catch it instead.
+   *
+   * The sequence this models, which is why the seeding is where it is:
+   *
+   *   t=0  MSG_1 arrives. Run A starts and settles.
+   *   t=3  A wakes, claims, looks for newer -> nothing yet.
+   *   t=5  MSG_2 arrives. Its own webhook starts run B, which settles.
+   *        A is mid-generation when the row becomes visible.
+   *   ...  A's pre-dispatch check finds MSG_2, adopts it, generates again.
+   *   t=8  B wakes, tries to claim, loses, and stands down.
+   *
+   * So MSG_2 must appear AFTER A's post-claim look and BEFORE its extension
+   * check, and B must start while A still holds the claim. Seeding inside the
+   * generate call is the only window that satisfies both — seeding it in the
+   * injected `sleep` instead would place it before A claims, which is the
+   * eight-second world this ticket left.
+   *
+   * What would fail if the claim were false: with the extension removed, A
+   * sends a reply to MSG_1 and B either sends a second one or the guest's
+   * second message goes unanswered. Both show up here as a scheduleAndSend
+   * count of 2, or as a ctx that answers MSG_1.
+   */
+  it('a second message 5s later still produces ONE reply, covering both', async () => {
+    sendSucceeds()
+    const { deps } = makeDeps()
+    let second: Promise<unknown> | null = null
+
+    generateStageMock.mockImplementationOnce(async () => {
+      // The guest's second message lands, and its own webhook fires.
+      seedInbox(
+        { id: MSG_1, body: 'can i get a flat white', createdAt: T0 },
+        { id: MSG_2, body: 'oat milk if you have it', createdAt: T_PLUS_5S },
+      )
+      second = handleInbound(MSG_2, { coalescing: true, coalesceDeps: deps })
+      return { status: 'success', result: successResult() }
+    })
+
+    const first = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const secondResult = await second
+
+    // ONE reply.
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    // ...covering BOTH: it answers the newer message, and the older one is in
+    // `## Recent conversation` by construction.
+    const ctxArg = buildRuntimeContextMock.mock.calls[1][0] as { currentMessage: { id: string } }
+    expect(ctxArg.currentMessage.id).toBe(MSG_2)
+    expect(first).toMatchObject({ status: 'sent' })
+    // ...and NO second reply: the later run folded into this turn rather than
+    // starting its own.
+    expect(secondResult).toMatchObject({ status: 'coalesced' })
+  })
+
+  /**
+   * The same shape one intention deeper, and the incident's actual harm:
+   * TAC-526 existed because a guest was asked their name twice. A shortened
+   * settle must not bring that back by turning one turn into two.
+   */
+  it('still records the intention prompt only once across that gap', async () => {
+    sendSucceeds()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [{ key: 'learn_name', promptLine: 'ask their name' }] }),
+    )
+    const { deps } = makeDeps()
+    let second: Promise<unknown> | null = null
+
+    generateStageMock.mockImplementationOnce(async () => {
+      seedInbox(
+        { id: MSG_1, body: 'can i get a flat white', createdAt: T0 },
+        { id: MSG_2, body: 'oat milk if you have it', createdAt: T_PLUS_5S },
+      )
+      second = handleInbound(MSG_2, { coalescing: true, coalesceDeps: deps })
+      return { status: 'success', result: successResult() }
+    })
+
+    await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    await second
+
+    expect(recordIntentionPromptsMock).toHaveBeenCalledTimes(1)
   })
 })
 

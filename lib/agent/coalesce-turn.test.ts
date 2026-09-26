@@ -497,10 +497,16 @@ describe('the shipped constants', () => {
     expect(INBOUND_COALESCING_ENABLED).toBe(true)
   })
 
-  it('pins the settle window at 8s and the lease at 2 minutes', () => {
+  it('pins the settle window at 3s and the lease at 2 minutes', () => {
     // The window is a costed trade, not a default. See the constant's own
     // docstring for the no-settle alternative and what it buys.
-    expect(COALESCE_SETTLE_MS).toBe(8_000)
+    //
+    // 8s until TAC-540, 3s since. The pin exists so that change has to be
+    // DELIBERATE: the settle sits in front of every turn, bursty or not, so
+    // moving it moves p50 for every guest. Nothing else in the suite would
+    // fail if someone edited the constant, because the burst tests seed
+    // their fragments up front and the fake sleep never waits.
+    expect(COALESCE_SETTLE_MS).toBe(3_000)
     expect(CLAIM_LEASE_MS).toBe(120_000)
   })
 

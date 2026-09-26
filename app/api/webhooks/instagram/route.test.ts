@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   refreshInstagramProfile: vi.fn(),
   captureScanUnattributed: vi.fn(),
   scheduleScanArrival: vi.fn(),
+  markInboundSeen: vi.fn(),
 }))
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
@@ -43,6 +44,15 @@ vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
 // without needing an instagram_scan_arrivals table in the fake. The DECISION
 // is still the real resolveAgentHandoff, so a route that stopped scheduling,
 // or scheduled the wrong thing, fails here.
+// TAC-540. The Seen call is a spy, so these tests see what the route hands to
+// waitUntil and never make a Graph call. The DECISION is still the real
+// resolveAgentHandoff, so a route that marked seen for an echo, a read, a
+// bare scan or a shut gate fails here rather than in mark-seen's own tests —
+// which cannot see the route's branching at all.
+vi.mock('@/lib/messaging/instagram/mark-seen', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/mark-seen')>()
+  return { ...actual, markInboundSeen: mocks.markInboundSeen }
+})
 vi.mock('@/lib/agent/scan-arrival-store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/agent/scan-arrival-store')>()
   return { ...actual, scheduleScanArrival: mocks.scheduleScanArrival }
@@ -189,6 +199,8 @@ beforeEach(() => {
   mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
   mocks.captureScanUnattributed.mockReset()
   mocks.captureScanUnattributed.mockResolvedValue(undefined)
+  mocks.markInboundSeen.mockReset()
+  mocks.markInboundSeen.mockResolvedValue({ status: 'sent' })
   gate.open = null
   useDb()
 })
@@ -769,8 +781,12 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
       const [saved] = db.tables.messages
       expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
       expect(mocks.handleInbound).toHaveBeenCalledWith(saved?.id)
-      // The agent run and the profile refresh (TAC-479), each handed off once.
-      expect(mocks.waitUntil).toHaveBeenCalledTimes(2)
+      // The agent run, the profile refresh (TAC-479) and the Seen tick
+      // (TAC-540), each handed off once. The count is the point: it is what
+      // catches a fourth background call arriving without anyone deciding it
+      // belongs on this path — which is how this assertion earned its keep
+      // when TAC-540 added the third.
+      expect(mocks.waitUntil).toHaveBeenCalledTimes(3)
       expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
     },
   )
@@ -1017,6 +1033,155 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
 // (`fields: ['referral']`, an account, a sender, a timestamp) with the
 // referral contents the recorded postback fixture carries, since that is the
 // same ig.me link arriving by the other path.
+// TAC-540 AC 1: Seen fires for a turn-starting inbound message, and for
+// nothing else. Each exclusion gets its own test rather than relying on one
+// "only on run" assertion, because the exclusions have DIFFERENT mechanisms
+// inside resolveAgentHandoff (an ordered kind check, the gate, a referral
+// branch, a titleless-postback branch) and a single test would pass while any
+// one of them was removed.
+//
+// The paused venue is the one exclusion not here: it is decided inside
+// markInboundSeen, which this file replaces with a spy, so it is covered in
+// mark-seen.test.ts instead.
+describe('POST /api/webhooks/instagram marking the thread seen (TAC-540)', () => {
+  function post(body: string): Promise<Response> {
+    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+    return POST(postRequest(body, signed(body)))
+  }
+
+  function recorded(name: string): string {
+    return readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  }
+
+  it('marks the thread seen for a guest message that starts a turn', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE] })
+    const seen = Promise.resolve({ status: 'sent' as const })
+    mocks.markInboundSeen.mockReturnValue(seen)
+
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    const [saved] = db.tables.messages
+    // The venue and guest the handoff resolved, not something re-derived:
+    // a Seen tick sent to the wrong thread is worse than none.
+    expect(mocks.markInboundSeen).toHaveBeenCalledWith(db.client, {
+      venueId: saved?.venue_id,
+      guestId: saved?.guest_id,
+    })
+    // Handed to waitUntil, never awaited — a Graph call must not sit inside
+    // Meta's delivery deadline. Identity, not shape: two resolved promises
+    // are deep-equal, so toHaveBeenCalledWith(expect.any(Promise)) would pass
+    // against a different promise entirely.
+    expect(mocks.waitUntil).toHaveBeenCalledWith(seen)
+  })
+
+  it.each(['echo', 'read'])('does not mark the recorded %s seen', async (name) => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+
+    const res = await post(recorded(name))
+
+    expect(res.status).toBe(200)
+    expect(mocks.markInboundSeen).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A bare scan resolves to `schedule_arrival`, not `run`: nothing is
+   * generated for five minutes, so there is nothing to have seen yet. Fails
+   * if the route treats every persisted outcome as a turn.
+   */
+  it('does not mark a bare scan referral seen', async () => {
+    gate.open = true
+    useDb({
+      venues: [FIXTURE_VENUE],
+      guests: [FIXTURE_GUEST],
+      messages: [{ id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' }],
+    })
+    const body = JSON.stringify({
+      object: 'instagram',
+      entry: [
+        {
+          id: FIXTURE_ACCOUNT_ID,
+          time: 1789935488,
+          messaging: [
+            {
+              sender: { id: FIXTURE_GUEST_IGSID },
+              recipient: { id: FIXTURE_ACCOUNT_ID },
+              timestamp: 1789935488000,
+              referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+            },
+          ],
+        },
+      ],
+    })
+
+    const res = await post(body)
+    await flushMicrotasks()
+
+    expect(res.status).toBe(200)
+    expect(mocks.scheduleScanArrival).toHaveBeenCalled()
+    expect(mocks.markInboundSeen).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A paused venue must not mark Seen on a message it will never answer, and
+   * a SHUT GATE is the same thing at a different layer: the agent is not
+   * going to run, so telling the guest we are reading would be a lie the
+   * system cannot follow through on.
+   */
+  it('does not mark seen while the agent gate is shut', async () => {
+    gate.open = false
+    useDb({ venues: [FIXTURE_VENUE] })
+
+    const res = await post(recorded('message'))
+    await flushMicrotasks()
+
+    expect(res.status).toBe(200)
+    expect(mocks.handleInbound).not.toHaveBeenCalled()
+    expect(mocks.markInboundSeen).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A redelivery of an event already saved. The FIRST delivery was the turn
+   * and marked it seen; doing it again on every Meta retry would be a second
+   * call for one guest action.
+   */
+  it('does not mark seen on a redelivery of a message already saved', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE] })
+    await post(recorded('message'))
+    expect(mocks.markInboundSeen).toHaveBeenCalledTimes(1)
+
+    mocks.markInboundSeen.mockClear()
+    const res = await post(recorded('message'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.markInboundSeen).not.toHaveBeenCalled()
+  })
+
+  /**
+   * It runs under waitUntil, which this file replaces with a spy that does
+   * not await — so a rejection here is exactly the shape that would become an
+   * unhandled rejection in production. The 200 and the rest of the delivery
+   * loop must be untouched by it.
+   */
+  it('still answers 200 and still runs the agent when marking seen fails', async () => {
+    gate.open = true
+    useDb({ venues: [FIXTURE_VENUE] })
+    mocks.markInboundSeen.mockRejectedValue(new Error('graph exploded'))
+    const agentRun = Promise.resolve()
+    mocks.handleInbound.mockReturnValue(agentRun)
+
+    const res = await post(recorded('message'))
+    await flushMicrotasks()
+
+    expect(res.status).toBe(200)
+    expect(mocks.handleInbound).toHaveBeenCalledTimes(1)
+    expect(mocks.waitUntil).toHaveBeenCalledWith(agentRun)
+  })
+})
+
 describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', () => {
   const SCAN_MS = 1789935488000
 

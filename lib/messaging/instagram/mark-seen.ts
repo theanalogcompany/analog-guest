@@ -44,8 +44,8 @@ import type { Database } from '@/db/types'
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 
-import { sendInstagramSenderAction } from './sender-actions'
-import { loadInstagramSendTarget } from './send-target'
+import { sendInstagramSenderAction, type InstagramSenderActionResult } from './sender-actions'
+import { loadInstagramSendTarget, type InstagramSendTargetResult } from './send-target'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -71,17 +71,36 @@ export interface MarkSeenTarget {
 }
 
 /**
+ * Injected so a test asserts on the calls this actually makes rather than on
+ * a mock's opinion of them. `dispatch-instagram-reply.ts`'s shape, and for
+ * the same reason: the send target resolution reads a credentials table, and
+ * stubbing it at the module boundary would hide which venue was asked about.
+ */
+export interface MarkSeenDeps {
+  loadTarget: (input: MarkSeenTarget) => Promise<InstagramSendTargetResult>
+  sendAction: (input: {
+    accountId: string
+    recipientId: string
+    token: string
+  }) => Promise<InstagramSenderActionResult>
+}
+
+function defaultDeps(supabase: AdminSupabaseClient): MarkSeenDeps {
+  return {
+    loadTarget: (input) => loadInstagramSendTarget(supabase, input),
+    sendAction: (input) => sendInstagramSenderAction({ ...input, action: 'mark_seen', fetchImpl: fetch }),
+  }
+}
+
+/**
  * Mark the guest's thread as seen. Fire-and-forget; never throws.
- *
- * `fetchImpl` is injected for the same reason every other Graph caller in this
- * folder injects it: so a test asserts on the request that was actually built
- * rather than on a mock's opinion of it.
  */
 export async function markInboundSeen(
   supabase: AdminSupabaseClient,
   target: MarkSeenTarget,
-  fetchImpl: typeof fetch = fetch,
+  injected: Partial<MarkSeenDeps> = {},
 ): Promise<MarkSeenOutcome> {
+  const deps: MarkSeenDeps = { ...defaultDeps(supabase), ...injected }
   try {
     const { data, error } = await supabase
       .from('venues')
@@ -113,10 +132,7 @@ export async function markInboundSeen(
       return { status: 'venue_halted', venueStatus: venueStatus ?? 'unknown' }
     }
 
-    const targetResult = await loadInstagramSendTarget(supabase, {
-      venueId: target.venueId,
-      guestId: target.guestId,
-    })
+    const targetResult = await deps.loadTarget(target)
     if (!targetResult.ok) {
       console.warn('instagram: no send target, not marking seen', {
         event: 'instagram_mark_seen_skipped',
@@ -127,12 +143,10 @@ export async function markInboundSeen(
       return { status: 'no_send_target', problem: targetResult.problem }
     }
 
-    const sent = await sendInstagramSenderAction({
+    const sent = await deps.sendAction({
       accountId: targetResult.target.accountId,
       recipientId: targetResult.target.recipientId,
-      action: 'mark_seen',
       token: targetResult.target.token,
-      fetchImpl,
     })
     if (!sent.ok) {
       console.warn('instagram: mark_seen failed (cosmetic)', {
