@@ -16,7 +16,21 @@ import { describe, expect, it } from 'vitest'
 
 const ROOT = join(__dirname, '..', '..', '..')
 
-const INSTAGRAM_OUTBOUND_MODULES = ['window', 'send', 'send-target', 'reply-check'] as const
+const INSTAGRAM_OUTBOUND_MODULES = [
+  'window',
+  'send',
+  'send-target',
+  'reply-check',
+  // TAC-540. Meta's sender actions (mark_seen / typing_on / typing_off). Guarded
+  // for the same reason as the send itself: a Sendblue guest has no IGSID and
+  // no Instagram account, so a sender action reaching the SMS path is a bug
+  // that behaves fine until the day it runs.
+  'sender-actions',
+  // TAC-540 code review. It composes send-target and sender-actions, so a
+  // shared module importing IT would pull both onto a shared path without
+  // tripping the entries above — the guard matches imports textually.
+  'mark-seen',
+] as const
 
 /** Everything outside lib/messaging/instagram/ allowed to import them. */
 const ALLOWED_IMPORTERS = [
@@ -57,6 +71,17 @@ const ALLOWED_IMPORTERS = [
   // processDueCommitments, processDueFollowups — rather than inside a provider
   // folder. Paying one line here is the better trade.
   join('lib', 'agent', 'instagram-window-warning.ts'),
+  // TAC-540. The channel switch for the typing indicator, and the reason it
+  // exists at all: handle-inbound.ts serves both channels, so importing the
+  // sender actions there directly would have put the shared inbound
+  // orchestrator on this list. This file is dispatch-reply.ts's shape — one
+  // exhaustive switch, a no-op text arm — and routes nothing else.
+  join('lib', 'agent', 'typing-indicator.ts'),
+  // TAC-540. The Instagram webhook, which hands mark-seen to waitUntil right
+  // after the 200. It is an Instagram-only route and could not be anything
+  // else, but it sits under app/ rather than inside the provider folder, so
+  // the guard sees it and it is named here deliberately.
+  join('app', 'api', 'webhooks', 'instagram', 'route.ts'),
 ]
 
 function sourceFiles(): string[] {

@@ -14,6 +14,7 @@ import {
   KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
   KNOWLEDGE_RELEVANCE_FLOOR,
   knowledgeGapWillQueue,
+  mayAutoSendAfterClassification,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
@@ -6124,5 +6125,122 @@ describe('closed-venue arrival (TAC-363)', () => {
       expect(r).toEqual({ status: 'check_failed' })
       expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+/**
+ * TAC-540. The prediction behind the typing dots.
+ *
+ * It mirrors gate triggers 6 and 8 plus the ticket's closed-venue clause, so
+ * these tests are written against the same inputs those triggers read. What
+ * they CANNOT establish is that the prediction is right — most of the gate's
+ * triggers need a draft that does not exist when this runs, so a turn can
+ * pass this and still queue. `typing_off` is what corrects that, and it is
+ * tested in handle-inbound.test.ts.
+ */
+describe('mayAutoSendAfterClassification (TAC-540)', () => {
+  function venue(over: Record<string, unknown> = {}) {
+    return {
+      id: 'venue-1',
+      timezone: 'UTC',
+      venueInfo: { hours: {} },
+      holdAllOutbound: false,
+      approvalPolicy: { default: 'auto_send', perCategory: {} },
+      ...over,
+    } as unknown as RuntimeContext['venue']
+  }
+
+  function ctxFor(
+    category: string,
+    venueOver: Record<string, unknown> = {},
+    computedAt = new Date('2026-09-22T18:00:00.000Z'),
+  ): RuntimeContext {
+    return makeCtx({
+      venue: venue(venueOver),
+      classification: { category, classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false } as RuntimeContext['classification'],
+      recognition: { score: 0.5, state: 'regular', signals: {}, computedAt } as RuntimeContext['recognition'],
+    })
+  }
+
+  it('is true for an ordinary category at an ordinary venue', () => {
+    expect(mayAutoSendAfterClassification(ctxFor('new_question'))).toBe(true)
+  })
+
+  /** Mirrors trigger 8. */
+  it('is false when the category is routed to operator approval', () => {
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor('new_question', {
+          approvalPolicy: { default: 'auto_send', perCategory: { new_question: 'operator_approval' } },
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  /**
+   * comp_complaint carries a code-level default of operator_approval, so it
+   * is false at every venue without anyone configuring anything. Pinned
+   * because it is the one category where the answer is not obvious from the
+   * stored policy alone.
+   */
+  it('is false for comp_complaint, which the fleet default routes to review', () => {
+    expect(mayAutoSendAfterClassification(ctxFor('comp_complaint'))).toBe(false)
+  })
+
+  /** Mirrors trigger 6. Not in the ticket's wording; strictly narrowing. */
+  it('is false at a venue holding all outbound', () => {
+    expect(mayAutoSendAfterClassification(ctxFor('new_question', { holdAllOutbound: true }))).toBe(
+      false,
+    )
+  })
+
+  /**
+   * Trigger 6's own carve-out: an opt_out confirmation must auto-send for
+   * TCPA reasons even at a holding venue, so the prediction has to agree.
+   * Without this clause the dots would be withheld on the one category that
+   * is guaranteed to send.
+   */
+  it('still allows an opt_out confirmation at a venue holding all outbound', () => {
+    expect(mayAutoSendAfterClassification(ctxFor('opt_out', { holdAllOutbound: true }))).toBe(true)
+  })
+
+  it('is false while the venue is positively closed', () => {
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor(
+          'new_question',
+          { timezone: 'America/Los_Angeles', venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } } },
+          // Monday 21:00 in Los Angeles.
+          new Date('2026-09-22T04:00:00.000Z'),
+        ),
+      ),
+    ).toBe(false)
+  })
+
+  /**
+   * `isVenueClosed` is a POSITIVE verdict only. A venue whose hours nobody
+   * filled in resolves to `unknown`, and folding that in with `closed` would
+   * silently withhold the dots at every such venue — the inversion
+   * venue-open-state.ts's own header warns about.
+   */
+  it('is true when the hours cannot be read, because unknown is not closed', () => {
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor('new_question', { venueInfo: { hours: { monday: '—' } } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('is true while the venue is open', () => {
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor(
+          'new_question',
+          { timezone: 'America/Los_Angeles', venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } } },
+          // Monday 10:00 in Los Angeles.
+          new Date('2026-09-21T17:00:00.000Z'),
+        ),
+      ),
+    ).toBe(true)
   })
 })

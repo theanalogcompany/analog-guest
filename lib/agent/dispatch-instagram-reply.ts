@@ -36,9 +36,17 @@
 //   6. Whatever didn't go out becomes a card (rule 4), never a retry loop: the
 //      whole reply when nothing went out, the rest of it when part did.
 //
-// No read receipt and no typing indicator: Sendblue's must never be sent for
-// an Instagram message (they would go to the guest's phone, if they have one),
-// and Meta's sender actions are not built.
+// NO SENDBLUE READ RECEIPT AND NO SENDBLUE TYPING INDICATOR: those would go
+// to the guest's phone, if they even have one.
+//
+// Meta's own sender actions DO exist since TAC-540, and deliberately not
+// here. Seen fires from the Instagram webhook, before the settle, because by
+// the time a reply is being dispatched it is far too late to be worth
+// sending; and the typing indicator is turned on and off by
+// lib/agent/handle-inbound.ts, which is the only place that knows whether a
+// turn is still going. Meta clears the indicator when a message is sent
+// (developers.facebook.com/docs/graph-api/reference/page/messages/), so this
+// file has nothing to turn off after a successful send.
 
 import { randomUUID } from 'node:crypto'
 

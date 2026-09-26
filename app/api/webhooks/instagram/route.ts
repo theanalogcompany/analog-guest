@@ -63,6 +63,7 @@ import {
   captureInstagramScanUnattributed,
 } from '@/lib/analytics/posthog'
 import { resolveAgentHandoff } from '@/lib/messaging/instagram/agent-gate'
+import { markInboundSeen } from '@/lib/messaging/instagram/mark-seen'
 import {
   logInstagramOutcome,
   processInstagramDelivery,
@@ -233,6 +234,22 @@ export async function POST(request: Request): Promise<Response> {
       // handleInbound, so exactly one of these two writes a row.
       const handoff = resolveAgentHandoff(outcome)
       if (handoff.kind === 'run') {
+        // TAC-540: show the guest Seen, about a second after they hit send.
+        //
+        // GATED ON THE SAME `run` THE AGENT IS, which is what excludes an
+        // echo, a read receipt, a bare scan referral, a redelivery, a
+        // titleless postback and a shut agent gate — every exclusion the
+        // ticket names except the paused venue, which markInboundSeen reads
+        // for itself because `venues.status` is not resolved this early.
+        // Re-deriving any of the rest here would be a second copy of the
+        // handoff rule, and two copies agree until one changes.
+        //
+        // waitUntil and never awaited, like every other side effect in this
+        // loop: a Graph call must not sit inside Meta's delivery deadline,
+        // and a failure here must not cost the 200. It never throws.
+        waitUntil(
+          markInboundSeen(supabase, { venueId: handoff.venueId, guestId: handoff.guestId }),
+        )
         waitUntil(runInboundAgent(handoff.messageId))
       } else if (handoff.kind === 'schedule_arrival') {
         // TAC-536: a scan with no message. Nothing is generated now and no

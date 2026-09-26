@@ -11,7 +11,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { CoalesceDeps } from './coalesce-turn'
 
@@ -59,6 +59,11 @@ const captureCrisisSafetyReplySentMock = vi.fn()
 const captureIntentionPromptRecordingFailedMock = vi.fn()
 const captureIntentionPromptRaisedMock = vi.fn()
 const sendDraftFlaggedPushMock = vi.fn()
+// TAC-540. Resolves rather than returning undefined: handle-inbound calls
+// `.catch()` on the typing_on promise, and a bare vi.fn() would throw there
+// on the first call — the defect arriving through the mock, which this repo
+// has already paid for once with verifyMechanicOfferStage.
+const signalTypingMock = vi.fn().mockResolvedValue({ status: 'sent' })
 const guestMaybeSingleMock = vi.fn()
 const inboundSingleMock = vi.fn()
 const existingReplyMaybeSingleMock = vi.fn()
@@ -129,6 +134,13 @@ vi.mock('./stages', async () => {
     // defect found in one sitting; see CLAUDE.md's rule on mocked behaviour
     // flags. Flipping it broke nothing — the branch simply had no coverage.
     shouldRetrieveKnowledge: () => true,
+    // TAC-540. Passed through REAL via importOriginal rather than stubbed:
+    // it is a pure predicate over the context these tests already build, and
+    // a stub would be this file asserting on its own opinion of when the
+    // typing dots appear. A missing entry here arrives `undefined` and throws
+    // the whole turn into `failed` — which is how the allow-list announced
+    // itself when this landed.
+    mayAutoSendAfterClassification: actual.mayAutoSendAfterClassification,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
@@ -274,16 +286,40 @@ vi.mock('./coalesce-turn', async () => {
   }
 })
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
+// TAC-540. The transport is a spy, so these tests see WHICH signal was sent
+// and when, without a Graph call. The channel switch itself is the real one
+// in typing-indicator.test.ts; what is under test here is when handle-inbound
+// asks for dots and when it takes them away.
+vi.mock('./typing-indicator', () => ({
+  signalTyping: (...a: unknown[]) => signalTypingMock(...a),
+}))
 const traceControl = vi.hoisted(() => ({ flushThrows: false }))
+/**
+ * TAC-540 part D. Spans now RECORD when they open and close, so a test can
+ * see whether each of the five checks owns its own window or whether they
+ * all share the batch's. Before this the mock discarded everything, which is
+ * why three spans could wrap the same `Promise.allSettled` for a year with
+ * nothing to notice it.
+ *
+ * Ordinals rather than timestamps: two checks that finish in the same
+ * millisecond are indistinguishable by clock, and what is being asserted is
+ * ORDER.
+ */
+const spanLog = vi.hoisted(() => ({ events: [] as Array<{ name: string; phase: 'open' | 'close' }> }))
 vi.mock('@/lib/observability', () => ({
   startAgentTrace: () => ({
     id: '',
     captureContent: false,
-    span: () => ({
-      span: () => ({ end: () => undefined }),
-      end: () => undefined,
-      update: () => undefined,
-    }),
+    span: (name: string) => {
+      spanLog.events.push({ name, phase: 'open' })
+      return {
+        span: () => ({ end: () => undefined }),
+        end: () => {
+          spanLog.events.push({ name, phase: 'close' })
+        },
+        update: () => undefined,
+      }
+    },
     update: () => undefined,
     // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
     // which is the only way the orchestrator can throw past its own top-level
@@ -315,7 +351,14 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       id: VENUE_ID,
       slug: 'v',
       brandPersona: {},
-      venueInfo: {},
+      // TAC-540: `hours` is non-optional on VenueInfo (the schema defaults it
+      // to {}), so `venueInfo: {}` was a fixture lying about a state the type
+      // forbids. It went unnoticed while every real reader of it — the gate's
+      // closed-venue triggers — was mocked out in this file;
+      // mayAutoSendAfterClassification is the first one that actually runs
+      // here. Backfilled rather than making the source defensive, the call
+      // TAC-301, TAC-362 and TAC-377 each made on the same kind of helper.
+      venueInfo: { hours: {} },
       timezone: 'UTC',
       sendblueNumber: '+1',
       holdAllOutbound: false,
@@ -365,6 +408,10 @@ beforeEach(() => {
   // default has to be restored here or every test gets `undefined` back.
   dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'noop' })
   sendCommitmentArrivalPushMock.mockResolvedValue(undefined)
+  // TAC-540: clearAllMocks wipes this too, and an undefined return makes
+  // handle-inbound's `.catch()` on it throw.
+  signalTypingMock.mockResolvedValue({ status: 'sent' })
+  spanLog.events = []
   inboundSingleMock.mockResolvedValue({
     data: {
       id: INBOUND_ID,
@@ -1207,7 +1254,21 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
 })
 
 describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
-  it('sends the fixed reply directly, skipping retrieval, generation, and the approval gate', async () => {
+  /**
+   * REVERSED BY TAC-540, not deleted, because the old behaviour is exactly
+   * what changed and a deleted assertion leaves no record that it was ever
+   * the other way.
+   *
+   * Corpus retrieval now STARTS beside classification, so on a crisis turn it
+   * has already been called and its result is thrown away — the ticket's own
+   * ruling. Generation and the approval gate are still skipped, which is what
+   * the short circuit is actually for.
+   *
+   * The property that replaces "never called" is stronger and is the one that
+   * matters here: the crisis path must not WAIT for it. See the two tests
+   * below.
+   */
+  it('sends the fixed reply directly, skipping generation and the approval gate', async () => {
     classifyStageMock.mockResolvedValueOnce({
       category: 'casual_chatter',
       classifierConfidence: 0.8,
@@ -1220,9 +1281,66 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
     })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-1' })
-    expect(retrieveCorpusStageMock).not.toHaveBeenCalled()
+    // Started alongside classification, and discarded: one Voyage embed and
+    // one RPC spent on a turn that does not use them, which the ticket
+    // accepts in exchange for overlapping them on every ordinary turn.
+    expect(retrieveCorpusStageMock).toHaveBeenCalledTimes(1)
     expect(generateStageMock).not.toHaveBeenCalled()
     expect(applyApprovalPolicyStageMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * TAC-540, and the reason part C is NOT `Promise.allSettled` over the pair.
+   * Awaiting both together would make the crisis reply wait for a retrieval
+   * it never reads — adding latency on the one turn in this file where
+   * latency is worst.
+   *
+   * Fails if the corpus promise is awaited before the crisis short circuit:
+   * this retrieval never settles, so the whole turn would hang and the test
+   * would time out rather than assert.
+   */
+  it('does NOT wait for the discarded retrieval before sending the crisis reply', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'casual_chatter',
+      classifierConfidence: 0.8,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    retrieveCorpusStageMock.mockReturnValueOnce(new Promise(() => {}))
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-3',
+      providerMessageId: 'p',
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-3' })
+  }, 2000)
+
+  /**
+   * The discarded retrieval's REJECTION must not reach the crisis turn. The
+   * `.then(ok, err)` claim in handle-inbound is what makes this true; without
+   * it this is an unhandled rejection, and the corpus red alert would fire on
+   * a turn that never consulted the corpus.
+   */
+  it('a retrieval that fails after the crisis short circuit changes nothing', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'casual_chatter',
+      classifierConfidence: 0.8,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    retrieveCorpusStageMock.mockRejectedValueOnce(new Error('voyage exploded'))
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-4',
+      providerMessageId: 'p',
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-4' })
+    expect(fireRedAlertMock).not.toHaveBeenCalled()
   })
 
   it('dispatches the exact fixed body via scheduleAndSend, skipping the read receipt and typing beats and stamping review_reason', async () => {
@@ -2643,5 +2761,813 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
 
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
     warn.mockRestore()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-540
+// ---------------------------------------------------------------------------
+
+/**
+ * An Instagram context. `conversationChannel` is what the typing switch reads;
+ * everything else is the ordinary fixture.
+ *
+ * Named apart from the `instagramCtx` inside the TAC-469 describe above,
+ * which is scoped to that block and carries a phoneless guest it needs and
+ * these tests do not.
+ */
+function typingCtx(overrides: Record<string, unknown> = {}) {
+  return makeCtx({ conversationChannel: 'instagram', ...overrides })
+}
+
+/**
+ * An Instagram auto-send that succeeds. `dispatch-reply.ts` is REAL in this
+ * file, so an Instagram conversation routes to the mocked
+ * dispatchInstagramReply, never to scheduleAndSend — which is also AC 4
+ * holding by construction.
+ */
+function instagramSendSucceeds(outboundMessageId = 'ig-1'): void {
+  dispatchInstagramReplyMock.mockResolvedValue({
+    kind: 'sent',
+    outboundMessageId,
+    providerMessageId: 'mid-1',
+    generationId: 'gen-1',
+    bubbleCount: 1,
+    deliveredBody: 'sure thing',
+    undelivered: null,
+  })
+}
+
+/** Just the signals, in order: ['on'] or ['on', 'on', 'off']. */
+function typingSignals(): string[] {
+  return signalTypingMock.mock.calls.map((c) => c[1] as string)
+}
+
+/**
+ * Wait for the exit's fire-and-forget typing_off.
+ *
+ * It is handed to `waitUntil` rather than awaited (code review: awaiting it
+ * put two Graph calls in front of the claim release and the retry), and
+ * `waitUntil` is `(p) => p` here, so `handleInbound` returns before the `off`
+ * is sent.
+ *
+ * WAITS FOR THE CONDITION, NOT A TICK COUNT, and the first version did the
+ * latter. Two macrotasks happened to be enough, which is the same
+ * coincidence the tests using it were added to remove: probing with one
+ * extra `setTimeout` inside `stopTypingUnlessSent` broke it, and production
+ * spends three supabase queries there before the POST. A fixed number of
+ * ticks is a guess about an implementation; this is the property.
+ */
+async function flushTyping(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(typingSignals()).toContain('off')
+  })
+}
+
+describe('TAC-540 — typing dots on the auto-send path', () => {
+  beforeEach(() => {
+    buildRuntimeContextMock.mockResolvedValue(typingCtx())
+  })
+
+  /**
+   * Drain fire-and-forget work before the next test, the same reason
+   * coalesce-inbound.test.ts carries one: `waitUntil` is `(p) => p` here, so
+   * a typing_off (and the handoff behind it) started in one test can still be
+   * in flight when the next begins, where it lands in the shared
+   * signalTypingMock and makes a `toEqual` on the signal sequence read
+   * another test's work. Not reachable on the un-probed suite, which is
+   * deterministic; it shows up the moment anything delays the exit.
+   */
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  })
+
+  /**
+   * Both sites, and the second is not redundant. Meta turns the indicator off
+   * "after 20 seconds or after a response is sent", and generation alone runs
+   * to ~11s at p90 on top of classification's ~2.8s — so one typing_on would
+   * routinely expire before the checks, the gate and the send had started.
+   *
+   * Fails if either call is removed, which is the whole point of asserting
+   * the SEQUENCE rather than `toHaveBeenCalled()`.
+   */
+  it('turns the dots on after classification AND again after generation', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(typingSignals()).toEqual(['on', 'on'])
+    expect(signalTypingMock).toHaveBeenCalledWith(
+      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+      'on',
+    )
+  })
+
+  /**
+   * The ordering claim: the first typing_on precedes generation. Without it
+   * the dots would appear only once the slow half was already done, which is
+   * most of the wait the ticket exists to cover.
+   */
+  it('shows the dots BEFORE generation starts, not after', async () => {
+    const order: string[] = []
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) => {
+      order.push(`typing_${signal}`)
+      return { status: 'sent' }
+    })
+    generateStageMock.mockImplementation(async () => {
+      order.push('generate')
+      return { status: 'success', result: successResult() }
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    instagramSendSucceeds()
+
+    await handleInbound(INBOUND_ID)
+
+    expect(order[0]).toBe('typing_on')
+    expect(order).toContain('generate')
+    expect(order.indexOf('typing_on')).toBeLessThan(order.indexOf('generate'))
+  })
+
+  /**
+   * AC 2. A held draft is the case the whole `typing_off` mechanism exists
+   * for: the prediction after classification said auto-send, a
+   * post-generation check disagreed, and the guest must not be left watching
+   * dots for a reply that is now sitting on an operator's screen.
+   */
+  it('turns the dots off when the draft is held for approval, and sends nothing', async () => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['model_flagged'],
+      primaryTrigger: 'model_flagged',
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    // Code review: this is the headline test for the whole typing_off
+    // mechanism and it was the one that had no flush. It passed by about one
+    // microtask, because the mocked signalTyping resolves without ever
+    // yielding to the macrotask queue — where production does a
+    // loadInstagramSendTarget (three supabase queries) before the POST.
+    // Verified by probe: one setTimeout inside stopTypingUnlessSent and it
+    // failed with ['on','on'].
+    await flushTyping()
+
+    expect(r).toMatchObject({ status: 'queued' })
+    expect(typingSignals()).toEqual(['on', 'on', 'off'])
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Meta clears the indicator when a message is sent, so a typing_off behind
+   * a delivered reply is a second call fighting Meta's own clear. `sent` is
+   * the ONE false in TYPING_OFF_AFTER, and this is what pins it.
+   */
+  it('does NOT turn the dots off after a reply actually went out', async () => {
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+
+    await handleInbound(INBOUND_ID)
+
+    expect(typingSignals()).not.toContain('off')
+  })
+
+  /**
+   * Every other way a turn can end. Each case drives a DIFFERENT return site
+   * in runInboundTurn, so a `typing_off` wired to one branch rather than to
+   * the single exit fails here.
+   *
+   * The total map in handle-inbound is the other half: an eleventh
+   * AgentResult status fails `tsc` rather than silently inheriting "leave the
+   * dots on", which no test can catch because the status would not exist yet.
+   */
+  it.each([
+    [
+      'refused (below the fidelity floor)',
+      () => {
+        generateStageMock.mockResolvedValue({
+          status: 'refused',
+          attemptScores: [0.2],
+          finalScore: 0.2,
+        })
+      },
+    ],
+    [
+      'failed in generation, with no card',
+      () => {
+        generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
+        loadPendingRowsBySlotMock.mockRejectedValue(new Error('no card for you'))
+      },
+    ],
+    [
+      'failed in the corpus stage',
+      () => {
+        retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+      },
+    ],
+    [
+      'dropped, because a pending card holds the slot',
+      () => {
+        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        applyApprovalPolicyStageMock.mockResolvedValue({
+          action: 'drop',
+          reason: 'obligation_slot_taken',
+          protectedDraftId: 'card-9',
+          protectedCommitment: null,
+          droppedCommitment: null,
+          triggers: ['commitment_type_gated'],
+        })
+      },
+    ],
+    [
+      'silenced, because nothing needed answering',
+      () => {
+        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        applyApprovalPolicyStageMock.mockResolvedValue({ action: 'silence' })
+      },
+    ],
+    /**
+     * ADDED IN CODE REVIEW, and it was the gap: flipping
+     * `TYPING_OFF_AFTER.superseded` to false passed 168 tests. It is the one
+     * status that is neither covered by the cases above nor unreachable with
+     * the dots on — `skipped_duplicate`, `venue_halted` and `coalesced` all
+     * return before the context is even built.
+     *
+     * Reachable exactly like this: dots go on, generation succeeds, and the
+     * Instagram reply check finds that staff already answered by hand. So
+     * nothing is sent, Meta never clears the indicator, and without the
+     * `typing_off` the guest watches dots for the full 20 seconds
+     * immediately after a human replied to them.
+     */
+    [
+      'superseded, because staff already answered in the Instagram app',
+      () => {
+        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+        dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'staff-1' })
+      },
+    ],
+  ])('turns the dots off when the turn ends %s', async (_name, arrange) => {
+    arrange()
+    const r = await handleInbound(INBOUND_ID).catch(() => null)
+    // The exit hands typing_off to waitUntil rather than awaiting it, so
+    // that the claim release and the retry are not held behind two Graph
+    // calls. Drained here.
+    await flushTyping()
+
+    expect(r).not.toMatchObject({ status: 'sent' })
+    expect(typingSignals()).toContain('off')
+  })
+
+  /**
+   * A crisis turn never turns the dots on, so there is nothing to turn off.
+   *
+   * The ticket lists "crisis-routed" among the typing_off cases, but a crisis
+   * turn DOES dispatch a reply — so placing typing_on below the short circuit
+   * is what makes that list consistent with no special case. It also keeps
+   * the crisis path's timing exactly as it was.
+   *
+   * Fails if typing_on is hoisted above the crisis short circuit, which is
+   * the obvious reading of "after classification".
+   */
+  it('never shows dots on a crisis turn, and never has to take them away', async () => {
+    classifyStageMock.mockResolvedValueOnce({
+      category: 'casual_chatter',
+      classifierConfidence: 0.8,
+      reasoning: 'mock',
+      crisisSafety: true,
+    })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent',
+      outboundMessageId: 'crisis-1',
+      providerMessageId: 'mid-c',
+      generationId: 'gen-c',
+      bubbleCount: 1,
+      deliveredBody: 'fixed crisis body',
+      undelivered: null,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(signalTypingMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('TAC-540 — the prediction that decides whether dots appear at all', () => {
+  /**
+   * A category routed to operator approval will queue whatever the draft
+   * says, so showing dots would be a false promise on every one of those
+   * turns rather than occasionally.
+   */
+  it('shows no dots when the category is routed to operator approval', async () => {
+    buildRuntimeContextMock.mockResolvedValue(
+      typingCtx({
+        venue: {
+          ...typingCtx().venue,
+          approvalPolicy: { default: 'auto_send', perCategory: { new_question: 'operator_approval' } },
+        },
+      }),
+    )
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['category_requires_approval'],
+      primaryTrigger: 'category_requires_approval',
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(signalTypingMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Not in the ticket's own wording, and included because at a venue
+   * carrying it EVERY reply queues — so without it the dots would be false on
+   * every single turn there. Strictly narrowing.
+   */
+  it('shows no dots at a venue holding all outbound', async () => {
+    const base = typingCtx()
+    buildRuntimeContextMock.mockResolvedValue(
+      typingCtx({ venue: { ...base.venue, holdAllOutbound: true } }),
+    )
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: ['hold_all_outbound'],
+      primaryTrigger: 'hold_all_outbound',
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(signalTypingMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The ticket's own closed-venue clause. `isVenueClosed` is a POSITIVE
+   * verdict only, so a venue whose hours nobody filled in still gets dots —
+   * which is why the fixture states real hours and a time outside them
+   * rather than leaving `hours` empty.
+   */
+  it('shows no dots while the venue is positively closed', async () => {
+    const base = typingCtx()
+    buildRuntimeContextMock.mockResolvedValue(
+      typingCtx({
+        venue: {
+          ...base.venue,
+          timezone: 'America/Los_Angeles',
+          venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+        },
+        // A Monday, 21:00 in Los Angeles: six hours after close.
+        recognition: { ...base.recognition, computedAt: new Date('2026-09-22T04:00:00.000Z') },
+      }),
+    )
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+
+    await handleInbound(INBOUND_ID)
+
+    expect(signalTypingMock).not.toHaveBeenCalled()
+  })
+
+  /** AC 4, from the orchestrator's side. */
+  it('a text conversation never reaches the typing switch at all', async () => {
+    buildRuntimeContextMock.mockResolvedValue(makeCtx())
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(signalTypingMock).not.toHaveBeenCalled()
+    // The other half of AC 4: the text arm still runs, untouched.
+    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('TAC-540 — a sender action can never change the reply', () => {
+  beforeEach(() => {
+    buildRuntimeContextMock.mockResolvedValue(typingCtx())
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+  })
+
+  /**
+   * AC 3, one test per failure mode. Each asserts the reply's OUTCOME and
+   * that it still reached scheduleAndSend with the same body — not merely
+   * that nothing threw, because a turn that silently degraded to a card
+   * would also not throw.
+   */
+  it.each([
+    ['throws', () => signalTypingMock.mockRejectedValue(new Error('graph exploded'))],
+    ['returns a non-2xx', () => signalTypingMock.mockResolvedValue({ status: 'send_failed', kind: 'graph_error' })],
+    ['times out', () => signalTypingMock.mockResolvedValue({ status: 'send_failed', kind: 'timeout' })],
+    [
+      'never settles',
+      () =>
+        signalTypingMock.mockImplementation((_t: unknown, signal: string) =>
+          // typing_off IS awaited at the exit, so a never-settling `off`
+          // would hang the turn. Only `on` is left open here, which is the
+          // fire-and-forget one.
+          signal === 'on' ? new Promise(() => {}) : Promise.resolve({ status: 'sent' }),
+        ),
+    ],
+  ])('a typing_on that %s changes nothing about the reply', async (_name, arrange) => {
+    arrange()
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-1' })
+    // AC 4 rides along: an Instagram turn never reaches the Sendblue arm.
+    expect(dispatchInstagramReplyMock).toHaveBeenCalledTimes(1)
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  }, 2000)
+
+  /**
+   * THE EXIT MUST NOT HOLD THE REPLY PATH, added in code review.
+   *
+   * `stopTypingUnlessSent` runs immediately before `closeCoalescedTurn`,
+   * which releases the conversation claim and then fires the retry or hands
+   * off a newer message — the things that actually produce the guest's reply
+   * on a failed turn. Awaiting it put up to two Graph round-trips and an
+   * un-timeouted send-target lookup in front of that, on the one ticket whose
+   * subject is Instagram latency.
+   *
+   * FAILS WHEN THE waitUntil IS REVERTED TO AN await: this typing_off never
+   * settles, so the whole turn hangs and the test times out rather than
+   * asserting. Without it, nothing in the suite noticed the difference —
+   * re-awaiting the exit passed all 132 tests.
+   */
+  it('returns without waiting for typing_off, so the retry is not held behind it', async () => {
+    generateStageMock.mockResolvedValue({ status: 'refused', attemptScores: [0.1], finalScore: 0.1 })
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
+      signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
+    )
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'refused' })
+  }, 2000)
+
+  /**
+   * The same property on the CATCH path, which is where it matters most.
+   *
+   * `closeCoalescedTurn(..., null)`'s own comment calls a throw "the
+   * strongest case for a retry": the turn produced no result at all, so the
+   * guest certainly got nothing. An `await` there would delay exactly that
+   * retry. The happy path was pinned and this one was not — found in code
+   * review, and reverting only this call to an `await` passed all 170 tests.
+   *
+   * `flushThrows` makes `trace.flushAsync()` throw from runInboundTurn's
+   * `finally`, which is the only way to escape its own top-level catch and
+   * reach the wrapper's.
+   */
+  it('returns without waiting for typing_off when the turn throws past its own catch', async () => {
+    traceControl.flushThrows = true
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    instagramSendSucceeds()
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
+      signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
+    )
+
+    await expect(handleInbound(INBOUND_ID)).rejects.toThrow('flush failed')
+  }, 2000)
+
+  /**
+   * THE ORDERING GUARD, and the test the ruling asked for specifically.
+   *
+   * typing_on is fire-and-forget, so a turn that fails fast can reach its
+   * exit while that POST is still open. Sent in that order, Meta applies the
+   * `off` first and the `on` second, and the guest watches dots for the full
+   * 20-second timeout on a turn that is not replying.
+   *
+   * The fixture forces exactly that race: typing_on does not resolve until
+   * it is released, and the turn fails immediately after it is issued. If
+   * the exit did not await the in-flight typing_on, the `off` would be sent
+   * while `on` was still pending — which is what the index comparison below
+   * detects.
+   *
+   * FAILS WHEN THE AWAIT IS REMOVED: without it, `off` is recorded while
+   * the `on` promise is still pending.
+   *
+   * KNOWN SENSITIVITY, recorded rather than chased. This is the most
+   * timing-sensitive test in the file, and inserting an extra macrotask into
+   * the very statement it pins breaks it while leaving every other TAC-540
+   * test green. That is a probe perturbing the line under test, not a
+   * defect — but if it ever goes flaky, this is why, and the fixture's 20ms
+   * release is the knob.
+   */
+  it('waits for an in-flight typing_on before sending typing_off', async () => {
+    const completed: string[] = []
+    let releaseOn: (() => void) | null = null
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) => {
+      if (signal === 'on') {
+        await new Promise<void>((resolve) => {
+          releaseOn = resolve
+        })
+        completed.push('on')
+        return { status: 'sent' }
+      }
+      completed.push('off')
+      return { status: 'sent' }
+    })
+    // Fail the turn right after the first typing_on is issued, so the exit is
+    // reached while that POST is still open.
+    generateStageMock.mockImplementation(async () => {
+      // The typing_on is in flight by now; let it finish only once the turn
+      // has had the chance to reach its exit.
+      setTimeout(() => releaseOn?.(), 20)
+      return { status: 'refused', attemptScores: [0.1], finalScore: 0.1 }
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    // typing_off is fire-and-forget at the exit (code review: awaiting it
+    // held the claim release and the retry behind two Graph calls), so the
+    // run returns before it lands. Waited for here, not slept past.
+    await vi.waitFor(() => {
+      expect(completed).toContain('off')
+    })
+
+    expect(r).toMatchObject({ status: 'refused' })
+    // The `on` completed FIRST. Without the in-flight await inside
+    // stopTypingUnlessSent, `off` is pushed while the `on` promise is still
+    // pending and this order is reversed.
+    expect(completed).toEqual(['on', 'off'])
+  })
+})
+
+describe('TAC-540 — classify and voice retrieval overlap', () => {
+  /**
+   * Both must be IN FLIGHT at the same time. Asserted with deferred
+   * promises rather than by timing: `retrieveCorpusStage` is only allowed to
+   * finish once `classifyStage` has been entered, so if the two ran in
+   * sequence this deadlocks and the test times out rather than passing on a
+   * fast machine.
+   *
+   * Fails the moment retrieval is moved back below classification.
+   */
+  it('has both in flight at once: neither finishes before the other starts', async () => {
+    const entered = { classify: false, corpus: false }
+    let bothEntered: (() => void) | null = null
+    const bothRunning = new Promise<void>((resolve) => {
+      bothEntered = resolve
+    })
+    const enter = (which: 'classify' | 'corpus') => {
+      entered[which] = true
+      if (entered.classify && entered.corpus) bothEntered?.()
+    }
+
+    // ORDER-AGNOSTIC on purpose. The property the ticket names is that they
+    // OVERLAP, not which is called first — so neither mock is allowed to
+    // resolve until both have been entered. Sequentially this deadlocks and
+    // the test times out; in parallel both gates open and it passes whichever
+    // order they were started in.
+    //
+    // An earlier version had classification release retrieval, which also
+    // pinned retrieval as FIRST. That is true of the implementation and is
+    // not what is being claimed here, so it was over-specified: a later
+    // reordering that kept them parallel would have failed it.
+    retrieveCorpusStageMock.mockImplementation(async () => {
+      enter('corpus')
+      await bothRunning
+      return []
+    })
+    classifyStageMock.mockImplementation(async () => {
+      enter('classify')
+      await bothRunning
+      return { category: 'new_question', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false }
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(entered).toEqual({ classify: true, corpus: true })
+    expect(retrieveCorpusStageMock).toHaveBeenCalledTimes(1)
+  }, 2000)
+
+  /**
+   * Failure semantics, unchanged. Same stage name, same red alert, same
+   * return — and, the part the parallelisation could have broken, the
+   * classification failure does NOT wait for retrieval: this one never
+   * settles, so a turn that awaited it would time out.
+   */
+  it('a classification failure still fails as classification, without waiting for retrieval', async () => {
+    retrieveCorpusStageMock.mockReturnValue(new Promise(() => {}))
+    classifyStageMock.mockRejectedValue(new Error('anthropic exploded'))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'failed', stage: 'classification' })
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'classification' }),
+    )
+  }, 2000)
+
+  /**
+   * The floating-promise claim. Without the `.then(ok, err)` in
+   * handle-inbound, this rejection has no handler attached when the
+   * classification failure returns, and Node reports an unhandled rejection.
+   *
+   * Asserted by listening for the process event rather than by inspecting
+   * the source: an unhandled rejection does not fail a vitest assertion on
+   * its own, so nothing else here would notice it.
+   */
+  it('a retrieval that rejects after a classification failure is not an unhandled rejection', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+      classifyStageMock.mockRejectedValue(new Error('anthropic exploded'))
+
+      const r = await handleInbound(INBOUND_ID)
+      // Two macrotask turns: Node reports an unhandled rejection after the
+      // microtask queue drains, so a same-tick assertion would always pass.
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(r).toMatchObject({ status: 'failed', stage: 'classification' })
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  /** The corpus failure keeps its own stage and its own alert. */
+  it('a corpus failure still fails as corpus, in its old position', async () => {
+    retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'failed', stage: 'corpus' })
+    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'corpus' }))
+    // Classification ran first and succeeded, so its alert never fired: the
+    // ordering when both could fail is unchanged.
+    expect(fireRedAlertMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'classification' }),
+    )
+  })
+})
+
+describe('TAC-540 — each verify check owns its own span window', () => {
+  const CHECK_SPANS = [
+    'verify_grounding',
+    'verify_mechanic_offer',
+    'verify_prose_promise',
+    'verify_cancellation_claim',
+    'verify_closed_venue_arrival',
+  ]
+
+  /**
+   * Resolve a stage only when its gate is opened, and record the resolution
+   * in the SAME ordered log the spans write to — so a test can see whether a
+   * span closed while other checks were still running.
+   */
+  function deferred<T>(name: string, value: T) {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return {
+      run: async () => {
+        await gate
+        spanLog.events.push({ name: `resolved:${name}`, phase: 'close' })
+        return value
+      },
+      release: () => release(),
+    }
+  }
+
+  beforeEach(() => {
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+  })
+
+  it('opens a span for all five checks, including the two that had none', async () => {
+    await handleInbound(INBOUND_ID)
+
+    const opened = spanLog.events.filter((e) => e.phase === 'open').map((e) => e.name)
+    for (const name of CHECK_SPANS) expect(opened).toContain(name)
+  })
+
+  /**
+   * THE AC 6 TEST: a span must close when ITS OWN call resolves, not when
+   * the batch does.
+   *
+   * Before this ticket all three existing spans were ended after the
+   * `Promise.allSettled`, so every one of them recorded the maximum of the
+   * five and no check could be told apart from another (TAC-420 finding F1).
+   *
+   * The fixture releases the five checks in a chosen order and asserts the
+   * spans closed in that same order. Under the old shape every close lands
+   * after the slowest check, so the recorded order would be the array order
+   * instead — which is a DIFFERENT order here by construction.
+   */
+  it('closes each span while the other checks are STILL RUNNING, not after the batch', async () => {
+    const grounding = deferred('grounding', { status: 'skipped' as const })
+    const mechanic = deferred('mechanic', { status: 'skipped' as const })
+    const prose = deferred('prose', { status: 'skipped' as const })
+    const cancellation = deferred('cancellation', { resolution: { status: 'none' as const }, claim: 'clean' as const })
+    const closedVenue = deferred('closedVenue', { status: 'skipped' as const })
+
+    verifyGroundingStageMock.mockImplementation(grounding.run)
+    verifyMechanicOfferStageMock.mockImplementation(mechanic.run)
+    verifyProsePromiseStageMock.mockImplementation(prose.run)
+    verifyCancellationClaimStageMock.mockImplementation(cancellation.run)
+    verifyClosedVenueArrivalStageMock.mockImplementation(closedVenue.run)
+
+    const turn = handleInbound(INBOUND_ID)
+    // Deliberately NOT the order the checks appear in the allSettled array:
+    // if the spans closed together after the batch, the recorded order would
+    // be that array order and this assertion would fail.
+    const releaseOrder = [
+      ['verify_closed_venue_arrival', closedVenue],
+      ['verify_prose_promise', prose],
+      ['verify_grounding', grounding],
+      ['verify_cancellation_claim', cancellation],
+      ['verify_mechanic_offer', mechanic],
+    ] as const
+    for (const [, d] of releaseOrder) {
+      d.release()
+      // One macrotask between releases, so each span's close is recorded
+      // before the next check is allowed to finish.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    await turn
+
+    // THE ASSERTION THAT ACTUALLY CATCHES IT, and the first version of this
+    // test did not.
+    //
+    // Asserting the close ORDER is not enough: the pre-TAC-540 shape ends
+    // every span after the batch, but it ends them in the order the checks
+    // resolved — so the order matches and a mutant restoring that shape
+    // passes. Found by running exactly that mutant against the first version
+    // of this test, which it survived.
+    //
+    // What separates the two is the WINDOW. Each span must close while the
+    // other checks are still in flight, so the log has to interleave:
+    // resolved, closed, resolved, closed. Batched ends produce all five
+    // resolutions and then all five closes.
+    const log = spanLog.events
+      .filter((e) => CHECK_SPANS.includes(e.name) || e.name.startsWith('resolved:'))
+      .filter((e) => e.phase === 'close')
+      .map((e) => e.name)
+
+    const firstSpanClose = log.findIndex((n) => CHECK_SPANS.includes(n))
+    const lastResolve = log.map((n) => n.startsWith('resolved:')).lastIndexOf(true)
+    expect(firstSpanClose).toBeGreaterThanOrEqual(0)
+    expect(firstSpanClose).toBeLessThan(lastResolve)
+
+    // ...and each span still closes in ITS OWN check's order, which is what
+    // makes the slowest one identifiable afterwards.
+    const closed = log.filter((n) => CHECK_SPANS.includes(n))
+    expect(closed).toEqual(releaseOrder.map(([name]) => name))
+  })
+
+  /**
+   * A check that THROWS must still close its span, and must still reach
+   * `allSettled` as a rejection so the existing degrade-to-`skipped` /
+   * `check_failed` handling below it is untouched.
+   *
+   * Fails if the thunk swallows the error instead of rethrowing: the turn
+   * would then read a fulfilled `undefined` and crash where it destructures.
+   */
+  it('closes the span and still rejects when a check throws', async () => {
+    verifyGroundingStageMock.mockRejectedValue(new Error('haiku exploded'))
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    const closed = spanLog.events.filter((e) => e.phase === 'close').map((e) => e.name)
+    expect(closed).toContain('verify_grounding')
   })
 })

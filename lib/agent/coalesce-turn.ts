@@ -48,7 +48,7 @@
  * a rollback is a one-line revert.
  *
  * Never throws. `RAGResult`-shaped per the repo convention, with an injected
- * `{ store, now, sleep }` so no test ever waits 8 real seconds — the
+ * `{ store, now, sleep }` so no test ever waits the real settle — the
  * `dispatch-instagram-reply.ts` precedent.
  */
 
@@ -70,32 +70,37 @@ export const INBOUND_COALESCING_ENABLED = true
  * How long a run waits after `loadInbound` before claiming, so a fragment
  * already in flight lands first.
  *
- * 8 SECONDS, AND THE TRADE IS WRITTEN DOWN BECAUSE IT IS A REAL COST. The
- * observed burst gap was 7s, so 8s catches that burst before a model call is
- * spent. But TAC-421 deleted a 6.5s pre-send sleep for being 27% of a 24.4s
- * first-bubble p50, and this adds 8s back. The difference is what the delay
- * buys: TAC-421's sleep bought nothing (its own invariant test was a
- * tautology), and this buys one reply instead of two.
+ * 3 SECONDS SINCE TAC-540, DOWN FROM 8. Both numbers are on the record
+ * because the trade moved rather than the reasoning.
  *
- * THE NO-SETTLE ALTERNATIVE WAS COSTED AND REJECTED, NOT OVERLOOKED. At
- * `COALESCE_SETTLE_MS = 0` every acceptance criterion still passes, because
- * the pre-dispatch extension check catches what the settle misses. Against the
- * ticket's measured 37/168 ~ 22% burst rate: no-settle is ~5s better in
- * expectation (21.3s vs 26s), ~7s worse per burst (~33s vs ~26s), and spends
- * one wasted generation set per burst (~0.22 per turn), since the run
- * generates, discovers a newer message, and generates again.
+ * TAC-526 chose 8s against a 7s observed burst gap, so the settle caught that
+ * burst before a model call was spent. What made 8s expensive is that it sits
+ * in front of EVERY turn, bursty or not: Instagram first-bubble p50 was
+ * ~16-18s before it and ~23-25s after, with the guest seeing nothing for all
+ * of it. TAC-540 pays 5s of that back.
  *
- * So 8s trades expected latency for worst-case latency and model cost. If that
- * trade proves wrong the lever is this one constant, and
- * `scripts/measurement/coalesce-window.ts` is what supplies the evidence to
- * move it rather than the argument.
+ * THE SETTLE WAS NEVER THE CORRECTNESS MECHANISM, which is what makes the cut
+ * affordable. TAC-526's own costing says every acceptance criterion passes at
+ * `COALESCE_SETTLE_MS = 0`, because the claim stops the second reply and the
+ * pre-dispatch extension check adopts a message the settle missed. Shortening
+ * it moves bursts from the cheap path (caught by the settle, one generation)
+ * to the more expensive one (caught by the extension, a generation spent and
+ * discarded) — it does not let a second reply out. `coalesce-inbound.test.ts`
+ * covers a 5-second gap for exactly this: the case the old settle caught and
+ * this one does not, still producing one reply and no second one.
  *
- * ALSO ON THE LATENCY LEDGER: the read receipt fires inside `scheduleAndSend`,
- * so this delays it by the same 8s. Firing it before the settle would make the
- * wait feel better and costs a provider call per inbound message on a
- * hard-stop surface. Considered, out of scope, stated rather than discovered.
+ * So the trade, against TAC-526's measured ~22% burst rate: ~5s better on
+ * every turn, and roughly one extra discarded generation set per burst that
+ * falls between 3s and 8s. If that proves wrong the lever is this one
+ * constant, and `scripts/measurement/coalesce-window.ts` is what supplies the
+ * evidence to move it rather than the argument.
+ *
+ * NO LONGER ON THE LATENCY LEDGER: this used to delay the read receipt, which
+ * fired inside `scheduleAndSend` behind the settle. TAC-540 moved Seen to the
+ * Instagram webhook, ahead of the settle entirely, so the guest now gets a
+ * Seen tick about a second after they send whatever this constant is.
  */
-export const COALESCE_SETTLE_MS = 8_000
+export const COALESCE_SETTLE_MS = 3_000
 
 /**
  * How long a claim is honoured before another run may take it over.
@@ -577,10 +582,41 @@ export interface InboundTurnState {
    * bound that.
    */
   retryDepth: number
+  /**
+   * TAC-540: non-null once this turn has shown the guest typing dots, and who
+   * to turn them off for.
+   *
+   * Lives on the turn rather than in `runInboundTurn` because an extension
+   * RE-ENTERS that function, and the single `typing_off` exit is one level up
+   * in `handleInbound` — the same reason the claim and the extension budget
+   * are here.
+   */
+  typingShownFor: { venueId: string; guestId: string } | null
+  /**
+   * The most recent `typing_on` request, still in flight.
+   *
+   * IT IS AWAITED BEFORE `typing_off` IS SENT, and that is not tidiness.
+   * `typing_on` is deliberately fire-and-forget (it sits on the critical
+   * path), so a turn that fails fast — a corpus throw about half a second
+   * after classification — can reach its exit while the POST is still open.
+   * Sent in that order, Meta processes the `off` first and the `on` second,
+   * and the guest watches dots for the full 20-second timeout for a reply
+   * that is not coming. Which is the exact thing the `typing_off` exists to
+   * prevent.
+   */
+  typingInFlight: Promise<unknown> | null
 }
 
 export function newInboundTurnState(enabled: boolean, retryDepth = 0): InboundTurnState {
-  return { claim: null, extensionsUsed: 0, answered: null, enabled, retryDepth }
+  return {
+    claim: null,
+    extensionsUsed: 0,
+    answered: null,
+    enabled,
+    retryDepth,
+    typingShownFor: null,
+    typingInFlight: null,
+  }
 }
 
 /**

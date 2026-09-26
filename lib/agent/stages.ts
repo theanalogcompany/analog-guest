@@ -2119,6 +2119,59 @@ export type ApprovalDecision =
       droppedCommitment: CommitmentIdentity | null
     }
 
+/**
+ * TAC-540: is this turn, on what we know right after classification, headed
+ * for an auto-send?
+ *
+ * A PREDICTION, NOT A GUARANTEE, and reading it as one is the mistake to
+ * avoid. It exists to decide whether to show the guest typing dots before the
+ * expensive half of the turn runs, so it can only consult what is knowable
+ * that early. Most of `applyApprovalPolicyStage`'s triggers are not: the
+ * fidelity floor, the model's self-flag, the comp regex and all five
+ * post-generation backstops need a draft that does not exist yet. A turn can
+ * pass this and still queue.
+ *
+ * THAT IS WHY `typing_off` IS THE MECHANISM AND THIS IS THE OPTIMISATION. The
+ * correction on every non-send exit is what makes "a guest never watches dots
+ * for a reply that is not coming" true; this only keeps the dots off the turns
+ * we can already tell will not send, so the correction is rare rather than
+ * routine.
+ *
+ * The three conditions mirror the gate, and each names the trigger it mirrors
+ * so a reader can check them against it:
+ *
+ *   - the category's own policy       -> trigger 8, category_requires_approval
+ *   - venues.hold_all_outbound        -> trigger 6, hold_all_outbound
+ *   - a positively closed venue       -> TAC-540's own clause
+ *
+ * The closed-venue clause is not a gate trigger on its own (trigger 17 needs
+ * an emitted arrival), and it is here because a closed venue is where a reply
+ * is most likely to end up in front of an operator and least likely to be
+ * something a guest should watch being typed.
+ *
+ * `hold_all_outbound` is not in the ticket's own wording and is included
+ * anyway: at a venue carrying it, EVERY reply queues, so without it the dots
+ * would be false on every single turn there rather than occasionally. It can
+ * only ever narrow what this returns.
+ *
+ * DEMO GUESTS: the gate short-circuits to `send` for them (TAC-284), and this
+ * does not model that. A demo guest at a holding venue gets no dots and still
+ * gets a reply — a missing tick, never a false one, which is the safe
+ * direction and not worth a special case in a prediction.
+ *
+ * Pure. No I/O, no model call, and nothing here decides whether a reply goes
+ * out.
+ */
+export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
+  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+    return false
+  }
+  if (resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) !== 'auto_send') {
+    return false
+  }
+  return !isVenueClosed(ctx.venue, ctx.recognition.computedAt)
+}
+
 export async function applyApprovalPolicyStage(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,

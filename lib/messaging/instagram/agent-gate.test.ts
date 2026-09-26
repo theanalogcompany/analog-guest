@@ -77,15 +77,35 @@ describe('the Instagram agent gate', () => {
     expect(INSTAGRAM_AGENT_REPLIES_ENABLED).toBe(true)
   })
 
+  /**
+   * TAC-540 widened the `run` handoff with `venueId` and `guestId`, so the
+   * route can mark the thread seen without re-narrowing the outcome at the
+   * call site. Pinned with `toEqual` rather than `toMatchObject` for the
+   * reason it always was: the field SET is the contract, and a partial match
+   * would pass while one of the two ids went silently missing — which is a
+   * Seen tick sent to the wrong thread, or none at all.
+   */
   it('hands a newly saved guest message or postback to the agent by default', () => {
-    expect(resolveAgentHandoff(saved('message'))).toEqual({ kind: 'run', messageId: 'msg-message' })
-    expect(resolveAgentHandoff(saved('postback'))).toEqual({ kind: 'run', messageId: 'msg-postback' })
+    expect(resolveAgentHandoff(saved('message'))).toEqual({
+      kind: 'run',
+      messageId: 'msg-message',
+      venueId: 'v',
+      guestId: 'g',
+    })
+    expect(resolveAgentHandoff(saved('postback'))).toEqual({
+      kind: 'run',
+      messageId: 'msg-postback',
+      venueId: 'v',
+      guestId: 'g',
+    })
   })
 
   it('hands a newly saved guest message or postback to the agent once open', () => {
     expect(resolveAgentHandoff(saved('message'), true)).toEqual({
       kind: 'run',
       messageId: 'msg-message',
+      venueId: 'v',
+      guestId: 'g',
     })
   })
 

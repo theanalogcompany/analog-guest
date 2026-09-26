@@ -2340,6 +2340,36 @@ export async function captureInstagramReplySuperseded(props: InstagramReplySuper
   await capturePostHogEvent('instagram_reply_superseded', props.guestId, { ...props })
 }
 
+export interface InstagramSenderActionFailedProps {
+  venueId: string
+  guestId: string
+  /** 'mark_seen' | 'typing_on' | 'typing_off'. A vocabulary constant. */
+  action: string
+  /** The InstagramSendFailureKind the Graph failure classified to. */
+  kind: string
+}
+
+/**
+ * TAC-540: a Seen tick or a typing indicator did not go out.
+ *
+ * PostHog only, NO Slack relay, and the restraint is the point. These are
+ * cosmetic by construction — nothing reads the result and no reply changes —
+ * so relaying them would put a line in Slack for something nobody can act on
+ * per occurrence. The cause that actually matters, a rejected or expired
+ * token, already relays loudly through `instagram_send_failed` on the very
+ * next reply, and `kind` here is the same vocabulary, so the two line up in a
+ * query.
+ *
+ * Worth watching as a RATE rather than an event: a venue whose sender actions
+ * all fail while its sends succeed is the shape of a permissions problem
+ * rather than a token one.
+ */
+export async function captureInstagramSenderActionFailed(
+  props: InstagramSenderActionFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_sender_action_failed', props.guestId, { ...props })
+}
+
 export type InstagramScanUnattributedReason =
   /**
    * An icebreaker tap carrying no referral.
