@@ -1079,20 +1079,39 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   })
 
   // Q1, ruled 2026-09-22: the introduction is conditional on the guest's own
-  // message not naming a person, and it says out loud that it outranks the
-  // venue's voice setting. It has to. speakerFramingProse's `owner` branch
-  // renders "Do not name yourself unless the guest asks", this paragraph
-  // renders later in the user prompt, and it was already winning silently.
-  it('makes the introduction conditional and states that it outranks the voice setting', () => {
+  // message not naming a person. Le Mil's prefill names the venue, not a
+  // person, so an ordinary scan takes the introduce branch.
+  //
+  // TAC-541 (2026-09-26) DELETED the second half of the clause, and this test
+  // was renamed with it: it used to be called "states that it outranks the
+  // voice setting", which is now the opposite of what it checks. That half
+  // read "even where your voice guidance would otherwise have you hold your
+  // name back", and it did exactly that, overriding `owner` framing's "Do not
+  // name yourself unless the guest asks" to produce "I'm Himanshu" on a live
+  // scan.
+  it('makes the introduction conditional, and no longer overrides the voice setting', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
     expect(out).toContain(
-      "Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back.",
+      "Say hello. If their message doesn't name a person, say who they've reached as well.",
     )
   })
+
+  // THE CANARY, and it is the whole of TAC-541's opener half. Restoring the
+  // override in either channel's copy fails here. Deliberately matched on the
+  // distinctive fragment rather than the full sentence, so a reworded revival
+  // ("even where your persona would hold your name back") is caught too.
+  it.each(['text', 'instagram'] as const)(
+    'the %s opener never licenses a name against the voice setting (TAC-541)',
+    (channel) => {
+      const opener = firstTouchOpenerFor(channel)
+      expect(opener).not.toMatch(/hold your name back/i)
+      expect(opener).not.toMatch(/even where your (voice|persona|venue)/i)
+    },
+  )
 
   it('renders byte-identical to the pre-opener shape when firstTouchAfterQrScan is false', () => {
     const withFlagFalse = runtimeToProse(
@@ -1388,9 +1407,9 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
 // the assembled prompt in compose-prompt.test.ts.
 describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
   const SMS_OPENER =
-    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
+    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
   const INSTAGRAM_OPENER =
-    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
+    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
 
   it('the SMS opener is the approved wording and the Instagram opener swaps one phrase', () => {
     expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
@@ -1421,7 +1440,7 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
     for (const phrase of [
       'sent right after they scanned the sign at your pickup counter.',
       'They have just ordered and collected it.',
-      "Say hello. If their message doesn't name a person, say who they've reached as well,",
+      "Say hello. If their message doesn't name a person, say who they've reached as well.",
       'Ask what they just got.',
     ]) {
       expect(firstTouchOpenerFor('text')).toContain(phrase)

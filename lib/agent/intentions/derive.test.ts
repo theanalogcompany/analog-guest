@@ -4,6 +4,7 @@ import { INTENTION_RULES_DEFAULT } from '@/lib/schemas/intention-rules'
 import {
   EVENT_ARMED_WINDOW_DAYS,
   FIRST_CONTACT_WINDOW_DAYS,
+  INTENTION_DEFINITION_BY_KEY,
   type IntentionKey,
   resolveIntentionKey,
   UNDERSTAND_ORDER_WINDOW_DAYS,
@@ -1121,7 +1122,7 @@ describe('deriveIntentionState (shared core)', () => {
       now: NOW,
     })
     expect(open).toEqual([
-      { key: 'learn_name', promptLine: "You don't know this guest's name yet.", eligibleAt: daysAgo(1) },
+      { key: 'learn_name', promptLine: NAME_LINE, eligibleAt: daysAgo(1) },
     ])
   })
 
@@ -1177,7 +1178,9 @@ describe('deriveIntentionState (shared core)', () => {
 })
 
 const ORDER_LINE = "You haven't heard what this guest ordered yet."
-const NAME_LINE = "You don't know this guest's name yet."
+// Read from the definition rather than transcribed: this fixture only needs
+// "whatever learn_name's line is", and TAC-541 changed that text.
+const NAME_LINE = INTENTION_DEFINITION_BY_KEY.learn_name.promptLine
 const bothOpen: OpenIntention[] = [
   { key: 'understand_order', promptLine: ORDER_LINE, eligibleAt: hoursAgo(1) },
   { key: 'learn_name', promptLine: NAME_LINE, eligibleAt: hoursAgo(1) },

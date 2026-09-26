@@ -1277,12 +1277,24 @@ function formatMechanicEligibility(
 //      the reply is a hello and one question by design. Warmth is voice.
 //
 //   2. The identity clause is conditional on the guest's own message not
-//      naming a person, and says out loud that it beats the venue's voice
-//      setting. It has to: speakerFramingProse's `owner` branch renders "Do
-//      not name yourself unless the guest asks", this paragraph renders later
-//      in the user prompt, and it was already overriding that silently. Le
-//      Mil's prefill names the venue and not a person, so every ordinary scan
-//      takes the introduce branch.
+//      naming a person. Le Mil's prefill names the venue and not a person, so
+//      every ordinary scan takes the introduce branch.
+//
+//      TAC-541 (2026-09-26) DELETED the second half of it, which read "even
+//      where your voice guidance would otherwise have you hold your name
+//      back". That half was written for `owner` framing, whose branch renders
+//      "Do not name yourself unless the guest asks", and it worked: on a fresh
+//      scan the agent replied "I'm Himanshu", which is the defect. The clause
+//      overrode the one setting that was holding the name back.
+//
+//      The ruling is that the speaker is the venue and no individual is ever
+//      the speaker, so "who they've reached" now resolves through the voice
+//      setting rather than around it: under `venue` framing that is the
+//      venue's name, and under any framing the opener no longer licenses a
+//      personal one. Himanshu and Milana stay mentionable AS PEOPLE, which
+//      this sentence never governed. Do not restore the override half; it
+//      cannot be made safe by rewording, because its whole job was to beat the
+//      setting that decides who is speaking.
 //
 //   3. Present tense. "have just ordered and collected it" replaces "have
 //      already ordered and have it in hand ... what it was". The recency sits
@@ -1327,7 +1339,7 @@ function formatMechanicEligibility(
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
 // at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well, even where your voice guidance would otherwise have you hold your name back. Ask what they just got."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],

@@ -721,9 +721,24 @@ describe('the scan-greeting instruction (TAC-536)', () => {
       hadPriorConversation: false,
     })
     expect(text).toBe(
-      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached, even where your voice guidance would otherwise have you hold your name back. Ask what they just got. One short line. Say only what the facts below say about past visits.',
+      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached. Ask what they just got. One short line. Say only what the facts below say about past visits.',
     )
   })
+
+  // THE TAC-541 CANARY. Both variants, because a future edit is as likely to
+  // add the override to the returning one. "Say who they have reached" now
+  // resolves through the voice setting rather than around it; the deleted half
+  // ("even where your voice guidance would otherwise have you hold your name
+  // back") is what produced "I'm Himanshu" on a live scan. A reworded revival
+  // is caught by the second pattern, not just the literal one.
+  it.each([true, false])(
+    'never licenses a name against the voice setting, hadPriorConversation=%s (TAC-541)',
+    (hadPriorConversation) => {
+      const text = categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation })
+      expect(text).not.toMatch(/hold your name back/i)
+      expect(text).not.toMatch(/even where your (voice|persona|venue)/i)
+    },
+  )
 
   // A wiring bug, not a reachable state. It falls to the variant that
   // introduces itself, because an introduction nobody needed is odd and

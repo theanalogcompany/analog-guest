@@ -221,17 +221,67 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
     expect(INTENTION_DEFINITION_BY_KEY.did_they_like_it.classifierDescription).toMatch(/drink or food/i)
   })
 
-  // Approved drafts, transcribed verbatim from the 2026-09-14 ruling.
+  // Approved drafts, transcribed verbatim from the 2026-09-14 ruling, and for
+  // learn_name from TAC-541's of 2026-09-26.
   it('renders the approved promptLine drafts verbatim', () => {
     expect(Object.fromEntries(INTENTION_DEFINITIONS.map((d) => [d.key, d.promptLine]))).toEqual({
       understand_order: "You haven't heard what this guest ordered yet.",
       got_the_recommendation: "You suggested something to this guest and haven't heard whether they tried it.",
       did_they_like_it: 'You know what this guest ordered, but not whether they liked it.',
-      learn_name: "You don't know this guest's name yet.",
+      learn_name:
+        "You don't know this guest's name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way \"by the way, what's your name?\" reads. A bare \"what's your name?\" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.",
       are_they_local: "You don't know whether this guest lives or works nearby.",
       their_rhythm: "You don't know what time of day this guest tends to come by.",
       why_theyre_here: "You don't know what brings this guest in.",
     })
+  })
+
+  // TAC-541 ruling 3. The generic restraint paragraph says "one short question
+  // on the end is fine" for every intention alike, and on a name that produced
+  // a bare "what's your name?" bolted onto an unrelated reply; the guest's own
+  // "why?" is the evidence. The shape is pinned as ONE CONTIGUOUS LITERAL, not
+  // fragments: per TAC-409 a sentence can be reversed while every asserted
+  // fragment survives.
+  it("carries the name ask's approved shape, contiguously", () => {
+    expect(INTENTION_DEFINITION_BY_KEY.learn_name.promptLine).toContain(
+      'Asked at all, it goes on the end as a light aside, always with something softening it in front, the way "by the way, what\'s your name?" reads.',
+    )
+  })
+
+  // THE TIGHTENING, measured rather than guessed. The shaping above took the
+  // bare-ask rate from 19/20 (the pre-TAC-541 line, control arm) to 6/18, and
+  // all six survivors were ONE shape: an unrelated reply with a bare "what's
+  // your name?" bolted on the end. Ruled 2026-09-26 to name that shape
+  // explicitly rather than leave "never a bare question standing on its own",
+  // which the model can read as "never as its own message".
+  it('rules out the bare-question-bolted-on shape by name', () => {
+    expect(INTENTION_DEFINITION_BY_KEY.learn_name.promptLine).toContain(
+      'A bare "what\'s your name?" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.',
+    )
+  })
+
+  // THE LOAD-BEARING HALF, and the reason "Asked at all" is worded that way.
+  // promptLine's contract is a STATE the agent is in, never an instruction to
+  // execute, and whether to ask at all stays the restraint paragraph's call.
+  // A mutant rewriting this to "Ask their name, as a light aside" keeps the
+  // shape and breaks the contract, so the shape assertion above cannot catch
+  // it on its own.
+  it('states the name ask as a conditional shape, never as an instruction to ask', () => {
+    const line = INTENTION_DEFINITION_BY_KEY.learn_name.promptLine
+    expect(line).toMatch(/^You don't know this guest's name yet\./)
+    expect(line).toContain('Asked at all,')
+    expect(line).not.toMatch(/^Ask\b|\. Ask (their|the guest's|for their) name/i)
+  })
+
+  // Every OTHER line stays a bare state. TAC-541 shaped one intention, and the
+  // next reader should have to decide rather than copy: a second line growing
+  // a worked example is a change, not a tidy.
+  it('leaves every other promptLine a bare state with no worked example', () => {
+    for (const def of INTENTION_DEFINITIONS) {
+      if (def.key === 'learn_name') continue
+      expect(def.promptLine, def.key).not.toContain('"')
+      expect(def.promptLine, def.key).not.toMatch(/Asked at all/i)
+    }
   })
 })
 

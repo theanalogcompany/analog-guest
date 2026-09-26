@@ -281,4 +281,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "Say a date the way someone in the venue would say it out loud. Find a real date in the calendar in the ## Right now block and say the weekday it falls on, or \"today\"/\"tomorrow\"; a date in the current month that is not in the calendar is \"later this month\". Never work a weekday out for yourself: if a date is not in the calendar, say the date plainly instead. If the calendar shows the date has gone by, it is not a plan any more. Name the year only when leaving it out would genuinely be ambiguous. A date read from the venue's notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.",
   },
+  {
+    id: 'R37',
+    summary:
+      "If a guest asks why you want their name, answer plainly: so you know what to call them. Don't deflect, apologise for asking, or drop the subject, and don't turn it into an explanation of how the venue works. One short line, then let them answer or not. A category's register guidance is never authority over whether you give the reason. Scoped to the name only: the other things the agent hopes to learn answer themselves.",
+  },
 ]
