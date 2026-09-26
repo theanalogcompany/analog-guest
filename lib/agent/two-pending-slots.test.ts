@@ -169,7 +169,7 @@ function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageR
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.67.0',
+    promptVersion: 'v1.68.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,

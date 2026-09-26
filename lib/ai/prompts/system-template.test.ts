@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.67.0 (the two-block system prompt for the cache breakpoint)', () => {
-    expect(PROMPT_VERSION).toBe('v1.67.0')
+  it('is v1.68.0 (no guest-facing message names a person as the speaker)', () => {
+    expect(PROMPT_VERSION).toBe('v1.68.0')
   })
 })
 
@@ -68,17 +68,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
     // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
     // TAC-484 appends R35 after that. TAC-520 appends R36 after that.
+    // TAC-541 appends R37 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36',
+      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36', 'R37',
     ])
   })
 
-  it('curates 28 rules ending at R36 (TAC-520)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(28)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R36')
+  it('curates 29 rules ending at R37 (TAC-541)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(29)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R37')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -1118,7 +1119,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // appended R32-R34 after that, TAC-484 appended R35 and TAC-520 appended
   // R36, so the count grows again each time (still the same adjacency shape,
   // just more lines).
-  it('is immediately followed by exactly R23-R36, then # Voice imperative', () => {
+  it('is immediately followed by exactly R23-R37, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
@@ -1126,7 +1127,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
     // R22 itself, plus R23-R36 — exactly fifteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(15)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(16)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1288,7 +1289,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
   // that, TAC-484 appended R35 and TAC-520 appended R36, so the count grows
   // again.
-  it('is immediately followed by exactly R29-R36, then # Voice imperative (TAC-520)', () => {
+  it('is immediately followed by exactly R29-R37, then # Voice imperative (TAC-541)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
@@ -1296,7 +1297,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
     // R28 itself, plus R29-R36 — exactly nine bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(9)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(10)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1403,7 +1404,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
   // landed after them. TAC-484 appended R35 and TAC-520 appended R36.
-  it('is immediately followed by exactly R32-R36, then # Voice imperative (TAC-520)', () => {
+  it('is immediately followed by exactly R32-R37, then # Voice imperative (TAC-541)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
@@ -1411,7 +1412,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
     // R31 itself, plus R32-R36 — exactly six bullet lines, then nothing but
     // whitespace before the heading. TAC-484 appended R35.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(6)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1551,13 +1552,13 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   // worth guarding was never "R34 is last" but "exactly N bullets sit between
   // R34 and the section break," which is what catches a rule being appended
   // without being classified.
-  it('is immediately followed by exactly R35-R36, then # Voice imperative', () => {
+  it('is immediately followed by exactly R35-R37, then # Voice imperative', () => {
     const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1655,13 +1656,13 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 
   // TAC-520 appended R36, so R35 is no longer terminal either. Same rewrite
   // R34 got when R35 landed: pin the adjacency, do not delete the guard.
-  it('is immediately followed by exactly R36, then # Voice imperative (TAC-520)', () => {
+  it('is immediately followed by exactly R36-R37, then # Voice imperative (TAC-541)', () => {
     const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r35Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
     const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1689,13 +1690,15 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue would (TAC-520)', () => {
   const R36_START = 'Say a date the way someone working in the venue'
 
-  it('is the last bullet in the universal block, immediately before # Voice imperative', () => {
+  // TAC-541 appended R37, so R36 is no longer terminal. Same rewrite R34 and
+  // R35 each got in turn: pin the adjacency, never delete the guard.
+  it('is immediately followed by exactly R37, then # Voice imperative (TAC-541)', () => {
     const r36Idx = SYSTEM_TEMPLATE.indexOf(R36_START)
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r36Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r36Idx)
     const between = SYSTEM_TEMPLATE.slice(r36Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(1)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
   })
 
   it('is appended after R35, never inserted (ids are positional and append-only)', () => {
@@ -2148,5 +2151,116 @@ describe('SYSTEM_TEMPLATE — # Commitments recommendation heads-up example (TAC
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+})
+
+// TAC-541 R37. The second defect from the 2026-09-26 device test: a bare
+// "what's your name?" drew "why?" from the guest, and the answer had to be
+// typed by an operator.
+//
+// WHY IT IS A UNIVERSAL RULE AND NOT PART OF learn_name's LINE, which is the
+// first place anyone would put it: learn_name closes the moment it is raised,
+// so on the turn the guest asks "why?" its line no longer renders at all. A
+// reason written there would have shipped inert, which is the failure this
+// repo keeps recording. The intention carries the ask's SHAPE; the rule
+// carries the REASON, because only one of the two still renders by then.
+//
+// EVERY CLAUSE IS PINNED CONTIGUOUSLY, never as separate fragments. The
+// TAC-409 lesson is that a sentence can be reversed while every asserted
+// fragment survives, and TAC-502 ran three such mutants past a
+// fragment-pinned suite on the entry that cites it.
+describe('SYSTEM_TEMPLATE — R37: answer why you want the name (TAC-541)', () => {
+  const R37_START = 'If a guest asks why you want their name'
+
+  it('gives the what-to-call-you reason as one contiguous clause', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If a guest asks why you want their name, answer plainly: so you know what to call them. "just so we know what to call you" is the shape. That is the real reason and it is yours to give.',
+    )
+  })
+
+  // THE CORRECTION, pinned so it cannot drift back. The first draft read "so
+  // you remember them next time they come in", and Jaipal cut it on
+  // 2026-09-26: nobody at the counter can actually recognise a guest, so that
+  // reason promises something the venue cannot do. It is a canary rather than
+  // a wording check, because the over-promise is the failure, not the phrasing.
+  it('never promises recognition, which the venue cannot deliver', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R37_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(body).not.toMatch(/remember (you|them)\b/i)
+    expect(body).not.toMatch(/recognis|recogniz/i)
+    expect(body).not.toMatch(/next time/i)
+  })
+
+  it('names all three things not to do, contiguously', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not deflect, apologise for asking, or drop the subject, and do not turn it into an explanation of how the venue works.',
+    )
+  })
+
+  // The boundary every sibling in this series carries (R23 to R15, R30 to the
+  // `unknown` holding response, R32 to R5, R33 to R26, R34 to R21, R35 to the
+  // category layer). It is not boilerplate here: `unknown`'s own instruction
+  // asks for a warm holding response that "will be followed up on", it renders
+  // AFTER this rule, and TAC-240 reroutes anything under 0.3 classifier
+  // confidence there. A bare "why?" is exactly that shape.
+  it('states that a category cannot override it, contiguously', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A category's register guidance, whether it frames the turn as a holding response or as a close, is never authority over whether you give the reason.",
+    )
+  })
+
+  // SCOPED TO THE NAME (ruled 2026-09-26, narrowing the plan). The wider draft
+  // also covered "why you're asking something else about them", which reaches
+  // are_they_local and the rest, where "so we remember you next time" is a
+  // non-sequitur. Those questions answer themselves.
+  it('is scoped to the name, and carries no clause reaching the other intentions', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R37_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    const body = SYSTEM_TEMPLATE.slice(start, end)
+    expect(body).not.toMatch(/something else about them/i)
+    expect(body).not.toMatch(/\bnearby\b|lives or works|time of day|brings (them|this guest) in/i)
+  })
+
+  it('is appended after R36, never inserted (ids are positional and append-only)', () => {
+    expect(SYSTEM_TEMPLATE.indexOf(R37_START)).toBeGreaterThan(
+      SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue'),
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R37_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
+  })
+
+  // TAC-541's whole subject is that no person is the speaker, so the rule that
+  // hands the agent a reason must not hand it a name to sign with either.
+  it('names no person and no venue from the motivating incident', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R37_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
+    for (const term of ['himanshu', 'milana', 'le mil', 'blossom tonic']) {
+      expect(body).not.toContain(term)
+    }
+  })
+
+  // TAC-495: compose-prompt scans every Instagram prompt for channel claims,
+  // and a failure there points far from here. Asserted at the source, and that
+  // the rule survives the Instagram substitution table at all.
+  it('makes no claim about the channel, so both channel variants carry it', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R37_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(
+      /\btext|\bSMS\b|iMessage|this number|\bphone\b/i,
+    )
+    expect(systemTemplateFor('instagram')).toContain(R37_START)
+  })
+
+  it('is displayed on the Voices rail, with the what-to-call-you reason in its summary', () => {
+    const r37 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R37')
+    expect(r37).toBeDefined()
+    expect(r37?.summary).toContain('so you know what to call them')
   })
 })

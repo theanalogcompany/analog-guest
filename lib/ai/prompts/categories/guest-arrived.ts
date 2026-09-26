@@ -47,7 +47,7 @@ export const GUEST_ARRIVED_INSTRUCTIONS_RETURNING = `The guest just scanned the 
  * No messages on our record. See the header for why this is not TAC-423's
  * opener character for character.
  */
-export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached, even where your voice guidance would otherwise have you hold your name back. Ask what they just got. One short line. Say only what the facts below say about past visits.`
+export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached. Ask what they just got. One short line. Say only what the facts below say about past visits.`
 
 /**
  * Pick the variant.

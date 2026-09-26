@@ -299,7 +299,25 @@ const DEFINITIONS = {
     priority: 40,
     armsOn: { kind: 'first_contact' },
     gate: { kind: 'replies_only', defaultMinReplies: 3, firstMessageMinReplies: 0 },
-    promptLine: "You don't know this guest's name yet.",
+    // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
+    // restraint paragraph is what made that necessary: "one short question on
+    // the end is fine" is true of every intention here, and on a name it
+    // produced a bare "what's your name?" bolted onto an unrelated reply. The
+    // guest's own "why?" (device test, 2026-09-26) is the evidence.
+    //
+    // WHY A NAME NEEDS ITS OWN SHAPE WHERE THE OTHERS DO NOT: the natural human
+    // move is to offer your own name first, and TAC-541 ruling 1 removes that
+    // move permanently. The speaker is the venue, so there is no name to trade.
+    // What replaces it is a lighter frame, and Jaipal's own wording is quoted
+    // as the model to follow rather than paraphrased.
+    //
+    // STILL A STATE, NOT AN INSTRUCTION, which is this field's whole mechanism
+    // (see promptLine's own docstring). "Asked at all" is load-bearing: it
+    // shapes the FORM if the ask happens and says nothing about whether to ask,
+    // which remains entirely the restraint paragraph's call. Inverting it to
+    // "Ask their name" is a mutant definitions.test.ts kills.
+    promptLine:
+      "You don't know this guest's name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way \"by the way, what's your name?\" reads. A bare \"what's your name?\" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.",
     classifierDescription: "asks the guest's name or what to call them",
     satisfactionLabel: 'Closes once raised, or once a first name is on record for this guest.',
     expiresAfterMs: FIRST_CONTACT_WINDOW_DAYS * MS_PER_DAY,
