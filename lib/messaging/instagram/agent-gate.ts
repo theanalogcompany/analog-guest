@@ -128,7 +128,13 @@ export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = true
  *                     the denominator the ledger exists to provide
  */
 export type InstagramAgentHandoff =
-  | { kind: 'run'; messageId: string }
+  /**
+   * TAC-540 added `venueId` and `guestId`. The route needs them to mark the
+   * thread seen, and carrying them here rather than re-narrowing `outcome` at
+   * the call site keeps "what is a turn" answered in exactly one place — the
+   * same reason `schedule_arrival` already carries them.
+   */
+  | { kind: 'run'; messageId: string; venueId: string; guestId: string }
   | {
       kind: 'schedule_arrival'
       messageId: string
@@ -190,7 +196,12 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
     // nothing to reply to, so the agent isn't run; the row still opens the
     // window.
     if (outcome.titlelessPostback) return { kind: 'record', reason: 'titleless_postback' }
-    return { kind: 'run', messageId: outcome.messageId }
+    return {
+      kind: 'run',
+      messageId: outcome.messageId,
+      venueId: outcome.venueId,
+      guestId: outcome.guestId,
+    }
   },
   // The guest's message reached us and we could not file it. A lost turn, and
   // the most important kind — unless what was lost was an echo or a read.

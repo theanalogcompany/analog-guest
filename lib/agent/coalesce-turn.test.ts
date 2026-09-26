@@ -767,6 +767,8 @@ describe('findUncoveredInbound tells "nothing" apart from "could not check"', ()
     answered,
     enabled,
     retryDepth: 0,
+    typingShownFor: null,
+    typingInFlight: null,
   })
 
   it('reports none when the read succeeded and found nothing', async () => {
@@ -868,6 +870,8 @@ describe('never throws, which the module claims at the top', () => {
         answered: { id: 'msg-1', createdAt: T0 },
         enabled: true,
         retryDepth: 0,
+        typingShownFor: null,
+        typingInFlight: null,
       },
       {
         findNewerInbound: async () => {
@@ -897,6 +901,8 @@ describe('shouldRetryTurn — the bound, and which outcomes earn a second attemp
     answered: { id: 'msg-1', createdAt: T0 },
     enabled: true,
     retryDepth: 0,
+    typingShownFor: null,
+    typingInFlight: null,
     ...over,
   })
 

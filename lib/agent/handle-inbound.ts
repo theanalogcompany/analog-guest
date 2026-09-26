@@ -17,7 +17,7 @@ import {
 } from '@/lib/guests/context'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
-import { startAgentTrace } from '@/lib/observability'
+import { startAgentTrace, type AgentSpanUpdate } from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -49,6 +49,7 @@ import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
 import { dispatchReply, type DispatchReplyOutcome } from './dispatch-reply'
+import { signalTyping } from './typing-indicator'
 import { INSTAGRAM_SEND_FAILED_REVIEW_REASON } from './dispatch-instagram-reply'
 import {
   applyApprovalPolicyStage,
@@ -57,6 +58,7 @@ import {
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
+  mayAutoSendAfterClassification,
   type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
   type CancellationBackstopResult,
@@ -490,6 +492,112 @@ export function undeliveredAgentResult(
 }
 
 /**
+ * TAC-540: after a turn ends this way, does the guest still need the dots
+ * turned off?
+ *
+ * A TOTAL MAP, not a `!== 'sent'` check, and the totality is the guard: an
+ * eleventh `AgentResult` status fails `tsc` here rather than silently
+ * inheriting "leave the dots on", which is the one failure mode this table
+ * exists to make impossible. Same discipline `PUSH_POLICY` and
+ * `VENUE_PROCESSING` carry.
+ *
+ * `sent` is the only false. Meta's own documentation says the indicator turns
+ * off "after 20 seconds or after a response is sent"
+ * (developers.facebook.com/docs/graph-api/reference/page/messages/), so a
+ * reply that reached the guest has already cleared it and a `typing_off`
+ * behind it would be a second call fighting Meta's own clear. That covers the
+ * partly-delivered Instagram case too: something reached the guest.
+ *
+ * Three of the trues are unreachable with the dots on, because they return
+ * before classification ever runs — `skipped_duplicate`, `venue_halted`, and
+ * `coalesced`. They are stated rather than omitted so the map stays total and
+ * nobody has to re-derive which exits can carry dots.
+ */
+const TYPING_OFF_AFTER = {
+  sent: false,
+  queued: true,
+  refused: true,
+  skipped_duplicate: true,
+  dropped: true,
+  silenced: true,
+  superseded: true,
+  coalesced: true,
+  venue_halted: true,
+  failed: true,
+} as const satisfies Record<AgentResult['status'], boolean>
+
+/**
+ * Turn the dots off unless a reply went out.
+ *
+ * Never throws: it runs after the turn's outcome is already decided, and a
+ * cosmetic call must not be able to turn a delivered reply into a failed
+ * request.
+ *
+ * AWAITED, unlike `typing_on`, and the asymmetry is the design. `typing_on`
+ * sits on the critical path with a guest waiting, so it is fire-and-forget.
+ * By the time this runs the reply has either gone or not, so the await costs
+ * the guest nothing and buys a deterministic order — which matters, because
+ * of the in-flight wait directly below.
+ */
+async function stopTypingUnlessSent(
+  turn: InboundTurnState,
+  result: AgentResult | null,
+): Promise<void> {
+  const shown = turn.typingShownFor
+  if (shown === null) return
+  // `null` means the run threw past its own catch: the guest certainly got
+  // nothing, so the dots certainly have to go.
+  if (result !== null && !TYPING_OFF_AFTER[result.status]) return
+  try {
+    // THE ORDERING GUARD. `typing_on` is fire-and-forget, so a fast failure
+    // can reach this exit while that POST is still open. Sent in that order,
+    // Meta applies the `off` first and the `on` second and the guest watches
+    // dots for the full 20-second timeout — on a turn we already know is not
+    // replying. `allSettled` because a rejected `typing_on` is not a reason to
+    // skip the `off`.
+    if (turn.typingInFlight !== null) await Promise.allSettled([turn.typingInFlight])
+    await signalTyping({ ...shown, channel: 'instagram' }, 'off')
+  } catch (e) {
+    console.error('[agent] typing_off failed (cosmetic)', {
+      venueId: shown.venueId,
+      guestId: shown.guestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  } finally {
+    turn.typingShownFor = null
+    turn.typingInFlight = null
+  }
+}
+
+/**
+ * Show the dots, and remember we did.
+ *
+ * FIRE-AND-FORGET, deliberately. Both call sites sit directly on the critical
+ * path — one right after classification, one right after generation — and the
+ * whole point of TAC-540 is to take latency out of that path, not move it
+ * around. The promise is kept on the turn so the exit can wait for it before
+ * sending `typing_off`; nothing else reads it.
+ *
+ * Marks `typingShownFor` SYNCHRONOUSLY, before the request resolves. If the
+ * POST is still open when the turn ends, the exit must still know to turn the
+ * dots off — deferring the mark until success would lose exactly the race the
+ * in-flight wait exists to handle.
+ */
+function startTyping(turn: InboundTurnState, ctx: RuntimeContext): void {
+  if (ctx.conversationChannel !== 'instagram') return
+  const target = { venueId: ctx.venue.id, guestId: ctx.guest.id }
+  turn.typingShownFor = target
+  const sending = signalTyping({ ...target, channel: 'instagram' }, 'on').catch((e: unknown) => {
+    console.error('[agent] typing_on threw unexpectedly', {
+      agentRunId: ctx.agentRunId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  })
+  turn.typingInFlight = sending
+  waitUntil(sending)
+}
+
+/**
  * Top-level orchestrator for inbound messages.
  *
  * Server-only. Generates an agentRunId, idempotency-checks against existing
@@ -540,12 +648,26 @@ export async function handleInbound(
     // block awaits captureAgentLatencyHigh, which is guarded today but by a
     // guarantee living in another module. The ledger should not depend on it.
     await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
+    // TAC-540: before the handoff, for the same reason as on the happy path
+    // below.
+    await stopTypingUnlessSent(turn, null)
     // `null` is the strongest case for a retry: the turn produced no result
     // at all, so the guest certainly got nothing.
     await closeCoalescedTurn(turn, agentRunId, coalesceDeps, null)
     throw unexpected
   }
   await recordSafely({ inboundMessageId, agentRunId, result })
+  // TAC-540: ONE exit for the typing indicator, covering all of
+  // runInboundTurn's ~23 return sites plus a throw that escaped its own
+  // catch. TAC-523's shape, and the same argument: the orchestrator's
+  // `finally` cannot see a throw past itself, and twenty-odd return sites is
+  // exactly the shape two copies of a rule drift on.
+  //
+  // BEFORE closeCoalescedTurn, deliberately. That function can re-invoke
+  // handleInbound for a retry or a handoff, and the new run shows its own
+  // dots. Turning ours off first makes the order deterministic — off, then
+  // the retry's on — instead of racing a fresh turn's typing_on.
+  await stopTypingUnlessSent(turn, result)
   await closeCoalescedTurn(turn, agentRunId, coalesceDeps, result)
   return result
 }
@@ -958,6 +1080,38 @@ async function runInboundTurn(
       return { status: 'failed', stage: 'context_build', error: errMsg }
     }
 
+    // TAC-540 part C: voice-corpus retrieval starts HERE, alongside
+    // classification, and is awaited at its old position further down.
+    //
+    // SAFE BECAUSE retrieveCorpusStage NEVER READS ctx.classification —
+    // checked line by line, not assumed. Its query is
+    // `ctx.currentMessage?.body` (TAC-420 AC 1), and everything else it
+    // touches (ctx.venue, ctx.guest, ctx.agentRunId) is set before this
+    // point. So the query it builds is identical whichever order the two run
+    // in, and classifyStage mutates nothing for it to race on.
+    //
+    // NOT `Promise.allSettled` OVER THE PAIR, and that is the whole shape of
+    // this change. Awaiting both together would make a classification failure
+    // AND the crisis short-circuit wait for retrieval before returning —
+    // adding latency to the crisis path, which is the one place in this file
+    // where added latency is worst. Instead the rejection is claimed
+    // immediately and the value is read at the old site.
+    //
+    // THE `.then(ok, err)` IS NOT DECORATION. Without it, a classification
+    // failure returns while this promise is still open, and a rejection with
+    // no handler attached is an unhandled rejection that can take the process
+    // down. Claiming it here means every return path below is free to ignore
+    // it.
+    const retrieveSpan = trace.span(
+      'retrieve',
+      { queryLength: ctx.currentMessage?.body.length ?? 0 },
+      { query: ctx.currentMessage?.body ?? null },
+    )
+    const retrievingCorpus = retrieveCorpusStage(ctx).then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    )
+
     // Classify
     const classifySpan = trace.span(
       'classify',
@@ -1067,6 +1221,24 @@ async function runInboundTurn(
       }
     }
 
+    // TAC-540: show the guest typing dots, if this turn looks headed for an
+    // auto-send.
+    //
+    // BELOW THE CRISIS SHORT-CIRCUIT, NOT ABOVE IT, and that placement is a
+    // decision rather than an accident of ordering. The ticket lists
+    // "crisis-routed" among the cases that need typing_off — but a crisis
+    // turn DOES dispatch a reply, so it would not need one. Putting the
+    // typing_on below the short-circuit makes that list consistent with no
+    // special case: a crisis turn never turns the dots on, so there is
+    // nothing to turn off. It also leaves the crisis path's timing exactly as
+    // it was, which matters more here than anywhere else in this file.
+    //
+    // `mayAutoSendAfterClassification` is a PREDICTION from what is knowable
+    // this early; most of the gate's triggers need a draft. Dots can go on
+    // and the draft can still queue, and `stopTypingUnlessSent` is what
+    // corrects that. Fire-and-forget: nothing below waits on it.
+    if (mayAutoSendAfterClassification(ctx)) startTyping(turn, ctx)
+
     // TAC-380: persist intentions seen eligible for the first time this turn,
     // and move re-armed ones to their newer event's anchor.
     // Fire-and-forget like every intentions write; it can't affect the reply. A
@@ -1143,14 +1315,16 @@ async function runInboundTurn(
         }),
     )
 
-    // Retrieve corpus
-    const retrieveSpan = trace.span(
-      'retrieve',
-      { queryLength: ctx.currentMessage?.body.length ?? 0 },
-      { query: ctx.currentMessage?.body ?? null },
-    )
+    // Retrieve corpus. TAC-540: the call was STARTED above, next to
+    // classification; this is where its result is consumed, unchanged in
+    // position, in outcome and in what it alerts on. A turn that returned
+    // before here — a classification failure, the crisis short-circuit — has
+    // discarded it, which is the ticket's own ruling and costs one Voyage
+    // embed plus one RPC on those paths.
+    const corpusResult = await retrievingCorpus
     try {
-      ctx.corpus = await retrieveCorpusStage(ctx)
+      if (!corpusResult.ok) throw corpusResult.error
+      ctx.corpus = corpusResult.value
       retrieveSpan.end({
         output: {
           matchCount: ctx.corpus.length,
@@ -1337,6 +1511,18 @@ async function runInboundTurn(
       attempts: gen.result.attempts,
     })
 
+    // TAC-540: refresh the dots, and this second call is REQUIRED rather than
+    // belt-and-braces. Meta turns the indicator off "after 20 seconds or
+    // after a response is sent"
+    // (developers.facebook.com/docs/graph-api/reference/page/messages/), and
+    // generation alone runs to ~11s at p90 on top of classification's ~2.8s.
+    // Without this the dots would routinely die before the five checks, the
+    // gate and the send had even started.
+    //
+    // Only when site 1 fired: if this turn was predicted to queue, finishing
+    // a generation is not new evidence that it will not.
+    if (turn.typingShownFor !== null) startTyping(turn, ctx)
+
     // TAC-296: capture what the agent UNDERSTOOD from the inbound into
     // guests.context. Fires BEFORE the approval-policy gate so the write
     // happens regardless of whether the draft ships, queues, or refuses —
@@ -1496,22 +1682,52 @@ async function runInboundTurn(
     // accident. allSettled means a hypothetical future throw degrades to
     // exactly what that stage's own internal catch already returns for a
     // degraded call, instead of losing the sibling stage's result too.
-    const verifySpan = trace.span('verify_grounding', { knowledgeGap: gen.result.knowledgeGap })
+    //
+    // TAC-540 part D: EACH CHECK NOW OWNS ITS OWN SPAN, OPENED AND CLOSED
+    // AROUND ITS OWN CALL. Before this, three spans were opened before the
+    // batch and closed after it, so every one of them recorded the MAXIMUM of
+    // the five and no check could be told apart from another (TAC-420 finding
+    // F1); the cancellation and closed-venue checks had no span at all.
+    // Measurement only — no check moves, no order changes, no failure
+    // handling changes, and the degrade-on-throw logic below is untouched.
+    //
+    // Each thunk ends its span on the rejection path too, then rethrows, so
+    // `allSettled` still sees the rejection and the existing degrades still
+    // apply. Without the rethrow a throwing stage would silently become a
+    // fulfilled `undefined`.
     const gatedMechanicCount = ctx.mechanics.filter((m) => m.requiresOperatorApproval).length
-    const mechanicSpan = trace.span('verify_mechanic_offer', { gatedMechanicCount })
-    // TAC-401: the prose-promise check joins this array rather than running
-    // after it (ruled 2026-09-21, ruling 2). It is a third independent Haiku
-    // call with no dependency on either sibling, and a guest is waiting on
-    // this turn, so running it in sequence would add its full latency to every
-    // inbound reply instead of overlapping it with calls already in flight.
-    // No input attributes, deliberately. The span's own `status` output
-    // already says whether the check ran and what it found, and every
-    // candidate attribute here either needs a helper from './stages' (which
-    // this file's tests mock with an explicit allow-list) or reads a
-    // GenerateMessageResult field the fixtures cast partially. Both turn a
-    // span label into a throw on the reply path.
-    const prosePromiseSpan = trace.span('verify_prose_promise', {})
+    // `ctx` and `gen` are narrowed in straight-line code but not inside a
+    // closure, because both are `let`. Aliased to consts so the thunks below
+    // see the narrowed types rather than a cast.
+    const verifyCtx = ctx
+    const generated = gen.result
     const verifyStartedAt = Date.now()
+    /** Run one check inside its own span, timed on its own call alone. */
+    const timedCheck = async <T,>(
+      name: string,
+      input: Record<string, unknown>,
+      run: () => Promise<T>,
+      describe: (value: T) => AgentSpanUpdate,
+    ): Promise<T> => {
+      const span = trace.span(name, input)
+      const startedAt = Date.now()
+      try {
+        const value = await run()
+        const described = describe(value)
+        span.end({
+          ...described,
+          output: { ...(described.output as Record<string, unknown>), elapsedMs: Date.now() - startedAt },
+        })
+        return value
+      } catch (e) {
+        span.end({
+          level: 'ERROR',
+          statusMessage: e instanceof Error ? e.message : String(e),
+          output: { elapsedMs: Date.now() - startedAt },
+        })
+        throw e
+      }
+    }
     const [
       groundingSettled,
       mechanicOfferSettled,
@@ -1519,14 +1735,75 @@ async function runInboundTurn(
       cancellationSettled,
       closedVenueArrivalSettled,
     ] = await Promise.allSettled([
-      verifyGroundingStage(ctx, gen.result),
-      verifyMechanicOfferStage(ctx, gen.result),
-      verifyProsePromiseStage(ctx, gen.result),
-      verifyCancellationClaimStage(ctx, gen.result),
+      timedCheck(
+        'verify_grounding',
+        { knowledgeGap: generated.knowledgeGap },
+        () => verifyGroundingStage(verifyCtx, generated),
+        (value) => ({
+          output: {
+            ran: generated.knowledgeGap === false && verifyCtx.guest.isDemo !== true,
+            // TAC-367: `status` is the load-bearing field — it distinguishes
+            // a clean verdict from one that was never readable, which the old
+            // boolean pair could not. Both kept so existing trace queries
+            // don't break.
+            status: value.status,
+            hasUngroundedClaim: value.status === 'flagged',
+            claimCount: value.status === 'flagged' ? value.claims.length : 0,
+          },
+          content:
+            trace.captureContent
+              ? { ungroundedClaims: value.status === 'flagged' ? value.claims : [] }
+              : undefined,
+        }),
+      ),
+      timedCheck(
+        'verify_mechanic_offer',
+        { gatedMechanicCount },
+        () => verifyMechanicOfferStage(verifyCtx, generated),
+        (value) => ({ output: { status: value.status } }),
+      ),
+      // TAC-401: the prose-promise check joins this array rather than running
+      // after it (ruled 2026-09-21, ruling 2). It is a third independent
+      // Haiku call with no dependency on either sibling, and a guest is
+      // waiting on this turn, so running it in sequence would add its full
+      // latency to every inbound reply instead of overlapping it with calls
+      // already in flight.
+      // No input attributes, deliberately. The span's own `status` output
+      // already says whether the check ran and what it found, and every
+      // candidate attribute here either needs a helper from './stages' (which
+      // this file's tests mock with an explicit allow-list) or reads a
+      // GenerateMessageResult field the fixtures cast partially. Both turn a
+      // span label into a throw on the reply path.
+      timedCheck(
+        'verify_prose_promise',
+        {},
+        () => verifyProsePromiseStage(verifyCtx, generated),
+        (value) => ({
+          output: {
+            status: value.status,
+            namedCommitment: value.status === 'flagged' && value.commitment !== null,
+          },
+        }),
+      ),
+      timedCheck(
+        'verify_cancellation_claim',
+        {},
+        () => verifyCancellationClaimStage(verifyCtx, generated),
+        (value) => ({ output: { claim: value.claim, resolution: value.resolution.status } }),
+      ),
       // TAC-363: fifth independent check. Skips without a model call unless
       // the venue is positively closed, so it costs nothing during service.
-      verifyClosedVenueArrivalStage(ctx, gen.result),
+      timedCheck(
+        'verify_closed_venue_arrival',
+        {},
+        () => verifyClosedVenueArrivalStage(verifyCtx, generated),
+        (value) => ({ output: { status: value.status } }),
+      ),
     ])
+    // The wall clock for all five checks together — what they actually cost
+    // the guest, since they overlap. Per-check durations live on each span's
+    // own `elapsedMs` (TAC-540); this is the number that answers "how long
+    // did the checks add to this reply".
     const verifyElapsedMs = Date.now() - verifyStartedAt
     if (groundingSettled.status === 'rejected') {
       console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to skipped)', {
@@ -1628,33 +1905,9 @@ async function runInboundTurn(
             claim: 'check_failed',
           }
 
-    const groundingClaims =
-      groundingBackstop.status === 'flagged' ? groundingBackstop.claims : []
-    verifySpan.end({
-      output: {
-        ran: gen.result.knowledgeGap === false && ctx.guest.isDemo !== true,
-        // TAC-367: `status` is the new load-bearing field — it distinguishes
-        // a clean verdict from one that was never readable, which the old
-        // boolean pair could not. Both kept so existing trace queries don't
-        // break.
-        status: groundingBackstop.status,
-        hasUngroundedClaim: groundingBackstop.status === 'flagged',
-        claimCount: groundingClaims.length,
-      },
-      content: trace.captureContent ? { ungroundedClaims: groundingClaims } : undefined,
-    })
-    mechanicSpan.end({ output: { status: mechanicOfferBackstop.status } })
-    // TAC-401: `verifyElapsedMs` is the wall clock for all three checks
-    // together, which is what the added latency of this one actually costs on
-    // the inbound path — it overlaps the two that were already running.
-    prosePromiseSpan.end({
-      output: {
-        status: prosePromiseBackstop.status,
-        namedCommitment:
-          prosePromiseBackstop.status === 'flagged' && prosePromiseBackstop.commitment !== null,
-        allChecksElapsedMs: verifyElapsedMs,
-      },
-    })
+    // TAC-540: the five spans are opened and closed inside their own thunks
+    // above, each around its own call, so nothing is ended here any more.
+    // A span ended twice is a span that reports the wrong window.
     if (groundingBackstop.status === 'flagged') {
       console.warn('[agent] inbound grounding backstop caught an unverified claim', {
         agentRunId,
