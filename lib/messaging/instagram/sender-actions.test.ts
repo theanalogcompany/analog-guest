@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { INSTAGRAM_GRAPH_BASE_URL, type FetchLike } from './graph'
+import { INSTAGRAM_SEND_TIMEOUT_MS } from './send'
 import {
   INSTAGRAM_SENDER_ACTIONS,
   INSTAGRAM_SENDER_ACTION_TIMEOUT_MS,
@@ -92,12 +93,25 @@ describe('the request we build', () => {
    * Shorter than the send's 10s. A send waits longer because its outcome is
    * ambiguous and Meta may have delivered it; nothing reads this result, so
    * waiting longer buys nothing and costs a slow turn.
+   *
+   * The constant's VALUE, and that it is actually PASSED. Asserting only
+   * `signal instanceof AbortSignal` would hold with the `timeoutMs` option
+   * deleted, because graphRequest falls back to its own default — which is
+   * also 5s today, so the two are indistinguishable by behaviour. Pinning
+   * the argument is what makes the wiring survive the graph default moving.
    */
-  it('abandons a sender action after its own timeout, sooner than a send', async () => {
+  it('passes its own timeout to graphRequest, shorter than a send', async () => {
     expect(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS).toBe(5_000)
-    const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
-    await send('mark_seen', fetchImpl)
-    expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal)
+    expect(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS).toBeLessThan(INSTAGRAM_SEND_TIMEOUT_MS)
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
+      await send('mark_seen', fetchImpl)
+      expect(timeoutSpy).toHaveBeenCalledWith(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS)
+      expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal)
+    } finally {
+      timeoutSpy.mockRestore()
+    }
   })
 })
 

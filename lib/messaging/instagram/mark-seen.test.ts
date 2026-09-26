@@ -11,13 +11,19 @@
 // value alone: an outcome object saying `venue_halted` while the POST went out
 // anyway is exactly the shape of the bug this file exists to prevent.
 
+import { formatWithOptions } from 'node:util'
+
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/analytics/posthog', () => ({
   captureInstagramSenderActionFailed: vi.fn(async () => undefined),
 }))
+// TAC-540 code review. The transport is mocked so ONE test can exercise the
+// default wiring; every other test injects `sendAction` and never reaches it.
+vi.mock('./sender-actions', () => ({ sendInstagramSenderAction: vi.fn(async () => ({ ok: true })) }))
 
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
+import { sendInstagramSenderAction } from './sender-actions'
 import { markInboundSeen, type MarkSeenDeps } from './mark-seen'
 import { createInstagramDbFake, type FakeRow } from './testing/db-fake'
 
@@ -197,11 +203,50 @@ describe('what reaches a log line', () => {
       })
       await markInboundSeen(supabase, TARGET, deps)
 
-      const rendered = JSON.stringify(logged)
+      // formatWithOptions, NOT JSON.stringify. TAC-458 records that
+      // stringify renders an Error, a Headers and a URLSearchParams as `{}`
+      // while console prints them in full — so a leak test using it passed
+      // against the very leak it was named for. The renderer has to see at
+      // least what the sink prints.
+      const rendered = formatWithOptions(
+        { depth: null, maxArrayLength: null, maxStringLength: null },
+        ...logged,
+      )
       expect(rendered).not.toContain(IGSID)
       expect(rendered).not.toContain(TOKEN)
     } finally {
       for (const spy of spies) spy.mockRestore()
     }
+  })
+})
+
+describe('the default wiring', () => {
+  /**
+   * THE FEATURE CAN SHIP INERT WITHOUT THIS, and a code-review mutant proved
+   * it: changing `action: 'mark_seen'` to `'typing_on'` in `defaultDeps`
+   * passed 621 tests. Every other test in this file injects `sendAction`, so
+   * that literal — deliberately absent from `MarkSeenDeps.sendAction`'s
+   * signature, because it is not the caller's to choose — was the one
+   * decision point nothing checked.
+   *
+   * Same shape as TAC-385's rendered_intentions SELECT and TAC-476's page
+   * wiring: the author's mutants ask what the code computes, and the ones
+   * that survive ask whether anything calls it.
+   */
+  it('sends mark_seen through the real transport, with the resolved target', async () => {
+    const { supabase } = dbWith(venueRow('active'))
+    const { deps } = stubDeps()
+
+    // Only loadTarget is injected: sendAction comes from defaultDeps.
+    expect(await markInboundSeen(supabase, TARGET, { loadTarget: deps.loadTarget })).toEqual({
+      status: 'sent',
+    })
+    expect(sendInstagramSenderAction).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      recipientId: IGSID,
+      token: TOKEN,
+      action: 'mark_seen',
+      fetchImpl: expect.any(Function),
+    })
   })
 })

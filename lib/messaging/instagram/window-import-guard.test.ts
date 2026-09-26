@@ -26,6 +26,10 @@ const INSTAGRAM_OUTBOUND_MODULES = [
   // no Instagram account, so a sender action reaching the SMS path is a bug
   // that behaves fine until the day it runs.
   'sender-actions',
+  // TAC-540 code review. It composes send-target and sender-actions, so a
+  // shared module importing IT would pull both onto a shared path without
+  // tripping the entries above — the guard matches imports textually.
+  'mark-seen',
 ] as const
 
 /** Everything outside lib/messaging/instagram/ allowed to import them. */
@@ -73,6 +77,11 @@ const ALLOWED_IMPORTERS = [
   // orchestrator on this list. This file is dispatch-reply.ts's shape — one
   // exhaustive switch, a no-op text arm — and routes nothing else.
   join('lib', 'agent', 'typing-indicator.ts'),
+  // TAC-540. The Instagram webhook, which hands mark-seen to waitUntil right
+  // after the 200. It is an Instagram-only route and could not be anything
+  // else, but it sits under app/ rather than inside the provider folder, so
+  // the guard sees it and it is named here deliberately.
+  join('app', 'api', 'webhooks', 'instagram', 'route.ts'),
 ]
 
 function sourceFiles(): string[] {

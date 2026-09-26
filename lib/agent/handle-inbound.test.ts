@@ -2803,6 +2803,19 @@ function typingSignals(): string[] {
   return signalTypingMock.mock.calls.map((c) => c[1] as string)
 }
 
+/**
+ * Let the exit's fire-and-forget typing_off run.
+ *
+ * It is handed to `waitUntil` rather than awaited (code review: awaiting it
+ * put two Graph calls in front of the claim release and the retry), and
+ * `waitUntil` is `(p) => p` here, so `handleInbound` can return before the
+ * `off` is sent. Two macrotasks is ample for mocks that resolve immediately.
+ */
+async function flushTyping(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 describe('TAC-540 — typing dots on the auto-send path', () => {
   beforeEach(() => {
     buildRuntimeContextMock.mockResolvedValue(typingCtx())
@@ -2953,9 +2966,34 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
         applyApprovalPolicyStageMock.mockResolvedValue({ action: 'silence' })
       },
     ],
+    /**
+     * ADDED IN CODE REVIEW, and it was the gap: flipping
+     * `TYPING_OFF_AFTER.superseded` to false passed 168 tests. It is the one
+     * status that is neither covered by the cases above nor unreachable with
+     * the dots on — `skipped_duplicate`, `venue_halted` and `coalesced` all
+     * return before the context is even built.
+     *
+     * Reachable exactly like this: dots go on, generation succeeds, and the
+     * Instagram reply check finds that staff already answered by hand. So
+     * nothing is sent, Meta never clears the indicator, and without the
+     * `typing_off` the guest watches dots for the full 20 seconds
+     * immediately after a human replied to them.
+     */
+    [
+      'superseded, because staff already answered in the Instagram app',
+      () => {
+        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+        dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'staff-1' })
+      },
+    ],
   ])('turns the dots off when the turn ends %s', async (_name, arrange) => {
     arrange()
     const r = await handleInbound(INBOUND_ID).catch(() => null)
+    // The exit hands typing_off to waitUntil rather than awaiting it, so
+    // that the claim release and the retry are not held behind two Graph
+    // calls. Drained here.
+    await flushTyping()
 
     expect(r).not.toMatchObject({ status: 'sent' })
     expect(typingSignals()).toContain('off')
@@ -3142,6 +3180,32 @@ describe('TAC-540 — a sender action can never change the reply', () => {
   }, 2000)
 
   /**
+   * THE EXIT MUST NOT HOLD THE REPLY PATH, added in code review.
+   *
+   * `stopTypingUnlessSent` runs immediately before `closeCoalescedTurn`,
+   * which releases the conversation claim and then fires the retry or hands
+   * off a newer message — the things that actually produce the guest's reply
+   * on a failed turn. Awaiting it put up to two Graph round-trips and an
+   * un-timeouted send-target lookup in front of that, on the one ticket whose
+   * subject is Instagram latency.
+   *
+   * FAILS WHEN THE waitUntil IS REVERTED TO AN await: this typing_off never
+   * settles, so the whole turn hangs and the test times out rather than
+   * asserting. Without it, nothing in the suite noticed the difference —
+   * re-awaiting the exit passed all 132 tests.
+   */
+  it('returns without waiting for typing_off, so the retry is not held behind it', async () => {
+    generateStageMock.mockResolvedValue({ status: 'refused', attemptScores: [0.1], finalScore: 0.1 })
+    signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
+      signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
+    )
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'refused' })
+  }, 2000)
+
+  /**
    * THE ORDERING GUARD, and the test the ruling asked for specifically.
    *
    * typing_on is fire-and-forget, so a turn that fails fast can reach its
@@ -3182,10 +3246,17 @@ describe('TAC-540 — a sender action can never change the reply', () => {
     })
 
     const r = await handleInbound(INBOUND_ID)
+    // typing_off is fire-and-forget at the exit (code review: awaiting it
+    // held the claim release and the retry behind two Graph calls), so the
+    // run returns before it lands. Waited for here, not slept past.
+    await vi.waitFor(() => {
+      expect(completed).toContain('off')
+    })
 
     expect(r).toMatchObject({ status: 'refused' })
-    // The `on` completed FIRST. Without the await, `off` is pushed while the
-    // `on` promise is still pending and this order is reversed.
+    // The `on` completed FIRST. Without the in-flight await inside
+    // stopTypingUnlessSent, `off` is pushed while the `on` promise is still
+    // pending and this order is reversed.
     expect(completed).toEqual(['on', 'off'])
   })
 })

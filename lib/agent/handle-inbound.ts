@@ -648,9 +648,8 @@ export async function handleInbound(
     // block awaits captureAgentLatencyHigh, which is guarded today but by a
     // guarantee living in another module. The ledger should not depend on it.
     await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
-    // TAC-540: before the handoff, for the same reason as on the happy path
-    // below.
-    await stopTypingUnlessSent(turn, null)
+    // TAC-540: started before the handoff, never awaited. See the happy path.
+    waitUntil(stopTypingUnlessSent(turn, null))
     // `null` is the strongest case for a retry: the turn produced no result
     // at all, so the guest certainly got nothing.
     await closeCoalescedTurn(turn, agentRunId, coalesceDeps, null)
@@ -663,11 +662,26 @@ export async function handleInbound(
   // `finally` cannot see a throw past itself, and twenty-odd return sites is
   // exactly the shape two copies of a rule drift on.
   //
-  // BEFORE closeCoalescedTurn, deliberately. That function can re-invoke
-  // handleInbound for a retry or a handoff, and the new run shows its own
-  // dots. Turning ours off first makes the order deterministic — off, then
-  // the retry's on — instead of racing a fresh turn's typing_on.
-  await stopTypingUnlessSent(turn, result)
+  // STARTED HERE AND NEVER AWAITED, and the not-awaiting is the load-bearing
+  // half. It is started before `closeCoalescedTurn` so the `off` is issued as
+  // early as possible; it is handed to `waitUntil` because that function
+  // RELEASES THE CLAIM and then fires the retry or the handoff, which is what
+  // actually produces the guest's reply on a failed turn.
+  //
+  // Awaiting it put up to two Graph round-trips and a send-target lookup — a
+  // 5s Graph timeout and three supabase reads with no client-side bound —
+  // directly in front of that retry. Roughly 0.5-1s typically, ~10s in the
+  // tail, on the one ticket whose whole subject is Instagram latency. Found
+  // in code review; the first version awaited it.
+  //
+  // What the await bought and what replaces it: the ordering guard against
+  // the retry's OWN typing_on. That guard is weaker now and deliberately so.
+  // A retried run is at least loadInbound + COALESCE_SETTLE_MS + classify
+  // away from showing dots, where this is a call already in flight, so the
+  // race is overwhelmingly won — and losing it costs a retry's dots, not a
+  // reply. The ordering that still holds unconditionally is the one inside
+  // `stopTypingUnlessSent`: `off` never overtakes this turn's own `on`.
+  waitUntil(stopTypingUnlessSent(turn, result))
   await closeCoalescedTurn(turn, agentRunId, coalesceDeps, result)
   return result
 }
@@ -1143,6 +1157,10 @@ async function runInboundTurn(
         stage: 'classification',
         errorMessage: errMsg,
       })
+      // TAC-540: the retrieve span was opened above, beside this one. Closed
+      // here so a classification failure does not leave a span that reads in
+      // Langfuse as "retrieval hung" — on part D's own ticket.
+      retrieveSpan.end({ output: { discarded: 'classification_failed' } })
       return { status: 'failed', stage: 'classification', error: errMsg }
     }
 
@@ -1178,6 +1196,7 @@ async function runInboundTurn(
         })
         if (dispatched.kind !== 'sent') {
           crisisSpan.end({ level: 'WARNING', output: { outcome: dispatched.kind } })
+          retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
           return undeliveredAgentResult(ctx, dispatched)
         }
         const { outboundMessageId } = dispatched
@@ -1211,12 +1230,17 @@ async function runInboundTurn(
           output: { status: 'sent', outboundMessageId, crisisSafety: true },
           content: { outboundDraft: result.body },
         })
+        // The retrieval started beside classification is discarded on this
+        // path (the ticket's ruling). Its span is closed rather than left
+        // open, so a crisis trace does not read as a hung retrieval.
+        retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
         return { status: 'sent', outboundMessageId }
       } catch (e) {
         // scheduleAndSend already fired the appropriate stage-specific alert.
         const errMsg = e instanceof Error ? e.message : String(e)
         const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
         crisisSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
+        retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
         return { status: 'failed', stage, error: errMsg }
       }
     }
@@ -1519,8 +1543,15 @@ async function runInboundTurn(
     // Without this the dots would routinely die before the five checks, the
     // gate and the send had even started.
     //
-    // Only when site 1 fired: if this turn was predicted to queue, finishing
-    // a generation is not new evidence that it will not.
+    // Only when the dots are already showing: if this turn was predicted to
+    // queue, finishing a generation is not new evidence that it will not.
+    //
+    // NOT quite "only when site 1 fired", and the difference is the extension
+    // path: TAC-526 re-enters runInboundTurn with the SAME turn state, so a
+    // pass whose own classification predicts a queue can still refresh dots
+    // an earlier pass turned on. That is correct — they ARE showing, and the
+    // single exit still takes them away — but the guarantee is about
+    // `typingShownFor`, not about this function having run before.
     if (turn.typingShownFor !== null) startTyping(turn, ctx)
 
     // TAC-296: capture what the agent UNDERSTOOD from the inbound into

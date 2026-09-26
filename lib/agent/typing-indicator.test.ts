@@ -5,6 +5,8 @@
 // anything at all. Everything about WHEN the dots go on and off lives in
 // handle-inbound and is tested there.
 
+import { formatWithOptions } from 'node:util'
+
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/db/admin', () => ({
@@ -17,8 +19,14 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('@/lib/analytics/posthog', () => ({
   captureInstagramSenderActionFailed: vi.fn(async () => undefined),
 }))
+// TAC-540 code review. Mocked so ONE test can exercise the default wiring;
+// every other test injects `sendAction` and never reaches it.
+vi.mock('@/lib/messaging/instagram/sender-actions', () => ({
+  sendInstagramSenderAction: vi.fn(async () => ({ ok: true })),
+}))
 
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
+import { sendInstagramSenderAction } from '@/lib/messaging/instagram/sender-actions'
 import { signalTyping, type TypingIndicatorDeps } from './typing-indicator'
 
 const VENUE_ID = 'venue-1'
@@ -164,11 +172,51 @@ describe('fails open', () => {
         })),
       })
       await signalTyping({ venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' }, 'on', deps)
-      const rendered = JSON.stringify(logged)
+      // formatWithOptions, NOT JSON.stringify. TAC-458 records that
+      // stringify renders an Error, a Headers and a URLSearchParams as `{}`
+      // while console prints them in full — so a leak test using it passed
+      // against the very leak it was named for. The renderer has to see at
+      // least what the sink prints.
+      const rendered = formatWithOptions(
+        { depth: null, maxArrayLength: null, maxStringLength: null },
+        ...logged,
+      )
       expect(rendered).not.toContain(IGSID)
       expect(rendered).not.toContain(TOKEN)
     } finally {
       for (const spy of spies) spy.mockRestore()
     }
+  })
+})
+
+describe('the default wiring', () => {
+  /**
+   * Without this the typing indicator can ship inert. A code-review mutant
+   * replaced `defaultDeps().sendAction` with `async () => ({ ok: true })` and
+   * 139 tests passed, because every other test here injects it and
+   * handle-inbound.test.ts mocks this module whole. See mark-seen.test.ts's
+   * twin for the general form.
+   */
+  it.each([
+    ['on', 'typing_on'],
+    ['off', 'typing_off'],
+  ] as const)('routes %s through the real transport as %s', async (signal, action) => {
+    const { deps } = stubDeps()
+
+    // Only loadTarget is injected: sendAction comes from defaultDeps.
+    const result = await signalTyping(
+      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+      signal,
+      { loadTarget: deps.loadTarget },
+    )
+
+    expect(result).toEqual({ status: 'sent' })
+    expect(sendInstagramSenderAction).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      recipientId: IGSID,
+      token: TOKEN,
+      action,
+      fetchImpl: expect.any(Function),
+    })
   })
 })
