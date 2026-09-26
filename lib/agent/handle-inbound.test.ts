@@ -3200,21 +3200,35 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
    *
    * Fails the moment retrieval is moved back below classification.
    */
-  it('starts the corpus retrieval before classification has finished', async () => {
-    let releaseCorpus: (() => void) | null = null
-    let classifyStarted = false
+  it('has both in flight at once: neither finishes before the other starts', async () => {
+    const entered = { classify: false, corpus: false }
+    let bothEntered: (() => void) | null = null
+    const bothRunning = new Promise<void>((resolve) => {
+      bothEntered = resolve
+    })
+    const enter = (which: 'classify' | 'corpus') => {
+      entered[which] = true
+      if (entered.classify && entered.corpus) bothEntered?.()
+    }
 
+    // ORDER-AGNOSTIC on purpose. The property the ticket names is that they
+    // OVERLAP, not which is called first — so neither mock is allowed to
+    // resolve until both have been entered. Sequentially this deadlocks and
+    // the test times out; in parallel both gates open and it passes whichever
+    // order they were started in.
+    //
+    // An earlier version had classification release retrieval, which also
+    // pinned retrieval as FIRST. That is true of the implementation and is
+    // not what is being claimed here, so it was over-specified: a later
+    // reordering that kept them parallel would have failed it.
     retrieveCorpusStageMock.mockImplementation(async () => {
-      await new Promise<void>((resolve) => {
-        releaseCorpus = resolve
-      })
+      enter('corpus')
+      await bothRunning
       return []
     })
     classifyStageMock.mockImplementation(async () => {
-      classifyStarted = true
-      // Retrieval is already running: release it from inside classification,
-      // which is only possible if it started first.
-      releaseCorpus?.()
+      enter('classify')
+      await bothRunning
       return { category: 'new_question', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false }
     })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
@@ -3224,7 +3238,7 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
     const r = await handleInbound(INBOUND_ID)
 
     expect(r).toMatchObject({ status: 'sent' })
-    expect(classifyStarted).toBe(true)
+    expect(entered).toEqual({ classify: true, corpus: true })
     expect(retrieveCorpusStageMock).toHaveBeenCalledTimes(1)
   }, 2000)
 
@@ -3300,13 +3314,24 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     'verify_closed_venue_arrival',
   ]
 
-  /** Resolve a stage only when its gate is opened, so the order is chosen. */
-  function deferred<T>(value: T) {
+  /**
+   * Resolve a stage only when its gate is opened, and record the resolution
+   * in the SAME ordered log the spans write to — so a test can see whether a
+   * span closed while other checks were still running.
+   */
+  function deferred<T>(name: string, value: T) {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    return { run: async () => { await gate; return value }, release: () => release() }
+    return {
+      run: async () => {
+        await gate
+        spanLog.events.push({ name: `resolved:${name}`, phase: 'close' })
+        return value
+      },
+      release: () => release(),
+    }
   }
 
   beforeEach(() => {
@@ -3335,12 +3360,12 @@ describe('TAC-540 — each verify check owns its own span window', () => {
    * after the slowest check, so the recorded order would be the array order
    * instead — which is a DIFFERENT order here by construction.
    */
-  it('closes each span when its own check resolves, not when the batch does', async () => {
-    const grounding = deferred({ status: 'skipped' as const })
-    const mechanic = deferred({ status: 'skipped' as const })
-    const prose = deferred({ status: 'skipped' as const })
-    const cancellation = deferred({ resolution: { status: 'none' as const }, claim: 'clean' as const })
-    const closedVenue = deferred({ status: 'skipped' as const })
+  it('closes each span while the other checks are STILL RUNNING, not after the batch', async () => {
+    const grounding = deferred('grounding', { status: 'skipped' as const })
+    const mechanic = deferred('mechanic', { status: 'skipped' as const })
+    const prose = deferred('prose', { status: 'skipped' as const })
+    const cancellation = deferred('cancellation', { resolution: { status: 'none' as const }, claim: 'clean' as const })
+    const closedVenue = deferred('closedVenue', { status: 'skipped' as const })
 
     verifyGroundingStageMock.mockImplementation(grounding.run)
     verifyMechanicOfferStageMock.mockImplementation(mechanic.run)
@@ -3367,9 +3392,32 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     }
     await turn
 
-    const closed = spanLog.events
-      .filter((e) => e.phase === 'close' && CHECK_SPANS.includes(e.name))
+    // THE ASSERTION THAT ACTUALLY CATCHES IT, and the first version of this
+    // test did not.
+    //
+    // Asserting the close ORDER is not enough: the pre-TAC-540 shape ends
+    // every span after the batch, but it ends them in the order the checks
+    // resolved — so the order matches and a mutant restoring that shape
+    // passes. Found by running exactly that mutant against the first version
+    // of this test, which it survived.
+    //
+    // What separates the two is the WINDOW. Each span must close while the
+    // other checks are still in flight, so the log has to interleave:
+    // resolved, closed, resolved, closed. Batched ends produce all five
+    // resolutions and then all five closes.
+    const log = spanLog.events
+      .filter((e) => CHECK_SPANS.includes(e.name) || e.name.startsWith('resolved:'))
+      .filter((e) => e.phase === 'close')
       .map((e) => e.name)
+
+    const firstSpanClose = log.findIndex((n) => CHECK_SPANS.includes(n))
+    const lastResolve = log.map((n) => n.startsWith('resolved:')).lastIndexOf(true)
+    expect(firstSpanClose).toBeGreaterThanOrEqual(0)
+    expect(firstSpanClose).toBeLessThan(lastResolve)
+
+    // ...and each span still closes in ITS OWN check's order, which is what
+    // makes the slowest one identifiable afterwards.
+    const closed = log.filter((n) => CHECK_SPANS.includes(n))
     expect(closed).toEqual(releaseOrder.map(([name]) => name))
   })
 
