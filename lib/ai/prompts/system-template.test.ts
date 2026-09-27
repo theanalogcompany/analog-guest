@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.68.0 (no guest-facing message names a person as the speaker)', () => {
-    expect(PROMPT_VERSION).toBe('v1.68.0')
+  it('is v1.69.0 (use the guest name sparingly)', () => {
+    expect(PROMPT_VERSION).toBe('v1.69.0')
   })
 })
 
@@ -68,18 +68,18 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // TAC-348 appends R23-R28 after that (R22 stays undisplayed). TAC-356
     // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
     // TAC-484 appends R35 after that. TAC-520 appends R36 after that.
-    // TAC-541 appends R37 after that.
+    // TAC-541 appends R37 after that. TAC-544 appends R38 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36', 'R37',
+      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36', 'R37', 'R38',
     ])
   })
 
-  it('curates 29 rules ending at R37 (TAC-541)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(29)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R37')
+  it('curates 30 rules ending at R38 (TAC-544)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(30)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R38')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -1119,7 +1119,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // appended R32-R34 after that, TAC-484 appended R35 and TAC-520 appended
   // R36, so the count grows again each time (still the same adjacency shape,
   // just more lines).
-  it('is immediately followed by exactly R23-R37, then # Voice imperative', () => {
+  it('is immediately followed by exactly R23-R38, then # Voice imperative', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
@@ -1127,7 +1127,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
     // R22 itself, plus R23-R36 — exactly fifteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(16)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(17)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1289,7 +1289,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
   // that, TAC-484 appended R35 and TAC-520 appended R36, so the count grows
   // again.
-  it('is immediately followed by exactly R29-R37, then # Voice imperative (TAC-541)', () => {
+  it('is immediately followed by exactly R29-R38, then # Voice imperative (TAC-544)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
@@ -1297,7 +1297,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
     // R28 itself, plus R29-R36 — exactly nine bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(10)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(11)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1404,7 +1404,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
   // landed after them. TAC-484 appended R35 and TAC-520 appended R36.
-  it('is immediately followed by exactly R32-R37, then # Voice imperative (TAC-541)', () => {
+  it('is immediately followed by exactly R32-R38, then # Voice imperative (TAC-544)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
@@ -1412,7 +1412,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
     // R31 itself, plus R32-R36 — exactly six bullet lines, then nothing but
     // whitespace before the heading. TAC-484 appended R35.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(7)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(8)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1552,13 +1552,13 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   // worth guarding was never "R34 is last" but "exactly N bullets sit between
   // R34 and the section break," which is what catches a rule being appended
   // without being classified.
-  it('is immediately followed by exactly R35-R37, then # Voice imperative', () => {
+  it('is immediately followed by exactly R35-R38, then # Voice imperative', () => {
     const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1656,13 +1656,13 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 
   // TAC-520 appended R36, so R35 is no longer terminal either. Same rewrite
   // R34 got when R35 landed: pin the adjacency, do not delete the guard.
-  it('is immediately followed by exactly R36-R37, then # Voice imperative (TAC-541)', () => {
+  it('is immediately followed by exactly R36-R38, then # Voice imperative (TAC-544)', () => {
     const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r35Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
     const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1690,15 +1690,15 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue would (TAC-520)', () => {
   const R36_START = 'Say a date the way someone working in the venue'
 
-  // TAC-541 appended R37, so R36 is no longer terminal. Same rewrite R34 and
-  // R35 each got in turn: pin the adjacency, never delete the guard.
-  it('is immediately followed by exactly R37, then # Voice imperative (TAC-541)', () => {
+  // TAC-544 appended R38, so R37 is no longer the only follower. Same rewrite
+  // R34, R35 and R36 each got in turn: pin the adjacency, never delete the guard.
+  it('is immediately followed by exactly R37-R38, then # Voice imperative (TAC-544)', () => {
     const r36Idx = SYSTEM_TEMPLATE.indexOf(R36_START)
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r36Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r36Idx)
     const between = SYSTEM_TEMPLATE.slice(r36Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(2)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
   })
 
   it('is appended after R35, never inserted (ids are positional and append-only)', () => {
@@ -2262,5 +2262,91 @@ describe('SYSTEM_TEMPLATE — R37: answer why you want the name (TAC-541)', () =
     const r37 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R37')
     expect(r37).toBeDefined()
     expect(r37?.summary).toContain('so you know what to call them')
+  })
+})
+
+// TAC-544 R38. Once the agent knew a guest's name it used it in almost every
+// reply: three of four consecutive replies on 2026-09-26, two in a row the day
+// before. The cause was an ABSENCE rather than a bad rule. `- First name: ...`
+// renders in the guest block on every turn (serializers.ts) and nothing
+// governed how often to use it; the only name-frequency guidance in the prompt
+// sat in WELCOME_INSTRUCTIONS, which covers the first outbound only.
+//
+// PINNED AS ONE CONTIGUOUS LITERAL, not as fragments. The rule is two
+// sentences, so the whole of it fits in one assertion, and the TAC-409 lesson
+// (a sentence can be reversed while every asserted fragment survives, which
+// TAC-502 then demonstrated three times over) has no room to bite.
+describe('SYSTEM_TEMPLATE — R38: use the guest name sparingly (TAC-544)', () => {
+  const R38_START = "Use the guest's name sparingly"
+
+  const body = () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R38_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    return SYSTEM_TEMPLATE.slice(start, end)
+  }
+
+  // The verbatim rule, exactly as approved on the ticket. This is the mutant
+  // target: deleting the bullet, or rewording any clause of it, fails here.
+  it('carries the approved wording verbatim, as one contiguous rule', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row.",
+    )
+  })
+
+  // The half a model can actually check on a single turn. "Sparingly" is a
+  // frequency word with no referent inside one generation (the TAC-362
+  // lesson, measured there: a per-message instruction is obeyed where a
+  // frequency word is not), so the consecutive-replies prohibition is what
+  // carries the observed failure. It is asserted separately from the verbatim
+  // pin so that softening it to a preference fails on its own terms.
+  it('states the consecutive-replies prohibition absolutely', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Never use it in two replies in a row.')
+    expect(body()).not.toMatch(/try not to use it|avoid using it|prefer not to/i)
+  })
+
+  // NO QUOTED EXAMPLE, DELIBERATELY (ticket: "It contains no quoted example on
+  // purpose: Jaipal does not want templated phrasing"). Every sibling in the
+  // R23-R37 series carries one, so adding one here is the likeliest future
+  // "improvement" — and a quoted name use is the one thing the model would
+  // reproduce verbatim, which is the defect rather than a side effect. A
+  // canary, not a wording check.
+  it('quotes no example phrasing, so there is nothing to reproduce', () => {
+    expect(body()).not.toContain('"')
+    expect(body()).not.toMatch(/\bis the shape\b|for example|e\.g\./i)
+  })
+
+  // The name in the motivating incident is a real guest's. It must not reach
+  // the prompt, and neither must the venue's own names (the R36/R37 canary).
+  it('names no person or venue from the motivating incident', () => {
+    const lower = body().toLowerCase()
+    for (const term of ['jaipal', 'himanshu', 'milana', 'le mil', 'blossom tonic']) {
+      expect(lower).not.toContain(term)
+    }
+  })
+
+  it('is appended after R37, never inserted (ids are positional and append-only)', () => {
+    expect(SYSTEM_TEMPLATE.indexOf(R38_START)).toBeGreaterThan(
+      SYSTEM_TEMPLATE.indexOf('If a guest asks why you want their name'),
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    expect(body()).not.toMatch(/[—–]/)
+  })
+
+  // TAC-495: compose-prompt scans every Instagram prompt for channel claims,
+  // and a failure there points far from here. Asserted at the source, and that
+  // the rule survives the Instagram substitution table at all.
+  it('makes no claim about the channel, so both channel variants carry it', () => {
+    expect(body()).not.toMatch(/\btext|\bSMS\b|iMessage|this number|\bphone\b/i)
+    expect(systemTemplateFor('instagram')).toContain(R38_START)
+  })
+
+  it('is displayed on the Voices rail, with the consecutive-replies half in its summary', () => {
+    const r38 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R38')
+    expect(r38).toBeDefined()
+    expect(r38?.summary).toContain('Never use it in two replies in a row')
   })
 })
