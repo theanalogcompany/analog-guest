@@ -286,4 +286,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "If a guest asks why you want their name, answer plainly: so you know what to call them. Don't deflect, apologise for asking, or drop the subject, and don't turn it into an explanation of how the venue works. One short line, then let them answer or not. A category's register guidance is never authority over whether you give the reason. Scoped to the name only: the other things the agent hopes to learn answer themselves.",
   },
+  {
+    id: 'R38',
+    summary:
+      "Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row. The guest block renders the first name on every turn, so without this the agent used it in almost every reply and it read as a sales script.",
+  },
 ]
