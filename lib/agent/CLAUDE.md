@@ -34,6 +34,53 @@ post-generation checks -> `send`.
 fallback and none may be added: a derived query is the defect that made every proactive
 path retrieve four arbitrary chunks. `''` is the legitimate "do not retrieve" answer.
 
+### Knowledge retrieval reads the conversation (TAC-547)
+
+`retrieveKnowledgeWithContextStage` runs **two arms** under `Promise.allSettled` - the bare
+message, and a contextual query from `buildContextQuery` - and merges them. Each arm goes
+through the untouched `retrieveKnowledgeStage`, so each keeps its own tag-preference fallback
+and graceful degrade, and arm B failing leaves arm A alone. **No prior turn runs one arm**, so
+a first message behaves exactly as before.
+
+`retrieval-context.ts` owns the pieces: `CONTEXT_TURNS` (2), `MAX_CONTEXT_BODY_CHARS` (200),
+`reachedGuest`, `contextTurns`, `buildContextQuery`, `mergeKnowledgeMatches`, and
+`KNOWLEDGE_MERGE_RULE`.
+
+**The merge rule is INTERLEAVE BY RANK, and that is a fact about cosine rather than about
+this corpus.** The two arms' scores are not on one scale - the contextual query is three
+messages long and embeds systematically higher (top-1 median 0.7812 against 0.5001, ranges
+barely overlapping). So "best score per entry" is really "keep the contextual arm": measured,
+it displaced 83 of 120 control entries and cost 7 of 15 standalone targets. Interleaving by
+rank is scale-free and guarantees the control arm's top two survive (A0, B0, A1, B1 at a limit
+of 4). It still drops the control's ranks 2-3, so the measured zero regressions is that
+guarantee plus where targets happened to sit, not a claim that nothing is displaced.
+
+**Dedupe by the embedding chunk `id`, never `knowledgeCorpusId`** - the TAC-500 trap, since
+one corpus entry split across chunks would collapse and lose a chunk's text. 1:1 on today's
+data, so moot in practice and still required to be right.
+
+**The context window** is the last `CONTEXT_TURNS` entries of `ctx.recentMessages` that
+**reached the guest** (a held draft is text the guest never read, and the most likely to be
+off-topic) and fall inside `ctx.conversationWindowMs` - hoisted onto `RuntimeContext` rather
+than re-derived, because TAC-380 ruling 1 made that the one definition of "the same
+conversation".
+
+**Voice retrieval is deliberately unchanged.** Voice corpus is style, not fact, and
+`retrieveCorpusStage` fails CLOSED on inbound - moving its query could trip
+`insufficient_corpus_matches`, which throws and leaves the guest with no reply at all.
+
+`lib/voices/regenerate-with-critique.ts` now **calls this stage** rather than reimplementing
+retrieval, which deletes a duplication that had already drifted once. Its contextual arm works
+only because the window is measured from `ctx.currentMessage.receivedAt`: that path pins
+history with `historyEndIso` while `buildRuntimeContext` stamps `computedAt = new Date()`, so
+against wall-clock now every replay older than the window would have an empty context and the
+arm would be silently dead. That is the re-dating trap reaching a second consumer.
+
+**Recorded divergence:** `scripts/onboarding/run-test-scenarios.ts` and the
+`scripts/measurement/*` harnesses still call the single-arm stage, so they no longer match
+production. For the scenario harness that is equivalent only by coincidence - its synthetic
+guests carry history 30+ days old, so `buildContextQuery` returns `''` anyway.
+
 ## Floors and constants
 
 All in `stages.ts` unless noted. These are the live values; treat a number quoted anywhere

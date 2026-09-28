@@ -31,7 +31,7 @@ differently-worded reintroduction passes and needs a human to catch.
 
 ## Universal voice rules
 
-Currently R1 through R38 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
+Currently R1 through R39 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
 trust a number quoted elsewhere, including this sentence.**
 
 Numbering is **positional and append-only.** Never insert mid-list and never reuse a
