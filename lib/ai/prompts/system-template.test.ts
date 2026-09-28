@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.69.0 (use the guest name sparingly)', () => {
-    expect(PROMPT_VERSION).toBe('v1.69.0')
+  it('is v1.70.0 (honest take first, then the specifics)', () => {
+    expect(PROMPT_VERSION).toBe('v1.70.0')
   })
 })
 
@@ -69,17 +69,19 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // appends R29-R31 after that. TAC-359 appends R32-R34 after that.
     // TAC-484 appends R35 after that. TAC-520 appends R36 after that.
     // TAC-541 appends R37 after that. TAC-544 appends R38 after that.
+    // TAC-548 appends R39 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
       'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
       'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
       'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36', 'R37', 'R38',
+      'R39',
     ])
   })
 
-  it('curates 30 rules ending at R38 (TAC-544)', () => {
-    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(30)
-    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R38')
+  it('curates 31 rules ending at R39 (TAC-548)', () => {
+    expect(UNIVERSAL_RULES_DISPLAY).toHaveLength(31)
+    expect(UNIVERSAL_RULES_DISPLAY.at(-1)?.id).toBe('R39')
   })
 
   it('shares the R11 anchor phrase across both sources', () => {
@@ -1119,7 +1121,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // appended R32-R34 after that, TAC-484 appended R35 and TAC-520 appended
   // R36, so the count grows again each time (still the same adjacency shape,
   // just more lines).
-  it('is immediately followed by exactly R23-R38, then # Voice imperative', () => {
+  it('is immediately followed by exactly R23-R39, then # Voice imperative (TAC-548)', () => {
     const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
@@ -1127,7 +1129,7 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
     // R22 itself, plus R23-R36 — exactly fifteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(17)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(18)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1289,7 +1291,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // TAC-348 when R23-R28 landed after it. TAC-359 appended R32-R34 after
   // that, TAC-484 appended R35 and TAC-520 appended R36, so the count grows
   // again.
-  it('is immediately followed by exactly R29-R38, then # Voice imperative (TAC-544)', () => {
+  it('is immediately followed by exactly R29-R39, then # Voice imperative (TAC-548)', () => {
     const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
@@ -1297,7 +1299,7 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
     // R28 itself, plus R29-R36 — exactly nine bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(11)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(12)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1404,7 +1406,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
   // in the block. Rewritten to pin adjacency instead of asserting R31 is
   // terminal — same treatment R22's and R28's own tests got when rules
   // landed after them. TAC-484 appended R35 and TAC-520 appended R36.
-  it('is immediately followed by exactly R32-R38, then # Voice imperative (TAC-544)', () => {
+  it('is immediately followed by exactly R32-R39, then # Voice imperative (TAC-548)', () => {
     const r31Idx = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r31Idx).toBeGreaterThan(-1)
@@ -1412,7 +1414,7 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
     // R31 itself, plus R32-R36 — exactly six bullet lines, then nothing but
     // whitespace before the heading. TAC-484 appended R35.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(8)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(9)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1552,13 +1554,13 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   // worth guarding was never "R34 is last" but "exactly N bullets sit between
   // R34 and the section break," which is what catches a rule being appended
   // without being classified.
-  it('is immediately followed by exactly R35-R38, then # Voice imperative', () => {
+  it('is immediately followed by exactly R35-R39, then # Voice imperative (TAC-548)', () => {
     const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(6)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1656,13 +1658,13 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
 
   // TAC-520 appended R36, so R35 is no longer terminal either. Same rewrite
   // R34 got when R35 landed: pin the adjacency, do not delete the guard.
-  it('is immediately followed by exactly R36-R38, then # Voice imperative (TAC-544)', () => {
+  it('is immediately followed by exactly R36-R39, then # Voice imperative (TAC-548)', () => {
     const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r35Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
     const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
@@ -1692,13 +1694,13 @@ describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue woul
 
   // TAC-544 appended R38, so R37 is no longer the only follower. Same rewrite
   // R34, R35 and R36 each got in turn: pin the adjacency, never delete the guard.
-  it('is immediately followed by exactly R37-R38, then # Voice imperative (TAC-544)', () => {
+  it('is immediately followed by exactly R37-R39, then # Voice imperative (TAC-548)', () => {
     const r36Idx = SYSTEM_TEMPLATE.indexOf(R36_START)
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r36Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r36Idx)
     const between = SYSTEM_TEMPLATE.slice(r36Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(3)
+    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
   })
 
   it('is appended after R35, never inserted (ids are positional and append-only)', () => {
@@ -2348,5 +2350,112 @@ describe('SYSTEM_TEMPLATE — R38: use the guest name sparingly (TAC-544)', () =
     const r38 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R38')
     expect(r38).toBeDefined()
     expect(r38?.summary).toContain('Never use it in two replies in a row')
+  })
+})
+
+// TAC-548 R39. The agent answered a NEARBY question, or answered correctly but
+// thinly, with the specifics sitting unused in a knowledge entry it had already
+// retrieved. Device cases at Le Mil's, 2026-09-28: "how do i use your beans"
+// got where to BUY them, and "does the badra taste good" got a take with the
+// entry's actual tasting notes unused.
+//
+// THE DIRECTION IS THE UNUSUAL PART AND IS WHAT THESE PIN. Most rules in this
+// series remove something. This one ADDS substance on top of a take that was
+// already right, and the take is named FIRST in the wording on purpose. An
+// earlier draft opening "Answer the exact thing the guest asked" was rejected
+// for risking fixed, spec-like replies (TAC-543 is the precedent: tightening
+// left the agent more careful and more generic). So the ordering assertion
+// below is not stylistic. A reworded rule that leads with the specifics is the
+// rejected draft arriving by another route, and it has to fail here.
+//
+// PINNED AS ONE CONTIGUOUS LITERAL, per the TAC-409 lesson that a sentence can
+// be reversed while every asserted fragment survives. The rule is one sentence,
+// so the whole of it fits in a single assertion.
+describe('SYSTEM_TEMPLATE — R39: honest take first, then the specifics (TAC-548)', () => {
+  const R39_START = 'Give your honest take first'
+
+  const body = () => {
+    const start = SYSTEM_TEMPLATE.indexOf(R39_START)
+    const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    return SYSTEM_TEMPLATE.slice(start, end)
+  }
+
+  // The verbatim rule, exactly as approved on the ticket. This is the mutant
+  // target: deleting the bullet, or rewording any clause of it, fails here.
+  it('carries the approved wording verbatim, as one contiguous rule', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it.',
+    )
+  })
+
+  // The take leads. Asserted as an ORDER within the rule rather than as the
+  // presence of two phrases, because a version that keeps both clauses and
+  // swaps them is the rejected "answer the exact thing first" draft, and a
+  // presence-only pair of assertions would pass it. Jaipal's constraint is
+  // that "it's intense, honestly" is the voice WORKING and must survive.
+  it('leads with the take and puts the specifics second', () => {
+    const rule = body()
+    const take = rule.indexOf('honest take first')
+    const specifics = rule.indexOf('back it up with the specific details')
+    expect(take).toBeGreaterThan(-1)
+    expect(specifics).toBeGreaterThan(take)
+  })
+
+  // Both observed misses, named. A rule that dropped either branch would leave
+  // one of the two device cases uncovered while still reading as this rule.
+  it('names both branches: flavor on a taste question, method on a how-to', () => {
+    expect(body()).toContain('the actual flavor if they asked how it tastes')
+    expect(body()).toContain('the how if they asked how to use or brew it')
+  })
+
+  // Scoped to detail the runtime context ALREADY holds ("the specific details
+  // you have"), which is what keeps it from pulling against R8's never-invent
+  // prohibition. A rule asking for detail unconditionally would licence
+  // exactly the fabrication R8 exists to stop.
+  it('asks only for specifics the context already holds', () => {
+    expect(body()).toContain('the specific details you have')
+  })
+
+  // NO QUOTED EXAMPLE, DELIBERATELY (ticket: the wording "contains no quoted
+  // example on purpose", because Jaipal does not want templated phrasing).
+  // R38 one bullet above made the same call. A canary, not a wording check.
+  it('quotes no example phrasing, so there is nothing to reproduce', () => {
+    expect(body()).not.toContain('"')
+    expect(body()).not.toMatch(/\bis the shape\b|for example|e\.g\./i)
+  })
+
+  // The venue and the item from the motivating device cases must not reach the
+  // prompt (the R36/R37/R38 canary).
+  it('names no person, venue or item from the motivating incident', () => {
+    const lower = body().toLowerCase()
+    for (const term of ['jaipal', 'himanshu', 'milana', 'le mil', 'bhadra', 'robusta']) {
+      expect(lower).not.toContain(term)
+    }
+  })
+
+  it('is appended after R38, never inserted (ids are positional and append-only)', () => {
+    expect(SYSTEM_TEMPLATE.indexOf(R39_START)).toBeGreaterThan(
+      SYSTEM_TEMPLATE.indexOf("Use the guest's name sparingly"),
+    )
+  })
+
+  it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
+    expect(body()).not.toMatch(/[—–]/)
+  })
+
+  // TAC-495: compose-prompt scans every Instagram prompt for channel claims,
+  // and a failure there points far from here. Asserted at the source, and that
+  // the rule survives the Instagram substitution table at all.
+  it('makes no claim about the channel, so both channel variants carry it', () => {
+    expect(body()).not.toMatch(/\btext|\bSMS\b|iMessage|this number|\bphone\b/i)
+    expect(systemTemplateFor('instagram')).toContain(R39_START)
+  })
+
+  it('is displayed on the Voices rail, with the take-first half in its summary', () => {
+    const r39 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R39')
+    expect(r39).toBeDefined()
+    expect(r39?.summary).toContain('Give your honest take first')
   })
 })

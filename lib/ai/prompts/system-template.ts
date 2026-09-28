@@ -1566,7 +1566,63 @@ import {
 // "Never use it in two replies in a row" is the half a model can actually
 // check, and it is the observed failure. "Sparingly" alone is a frequency word
 // with no referent inside a single generation, which is the TAC-362 lesson.
-export const PROMPT_VERSION = 'v1.69.0'
+// v1.70.0 (TAC-548): a new R39. Keep the honest take, add the specifics. The
+// answered a NEARBY question, or answered correctly but thinly, with the
+// specifics sitting unused in the knowledge entry it had already retrieved.
+// Device cases at Le Mil's, 2026-09-28: "how do i use your beans" got where to
+// BUY them; "how do i brew that" got a description of the bean; and "does the
+// badra taste good" got "it's intense, honestly... 100% Robusta so it hits
+// hard" while that entry's actual tasting notes went unused.
+//
+// THE CONSTRAINT IS THE POINT, AND IT RUNS THE OPPOSITE WAY TO MOST RULES IN
+// THIS SERIES. Jaipal LIKES "it's intense, honestly". That is the voice
+// working, and it is what the reply must keep. So this rule ADDS substance on
+// top of a take rather than correcting a fault, and the take is named FIRST in
+// the wording for that reason. An earlier draft opening "Answer the exact
+// thing the guest asked" was REJECTED before any code was written: it risked
+// making replies fixed and spec-like. TAC-543 is the recorded precedent that
+// tightening a rule can leave the agent more careful and more generic, which
+// is the failure this one must not reproduce. A drier reply is a FAILURE here
+// even when the facts improve, and the measurement treats it as one.
+//
+// NO QUOTED EXAMPLE, DELIBERATELY (approved wording, 2026-09-28), the same
+// call R38 made one bullet above and for the same reason: a quoted phrasing is
+// the one thing the model reproduces verbatim, and templated phrasing is the
+// defect rather than a side effect of it. R32 and R33 are the other two in the
+// R23-R38 series carrying none.
+//
+// SCOPED TO WHAT THE GUEST ASKED, not to volunteering detail generally. The
+// two named branches (flavor on a taste question, method on a how-to) are the
+// two observed misses; the rule says "the specific details you have", so it
+// asks for nothing the runtime context does not already hold and cannot pull
+// against R8's never-invent prohibition.
+//
+// SHIPPED ON THE REPLIES, NOT ON THE RATES. The ticket is explicit that this
+// is a taste call: Jaipal read a verbatim side-by-side of all twenty questions
+// and said ship. The measurement informed that and did not make it.
+//
+// What it found, at 3 reps per cell against Le Mil's live config, control
+// being this same prompt with R39 sliced out: answers-the-question-type 87% ->
+// 91%, uses-the-specifics 94% -> 96%, keeps-a-personal-take 72% -> 83%. Per
+// question the change is better on 2 and worse on 0 for question type, and
+// better on 6 and worse on 2 for the take. Mean reply length moved 181 -> 180
+// characters, so it buys the facts without padding.
+//
+// THE FIRST RUN SAID THE OPPOSITE AND WAS ONE DRAW PER CELL. It reported the
+// take rate FALLING 89% -> 78%, which would have failed the ticket's own bar.
+// Three of the four replies behind that drop differed from their control by a
+// single adverb ("works great"/"works", "tastes a lot like"/"tastes like").
+// That is the TAC-520 lesson on this seam: generation runs at temperature 0.7
+// and one draw is a draw, not a property. Re-run with repeats, the direction
+// reversed. Do not re-measure this rule at n=1.
+//
+// TWO QUESTIONS MISSED THE TYPE BAR AND NEITHER IS THIS RULE, recorded so the
+// next reader does not re-derive it: "is the chikka any good" was 0/3 in BOTH
+// arms because that entry reached no retrieved chunk on any rep, and "how do i
+// brew the bhadra" answered pour over in both arms. Both are retrieval, which
+// is TAC-547's subject, not generation. A rule cannot use a specific that is
+// not in the context.
+export const PROMPT_VERSION = 'v1.70.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1744,6 +1800,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - Say a date the way someone working in the venue would say it out loud. When the venue's notes give a real date, find that date in the calendar in the ## Right now block and say the weekday it falls on: "Friday", or "this Saturday". If it is today or tomorrow, say "today", "tonight" or "tomorrow" instead. A date in the current month that is not in the calendar is "later this month". Never work a weekday out for yourself. If a date is not in the calendar, do not name a weekday for it and do not take a different date from the calendar in its place: say the date the way the notes wrote it. If the calendar shows the date has already gone by, it is not a plan any more: say what is actually true rather than describing it as coming up. Name the year only when leaving it out would genuinely be ambiguous, which here is almost never; use the date in the ## Right now block to judge that, and when something really is a year or more out, the year earns its place and you should say it plainly rather than being vague. This holds just as much for a date you read in the venue's own notes as for one stated anywhere else in your context. Restating a documented date in plainer terms invents nothing, and the never-invent rule above does not ask you to repeat a date in the form it happens to be written in. When the notes give only a month or a season and no actual day, the date is not set: say that plainly instead of naming the month as if it were the plan.
 - If a guest asks why you want their name, answer plainly: so you know what to call them. "just so we know what to call you" is the shape. That is the real reason and it is yours to give. Do not deflect, apologise for asking, or drop the subject, and do not turn it into an explanation of how the venue works. One short line, then let them answer or not. A category's register guidance, whether it frames the turn as a holding response or as a close, is never authority over whether you give the reason.
 - Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row.
+- Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

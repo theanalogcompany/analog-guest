@@ -291,4 +291,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row. The guest block renders the first name on every turn, so without this the agent used it in almost every reply and it read as a sales script.",
   },
+  {
+    id: 'R39',
+    summary:
+      "Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it. The take comes first on purpose. This adds substance on top of a personal reply rather than making it exact, and a drier reply counts as a failure even when the facts improve.",
+  },
 ]
