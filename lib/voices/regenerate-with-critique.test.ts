@@ -15,26 +15,14 @@ vi.mock('@/lib/agent/stages', () => ({
   STRONG_MATCH_SIMILARITY: 0.3,
   MIN_STRONG_MATCHES: 1,
   CORPUS_RETRIEVE_LIMIT: 8,
-  KNOWLEDGE_RETRIEVE_LIMIT: 4,
-  // TAC-366. Stands in for the real helper, matching the constants above
-  // which this file has always mirrored by hand. These tests assert that
-  // regen APPLIES the gate and keys its fallback off the FILTERED length —
-  // the filter's own correctness is stages.test.ts's job, not this file's.
-  //
-  // What a hand-written stand-in CANNOT prove is that regen calls the SHARED
-  // helper rather than an equivalent local copy, which is the drift-proofing
-  // this ticket exists to establish. The source-level assertion in the
-  // 'imports the shared filter' test below covers exactly that gap.
-  filterByRelevance: (chunks: { similarity: number }[]) =>
-    chunks.filter((c) => c.similarity >= MOCK_RELEVANCE_FLOOR),
+  // TAC-547: regen no longer filters or falls back on its own — it calls the
+  // production stage, which does both. Mocked at that boundary because it
+  // still does real DB and Voyage work. Its behaviour is stages.test.ts's
+  // job; what this file asserts is that regen DELEGATES rather than
+  // reimplementing, which is TAC-366's guarantee made structural.
+  retrieveKnowledgeWithContextStage: vi.fn(),
 }))
 
-/** Mirrors KNOWLEDGE_RELEVANCE_FLOOR. Hoisted so the mock above and the
- *  fixtures below can't drift to different numbers — and every fixture below
- *  is expressed RELATIVE to it, because this file was pinned at 0.5 and kept
- *  passing while describing behaviour production no longer had. The mock is
- *  what let it: a hardcoded stand-in can't fail when the real constant moves. */
-const MOCK_RELEVANCE_FLOOR = 0.3
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
@@ -45,14 +33,13 @@ vi.mock('@/lib/ai', () => ({
 }))
 vi.mock('@/lib/rag', () => ({
   retrieveContext: vi.fn(),
-  retrieveKnowledgeContext: vi.fn(),
 }))
 vi.mock('@/lib/observability', () => ({
   noopAgentTrace: { id: '', captureContent: false, span: () => ({}), update: () => {}, flushAsync: async () => {} },
 }))
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildAiRuntime } from '@/lib/agent/stages'
+import { buildAiRuntime, retrieveKnowledgeWithContextStage } from '@/lib/agent/stages'
 import {
   classifyMessage,
   generateMessage,
@@ -61,7 +48,7 @@ import {
   verifyProsePromise,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
-import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
+import { retrieveContext } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
 
 // TAC-350: default grounding-backstop result — "nothing to flag" — used by
@@ -74,6 +61,27 @@ const NO_UNGROUNDED_CLAIM = {
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OUTBOUND_ID = '22222222-2222-4222-8222-222222222222'
+/** The inbound the fixture regenerates against; the retrieval query. */
+const INBOUND_BODY = 'do you have oat milk'
+
+function chunk(id: string, similarity: number) {
+  return {
+    id,
+    knowledgeCorpusId: `kc-${id}`,
+    text: `chunk ${id}`,
+    sourceType: 'voicenote_transcript',
+    confidence: 0.9,
+    similarity,
+    primaryTags: [] as string[],
+    secondaryTags: [] as string[],
+  }
+}
+
+/** The knowledge chunks the generator was actually handed. */
+function knowledgeHandedToGenerator() {
+  const call = vi.mocked(generateMessage).mock.calls.at(-1)
+  return (call?.[0] as { knowledgeChunks?: { id: string }[] } | undefined)?.knowledgeChunks ?? []
+}
 const INBOUND_ID = '33333333-3333-4333-8333-333333333333'
 const GUEST_ID = '44444444-4444-4444-8444-444444444444'
 
@@ -179,7 +187,11 @@ beforeEach(() => {
   vi.mocked(classifyMessage).mockReset()
   vi.mocked(generateMessage).mockReset()
   vi.mocked(retrieveContext).mockReset()
-  vi.mocked(retrieveKnowledgeContext).mockReset()
+  vi.mocked(retrieveKnowledgeWithContextStage).mockReset()
+  // Default: retrieval succeeds with nothing. Every test that cares sets its
+  // own; without a default the stage resolves undefined and regen throws on
+  // .map, which reads as a wiring bug rather than a fixture one.
+  vi.mocked(retrieveKnowledgeWithContextStage).mockResolvedValue([])
   vi.mocked(verifyGrounding).mockReset()
   vi.mocked(verifyMechanicOffer).mockReset()
   vi.mocked(verifyProsePromise).mockReset()
@@ -278,7 +290,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
-        promptVersion: 'v1.69.0',
+        promptVersion: 'v1.70.0',
       },
     })
   })
@@ -302,7 +314,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
       critique: 'x',
     })
     expect(retrieveContext).not.toHaveBeenCalled()
-    expect(retrieveKnowledgeContext).not.toHaveBeenCalled()
+    expect(retrieveKnowledgeWithContextStage).not.toHaveBeenCalled()
     expect(generateMessage).not.toHaveBeenCalled()
   })
 })
@@ -355,10 +367,6 @@ describe('regenerateWithCritique — happy path', () => {
           similarity: 0.5,
         },
       ],
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValue({
-      ok: true,
-      data: [],
     })
     vi.mocked(generateMessage).mockResolvedValue({
       ok: true,
@@ -755,135 +763,15 @@ describe('regenerateWithCritique — happy path', () => {
   })
 })
 
-describe('regenerateWithCritique — primary-tag preference (TAC-242)', () => {
-  beforeEach(() => {
-    vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
-    )
-    vi.mocked(buildRuntimeContext).mockResolvedValue(
-      baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
-    )
-    vi.mocked(buildAiRuntime).mockReturnValue({
-      guestName: 'Test',
-      inboundMessage: 'do you have any free drinks?',
-      today: {
-        isoDate: '2026-05-08',
-        dayOfWeek: 'Friday',
-        venueLocalTime: '10:00',
-        venueTimezone: 'America/Los_Angeles',
-        calendar: [
-          { weekday: 'Mon', monthDay: 'Jan 5' },
-          { weekday: 'Tue', monthDay: 'Jan 6' },
-          { weekday: 'Wed', monthDay: 'Jan 7' },
-        ],
-      },
-      recentMessages: [],
-      mechanics: [],
-    })
-    vi.mocked(retrieveContext).mockResolvedValue({
-      ok: true,
-      data: [
-        {
-          id: 'c1',
-          voiceCorpusId: 'vc1',
-          text: 'venue speaks like this',
-          sourceType: 'sample_text',
-          confidence: 0.9,
-          similarity: 0.5,
-        },
-      ],
-    })
-    vi.mocked(generateMessage).mockResolvedValue({
-      ok: true,
-      data: {
-        body: 'no, sorry.',
-        voiceFidelity: 0.85,
-        reasoning: 'good',
-        unverifiedUrls: [],
-        requiresOperatorApproval: false,
-        approvalReason: '',
-    complaintIntent: 'none' as const,
-    knowledgeGap: false,
-        contextUpdate: {},
-        commitment: {},
-        arrivalCapture: {},
-        cancelsCommitmentId: '',
-        attempts: 1,
-        attemptScores: [0.85],
-        attemptHistory: [],
-        systemPrompt: '',
-        userPrompt: '',
-        promptVersion: 'v1.13.0',
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        dashViolationPersisted: false,
-        selfTalkViolationPersisted: false,
-        emojiDirectiveViolated: false,
-      },
-    })
-    vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
-  })
+// TAC-242's primary-tag-preference block lived here. TAC-547 deleted it: regen
+// no longer resolves a tag preference or calls the knowledge RPC at all — it
+// calls `retrieveKnowledgeWithContextStage`, which does both. Testing the
+// preference here would be testing the production stage through a second
+// mock, and the real coverage is stages.test.ts's
+// 'retrieveKnowledgeStage — tag-aware routing' and
+// 'lets EACH arm take its own tag-preference fallback'. What this file still
+// owns is that regen DELEGATES, asserted at the bottom of the file.
 
-  it('threads the mapped preference into retrieveKnowledgeContext for mechanic_request', async () => {
-    vi.mocked(classifyMessage).mockResolvedValue({
-      ok: true,
-      data: {
-        category: 'mechanic_request',
-        classifierConfidence: 0.9,
-        reasoning: 'r',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        promptVersion: 'v1.13.0',
-      },
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [],
-    })
-    // Fallback after zero matches:
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [],
-    })
-
-    await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-
-    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(2)
-    const firstArgs = vi.mocked(retrieveKnowledgeContext).mock.calls[0][0]
-    const secondArgs = vi.mocked(retrieveKnowledgeContext).mock.calls[1][0]
-    expect(firstArgs.primaryTagPreference).toEqual(['mechanic'])
-    expect(secondArgs.primaryTagPreference).toBeUndefined()
-  })
-
-  it('does NOT fall back when category is unmapped (cosine-only)', async () => {
-    vi.mocked(classifyMessage).mockResolvedValue({
-      ok: true,
-      data: {
-        category: 'reply',
-        classifierConfidence: 0.9,
-        reasoning: 'r',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        promptVersion: 'v1.13.0',
-      },
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({ ok: true, data: [] })
-
-    await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-
-    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(1)
-    const args = vi.mocked(retrieveKnowledgeContext).mock.calls[0][0]
-    expect(args.primaryTagPreference).toBeUndefined()
-  })
-})
 
 describe('regenerateWithCritique — corpus thinness', () => {
   it('fails closed when no strong matches above 0.3', async () => {
@@ -933,18 +821,24 @@ describe('regenerateWithCritique — corpus thinness', () => {
 })
 
 /**
- * TAC-366. The regen path is required to gate retrieval identically to
- * `retrieveKnowledgeStage`. It did not: `filterByRelevance` lived only in
- * stages.ts, so Voices surfaced up to four chunks where production surfaced
- * zero — drift running in the direction that HID the TAC-358 bug from anyone
- * reproducing it in the playground.
+ * TAC-366, rewritten by TAC-547.
  *
- * Two divergences, and the second is the one a careless fix leaves behind:
- * the missing filter, and a fallback that triggered on zero RETURNED rows
- * rather than zero RELEVANT ones (TAC-350 changed that in stages.ts and this
- * path kept the old condition).
+ * TAC-366's subject was that regen reimplemented `retrieveKnowledgeStage`'s
+ * body and had drifted from it: the relevance floor lived only in stages.ts,
+ * so the playground showed up to four chunks where production showed zero —
+ * in the direction that HID the TAC-358 bug from anyone reproducing it here.
+ * It fixed that by sharing `filterByRelevance`.
+ *
+ * TAC-547 removed the duplication outright: regen now calls the production
+ * stage, so the floor, the tag-preference fallback and the contextual arm are
+ * production's by construction rather than by a mirrored helper. These tests
+ * therefore assert the DELEGATION, which is the stronger guarantee — the
+ * floor's own behaviour is stages.test.ts's job and is no longer restatable
+ * here. The source-level half is kept and widened: it is still what stops
+ * someone reintroducing a local copy, which is the whole point of the
+ * original ticket.
  */
-describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-366)', () => {
+describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts (TAC-366, TAC-547)', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
@@ -952,22 +846,16 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
     vi.mocked(buildRuntimeContext).mockResolvedValue(
       baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
     )
-    vi.mocked(buildAiRuntime).mockReturnValue({
-      guestName: 'Test',
-      inboundMessage: 'whats underrated here',
-      today: {
-        isoDate: '2026-05-08',
-        dayOfWeek: 'Friday',
-        venueLocalTime: '10:00',
-        venueTimezone: 'America/Los_Angeles',
-        calendar: [
-          { weekday: 'Mon', monthDay: 'Jan 5' },
-          { weekday: 'Tue', monthDay: 'Jan 6' },
-          { weekday: 'Wed', monthDay: 'Jan 7' },
-        ],
+    vi.mocked(classifyMessage).mockResolvedValue({
+      ok: true,
+      data: {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        promptVersion: 'v1.8.0',
       },
-      recentMessages: [],
-      mechanics: [],
     })
     vi.mocked(retrieveContext).mockResolvedValue({
       ok: true,
@@ -975,198 +863,102 @@ describe('regenerateWithCritique — relevance floor parity with stages.ts (TAC-
         {
           id: 'c1',
           voiceCorpusId: 'vc1',
-          text: 'venue speaks like this',
+          text: 't',
           sourceType: 'sample_text',
           confidence: 0.9,
-          similarity: 0.5,
+          similarity: 0.8,
         },
       ],
     })
+    vi.mocked(buildAiRuntime).mockReturnValue({} as ReturnType<typeof buildAiRuntime>)
     vi.mocked(generateMessage).mockResolvedValue({
       ok: true,
       data: {
-        body: 'the blossom tonic.',
-        voiceFidelity: 0.85,
-        reasoning: 'good',
-        unverifiedUrls: [],
+        body: 'b',
+        voiceFidelity: 0.9,
+        reasoning: 'r',
+        promptVersion: 'v1.8.0',
+        attemptScores: [0.9],
+        knowledgeGap: false,
         requiresOperatorApproval: false,
         approvalReason: '',
-        complaintIntent: 'none' as const,
-        knowledgeGap: false,
         contextUpdate: {},
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
-        attempts: 1,
-        attemptScores: [0.85],
-        attemptHistory: [],
-        systemPrompt: '',
-        userPrompt: '',
-        promptVersion: 'v1.13.0',
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        userPrompt: 'p',
+        systemPrompt: 's',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
         emojiDirectiveViolated: false,
+        unverifiedUrls: [],
       },
-    })
+    } as unknown as Awaited<ReturnType<typeof generateMessage>>)
     vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
-    vi.mocked(classifyMessage).mockResolvedValue({
-      ok: true,
-      data: {
-        category: 'recommendation_request',
-        classifierConfidence: 0.9,
-        reasoning: 'r',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        promptVersion: 'v1.13.0',
-      },
-    })
   })
 
-  function chunk(id: string, similarity: number) {
-    return {
-      id,
-      knowledgeCorpusId: `kc-${id}`,
-      text: `chunk ${id}`,
-      sourceType: 'manual_entry',
-      confidence: 0.85,
-      similarity,
-      primaryTags: ['recommendations'],
-      secondaryTags: [],
-    }
-  }
-
-  /** The chunks actually handed to the generator on the last call. */
-  function knowledgeHandedToGenerator(): { id: string }[] {
-    const call = vi.mocked(generateMessage).mock.calls.at(-1)
-    return (call?.[0].knowledgeChunks ?? []) as { id: string }[]
-  }
-
-  it('drops sub-floor chunks from the primary result', async () => {
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        chunk('keep', MOCK_RELEVANCE_FLOOR + 0.32),
-        chunk('drop', MOCK_RELEVANCE_FLOOR - 0.003),
-        chunk('edge', MOCK_RELEVANCE_FLOOR),
-      ],
+  it('calls the shared stage with the category and the original inbound body', async () => {
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
     })
 
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    // The boundary case belongs to the SURVIVORS — the production filter is
-    // `>=`. The near-miss is three thousandths under, the shape of the live
-    // TAC-358 case (0.4971 against the then-floor of 0.5).
-    expect(knowledgeHandedToGenerator().map((c) => c.id)).toEqual(['keep', 'edge'])
+    expect(retrieveKnowledgeWithContextStage).toHaveBeenCalledTimes(1)
+    const [, category, query] = vi.mocked(retrieveKnowledgeWithContextStage).mock.calls[0]
+    expect(category).toBe('new_question')
+    expect(query).toBe(INBOUND_BODY)
   })
 
-  it('falls back when every primary row is BELOW the floor, not only when zero rows return', async () => {
-    // The divergence a naive fix leaves behind. Pre-TAC-366 this path keyed
-    // the fallback off `rows.length === 0`, so three sub-floor rows counted
-    // as a full result and the untagged retry never fired.
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        chunk('weak1', MOCK_RELEVANCE_FLOOR - 0.02),
-        chunk('weak2', MOCK_RELEVANCE_FLOOR - 0.09),
-      ],
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [chunk('rescued', MOCK_RELEVANCE_FLOOR + 0.41)],
+  it('hands the stage result to the generator unchanged', async () => {
+    vi.mocked(retrieveKnowledgeWithContextStage).mockResolvedValueOnce([
+      chunk('a', 0.9),
+      chunk('b', 0.8),
+    ])
+
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
     })
 
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(retrieveKnowledgeContext).mock.calls[1][0].primaryTagPreference).toBeUndefined()
-    expect(knowledgeHandedToGenerator().map((c) => c.id)).toEqual(['rescued'])
-  })
-
-  it('filters the fallback result too', async () => {
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({ ok: true, data: [] })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [chunk('good', MOCK_RELEVANCE_FLOOR + 0.36), chunk('weak', MOCK_RELEVANCE_FLOOR - 0.03)],
-    })
-
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    expect(knowledgeHandedToGenerator().map((c) => c.id)).toEqual(['good'])
-  })
-
-  it('hands the generator nothing when the fallback is also all sub-floor', async () => {
-    // Both calls return only sub-floor rows, so the generator gets nothing —
-    // the playground must agree with production about emptiness, or it
-    // disagrees with the thing it exists to reproduce.
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [chunk('a', MOCK_RELEVANCE_FLOOR - 0.04)],
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [chunk('b', MOCK_RELEVANCE_FLOOR - 0.01)],
-    })
-
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    expect(knowledgeHandedToGenerator()).toEqual([])
-  })
-
-  it('hands the generator nothing when the FALLBACK call itself fails', async () => {
-    // Parity with stages.ts, which explicitly `return []` here. On this path
-    // it holds only implicitly — `rows` is already empty because that is the
-    // branch's entry condition — so a future "salvage the primary rows
-    // rather than send nothing" edit in the else block would hand the
-    // generator UNFILTERED chunks and every other test would still pass.
-    // Mutation-verified: that edit fails this test and only this test.
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        chunk('weak1', MOCK_RELEVANCE_FLOOR - 0.02),
-        chunk('weak2', MOCK_RELEVANCE_FLOOR - 0.09),
-      ],
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: false,
-      error: 'voyage timeout',
-    })
-
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    expect(knowledgeHandedToGenerator()).toEqual([])
-  })
-
-  it('imports the shared filter from stages.ts rather than reimplementing it', async () => {
-    // The behavioural tests above pass equally well against a LOCAL
-    // `chunks.filter(c => c.similarity >= 0.5)` — verified in review. That
-    // local copy is precisely the drift this ticket removes, so the guarantee
-    // has to be asserted at the source level. Same technique as
-    // handle-operator-decline.test.ts's persist-not-send import check.
-    const src = await readFile(
-      new URL('./regenerate-with-critique.ts', import.meta.url),
-      'utf8',
-    )
-    expect(src).toMatch(/import\s*{[^}]*\bfilterByRelevance\b[^}]*}\s*from\s*'@\/lib\/agent\/stages'/)
-    // No similarity compared against a NUMERIC LITERAL. Catches someone
-    // "simplifying" the import away into an inline `>= 0.5`, while still
-    // permitting the legitimate `m.similarity >= STRONG_MATCH_SIMILARITY`
-    // voice-corpus thinness check that lives in this same function — the
-    // first draft of this assertion banned both and failed on the good one.
-    const withoutComments = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
-    expect(withoutComments).not.toMatch(/similarity\s*>=\s*\d*\.?\d/)
-  })
-
-  it('leaves an all-above-floor result untouched', async () => {
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValueOnce({
-      ok: true,
-      data: [chunk('a', MOCK_RELEVANCE_FLOOR + 0.5), chunk('b', MOCK_RELEVANCE_FLOOR + 0.4)],
-    })
-
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-
-    expect(retrieveKnowledgeContext).toHaveBeenCalledTimes(1)
     expect(knowledgeHandedToGenerator().map((c) => c.id)).toEqual(['a', 'b'])
+  })
+
+  it('degrades to no knowledge when the stage returns nothing, without failing the regen', async () => {
+    vi.mocked(retrieveKnowledgeWithContextStage).mockResolvedValueOnce([])
+
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+
+    expect(r.ok).toBe(true)
+    expect(knowledgeHandedToGenerator()).toEqual([])
+  })
+
+  it('does NOT reimplement retrieval: no direct RPC call, no local floor', async () => {
+    // The behavioural tests above pass equally well against a local copy of
+    // the stage's body — that local copy is precisely the drift TAC-366
+    // removed and TAC-547 deleted, so the guarantee is asserted at the
+    // source. Same technique as handle-operator-decline.test.ts's
+    // persist-not-send import check.
+    const src = await readFile(new URL('./regenerate-with-critique.ts', import.meta.url), 'utf8')
+    const withoutComments = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+
+    expect(withoutComments).toMatch(
+      /import\s*{[^}]*\bretrieveKnowledgeWithContextStage\b[^}]*}\s*from\s*'@\/lib\/agent\/stages'/,
+    )
+    // No direct knowledge RPC, which is how a reimplementation would start.
+    expect(withoutComments).not.toMatch(/\bretrieveKnowledgeContext\s*\(/)
+    // No tag preference resolved locally.
+    expect(withoutComments).not.toMatch(/\bgetPrimaryTagPreference\s*\(/)
+    // No similarity compared against a NUMERIC LITERAL. Catches someone
+    // inlining the floor, while still permitting the legitimate
+    // `m.similarity >= STRONG_MATCH_SIMILARITY` voice-corpus thinness check
+    // that lives in this same function — the first draft of this assertion
+    // banned both and failed on the good one.
+    expect(withoutComments).not.toMatch(/similarity\s*>=\s*\d*\.?\d/)
   })
 })

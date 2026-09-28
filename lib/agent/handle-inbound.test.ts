@@ -27,7 +27,9 @@ vi.mock('@/lib/rag', () => ({
 const buildRuntimeContextMock = vi.fn()
 const classifyStageMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
-const retrieveKnowledgeStageMock = vi.fn()
+// TAC-547: handle-inbound calls the two-arm stage. Mocked at the same seam
+// the single-arm one was, because it still does real DB/Voyage work.
+const retrieveKnowledgeWithContextStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
@@ -123,7 +125,8 @@ vi.mock('./stages', async () => {
     computeFirstTouchAfterQrScan: actual.computeFirstTouchAfterQrScan,
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
+    retrieveKnowledgeWithContextStage: (...a: unknown[]) =>
+      retrieveKnowledgeWithContextStageMock(...a),
     // TAC-367: TRUE, matching production. The real predicate's first line is
     // `if (ctx.currentMessage !== null) return true`, and every test in this
     // file exercises the inbound path, where currentMessage is non-null by
@@ -385,6 +388,11 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
+    // TAC-547: real value, not a placeholder. Left at the followup_rules
+    // default so the contextual arm is reachable for any test that supplies
+    // history; the shared fixture keeps an EMPTY history because several
+    // tests here depend on it for firstTouchAfterQrScan.
+    conversationWindowMs: 48 * 60 * 60 * 1000,
     recognition: { score: 0.5, state: 'regular', signals: {}, computedAt: new Date() },
     mechanics: [],
     recentVisits: [],
@@ -439,7 +447,7 @@ beforeEach(() => {
   retrieveCorpusStageMock.mockResolvedValue([])
   // Non-empty: with [] an assertion of [] could not tell "retrieval was
   // skipped" from "retrieval ran and matched nothing".
-  retrieveKnowledgeStageMock.mockResolvedValue([
+  retrieveKnowledgeWithContextStageMock.mockResolvedValue([
     {
       id: 'k1',
       knowledgeCorpusId: 'kc1',
@@ -912,7 +920,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.69.0',
+    promptVersion: 'v1.70.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1567,9 +1575,53 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
 
     await handleInbound(INBOUND_ID)
 
-    expect(retrieveKnowledgeStageMock).toHaveBeenCalledTimes(1)
+    // TAC-547: the property is unchanged (inbound retrieves); the stage it
+    // goes through is the two-arm one now.
+    expect(retrieveKnowledgeWithContextStageMock).toHaveBeenCalledTimes(1)
     const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown[] }
     expect(ctx.knowledgeCorpus).toHaveLength(1)
+  })
+
+  // TAC-547. Found by a code-review mutant that survived all 6973 tests:
+  // handing the stage `{ ...ctx, recentMessages: [] }` makes the contextual
+  // arm dead in production with nothing red. `toHaveBeenCalledTimes` says the
+  // stage RAN; only this says it was given what it needs to run two arms.
+  //
+  // The context is SNAPSHOT INSIDE the mock, never read off
+  // `mock.calls` afterwards: handleInbound mutates ctx in place, so a
+  // recorded argument is a live reference and would describe the end state
+  // (the TAC-389 trap).
+  it('hands the stage a context carrying the conversation, not an emptied one', async () => {
+    let handed: { recentMessages: unknown[]; conversationWindowMs: number } | null = null
+    retrieveKnowledgeWithContextStageMock.mockImplementationOnce(async (c: unknown) => {
+      const ctx = c as { recentMessages: unknown[]; conversationWindowMs: number }
+      handed = {
+        recentMessages: [...ctx.recentMessages],
+        conversationWindowMs: ctx.conversationWindowMs,
+      }
+      return []
+    })
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        recentMessages: [
+          {
+            direction: 'inbound',
+            body: 'does the bhadra taste good',
+            delivery: 'delivered',
+            createdAt: new Date(Date.now() - 6 * 60_000),
+          },
+        ],
+      }),
+    )
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-w', providerMessageId: 'p' })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(handed).not.toBeNull()
+    expect(handed!.recentMessages.length).toBeGreaterThan(0)
+    expect(handed!.conversationWindowMs).toBeGreaterThan(0)
   })
 })
 

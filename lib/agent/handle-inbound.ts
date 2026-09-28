@@ -65,7 +65,7 @@ import {
   type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
   retrieveCorpusStage,
-  retrieveKnowledgeStage,
+  retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
   verifyMechanicOfferStage,
@@ -73,6 +73,7 @@ import {
   verifyClosedVenueArrivalStage,
   verifyProsePromiseStage,
 } from './stages'
+import { buildContextQuery } from './retrieval-context'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
@@ -1379,10 +1380,20 @@ async function runInboundTurn(
     // shouldRetrieveKnowledge; degrades gracefully on Voyage / DB error so
     // the run can proceed without grounding.
     if (shouldRetrieveKnowledge(ctx)) {
+      const contextQueryLength = buildContextQuery(ctx).length
       const knowledgeSpan = trace.span('retrieve_knowledge', {
         queryLength: ctx.currentMessage?.body.length ?? 0,
+        // TAC-547: 2 when a contextual arm ran, 1 when there was no usable
+        // prior turn. A venue sitting at 1 on every turn is the signal that
+        // the context window is filtering everything out.
+        armCount: contextQueryLength > 0 ? 2 : 1,
+        contextQueryLength,
       })
-      ctx.knowledgeCorpus = await retrieveKnowledgeStage(
+      // TAC-547: two arms — the guest's message alone, and a contextual query
+      // carrying the last turns that reached them — merged into one slate. A
+      // turn with no usable prior runs ONE arm and is byte-identical to what
+      // this call did before.
+      ctx.knowledgeCorpus = await retrieveKnowledgeWithContextStage(
         ctx,
         ctx.classification?.category ?? null,
         // TAC-367: the guest's own message. Explicit now — this path always

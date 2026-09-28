@@ -29,7 +29,9 @@ vi.mock('@/lib/rag', () => ({
 const buildRuntimeContextMock = vi.fn()
 const classifyStageMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
-const retrieveKnowledgeStageMock = vi.fn()
+// TAC-547: handle-inbound calls the two-arm stage. Mocked at the same seam
+// the single-arm one was, because it still does real DB/Voyage work.
+const retrieveKnowledgeWithContextStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
@@ -119,7 +121,8 @@ vi.mock('./stages', async () => {
     computeFirstTouchAfterQrScan: actual.computeFirstTouchAfterQrScan,
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
+    retrieveKnowledgeWithContextStage: (...a: unknown[]) =>
+      retrieveKnowledgeWithContextStageMock(...a),
     // TAC-367: TRUE, matching production. The real predicate's first line is
     // `if (ctx.currentMessage !== null) return true`, and every test in this
     // file exercises the inbound path, where currentMessage is non-null by
@@ -403,7 +406,7 @@ beforeEach(() => {
   retrieveCorpusStageMock.mockResolvedValue([])
   // Non-empty: with [] an assertion of [] could not tell "retrieval was
   // skipped" from "retrieval ran and matched nothing".
-  retrieveKnowledgeStageMock.mockResolvedValue([
+  retrieveKnowledgeWithContextStageMock.mockResolvedValue([
     {
       id: 'k1',
       knowledgeCorpusId: 'kc1',
@@ -451,7 +454,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.69.0',
+    promptVersion: 'v1.70.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
