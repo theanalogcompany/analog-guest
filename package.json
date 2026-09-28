@@ -21,6 +21,7 @@
     "load-venue-knowledge": "tsx --env-file=.env.local scripts/load-venue-knowledge.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test-map": "tsx scripts/lib/test-map.ts",
     "prepare": "husky",
     "measure-instagram-copy": "tsx --env-file=.env.local scripts/measurement/instagram-channel-copy.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
