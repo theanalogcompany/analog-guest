@@ -1,0 +1,71 @@
+---
+paths:
+  - "lib/ai/prompts/**"
+  - "lib/ai/generate-message.ts"
+  - "lib/ai/classify-message.ts"
+  - "lib/agent/**"
+  - "lib/voices/**"
+  - "**/*.test.ts"
+---
+
+# Bumping PROMPT_VERSION is a repo-wide sweep
+
+`PROMPT_VERSION` lives in `lib/ai/prompts/system-template.ts`. Changing the composed prompt
+means bumping it, and the bump touches files in several directories.
+
+## Grep. Never read a list, including this one.
+
+```
+grep -rn "v1\.<old>\.<new>" --include='*.ts' .
+```
+
+**A carried count is worse than no count - no count makes you grep, a stale one tells you
+that you already did.** The site list has grown on essentially every bump, because every new
+orchestrator test adds a `promptVersion` fixture. Recorded history: 4 files, then 7, then 8,
+then 9, then 12 sites in 9 files, then 14 in 13.
+
+**Re-run the grep after EVERY rebase**, and do not carry the earlier result forward. One
+sweep found 14 sites and its re-run found 12, and the two sets were not the same. Another
+re-run **grew** by two files that arrived with the commits the rebase was picking up - one of
+them from a ticket that had merged into the very head commit being rebased onto. That is the
+expensive direction: a carried list silently **omits** the new sites, and those are fixture
+values fed to mocks, so nothing fails.
+
+## Most hits are fixtures that fail silently
+
+A `promptVersion` in a mocked result is never compared against the live constant, so a stale
+one ships green. Update every live hit, not only the ones a failing test forces.
+
+## Two kinds of hit you must NOT change
+
+1. **`system-template.ts`'s own changelog entry** for the old version. That is history.
+2. **Comments elsewhere citing what a past version decided** (`serializers.ts`,
+   `serializers.test.ts` have carried these). Also history.
+
+A blind `sed` breaks all of them.
+
+## The number can be taken out from under you
+
+Three tickets bumping this one constant in a night is not a conflict to resolve by taking the
+highest - they are different changes, so every changelog entry stays and your branch takes the
+**next free** number. One branch renumbered twice on the way: built at v1.60.0, which another
+ticket took; renumbered to v1.61.0, which a third took; landed at v1.62.0. Another tried four
+numbers.
+
+**Re-read the constant on `main` at rebase time** rather than trusting a number that was free
+when the branch was cut.
+
+## Sibling versions are independent and must not be bumped along
+
+The verifiers and extractors each carry their own version
+(`VERIFY_GROUNDING_PROMPT_VERSION`, `VERIFY_PROSE_PROMISE_PROMPT_VERSION`,
+`EXTRACT_REPORTED_ORDER_PROMPT_VERSION`, and the rest). They never touch the
+classify/generate contract, so bumping `PROMPT_VERSION` for a change to one of them is a
+false signal - and vice versa.
+
+## Bump means the harness baseline resets
+
+`run-test-scenarios` grades against the composed prompt, so a diff across a bump is a
+**baseline reset**, not a regression. Say so when reporting one. A change that alters what a
+scenario can raise, or that makes the model hold more drafts, moves routing grades for
+reasons unrelated to routing.
