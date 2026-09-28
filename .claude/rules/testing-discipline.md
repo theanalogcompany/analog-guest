@@ -139,6 +139,12 @@ already answered wrongly in the same keystroke that wrote the fixture.
   timeout as the **signal** that a `sleep` was reintroduced.
 - **Read `Test Files N failed` and the per-file count, not `Tests N passed`.** A new import
   can make one file collect zero tests while the run summary reads green.
+- **Reconcile a total against its parts before quoting it.** The default reporter's summary
+  line and its own per-file data can disagree: on 2026-09-28 the summary read 6,950 while
+  `--reporter=json` summed to 6,944 across the same run. Diff per file
+  (`--reporter=json --outputFile`) when a delta matters - that is what distinguishes "my
+  change added N" from "something else moved too", and it is the only form that told the
+  truth here.
 - `.worktrees/**` and `.claude/**` are excluded in config. Note `exclude` **replaces**
   vitest's defaults, so `node_modules`/`dist` are restated there and must stay.
 - **Measure a before/after in a throwaway worktree, and remove it before measuring the

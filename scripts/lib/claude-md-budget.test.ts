@@ -38,8 +38,14 @@ const RULE_MAX_LINES = 400
 /**
  * Splitting must not become a way to hide growth: a hundred small nested files
  * is the same total cost for anyone whose task spans them.
+ *
+ * Landed at 120,903 bytes across 15 files on 2026-09-28, against 1,205,827 in
+ * a single eagerly-loaded file before. The cap is set with room for roughly one
+ * more subsystem file, so the next substantial addition is a conversation
+ * rather than a reflex. Raising it is fine; raising it without saying what grew
+ * is how the old file got to 1.34 MB.
  */
-const COMBINED_MAX_BYTES = 120_000
+const COMBINED_MAX_BYTES = 140_000
 
 /** One 362 KB line is how 135 KB of duplicated text stayed invisible. */
 const MAX_LINE_CHARS = 2_000
@@ -48,15 +54,29 @@ const MAX_LINE_CHARS = 2_000
  * Discover tracked instruction files through git, so an untracked scratch copy
  * or a worktree under .worktrees/ cannot affect the result.
  */
-function tracked(pattern: string): string[] {
-  const out = execFileSync('git', ['ls-files', '-z', pattern], { cwd: ROOT, encoding: 'utf8' })
+function tracked(pattern?: string): string[] {
+  const args = pattern ? ['ls-files', '-z', pattern] : ['ls-files', '-z']
+  const out = execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' })
   return out.split('\0').filter(Boolean)
 }
 
 const rootFile = 'CLAUDE.md'
-const nestedFiles = tracked('*/**/CLAUDE.md').filter((p) => p !== rootFile)
-const ruleFiles = tracked('.claude/rules/*.md')
-const decisionFiles = tracked('docs/decisions/*.md')
+
+// Filter every tracked path by BASENAME rather than trusting a git pathspec.
+//
+// The obvious star-slash-doublestar-slash-CLAUDE.md pathspec silently missed
+// both `scripts/CLAUDE.md` and `.github/CLAUDE.md`: one path segment is not
+// enough for that pattern, and a leading dot is not matched either. Two files
+// escaped the budget entirely and the orphan check below could not see them,
+// while every assertion in this file still passed. A basename filter has no
+// pathspec subtleties to get wrong.
+//
+// (Spelled out in words above because the pattern itself contains the
+// characters that end a block comment.)
+const allClaudeMd = tracked().filter((p) => p === 'CLAUDE.md' || p.endsWith('/CLAUDE.md'))
+const nestedFiles = allClaudeMd.filter((p) => p !== rootFile)
+const ruleFiles = tracked().filter((p) => /^\.claude\/rules\/.+\.md$/.test(p))
+const decisionFiles = tracked().filter((p) => /^docs\/decisions\/.+\.md$/.test(p))
 
 interface Sized {
   path: string

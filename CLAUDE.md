@@ -42,6 +42,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
 | `app/admin/CLAUDE.md` | route paths, loaders, write routes, brand tokens |
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
+| `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
 
 `.claude/rules/` holds `testing-discipline.md`, `prompt-versioning.md` and
 `errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
@@ -274,7 +275,7 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 6922 tests across 300 files (2026-09-27).** Measure it, never estimate:
+**Recorded baseline: 6944 tests across 301 files (2026-09-28).** Measure it, never estimate:
 
 ```
 git worktree add .worktrees/baseline origin/main
