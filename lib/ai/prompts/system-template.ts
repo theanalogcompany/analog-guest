@@ -1566,7 +1566,7 @@ import {
 // "Never use it in two replies in a row" is the half a model can actually
 // check, and it is the observed failure. "Sparingly" alone is a frequency word
 // with no referent inside a single generation, which is the TAC-362 lesson.
-// TAC-548: a new R39. Keep the honest take, add the specifics. The agent
+// v1.70.0 (TAC-548): a new R39. Keep the honest take, add the specifics. The
 // answered a NEARBY question, or answered correctly but thinly, with the
 // specifics sitting unused in the knowledge entry it had already retrieved.
 // Device cases at Le Mil's, 2026-09-28: "how do i use your beans" got where to
@@ -1597,14 +1597,32 @@ import {
 // asks for nothing the runtime context does not already hold and cannot pull
 // against R8's never-invent prohibition.
 //
-// PROMPT_VERSION IS DELIBERATELY NOT BUMPED YET. Jaipal's instruction on
-// 2026-09-28 was to hold the bump until he reads the side-by-side and says
-// ship; the ticket's own notes say to bump at commit, and the later
-// instruction governs. Whoever ships this adds the bump and re-runs the
-// grep sweep (CLAUDE.md, "Bumping PROMPT_VERSION requires..."), re-reading
-// the constant on origin/main at that moment rather than trusting a number
-// that was free when the branch was cut.
-export const PROMPT_VERSION = 'v1.69.0'
+// SHIPPED ON THE REPLIES, NOT ON THE RATES. The ticket is explicit that this
+// is a taste call: Jaipal read a verbatim side-by-side of all twenty questions
+// and said ship. The measurement informed that and did not make it.
+//
+// What it found, at 3 reps per cell against Le Mil's live config, control
+// being this same prompt with R39 sliced out: answers-the-question-type 87% ->
+// 91%, uses-the-specifics 94% -> 96%, keeps-a-personal-take 72% -> 83%. Per
+// question the change is better on 2 and worse on 0 for question type, and
+// better on 6 and worse on 2 for the take. Mean reply length moved 181 -> 180
+// characters, so it buys the facts without padding.
+//
+// THE FIRST RUN SAID THE OPPOSITE AND WAS ONE DRAW PER CELL. It reported the
+// take rate FALLING 89% -> 78%, which would have failed the ticket's own bar.
+// Three of the four replies behind that drop differed from their control by a
+// single adverb ("works great"/"works", "tastes a lot like"/"tastes like").
+// That is the TAC-520 lesson on this seam: generation runs at temperature 0.7
+// and one draw is a draw, not a property. Re-run with repeats, the direction
+// reversed. Do not re-measure this rule at n=1.
+//
+// TWO QUESTIONS MISSED THE TYPE BAR AND NEITHER IS THIS RULE, recorded so the
+// next reader does not re-derive it: "is the chikka any good" was 0/3 in BOTH
+// arms because that entry reached no retrieved chunk on any rep, and "how do i
+// brew the bhadra" answered pour over in both arms. Both are retrieval, which
+// is TAC-547's subject, not generation. A rule cannot use a specific that is
+// not in the context.
+export const PROMPT_VERSION = 'v1.70.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

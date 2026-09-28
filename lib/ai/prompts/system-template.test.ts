@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.69.0 (use the guest name sparingly)', () => {
-    expect(PROMPT_VERSION).toBe('v1.69.0')
+  it('is v1.70.0 (honest take first, then the specifics)', () => {
+    expect(PROMPT_VERSION).toBe('v1.70.0')
   })
 })
 
