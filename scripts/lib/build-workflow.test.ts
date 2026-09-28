@@ -672,7 +672,7 @@ describe('work-ticket.md', () => {
 
   it('finds a branch an earlier run pushed', () => {
     const exists = line('- `branchExists` —')
-    expect(exists).toContain("`git branch --list -a -i '*jaipal/tac-xxx-*'`")
+    expect(exists).toContain("`git branch --list -a -i '*/tac-xxx-*'`")
     // The old glob was case-sensitive and local-only, so it missed the
     // lowercase branches CI sessions create and every branch on GitHub.
     expect(doc).not.toContain('jaipal/TAC-XXX')

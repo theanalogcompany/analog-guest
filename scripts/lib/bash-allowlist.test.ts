@@ -52,6 +52,10 @@ const PLACEHOLDERS: Record<string, string> = {
   '<path>': 'lib/utils.ts',
   '<ref>': 'jaipal/tac-325-order-capture',
   '<repo>': 'theanalogcompany/analog-guest',
+  // Deliberately NOT `jaipal`: the owner segment of a ticket branch is any
+  // username (scripts/lib/ticket-branch.mjs), and filling this in with the old
+  // literal would let a rule that only admits `jaipal/` keep passing.
+  '<username>': 'octo-cat',
   '<x>': 'x',
 }
 const FENCE = /```[a-z]*\n([\s\S]*?)```/g
@@ -321,7 +325,7 @@ describe('the build allowlist', () => {
   })
 
   it('lists the same known gaps as CLAUDE.md', () => {
-    const entry = between(read('CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
+    const entry = between(read('.github/CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
     expect(commandsIn(between(entry, 'These all pass:', 'Each discards')).sort()).toEqual([...KNOWN_GAPS].sort())
   })
 
@@ -436,8 +440,8 @@ describe('what the prompts teach, the allowlist permits', () => {
     expect(refusedIn(commands)).toEqual([])
   })
 
-  it('CLAUDE.md\'s test baseline', () => {
-    const commands = commandsIn(between(read('CLAUDE.md'), 'To get a trustworthy before/after on a branch', 'THE-164 covers'))
+  it('.github/CLAUDE.md\'s test baseline', () => {
+    const commands = commandsIn(between(read('.github/CLAUDE.md'), 'To get a trustworthy before/after on a branch', 'THE-164 covers'))
     expect(commands.slice(0, 3)).toEqual([
       'git worktree add .worktrees/baseline origin/main',
       'npx vitest run --root .worktrees/baseline',
@@ -445,19 +449,19 @@ describe('what the prompts teach, the allowlist permits', () => {
     ])
     // Named once, to say it is what the baseline used to use.
     expect(refusedIn(commands)).toEqual(['git stash'])
-    expect(read('CLAUDE.md')).toContain('this used to be `git stash`, which CI refuses')
+    expect(read('.github/CLAUDE.md')).toContain('this used to be `git stash`, which CI refuses')
   })
 
-  it('CLAUDE.md\'s push-actor check', () => {
-    const commands = commandsIn(between(read('CLAUDE.md'), "- **A build session's `git push` used the job's own token", '\n- '))
+  it('.github/CLAUDE.md\'s push-actor check', () => {
+    const commands = commandsIn(between(read('.github/CLAUDE.md'), "- **A build session's `git push` used the job's own token", '\n- '))
     expect(commands.filter((command) => command.startsWith('gh api'))).toHaveLength(1)
     expect(refusedIn(commands)).toEqual([])
   })
 })
 
-describe('CLAUDE.md\'s list of what stays refused', () => {
+describe('.github/CLAUDE.md\'s list of what stays refused', () => {
   it('names only refused commands', () => {
-    const entry = between(read('CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
+    const entry = between(read('.github/CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
     const commands = commandsIn(between(entry, 'What stays refused on purpose', 'Facts about a side folder'))
     expect(commands).toContain('git stash')
     expect(commands).toContain('gh pr merge 221')

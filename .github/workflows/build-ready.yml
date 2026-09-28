@@ -31,7 +31,7 @@ name: Build ready tickets
 #
 # Blocked on Jaipal is a label, not a status, and the claim check above never
 # reads status. Status is a separate, derived signal this step also writes,
-# every run (TAC-466): a branch `jaipal/tac-xxx-...` on GitHub moves a ticket
+# every run (TAC-466): a branch `<username>/tac-xxx-...` on GitHub moves a ticket
 # to In Progress, a merged PR moves it to Ready For QA. Forward-only, never
 # invented outside those two targets, and run over every Ready/In Progress
 # candidate this repo owns, not just what the claim check selected this run
@@ -624,7 +624,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$REPORTER_DIR/lib"
           cp scripts/run-report.mjs "$REPORTER_DIR/"
-          cp scripts/lib/run-report.mjs scripts/lib/linear-cli.mjs scripts/lib/comment-provenance.mjs "$REPORTER_DIR/lib/"
+          cp scripts/lib/run-report.mjs scripts/lib/linear-cli.mjs scripts/lib/comment-provenance.mjs scripts/lib/ticket-branch.mjs "$REPORTER_DIR/lib/"
 
       - name: Work
         id: work

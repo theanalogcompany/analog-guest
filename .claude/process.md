@@ -261,7 +261,8 @@ decides whether another session has one from what that session left behind:
 - **A `[POLLING-STATE]`** edited in the last 3 hours.
 - **A commit on the ticket's branch on GitHub** in the last 3 hours, by
   anyone but the build session itself. Only a branch named
-  `jaipal/tac-xxx-...` counts.
+  `<username>/tac-xxx-...` counts: any single-segment owner prefix, and no
+  branch without one.
 - **An open PR from the ticket's branch.** For a start only: the build is
   finished and waiting for Jaipal to merge it. A ticket reopened while its
   old PR is still open is not started until that PR is merged or closed.
@@ -288,7 +289,7 @@ workflow's concurrency group runs one at a time.
 **What nothing protects.** A session that has neither posted to the ticket
 nor pushed to its branch is invisible, so a local session is unprotected
 until its `[CLAIM]` lands, and one that never posts a claim is unprotected
-until it first pushes to a `jaipal/tac-xxx-...` branch. A session whose
+until it first pushes to a `<username>/tac-xxx-...` branch. A session whose
 claim is released or more than 3 hours old is unprotected on a resume unless
 it has pushed since the ruling. A build dispatched with a named ticket skips
 the selection, and with it this check. A local session and a build run that

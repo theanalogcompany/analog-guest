@@ -39,13 +39,14 @@
  *
  * What this cannot see: a local session that has written nothing to Linear
  * and pushed nothing to GitHub, or pushed only to a branch not named
- * jaipal/<ticket>-.... Nothing protects that window, and nothing here
+ * <username>/<ticket>-.... Nothing protects that window, and nothing here
  * pretends to.
  *
  * No I/O at module load, and none outside run's injected dependencies.
  */
 
 import { commentMarker, isBotComment, unescapeBrackets } from './comment-provenance.mjs';
+import { TICKET_BRANCH_OWNER } from './ticket-branch.mjs';
 
 export const EXIT = { OK: 0, FAILED: 1, USAGE: 2 };
 
@@ -142,12 +143,13 @@ export function parseRefs(text) {
   return refs;
 }
 
+
 /**
- * Whether a branch name is the ticket's: `jaipal/<ticket>-...`, in any case.
+ * Whether a branch name is the ticket's: `<username>/<ticket>-...`, in any case.
  * The same rule as work-ticket.md's branchExists and run-report.mjs.
  */
 export function isTicketBranch(identifier, name) {
-  return new RegExp(`^jaipal/${escapeRegExp(identifier)}-.+$`, 'i').test(name);
+  return new RegExp(`^${TICKET_BRANCH_OWNER}/${escapeRegExp(identifier)}-.+$`, 'i').test(name);
 }
 
 /**

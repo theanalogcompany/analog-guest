@@ -10,7 +10,7 @@
  * automatically — never happened for this repo. This module is what makes
  * it true instead:
  *
- * - a branch `jaipal/tac-xxx-...` exists on GitHub -> In Progress
+ * - a branch `<username>/tac-xxx-...` exists on GitHub -> In Progress
  * - the ticket's PR has merged -> Ready For QA
  *
  * derived fresh every run, never invented outside those two targets, never

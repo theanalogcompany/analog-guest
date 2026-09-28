@@ -303,7 +303,20 @@ describe('which branches are the ticket\'s', () => {
     ['jaipal/tac-4480-other', false],
     ['jaipal/tac-44-other', false],
     ['jaipal/tac-448', false],
-    ['someone/tac-448-x', false],
+    // ANY owner segment counts, not the literal `jaipal`. This row asserted
+    // `false` until 2026-09-28: a branch under your own username registered as
+    // nobody's claim, so a build run would start a ticket a local session
+    // already had, which is the 2026-09-17 incident.
+    ['someone/tac-448-x', true],
+    ['alex/tac-448-claim-check', true],
+    ['octo-cat/tac-448-x', true],
+    ['first.last/tac-448-x', true],
+    ['claudechen95/tac-448-x', true],
+    ['user_1/tac-448-x', true],
+    // Still one segment only, and still needs an owner.
+    ['team/alex/tac-448-x', false],
+    ['tac-448-x', false],
+    ['/tac-448-x', false],
     ['main', false],
   ])('%s → %s', (name, expected) => {
     expect(isTicketBranch('TAC-448', name)).toBe(expected)
