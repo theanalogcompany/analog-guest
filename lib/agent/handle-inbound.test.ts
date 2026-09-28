@@ -28,6 +28,9 @@ const buildRuntimeContextMock = vi.fn()
 const classifyStageMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
 const retrieveKnowledgeStageMock = vi.fn()
+// TAC-547: handle-inbound calls the two-arm stage. Mocked at the same seam
+// the single-arm one was, because it still does real DB/Voyage work.
+const retrieveKnowledgeWithContextStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
@@ -124,6 +127,8 @@ vi.mock('./stages', async () => {
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
     retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
+    retrieveKnowledgeWithContextStage: (...a: unknown[]) =>
+      retrieveKnowledgeWithContextStageMock(...a),
     // TAC-367: TRUE, matching production. The real predicate's first line is
     // `if (ctx.currentMessage !== null) return true`, and every test in this
     // file exercises the inbound path, where currentMessage is non-null by
@@ -439,7 +444,7 @@ beforeEach(() => {
   retrieveCorpusStageMock.mockResolvedValue([])
   // Non-empty: with [] an assertion of [] could not tell "retrieval was
   // skipped" from "retrieval ran and matched nothing".
-  retrieveKnowledgeStageMock.mockResolvedValue([
+  retrieveKnowledgeWithContextStageMock.mockResolvedValue([
     {
       id: 'k1',
       knowledgeCorpusId: 'kc1',
@@ -1567,7 +1572,9 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
 
     await handleInbound(INBOUND_ID)
 
-    expect(retrieveKnowledgeStageMock).toHaveBeenCalledTimes(1)
+    // TAC-547: the property is unchanged (inbound retrieves); the stage it
+    // goes through is the two-arm one now.
+    expect(retrieveKnowledgeWithContextStageMock).toHaveBeenCalledTimes(1)
     const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown[] }
     expect(ctx.knowledgeCorpus).toHaveLength(1)
   })

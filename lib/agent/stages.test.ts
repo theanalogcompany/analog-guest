@@ -17,6 +17,7 @@ import {
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
+  retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
   verifyGroundingStage,
   verifyMechanicOfferStage,
@@ -25,6 +26,7 @@ import {
 } from './stages'
 import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
+import type { RecentMessage } from '@/lib/ai/types'
 // TAC-367: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
 // source under test imports it the same way for the same reason.
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
@@ -253,6 +255,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     conversationChannel: 'text' as const,
     pendingQuestion: null,
     recentMessages: [],
+    conversationWindowMs: 48 * 60 * 60 * 1000,
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
@@ -6242,5 +6245,199 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
         ),
       ),
     ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// retrieveKnowledgeWithContextStage — two arms, merged (TAC-547)
+// ---------------------------------------------------------------------------
+
+describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
+  beforeEach(() => {
+    retrieveKnowledgeContextMock.mockReset()
+  })
+
+  const CURRENT = 'how should i brew it'
+
+  function row(id: string, similarity: number) {
+    return {
+      id,
+      knowledgeCorpusId: `kc-${id}`,
+      text: `chunk ${id}`,
+      sourceType: 'voicenote_transcript',
+      confidence: 0.9,
+      similarity,
+      primaryTags: [],
+      secondaryTags: [],
+    }
+  }
+
+  function ctxWithHistory(history: Array<Partial<RecentMessage>>): RuntimeContext {
+    const now = new Date('2026-09-28T12:00:00Z')
+    return makeCtx({
+      currentMessage: { id: 'm1', body: CURRENT, providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      recentMessages: history.map((h, i) => ({
+        direction: 'inbound',
+        body: `turn ${i}`,
+        delivery: 'delivered',
+        createdAt: new Date(now.getTime() - 60_000),
+        ...h,
+      })) as RecentMessage[],
+      recognition: { ...makeCtx({}).recognition, computedAt: now },
+      conversationWindowMs: 48 * 60 * 60 * 1000,
+    })
+  }
+
+  // The absolute half of the no-lost-result claim: a turn with no usable
+  // prior runs ONE arm, so it is byte-identical to pre-TAC-547.
+  it('runs exactly ONE arm when there is no prior turn', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    const out = await retrieveKnowledgeWithContextStage(ctxWithHistory([]), null, CURRENT)
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
+    expect(retrieveKnowledgeContextMock.mock.calls[0][0].query).toBe(CURRENT)
+    expect(out.map((r) => r.id)).toEqual(['a'])
+  })
+
+  it('runs ONE arm when every prior turn is outside the conversation window', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ createdAt: new Date('2026-09-19T12:00:00Z') }]),
+      null,
+      CURRENT,
+    )
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs ONE arm when the only prior turn never reached the guest', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ direction: 'outbound', delivery: 'awaiting_review' }]),
+      null,
+      CURRENT,
+    )
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs TWO arms with the bare and the contextual query when a prior turn exists', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'does the bhadra taste good' }]),
+      null,
+      CURRENT,
+    )
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
+    const queries = retrieveKnowledgeContextMock.mock.calls.map((c) => c[0].query)
+    expect(queries).toEqual([CURRENT, `does the bhadra taste good\n${CURRENT}`])
+  })
+
+  it('merges the two arms, interleaved by rank', async () => {
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [row('a0', 0.40), row('a1', 0.39)] })
+      .mockResolvedValueOnce({ ok: true, data: [row('b0', 0.99), row('b1', 0.98)] })
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out.map((r) => r.id)).toEqual(['a0', 'b0', 'a1', 'b1'])
+  })
+
+  // The arms must not be sequential: arm A's promise is held open until arm B
+  // has been called, so a sequential implementation deadlocks and this test
+  // fails by TIMEOUT rather than passing slowly.
+  it('runs the two arms in PARALLEL, not one after the other', { timeout: 2000 }, async () => {
+    let releaseArmA: () => void = () => {}
+    const armACalled = new Promise<void>((resolve) => {
+      releaseArmA = resolve
+    })
+    retrieveKnowledgeContextMock
+      .mockImplementationOnce(async () => {
+        await armACalled
+        return { ok: true, data: [row('a', 0.6)] }
+      })
+      .mockImplementationOnce(async () => {
+        releaseArmA()
+        return { ok: true, data: [row('b', 0.7)] }
+      })
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out.map((r) => r.id)).toEqual(['a', 'b'])
+  })
+
+  it('falls back to arm A alone when the contextual arm rejects — exactly today', async () => {
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [row('a', 0.6)] })
+      .mockRejectedValueOnce(new Error('voyage down'))
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out.map((r) => r.id)).toEqual(['a'])
+  })
+
+  it('falls back to arm B alone when the bare arm rejects', async () => {
+    retrieveKnowledgeContextMock
+      .mockRejectedValueOnce(new Error('voyage down'))
+      .mockResolvedValueOnce({ ok: true, data: [row('b', 0.7)] })
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out.map((r) => r.id)).toEqual(['b'])
+  })
+
+  it('returns [] when both arms reject, as today', async () => {
+    retrieveKnowledgeContextMock.mockRejectedValue(new Error('voyage down'))
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out).toEqual([])
+  })
+
+  it('degrades to arm A alone when the contextual arm returns an error result', async () => {
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [row('a', 0.6)] })
+      .mockResolvedValueOnce({ ok: false, error: 'db_query_failed' })
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      null,
+      CURRENT,
+    )
+    expect(out.map((r) => r.id)).toEqual(['a'])
+  })
+
+  // Each arm goes through retrieveKnowledgeStage, so each keeps its own
+  // TAC-242 untagged retry rather than sharing one.
+  it('lets EACH arm take its own tag-preference fallback', async () => {
+    retrieveKnowledgeContextMock
+      .mockResolvedValueOnce({ ok: true, data: [] }) // arm A, tagged
+      .mockResolvedValueOnce({ ok: true, data: [] }) // arm B, tagged
+      .mockResolvedValueOnce({ ok: true, data: [row('a', 0.6)] }) // arm A, untagged retry
+      .mockResolvedValueOnce({ ok: true, data: [row('b', 0.7)] }) // arm B, untagged retry
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'prev' }]),
+      'mechanic_request',
+      CURRENT,
+    )
+    expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(4)
+    expect(out.map((r) => r.id).sort()).toEqual(['a', 'b'])
+  })
+
+  it('honours an explicit turns override, so the measurement arms are real', async () => {
+    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([{ body: 'older' }, { body: 'newer' }]),
+      null,
+      CURRENT,
+      { turns: 1 },
+    )
+    expect(retrieveKnowledgeContextMock.mock.calls[1][0].query).toBe(`newer\n${CURRENT}`)
   })
 })
