@@ -221,6 +221,45 @@ describe('readGitState', () => {
   it('says so when git cannot be read at all', () => {
     expect(readGitState(fakeGit({}), 'TAC-447')).toEqual({ readable: false })
   })
+
+  // The owner segment is any username, not the literal `jaipal`. Before
+  // 2026-09-28 a branch under someone's own name was invisible here and to
+  // claim detection, so a build run would start a ticket a local session had.
+  // The owner pattern is imported from claims.mjs, so this and isTicketBranch
+  // cannot disagree.
+  it.each(['alex', 'octo-cat', 'first.last', 'claudechen95'])('reads a branch owned by %s', (owner) => {
+    const state = readGitState(
+      fakeGit({
+        [REFS]: `refs/remotes/origin/main\nrefs/remotes/origin/${owner}/tac-325-order-capture`,
+        [`log --format=%h %s refs/remotes/origin/main..refs/remotes/origin/${owner}/tac-325-order-capture`]:
+          'ddd4444 TAC-325: x\n',
+        'status --porcelain': '',
+      }),
+      'TAC-325',
+    )
+    expect(state.branches).toEqual([
+      {
+        name: `${owner}/tac-325-order-capture`,
+        local: false,
+        remote: true,
+        onGitHub: ['ddd4444 TAC-325: x'],
+        notPushed: [],
+      },
+    ])
+  })
+
+  it('still needs an owner segment, and only one', () => {
+    const none = readGitState(
+      fakeGit({ [REFS]: 'refs/remotes/origin/tac-325-order-capture', 'status --porcelain': '' }),
+      'TAC-325',
+    )
+    expect(none.branches).toEqual([])
+    const nested = readGitState(
+      fakeGit({ [REFS]: 'refs/remotes/origin/team/alex/tac-325-x', 'status --porcelain': '' }),
+      'TAC-325',
+    )
+    expect(nested.branches).toEqual([])
+  })
 })
 
 // 20s, not the 5000ms default (2026-09-25). Every test in this block shells

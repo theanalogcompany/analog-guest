@@ -52,6 +52,10 @@ const PLACEHOLDERS: Record<string, string> = {
   '<path>': 'lib/utils.ts',
   '<ref>': 'jaipal/tac-325-order-capture',
   '<repo>': 'theanalogcompany/analog-guest',
+  // Deliberately NOT `jaipal`: the owner segment of a ticket branch is any
+  // username (scripts/lib/ticket-branch.mjs), and filling this in with the old
+  // literal would let a rule that only admits `jaipal/` keep passing.
+  '<username>': 'octo-cat',
   '<x>': 'x',
 }
 const FENCE = /```[a-z]*\n([\s\S]*?)```/g

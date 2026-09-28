@@ -28,6 +28,7 @@
  */
 
 import { redact } from './linear-cli.mjs';
+import { TICKET_BRANCH_OWNER } from './ticket-branch.mjs';
 
 export const EXIT = { OK: 0, USAGE: 2 };
 
@@ -121,14 +122,16 @@ function readSideFolders(git) {
  * The ticket's branches, and what is on each, from the runner's git.
  * `git(args)` returns stdout, or null when the command fails.
  *
- * A ticket's branch is `jaipal/<ticket>-...`, matched without regard to case:
- * sessions name it with the lowercase id (`jaipal/tac-396-...`).
+ * A ticket's branch is `<username>/<ticket>-...`, matched without regard to
+ * case: sessions name it with the lowercase id (`alex/tac-396-...`). The owner
+ * pattern is imported from claims.mjs, not restated, so this and claim
+ * detection cannot disagree about what a ticket branch is.
  */
 export function readGitState(git, ticket) {
   const refsOut = git(['for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/origin/']);
   if (refsOut === null) return { readable: false };
 
-  const own = new RegExp(`^refs/(heads|remotes/origin)/(jaipal/${escapeRegExp(ticket)}-.+)$`, 'i');
+  const own = new RegExp(`^refs/(heads|remotes/origin)/(${TICKET_BRANCH_OWNER}/${escapeRegExp(ticket)}-.+)$`, 'i');
   const byName = new Map();
   for (const ref of lines(refsOut)) {
     const m = ref.match(own);

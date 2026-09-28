@@ -190,10 +190,12 @@ command when the question is which variables exist.
 Branch protection on `main`; everything goes through a PR. CI must be green:
 `tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build`.
 
-Branch `jaipal/<ticket>-short-description`. **`jaipal/` is a protocol token, not a personal
-namespace - use that literal whoever you are.** Five executable places match on it and a
-branch under your own name is invisible to all of them, including ticket claiming. See
-`docs/decisions/0004-jaipal-is-a-protocol-token.md`.
+Branch `<your-username>/<ticket>-short-description`, ticket id lowercase. Any single path
+segment works as the owner; `team/alex/<ticket>-x` and a bare `<ticket>-x` do not, because the
+owner is what makes a branch attributable to a session. The pattern has **one** definition,
+`TICKET_BRANCH_OWNER` in `scripts/lib/ticket-branch.mjs` - claim detection and the turn-limit
+report both import it, so they cannot disagree about what a ticket branch is. See
+`docs/decisions/0004-ticket-branch-owner-is-any-username.md`.
 
 Commits: lowercase imperative, no emoji, `THE-XXX: <subject>` (or a `docs:`-style prefix with
 no ticket). The body explains **why** when the change is not obvious. Never add your agent
@@ -275,7 +277,7 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 6944 tests across 301 files (2026-09-28).** Measure it, never estimate:
+**Recorded baseline: 6957 tests across 301 files (2026-09-28).** Measure it, never estimate:
 
 ```
 git worktree add .worktrees/baseline origin/main
