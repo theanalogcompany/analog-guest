@@ -120,7 +120,18 @@ function normalizeBody(body: string): string {
  */
 export function contextTurns(ctx: RuntimeContext, turns = CONTEXT_TURNS): RecentMessage[] {
   if (turns <= 0) return []
-  const now = ctx.recognition.computedAt.getTime()
+  // Measured from the CURRENT MESSAGE, not from wall-clock now. The question
+  // is whether a prior turn belongs to the same conversation as the message
+  // being answered, which is a fact about those two messages.
+  //
+  // Identical in production, where the inbound is seconds old. It is what
+  // makes the Voices regen path work at all: that path pins history with
+  // `historyEndIso` while `buildRuntimeContext` stamps `computedAt = new
+  // Date()`, so against wall clock every replay older than the window has an
+  // empty context and the contextual arm is silently dead — the TAC-367
+  // re-dating trap ("historyEndIso pins message history, NOT the clock")
+  // arriving through a second consumer. Found in code review, by mutant.
+  const now = (ctx.currentMessage?.receivedAt ?? ctx.recognition.computedAt).getTime()
   const windowMs = ctx.conversationWindowMs
   return ctx.recentMessages
     .filter((m) => m.body.trim().length > 0)
@@ -169,7 +180,11 @@ export function buildContextQuery(ctx: RuntimeContext, turns = CONTEXT_TURNS): s
  *     the measurement is what bounds it.
  *   interleave — round-robin by RANK across the arms (A0, B0, A1, B1, …).
  *     Scale-free, so it does not care that a longer query embeds to a
- *     different score range, and it guarantees the first arm's top 2 survive.
+ *     different score range, and with two arms it guarantees the first arm's
+ *     top 2 survive **so long as `limit >= 3`** — A1 sits in slot 3. That
+ *     condition is not decorative: KNOWLEDGE_RETRIEVE_LIMIT is an editable
+ *     tunable surfaced on /admin/tunables, and at limit 2 the slate is
+ *     A0, B0 and A1 is displaced. Pinned by a test.
  *
  * The floor cannot change the result when the arms come from
  * `retrieveKnowledgeStage`, which has already applied it — each merged score
@@ -205,15 +220,12 @@ function selectByScore(
   arms: KnowledgeMatch[][],
   best: Map<string, KnowledgeMatch>,
 ): KnowledgeMatch[] {
-  const order = new Map<string, number>()
-  let n = 0
-  for (const arm of arms) for (const row of arm) if (!order.has(row.id)) order.set(row.id, n++)
-  return [...best.values()].sort((a, b) => {
-    if (b.similarity !== a.similarity) return b.similarity - a.similarity
-    // Stable on a tie: first arm, then first seen. Without this a tie orders
-    // by Map insertion, which reads as arbitrary and is not reproducible.
-    return (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)
-  })
+  // `best` is filled in arm order, `Map.set` on an existing key does not move
+  // it, and Array.prototype.sort is stable (ES2019) — so a tie already falls
+  // out as first arm, then first seen. An explicit tiebreak here was provably
+  // inert for every input and its test could not fail; both were removed in
+  // code review rather than left reading as a guard.
+  return [...best.values()].sort((a, b) => b.similarity - a.similarity)
 }
 
 function selectByRank(

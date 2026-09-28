@@ -15,7 +15,6 @@ vi.mock('@/lib/agent/stages', () => ({
   STRONG_MATCH_SIMILARITY: 0.3,
   MIN_STRONG_MATCHES: 1,
   CORPUS_RETRIEVE_LIMIT: 8,
-  KNOWLEDGE_RETRIEVE_LIMIT: 4,
   // TAC-547: regen no longer filters or falls back on its own — it calls the
   // production stage, which does both. Mocked at that boundary because it
   // still does real DB and Voyage work. Its behaviour is stages.test.ts's
@@ -34,7 +33,6 @@ vi.mock('@/lib/ai', () => ({
 }))
 vi.mock('@/lib/rag', () => ({
   retrieveContext: vi.fn(),
-  retrieveKnowledgeContext: vi.fn(),
 }))
 vi.mock('@/lib/observability', () => ({
   noopAgentTrace: { id: '', captureContent: false, span: () => ({}), update: () => {}, flushAsync: async () => {} },
@@ -50,7 +48,7 @@ import {
   verifyProsePromise,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
-import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
+import { retrieveContext } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
 
 // TAC-350: default grounding-backstop result — "nothing to flag" — used by
@@ -189,7 +187,6 @@ beforeEach(() => {
   vi.mocked(classifyMessage).mockReset()
   vi.mocked(generateMessage).mockReset()
   vi.mocked(retrieveContext).mockReset()
-  vi.mocked(retrieveKnowledgeContext).mockReset()
   vi.mocked(retrieveKnowledgeWithContextStage).mockReset()
   // Default: retrieval succeeds with nothing. Every test that cares sets its
   // own; without a default the stage resolves undefined and regen throws on
@@ -317,7 +314,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
       critique: 'x',
     })
     expect(retrieveContext).not.toHaveBeenCalled()
-    expect(retrieveKnowledgeContext).not.toHaveBeenCalled()
+    expect(retrieveKnowledgeWithContextStage).not.toHaveBeenCalled()
     expect(generateMessage).not.toHaveBeenCalled()
   })
 })
@@ -370,10 +367,6 @@ describe('regenerateWithCritique — happy path', () => {
           similarity: 0.5,
         },
       ],
-    })
-    vi.mocked(retrieveKnowledgeContext).mockResolvedValue({
-      ok: true,
-      data: [],
     })
     vi.mocked(generateMessage).mockResolvedValue({
       ok: true,

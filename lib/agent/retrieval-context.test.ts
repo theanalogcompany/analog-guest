@@ -34,7 +34,7 @@ function ctxWith(
   windowMs = WINDOW_MS,
 ): RuntimeContext {
   return {
-    currentMessage: current === null ? null : { body: current },
+    currentMessage: current === null ? null : { body: current, receivedAt: NOW },
     recentMessages,
     conversationWindowMs: windowMs,
     recognition: { computedAt: NOW },
@@ -130,6 +130,37 @@ describe('buildContextQuery', () => {
     expect(contextTurns(ctxWith([{ ...msg('inbound', 'past'), createdAt: past }]))).toHaveLength(0)
   })
 
+  // Kills a window hardcoded to 48h, and a window zeroed at the construction
+  // site: both leave every other test green. The whole reason
+  // conversationWindowMs is hoisted onto the context is that ONE definition of
+  // "the same conversation" is shared with the intention brake, and that is
+  // worth nothing if no test can tell the field from a constant.
+  it('READS the venue window rather than assuming 48h', () => {
+    const twoHours = 2 * 60 * 60 * 1000
+    const threeHoursAgo = msg('inbound', 'older than a 2h window', { minutesAgo: 180 })
+    expect(buildContextQuery(ctxWith([threeHoursAgo]))).not.toBe('')
+    expect(buildContextQuery(ctxWith([threeHoursAgo], 'how should i brew it', twoHours))).toBe('')
+  })
+
+  it('treats a zero window as admitting nothing, not everything', () => {
+    expect(buildContextQuery(ctxWith([msg('inbound', 'a minute ago')], 'q', 0))).toBe('')
+  })
+
+  // Kills measuring staleness from wall-clock now rather than from the message
+  // being answered. Identical in production; it is what keeps the Voices regen
+  // path alive, where history is pinned to a past turn but computedAt is today.
+  it('measures the window from the CURRENT MESSAGE, not from computedAt', () => {
+    const tenDaysAgo = new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000)
+    const replay = {
+      currentMessage: { body: 'how should i brew it', receivedAt: tenDaysAgo },
+      recentMessages: [{ ...msg('inbound', 'the turn before it'), createdAt: new Date(tenDaysAgo.getTime() - 60_000) }],
+      conversationWindowMs: WINDOW_MS,
+      // Stamped today, as buildRuntimeContext does on every replay.
+      recognition: { computedAt: NOW },
+    } as unknown as RuntimeContext
+    expect(buildContextQuery(replay)).toBe('the turn before it\nhow should i brew it')
+  })
+
   it('truncates a long body to the history bound', () => {
     const long = 'x'.repeat(MAX_CONTEXT_BODY_CHARS + 50)
     const q = buildContextQuery(ctxWith([msg('inbound', long)]))
@@ -155,6 +186,14 @@ describe('buildContextQuery', () => {
     ])
     expect(buildContextQuery(ctx, 1)).toBe('agent reply\nhow should i brew it')
     expect(buildContextQuery(ctx, 2)).toBe('prev guest\nagent reply\nhow should i brew it')
+  })
+
+  // Pinned by VALUE, like KNOWLEDGE_MERGE_RULE two lines from it in the
+  // source: 2 is the measured choice (13/15 at window 1, 15/15 at 2), and
+  // without this the constant can move and only a test named for something
+  // else notices.
+  it('uses a window of 2, the measured value', () => {
+    expect(CONTEXT_TURNS).toBe(2)
   })
 
   it('defaults to CONTEXT_TURNS', () => {
@@ -242,13 +281,6 @@ describe('mergeKnowledgeMatches', () => {
     expect(out.map((r) => r.id)).toEqual(['a0', 'a1', 'a2', 'a3'])
   })
 
-  it('orders best-score ties by arm then by first appearance, not by Map insertion', () => {
-    const out = mergeKnowledgeMatches(
-      [[match('a', 0.5)], [match('b', 0.5)]],
-      { ...MERGE, rule: 'best-score' },
-    )
-    expect(out.map((r) => r.id)).toEqual(['a', 'b'])
-  })
 
   it('handles arms of different lengths without emitting holes', () => {
     const out = mergeKnowledgeMatches([[match('a0', 0.9)], [match('b0', 0.8), match('b1', 0.7)]], MERGE)
@@ -257,5 +289,19 @@ describe('mergeKnowledgeMatches', () => {
 
   it('ships interleave', () => {
     expect(KNOWLEDGE_MERGE_RULE).toBe('interleave')
+  })
+
+  // The top-two guarantee holds only while there are at least three slots.
+  // KNOWLEDGE_RETRIEVE_LIMIT is an editable tunable, so the condition is
+  // pinned rather than left implied by the prose.
+  it('loses the control arm A1 at limit 2, which is why the guarantee names limit >= 3', () => {
+    const control = [match('a0', 0.4), match('a1', 0.39)]
+    const contextual = [match('b0', 0.99)]
+    expect(
+      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 2 }).map((r) => r.id),
+    ).toEqual(['a0', 'b0'])
+    expect(
+      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 3 }).map((r) => r.id),
+    ).toEqual(['a0', 'b0', 'a1'])
   })
 })

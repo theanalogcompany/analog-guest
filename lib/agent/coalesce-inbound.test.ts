@@ -29,7 +29,6 @@ vi.mock('@/lib/rag', () => ({
 const buildRuntimeContextMock = vi.fn()
 const classifyStageMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
-const retrieveKnowledgeStageMock = vi.fn()
 // TAC-547: handle-inbound calls the two-arm stage. Mocked at the same seam
 // the single-arm one was, because it still does real DB/Voyage work.
 const retrieveKnowledgeWithContextStageMock = vi.fn()
@@ -122,7 +121,6 @@ vi.mock('./stages', async () => {
     computeFirstTouchAfterQrScan: actual.computeFirstTouchAfterQrScan,
     classifyStage: (...a: unknown[]) => classifyStageMock(...a),
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
     retrieveKnowledgeWithContextStage: (...a: unknown[]) =>
       retrieveKnowledgeWithContextStageMock(...a),
     // TAC-367: TRUE, matching production. The real predicate's first line is
