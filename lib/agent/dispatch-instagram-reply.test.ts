@@ -70,6 +70,7 @@ function makeCtx(): RuntimeContext {
     conversationChannel: 'instagram',
     pendingQuestion: null,
     recentMessages: [],
+    conversationWindowMs: 48 * 60 * 60 * 1000,
     recognition: { state: 'new', score: 0, computedAt: NOW } as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],

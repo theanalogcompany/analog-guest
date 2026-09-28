@@ -73,6 +73,13 @@ import { canAutoSendComplaintTurn } from './complaint-routing'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
+import {
+  buildContextQuery,
+  CONTEXT_TURNS,
+  KNOWLEDGE_MERGE_RULE,
+  mergeKnowledgeMatches,
+  type MergeRule,
+} from './retrieval-context'
 import { looksLikeQuestion } from './looks-like-question'
 import {
   commitmentIdentityOf,
@@ -981,6 +988,69 @@ export async function retrieveKnowledgeStage(
   }
 
   return filtered
+}
+
+/**
+ * TAC-547: knowledge retrieval with conversation context.
+ *
+ * Two arms in parallel — the guest's current message alone (exactly what
+ * production did before this, and exactly what `retrieveKnowledgeStage`
+ * still does), and a contextual query carrying the last turns that reached
+ * the guest — merged into one slate.
+ *
+ * WHY TWO CALLS TO THE EXISTING STAGE rather than one widened function: each
+ * arm keeps its own tag-preference fallback and its own graceful degrade for
+ * free, and `retrieveKnowledgeStage` stays byte-identical so every test that
+ * pins it still does.
+ *
+ * NO PRIOR TURN → ONE ARM. When `buildContextQuery` returns '' (a first
+ * message, a conversation older than the window, nothing delivered) this
+ * returns `retrieveKnowledgeStage`'s array directly: no second embed, no
+ * second RPC, no merge. That is what makes a standalone first message
+ * byte-identical to today rather than merely similar.
+ *
+ * That early return is DEFENCE IN DEPTH, and honestly inert today: bypassing
+ * it was run as a mutant and survived, because `retrieveKnowledgeStage`
+ * short-circuits an empty query to [] on its own, so the merge of
+ * [armA, []] reproduces armA exactly. It is kept because it makes the
+ * guarantee independent of that second guard — if an empty query ever stopped
+ * meaning "return nothing", this path would still run one arm — and because
+ * it states the intent where a reader looks for it. Do not read it as the
+ * thing the tests are pinning; the single-call assertions are.
+ *
+ * DEGRADATION. `allSettled`, so one arm's rejection cannot take the other
+ * down. Arm B failing leaves arm A alone — exactly today's behaviour. Arm A
+ * failing leaves arm B alone, which is strictly better than today's []. Both
+ * failing gives [], as today.
+ */
+export async function retrieveKnowledgeWithContextStage(
+  ctx: RuntimeContext,
+  category: MessageCategory | null,
+  query: string,
+  options?: { turns?: number; rule?: MergeRule },
+): Promise<KnowledgeMatch[]> {
+  const contextQuery = buildContextQuery(ctx, options?.turns ?? CONTEXT_TURNS)
+  if (contextQuery === '') return retrieveKnowledgeStage(ctx, category, query)
+
+  const settled = await Promise.allSettled([
+    retrieveKnowledgeStage(ctx, category, query),
+    retrieveKnowledgeStage(ctx, category, contextQuery),
+  ])
+  const arms = settled.map((s) => (s.status === 'fulfilled' ? s.value : []))
+  for (const s of settled) {
+    if (s.status === 'rejected') {
+      console.warn(
+        `[agent] knowledge retrieval arm rejected for venue=${ctx.venue.id}: ${
+          s.reason instanceof Error ? s.reason.message : String(s.reason)
+        }`,
+      )
+    }
+  }
+  return mergeKnowledgeMatches(arms, {
+    rule: options?.rule ?? KNOWLEDGE_MERGE_RULE,
+    limit: KNOWLEDGE_RETRIEVE_LIMIT,
+    floor: KNOWLEDGE_RELEVANCE_FLOOR,
+  })
 }
 
 export type GenerateOutcome =

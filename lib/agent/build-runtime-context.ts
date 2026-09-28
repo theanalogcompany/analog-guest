@@ -439,6 +439,13 @@ export async function buildRuntimeContext(input: {
     MAX_HISTORY_MESSAGES,
   )
 
+  // TAC-380 ruling 1: ONE definition of "still the same conversation", shared
+  // by the intention brake and (TAC-547) the contextual retrieval query.
+  // Computed once here rather than inside the intentions branch, so the
+  // retrieval layer reads the same number rather than re-deriving it.
+  const conversationWindowMs =
+    parseFollowupRules(config.followup_rules).recent_conversation_hours * 60 * 60 * 1000
+
   const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
     id: m.id,
     type: m.type as MechanicType,
@@ -697,8 +704,7 @@ export async function buildRuntimeContext(input: {
       // the code default (48h), at which the brake rarely fires. That is the
       // intended failure direction: under-braking, since a prompt closes on
       // being asked anyway.
-      conversationWindowMs:
-        parseFollowupRules(config.followup_rules).recent_conversation_hours * 60 * 60 * 1000,
+      conversationWindowMs,
     })
     intentions = {
       ...derived,
@@ -748,6 +754,7 @@ export async function buildRuntimeContext(input: {
     scanArrival,
     conversationChannel: channelResolution.channel,
     recentMessages,
+    conversationWindowMs,
     recognition,
     mechanics,
     recentVisits,

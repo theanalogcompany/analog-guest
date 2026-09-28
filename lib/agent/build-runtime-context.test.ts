@@ -407,3 +407,61 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     )
   })
 })
+
+// TAC-547. Same source-level technique and the same limits as the block above:
+// it catches a removed or rewired derivation, not a wrong value that still
+// matches these shapes.
+//
+// Written because a code-review mutant replaced this derivation with `= 0` and
+// survived all 6973 tests, switching off BOTH consumers at once — the
+// contextual retrieval arm and the TAC-380 intention brake — with nothing red.
+// One line, two features, no signal.
+describe('buildRuntimeContext: conversation window (TAC-547)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+
+  it('derives the window from followup_rules, not from a literal', () => {
+    expect(src).toMatch(
+      /const conversationWindowMs =\s*\n?\s*parseFollowupRules\(config\.followup_rules\)\.recent_conversation_hours \* 60 \* 60 \* 1000/,
+    )
+  })
+
+  it('puts it on the returned context', () => {
+    // Anchored to the RETURN site. A bare '    conversationWindowMs,' is a
+    // substring of the 6-space brake-call line, so it matched even with the
+    // return-site entry deleted — a mutant caught that. `tsc` is the stronger
+    // guard here (the field is required on RuntimeContext); this states the
+    // intent where a reader looks for it.
+    expect(src).toContain('    recentMessages,\n    conversationWindowMs,\n')
+  })
+
+  it('hands the SAME local to the intention brake, so there is one definition', () => {
+    // TAC-380 ruling 1. Two derivations of "the same conversation" is exactly
+    // the drift the hoist exists to prevent, so the brake must read the local
+    // rather than recompute — a second parseFollowupRules call would pass the
+    // test above while reintroducing the split.
+    const callStart = src.indexOf('deriveOpenIntentions({')
+    expect(callStart).toBeGreaterThan(-1)
+    // Brace-matched, not `indexOf('})')`: this call nests
+    // buildSatisfactionFacts({...}), so the first '})' closes the INNER call
+    // and a naive slice stops before the argument under test. The first
+    // version did exactly that and reported a failure I briefly read as test
+    // interference.
+    const call = balancedCallText(src, callStart)
+    expect(call).toContain('conversationWindowMs,')
+    expect(src.match(/parseFollowupRules\(/g) ?? []).toHaveLength(1)
+  })
+})
+
+/** The text of a `name({ ... })` call starting at `from`, to its matching brace. */
+function balancedCallText(src: string, from: number): string {
+  const open = src.indexOf('{', from)
+  let depth = 0
+  for (let i = open; i < src.length; i += 1) {
+    if (src[i] === '{') depth += 1
+    else if (src[i] === '}') {
+      depth -= 1
+      if (depth === 0) return src.slice(from, i + 1)
+    }
+  }
+  throw new Error('unbalanced call text')
+}

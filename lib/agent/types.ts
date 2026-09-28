@@ -256,6 +256,13 @@ export interface RuntimeContext {
   // nothing routes a send on it.
   conversationChannel: MessageChannel | null
   recentMessages: RecentMessage[]
+  /**
+   * TAC-380 ruling 1's single definition of "still the same conversation":
+   * `followup_rules.recent_conversation_hours` in ms, 48h by default. Read by
+   * the intention brake and, since TAC-547, by the contextual retrieval query,
+   * so the two cannot drift into two definitions of the same thing.
+   */
+  conversationWindowMs: number
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption
