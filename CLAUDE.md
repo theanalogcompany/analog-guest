@@ -30,18 +30,18 @@ reasoning: `docs/decisions/0001-claude-md-is-an-index.md`.
 Nested files load only when Claude reads a file in that directory, so they cost nothing
 otherwise. `@path` imports are **eager** and do not help.
 
-| directory | its `CLAUDE.md` covers |
+| read this when you work in that directory | covers |
 | --- | --- |
-| `lib/agent/` | orchestrators, stage pipeline, floors, the 23 approval triggers, pending slots, coalescing, intentions |
-| `lib/ai/` | `generateObject` patterns, the schema budget, the five verifiers, truncation |
-| `lib/ai/prompts/` | prompt assembly order, universal voice rules, channel copy, serializers |
-| `lib/messaging/instagram/` | the Meta half: signatures, echoes, the reply window, tokens, deletion |
-| `db/migrations/` | apply order, high-stakes tables, the SQL patterns this schema uses |
-| `lib/operator/` | venue scope, queue Contract fields, card copy, dispatch |
-| `lib/guests/` | commitment CAS and dedup, guest context, visit precision |
-| `lib/notifications/` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
-| `app/admin/` | route paths, loaders, write routes, brand tokens |
-| `scripts/` | onboarding pipeline, measurement harness convention, Drive auth |
+| `lib/agent/CLAUDE.md` | orchestrators, stage pipeline, floors, the 23 approval triggers, pending slots, coalescing, intentions |
+| `lib/ai/CLAUDE.md` | `generateObject` patterns, the schema budget, the five verifiers, truncation |
+| `lib/ai/prompts/CLAUDE.md` | prompt assembly order, universal voice rules, channel copy, serializers |
+| `lib/messaging/instagram/CLAUDE.md` | the Meta half: signatures, echoes, the reply window, tokens, deletion |
+| `db/migrations/CLAUDE.md` | apply order, high-stakes tables, the SQL patterns this schema uses |
+| `lib/operator/CLAUDE.md` | venue scope, queue Contract fields, card copy, dispatch |
+| `lib/guests/CLAUDE.md` | commitment CAS and dedup, guest context, visit precision |
+| `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
+| `app/admin/CLAUDE.md` | route paths, loaders, write routes, brand tokens |
+| `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 
 `.claude/rules/` holds `testing-discipline.md`, `prompt-versioning.md` and
 `errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
