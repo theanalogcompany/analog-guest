@@ -45,12 +45,10 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { getPrimaryTagPreference } from '@/lib/agent/knowledge-tag-mapping'
 import {
   buildAiRuntime,
   CORPUS_RETRIEVE_LIMIT,
-  filterByRelevance,
-  KNOWLEDGE_RETRIEVE_LIMIT,
+  retrieveKnowledgeWithContextStage,
   MIN_STRONG_MATCHES,
   STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
@@ -58,7 +56,7 @@ import type { EmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
-import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
+import { retrieveContext } from '@/lib/rag'
 
 export interface RegenerateWithCritiqueInput {
   venueId: string
@@ -369,58 +367,33 @@ export async function regenerateWithCritique(
     }
   }
 
-  // 5. Retrieve knowledge corpus (graceful degradation, mirrors stages.ts).
-  // TAC-242: derive primary-tag preference from the just-classified category,
-  // fall back to no-filter retrieval when the preferenced query returns
-  // zero matches.
-  const knowledgePreference = getPrimaryTagPreference(classification.data.category)
-  let knowledgeChunks: AiKnowledgeCorpusChunk[] = []
-  const knowledge = await retrieveKnowledgeContext({
-    venueId: input.venueId,
-    query: load.data.inbound.body,
-    limit: KNOWLEDGE_RETRIEVE_LIMIT,
-    primaryTagPreference: knowledgePreference,
-  })
-  if (knowledge.ok) {
-    // TAC-366: apply the SAME relevance floor production applies. Both halves
-    // of this matter and the second is easy to miss:
-    //
-    //   1. Chunks below KNOWLEDGE_RELEVANCE_FLOOR are dropped. Without this,
-    //      Voices showed up to four chunks on terse queries where production
-    //      showed zero — the drift ran in the direction that HID the TAC-358
-    //      bug from anyone reproducing it here.
-    //   2. The fallback triggers on zero RELEVANT rows, not zero RETURNED
-    //      rows. TAC-350 changed that deliberately in stages.ts; this path
-    //      kept the pre-TAC-350 condition. Filtering only at the end would
-    //      have fixed (1) and silently left (2) behind.
-    let rows = filterByRelevance(knowledge.data)
-    if (knowledgePreference !== undefined && rows.length === 0) {
-      const fallback = await retrieveKnowledgeContext({
-        venueId: input.venueId,
-        query: load.data.inbound.body,
-        limit: KNOWLEDGE_RETRIEVE_LIMIT,
-      })
-      if (fallback.ok) {
-        rows = filterByRelevance(fallback.data)
-      } else {
-        console.warn(
-          `[voices/regen] knowledge retrieval (fallback) degraded for venue=${input.venueId}: ${fallback.error}`,
-        )
-      }
-    }
-    knowledgeChunks = rows.map((c) => ({
-      id: c.id,
-      text: c.text,
-      sourceType: c.sourceType,
-      primaryTags: c.primaryTags,
-      secondaryTags: c.secondaryTags,
-      relevanceScore: c.similarity,
-    }))
-  } else {
-    console.warn(
-      `[voices/regen] knowledge retrieval degraded for venue=${input.venueId}: ${knowledge.error}`,
-    )
-  }
+  // 5. Retrieve knowledge corpus.
+  //
+  // TAC-547: this block used to REIMPLEMENT retrieveKnowledgeStage's body —
+  // the tag preference, the relevance floor and the zero-relevant-rows
+  // fallback, all restated. That is the duplication this file's own header
+  // warns about, and it had already drifted once: TAC-350 shipped the floor
+  // to stages.ts and this copy kept the pre-TAC-350 semantics until TAC-366,
+  // in the direction that HID a live bug from anyone reproducing it here.
+  //
+  // It now calls the shared stage, so the playground retrieves exactly what
+  // production retrieves — including TAC-547's contextual arm, which is what
+  // makes a regenerated follow-up see the same knowledge the live turn did.
+  // Safe against this file's analytics-isolation rule: retrieveKnowledgeStage
+  // emits no PostHog or Langfuse event, only a console.warn on degrade.
+  const knowledgeRows = await retrieveKnowledgeWithContextStage(
+    ctx,
+    classification.data.category,
+    load.data.inbound.body,
+  )
+  const knowledgeChunks: AiKnowledgeCorpusChunk[] = knowledgeRows.map((c) => ({
+    id: c.id,
+    text: c.text,
+    sourceType: c.sourceType,
+    primaryTags: c.primaryTags,
+    secondaryTags: c.secondaryTags,
+    relevanceScore: c.similarity,
+  }))
 
   const ragChunks: AiVoiceCorpusChunk[] = corpus.data.map((c) => ({
     id: c.id,

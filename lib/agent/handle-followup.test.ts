@@ -167,6 +167,7 @@ function makeCtx(followupTrigger: RuntimeContext['followupTrigger']): RuntimeCon
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
+    conversationWindowMs: 48 * 60 * 60 * 1000,
     recognition: { state: 'regular', score: 0, computedAt: new Date() } as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],

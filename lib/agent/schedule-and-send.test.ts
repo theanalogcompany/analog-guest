@@ -190,6 +190,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     scanArrival: null,
     conversationChannel: 'text',
     recentMessages: [],
+    conversationWindowMs: 48 * 60 * 60 * 1000,
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
