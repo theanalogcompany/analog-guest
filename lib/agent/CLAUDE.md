@@ -110,12 +110,29 @@ arbitrary one of the two slots.
 
 The knowledge-gap clock is decided **per guest**, not per slot.
 
+### An opt-out confirmation can never be held
+
+`POLICY_EXEMPT_CATEGORIES` (`lib/schemas/approval-policy.ts`) holds `opt_out`, and it beats
+everything: a stored per-category policy, a venue-wide default, the `hold_all_outbound`
+blanket hold, and anything hand-written in Studio.
+
+**TCPA and carrier compliance.** A guest who asks to stop must get the confirmation, so no
+configuration may route it to a human who might not be looking.
+
+Enforced in the **resolver**, not the UI. Hand-editing `venue_configs` is a normal workflow
+here, so an exclusion guarded only by a rendering decision is not guarded. The admin surface
+reads the same constant to omit the control, and the write route refuses it independently.
+
 ### Demo guest bypass
 
-`ctx.guest.isDemo === true` evaluates every trigger and then sends anyway. The bypass is
-total, including the comp regex. Only the literal `true` bypasses. The visibility
-guarantee is the `demo_bypassed_approval_gate` event, which relays to Slack only when a
-comp was involved.
+`guests.is_demo` - read as `ctx.guest.isDemo === true` - evaluates every trigger and then
+sends anyway. The bypass is **total**, including the comp regex, so a demo guest's comp
+auto-sends with no operator review. Only the literal `true` bypasses; `undefined`, `null` or
+a missing column flow through the normal policy.
+
+Acceptable only because demo guests are teammates' own phones. The visibility guarantee is
+the `demo_bypassed_approval_gate` event, which relays to Slack only when
+`comp_regex_backstop` is among the would-have-queued triggers - the irreversible case.
 
 ## Coalescing a burst into one turn
 
