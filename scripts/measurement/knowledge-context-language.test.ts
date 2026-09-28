@@ -35,6 +35,20 @@ describe('classifyBhadraReply (TAC-547)', () => {
     expect(classifyBhadraReply('espresso, great as a cortado').namesMilk).toBe(true)
   })
 
+  // KNOWN LIMITATION, pinned rather than tuned away. The 2026-09-28 run
+  // produced this body, which recommends espresso and moka pot *instead of*
+  // pour over — a correct answer that the detector flags, because it matches
+  // the words and cannot read the "over" as a rejection. It is recorded here
+  // so the next run knows the count is a floor, and NOT fixed after the fact:
+  // adjusting a detector once the data is in, in the direction that improves
+  // the number, is fitting the evidence to the answer.
+  it('KNOWN FALSE POSITIVE: flags a reply that recommends AGAINST pour over', () => {
+    const body =
+      "1:15 ratio works well, but since it's all Robusta we'd actually lean " +
+      'toward espresso or a moka pot over pour over.'
+    expect(meetsBar(classifyBhadraReply(body))).toBe(false)
+  })
+
   it('reports what it matched, so a run can be read rather than trusted', () => {
     expect(classifyBhadraReply('espresso with milk').matched).toEqual(
       expect.arrayContaining(['espresso', 'milk']),
