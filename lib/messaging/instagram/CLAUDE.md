@@ -185,3 +185,8 @@ excerpts and `pending_commitment` holds model-written descriptions of them.
 because this repo is public. **Never commit a delivery's signature beside its body.** Copy
 fixtures from logs by script, never by hand - a hand transcription put a postback's `mid`
 outside `postback` instead of inside it.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.
