@@ -4,91 +4,46 @@ import { describe, expect, it } from 'vitest'
 
 import {
   areaOf,
-  areaSlug,
   buildMap,
   countCases,
   countEachSites,
   discoverTestFiles,
-  escapeCell,
-  parseDescribes,
-  parseHeader,
+  hasHeader,
   readCommitted,
   renderAll,
   toEntry,
 } from './test-map'
 
-// Two jobs here, and the second is the one that matters.
+// The parsers get ordinary unit tests. The reason docs/testing/README.md is
+// worth trusting at all is the staleness check: it regenerates the file and
+// asserts the committed one equals it, so a PR that adds a test file without
+// running `npm run test-map` fails CI. Without that it is a claim nothing
+// enforces, which is the defect class .claude/rules/testing-discipline.md
+// exists for - and the root CLAUDE.md's hand-stamped baseline went stale within
+// one commit of being written, in this very branch.
 //
-// The pure parsers get ordinary unit tests. But the reason `docs/testing/` is
-// worth trusting at all is the staleness check below: it regenerates the index
-// and asserts the committed files equal it, so adding a test file without
-// running `npm run test-map` fails CI. Without that, the index is a claim
-// nothing enforces, which is the defect class `.claude/rules/testing-discipline.md`
-// exists for - and an index is exactly the artifact people stop questioning.
-//
-// The integrity checks mirror the two that claude-md-budget.test.ts already runs
-// over the instruction files (every pointer resolves, nothing is orphaned),
-// because `docs/testing/` is outside the tree those cover.
+// Verified by mutation, not by reading: adding a throwaway test file and
+// running without regenerating fails the staleness assertion with the command
+// to fix it.
 
 const ROOT = resolve(__dirname, '..', '..')
 
-describe('parseHeader', () => {
-  it('collapses a leading // block up to its first blank comment line', () => {
-    const text = [
-      '// verifyProsePromise, one of the five post-generation verifiers.',
-      '// The real NoObjectGeneratedError is passed through.',
-      '//',
-      '// Three concerns, in order:',
-      '',
-      "import { describe } from 'vitest'",
-    ].join('\n')
-    expect(parseHeader(text)).toBe(
-      'verifyProsePromise, one of the five post-generation verifiers. The real NoObjectGeneratedError is passed through.',
-    )
+describe('hasHeader', () => {
+  it('is true for a leading line comment', () => {
+    expect(hasHeader('// what this pins\n\nimport x from "y"')).toBe(true)
   })
 
-  it('returns null for a file that opens on an import', () => {
-    expect(parseHeader("import { describe } from 'vitest'\n")).toBeNull()
+  it('is true for a leading block comment', () => {
+    expect(hasHeader('/**\n * what this pins\n */\n')).toBe(true)
   })
 
-  it('returns null for a comment that starts on the second line', () => {
-    // A header has to be the first thing in the file to be the file's summary.
-    expect(parseHeader("import x from 'y'\n// not a header\n")).toBeNull()
+  it('is false for a file that opens on an import', () => {
+    expect(hasHeader("import { describe } from 'vitest'\n")).toBe(false)
   })
 
-  it('reads a leading block comment and strips its asterisks', () => {
-    const text = ['/**', ' * What this file pins.', ' * And the second line.', ' *', ' * Detail.', ' */'].join('\n')
-    expect(parseHeader(text)).toBe('What this file pins. And the second line.')
-  })
-
-  it('truncates a very long first paragraph with an ellipsis', () => {
-    const long = `// ${'word '.repeat(80)}`
-    const summary = parseHeader(long)
-    expect(summary).not.toBeNull()
-    expect(summary!.length).toBeLessThanOrEqual(200)
-    expect(summary!.endsWith('…')).toBe(true)
-  })
-})
-
-describe('parseDescribes', () => {
-  it('takes top-level describes and ignores nested ones', () => {
-    const text = [
-      "describe('verifyProsePromise', () => {",
-      "  describe('the approved rule (TAC-527)', () => {",
-      '  })',
-      '})',
-      "describe('a second top-level block', () => {})",
-    ].join('\n')
-    expect(parseDescribes(text)).toEqual(['verifyProsePromise', 'a second top-level block'])
-  })
-
-  it('reads a describe.each template', () => {
-    expect(parseDescribes("describe.each(['a'])('channel %s', () => {})")).toEqual(['channel %s'])
-  })
-
-  it('handles all three quote styles', () => {
-    const text = ["describe('single', () => {})", 'describe("double", () => {})', 'describe(`tick`, () => {})'].join('\n')
-    expect(parseDescribes(text)).toEqual(['single', 'double', 'tick'])
+  it('is false for a comment that starts on the second line', () => {
+    // A header has to be the first thing in the file to describe the file.
+    expect(hasHeader("import x from 'y'\n// not a header\n")).toBe(false)
   })
 })
 
@@ -99,7 +54,7 @@ describe('countCases', () => {
       "    it.each([1])('b %i', () => {})",
       "test('c', () => {})",
       "  it.skip('d', () => {})",
-      '  // it(\'commented out\', () => {})',
+      "  // it('commented out', () => {})",
       "  const described = it('not this one either')",
     ].join('\n')
     // The commented line and the assignment both fail the column-anchored
@@ -137,42 +92,10 @@ describe('areaOf', () => {
   })
 })
 
-describe('areaSlug', () => {
-  it('flattens a path into a filename', () => {
-    expect(areaSlug('lib/agent')).toBe('lib-agent')
-    expect(areaSlug('scripts/onboarding')).toBe('scripts-onboarding')
-  })
-
-  it('names the root area something that is a legal filename', () => {
-    expect(areaSlug('<root>')).toBe('root')
-  })
-})
-
-describe('escapeCell', () => {
-  it('escapes a pipe so it cannot split the column', () => {
-    // A describe name containing a pipe is not hypothetical: `a | b` reads as
-    // an alternation in plenty of these names.
-    expect(escapeCell('returns a | b')).toBe('returns a \\| b')
-  })
-})
-
 describe('toEntry', () => {
-  it('prefers the header and records that it did', () => {
-    const entry = toEntry('lib/x/y.test.ts', "// What this pins.\n\ndescribe('y', () => {})")
-    expect(entry.summary).toBe('What this pins.')
-    expect(entry.source).toBe('header')
-  })
-
-  it('falls back to describe names and marks them as derived', () => {
-    const entry = toEntry('lib/x/y.test.ts', "describe('first', () => {})\ndescribe('second', () => {})")
-    expect(entry.summary).toBe('first; second')
-    expect(entry.source).toBe('names')
-  })
-
-  it('says so when a file offers neither', () => {
-    const entry = toEntry('lib/x/y.test.ts', "it('a bare case', () => {})")
-    expect(entry.source).toBe('none')
-    expect(entry.summary).toBe('(no header, no top-level describe)')
+  it('records cases, each sites and header presence', () => {
+    const entry = toEntry('lib/x/y.test.ts', "// pins y\n\nit.each([1])('a %i', () => {})")
+    expect(entry).toEqual({ path: 'lib/x/y.test.ts', cases: 1, eachSites: 1, hasHeader: true })
   })
 })
 
@@ -181,15 +104,15 @@ describe('discovery', () => {
 
   it('finds the test files at all', () => {
     // Guard the guard: every check below iterates this list, so an empty one
-    // passes them vacuously - and a discovery that silently stops matching is
+    // passes them vacuously, and a discovery that silently stops matching is
     // the failure this file exists to catch.
     expect(files.length).toBeGreaterThanOrEqual(300)
   })
 
   it('finds no file outside the tracked tree', () => {
     // A worktree under .claude/worktrees/ holds a full second copy of every
-    // test file. git ls-files cannot see it; a directory walk would, and the
-    // per-area counts would come back doubled.
+    // test file. git ls-files cannot see it; a directory walk would, and every
+    // per-area count would come back doubled.
     expect(files.filter((p) => p.startsWith('.claude/') || p.startsWith('.worktrees/'))).toEqual([])
   })
 
@@ -210,80 +133,53 @@ describe('docs/testing is current', () => {
   const generated = renderAll(ROOT)
   const committed = readCommitted(ROOT)
 
-  it('has the same set of files on disk as the generator produces', () => {
+  it('holds exactly the files the generator produces, and no leftovers', () => {
+    // Both directions. The area files this generator used to emit were deleted;
+    // a stale one left behind would otherwise sit there forever, unregenerated
+    // and silently wrong.
     expect([...committed.keys()].sort(), 'run `npm run test-map`').toEqual([...generated.keys()].sort())
   })
 
-  it.each([...renderAll(ROOT).keys()].sort())('%s matches the generator byte for byte', (path) => {
+  it('matches the generator byte for byte', () => {
     expect(
-      committed.get(path),
-      `${path} is stale or hand-edited. Run \`npm run test-map\` and commit the result.`,
-    ).toBe(generated.get(path))
-  })
-})
-
-describe('docs/testing integrity', () => {
-  const committed = readCommitted(ROOT)
-  const index = committed.get('docs/testing/README.md') ?? ''
-
-  /**
-   * Backticked repo paths, as the area docs write them.
-   *
-   * Anything but a backtick or whitespace: an App Router path carries `(authed)`
-   * and `[messageId]`, and a `[\w./-]` class silently dropped 61 of 305 rows -
-   * caught only by the floor in the next test.
-   */
-  function pathsIn(text: string): string[] {
-    return [...new Set(text.match(/`([^`\s]+\.test\.tsx?)`/g) ?? [])].map((m) => m.slice(1, -1))
-  }
-
-  it('extracts a path from every row of every area doc', () => {
-    // Guard the guard: with no paths extracted, the existence check below
-    // passes against an index whose every link is broken. Reconciled against
-    // the row count rather than a round number, so an extractor that silently
-    // stops matching one path SHAPE fails here instead of passing on 80%.
-    const areaDocs = [...committed.entries()].filter(([p]) => !p.endsWith('README.md'))
-    const extracted = areaDocs.flatMap(([, t]) => pathsIn(t)).length
-    const rows = areaDocs.flatMap(([, t]) => t.split('\n').filter((l) => /^\| `/.test(l))).length
-    expect(rows).toBeGreaterThanOrEqual(300)
-    expect(extracted, 'an area-doc row whose path the extractor cannot read').toBe(rows)
+      committed.get('docs/testing/README.md'),
+      'docs/testing/README.md is stale or hand-edited. Run `npm run test-map` and commit it.',
+    ).toBe(generated.get('docs/testing/README.md'))
   })
 
-  it('names only test files that exist', () => {
-    const dangling: string[] = []
-    for (const [doc, text] of committed) {
-      for (const path of pathsIn(text)) {
-        try {
-          readFileSync(resolve(ROOT, path))
-        } catch {
-          dangling.push(`${doc} -> ${path}`)
-        }
-      }
+  it('reconciles its per-area file counts against discovery', () => {
+    // The table is the whole artifact now, so a row that disagrees with the
+    // repo is the only way this file can lie. Parsed back out of the rendered
+    // markdown rather than recomputed, so a rendering bug cannot hide.
+    const text = generated.get('docs/testing/README.md') ?? ''
+    const rows = [...text.matchAll(/^\| `([^`]+)` \| (\d+) \| (\d+) \| (\d+)\/(\d+) \|$/gm)]
+    expect(rows.length).toBeGreaterThanOrEqual(20)
+    const areas = buildMap(ROOT)
+    expect(rows.length).toBe(areas.size)
+    for (const [, area, files, , headers, headerTotal] of rows) {
+      const entries = areas.get(area)
+      expect(entries, `row for ${area} names an area that does not exist`).toBeDefined()
+      expect(Number(files), `${area} file count`).toBe(entries!.length)
+      expect(Number(headerTotal), `${area} header denominator`).toBe(entries!.length)
+      expect(Number(headers), `${area} header count`).toBe(entries!.filter((e) => e.hasHeader).length)
     }
-    expect(dangling, 'docs/testing names files that do not exist').toEqual([])
   })
 
-  it('links every area doc from the index, so none is orphaned', () => {
-    const areaDocs = [...committed.keys()].filter((p) => !p.endsWith('README.md'))
-    const orphans = areaDocs.filter((p) => !index.includes(p.replace('docs/testing/', '')))
-    expect(orphans, 'not linked from docs/testing/README.md').toEqual([])
-  })
-
-  it('links nothing the index cannot resolve', () => {
-    const linked = [...new Set(index.match(/\]\(([\w.-]+\.md)\)/g) ?? [])].map((m) => m.slice(2, -1))
-    expect(linked.length).toBeGreaterThanOrEqual(20)
-    const missing = linked.filter((name) => !committed.has(`docs/testing/${name}`))
-    expect(missing, 'docs/testing/README.md links a file that is not there').toEqual([])
-  })
-
-  it('warns on every generated file that it is generated', () => {
+  it('warns that it is generated', () => {
     // Without this line the first person to fix a typo by hand loses the edit
     // on the next regeneration, and the global rule against editing generated
     // files has nothing to key on.
-    const unmarked = [...committed.entries()]
-      .filter(([, text]) => !text.includes('GENERATED FILE - do not edit by hand'))
-      .map(([path]) => path)
-    expect(unmarked).toEqual([])
+    expect(committed.get('docs/testing/README.md')).toContain('GENERATED FILE - do not edit by hand')
+  })
+
+  it('still records what is not covered anywhere', () => {
+    // The absence section is the ONLY reason this file survived the experiment
+    // that deleted the 26 per-area files: it is the one question grep cannot
+    // answer. If it is ever emptied, the file has no purpose left.
+    const text = committed.get('docs/testing/README.md') ?? ''
+    expect(text).toContain('What is not covered, anywhere')
+    expect(text).toContain('app/api/webhooks/square/route.ts')
+    expect(text).toContain('lib/auth/require-admin.ts')
   })
 })
 
@@ -291,14 +187,16 @@ describe('the pointers into docs/testing', () => {
   const read = (path: string) => readFileSync(resolve(ROOT, path), 'utf8')
 
   it('is reachable from the rule that loads when a test file is opened', () => {
-    // This is the layer that does the work: testing-discipline.md has
-    // `paths: **/*.test.ts` in its frontmatter, so it enters context exactly
-    // when the index becomes relevant. An index nobody is pointed at is an
-    // index nobody reads.
+    // testing-discipline.md has `paths: **/*.test.ts` in its frontmatter, so it
+    // enters context exactly when this becomes relevant.
     expect(read('.claude/rules/testing-discipline.md')).toContain('docs/testing/README.md')
   })
 
   it('is reachable from the root CLAUDE.md', () => {
     expect(read('CLAUDE.md')).toContain('docs/testing/README.md')
+  })
+
+  it('is named by the agent that is meant to consult it', () => {
+    expect(read('.claude/agents/test-author.md')).toContain('docs/testing/README.md')
   })
 })

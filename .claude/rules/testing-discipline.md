@@ -157,17 +157,21 @@ already answered wrongly in the same keystroke that wrote the fixture.
 
 ## Finding the right test file
 
-`docs/testing/README.md` indexes the suite by area, and each area file lists its test files one
-per line. Start there rather than globbing and reading a handful to find out which one is
-relevant - that is what it is for, and it is generated and CI-checked so it cannot go stale.
+**Grep, do not read a doc.** `grep -rn "^describe(" <area> --include="*.test.ts"` lists every
+test file in a directory with what it covers, generated live and scoped to that directory. For
+a behaviour with an obvious literal, `grep -rn "<literal>" --include="*.test.ts"` is exhaustive
+by construction.
 
-**It is for choosing what to read, never for concluding what is true.** A summary marked
-`names` was derived from `describe` names, and this file opens with a specimen whose name
-encoded the opposite of its assertion for two months. Even a `header` summary is a claim
-nothing enforces. Once you are about to rely on what a test asserts, read the assertion.
+This is measured, not assumed. An index of one line per test file was built, then tested
+against a control arm on six subagent runs: it was opened in 3 of 6, never first, never
+produced a better answer, and both agents on an area-survey question independently ran the
+`^describe(` grep above. The 26 per-area files were deleted as a cached copy of it.
 
-A file whose index line says nothing useful (`verifyProsePromise`, and little else) has earned
-a header: a leading comment giving the subject, the fixture strategy, and what the file pins.
-**Scope and strategy only** - those rot loudly when the module or the fake changes. Never a
-guarantee like "ensures X is safe" or "covers all cases", because nothing can contradict those
-and they are what stops the next person looking.
+`docs/testing/README.md` survives for the one question grep cannot answer: **what is not
+tested anywhere.** You cannot grep for a test that does not exist.
+
+A file whose `describe` names say nothing (`verifyProsePromise`, and little else) has earned a
+header: a leading comment giving the subject, the fixture strategy, and what it pins. **Scope
+and strategy only** - those rot loudly when the module or the fake changes. Never a guarantee
+like "ensures X is safe" or "covers all cases", because nothing can contradict those and they
+are what stops the next person looking.

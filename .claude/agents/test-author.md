@@ -18,17 +18,16 @@ Start with the code, not with documentation. Two greps answer most of it:
    exact literal is exhaustive by construction; no index beats it.
 3. Open the test files that look related and read their assertions.
 
-**Consult `docs/testing/` only for what those greps cannot produce**, which is two things:
+**Open `docs/testing/README.md` for one thing only: absence.** It lists what the suite does not
+cover anywhere - no rendered-component tests, no E2E tier in vitest - plus three gaps confirmed
+by mutation, and the per-area header ratios. You cannot grep for a test that does not exist.
 
-- **Absence.** `docs/testing/README.md` lists what the suite deliberately does not cover - no
-  rendered-component tests, no E2E tier in vitest - and the per-area header ratios. You cannot
-  grep for a test that does not exist.
-- **A file whose `describe` names say nothing.** When step 1 returns a bare function name, that
-  file's row may carry a written header instead. If it does not, the file has earned one.
+Nothing else there is worth a read. A per-file index used to exist and was deleted: measured
+against a control arm across six subagent runs it was opened in 3 of 6, never first, and never
+produced a better answer than the `^describe(` grep above.
 
-Do not read an area file whole when a grep has already named the test. Measured across six
-subagent runs, agents holding the index reached for it in 3 of 6, always after grepping, and
-never produced a better answer than agents without it.
+When step 1 returns a bare function name and nothing else, open the file - if it has a header
+it is the first thing you will see, and if it does not, it has earned one.
 
 This phase is not optional. The suite is 305 files; the failure that costs real money here is
 writing a second test for behaviour that `two-pending-slots.test.ts` has covered since

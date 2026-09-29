@@ -277,7 +277,7 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 7104 tests across 305 files (2026-09-29).** Measure it, never estimate:
+**Recorded baseline: 7068 tests across 305 files (2026-09-29).** Measure it, never estimate:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -295,11 +295,13 @@ That number is hand-stamped and nothing enforces it, so it goes stale the moment
 test - it already did once, in the PR that added the line below. The per-area breakdown is
 generated and CI-checked; only the runtime total has to come from a run.
 
-**Before adding a test, search `docs/testing/`** - a grep over those 27 files names the test
-that already covers the behaviour. `docs/testing/README.md` is the area table and the list of
-what the suite deliberately does not cover; read a `docs/testing/<area>.md` in full only when
-you have no keyword to grep for yet. Regenerate with `npm run test-map` whenever you add or
-remove a test file, or `npx vitest run` fails.
+**To find which test covers something, grep - do not read a doc.**
+`grep -rn "^describe(" <area> --include="*.test.ts"` lists every test file in a directory with
+what it covers, live and scoped. A control-arm experiment found no index beats it.
+
+`docs/testing/README.md` is for the question grep cannot answer: **what is not tested
+anywhere**, including three gaps confirmed by mutation. Generated; regenerate with
+`npm run test-map` when you add or remove a test file, or `npx vitest run` fails.
 
 It is a directory, not evidence - a summary marked `names` came from `describe` names, which
 have lied here before. Use it to pick what to read, then read the assertion.
