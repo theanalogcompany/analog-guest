@@ -148,3 +148,8 @@ with a glob; the filename embeds the client id and there is no fixed path.
 
 **This is interactive and human-only.** It opens a browser consent flow with no scripted path
 around it. Stop and hand off to the operator.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

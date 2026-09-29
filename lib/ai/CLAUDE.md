@@ -120,3 +120,8 @@ violation ships and fires an observation event. Do not read the dash loop as pre
 adding a mutation.
 
 Known limit: the loop returns the **last** attempt, not the best one.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

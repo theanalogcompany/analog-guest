@@ -3,7 +3,7 @@
 
 # The shape of the test suite
 
-305 test files, 5942 `it`/`test` declaration sites across 26 areas.
+306 test files, 5956 `it`/`test` declaration sites across 26 areas.
 
 **Declaration sites are not the test count.** 192 `.each` tables expand at runtime, so
 the figure `vitest` reports is higher. Quote the run, never this number.
@@ -48,7 +48,7 @@ when you leave.
 | `lib/voice-training` | 6 | 38 | 6/6 |
 | `lib/voices` | 6 | 61 | 3/6 |
 | `scripts` | 2 | 81 | 0/2 |
-| `scripts/lib` | 16 | 436 | 0/16 |
+| `scripts/lib` | 17 | 450 | 0/17 |
 | `scripts/measurement` | 10 | 170 | 0/10 |
 | `scripts/onboarding` | 25 | 349 | 3/25 |
 

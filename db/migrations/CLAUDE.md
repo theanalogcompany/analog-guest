@@ -104,3 +104,8 @@ the code back and leaving the CHECK wide; a value nothing writes costs nothing.
 
 **No RLS anywhere yet.** Agent and cron use the service role and would bypass it. THE-110
 tracks adding policies before any external user gets DB access.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

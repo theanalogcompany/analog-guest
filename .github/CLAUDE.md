@@ -132,3 +132,8 @@ THE-164 covers expanding test coverage.
 - **`analog-operator`'s `build-ready.yml` has the same setup**, so a token or allowlist
   finding here applies there too. The two allowlists are kept in step by
   `scripts/lib/linear-prompts.test.ts`.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

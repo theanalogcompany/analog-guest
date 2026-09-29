@@ -395,7 +395,7 @@ export async function dispatchOperatorOutbound(
     if (!sendResult.ok) {
       // Known v1 gap: the row is now review_state=approved|edited with
       // provider_message_id=null. Surfaces via the failure mode documented in
-      // CLAUDE.md "Operator API" section; recovery is manual SQL or the v2
+      // lib/operator/CLAUDE.md, "Dispatch"; recovery is manual SQL or the v2
       // failed_dispatch reconciliation ticket. We do NOT roll back the state
       // flip because doing so naively reintroduces double-send risk.
       return {

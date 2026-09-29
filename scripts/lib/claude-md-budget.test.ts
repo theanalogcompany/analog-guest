@@ -195,6 +195,44 @@ describe('instruction file pointers', () => {
     expect(orphans, `not referenced from ${rootFile}`).toEqual([])
   })
 
+  // A nested file is where a human lands from a code search, and five of them used
+  // to name nothing at all - no index, no decisions, no way out except the back
+  // button. Agents never felt it because the loader hands them the next hop; a
+  // human has only what the page links to.
+  it('gives every nested CLAUDE.md a way back to the index', () => {
+    const deadEnds = nestedFiles.filter((p) => !pointersIn(read(p)).includes(rootFile))
+    expect(
+      deadEnds,
+      `these name no path back to ${rootFile}. A reader who arrives here from a code search ` +
+        `has no route to the index or the decision records.`,
+    ).toEqual([])
+  })
+
+  // README.md is the only document that links rather than quoting paths in
+  // backticks, because it is the one a human opens first and GitHub renders a
+  // backticked path as unclickable code. Links rot silently, so resolve them.
+  it('resolves every relative link in README.md', () => {
+    const readme = read('README.md')
+    const targets = [...readme.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)]
+      .map((m) => m[1])
+      .filter((t) => !/^(https?:|mailto:|#)/.test(t))
+      .map((t) => t.split('#')[0])
+
+    // Guard the guard: with no targets found this passes against a README whose
+    // every link is broken, which is the state it is meant to prevent.
+    expect(targets.length, 'README.md has no relative links to check').toBeGreaterThanOrEqual(15)
+
+    const dangling = [...new Set(targets)].filter((t) => {
+      try {
+        readFileSync(resolve(ROOT, t))
+        return false
+      } catch {
+        return true
+      }
+    })
+    expect(dangling, 'README.md links at files that do not exist').toEqual([])
+  })
+
   it('names every decision record from the decisions index', () => {
     const indexText = read('docs/decisions/README.md')
     const orphans = decisionFiles

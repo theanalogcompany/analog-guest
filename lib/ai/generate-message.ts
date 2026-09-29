@@ -573,7 +573,7 @@ export async function generateMessage(
         // UNVERIFIED_URL trigger queues the draft. The links themselves ride
         // along so the operator event can say which ones were wrong; a gate
         // whose true-positive history cannot be produced on demand is an
-        // unproven gate (CLAUDE.md, Common gotchas).
+        // unproven gate (CLAUDE.md, "Gotchas worth carrying everywhere").
         unverifiedUrls: findUnverifiedUrls(lastResult.body, allowedUrls),
         // TAC-362: same recompute-on-final-body pattern as the two above.
         // Only meaningful when this turn's directive was 'none' — 'allowed'

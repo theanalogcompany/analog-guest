@@ -854,7 +854,7 @@ async function scanVenue(
       // (message_id=NULL) is the audit signal for manual operator
       // investigation. Releasing would let the next tick re-claim and
       // re-dispatch, producing a duplicate. See migration 029 header +
-      // CLAUDE.md "Common gotchas".
+      // .claude/rules/errors-as-values.md, "Writes".
       console.warn(
         `[followup-engine] post-persist dispatch failure for guest=${guest.id}; claim left in place (message_id=NULL audit row)`,
       )

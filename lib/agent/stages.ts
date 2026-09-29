@@ -1226,7 +1226,8 @@ export async function generateStage(
  * return `clean`, which the gate then recorded on messages.ungrounded_claims
  * as `[]` — byte-identical to what a genuine pass writes. After the fact "the
  * check passed this draft" and "the check never completed" were the same row.
- * That is this repo's signature defect class (see CLAUDE.md's Common gotchas:
+ * That is this repo's signature defect class (see CLAUDE.md, "Gotchas worth
+ * carrying everywhere":
  * comp_regex_backstop, the push `future-add safety` test, is_test_synthetic),
  * and a distinct state is what makes the gate's mapping a total switch instead
  * of a ternary chain with a silent default.
@@ -1252,7 +1253,7 @@ export type GroundingBackstopResult =
  * passing. That was caught in code review, by someone adding the state and
  * running the tree rather than reading the sentence, and it is this repo's
  * signature defect class committed inside the ticket that exists to close an
- * instance of it (CLAUDE.md, Common gotchas).
+ * instance of it (CLAUDE.md, "Gotchas worth carrying everywhere").
  *
  * `satisfies Record<GroundingBackstopResult['status'], …>` is what makes the
  * claim true. A sixth state now fails to compile here until someone says what

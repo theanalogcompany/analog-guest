@@ -187,9 +187,13 @@ type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed' | 'i
 //
 // TAC-364 replaced all of these. They are now ONE PLAIN SENTENCE each, not a
 // rule name and not a category label: what the operator needs to know, written
-// to be understood cold. Five of the thirteen approval triggers have never
-// fired in production, so their copy will be read for the first time on a live
-// card.
+// to be understood cold. Several approval triggers have never fired in
+// production, so their copy will be read for the first time on a live card.
+//
+// No count here on purpose: this comment said "five of the thirteen" while
+// APPROVAL_TRIGGERS held 23, and a stale count is worse than none because it
+// stops you counting. scripts/lib/claude-md-claims.test.ts now fails on a
+// digit-form count that disagrees with the map.
 //
 // The wire field stays `string | null` — only the value changes from raw
 // classifier code to human-readable text. Typed as Record<ApprovalTrigger |
