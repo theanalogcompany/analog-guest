@@ -9,13 +9,18 @@ stops anyone looking. Your job is coverage that could catch a real defect, not a
 
 # Phase 1 — Find what already exists. Do this first, always.
 
-1. Read `docs/testing/README.md`, then the area file for the directory you are working in
-   (`docs/testing/lib-agent.md`, `docs/testing/app-admin.md`, and so on).
-2. Open the test files whose rows look related and read their assertions.
+1. `grep` for the behaviour across `docs/testing/*.md` and across the test files themselves.
+   The index rows name what each file covers, so one grep over 27 small files usually names
+   the right test outright.
+2. Read `docs/testing/<area>.md` in full ONLY when the grep is ambiguous or empty - when you
+   do not yet know the keyword, which is the case the index earns its keep on. Reading an area
+   file costs 400-2,000 tokens; grepping it costs a fraction of that, and a measured comparison
+   found agents that grepped the index did as well as agents that read it.
+3. Open the test files that look related and read their assertions.
 
-This phase is not optional and not a formality. The suite is 305 files; the failure that costs
-real money here is writing a second test for behaviour that `two-pending-slots.test.ts` has
-covered since TAC-394, or reporting a gap that is not one.
+This phase is not optional. The suite is 305 files; the failure that costs real money here is
+writing a second test for behaviour that `two-pending-slots.test.ts` has covered since
+TAC-394, or reporting a gap that is not one. Neither costs tokens - they cost a wasted PR.
 
 **The index is for choosing what to read, never for concluding what is true.** A row marked
 `names` was derived from `describe` names, and this repo has a specimen whose name encoded the

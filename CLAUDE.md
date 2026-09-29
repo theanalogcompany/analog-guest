@@ -295,9 +295,10 @@ That number is hand-stamped and nothing enforces it, so it goes stale the moment
 test - it already did once, in the PR that added the line below. The per-area breakdown is
 generated and CI-checked; only the runtime total has to come from a run.
 
-**Before adding a test, read `docs/testing/README.md`** and the area file for the directory
-you are working in. It lists every test file with what it covers, so you find the existing
-coverage instead of duplicating it. Regenerate with `npm run test-map` whenever you add or
+**Before adding a test, search `docs/testing/`** - a grep over those 27 files names the test
+that already covers the behaviour. `docs/testing/README.md` is the area table and the list of
+what the suite deliberately does not cover; read a `docs/testing/<area>.md` in full only when
+you have no keyword to grep for yet. Regenerate with `npm run test-map` whenever you add or
 remove a test file, or `npx vitest run` fails.
 
 It is a directory, not evidence - a summary marked `names` came from `describe` names, which
