@@ -390,6 +390,21 @@ export async function generateMessage(
     // same prefix shows up as two reads rather than being averaged away.
     let cacheReadTokens = 0
     let cacheWriteTokens = 0
+    // THE SAME SUMMING, for the buckets Langfuse prices natively. Summed rather
+    // than last-attempt because a retry is a second Sonnet call that was really
+    // paid for: 12.6% of generations run one (measured 2026-09-29) and reporting
+    // only the final attempt would hide that cost entirely.
+    //
+    // uncachedInputTokens is kept separate from cacheRead/cacheWrite because
+    // Langfuse's input buckets are DISJOINT and it sums them for cost - see
+    // AgentUsage in lib/observability/langfuse.ts. Do not add them together here.
+    let uncachedInputTokens = 0
+    let outputTokens = 0
+    // The model the provider actually served, last attempt wins. Every attempt in
+    // one call uses the same model, so last-wins and first-wins agree; reading it
+    // from the response rather than from getGenerationModel() is what makes a
+    // provider-side alias change visible instead of silently mis-attributed.
+    let servedModelId: string | undefined
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -399,7 +414,7 @@ export async function generateMessage(
       const userPromptForAttempt = regenFeedback
         ? `${userPrompt}\n\n${regenFeedback}`
         : userPrompt
-      const { object: rawObject, usage, providerMetadata } = await generateObject({
+      const { object: rawObject, usage, providerMetadata, response } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
         // maps each to its own Anthropic system text block and honours a
@@ -459,6 +474,12 @@ export async function generateMessage(
       cacheReadTokens += usage?.cachedInputTokens ?? 0
       cacheWriteTokens +=
         (providerMetadata?.anthropic?.cacheCreationInputTokens as number | null | undefined) ?? 0
+      // inputTokens is the SDK's TOTAL (noCache + cacheRead + cacheWrite), so the
+      // uncached portion comes off inputTokenDetails. Subtracting here instead
+      // would double-bill every cached token once this reaches Langfuse.
+      uncachedInputTokens += usage?.inputTokenDetails?.noCacheTokens ?? 0
+      outputTokens += usage?.outputTokens ?? 0
+      servedModelId = response?.modelId ?? servedModelId
       // Dashes are substituted, never regenerated. Done HERE rather than at
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
@@ -552,6 +573,23 @@ export async function generateMessage(
         promptVersion: PROMPT_VERSION,
         cacheReadTokens,
         cacheWriteTokens,
+        // The same three cache/input numbers again, in the shape toAgentUsage
+        // consumes, so the orchestrator can price the `generate` generation
+        // without reassembling them. cacheReadTokens/cacheWriteTokens above stay
+        // because the prompt-cache accounting in the span's output object is
+        // documented and queried; these two representations must agree, and
+        // generate-message.test.ts asserts they do.
+        modelId: servedModelId,
+        usage: {
+          inputTokens: uncachedInputTokens + cacheReadTokens + cacheWriteTokens,
+          outputTokens,
+          totalTokens: uncachedInputTokens + cacheReadTokens + cacheWriteTokens + outputTokens,
+          cachedInputTokens: cacheReadTokens,
+          inputTokenDetails: {
+            noCacheTokens: uncachedInputTokens,
+            cacheWriteTokens,
+          },
+        },
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
         //

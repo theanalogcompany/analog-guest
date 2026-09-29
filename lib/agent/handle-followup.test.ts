@@ -120,7 +120,10 @@ vi.mock('@/lib/notifications/send', () => ({
   shouldSendDraftFlaggedPush: () => false,
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 999_999_999,
+  // Never fires here — this file is not about the latency emit, and a stray
+  // emit would add noise to unrelated assertions. NOT production semantics:
+  // the real per-kind thresholds are pinned in lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: () => false,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureDraftQueued: vi.fn(),
@@ -133,7 +136,8 @@ vi.mock('@/lib/observability', () => ({
   startAgentTrace: () => ({
     id: '',
     captureContent: false,
-    span: () => ({ span: () => ({ end: () => undefined }), end: () => undefined, update: () => undefined }),
+    span: () => ({ span: () => ({ end: () => undefined }),
+      generation: () => ({ end: () => undefined }), end: () => undefined, update: () => undefined }),
     update: () => undefined,
     flushAsync: async () => undefined,
   }),

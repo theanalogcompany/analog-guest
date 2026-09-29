@@ -2,6 +2,7 @@ import type { SlotDropReason } from './pending-slots'
 import type {
   FollowupReason,
   MessageCategory,
+  ModelCallUsage,
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
@@ -232,6 +233,16 @@ export interface Classification {
   // TAC-397: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.correctsPendingReply for the full contract.
   correctsPendingReply: boolean
+  // Model id and token usage for the classify call, carried so the orchestrator
+  // can price the `classify` Langfuse generation. Passed through unmodified from
+  // ClassifyMessageResult — unlike `category`, these describe the call that was
+  // made and must NOT be rewritten by the confidence reroute.
+  //
+  // Optional because a provider need not report every field, and because absent
+  // is honestly different from zero. See lib/observability/langfuse.ts's
+  // AgentUsage for why the key names are not free choice.
+  modelId?: string
+  usage?: ModelCallUsage
 }
 
 export interface RuntimeContext {

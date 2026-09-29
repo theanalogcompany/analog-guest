@@ -232,7 +232,11 @@ vi.mock('@/lib/guests/context', () => ({
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
@@ -309,20 +313,39 @@ const traceControl = vi.hoisted(() => ({ flushThrows: false }))
  * ORDER.
  */
 const spanLog = vi.hoisted(() => ({ events: [] as Array<{ name: string; phase: 'open' | 'close' }> }))
-vi.mock('@/lib/observability', () => ({
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` must log IDENTICALLY. In production they differ only
+  // in the recorded observation type, never in position in the tree, so a fake
+  // where only one of them logs would silently drop a stage from spanLog — and
+  // the stage-ordering assertions below would then be asserting over a pipeline
+  // missing `classify`, and still pass.
+  const open = (name: string) => {
+    spanLog.events.push({ name, phase: 'open' })
+    return {
+      span: () => ({ end: () => undefined }),
+      generation: () => ({ end: () => undefined }),
+      end: () => {
+        spanLog.events.push({ name, phase: 'close' })
+      },
+      update: () => undefined,
+    }
+  }
+  return {
+  // Real implementation, not a stub: it is a pure mapper, and a stub returning
+  // {} would make the usage assertions unfalsifiable.
+  toAgentUsage: (u: Record<string, number | null | undefined>) => {
+    const out: Record<string, number> = {}
+    if (u.inputTokens) out.input = u.inputTokens
+    if (u.outputTokens) out.output = u.outputTokens
+    if (u.totalTokens) out.total = u.totalTokens
+    if (u.cachedInputTokens) out.input_cached_tokens = u.cachedInputTokens
+    return out
+  },
   startAgentTrace: () => ({
     id: '',
     captureContent: false,
-    span: (name: string) => {
-      spanLog.events.push({ name, phase: 'open' })
-      return {
-        span: () => ({ end: () => undefined }),
-        end: () => {
-          spanLog.events.push({ name, phase: 'close' })
-        },
-        update: () => undefined,
-      }
-    },
+    span: open,
+    generation: open,
     update: () => undefined,
     // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
     // which is the only way the orchestrator can throw past its own top-level
@@ -331,7 +354,8 @@ vi.mock('@/lib/observability', () => ({
       if (traceControl.flushThrows) throw new Error('flush failed')
     },
   }),
-}))
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),

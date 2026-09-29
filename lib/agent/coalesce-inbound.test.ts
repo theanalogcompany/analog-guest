@@ -232,7 +232,11 @@ vi.mock('@/lib/guests/context', () => ({
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: (...a: unknown[]) => captureAgentLatencyHighMock(...a),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
@@ -280,15 +284,23 @@ vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 // read a real unbounded loop as SURVIVED. Counting down means the retry
 // succeeds, the chain terminates, and the mutant fails an assertion instead.
 const traceControl = vi.hoisted(() => ({ flushThrowsTimes: 0 }))
-vi.mock('@/lib/observability', () => ({
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` are the same shape here. They differ in production
+  // only by recorded observation type, never by tree position, so the fake must
+  // not make one of them inert — `classify` is created with `generation()`.
+  const open = () => ({
+    span: () => ({ end: () => undefined }),
+    generation: () => ({ end: () => undefined }),
+    end: () => undefined,
+    update: () => undefined,
+  })
+  return {
+  toAgentUsage: () => ({}),
   startAgentTrace: () => ({
     id: '',
     captureContent: false,
-    span: () => ({
-      span: () => ({ end: () => undefined }),
-      end: () => undefined,
-      update: () => undefined,
-    }),
+    span: open,
+    generation: open,
     update: () => undefined,
     // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
     // which is the only way the orchestrator can throw past its own top-level
@@ -300,7 +312,8 @@ vi.mock('@/lib/observability', () => ({
       }
     },
   }),
-}))
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),
@@ -1347,8 +1360,8 @@ describe('TAC-526 — the settle and the latency emit', () => {
           { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
         )
       }
-      // Past AGENT_LATENCY_HIGH_THRESHOLD_MS (mocked to 10s) so the emit is
-      // reachable at all — without this the assertion is vacuous.
+      // Past the mocked latency bar (10s here, not production's 35s) so the
+      // emit is reachable at all — without this the assertion is vacuous.
       vi.setSystemTime(new Date(Date.now() + 20_000))
       return { status: 'success', result: successResult() }
     })

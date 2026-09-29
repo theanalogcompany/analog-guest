@@ -1091,3 +1091,136 @@ describe('replaceDashes — the edge cases probing found', () => {
     expect(replaceDashes(clean)).toBe(clean)
   })
 })
+
+describe('generateMessage — usage for Langfuse pricing', () => {
+  /**
+   * Queue responses that also carry SDK usage, so the summing across a regen is
+   * exercised. `queueResponses` above deliberately omits usage (every other test
+   * here is about bodies), which is why this needs its own queue.
+   *
+   * The numbers follow the SDK's real contract: `inputTokens` is the TOTAL, so
+   * noCache + cacheRead + cacheWrite must equal it. Attempt 2 is a cache HIT with
+   * a different split, which is what a real regen looks like.
+   */
+  function queueWithUsage() {
+    generateObjectMock.mockReset()
+    const attempts = [
+      {
+        body: 'first try, too generic',
+        voiceFidelity: 0.4,
+        reasoning: 'too generic',
+        usage: {
+          inputTokens: 10_000,
+          outputTokens: 100,
+          totalTokens: 10_100,
+          cachedInputTokens: 0,
+          inputTokenDetails: { noCacheTokens: 9_800, cacheWriteTokens: 200 },
+        },
+        providerMetadata: { anthropic: { cacheCreationInputTokens: 200 } },
+      },
+      {
+        body: 'second try, better',
+        voiceFidelity: 0.85,
+        reasoning: 'better',
+        usage: {
+          inputTokens: 10_050,
+          outputTokens: 120,
+          totalTokens: 10_170,
+          cachedInputTokens: 9_800,
+          inputTokenDetails: { noCacheTokens: 250, cacheWriteTokens: 0 },
+        },
+        providerMetadata: { anthropic: { cacheCreationInputTokens: 0 } },
+      },
+    ]
+    for (const a of attempts) {
+      generateObjectMock.mockResolvedValueOnce({
+        object: {
+          body: a.body,
+          voiceFidelity: a.voiceFidelity,
+          reasoning: a.reasoning,
+          requiresOperatorApproval: false,
+          approvalReason: '',
+          contextUpdate: {},
+        },
+        usage: a.usage,
+        providerMetadata: a.providerMetadata,
+        response: { modelId: 'claude-sonnet-4-6-20260219' },
+      })
+    }
+  }
+
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it('sums usage across attempts rather than reporting only the last', async () => {
+    // A retry is a second Sonnet call that was genuinely paid for. Reporting the
+    // final attempt alone would make a 2-attempt generation cost the same as a
+    // 1-attempt one, which is exactly the accounting gap this field closes.
+    queueWithUsage()
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attempts).toBe(2)
+
+    expect(r.data.usage?.inputTokenDetails?.noCacheTokens).toBe(9_800 + 250)
+    expect(r.data.usage?.cachedInputTokens).toBe(0 + 9_800)
+    expect(r.data.usage?.inputTokenDetails?.cacheWriteTokens).toBe(200 + 0)
+    expect(r.data.usage?.outputTokens).toBe(100 + 120)
+    // Not the last attempt's figure, asserted explicitly: an accumulator written
+    // as `=` instead of `+=` produces a plausible number and no other assertion
+    // in this file would notice.
+    expect(r.data.usage?.outputTokens).not.toBe(120)
+  })
+
+  it('keeps the input buckets disjoint so they reconcile to what the SDK reported', async () => {
+    // Langfuse SUMS input, input_cached_tokens and input_cache_creation for cost.
+    // If noCacheTokens ever carries the cached tokens too, cost inflates ~3x and
+    // nothing errors.
+    //
+    // RECONCILED AGAINST THE MOCK'S OWN inputTokens (10_000 + 10_050), not against
+    // r.data.usage.inputTokens. The latter is DERIVED from the same three buckets
+    // being checked, so that version of this test could not fail: a first draft
+    // wrote it that way and the double-billing mutant walked straight past it.
+    // The SDK's reported total is the independent source.
+    const SDK_REPORTED_INPUT_TOTAL = 10_000 + 10_050
+    const SDK_REPORTED_GRAND_TOTAL = 10_100 + 10_170
+    queueWithUsage()
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const u = r.data.usage
+    expect(
+      (u?.inputTokenDetails?.noCacheTokens ?? 0) +
+        (u?.cachedInputTokens ?? 0) +
+        (u?.inputTokenDetails?.cacheWriteTokens ?? 0),
+    ).toBe(SDK_REPORTED_INPUT_TOTAL)
+    expect(u?.inputTokens).toBe(SDK_REPORTED_INPUT_TOTAL)
+    expect(u?.totalTokens).toBe(SDK_REPORTED_GRAND_TOTAL)
+  })
+
+  it('agrees with the cacheReadTokens/cacheWriteTokens it duplicates', async () => {
+    // Two representations of one fact. They are both consumed - the scalars by the
+    // span's output object, the usage object by native pricing - so a divergence
+    // would make the trace UI and the cost dashboard disagree with each other,
+    // with no way to tell which is right.
+    queueWithUsage()
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.usage?.cachedInputTokens).toBe(r.data.cacheReadTokens)
+    expect(r.data.usage?.inputTokenDetails?.cacheWriteTokens).toBe(r.data.cacheWriteTokens)
+  })
+
+  it('reports the model the provider served, not the factory default', async () => {
+    // getGenerationModel() is mocked to 'mock-model' in this file. Reading the id
+    // off the response is what makes a provider-side alias change visible; taking
+    // it from the factory would attribute cost to whatever the code asked for.
+    queueWithUsage()
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.modelId).toBe('claude-sonnet-4-6-20260219')
+    expect(r.data.modelId).not.toBe('mock-model')
+  })
+})

@@ -22,12 +22,15 @@ vi.mock('posthog-node', () => ({
 }))
 
 import {
+  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  captureAgentLatencyHigh,
   captureClassificationLowConfidence,
   captureConversationChannelUnresolved,
   captureDemoBypassedApprovalGate,
   captureDraftDropped,
   capturePendingSlotInvariantBroken,
   formatDraftDropped,
+  isAgentLatencyHigh,
   phoneLast4,
 } from './posthog'
 
@@ -298,5 +301,80 @@ describe('captureConversationChannelUnresolved: a reply that cannot be routed (T
       (c) => (c[0] as { properties: { inboundChannel: string } }).properties.inboundChannel,
     )
     expect(channels).toEqual(['none', 'unparseable'])
+  })
+})
+
+describe('agent_latency_high: thresholds and the absence of a Slack relay', () => {
+  // This alarm shipped with a single 10_000ms threshold and a Slack relay, and
+  // had NO test coverage at all — which is how it ran for months firing on
+  // 99.3% of inbound turns (274/276 over the 30d window to 2026-09-29) into the
+  // channel people are supposed to read. The gap was the coverage, not the number.
+
+  const base = {
+    agentRunId: 'run-1',
+    venueId: 'v-1',
+    guestId: 'guest-1',
+    inboundBody: null,
+    generatedBody: null,
+  }
+
+  it('does NOT relay to Slack, while still emitting the PostHog event', async () => {
+    // The assertion this file exists for. A per-run threshold cannot be both
+    // sensitive and quiet, so the real-time channel is not the right sink; the
+    // aggregate alert lives in Langfuse. Asserts BOTH halves, because a mistake
+    // that silently dropped the PostHog event too would leave no forensics.
+    await captureAgentLatencyHigh({ ...base, totalElapsedMs: 40_000, kind: 'inbound' })
+    expect(postToSlackMock).not.toHaveBeenCalled()
+    expect(captureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'agent_latency_high',
+        distinctId: 'guest-1',
+        properties: expect.objectContaining({ totalElapsedMs: 40_000, kind: 'inbound' }),
+      }),
+    )
+  })
+
+  it('uses a different threshold per kind', async () => {
+    // Not an equality check against the literals — that is a derivation against
+    // itself. The claim under test is that the two are NOT the same number,
+    // because a single shared threshold is the original defect: inbound p50 is
+    // 18.0s against followup p50 0.2s, so one bar cannot serve both.
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound).not.toBe(
+      AGENT_LATENCY_HIGH_THRESHOLD_MS.followup,
+    )
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound).toBeGreaterThan(
+      AGENT_LATENCY_HIGH_THRESHOLD_MS.followup,
+    )
+  })
+
+  it('sits above the measured p95 for each kind, so it is not firing on the body', async () => {
+    // Measured p95: inbound 31.5s, followup 1.0s. A threshold at or below p95
+    // means >=5% of all runs alarm, which is the noise the old value produced.
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound).toBeGreaterThan(31_500)
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.followup).toBeGreaterThan(1_000)
+  })
+
+  it('stays reachable, so neither kind becomes a gate that cannot fire', async () => {
+    // The opposite failure, and the one this repo warns about explicitly:
+    // "distrust any gate whose true-positive history you cannot produce."
+    // Observed maxima over the same window: inbound 68.5s, followup 21.9s.
+    // A followup threshold of 25s would have been permanently dead.
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound).toBeLessThan(68_500)
+    expect(AGENT_LATENCY_HIGH_THRESHOLD_MS.followup).toBeLessThan(21_900)
+  })
+
+  it('isAgentLatencyHigh reads the threshold for the kind it was given', async () => {
+    const { inbound, followup } = AGENT_LATENCY_HIGH_THRESHOLD_MS
+    // Straddle each bar. The cross-kind pair is the important one: an elapsed
+    // time between the two thresholds must be high for followup and NOT high
+    // for inbound. A helper that ignored `kind` passes every same-kind check.
+    const between = Math.floor((followup + inbound) / 2)
+    expect(isAgentLatencyHigh('followup', between)).toBe(true)
+    expect(isAgentLatencyHigh('inbound', between)).toBe(false)
+
+    expect(isAgentLatencyHigh('inbound', inbound + 1)).toBe(true)
+    expect(isAgentLatencyHigh('inbound', inbound)).toBe(false)
+    expect(isAgentLatencyHigh('followup', followup + 1)).toBe(true)
+    expect(isAgentLatencyHigh('followup', followup)).toBe(false)
   })
 })

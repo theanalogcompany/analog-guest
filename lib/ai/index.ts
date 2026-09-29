@@ -25,6 +25,7 @@ export type {
   KnowledgeCorpusChunk,
   MessageCategory,
   MessageDelivery,
+  ModelCallUsage,
   PendingQuestion,
   RecentMessage,
   RuntimeContext,

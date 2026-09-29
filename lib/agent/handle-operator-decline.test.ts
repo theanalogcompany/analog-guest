@@ -155,7 +155,11 @@ vi.mock('@/lib/guests/context', () => ({
   updateGuestContext: (...args: unknown[]) => updateGuestContextMock(...args),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: (...args: unknown[]) =>
     captureAgentLatencyHighMock(...args),
   captureDraftDropped: (...args: unknown[]) => captureDraftDroppedMock(...args),

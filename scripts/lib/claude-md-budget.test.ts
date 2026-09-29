@@ -44,8 +44,32 @@ const RULE_MAX_LINES = 400
  * more subsystem file, so the next substantial addition is a conversation
  * rather than a reflex. Raising it is fine; raising it without saying what grew
  * is how the old file got to 1.34 MB.
+ *
+ * 140_000 -> 150_000 on 2026-09-29. WHAT GREW: `lib/observability/CLAUDE.md`,
+ * 0 -> ~17,000 bytes, making 16 files. It is the "roughly one more subsystem
+ * file" the previous cap budgeted for, so this is the conversation landing, not
+ * a bypass. Two thirds of it is content PR #282 deleted from the root file
+ * rather than routing - the latency and prompt-cache material a planning session
+ * then re-derived from scratch and got wrong. The rest documents the Langfuse v5
+ * / OpenTelemetry wiring.
+ *
+ * Before raising it: ~2,000 bytes were cut, and four "why" explanations were
+ * pushed into source headers where the routing table says they belong. Also
+ * replaced the measured baseline tables with the queries that regenerate them -
+ * right on its own terms, since a stale p50 stops the next person looking and
+ * re-deriving is 3 API calls and 14s against an endpoint that meters ingestion
+ * rather than reads. But it did NOT reduce the byte count. Do not reach for
+ * de-staling as a size lever; it is not one.
+ *
+ * WORTH RECONSIDERING NEXT TIME THIS FIRES. Nested files load only when Claude
+ * reads their directory, so this total is not a context cost any session pays -
+ * NESTED_MAX_BYTES is the cap that protects context, and ROOT_MAX_BYTES the one
+ * that protects every session. This one only answers "has the corpus quietly
+ * doubled", which is a conversation trigger rather than a budget. If it fires
+ * again, consider whether a per-file cap plus a file-count cap says the same
+ * thing without the pressure to shave prose to fit an aggregate nobody loads.
  */
-const COMBINED_MAX_BYTES = 140_000
+const COMBINED_MAX_BYTES = 150_000
 
 /** One 362 KB line is how 135 KB of duplicated text stayed invisible. */
 const MAX_LINE_CHARS = 2_000
