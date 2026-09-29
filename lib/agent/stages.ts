@@ -3207,6 +3207,11 @@ function triggerReasonToFollowupReason(
     // follow-up block's framing (days since a visit, a re-engagement reason)
     // has nothing to say about someone standing at the counter now.
     case 'instagram_scan_arrival':
+    // TAC-560: a warm close renders `## Closing this conversation` instead. The
+    // follow-up block's framing (days since a visit, a re-engagement reason) has
+    // nothing to say about a conversation that went quiet ten minutes ago, and
+    // naming a past visit is exactly what its own category instruction forbids.
+    case 'warm_close':
       return null
   }
 }
@@ -3555,6 +3560,9 @@ export function buildAiRuntime(
     // TAC-536: mapped straight through, never re-derived. Null on every turn
     // but a scan greeting, and the serializer omits the block on null.
     scanArrival: ctx.scanArrival,
+    // TAC-560: mapped straight through. Picks the `## Closing this conversation`
+    // block and replaces the category instructions; see composePrompt.
+    warmClose: ctx.warmClose,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

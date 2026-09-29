@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SPLIT_PROBABILITY } from './sentence-split'
 
 // TAC-355: scoped narrowly to the wiring this ticket adds to
 // handleFollowup — the mechanic-offer backstop is invoked on cron-triggered
@@ -188,6 +189,7 @@ function makeCtx(
     // is mocked, so this has to be set to whatever the test's own trigger is.
     followupTrigger,
     scanArrival: null,
+    warmClose: false,
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
@@ -230,7 +232,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.72.0',
+    promptVersion: 'v1.73.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1032,6 +1034,14 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
       expect(generateStageMock.mock.calls[0]?.[1]).toBe('guest_arrived')
     })
 
+    // TAC-560: the scan greeting keeps the ORDINARY coin. Nothing in TAC-536
+    // asks for one bubble, and the warm close's NEVER_SPLIT_RNG must not leak
+    // onto this path.
+    it('does not force a single bubble', async () => {
+      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      expect(dispatchReplyMock.mock.calls[0]?.[2]).not.toHaveProperty('rng')
+    })
+
     // The Instagram arm can decline. The text arm throws instead, so these are
     // reachable only here, and they must not read as a clean send.
     it('reports a reply staff already sent as superseded, not sent', async () => {
@@ -1279,5 +1289,116 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       },
       claim: 'check_failed',
     })
+  })
+})
+
+// TAC-560: the SECOND carve-out on the Instagram refusal, and the mirror refusal
+// that keeps the warm close off SMS for now.
+describe('handleFollowup — the warm close (TAC-560)', () => {
+  const warmTrigger = (): FollowupTrigger => ({
+    reason: 'warm_close',
+    triggeredAt: new Date(),
+    warmClose: { answersMessageId: 'our-last-msg' },
+  })
+
+  beforeEach(() => {
+    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+      ...makeCtx(args.followupTrigger),
+      conversationChannel: 'instagram',
+    }))
+    // Same trap the scan-greeting block documents: both are reset by the file's
+    // own beforeEach with no default, and this block is one of the few that
+    // generates and therefore reaches them.
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+  })
+
+  it('generates and sends on Instagram where every other reason is refused', async () => {
+    // TAC-469 rule 2 refuses Instagram follow-ups because they fire days later
+    // with the window almost always shut. A warm close fires TEN MINUTES after
+    // our own last message, so the window cannot have closed.
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(result).toMatchObject({ status: 'sent' })
+    expect(generateStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends through dispatchReply, never scheduleAndSend', async () => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    expect(dispatchReplyMock).toHaveBeenCalledTimes(1)
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  // ONE MESSAGE, ALWAYS. Rule 15 asks for one and so does this ticket's
+  // criteria; resolveDispatchBubbles would otherwise split a two-sentence close
+  // on a fair coin about half the time. Asserted as the PROPERTY (the value is
+  // at or above the split probability) rather than the literal, so a change to
+  // either constant fails here.
+  it('forces a single bubble', async () => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    const options = dispatchReplyMock.mock.calls[0]?.[2] as { rng?: () => number }
+    expect(options.rng).toBeTypeOf('function')
+    expect(options.rng?.()).toBeGreaterThanOrEqual(SPLIT_PROBABILITY)
+  })
+
+  // It names OUR OWN last outbound, which is the message the guest went quiet
+  // after. Without it the row names nothing and the reply check reads it as
+  // answering everything before it, silencing the agent's reply to whatever the
+  // guest says next.
+  it('names the message the guest went quiet after', async () => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+      answersInboundId: 'our-last-msg',
+    })
+  })
+
+  // EXEMPT, and this is the one place the two dispatchReply reasons differ. The
+  // check asks "has this guest's MESSAGE already been answered", keyed on an
+  // inbound row; a warm close answers no message, so an outbound id would
+  // resolve to nothing. What the check protects against is handled upstream: the
+  // processor's candidate scan takes the guest's newest message, so a reply staff
+  // typed by hand becomes the anchor and the pause restarts.
+  it('exempts the reply check', async () => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({ replyCheck: 'exempt' })
+  })
+
+  it('records it as acknowledgment, so no messages.category widening is needed', async () => {
+    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    expect(generateStageMock.mock.calls[0]?.[1]).toBe('acknowledgment')
+  })
+
+  // Ruled 2026-09-29: Instagram only for now. The SMS arm is a follow-up, and it
+  // is refused here rather than routed, so nothing can reach a text send by this
+  // path.
+  it('refuses a text conversation', async () => {
+    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+      ...makeCtx(args.followupTrigger),
+      conversationChannel: 'text',
+    }))
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(result).toEqual({ status: 'refused', reason: 'warm_close_is_instagram_only' })
+    expect(generateStageMock).not.toHaveBeenCalled()
+    expect(dispatchReplyMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unresolved channel too', async () => {
+    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+      ...makeCtx(args.followupTrigger),
+      conversationChannel: null,
+    }))
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(result).toEqual({ status: 'refused', reason: 'warm_close_is_instagram_only' })
   })
 })

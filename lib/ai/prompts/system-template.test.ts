@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.72.0 (the getting-to-know-you question is its own emission field)', () => {
-    expect(PROMPT_VERSION).toBe('v1.72.0')
+  it('is v1.73.0 (the warm close on a pause, and its self-report field)', () => {
+    expect(PROMPT_VERSION).toBe('v1.73.0')
   })
 })
 

@@ -216,6 +216,7 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     } as RuntimeContext['currentMessage'],
     followupTrigger: null,
     scanArrival: null,
+    warmClose: false,
     conversationChannel: 'text',
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
@@ -249,6 +250,7 @@ function makeGeneration(): GenerateMessageResult {
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.78],
@@ -2235,6 +2237,7 @@ describe('scheduleAndSend — the intention question is its own message (TAC-554
       ...makeGeneration(),
       body: `${answer} ${question}`,
       intentionQuestion: question,
+      closedTheConversation: false,
     }
   }
 

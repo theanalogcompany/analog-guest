@@ -690,6 +690,8 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // TAC-554: the fixed fallback holding line, with no generation behind
     // it, so there is no getting-to-know-you question to bubble.
     intentionQuestion: '',
+    // TAC-560: a holding message is never the warm close. It asserts nothing and closes nothing.
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     attempts: 0,
     attemptScores: [],

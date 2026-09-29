@@ -78,6 +78,26 @@ export const FollowupRulesSchema = z.object({
   // per-venue against this value (mirrors MORNING_HOUR_LOCAL=7 in
   // commitments-due.ts).
   cron_hour_local: z.number().int().min(0).max(23).default(10),
+
+  // TAC-560: minutes of guest silence, after our last message reached them,
+  // before the warm "line is open" close fires. The venue setting behind
+  // WARM_CLOSE_PAUSE_MINUTES_DEFAULT in lib/agent/warm-close.ts.
+  //
+  // IT LIVES HERE DESPITE NOT BEING A FOLLOW-UP, and the tension is worth
+  // stating rather than leaving to be discovered: `weekly_cap` does NOT count
+  // the warm close, and the per-reason toggles do not gate it. What this column
+  // has become is the per-venue timing-and-outreach bag, and the precedent is
+  // `recent_conversation_hours`, which TAC-380's intention brake and TAC-547's
+  // contextual retrieval both read for reasons unconnected to the engine.
+  //
+  // `quiet_hours_*` above, by contrast, DO gate it (ruled 2026-09-29), so the
+  // close never lands in the middle of the night.
+  //
+  // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Stored
+  // rows written before this key existed simply do not carry it and take the
+  // default below; followup-rules.test.ts pins that 028's own eleven values are
+  // unchanged and asserts this key separately.
+  warm_close_pause_minutes: z.number().int().positive().default(10),
 })
 
 export type FollowupRules = z.infer<typeof FollowupRulesSchema>
@@ -101,6 +121,7 @@ export const FOLLOWUP_RULES_DEFAULT: FollowupRules = {
   quiet_hours_start_local: '21:00',
   quiet_hours_end_local: '08:00',
   cron_hour_local: 10,
+  warm_close_pause_minutes: 10,
 }
 
 /**

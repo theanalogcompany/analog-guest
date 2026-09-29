@@ -240,12 +240,18 @@ vi.mock('./extract-reported-order', async () => {
   }
 })
 const recordIntentionPromptsMock = vi.fn()
+// TAC-560
+const markWarmCloseSentMock = vi.fn()
+const captureWarmCloseSentMock = vi.fn()
 const recordIntentionEligibilityMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
 // effect, mocked wholesale; its own unit coverage lives in
 // lib/agent/intentions/record.test.ts. This file only needs to prove the
 // call site: gated on ctx.openIntentions, fired with the right shape, never
 // lets a rejection propagate.
+vi.mock('./warm-close-store', () => ({
+  markWarmCloseSent: (...a: unknown[]) => markWarmCloseSentMock(...a),
+}))
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
   recordIntentionEligibility: (...a: unknown[]) =>
@@ -263,8 +269,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
-  captureCrisisSafetyReplySent: (...a: unknown[]) =>
-    captureCrisisSafetyReplySentMock(...a),
+  captureWarmCloseSent: (...a: unknown[]) => captureWarmCloseSentMock(...a),
+  captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
@@ -1001,12 +1007,15 @@ function successResult() {
     // string. `resolveCancellation` reads both as "cancels nothing", so the
     // omission is invisible until a test means to exercise a real id.
     cancelsCommitmentId: '',
+    // TAC-560: REQUIRED on GenerateMessageResult for the same reason. `false` is
+    // the ordinary turn; a test that means to exercise the close overrides it.
+    closedTheConversation: false,
     attempts: 1,
     attemptScores: [0.9],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.72.0',
+    promptVersion: 'v1.73.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -4213,5 +4222,81 @@ describe('TAC-540 — each verify check owns its own span window', () => {
       .filter((e) => e.phase === 'close')
       .map((e) => e.name)
     expect(closed).toContain('verify_grounding')
+  })
+})
+
+// TAC-560: the in-conversation half of the once-per-guest-ever marker.
+describe('handleInbound — the warm close marker (TAC-560)', () => {
+  beforeEach(() => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
+    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  })
+
+  it('writes the marker when the model reports this reply WAS the close', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+  })
+
+  // THE MUTANT THE ACCEPTANCE CRITERION NAMES, from this side. Without the
+  // marker the pause timer finds a null column and closes the guest a second
+  // time, which is the one thing AC 1 forbids.
+  it('writes NO marker on an ordinary reply', async () => {
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the path and the marker outcome', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ via: 'in_conversation', markerOutcome: 'marked' }),
+    )
+  })
+
+  it('reports an existing marker rather than overwriting it', async () => {
+    // A guest the timer closed moments earlier keeps that earlier timestamp.
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'already_marked' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'already_marked' }),
+    )
+  })
+
+  // The guest already has the message, so a failed marker write must never turn a
+  // delivered reply into a failed request. The cost is one guest who could
+  // receive the close twice, which the timer's `acknowledgment` belt catches.
+  it('still reports sent when the marker write fails', async () => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: false, error: 'boom' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'write_failed' }),
+    )
+  })
+
+  it('does not fail the turn when the marker write throws', async () => {
+    markWarmCloseSentMock.mockRejectedValue(new Error('boom'))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
   })
 })

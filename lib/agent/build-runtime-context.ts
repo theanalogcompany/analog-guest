@@ -807,6 +807,11 @@ export async function buildRuntimeContext(input: {
     // TAC-380: empty on every followup run and while the brake is engaged.
     // The serializer omits the block entirely when empty.
     openIntentions: intentions.open,
+    // TAC-560: true only on the pause-triggered warm close. Read off the
+    // trigger rather than derived, because whether this turn is a close is the
+    // caller's decision (the processor claimed it), not something re-inferable
+    // from the guest's state here.
+    warmClose: input.followupTrigger?.reason === 'warm_close',
     intentionDerivation: {
       newlyEligible: intentions.newlyEligible,
       brakeEngaged: intentions.brakeEngaged,

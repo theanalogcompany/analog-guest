@@ -9,6 +9,7 @@ import {
   captureDraftRegenerated,
   captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
+  captureWarmCloseSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
@@ -51,10 +52,8 @@ import {
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
-import {
-  recordIntentionEligibility,
-  recordIntentionPrompts,
-} from './intentions/record'
+import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
+import { markWarmCloseSent } from './warm-close-store'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
@@ -449,6 +448,8 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     // TAC-554: the crash card. Generation failed, so there is no
     // getting-to-know-you question, and the card is blank anyway.
     intentionQuestion: '',
+    // TAC-560: the crash card is a blank draft for an operator, not a close.
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     attempts: 2,
     attemptScores: [],
@@ -2800,6 +2801,52 @@ async function runInboundTurn(
                   error: e instanceof Error ? e.message : String(e),
                 },
               )
+            }),
+        )
+      }
+      // TAC-560: the in-conversation half of the once-per-guest-ever marker.
+      //
+      // When the model reports that this reply WAS the warm close (the guest said
+      // thanks, and the venue's own voice rule closed the conversation), record
+      // it, so the pause timer never sends a second one.
+      //
+      // Fire-and-forget, after the send, mirroring the intention recorder above:
+      // the guest already has the message, so a failed marker write must never
+      // turn a delivered reply into a failed request. The cost of that failure is
+      // one guest who could receive the close twice, which the timer's own belt
+      // (a last inbound that classified `acknowledgment`) is there to catch.
+      //
+      // NOT gated on the channel. The in-conversation close happens on SMS too,
+      // and marking it there is right even while the TIMER is Instagram-only:
+      // the marker means "this guest has been closed", not "the timer ran".
+      if (gen.result.closedTheConversation) {
+        const venueId = ctx.venue.id
+        const guestId = ctx.guest.id
+        const answersMessageId = ctx.currentMessage?.id ?? null
+        waitUntil(
+          markWarmCloseSent(createAdminClient(), guestId, new Date())
+            .then(async (marked) => {
+              if (!marked.ok) {
+                console.warn('[agent] warm close marker write failed', {
+                  agentRunId,
+                  guestId,
+                  error: marked.error,
+                })
+              }
+              await captureWarmCloseSent({
+                agentRunId,
+                venueId,
+                guestId,
+                via: 'in_conversation',
+                answersMessageId,
+                markerOutcome: marked.ok ? marked.data : 'write_failed',
+              })
+            })
+            .catch((e) => {
+              console.error('[agent] warm close marker threw unexpectedly', {
+                agentRunId,
+                error: e instanceof Error ? e.message : String(e),
+              })
             }),
         )
       }
