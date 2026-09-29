@@ -1622,7 +1622,45 @@ import {
 // brew the bhadra" answered pour over in both arms. Both are retrieval, which
 // is TAC-547's subject, not generation. A rule cannot use a specific that is
 // not in the context.
-export const PROMPT_VERSION = 'v1.70.0'
+// v1.71.0 (TAC-543): NO RULE CHANGE. The ## Visit history block gains one line
+// after the timestamped bullets, naming every distinct item the guest has
+// ordered with a count: "Everything they've ordered here: Cortado (4x), Pink
+// Panther (3x), ... Blossom Tonic (once)." Derived from the same Visit[] the
+// bullets render, so the two can never disagree. formatOrderSummary in
+// serializers.ts.
+//
+// WHY, and it is a fact about how the model reads the bullets rather than about
+// the data being absent. The bullets already carried every one of those items.
+// The model reads them as what a guest HABITUALLY orders, so an item ordered
+// ONCE did not register as being in the history at all: a guest who had had the
+// Blossom Tonic five days earlier was told "the Blossom Tonic is the one you
+// haven't touched yet". Naming the counts flatly is what closed it.
+//
+// MEASURED, 20 history questions per arm against Le Mil's live config, control
+// = this block without the line. Wrong has/hasn't claims 1/20 to 0/20, the one
+// control failure being the device case verbatim. "What do i usually get" leads
+// with the genuine 4x item 3/4 where the control led with the 3x item 4/4, so
+// the counts reach the answer and not just the prompt. Recommendation turns
+// 3/10 to 2/10 on presenting a history item as new: no regression, and no
+// improvement worth claiming at that n.
+//
+// TWO THINGS THIS DOES NOT FIX, both recorded rather than left to be found.
+// The DEPTH HEDGE survives it ("you've had it once but it's worth a proper sit
+// with it" states the count correctly and hedges anyway), which is TAC-543's
+// own parked finding and wants a deterministic check rather than prose. And a
+// FALSE EXCLUSIVITY claim about what is UNTRIED ("the two you haven't had",
+// when 9 untried drinks are on the menu) is live on main at 3/20, unmoved by
+// this line at 4/20, and out of reach of it: this line says what a guest HAS
+// had, and that question is about the complement. Separate follow-up.
+//
+// A CATEGORY-INSTRUCTION CLAUSE WAS TRIED FIRST AND DROPPED. Three wordings on
+// RECOMMENDATION_REQUEST_INSTRUCTIONS, measured at n=20 each, ranged 7-17 of 20
+// and none reached 0; one cost the TAC-417 acknowledgement (19/20 to 16/20)
+// because the model resolved "ask how they liked it" against "keep it to one
+// question" by asking nothing. Ruled out 2026-09-29. Do not re-add one without
+// measuring it: the prompt already tells this category to answer from the
+// block, and that sentence was in front of the model on every failure above.
+export const PROMPT_VERSION = 'v1.71.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

@@ -770,6 +770,48 @@ function formatFollowupContext(
 // time-delta matches the ## Recent conversation block style. The intro
 // line tells Sonnet how to use the data — pattern recognition for
 // recommendations, NOT reciting it back at the guest (R11 reinforces).
+/**
+ * TAC-543: one line naming every distinct item this guest has ordered, with a
+ * count, rendered AFTER the timestamped visits and never replacing them.
+ *
+ * WHY IT EXISTS, measured rather than assumed. The timestamped bullets carry
+ * the same facts, and two wordings of a category-instruction clause failed to
+ * make the model use them: it reads the block as what a guest HABITUALLY
+ * orders, so an item ordered once did not register as being in their history
+ * at all. Every defect in both measured runs landed on one of the two items
+ * ordered exactly once, and none ever landed on the items ordered four and
+ * three times. Naming the counts flatly is what closed it.
+ *
+ * DERIVED FROM THE SAME `visits` THE BULLETS RENDER, so the summary and the
+ * bullets can never disagree about what the guest has had. It is deliberately
+ * not a second query.
+ *
+ * Case is PRESERVED as the visits spell it: handing the model "sofi" for SoFi
+ * invites a mis-cased menu name into a guest-facing reply.
+ */
+export function formatOrderSummary(visits: readonly Visit[]): string {
+  const counts = new Map<string, number>()
+  const order: string[] = []
+  for (const v of visits) {
+    for (const raw of v.items) {
+      const name = raw.trim()
+      if (name === '') continue
+      const key = name.toLowerCase()
+      if (!counts.has(key)) {
+        counts.set(key, 0)
+        order.push(name)
+      }
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  if (order.length === 0) return ''
+  const parts = order
+    .map((name, i) => ({ name, n: counts.get(name.toLowerCase()) ?? 0, i }))
+    .sort((a, b) => b.n - a.n || a.i - b.i)
+    .map(({ name, n }) => `${name} (${n === 1 ? 'once' : `${n}\u00d7`})`)
+  return `Everything they've ordered here: ${parts.join(', ')}.`
+}
+
 function formatVisitHistory(
   visits: readonly Visit[],
   now: Date,
@@ -780,11 +822,17 @@ function formatVisitHistory(
     const items = v.items.join(', ')
     return `- [${delta}] ${items}`
   })
+  // The summary line sits INSIDE this function, after the bullets, so it can
+  // never render without them: the empty-visits guard above is the only exit.
+  const summary = formatOrderSummary(visits)
   return [
     '## Visit history',
     "Recent transactions, most recent first. Use this to recognize patterns and offer relevant suggestions — don't recite history back at the guest.",
     lines.join('\n'),
-  ].join('\n')
+    summary,
+  ]
+    .filter((part) => part !== '')
+    .join('\n')
 }
 
 // Category gate for the Visit History block. Welcome is the first-contact

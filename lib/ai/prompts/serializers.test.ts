@@ -16,6 +16,7 @@ import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../typ
 import {
   FIRST_TOUCH_SIGNAL_LINE,
   firstTouchOpenerFor,
+  formatOrderSummary,
   knowledgeChunksToProse,
   personaToProse,
   runtimeToProse,
@@ -1653,6 +1654,124 @@ describe('runtimeToProse — guest relationship line (TAC-234)', () => {
     expect(out).toContain('Guest relationship: regular')
     expect(out).toContain('Perk: The Joey')
     expect(out).not.toContain('The guest just sent:')
+  })
+})
+
+// TAC-543: the order summary line inside ## Visit history. The timestamped
+// bullets carry the same facts and two wordings of a category-instruction
+// clause could not make the model use them — it read the block as what a guest
+// HABITUALLY orders, so an item ordered once did not register as being in
+// their history. Measured: 16/20 replies presented a history item as new with
+// the bullets alone, 7/20 once the counts were named.
+describe('formatOrderSummary — the order summary line (TAC-543)', () => {
+  const t = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000)
+
+  it('DEDUPES an item ordered on several visits into one entry with a count', () => {
+    const line = formatOrderSummary([
+      { items: ['Cortado', 'Pink Panther'], visitedAt: t(1) },
+      { items: ['Cortado'], visitedAt: t(2) },
+      { items: ['Cortado', 'Pink Panther'], visitedAt: t(3) },
+    ])
+    // One entry per distinct item, never one per visit.
+    expect(line).toBe("Everything they've ordered here: Cortado (3\u00d7), Pink Panther (2\u00d7).")
+    expect(line.match(/Cortado/g)).toHaveLength(1)
+  })
+
+  it('writes "once" for a single order and "Nx" above one', () => {
+    // The distinction is the whole point: a once-ordered item is exactly what
+    // the model was treating as never-ordered.
+    const line = formatOrderSummary([
+      { items: ['Cortado', 'SoFi'], visitedAt: t(1) },
+      { items: ['Cortado'], visitedAt: t(2) },
+    ])
+    expect(line).toContain('Cortado (2\u00d7)')
+    expect(line).toContain('SoFi (once)')
+    expect(line).not.toContain('(1\u00d7)')
+  })
+
+  it('orders by count descending, then by first appearance', () => {
+    const line = formatOrderSummary([
+      { items: ['A', 'B', 'C'], visitedAt: t(1) },
+      { items: ['B', 'C'], visitedAt: t(2) },
+      { items: ['C'], visitedAt: t(3) },
+    ])
+    expect(line).toBe("Everything they've ordered here: C (3\u00d7), B (2\u00d7), A (once).")
+  })
+
+  it('is DERIVED from the visits it is given, naming every item and nothing else', () => {
+    // The guarantee that matters: the summary and the bullets cannot disagree
+    // about what the guest has had, because they read the same array.
+    const visits = [
+      { items: ['Cortado', 'Gulab Jamun Cake'], visitedAt: t(1) },
+      { items: ['SoFi'], visitedAt: t(2) },
+    ]
+    const line = formatOrderSummary(visits)
+    const named = visits.flatMap((v) => v.items)
+    for (const item of named) expect(line).toContain(item)
+    // Nothing invented: every capitalised token in the line comes from a visit.
+    const mentioned = line
+      .replace("Everything they've ordered here: ", '')
+      .split(/,\s*/)
+      .map((part) => part.replace(/\s*\((once|\d+\u00d7)\)\.?$/, ''))
+    expect(mentioned.sort()).toEqual([...new Set(named)].sort())
+  })
+
+  it('preserves the case the visits use, so a menu name is never handed back mis-cased', () => {
+    // "sofi" written to a guest is a voice regression; the visits spell it SoFi.
+    expect(formatOrderSummary([{ items: ['SoFi'], visitedAt: t(1) }])).toContain('SoFi')
+  })
+
+  it('returns an empty string for no visits, and skips blank item names', () => {
+    expect(formatOrderSummary([])).toBe('')
+    expect(formatOrderSummary([{ items: [], visitedAt: t(1) }])).toBe('')
+    expect(formatOrderSummary([{ items: ['  ', 'Cortado'], visitedAt: t(1) }])).toBe(
+      "Everything they've ordered here: Cortado (once).",
+    )
+  })
+})
+
+describe('runtimeToProse — the order summary renders ONLY with the block (TAC-543)', () => {
+  const t = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000)
+
+  it('renders after the last timestamped visit, never replacing them', () => {
+    const out = runtimeToProse(
+      {
+        recentVisits: [
+          { items: ['Cortado', 'SoFi'], visitedAt: t(1) },
+          { items: ['Cortado'], visitedAt: t(2) },
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    // The bullets SURVIVE. The summary is an addition, not a replacement.
+    expect(out).toContain('- [yesterday] Cortado, SoFi')
+    expect(out).toContain('- [2 days ago] Cortado')
+    expect(out).toContain("Everything they've ordered here: Cortado (2\u00d7), SoFi (once).")
+    // And it sits AFTER the bullets.
+    expect(out.indexOf('- [2 days ago] Cortado')).toBeLessThan(
+      out.indexOf("Everything they've ordered here:"),
+    )
+  })
+
+  it('never renders without the block: no visits means neither', () => {
+    const out = runtimeToProse({ recentVisits: [] }, 'reply', NOW)
+    expect(out).not.toContain('## Visit history')
+    expect(out).not.toContain("Everything they've ordered here")
+  })
+
+  it('never renders on a category that suppresses the block', () => {
+    // welcome and opt_out skip ## Visit history, so the summary must go with it
+    // rather than leaking out on its own.
+    for (const category of ['welcome', 'opt_out'] as const) {
+      const out = runtimeToProse(
+        { recentVisits: [{ items: ['Cortado'], visitedAt: t(1) }] },
+        category,
+        NOW,
+      )
+      expect(out).not.toContain('## Visit history')
+      expect(out).not.toContain("Everything they've ordered here")
+    }
   })
 })
 
