@@ -29,6 +29,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { logger } from '@/lib/observability/logger'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -65,7 +66,8 @@ export interface PendingScanArrival {
   hadPriorConversation: boolean
 }
 
-export type StoreResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export type StoreResult<T> =
+  { ok: true; data: T } | { ok: false; error: string }
 
 /**
  * Write the pending row for a saved scan.
@@ -121,7 +123,9 @@ export async function loadDueScanArrivals(
 ): Promise<StoreResult<PendingScanArrival[]>> {
   const { data, error } = await supabase
     .from('instagram_scan_arrivals')
-    .select('id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation')
+    .select(
+      'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation',
+    )
     .is('claimed_at', null)
     .is('resolved_at', null)
     .order('scanned_at', { ascending: true })
@@ -166,7 +170,8 @@ export async function claimScanArrival(
     .is('claimed_at', null)
     .select('id')
   if (error) {
-    if (error.code === UNIQUE_VIOLATION) return { status: 'already_greeted_today' }
+    if (error.code === UNIQUE_VIOLATION)
+      return { status: 'already_greeted_today' }
     return { status: 'failed', error: error.message }
   }
   return (data ?? []).length === 1 ? { status: 'claimed' } : { status: 'lost' }
@@ -220,17 +225,21 @@ export async function loadScanCarryForward(
     .limit(1)
     .maybeSingle()
   if (error) {
-    console.warn('[agent] scan carry-forward unreadable; treating this turn as ordinary', {
-      venueId,
-      guestId,
-      error: error.message,
-    })
+    logger.warn(
+      '[agent] scan carry-forward unreadable; treating this turn as ordinary',
+      {
+        venueId,
+        guestId,
+        error: error.message,
+      },
+    )
     return { lastScanAt: null, lastGreetingAt: null }
   }
   if (!data) return { lastScanAt: null, lastGreetingAt: null }
 
   const scannedAt = new Date(data.scanned_at)
-  if (!Number.isFinite(scannedAt.getTime())) return { lastScanAt: null, lastGreetingAt: null }
+  if (!Number.isFinite(scannedAt.getTime()))
+    return { lastScanAt: null, lastGreetingAt: null }
 
   const greetedAt =
     data.outcome === 'greeted' && typeof data.resolved_at === 'string'
@@ -238,6 +247,9 @@ export async function loadScanCarryForward(
       : null
   return {
     lastScanAt: scannedAt,
-    lastGreetingAt: greetedAt !== null && Number.isFinite(greetedAt.getTime()) ? greetedAt : null,
+    lastGreetingAt:
+      greetedAt !== null && Number.isFinite(greetedAt.getTime())
+        ? greetedAt
+        : null,
   }
 }

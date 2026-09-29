@@ -70,7 +70,9 @@ describe('INTENTION_DEFINITIONS — shape', () => {
   })
 
   it('defines exactly the seven ruled intentions, in the ruled priority order', () => {
-    expect(INTENTION_DEFINITIONS.map((d) => d.key)).toEqual(RULED_PRIORITY_ORDER)
+    expect(INTENTION_DEFINITIONS.map((d) => d.key)).toEqual(
+      RULED_PRIORITY_ORDER,
+    )
     expect(INTENTION_KEYS).toEqual(RULED_PRIORITY_ORDER)
   })
 
@@ -81,15 +83,28 @@ describe('INTENTION_DEFINITIONS — shape', () => {
   })
 
   it('retires both TAC-324 keys', () => {
-    expect(INTENTION_KEYS as readonly string[]).not.toContain('learn_first_order')
-    expect(INTENTION_KEYS as readonly string[]).not.toContain('invite_contact_save')
+    expect(INTENTION_KEYS as readonly string[]).not.toContain(
+      'learn_first_order',
+    )
+    expect(INTENTION_KEYS as readonly string[]).not.toContain(
+      'invite_contact_save',
+    )
   })
 
   it('every definition carries non-empty prose in all three text fields', () => {
     for (const def of INTENTION_DEFINITIONS) {
-      expect(def.promptLine.trim().length, `${def.key} promptLine`).toBeGreaterThan(0)
-      expect(def.classifierDescription.trim().length, `${def.key} classifierDescription`).toBeGreaterThan(0)
-      expect(def.satisfactionLabel.trim().length, `${def.key} satisfactionLabel`).toBeGreaterThan(0)
+      expect(
+        def.promptLine.trim().length,
+        `${def.key} promptLine`,
+      ).toBeGreaterThan(0)
+      expect(
+        def.classifierDescription.trim().length,
+        `${def.key} classifierDescription`,
+      ).toBeGreaterThan(0)
+      expect(
+        def.satisfactionLabel.trim().length,
+        `${def.key} satisfactionLabel`,
+      ).toBeGreaterThan(0)
     }
   })
 
@@ -109,8 +124,12 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
   })
 
   it('arms the event-armed pair off their events', () => {
-    expect(INTENTION_DEFINITION_BY_KEY.got_the_recommendation.armsOn).toEqual({ kind: 'open_recommendation' })
-    expect(INTENTION_DEFINITION_BY_KEY.did_they_like_it.armsOn).toEqual({ kind: 'recorded_order' })
+    expect(INTENTION_DEFINITION_BY_KEY.got_the_recommendation.armsOn).toEqual({
+      kind: 'open_recommendation',
+    })
+    expect(INTENTION_DEFINITION_BY_KEY.did_they_like_it.armsOn).toEqual({
+      kind: 'recorded_order',
+    })
   })
 
   // TAC-380 acceptance criteria, corrected 2026-09-14: first-contact intentions
@@ -127,7 +146,9 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
       why_theyre_here: false,
     } satisfies Record<IntentionKey, boolean>
     for (const def of INTENTION_DEFINITIONS) {
-      expect(rearmsOnNewerEvent(def.armsOn), def.key).toBe(RULED_REARMS[def.key])
+      expect(rearmsOnNewerEvent(def.armsOn), def.key).toBe(
+        RULED_REARMS[def.key],
+      )
     }
   })
 
@@ -148,7 +169,9 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
 
     for (const [key, minReplies] of Object.entries(RULED_MIN_REPLIES)) {
       const gate = INTENTION_DEFINITION_BY_KEY[key as IntentionKey].gate
-      expect(gate.kind, key).toBe(RULED_GATE_KIND[key as keyof typeof RULED_GATE_KIND])
+      expect(gate.kind, key).toBe(
+        RULED_GATE_KIND[key as keyof typeof RULED_GATE_KIND],
+      )
       expect(gate, key).toMatchObject({ defaultMinReplies: minReplies })
     }
   })
@@ -180,7 +203,9 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
     for (const def of INTENTION_DEFINITIONS) {
       if (def.gate.kind !== 'replies_only') continue
       if (def.key === 'learn_name') continue
-      expect(def.gate.firstMessageMinReplies, def.key).toBe(def.gate.defaultMinReplies)
+      expect(def.gate.firstMessageMinReplies, def.key).toBe(
+        def.gate.defaultMinReplies,
+      )
     }
   })
 
@@ -215,23 +240,33 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
   // did_they_like_it. Left on understand_order, a "how was your drink?" send
   // would close the wrong intention.
   it("keeps drink/food quality out of understand_order's classifier description", () => {
-    expect(INTENTION_DEFINITION_BY_KEY.understand_order.classifierDescription).not.toMatch(
-      /drink\/food|how (their|the) (drink|food) was/i,
-    )
-    expect(INTENTION_DEFINITION_BY_KEY.did_they_like_it.classifierDescription).toMatch(/drink or food/i)
+    expect(
+      INTENTION_DEFINITION_BY_KEY.understand_order.classifierDescription,
+    ).not.toMatch(/drink\/food|how (their|the) (drink|food) was/i)
+    expect(
+      INTENTION_DEFINITION_BY_KEY.did_they_like_it.classifierDescription,
+    ).toMatch(/drink or food/i)
   })
 
   // Approved drafts, transcribed verbatim from the 2026-09-14 ruling, and for
   // learn_name from TAC-541's of 2026-09-26.
   it('renders the approved promptLine drafts verbatim', () => {
-    expect(Object.fromEntries(INTENTION_DEFINITIONS.map((d) => [d.key, d.promptLine]))).toEqual({
+    expect(
+      Object.fromEntries(
+        INTENTION_DEFINITIONS.map((d) => [d.key, d.promptLine]),
+      ),
+    ).toEqual({
       understand_order: "You haven't heard what this guest ordered yet.",
-      got_the_recommendation: "You suggested something to this guest and haven't heard whether they tried it.",
-      did_they_like_it: 'You know what this guest ordered, but not whether they liked it.',
+      got_the_recommendation:
+        "You suggested something to this guest and haven't heard whether they tried it.",
+      did_they_like_it:
+        'You know what this guest ordered, but not whether they liked it.',
       learn_name:
-        "You don't know this guest's name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way \"by the way, what's your name?\" reads. A bare \"what's your name?\" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.",
-      are_they_local: "You don't know whether this guest lives or works nearby.",
-      their_rhythm: "You don't know what time of day this guest tends to come by.",
+        'You don\'t know this guest\'s name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way "by the way, what\'s your name?" reads. A bare "what\'s your name?" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.',
+      are_they_local:
+        "You don't know whether this guest lives or works nearby.",
+      their_rhythm:
+        "You don't know what time of day this guest tends to come by.",
       why_theyre_here: "You don't know what brings this guest in.",
     })
   })
@@ -270,7 +305,9 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
     const line = INTENTION_DEFINITION_BY_KEY.learn_name.promptLine
     expect(line).toMatch(/^You don't know this guest's name yet\./)
     expect(line).toContain('Asked at all,')
-    expect(line).not.toMatch(/^Ask\b|\. Ask (their|the guest's|for their) name/i)
+    expect(line).not.toMatch(
+      /^Ask\b|\. Ask (their|the guest's|for their) name/i,
+    )
   })
 
   // Every OTHER line stays a bare state. TAC-541 shaped one intention, and the
@@ -292,12 +329,18 @@ describe('isSatisfied truth table', () => {
     }
   })
 
-  it.each(RULED_PRIORITY_ORDER)('%s is closed only by its own recorded fact', (key) => {
-    const def = INTENTION_DEFINITION_BY_KEY[key]
-    for (const fact of Object.keys(NO_FACTS) as (keyof IntentionSatisfactionFacts)[]) {
-      expect(def.isSatisfied({ ...NO_FACTS, [fact]: true }), `${key} with ${fact}`).toBe(
-        SATISFIED_BY[key] === fact,
-      )
-    }
-  })
+  it.each(RULED_PRIORITY_ORDER)(
+    '%s is closed only by its own recorded fact',
+    (key) => {
+      const def = INTENTION_DEFINITION_BY_KEY[key]
+      for (const fact of Object.keys(
+        NO_FACTS,
+      ) as (keyof IntentionSatisfactionFacts)[]) {
+        expect(
+          def.isSatisfied({ ...NO_FACTS, [fact]: true }),
+          `${key} with ${fact}`,
+        ).toBe(SATISFIED_BY[key] === fact)
+      }
+    },
+  )
 })

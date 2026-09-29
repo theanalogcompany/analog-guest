@@ -26,17 +26,23 @@ describe('verifySquareWebhook', () => {
 
   it('rejects a tampered body', () => {
     const sig = sign(URL, BODY, KEY)
-    expect(verifySquareWebhook(BODY + 'x', headersWith(sig), URL, KEY)).toBe(false)
+    expect(verifySquareWebhook(BODY + 'x', headersWith(sig), URL, KEY)).toBe(
+      false,
+    )
   })
 
   it('rejects a notification-url mismatch (the URL is part of the signature)', () => {
     const sig = sign(URL, BODY, KEY)
-    expect(verifySquareWebhook(BODY, headersWith(sig), URL + '/', KEY)).toBe(false)
+    expect(verifySquareWebhook(BODY, headersWith(sig), URL + '/', KEY)).toBe(
+      false,
+    )
   })
 
   it('rejects the wrong key', () => {
     const sig = sign(URL, BODY, KEY)
-    expect(verifySquareWebhook(BODY, headersWith(sig), URL, 'other-key')).toBe(false)
+    expect(verifySquareWebhook(BODY, headersWith(sig), URL, 'other-key')).toBe(
+      false,
+    )
   })
 
   it('rejects a missing signature header without throwing', () => {

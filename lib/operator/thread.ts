@@ -49,7 +49,11 @@
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
 import { THREAD_MESSAGE_LIMIT, type ThreadMessage } from '@/lib/schemas'
-import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  bearerAllowsVenue,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
   ...DELIVERED_OUTBOUND_STATUSES,
@@ -61,9 +65,7 @@ export interface LoadGuestThreadInput {
 }
 
 export type LoadGuestThreadErrorCode =
-  | 'message_not_found'
-  | 'out_of_allowlist'
-  | 'db_error'
+  'message_not_found' | 'out_of_allowlist' | 'db_error'
 
 export interface LoadGuestThreadSuccess {
   ok: true
@@ -76,7 +78,8 @@ export interface LoadGuestThreadFailure {
   error?: string
 }
 
-export type LoadGuestThreadResult = LoadGuestThreadSuccess | LoadGuestThreadFailure
+export type LoadGuestThreadResult =
+  LoadGuestThreadSuccess | LoadGuestThreadFailure
 
 /**
  * Fetches up to THREAD_MESSAGE_LIMIT non-empty-body messages that reached the
@@ -90,7 +93,9 @@ export async function fetchThreadMessagesForGuest(
   supabase: ReturnType<typeof createAdminClient>,
   venueId: string,
   guestId: string,
-): Promise<{ ok: true; messages: ThreadMessage[] } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; messages: ThreadMessage[] } | { ok: false; error: string }
+> {
   const { data: rows, error: threadErr } = await supabase
     .from('messages')
     .select('id, body, direction, created_at')
@@ -153,7 +158,11 @@ export async function loadGuestThread(
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 
-  const result = await fetchThreadMessagesForGuest(supabase, row.venue_id, row.guest_id)
+  const result = await fetchThreadMessagesForGuest(
+    supabase,
+    row.venue_id,
+    row.guest_id,
+  )
   if (!result.ok) {
     return { ok: false, errorCode: 'db_error', error: result.error }
   }

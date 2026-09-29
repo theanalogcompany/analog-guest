@@ -19,6 +19,7 @@
 import { generateObject } from 'ai'
 import { getGenerationModel } from '@/lib/ai/client'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import {
   buildVerificationPrompt,
   type ClusterPayload,
@@ -29,7 +30,10 @@ import {
   type SimilarCritiqueMatch,
 } from './find-pattern-cluster-pure'
 
-export type { ClusterPayload, SimilarCritiqueMatch } from './find-pattern-cluster-pure'
+export type {
+  ClusterPayload,
+  SimilarCritiqueMatch,
+} from './find-pattern-cluster-pure'
 
 interface CritiqueLite {
   id: string
@@ -58,7 +62,7 @@ async function fetchSimilar(
     ...(excludeId ? { exclude_id: excludeId } : {}),
   })
   if (error) {
-    console.warn(
+    logger.warn(
       `[find-pattern-cluster] find_similar_critiques failed for venue=${venueId}: ${error.message}`,
     )
     return []
@@ -81,7 +85,10 @@ async function runVerification(input: {
       system: CLUSTER_VERIFICATION_SYSTEM,
       prompt: buildVerificationPrompt({
         newCritique: input.newCritique.text,
-        candidates: input.matches.map((m) => ({ id: m.id, text: m.critiqueText })),
+        candidates: input.matches.map((m) => ({
+          id: m.id,
+          text: m.critiqueText,
+        })),
       }),
       schema: ClusterVerificationOutputSchema,
       temperature: 0.3,
@@ -93,7 +100,7 @@ async function runVerification(input: {
       matches: input.matches,
     })
   } catch (e) {
-    console.warn(
+    logger.warn(
       `[find-pattern-cluster] verification call failed: ${e instanceof Error ? e.message : String(e)}`,
     )
     return null
@@ -113,7 +120,11 @@ export async function findPatternClusterForCritique(input: {
   messageId: string
   embedding: number[]
 }): Promise<ClusterPayload | null> {
-  const matches = await fetchSimilar(input.venueId, input.embedding, input.critiqueId)
+  const matches = await fetchSimilar(
+    input.venueId,
+    input.embedding,
+    input.critiqueId,
+  )
   if (!hasEnoughCandidates(matches)) return null
   return runVerification({
     newCritique: {
@@ -173,7 +184,7 @@ export async function findActiveClusters(
     .is('promoted_at', null)
     .is('dismissed_at', null)
   if (error) {
-    console.warn(
+    logger.warn(
       `[find-pattern-cluster] unresolved critiques load failed for venue=${venueId}: ${error.message}`,
     )
     return []
@@ -186,7 +197,7 @@ export async function findActiveClusters(
   for (const row of rows) {
     const embedding = parseVectorLiteral(row.embedding)
     if (!embedding) {
-      console.warn(
+      logger.warn(
         `[find-pattern-cluster] could not parse stored embedding for critique=${row.id}`,
       )
       continue

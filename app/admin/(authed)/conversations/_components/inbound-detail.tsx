@@ -40,7 +40,11 @@ export function InboundDetail({
         <Eyebrow>Inbound message</Eyebrow>
         <SectionHeader
           title={guestName}
-          subtitle={formatInTimeZone(message.createdAt, venueTimezone, 'h:mm a · EEE MMM d')}
+          subtitle={formatInTimeZone(
+            message.createdAt,
+            venueTimezone,
+            'h:mm a · EEE MMM d',
+          )}
         />
       </div>
 
@@ -53,7 +57,9 @@ export function InboundDetail({
           </HairlineRow>
           <HairlineRow>
             <Row label="Message ID">
-              <span className="text-xs font-fraunces-text break-all">{message.id}</span>
+              <span className="text-xs font-fraunces-text break-all">
+                {message.id}
+              </span>
             </Row>
           </HairlineRow>
           <HairlineRow last={!message.providerMessageId}>
@@ -66,7 +72,13 @@ export function InboundDetail({
           {message.providerMessageId ? (
             <HairlineRow last>
               <Row label="Received at">
-                <span>{formatInTimeZone(message.createdAt, venueTimezone, 'yyyy-MM-dd HH:mm:ss zzz')}</span>
+                <span>
+                  {formatInTimeZone(
+                    message.createdAt,
+                    venueTimezone,
+                    'yyyy-MM-dd HH:mm:ss zzz',
+                  )}
+                </span>
               </Row>
             </HairlineRow>
           ) : null}
@@ -76,7 +88,9 @@ export function InboundDetail({
       <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 shadow-none">
         <div className="flex flex-col gap-2">
           <Eyebrow>Body</Eyebrow>
-          <pre className="text-sm whitespace-pre-wrap break-words text-ink">{message.body}</pre>
+          <pre className="text-sm whitespace-pre-wrap break-words text-ink">
+            {message.body}
+          </pre>
         </div>
       </Card>
 
@@ -91,18 +105,27 @@ export function InboundDetail({
         </Button>
       ) : (
         <div className="text-xs text-ink-soft">
-          No outbound reply linked to this inbound (yet, or the agent skipped it).
+          No outbound reply linked to this inbound (yet, or the agent skipped
+          it).
         </div>
       )}
     </aside>
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
   return (
     <div className="flex items-baseline justify-between gap-4">
       <span className="text-sm text-ink-soft">{label}</span>
-      <span className="text-sm text-ink text-right max-w-[60%]">{children}</span>
+      <span className="text-sm text-ink text-right max-w-[60%]">
+        {children}
+      </span>
     </div>
   )
 }

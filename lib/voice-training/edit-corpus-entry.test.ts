@@ -50,7 +50,9 @@ describe('editCorpusEntry — content change', () => {
   it('updates content + flags is_processed=false then re-embeds', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: true,
@@ -73,7 +75,9 @@ describe('editCorpusEntry — content change', () => {
   it('returns embed_failed when re-embed fails (row stays with stale embeddings + is_processed=false)', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: false,
@@ -95,7 +99,9 @@ describe('editCorpusEntry — tags-only change', () => {
   it('updates tags but does NOT re-embed (avoids Voyage spend)', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await editCorpusEntry({
@@ -128,7 +134,9 @@ describe('editCorpusEntry — db error', () => {
   it('returns db_error on update failure (no embed call)', async () => {
     const state = newState({ updateError: { message: 'lost connection' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await editCorpusEntry({

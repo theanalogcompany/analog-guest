@@ -28,7 +28,9 @@ export async function upsertSquareCredential(opts: {
       merchant_external_id: opts.merchantId,
       location_external_id: opts.locationId ?? null,
       access_token_enc: encryptToken(opts.accessToken),
-      refresh_token_enc: opts.refreshToken ? encryptToken(opts.refreshToken) : null,
+      refresh_token_enc: opts.refreshToken
+        ? encryptToken(opts.refreshToken)
+        : null,
       token_expires_at: opts.expiresAt,
       scopes: [...opts.scopes],
       is_active: true,
@@ -36,7 +38,11 @@ export async function upsertSquareCredential(opts: {
     { onConflict: 'venue_id,provider' },
   )
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'credential_upsert_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'credential_upsert_failed',
+    }
   }
   return { ok: true, data: { stored: true } }
 }
@@ -61,7 +67,11 @@ export async function loadSquareCredential(opts: {
     .eq('is_active', true)
     .maybeSingle()
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'credential_load_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'credential_load_failed',
+    }
   }
   if (!data || !data.access_token_enc) {
     return { ok: true, data: null }
@@ -74,7 +84,9 @@ export async function loadSquareCredential(opts: {
       merchantExternalId: data.merchant_external_id,
       locationExternalId: data.location_external_id,
       accessToken: decryptToken(data.access_token_enc),
-      refreshToken: data.refresh_token_enc ? decryptToken(data.refresh_token_enc) : null,
+      refreshToken: data.refresh_token_enc
+        ? decryptToken(data.refresh_token_enc)
+        : null,
       tokenExpiresAt: data.token_expires_at,
       scopes: data.scopes ?? [],
     },

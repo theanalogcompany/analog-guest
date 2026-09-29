@@ -8,6 +8,8 @@
 // Leaving the env var unset is supported — the function logs a warning and
 // returns without sending.
 
+import { logger } from '@/lib/observability/logger'
+
 /**
  * Truncate a string to at most `max` characters. If the string is longer,
  * cut to (max) and append a single ellipsis character.
@@ -32,7 +34,7 @@ export function truncate(s: string, max: number): string {
 export async function postToSlack(text: string): Promise<void> {
   const webhookUrl = process.env.SLACK_ALERTS_WEBHOOK_URL
   if (!webhookUrl) {
-    console.warn('alert: SLACK_ALERTS_WEBHOOK_URL not set; skipping slack')
+    logger.warn('alert: SLACK_ALERTS_WEBHOOK_URL not set; skipping slack')
     return
   }
   try {
@@ -42,10 +44,12 @@ export async function postToSlack(text: string): Promise<void> {
       body: JSON.stringify({ text }),
     })
     if (!response.ok) {
-      console.error('alert: slack webhook returned non-2xx', { status: response.status })
+      logger.error('alert: slack webhook returned non-2xx', {
+        status: response.status,
+      })
     }
   } catch (e) {
-    console.error('alert: slack webhook failed', {
+    logger.error('alert: slack webhook failed', {
       error: e instanceof Error ? e.message : String(e),
     })
   }

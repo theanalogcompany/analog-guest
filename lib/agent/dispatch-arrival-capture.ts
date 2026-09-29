@@ -70,7 +70,10 @@ import {
   transitionToPendingAck,
 } from '@/lib/guests/commitments'
 import { isObligationType } from '@/lib/guests/commitment-expiry'
-import type { ActiveCommitment, ArrivalSignal } from '@/lib/schemas/guest-commitment'
+import type {
+  ActiveCommitment,
+  ArrivalSignal,
+} from '@/lib/schemas/guest-commitment'
 import type { VenueContext } from './types'
 import { isVenueClosed } from './venue-open-state'
 
@@ -83,9 +86,17 @@ export type ArrivalCaptureDispatchResult =
   // arrival can be recorded against — including the ruling 4(a) case, where the
   // only thing open is a recommendation.
   | { kind: 'no_open_obligations' }
-  | { kind: 'imminent_won'; commitmentRows: GuestCommitmentRow[]; failedCount: number }
+  | {
+      kind: 'imminent_won'
+      commitmentRows: GuestCommitmentRow[]
+      failedCount: number
+    }
   | { kind: 'imminent_lost' }
-  | { kind: 'scheduled_recorded'; commitmentRows: GuestCommitmentRow[]; failedCount: number }
+  | {
+      kind: 'scheduled_recorded'
+      commitmentRows: GuestCommitmentRow[]
+      failedCount: number
+    }
   | { kind: 'scheduled_lost' }
   | { kind: 'failed'; error: string; errorCode?: string }
 
@@ -126,7 +137,10 @@ export async function dispatchArrivalCapture(opts: {
 
   if (signal !== 'imminent' && signal !== 'scheduled') {
     // Schema enum should make this unreachable, but be defensive.
-    return { kind: 'invalid_signal', reason: `unknown signal: ${String(signal)}` }
+    return {
+      kind: 'invalid_signal',
+      reason: `unknown signal: ${String(signal)}`,
+    }
   }
 
   if (signal === 'scheduled') {
@@ -165,7 +179,11 @@ export async function dispatchArrivalCapture(opts: {
 
   // One guest, one arrival event: every target gets the SAME resolved arrival
   // time rather than each recomputing it.
-  const expectedArrival = resolveExpectedArrival(signal, arrivalCapture.expectedArrival, now)
+  const expectedArrival = resolveExpectedArrival(
+    signal,
+    arrivalCapture.expectedArrival,
+    now,
+  )
 
   const outcome = await sweep({
     targets,
@@ -178,7 +196,11 @@ export async function dispatchArrivalCapture(opts: {
 
   if (outcome.rows.length > 0) {
     return signal === 'imminent'
-      ? { kind: 'imminent_won', commitmentRows: outcome.rows, failedCount: outcome.failedCount }
+      ? {
+          kind: 'imminent_won',
+          commitmentRows: outcome.rows,
+          failedCount: outcome.failedCount,
+        }
       : {
           kind: 'scheduled_recorded',
           commitmentRows: outcome.rows,
@@ -195,7 +217,9 @@ export async function dispatchArrivalCapture(opts: {
       errorCode: outcome.firstError.errorCode,
     }
   }
-  return signal === 'imminent' ? { kind: 'imminent_lost' } : { kind: 'scheduled_lost' }
+  return signal === 'imminent'
+    ? { kind: 'imminent_lost' }
+    : { kind: 'scheduled_lost' }
 }
 
 function resolveExpectedArrival(
@@ -235,7 +259,8 @@ async function sweep(opts: {
   let firstError: SweepOutcome['firstError'] = null
 
   for (const target of targets) {
-    const write = signal === 'imminent' ? transitionToPendingAck : scheduleArrival
+    const write =
+      signal === 'imminent' ? transitionToPendingAck : scheduleArrival
     const r = await write({
       commitmentId: target.id,
       venueId,

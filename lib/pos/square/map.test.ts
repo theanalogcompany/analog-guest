@@ -36,8 +36,12 @@ describe('mapSquarePaymentToTransaction', () => {
   })
 
   it('maps statuses; missing fields degrade safely', () => {
-    expect(mapSquarePaymentToTransaction({ id: 'p', status: 'APPROVED' })?.status).toBe('authorized')
-    expect(mapSquarePaymentToTransaction({ id: 'p', status: 'CANCELED' })?.status).toBe('voided')
+    expect(
+      mapSquarePaymentToTransaction({ id: 'p', status: 'APPROVED' })?.status,
+    ).toBe('authorized')
+    expect(
+      mapSquarePaymentToTransaction({ id: 'p', status: 'CANCELED' })?.status,
+    ).toBe('voided')
     const bare = mapSquarePaymentToTransaction({ id: 'p' })
     expect(bare?.cardFingerprint).toBeNull()
     expect(bare?.amount).toEqual({ amountCents: 0, currency: 'USD' })
@@ -79,20 +83,42 @@ describe('mapSquareOrderLineItems', () => {
 describe('mapSquareInventoryCounts', () => {
   it('maps counts, dropping rows without ids', () => {
     const counts = mapSquareInventoryCounts([
-      { catalog_object_id: 'var_1', location_id: 'LOC_1', quantity: '5', state: 'IN_STOCK' },
+      {
+        catalog_object_id: 'var_1',
+        location_id: 'LOC_1',
+        quantity: '5',
+        state: 'IN_STOCK',
+      },
       { location_id: 'LOC_1', quantity: '9' }, // no catalog id → dropped
     ])
     expect(counts).toEqual([
-      { catalogExternalId: 'var_1', locationExternalId: 'LOC_1', quantity: 5, state: 'IN_STOCK' },
+      {
+        catalogExternalId: 'var_1',
+        locationExternalId: 'LOC_1',
+        quantity: 5,
+        state: 'IN_STOCK',
+      },
     ])
   })
 
   it('accepts the camelCase SDK shape (from batchGetCounts)', () => {
     expect(
       mapSquareInventoryCounts([
-        { catalogObjectId: 'v1', locationId: 'L1', quantity: '7', state: 'IN_STOCK' },
+        {
+          catalogObjectId: 'v1',
+          locationId: 'L1',
+          quantity: '7',
+          state: 'IN_STOCK',
+        },
       ]),
-    ).toEqual([{ catalogExternalId: 'v1', locationExternalId: 'L1', quantity: 7, state: 'IN_STOCK' }])
+    ).toEqual([
+      {
+        catalogExternalId: 'v1',
+        locationExternalId: 'L1',
+        quantity: 7,
+        state: 'IN_STOCK',
+      },
+    ])
   })
 
   it('returns [] on non-array input', () => {
@@ -111,7 +137,13 @@ describe('mapSquareCatalogObjects', () => {
           name: 'Croissant',
           categoryId: 'cat_1',
           variations: [
-            { id: 'var_1', itemVariationData: { name: 'Regular', priceMoney: { amount: 450, currency: 'USD' } } },
+            {
+              id: 'var_1',
+              itemVariationData: {
+                name: 'Regular',
+                priceMoney: { amount: 450, currency: 'USD' },
+              },
+            },
           ],
         },
       },
@@ -136,7 +168,10 @@ describe('mapSquareCatalogObjects', () => {
         type: 'ITEM',
         id: 'i',
         version: BigInt(10),
-        itemData: { name: 'Drip', variations: [{ id: 'v', itemVariationData: { name: 'L' } }] },
+        itemData: {
+          name: 'Drip',
+          variations: [{ id: 'v', itemVariationData: { name: 'L' } }],
+        },
       },
     ])
     expect(items[0]).toMatchObject({ name: 'Drip', price: null, version: 10 })
@@ -144,11 +179,18 @@ describe('mapSquareCatalogObjects', () => {
 
   it('marks deleted items unavailable and drops unnamed items', () => {
     const deleted = mapSquareCatalogObjects([
-      { type: 'ITEM', id: 'i', isDeleted: true, itemData: { name: 'X', variations: [{ id: 'v' }] } },
+      {
+        type: 'ITEM',
+        id: 'i',
+        isDeleted: true,
+        itemData: { name: 'X', variations: [{ id: 'v' }] },
+      },
     ])
     expect(deleted[0].isAvailable).toBe(false)
     expect(
-      mapSquareCatalogObjects([{ type: 'ITEM', id: 'i', itemData: { variations: [{ id: 'v' }] } }]),
+      mapSquareCatalogObjects([
+        { type: 'ITEM', id: 'i', itemData: { variations: [{ id: 'v' }] } },
+      ]),
     ).toEqual([])
   })
 

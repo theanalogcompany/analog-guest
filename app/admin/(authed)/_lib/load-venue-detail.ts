@@ -1,6 +1,12 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { firstOrNull } from '@/lib/db/postgrest'
-import { type BrandPersona, BrandPersonaSchema, type VenueInfo, VenueInfoSchema } from '@/lib/schemas'
+import { logger } from '@/lib/observability/logger'
+import {
+  type BrandPersona,
+  BrandPersonaSchema,
+  type VenueInfo,
+  VenueInfoSchema,
+} from '@/lib/schemas'
 
 // TAC-343: per-venue detail loader for /admin/venues/[slug]. Mirrors the
 // degrade-gracefully-with-a-visible-parse-error posture of
@@ -96,12 +102,16 @@ const MECHANICS_SELECT =
 const KNOWLEDGE_SELECT =
   'id, content, primary_tags, secondary_tags, is_processed, source_type, source_ref, created_at, updated_at, confidence_score, added_by_operator_id, metadata' as const
 
-export async function loadVenueDetail(slug: string): Promise<VenueDetailData | null> {
+export async function loadVenueDetail(
+  slug: string,
+): Promise<VenueDetailData | null> {
   const supabase = createAdminClient()
 
   const { data: venue, error: venueErr } = await supabase
     .from('venues')
-    .select('id, slug, name, timezone, venue_configs(venue_info, brand_persona, approval_policy)')
+    .select(
+      'id, slug, name, timezone, venue_configs(venue_info, brand_persona, approval_policy)',
+    )
     .eq('slug', slug)
     .maybeSingle()
   if (venueErr || !venue) {
@@ -136,51 +146,65 @@ export async function loadVenueDetail(slug: string): Promise<VenueDetailData | n
     brandPersonaParseError = 'venue has no venue_configs row'
   }
 
-  const [mechanicsResult, knowledgeResult, voiceCorpusCountResult] = await Promise.all([
-    supabase.from('mechanics').select(MECHANICS_SELECT).eq('venue_id', venue.id),
-    supabase.from('knowledge_corpus').select(KNOWLEDGE_SELECT).eq('venue_id', venue.id),
-    supabase
-      .from('voice_corpus')
-      .select('id', { count: 'exact', head: true })
-      .eq('venue_id', venue.id),
-  ])
+  const [mechanicsResult, knowledgeResult, voiceCorpusCountResult] =
+    await Promise.all([
+      supabase
+        .from('mechanics')
+        .select(MECHANICS_SELECT)
+        .eq('venue_id', venue.id),
+      supabase
+        .from('knowledge_corpus')
+        .select(KNOWLEDGE_SELECT)
+        .eq('venue_id', venue.id),
+      supabase
+        .from('voice_corpus')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venue.id),
+    ])
 
   if (mechanicsResult.error) {
-    console.warn('[loadVenueDetail] mechanics load failed', mechanicsResult.error.message)
+    logger.warn('[loadVenueDetail] mechanics load failed', {
+      error: mechanicsResult.error.message,
+    })
   }
   if (knowledgeResult.error) {
-    console.warn('[loadVenueDetail] knowledge_corpus load failed', knowledgeResult.error.message)
+    logger.warn('[loadVenueDetail] knowledge_corpus load failed', {
+      error: knowledgeResult.error.message,
+    })
   }
   if (voiceCorpusCountResult.error) {
-    console.warn(
-      '[loadVenueDetail] voice_corpus count failed',
-      voiceCorpusCountResult.error.message,
-    )
+    logger.warn('[loadVenueDetail] voice_corpus count failed', {
+      error: voiceCorpusCountResult.error.message,
+    })
   }
 
-  const mechanics: VenueDetailMechanicRow[] = (mechanicsResult.data ?? []).map((m) => ({
-    id: m.id,
-    name: m.name,
-    type: m.type,
-    isActive: m.is_active,
-    deactivatedAt: m.deactivated_at,
-    createdAt: m.created_at,
-    updatedAt: m.updated_at,
-    schemaVersion: m.schema_version,
-    description: m.description,
-    qualification: m.qualification,
-    rewardDescription: m.reward_description,
-    minState: m.min_state,
-    redemptionPolicy: m.redemption_policy,
-    redemptionWindowDays: m.redemption_window_days,
-    requiresOperatorApproval: m.requires_operator_approval,
-    trigger: m.trigger,
-    expirationRule: m.expiration_rule,
-    redemption: m.redemption,
-    metadata: m.metadata,
-  }))
+  const mechanics: VenueDetailMechanicRow[] = (mechanicsResult.data ?? []).map(
+    (m) => ({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      isActive: m.is_active,
+      deactivatedAt: m.deactivated_at,
+      createdAt: m.created_at,
+      updatedAt: m.updated_at,
+      schemaVersion: m.schema_version,
+      description: m.description,
+      qualification: m.qualification,
+      rewardDescription: m.reward_description,
+      minState: m.min_state,
+      redemptionPolicy: m.redemption_policy,
+      redemptionWindowDays: m.redemption_window_days,
+      requiresOperatorApproval: m.requires_operator_approval,
+      trigger: m.trigger,
+      expirationRule: m.expiration_rule,
+      redemption: m.redemption,
+      metadata: m.metadata,
+    }),
+  )
 
-  const knowledgeEntries: VenueDetailKnowledgeRow[] = (knowledgeResult.data ?? []).map((k) => ({
+  const knowledgeEntries: VenueDetailKnowledgeRow[] = (
+    knowledgeResult.data ?? []
+  ).map((k) => ({
     id: k.id,
     content: k.content,
     primaryTags: k.primary_tags ?? [],
@@ -196,7 +220,12 @@ export async function loadVenueDetail(slug: string): Promise<VenueDetailData | n
   }))
 
   return {
-    venue: { id: venue.id, slug: venue.slug, name: venue.name, timezone: venue.timezone },
+    venue: {
+      id: venue.id,
+      slug: venue.slug,
+      name: venue.name,
+      timezone: venue.timezone,
+    },
     venueInfo,
     venueInfoParseError,
     brandPersona,

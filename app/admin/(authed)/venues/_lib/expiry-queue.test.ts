@@ -61,6 +61,10 @@ describe('partitionCurrentContext', () => {
   })
 
   it('returns empty buckets for an empty array', () => {
-    expect(partitionCurrentContext([], NOW)).toEqual({ active: [], expired: [], malformed: [] })
+    expect(partitionCurrentContext([], NOW)).toEqual({
+      active: [],
+      expired: [],
+      malformed: [],
+    })
   })
 })

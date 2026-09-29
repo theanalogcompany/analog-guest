@@ -53,7 +53,12 @@ export async function dispatchReply(
       // The text arm sends the whole reply or throws, so what was delivered is
       // the generated body, verbatim: recording on this path is byte-for-byte
       // what it was before TAC-469.
-      return { kind: 'sent', ...sent, deliveredBody: generation.body, undelivered: null }
+      return {
+        kind: 'sent',
+        ...sent,
+        deliveredBody: generation.body,
+        undelivered: null,
+      }
     }
     case 'instagram':
       return dispatchInstagramReply(ctx, generation, options)
@@ -64,7 +69,8 @@ export async function dispatchReply(
         guestId: ctx.guest.id,
         kind: ctx.followupTrigger ? 'followup' : 'inbound',
         stage: 'send',
-        errorMessage: 'conversation channel unresolved; refusing to route a send on it',
+        errorMessage:
+          'conversation channel unresolved; refusing to route a send on it',
       })
       return { kind: 'not_sent', reason: 'channel_unresolved' }
     default: {

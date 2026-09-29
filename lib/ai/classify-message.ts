@@ -9,7 +9,12 @@ import {
   UNSENT_HISTORY_NOTE,
   venueInfoToProse,
 } from './prompts/serializers'
-import type { AIResult, ClassifyMessageInput, ClassifyMessageResult, RecentMessage } from './types'
+import type {
+  AIResult,
+  ClassifyMessageInput,
+  ClassifyMessageResult,
+  RecentMessage,
+} from './types'
 
 // Cap inbound length sent to the classifier. Generation still gets the full body.
 // Exported so the tunables manifest (TAC-183) can surface the cap to operators.
@@ -105,16 +110,22 @@ Return your classification with a confidence score (DECIMAL between 0.0 and 1.0,
 //
 // TAC-394: unsent lines carry the same marker the generator's block uses, and
 // the same one-sentence note.
-function formatClassifierRecentConversation(messages: readonly RecentMessage[]): string {
+function formatClassifierRecentConversation(
+  messages: readonly RecentMessage[],
+): string {
   const now = new Date()
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const marker = historyDeliveryMarker(m.delivery)
-    return marker === null ? `[${speaker}, ${delta}] ${m.body}` : `[${speaker}, ${delta}, ${marker}] ${m.body}`
+    return marker === null
+      ? `[${speaker}, ${delta}] ${m.body}`
+      : `[${speaker}, ${delta}, ${marker}] ${m.body}`
   })
   const block = `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
-  return messages.some((m) => m.delivery !== 'delivered') ? `${block}\n${UNSENT_HISTORY_NOTE}` : block
+  return messages.some((m) => m.delivery !== 'delivered')
+    ? `${block}\n${UNSENT_HISTORY_NOTE}`
+    : block
 }
 
 /**
@@ -135,7 +146,8 @@ export async function classifyMessage(
 
   const inboundForClassifier =
     input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
-      ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]'
+      ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) +
+        ' [...truncated]'
       : input.inboundBody
 
   const contextSections: string[] = []
@@ -147,10 +159,14 @@ export async function classifyMessage(
 
   const userPromptParts: string[] = []
   if (contextSections.length > 0) {
-    userPromptParts.push(`Context about the venue:\n\n${contextSections.join('\n\n')}`)
+    userPromptParts.push(
+      `Context about the venue:\n\n${contextSections.join('\n\n')}`,
+    )
   }
   if (input.recentMessages && input.recentMessages.length > 0) {
-    userPromptParts.push(formatClassifierRecentConversation(input.recentMessages))
+    userPromptParts.push(
+      formatClassifierRecentConversation(input.recentMessages),
+    )
   }
   if (input.guestState) {
     userPromptParts.push(`Guest relationship: ${input.guestState}`)
@@ -162,7 +178,8 @@ export async function classifyMessage(
   if (input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS) {
     const crisisCheckBody =
       input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
-        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) + ' [...truncated]'
+        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) +
+          ' [...truncated]'
         : input.inboundBody
     userPromptParts.push(
       `Full message, untruncated (for the crisisSafety determination ONLY — the shortened version above is what informs category):\n"${crisisCheckBody}"`,

@@ -15,15 +15,14 @@ export const RECENCY_BANDS: Array<{ maxDays: number; score: number }> = [
   { maxDays: Number.POSITIVE_INFINITY, score: 0 },
 ]
 
-export const VISIT_FREQ_MAX_VISITS = 12         // 12+ unique-day visits in 90d → 100 (pre-multiplier)
-export const MONEY_MAX_DOLLARS = 300            // $300 in 90d → 100
+export const VISIT_FREQ_MAX_VISITS = 12 // 12+ unique-day visits in 90d → 100 (pre-multiplier)
+export const MONEY_MAX_DOLLARS = 300 // $300 in 90d → 100
 const REFERRAL_MADE_PTS = 5
 const REFERRAL_CONVERTED_PTS = 20
 export const RESPONSE_MIN_SAMPLE = 3
-const ENGAGEMENT_MAX_WEIGHTED_SUM = Object.values(ENGAGEMENT_EVENT_WEIGHTS).reduce(
-  (acc, w) => acc + w,
-  0,
-)
+const ENGAGEMENT_MAX_WEIGHTED_SUM = Object.values(
+  ENGAGEMENT_EVENT_WEIGHTS,
+).reduce((acc, w) => acc + w, 0)
 const CONSISTENCY_MIN_VISITS = 4
 
 function clamp01to100(n: number): number {
@@ -39,12 +38,17 @@ function normalizeRecency(daysSinceLastVisit: number): number {
   return 0
 }
 
-function normalizeVisitFrequency(visits: number, multiplierTotal: number): number {
+function normalizeVisitFrequency(
+  visits: number,
+  multiplierTotal: number,
+): number {
   const base = Math.min(visits / VISIT_FREQ_MAX_VISITS, 1) * 100
   return clamp01to100(base * multiplierTotal)
 }
 
-function normalizeEngagementEvents(eventsByType: Record<string, number>): number {
+function normalizeEngagementEvents(
+  eventsByType: Record<string, number>,
+): number {
   let weighted = 0
   for (const [eventType, weight] of Object.entries(ENGAGEMENT_EVENT_WEIGHTS)) {
     const count = eventsByType[eventType] ?? 0
@@ -68,7 +72,9 @@ function normalizePercentMenuExplored(unique: number, total: number): number {
 }
 
 function normalizeReferrals(made: number, converted: number): number {
-  return clamp01to100(made * REFERRAL_MADE_PTS + converted * REFERRAL_CONVERTED_PTS)
+  return clamp01to100(
+    made * REFERRAL_MADE_PTS + converted * REFERRAL_CONVERTED_PTS,
+  )
 }
 
 /**
@@ -105,7 +111,8 @@ export function computeConsistencyMultiplier(
     intervals.push((sorted[i].getTime() - sorted[i - 1].getTime()) / MS_PER_DAY)
   }
   const mean = intervals.reduce((acc, v) => acc + v, 0) / intervals.length
-  const variance = intervals.reduce((acc, v) => acc + (v - mean) ** 2, 0) / intervals.length
+  const variance =
+    intervals.reduce((acc, v) => acc + (v - mean) ** 2, 0) / intervals.length
   const stdDev = Math.sqrt(variance)
   for (const band of formula.multipliers.consistency.bands) {
     if (band.maxVariance === null || stdDev <= band.maxVariance) {
@@ -141,14 +148,21 @@ export function normalizeSignals(
 ): RelationshipSignals {
   const distance = computeDistanceMultiplier(raw.distanceMiles, formula)
   const consistency = computeConsistencyMultiplier(raw.visitDateList, formula)
-  const total = computeTotalMultiplier(distance, consistency, formula.multiplierStackingCap)
+  const total = computeTotalMultiplier(
+    distance,
+    consistency,
+    formula.multiplierStackingCap,
+  )
 
   return {
     recency: normalizeRecency(raw.daysSinceLastVisit),
     visitFrequency: normalizeVisitFrequency(raw.visitsLast90Days, total),
     engagementEvents: normalizeEngagementEvents(raw.engagementEventsByType),
     moneySpent: normalizeMoneySpent(raw.totalSpentLast90Days),
-    responseRate: normalizeResponseRate(raw.repliedMessageCount, raw.outboundMessageCount),
+    responseRate: normalizeResponseRate(
+      raw.repliedMessageCount,
+      raw.outboundMessageCount,
+    ),
     percentMenuExplored: normalizePercentMenuExplored(
       raw.uniqueMenuItemsOrdered,
       raw.totalMenuItems,

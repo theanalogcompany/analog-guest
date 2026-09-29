@@ -187,7 +187,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R11',
     summary:
-      "When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good it is or reassures the guest — and this applies to the whole description, not just the closing line. Warmth still applies on feeling turns (complaint, thanks, milestone).",
+      'When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good it is or reassures the guest — and this applies to the whole description, not just the closing line. Warmth still applies on feeling turns (complaint, thanks, milestone).',
   },
   // R12 (message splitting) is RETIRED — TAC-319 moved splitting out of the
   // prompt into deterministic dispatch code (lib/agent/sentence-split.ts).
@@ -196,7 +196,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R17',
     summary:
-      "Price is not part of an answer unless the guest asked what something costs. Describing a drink is not asking its price.",
+      'Price is not part of an answer unless the guest asked what something costs. Describing a drink is not asking its price.',
   },
   {
     id: 'R18',
@@ -239,7 +239,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R28',
     summary:
-      "Never criticize, blame, or speak negatively about a staff member to a guest, even while acknowledging a mistake. Take ownership of the outcome without assigning blame to a person.",
+      'Never criticize, blame, or speak negatively about a staff member to a guest, even while acknowledging a mistake. Take ownership of the outcome without assigning blame to a person.',
   },
   {
     id: 'R29',
@@ -279,7 +279,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R36',
     summary:
-      "Say a date the way someone in the venue would say it out loud. Find a real date in the calendar in the ## Right now block and say the weekday it falls on, or \"today\"/\"tomorrow\"; a date in the current month that is not in the calendar is \"later this month\". Never work a weekday out for yourself: if a date is not in the calendar, say the date plainly instead. If the calendar shows the date has gone by, it is not a plan any more. Name the year only when leaving it out would genuinely be ambiguous. A date read from the venue's notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.",
+      'Say a date the way someone in the venue would say it out loud. Find a real date in the calendar in the ## Right now block and say the weekday it falls on, or "today"/"tomorrow"; a date in the current month that is not in the calendar is "later this month". Never work a weekday out for yourself: if a date is not in the calendar, say the date plainly instead. If the calendar shows the date has gone by, it is not a plan any more. Name the year only when leaving it out would genuinely be ambiguous. A date read from the venue\'s notes is the venue telling you when something is, not the words to say back, and restating it in plainer terms invents nothing. When the notes give only a month or a season with no day, the date is not set: say that plainly rather than naming the month as if it were the plan.',
   },
   {
     id: 'R37',
@@ -294,6 +294,6 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R39',
     summary:
-      "Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it. The take comes first on purpose. This adds substance on top of a personal reply rather than making it exact, and a drier reply counts as a failure even when the facts improve.",
+      'Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it. The take comes first on purpose. This adds substance on top of a personal reply rather than making it exact, and a drier reply counts as a failure even when the facts improve.',
   },
 ]

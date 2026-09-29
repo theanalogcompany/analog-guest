@@ -23,7 +23,11 @@ export async function removeCorpusEntry(
     return { ok: false, error: error.message, errorCode: 'db_error' }
   }
   if (!data) {
-    return { ok: false, error: `corpus entry not found: ${corpusId}`, errorCode: 'not_found' }
+    return {
+      ok: false,
+      error: `corpus entry not found: ${corpusId}`,
+      errorCode: 'not_found',
+    }
   }
   return { ok: true, corpusId }
 }

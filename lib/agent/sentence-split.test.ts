@@ -19,12 +19,16 @@ const neverSplit = () => 0.99 // rng above SPLIT_PROBABILITY → single block
 
 describe('splitIntoSentences', () => {
   it('returns a single-sentence body whole', () => {
-    expect(splitIntoSentences('Open until 4 tonight')).toEqual(['Open until 4 tonight'])
+    expect(splitIntoSentences('Open until 4 tonight')).toEqual([
+      'Open until 4 tonight',
+    ])
   })
 
   it('splits on period + whitespace + capital', () => {
     expect(
-      splitIntoSentences('Espresso with a small dollop of foam on top. Similar ratio to a flat white.'),
+      splitIntoSentences(
+        'Espresso with a small dollop of foam on top. Similar ratio to a flat white.',
+      ),
     ).toEqual([
       'Espresso with a small dollop of foam on top.',
       'Similar ratio to a flat white.',
@@ -32,11 +36,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('splits on ? and ! boundaries', () => {
-    expect(splitIntoSentences('Want it iced? We can do that! Just say when.')).toEqual([
-      'Want it iced?',
-      'We can do that!',
-      'Just say when.',
-    ])
+    expect(
+      splitIntoSentences('Want it iced? We can do that! Just say when.'),
+    ).toEqual(['Want it iced?', 'We can do that!', 'Just say when.'])
   })
 
   it('splits when the next sentence opens with a digit', () => {
@@ -67,10 +69,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('splits AFTER a price without harming the internal decimal', () => {
-    expect(splitIntoSentences('The mocha is $7.95. It comes iced too.')).toEqual([
-      'The mocha is $7.95.',
-      'It comes iced too.',
-    ])
+    expect(
+      splitIntoSentences('The mocha is $7.95. It comes iced too.'),
+    ).toEqual(['The mocha is $7.95.', 'It comes iced too.'])
   })
 
   it('does not split inside ratios or times', () => {
@@ -101,10 +102,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('still splits a real boundary elsewhere in a body that contains an ellipsis', () => {
-    expect(splitIntoSentences('Honestly... Maybe the cortado. Ask for it iced.')).toEqual([
-      'Honestly... Maybe the cortado.',
-      'Ask for it iced.',
-    ])
+    expect(
+      splitIntoSentences('Honestly... Maybe the cortado. Ask for it iced.'),
+    ).toEqual(['Honestly... Maybe the cortado.', 'Ask for it iced.'])
   })
 
   it('treats an emoji as a sentence opener', () => {
@@ -133,7 +133,9 @@ describe('stripTerminalPeriod', () => {
   })
 
   it('keeps a terminal ellipsis', () => {
-    expect(stripTerminalPeriod('Maybe the cortado...')).toBe('Maybe the cortado...')
+    expect(stripTerminalPeriod('Maybe the cortado...')).toBe(
+      'Maybe the cortado...',
+    )
   })
 
   it('never touches internal punctuation', () => {
@@ -158,13 +160,21 @@ describe('resolveDispatchBubbles — the flip', () => {
 
   it('splits a two-sentence body when the flip says split', () => {
     expect(
-      resolveDispatchBubbles('Espresso with foam on top. Stronger than a cortado.', alwaysSplit, ''),
+      resolveDispatchBubbles(
+        'Espresso with foam on top. Stronger than a cortado.',
+        alwaysSplit,
+        '',
+      ),
     ).toEqual(['Espresso with foam on top', 'Stronger than a cortado'])
   })
 
   it('keeps a two-sentence body whole when the flip says no', () => {
     expect(
-      resolveDispatchBubbles('Espresso with foam on top. Stronger than a cortado.', neverSplit, ''),
+      resolveDispatchBubbles(
+        'Espresso with foam on top. Stronger than a cortado.',
+        neverSplit,
+        '',
+      ),
     ).toEqual(['Espresso with foam on top. Stronger than a cortado.'])
   })
 
@@ -194,10 +204,13 @@ describe('resolveDispatchBubbles — the flip', () => {
   })
 
   it('strips terminal periods on the split branch but keeps ? and !', () => {
-    expect(resolveDispatchBubbles('Want it iced? We hold it until 6.', alwaysSplit, '')).toEqual([
-      'Want it iced?',
-      'We hold it until 6',
-    ])
+    expect(
+      resolveDispatchBubbles(
+        'Want it iced? We hold it until 6.',
+        alwaysSplit,
+        '',
+      ),
+    ).toEqual(['Want it iced?', 'We hold it until 6'])
   })
 
   it('leaves the single-block branch punctuation untouched', () => {
@@ -230,22 +243,36 @@ describe('resolveDispatchBubbles — the flip', () => {
   it('returns [] for empty, whitespace-only, or delimiter-only bodies', () => {
     expect(resolveDispatchBubbles('', alwaysSplit, '')).toEqual([])
     expect(resolveDispatchBubbles('   \n  ', alwaysSplit, '')).toEqual([])
-    expect(resolveDispatchBubbles(BUBBLE_DELIMITER, alwaysSplit, '')).toEqual([])
+    expect(resolveDispatchBubbles(BUBBLE_DELIMITER, alwaysSplit, '')).toEqual(
+      [],
+    )
   })
 
   it('flips exactly at the SPLIT_PROBABILITY threshold boundary', () => {
     const body = 'First one here. Second one here.'
     // rng() < SPLIT_PROBABILITY splits; exactly at the threshold does not.
-    expect(resolveDispatchBubbles(body, () => SPLIT_PROBABILITY - 0.0001, '')).toHaveLength(2)
-    expect(resolveDispatchBubbles(body, () => SPLIT_PROBABILITY, '')).toHaveLength(1)
+    expect(
+      resolveDispatchBubbles(body, () => SPLIT_PROBABILITY - 0.0001, ''),
+    ).toHaveLength(2)
+    expect(
+      resolveDispatchBubbles(body, () => SPLIT_PROBABILITY, ''),
+    ).toHaveLength(1)
   })
 
   it('caps the flippable range at MAX_BUBBLES_PER_RESPONSE', () => {
     // Guard against the cap and the flip range drifting apart: exactly at the
     // cap still flips, one past it does not.
-    const atCap = Array.from({ length: MAX_BUBBLES_PER_RESPONSE }, (_, i) => `Sentence ${i + 1} here.`).join(' ')
-    const pastCap = Array.from({ length: MAX_BUBBLES_PER_RESPONSE + 1 }, (_, i) => `Sentence ${i + 1} here.`).join(' ')
-    expect(resolveDispatchBubbles(atCap, alwaysSplit, '')).toHaveLength(MAX_BUBBLES_PER_RESPONSE)
+    const atCap = Array.from(
+      { length: MAX_BUBBLES_PER_RESPONSE },
+      (_, i) => `Sentence ${i + 1} here.`,
+    ).join(' ')
+    const pastCap = Array.from(
+      { length: MAX_BUBBLES_PER_RESPONSE + 1 },
+      (_, i) => `Sentence ${i + 1} here.`,
+    ).join(' ')
+    expect(resolveDispatchBubbles(atCap, alwaysSplit, '')).toHaveLength(
+      MAX_BUBBLES_PER_RESPONSE,
+    )
     expect(resolveDispatchBubbles(pastCap, alwaysSplit, '')).toHaveLength(1)
   })
 })
@@ -295,16 +322,18 @@ describe('intentionTailFor — the gate', () => {
 describe('resolveDispatchBubbles — the intention tail', () => {
   // FAILURE 1 FROM THE TICKET, on the code that shipped it. Three sentences
   // puts this in the flippable range, so it rode a fair coin and lost.
-  it('the ticket\'s first failure: three sentences that lost the coin stay one message', () => {
-    const body = "nice! what variation did you go with? and by the way, what's your name?"
+  it("the ticket's first failure: three sentences that lost the coin stay one message", () => {
+    const body =
+      "nice! what variation did you go with? and by the way, what's your name?"
     expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
   })
 
   // FAILURE 2 FROM THE TICKET. There is no `.?!` before "do", so
   // splitIntoSentences finds ONE sentence and no coin value could have split
   // it. This is the test that shows wording could never have carried the rule.
-  it('the ticket\'s second failure: one detectable sentence could not split at ANY coin value', () => {
-    const body = 'Foncii, nice to meet you 🙂 do you live or work around Polk Street?'
+  it("the ticket's second failure: one detectable sentence could not split at ANY coin value", () => {
+    const body =
+      'Foncii, nice to meet you 🙂 do you live or work around Polk Street?'
     expect(splitIntoSentences(body)).toHaveLength(1)
     expect(resolveDispatchBubbles(body, alwaysSplit, '')).toEqual([body])
     expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
@@ -335,7 +364,11 @@ describe('resolveDispatchBubbles — the intention tail', () => {
   // character, because generation composed the body by joining them.
   it('makes the last bubble the tail exactly', () => {
     const tail = 'where are you coming from?'
-    const bubbles = resolveDispatchBubbles(`Open until 3. ${tail}`, alwaysSplit, tail)
+    const bubbles = resolveDispatchBubbles(
+      `Open until 3. ${tail}`,
+      alwaysSplit,
+      tail,
+    )
     expect(bubbles[bubbles.length - 1]).toBe(tail)
   })
 
@@ -381,35 +414,48 @@ describe('resolveDispatchBubbles — the intention tail', () => {
   it('sends the question alone when the answer is empty', () => {
     const tail = 'what is your name?'
     expect(resolveDispatchBubbles(tail, alwaysSplit, tail)).toEqual([tail])
-    expect(resolveDispatchBubbles(`   ${tail}`, neverSplit, tail)).toEqual([tail])
+    expect(resolveDispatchBubbles(`   ${tail}`, neverSplit, tail)).toEqual([
+      tail,
+    ])
   })
 
   it('drops a contentless question rather than bubbling it', () => {
     // An em dash survives replaceDashes' refusal, so this shape is reachable.
-    expect(resolveDispatchBubbles('Open until 3. —', neverSplit, '—')).toEqual(['Open until 3. —'])
-    expect(resolveDispatchBubbles('Open until 3.', neverSplit, '  ')).toEqual(['Open until 3.'])
+    expect(resolveDispatchBubbles('Open until 3. —', neverSplit, '—')).toEqual([
+      'Open until 3. —',
+    ])
+    expect(resolveDispatchBubbles('Open until 3.', neverSplit, '  ')).toEqual([
+      'Open until 3.',
+    ])
   })
 
   // THE BELT. The composition guarantees the tail is a suffix; if it ever is
   // not, send one correct message rather than slice at a meaningless offset.
   it('falls back to the old path when the tail is not a suffix of the body', () => {
-    const bubbles = resolveDispatchBubbles('Open until 3 tonight.', neverSplit, 'what is your name?')
+    const bubbles = resolveDispatchBubbles(
+      'Open until 3 tonight.',
+      neverSplit,
+      'what is your name?',
+    )
     expect(bubbles).toEqual(['Open until 3 tonight.'])
   })
 
   it('returns [] for an empty body whatever the tail says', () => {
-    expect(resolveDispatchBubbles('', alwaysSplit, 'what is your name?')).toEqual([])
-    expect(resolveDispatchBubbles('   ', alwaysSplit, 'what is your name?')).toEqual([])
+    expect(
+      resolveDispatchBubbles('', alwaysSplit, 'what is your name?'),
+    ).toEqual([])
+    expect(
+      resolveDispatchBubbles('   ', alwaysSplit, 'what is your name?'),
+    ).toEqual([])
   })
 
   // An answer that becomes its own message should not end in a period, which
   // is TAC-319's own rule for a piece that dispatches as a bubble.
-  it('strips the answer\'s terminal period once it is a message of its own', () => {
+  it("strips the answer's terminal period once it is a message of its own", () => {
     const tail = 'what is your name?'
-    expect(resolveDispatchBubbles(`Open until 3 tonight. ${tail}`, neverSplit, tail)).toEqual([
-      'Open until 3 tonight',
-      tail,
-    ])
+    expect(
+      resolveDispatchBubbles(`Open until 3 tonight. ${tail}`, neverSplit, tail),
+    ).toEqual(['Open until 3 tonight', tail])
   })
 
   // THE NO-CHANGE GUARANTEE, and it is asserted as an EQUIVALENCE rather than
@@ -432,12 +478,18 @@ describe('resolveDispatchBubbles — the intention tail', () => {
         // Reconstruct the old rule independently rather than calling the new
         // function a second way, so this compares against a statement of the
         // old behaviour and not against itself.
-        const sentences = splitIntoSentences(body.replace(BUBBLE_DELIMITER, ' ').replace(/\s+/g, ' ').trim())
-        const cleaned = body.replace(BUBBLE_DELIMITER, ' ').replace(/\s+/g, ' ').trim()
+        const sentences = splitIntoSentences(
+          body.replace(BUBBLE_DELIMITER, ' ').replace(/\s+/g, ' ').trim(),
+        )
+        const cleaned = body
+          .replace(BUBBLE_DELIMITER, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
         const expected =
           cleaned === ''
             ? []
-            : sentences.length < 2 || sentences.length > MAX_BUBBLES_PER_RESPONSE
+            : sentences.length < 2 ||
+                sentences.length > MAX_BUBBLES_PER_RESPONSE
               ? [cleaned]
               : flip < SPLIT_PROBABILITY
                 ? sentences.map(stripTerminalPeriod)

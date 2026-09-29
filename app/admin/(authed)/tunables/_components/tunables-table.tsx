@@ -33,7 +33,9 @@ export function TunablesTable({ tunables }: TunablesTableProps) {
   const selectedCategory: TunableCategory | null = useMemo(() => {
     const raw = params.get('category')
     if (!raw) return null
-    return CATEGORIES.some((c) => c.id === raw) ? (raw as TunableCategory) : null
+    return CATEGORIES.some((c) => c.id === raw)
+      ? (raw as TunableCategory)
+      : null
   }, [params])
 
   const search = (params.get('search') ?? '').toLowerCase()
@@ -120,7 +122,12 @@ export function TunablesTable({ tunables }: TunablesTableProps) {
                 label={`${c.label} (${count})`}
                 isActive={selectedCategory === c.id}
                 disabled={count === 0}
-                onClick={() => updateParam('category', selectedCategory === c.id ? null : c.id)}
+                onClick={() =>
+                  updateParam(
+                    'category',
+                    selectedCategory === c.id ? null : c.id,
+                  )
+                }
               />
             )
           })}
@@ -138,7 +145,10 @@ export function TunablesTable({ tunables }: TunablesTableProps) {
       </div>
 
       {/* Header row */}
-      <div className="px-5 grid grid-cols-[2fr_1fr_0.6fr_0.8fr_1.4fr] gap-4 py-3 border-b border-stone-light/60 text-[11px] uppercase font-medium text-ink-faint" style={{ letterSpacing: 'var(--tracking-eyebrow)' }}>
+      <div
+        className="px-5 grid grid-cols-[2fr_1fr_0.6fr_0.8fr_1.4fr] gap-4 py-3 border-b border-stone-light/60 text-[11px] uppercase font-medium text-ink-faint"
+        style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
+      >
         <span>Name</span>
         <span>Value</span>
         <span>Type</span>
@@ -148,7 +158,10 @@ export function TunablesTable({ tunables }: TunablesTableProps) {
 
       {/* Body */}
       {filtered.length === 0 ? (
-        <div data-testid="tunables-empty-state" className="px-5 py-8 text-center text-sm text-ink-soft">
+        <div
+          data-testid="tunables-empty-state"
+          className="px-5 py-8 text-center text-sm text-ink-soft"
+        >
           No tunables match these filters.
         </div>
       ) : (
@@ -181,7 +194,12 @@ interface CategoryPillProps {
   onClick: () => void
 }
 
-function CategoryPill({ label, isActive, disabled, onClick }: CategoryPillProps) {
+function CategoryPill({
+  label,
+  isActive,
+  disabled,
+  onClick,
+}: CategoryPillProps) {
   // Discrete filter control → shadcn Button (TAC-306). Active reads as the
   // clay primary; inactive is the outline variant. disabled + aria-pressed
   // are forwarded for the same accessibility semantics as the prior pill.
@@ -208,7 +226,12 @@ interface TunableRowProps {
   onToggle: () => void
 }
 
-function TunableRow({ tunable, isExpanded, isLast, onToggle }: TunableRowProps) {
+function TunableRow({
+  tunable,
+  isExpanded,
+  isLast,
+  onToggle,
+}: TunableRowProps) {
   const isObject = tunable.type === 'object'
   return (
     <div className="px-5">
@@ -219,13 +242,23 @@ function TunableRow({ tunable, isExpanded, isLast, onToggle }: TunableRowProps) 
         className="w-full text-left grid grid-cols-[2fr_1fr_0.6fr_0.8fr_1.4fr] gap-4 py-3 border-b border-stone-light/60 hover:bg-highlight/40 transition-colors"
         data-testid={`tunable-row-${tunable.name}`}
       >
-        <span className="font-mono text-sm text-ink tabular-nums">{tunable.name}</span>
+        <span className="font-mono text-sm text-ink tabular-nums">
+          {tunable.name}
+        </span>
         <span className="text-sm text-ink tabular-nums truncate">
-          {isObject ? <span className="text-ink-faint">{'{…}'}</span> : String(tunable.value)}
+          {isObject ? (
+            <span className="text-ink-faint">{'{…}'}</span>
+          ) : (
+            String(tunable.value)
+          )}
         </span>
         <span className="text-sm text-ink-soft">{tunable.type}</span>
-        <span className="text-sm text-ink-soft">{tunable.category.replace('_', ' ')}</span>
-        <span className="text-xs text-ink-soft truncate font-mono">{tunable.source}</span>
+        <span className="text-sm text-ink-soft">
+          {tunable.category.replace('_', ' ')}
+        </span>
+        <span className="text-xs text-ink-soft truncate font-mono">
+          {tunable.source}
+        </span>
       </button>
       {isExpanded ? (
         <HairlineRow
@@ -253,11 +286,21 @@ function TunableDetail({ tunable }: { tunable: Tunable }) {
         </pre>
       ) : null}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-ink-soft">
-        <dt className="text-ink-faint uppercase font-medium" style={{ letterSpacing: 'var(--tracking-eyebrow)' }}>Source</dt>
+        <dt
+          className="text-ink-faint uppercase font-medium"
+          style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
+        >
+          Source
+        </dt>
         <dd className="font-mono">{tunable.source}</dd>
         {tunable.relatedTickets && tunable.relatedTickets.length > 0 ? (
           <>
-            <dt className="text-ink-faint uppercase font-medium" style={{ letterSpacing: 'var(--tracking-eyebrow)' }}>Tickets</dt>
+            <dt
+              className="text-ink-faint uppercase font-medium"
+              style={{ letterSpacing: 'var(--tracking-eyebrow)' }}
+            >
+              Tickets
+            </dt>
             <dd>{tunable.relatedTickets.join(', ')}</dd>
           </>
         ) : null}

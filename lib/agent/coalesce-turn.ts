@@ -203,20 +203,16 @@ export interface TurnClaimRow {
 }
 
 export type InsertClaimResult =
-  | { ok: true; conflict: boolean }
-  | { ok: false; error: string }
+  { ok: true; conflict: boolean } | { ok: false; error: string }
 
 export type ReadClaimResult =
-  | { ok: true; claim: TurnClaimRow | null }
-  | { ok: false; error: string }
+  { ok: true; claim: TurnClaimRow | null } | { ok: false; error: string }
 
 export type TakeOverClaimResult =
-  | { ok: true; tookOver: boolean }
-  | { ok: false; error: string }
+  { ok: true; tookOver: boolean } | { ok: false; error: string }
 
 export type DeleteClaimResult =
-  | { ok: true; deleted: boolean }
-  | { ok: false; error: string }
+  { ok: true; deleted: boolean } | { ok: false; error: string }
 
 /**
  * The store, narrow on purpose.
@@ -250,8 +246,7 @@ export interface NewerInbound {
 }
 
 export type FindNewerInboundResult =
-  | { ok: true; newer: NewerInbound | null }
-  | { ok: false; error: string }
+  { ok: true; newer: NewerInbound | null } | { ok: false; error: string }
 
 export interface CoalesceDeps {
   store: TurnClaimStore
@@ -350,10 +345,16 @@ async function attemptClaim(
   // The holder released between our INSERT and our read. One retry; anything
   // beyond that is a live conversation we are better off deferring to.
   if (held.claim === null) {
-    const retried = await deps.store.insertClaim(buildClaimRow(input, deps.now()))
+    const retried = await deps.store.insertClaim(
+      buildClaimRow(input, deps.now()),
+    )
     if (!retried.ok) return { status: 'unavailable', error: retried.error }
     if (!retried.conflict) return { status: 'won' }
-    return { status: 'lost', heldByAgentRunId: 'unknown', heldForMessageId: 'unknown' }
+    return {
+      status: 'lost',
+      heldByAgentRunId: 'unknown',
+      heldForMessageId: 'unknown',
+    }
   }
 
   // A live lease. Someone is working this conversation right now.
@@ -461,7 +462,9 @@ export function defaultCoalesceDeps(): CoalesceDeps {
       async readClaim(venueId, guestId) {
         const { data, error } = await supabase()
           .from('inbound_turn_claims')
-          .select('venue_id, guest_id, claimed_message_id, agent_run_id, claimed_at, expires_at')
+          .select(
+            'venue_id, guest_id, claimed_message_id, agent_run_id, claimed_at, expires_at',
+          )
           .eq('venue_id', venueId)
           .eq('guest_id', guestId)
           .maybeSingle()
@@ -493,7 +496,8 @@ export function defaultCoalesceDeps(): CoalesceDeps {
           // The CAS. Without it two runs reading one expired claim both "win".
           .eq('agent_run_id', expectedAgentRunId)
           .select('venue_id')
-        if (error) return { ok: false, error: `takeOverClaim: ${error.message}` }
+        if (error)
+          return { ok: false, error: `takeOverClaim: ${error.message}` }
         return { ok: true, tookOver: (data?.length ?? 0) > 0 }
       },
       async deleteClaim({ venueId, guestId, agentRunId }) {
@@ -524,7 +528,8 @@ export function defaultCoalesceDeps(): CoalesceDeps {
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .limit(2)
-      if (error) return { ok: false, error: `findNewerInbound: ${error.message}` }
+      if (error)
+        return { ok: false, error: `findNewerInbound: ${error.message}` }
       const newer = pickNewer(data ?? [], afterCreatedAt, afterId)
       return { ok: true, newer }
     },
@@ -551,7 +556,8 @@ export function pickNewer(
     const ms = new Date(row.created_at).getTime()
     if (Number.isNaN(ms)) continue
     if (ms > afterMs) return { id: row.id, createdAt: new Date(ms) }
-    if (ms === afterMs && row.id > afterId) return { id: row.id, createdAt: new Date(ms) }
+    if (ms === afterMs && row.id > afterId)
+      return { id: row.id, createdAt: new Date(ms) }
   }
   return null
 }
@@ -607,7 +613,10 @@ export interface InboundTurnState {
   typingInFlight: Promise<unknown> | null
 }
 
-export function newInboundTurnState(enabled: boolean, retryDepth = 0): InboundTurnState {
+export function newInboundTurnState(
+  enabled: boolean,
+  retryDepth = 0,
+): InboundTurnState {
   return {
     claim: null,
     extensionsUsed: 0,
@@ -662,7 +671,12 @@ export async function openCoalescedTurn(
 ): Promise<OpenTurnOutcome> {
   // The shut path is today's behaviour exactly: no wait, no claim, no adopt.
   if (!enabled) {
-    return { status: 'proceed', answerMessageId: input.messageId, claimed: false, degraded: null }
+    return {
+      status: 'proceed',
+      answerMessageId: input.messageId,
+      claimed: false,
+      degraded: null,
+    }
   }
 
   if (COALESCE_SETTLE_MS > 0) await deps.sleep(COALESCE_SETTLE_MS)
@@ -704,7 +718,8 @@ export async function openCoalescedTurn(
     afterCreatedAt: input.messageCreatedAt,
     afterId: input.messageId,
   })
-  const answerMessageId = newer.ok && newer.newer ? newer.newer.id : input.messageId
+  const answerMessageId =
+    newer.ok && newer.newer ? newer.newer.id : input.messageId
   return {
     status: 'proceed',
     answerMessageId,
@@ -756,7 +771,9 @@ export async function findUncoveredInbound(
       afterId: turn.answered.id,
     })
     if (!newer.ok) return { status: 'unreadable', error: newer.error }
-    return newer.newer === null ? { status: 'none' } : { status: 'found', message: newer.newer }
+    return newer.newer === null
+      ? { status: 'none' }
+      : { status: 'found', message: newer.newer }
   } catch (e) {
     // A throw is 'unreadable', never 'none'. From the EXTENSION that means
     // send what you have; from the HANDOFF it is reported rather than

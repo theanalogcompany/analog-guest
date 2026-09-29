@@ -36,7 +36,9 @@ interface SupabaseMockState {
   guestUpdateError: { message: string } | null
 }
 
-function newSupabaseState(overrides: Partial<SupabaseMockState> = {}): SupabaseMockState {
+function newSupabaseState(
+  overrides: Partial<SupabaseMockState> = {},
+): SupabaseMockState {
   return {
     existingTxn: null,
     existingTxnError: null,
@@ -86,13 +88,19 @@ function makeSupabaseMock(state: SupabaseMockState) {
               limit: () => ({
                 maybeSingle: async () => {
                   state.enrollmentGateFilters = filters
-                  return { data: state.existingTxn, error: state.existingTxnError }
+                  return {
+                    data: state.existingTxn,
+                    error: state.existingTxnError,
+                  }
                 },
               }),
               order: () => ({
                 limit: async () => {
                   state.ongoingLookupFilters = filters
-                  return { data: state.recentOngoing, error: state.recentOngoingError }
+                  return {
+                    data: state.recentOngoing,
+                    error: state.recentOngoingError,
+                  }
                 },
               }),
             }
@@ -102,7 +110,10 @@ function makeSupabaseMock(state: SupabaseMockState) {
             state.insertPayload = payload
             return {
               select: () => ({
-                single: async () => ({ data: state.insertedRow, error: state.insertError }),
+                single: async () => ({
+                  data: state.insertedRow,
+                  error: state.insertError,
+                }),
               }),
             }
           },
@@ -121,7 +132,10 @@ function makeSupabaseMock(state: SupabaseMockState) {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: state.guestRow, error: state.guestRowError }),
+              single: async () => ({
+                data: state.guestRow,
+                error: state.guestRowError,
+              }),
             }),
           }),
           update: (payload: Record<string, unknown>) => {
@@ -148,7 +162,11 @@ vi.mock('@/lib/db/admin', () => ({
 }))
 
 // Import after mocks so the module under test picks them up.
-import { bodyMentionsMenuItem, extractReportedOrder, resolveReportedItems } from './extract-reported-order'
+import {
+  bodyMentionsMenuItem,
+  extractReportedOrder,
+  resolveReportedItems,
+} from './extract-reported-order'
 
 // TAC-377 time fixtures. Le Mil's runs 07:00-15:00 America/Los_Angeles.
 // 2026-06-04 is a Thursday; 17:00Z is 10:00 PDT (open) and 04:00Z is 21:00
@@ -165,7 +183,9 @@ const OPEN_HOURS = {
 const DURING_SERVICE = new Date('2026-06-04T17:00:00Z')
 const AFTER_CLOSE = new Date('2026-06-05T04:00:00Z')
 
-function makeMenuItem(overrides: Partial<MenuItem> & { name: string }): MenuItem {
+function makeMenuItem(
+  overrides: Partial<MenuItem> & { name: string },
+): MenuItem {
   return {
     category: 'drinks',
     modifiers: [],
@@ -242,7 +262,9 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
   const menu = [{ name: 'Cortado' }, { name: 'Croissant' }]
 
   it('matches a menu item named inside a longer sentence', () => {
-    expect(bodyMentionsMenuItem('i got an oat cortado and a croissant', menu)).toBe(true)
+    expect(
+      bodyMentionsMenuItem('i got an oat cortado and a croissant', menu),
+    ).toBe(true)
   })
 
   it('is case- and whitespace-insensitive', () => {
@@ -267,8 +289,13 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
   // slash-separated. Confirmed live in UAT — this exact message wrote no
   // transaction pre-fix.
   it('matches on a single significant word from a multi-word, slash-separated menu name', () => {
-    const realMenu = [{ name: 'Gibraltar / Cortado' }, { name: 'Almond Croissant' }]
-    expect(bodyMentionsMenuItem('i got an oat cortado and a croissant', realMenu)).toBe(true)
+    const realMenu = [
+      { name: 'Gibraltar / Cortado' },
+      { name: 'Almond Croissant' },
+    ]
+    expect(
+      bodyMentionsMenuItem('i got an oat cortado and a croissant', realMenu),
+    ).toBe(true)
   })
 
   it('matches a multi-word menu name on just one of its words', () => {
@@ -280,7 +307,9 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
     // "and" alone must never trigger — it's dropped as a stopword-grade
     // token, not treated as a distinctive word of "Bacon and Eggs".
     const realMenu = [{ name: 'Bacon and Eggs' }]
-    expect(bodyMentionsMenuItem('you and me should hang out', realMenu)).toBe(false)
+    expect(bodyMentionsMenuItem('you and me should hang out', realMenu)).toBe(
+      false,
+    )
   })
 
   it('does not match on an alphanumeric menu word split into fragments', () => {
@@ -299,12 +328,16 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
   // plural guest phrasing) already worked via plain substring containment.
   it('matches a plural menu name against singular guest phrasing', () => {
     const realMenu = [{ name: 'Croissants' }]
-    expect(bodyMentionsMenuItem('i got a croissant this morning', realMenu)).toBe(true)
+    expect(
+      bodyMentionsMenuItem('i got a croissant this morning', realMenu),
+    ).toBe(true)
   })
 
   it('matches an "-es" plural menu name against singular guest phrasing', () => {
     const realMenu = [{ name: 'Sandwiches' }]
-    expect(bodyMentionsMenuItem('i got the turkey sandwich', realMenu)).toBe(true)
+    expect(bodyMentionsMenuItem('i got the turkey sandwich', realMenu)).toBe(
+      true,
+    )
   })
 
   it('still matches singular menu name against plural guest phrasing (unaffected, pre-existing)', () => {
@@ -357,7 +390,9 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
 
   it('still matches a genuine mention of San Pellegrino (sanity check on the fix)', () => {
     const realMenu = [{ name: 'San Pellegrino' }]
-    expect(bodyMentionsMenuItem('can i get a san pellegrino', realMenu)).toBe(true)
+    expect(bodyMentionsMenuItem('can i get a san pellegrino', realMenu)).toBe(
+      true,
+    )
   })
 
   it('still matches a genuine mention of ice (sanity check on the fix)', () => {
@@ -373,7 +408,9 @@ describe('bodyMentionsMenuItem (pure prefilter)', () => {
   // class is ever touched.
   it('matches a hyphenated mention without the hyphen breaking the boundary check', () => {
     const realMenu = [{ name: 'Carrot-Orange Juice' }]
-    expect(bodyMentionsMenuItem('i got a carrot-orange juice', realMenu)).toBe(true)
+    expect(bodyMentionsMenuItem('i got a carrot-orange juice', realMenu)).toBe(
+      true,
+    )
   })
 
   it('matches a possessive-suffixed mention without the apostrophe breaking the boundary check', () => {
@@ -403,26 +440,64 @@ describe('QR prefilled-body collision guard (TAC-326)', () => {
   // Snapshot captured directly from the live venues/venue_configs tables at
   // ticket time. Full real menu, not a trimmed subset — a partial menu would
   // not faithfully reproduce the actual collision check for this venue.
-  const knownVenueConfigs: { slug: string; qrEnrollmentMessage: string; menuItemNames: string[] }[] = [
+  const knownVenueConfigs: {
+    slug: string
+    qrEnrollmentMessage: string
+    menuItemNames: string[]
+  }[] = [
     {
       slug: 'mock-sextant-coffee-roasters',
       qrEnrollmentMessage: 'Hi Sana!',
       menuItemNames: [
-        'Red Eye', 'Au Lait', 'Pour Over', 'Traveler Coffee', 'Espresso',
-        'Americano', 'Macchiato', 'Gibraltar / Cortado', 'Cappuccino',
-        'Flat White', 'Latte', 'Mocha', 'Frosty Gandhi', 'Golden Latte',
-        'English Breakfast Tea', 'Turmeric Ginger Tea', 'Jasmine Green Tea',
-        'Mystic Mint Tea', 'Chamomile Tea', 'Spicy Chai Tea', 'London Fog Tea',
-        'Chai Latte', 'Matcha Latte', 'Iced Strawberry Matcha',
-        'Hibiscus Ice Tea', 'Hot Chocolate', 'Steamed Milk',
-        'Almond Croissant', 'Connoisseur- Colombia', 'Windsor - Whole Beans',
-        'WALIA IBEX - Whole Beans', 'TopoChico', 'Olipop',
-        'Vive Immunity boost', 'San Pellegrino',
+        'Red Eye',
+        'Au Lait',
+        'Pour Over',
+        'Traveler Coffee',
+        'Espresso',
+        'Americano',
+        'Macchiato',
+        'Gibraltar / Cortado',
+        'Cappuccino',
+        'Flat White',
+        'Latte',
+        'Mocha',
+        'Frosty Gandhi',
+        'Golden Latte',
+        'English Breakfast Tea',
+        'Turmeric Ginger Tea',
+        'Jasmine Green Tea',
+        'Mystic Mint Tea',
+        'Chamomile Tea',
+        'Spicy Chai Tea',
+        'London Fog Tea',
+        'Chai Latte',
+        'Matcha Latte',
+        'Iced Strawberry Matcha',
+        'Hibiscus Ice Tea',
+        'Hot Chocolate',
+        'Steamed Milk',
+        'Almond Croissant',
+        'Connoisseur- Colombia',
+        'Windsor - Whole Beans',
+        'WALIA IBEX - Whole Beans',
+        'TopoChico',
+        'Olipop',
+        'Vive Immunity boost',
+        'San Pellegrino',
         'Wild Wonder Organic Peach Ginger Prebiotic & Probiotic Drink',
-        'Fresh Orange Juice', 'Mixed Greens Juice', 'Beet Juice',
-        'Carrot-Orange Juice', 'Beanie', 'T-shirt', 'Tote Bag',
-        'HARIO V60 COFFEE PAPER FILTER', 'HARIO V60 Dripper', 'HARIO V60 DRIPPER',
-        'Hario V60 Range server', 'OXO Brew', 'Might Small Glass Carafe',
+        'Fresh Orange Juice',
+        'Mixed Greens Juice',
+        'Beet Juice',
+        'Carrot-Orange Juice',
+        'Beanie',
+        'T-shirt',
+        'Tote Bag',
+        'HARIO V60 COFFEE PAPER FILTER',
+        'HARIO V60 Dripper',
+        'HARIO V60 DRIPPER',
+        'Hario V60 Range server',
+        'OXO Brew',
+        'Might Small Glass Carafe',
         'Wired Wonka',
       ],
     },
@@ -439,14 +514,29 @@ describe('QR prefilled-body collision guard (TAC-326)', () => {
     // changes: nothing errors when it goes stale.
     ...[
       { slug: 'le-mils-coffee', qrEnrollmentMessage: 'Hi Himanshu!' },
-      { slug: 'le-mils-coffee (Instagram icebreaker)', qrEnrollmentMessage: "Hi Le Mil's!" },
+      {
+        slug: 'le-mils-coffee (Instagram icebreaker)',
+        qrEnrollmentMessage: "Hi Le Mil's!",
+      },
     ].map((entry) => ({
       ...entry,
       menuItemNames: [
-        'Pour Over', 'Espresso', 'Cortado', 'Americano', 'Cappuccino', 'Latte',
-        'SoFi', 'Almost Latte', 'Spiced Cold Brew', 'Blossom Tonic',
-        'Pink Panther', 'Gulab Jamun Cake', 'Rose Pistachio Barfi',
-        'Mango Cardamom Barfi', 'Mango Lassi', 'Flat White',
+        'Pour Over',
+        'Espresso',
+        'Cortado',
+        'Americano',
+        'Cappuccino',
+        'Latte',
+        'SoFi',
+        'Almost Latte',
+        'Spiced Cold Brew',
+        'Blossom Tonic',
+        'Pink Panther',
+        'Gulab Jamun Cake',
+        'Rose Pistachio Barfi',
+        'Mango Cardamom Barfi',
+        'Mango Lassi',
+        'Flat White',
       ],
     })),
   ]
@@ -465,7 +555,9 @@ describe('QR prefilled-body collision guard (TAC-326)', () => {
   // exactly the class of config error this guard exists to catch.
   it('fires on a deliberately colliding prefilled body (guard has teeth)', () => {
     expect(
-      bodyMentionsMenuItem('Welcome! Enjoy a free cortado on us.', [{ name: 'Cortado' }]),
+      bodyMentionsMenuItem('Welcome! Enjoy a free cortado on us.', [
+        { name: 'Cortado' },
+      ]),
     ).toBe(true)
   })
 })
@@ -474,12 +566,21 @@ describe('resolveReportedItems (pure resolution)', () => {
   const menu = [
     makeMenuItem({ name: 'Cortado', price: 5 }),
     makeMenuItem({ name: 'Croissant', price: 4.5 }),
-    makeMenuItem({ name: 'Seasonal special', price: undefined, priceNote: 'ask staff' }),
+    makeMenuItem({
+      name: 'Seasonal special',
+      price: undefined,
+      priceNote: 'ask staff',
+    }),
   ]
 
   it('resolves a single extracted item to its menu price', () => {
-    const resolved = resolveReportedItems([{ name: 'Cortado', quantity: 1 }], menu)
-    expect(resolved).toEqual([{ name: 'Cortado', quantity: 1, unitPriceCents: 500 }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Cortado', quantity: 1 }],
+      menu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Cortado', quantity: 1, unitPriceCents: 500 },
+    ])
   })
 
   it('resolves multiple extracted items', () => {
@@ -497,7 +598,10 @@ describe('resolveReportedItems (pure resolution)', () => {
   })
 
   it('drops a name that does not resolve to any menu item (alias/near-miss)', () => {
-    const resolved = resolveReportedItems([{ name: 'Oat Cortado Deluxe', quantity: 1 }], menu)
+    const resolved = resolveReportedItems(
+      [{ name: 'Oat Cortado Deluxe', quantity: 1 }],
+      menu,
+    )
     expect(resolved).toEqual([])
   })
 
@@ -506,12 +610,19 @@ describe('resolveReportedItems (pure resolution)', () => {
   })
 
   it('returns an empty array against an empty menu', () => {
-    expect(resolveReportedItems([{ name: 'Cortado', quantity: 1 }], [])).toEqual([])
+    expect(
+      resolveReportedItems([{ name: 'Cortado', quantity: 1 }], []),
+    ).toEqual([])
   })
 
   it('resolves a menu item with no price to a null unitPriceCents', () => {
-    const resolved = resolveReportedItems([{ name: 'Seasonal special', quantity: 1 }], menu)
-    expect(resolved).toEqual([{ name: 'Seasonal special', quantity: 1, unitPriceCents: null }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Seasonal special', quantity: 1 }],
+      menu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Seasonal special', quantity: 1, unitPriceCents: null },
+    ])
   })
 
   it('defaults a non-positive or non-finite quantity to 1 (post-LLM validation, THE-157)', () => {
@@ -527,7 +638,10 @@ describe('resolveReportedItems (pure resolution)', () => {
   })
 
   it('clamps an unreasonably large reported quantity rather than writing it unbounded', () => {
-    const resolved = resolveReportedItems([{ name: 'Cortado', quantity: 500 }], menu)
+    const resolved = resolveReportedItems(
+      [{ name: 'Cortado', quantity: 500 }],
+      menu,
+    )
     expect(resolved[0]?.quantity).toBe(20)
   })
 
@@ -536,26 +650,56 @@ describe('resolveReportedItems (pure resolution)', () => {
       makeMenuItem({ name: 'Latte', size: '12oz', price: 4 }),
       makeMenuItem({ name: 'Latte', size: '16oz', price: 5 }),
     ]
-    const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], sizedMenu)
-    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: 500 }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Latte', quantity: 1 }],
+      sizedMenu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Latte', quantity: 1, unitPriceCents: 500 },
+    ])
   })
 
   it('excludes an unpriced row from the max when resolving a duplicated name with a mix of priced/unpriced rows', () => {
     const mixedMenu = [
       makeMenuItem({ name: 'Latte', size: '12oz', price: 4 }),
-      makeMenuItem({ name: 'Latte', size: 'seasonal', price: undefined, priceNote: 'ask staff' }),
+      makeMenuItem({
+        name: 'Latte',
+        size: 'seasonal',
+        price: undefined,
+        priceNote: 'ask staff',
+      }),
     ]
-    const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], mixedMenu)
-    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: 400 }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Latte', quantity: 1 }],
+      mixedMenu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Latte', quantity: 1, unitPriceCents: 400 },
+    ])
   })
 
   it('resolves a duplicated name with no priced rows at all to a null unitPriceCents', () => {
     const unpricedMenu = [
-      makeMenuItem({ name: 'Latte', size: 'small', price: undefined, priceNote: 'ask staff' }),
-      makeMenuItem({ name: 'Latte', size: 'large', price: undefined, priceNote: 'ask staff' }),
+      makeMenuItem({
+        name: 'Latte',
+        size: 'small',
+        price: undefined,
+        priceNote: 'ask staff',
+      }),
+      makeMenuItem({
+        name: 'Latte',
+        size: 'large',
+        price: undefined,
+        priceNote: 'ask staff',
+      }),
     ]
-    const resolved = resolveReportedItems([{ name: 'Latte', quantity: 1 }], unpricedMenu)
-    expect(resolved).toEqual([{ name: 'Latte', quantity: 1, unitPriceCents: null }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Latte', quantity: 1 }],
+      unpricedMenu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Latte', quantity: 1, unitPriceCents: null },
+    ])
   })
 
   it('resolves a name that appears twice with the SAME price (duplicate data, not conflicting)', () => {
@@ -563,14 +707,24 @@ describe('resolveReportedItems (pure resolution)', () => {
       makeMenuItem({ name: 'Cortado', price: 5 }),
       makeMenuItem({ name: 'Cortado', price: 5 }),
     ]
-    const resolved = resolveReportedItems([{ name: 'Cortado', quantity: 1 }], duplicateMenu)
-    expect(resolved).toEqual([{ name: 'Cortado', quantity: 1, unitPriceCents: 500 }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Cortado', quantity: 1 }],
+      duplicateMenu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Cortado', quantity: 1, unitPriceCents: 500 },
+    ])
   })
 
   it('resolves the model returning the full multi-word, slash-separated canonical name verbatim', () => {
     const realMenu = [makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 })]
-    const resolved = resolveReportedItems([{ name: 'Gibraltar / Cortado', quantity: 1 }], realMenu)
-    expect(resolved).toEqual([{ name: 'Gibraltar / Cortado', quantity: 1, unitPriceCents: 500 }])
+    const resolved = resolveReportedItems(
+      [{ name: 'Gibraltar / Cortado', quantity: 1 }],
+      realMenu,
+    )
+    expect(resolved).toEqual([
+      { name: 'Gibraltar / Cortado', quantity: 1, unitPriceCents: 500 },
+    ])
   })
 
   it('drops a bare fragment the model did NOT canonicalize (resolver never fuzzy-maps on its own)', () => {
@@ -579,7 +733,10 @@ describe('resolveReportedItems (pure resolution)', () => {
     // exactly the fuzzy-matching the ticket rules out. The extractor prompt
     // is what's responsible for returning the verbatim name.
     const realMenu = [makeMenuItem({ name: 'Gibraltar / Cortado', price: 5 })]
-    const resolved = resolveReportedItems([{ name: 'cortado', quantity: 1 }], realMenu)
+    const resolved = resolveReportedItems(
+      [{ name: 'cortado', quantity: 1 }],
+      realMenu,
+    )
     expect(resolved).toEqual([])
   })
 })
@@ -587,7 +744,11 @@ describe('resolveReportedItems (pure resolution)', () => {
 describe('extractReportedOrder (orchestration gate)', () => {
   it('returns no_menu_item_mentioned without any DB or AI call', async () => {
     const ctx = makeCtx({
-      currentMessage: { id: 'm1', body: 'are you open today?', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'are you open today?',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
     const outcome = await extractReportedOrder(ctx)
     expect(outcome).toEqual({ kind: 'no_menu_item_mentioned' })
@@ -613,8 +774,14 @@ describe('extractReportedOrder (orchestration gate)', () => {
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(extractReportedOrderAiMock).toHaveBeenCalled()
-    expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
-    expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
+    expect(outcome).toMatchObject({
+      kind: 'recorded_ongoing',
+      amountCents: 500,
+      itemCount: 1,
+    })
+    expect(currentState.insertPayload).toMatchObject({
+      source: 'guest_reported_ongoing',
+    })
   })
 
   // TAC-325 REVERSES this. Pre-TAC-325, more than 7 days past guests.created_at
@@ -622,7 +789,9 @@ describe('extractReportedOrder (orchestration gate)', () => {
   // ongoing capture — the enrollment window still gates enrollment itself,
   // not order capture generally.
   it('falls through to ongoing capture more than 7 days after guest creation', async () => {
-    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    const eightDaysAgo = new Date(
+      Date.now() - 8 * 24 * 60 * 60 * 1000,
+    ).toISOString()
     currentState = newSupabaseState({
       guestRow: { created_at: eightDaysAgo, first_contacted_at: eightDaysAgo },
     })
@@ -638,11 +807,18 @@ describe('extractReportedOrder (orchestration gate)', () => {
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(extractReportedOrderAiMock).toHaveBeenCalled()
-    expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
+    expect(outcome).toMatchObject({
+      kind: 'recorded_ongoing',
+      amountCents: 500,
+      itemCount: 1,
+    })
   })
 
   it('returns no_items_resolved when the model reports no items', async () => {
-    extractReportedOrderAiMock.mockResolvedValue({ ok: true, data: { items: [], reportTiming: 'present', promptVersion: 'v1' } })
+    extractReportedOrderAiMock.mockResolvedValue({
+      ok: true,
+      data: { items: [], reportTiming: 'present', promptVersion: 'v1' },
+    })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'no_items_resolved' })
   })
@@ -650,7 +826,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
   it('returns no_items_resolved when the model returns items that resolve to nothing', async () => {
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Not On The Menu', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+      data: {
+        items: [{ name: 'Not On The Menu', quantity: 1 }],
+        reportTiming: 'present',
+        promptVersion: 'v1',
+      },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'no_items_resolved' })
@@ -659,7 +839,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
   it('records a transaction with a priced amount on the happy path', async () => {
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+      data: {
+        items: [{ name: 'Cortado', quantity: 1 }],
+        reportTiming: 'present',
+        promptVersion: 'v1',
+      },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({
@@ -679,8 +863,12 @@ describe('extractReportedOrder (orchestration gate)', () => {
       matched_at: null,
       match_method: null,
     })
-    const rawData = currentState.insertPayload?.raw_data as { line_items: unknown[] }
-    expect(rawData.line_items).toEqual([{ name: 'Cortado', quantity: 1, unit_price_cents: 500 }])
+    const rawData = currentState.insertPayload?.raw_data as {
+      line_items: unknown[]
+    }
+    expect(rawData.line_items).toEqual([
+      { name: 'Cortado', quantity: 1, unit_price_cents: 500 },
+    ])
   })
 
   it('records amount_cents: null when any resolved item has no venue price', async () => {
@@ -693,7 +881,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
           menu: {
             items: [
               makeMenuItem({ name: 'Cortado', price: 5 }),
-              makeMenuItem({ name: 'Seasonal special', price: undefined, priceNote: 'ask staff' }),
+              makeMenuItem({
+                name: 'Seasonal special',
+                price: undefined,
+                priceNote: 'ask staff',
+              }),
             ],
           },
         },
@@ -712,15 +904,24 @@ describe('extractReportedOrder (orchestration gate)', () => {
           { name: 'Cortado', quantity: 1 },
           { name: 'Seasonal special', quantity: 1 },
         ],
-        reportTiming: 'present', promptVersion: 'v1',
+        reportTiming: 'present',
+        promptVersion: 'v1',
       },
     })
     const outcome = await extractReportedOrder(ctx)
-    expect(outcome).toMatchObject({ kind: 'recorded', amountCents: null, itemCount: 2 })
-    const rawData = currentState.insertPayload?.raw_data as { line_items: Record<string, unknown>[] }
+    expect(outcome).toMatchObject({
+      kind: 'recorded',
+      amountCents: null,
+      itemCount: 2,
+    })
+    const rawData = currentState.insertPayload?.raw_data as {
+      line_items: Record<string, unknown>[]
+    }
     // Unpriced line item omits unit_price_cents entirely rather than writing
     // a fabricated 0 — parseTicket renders a blank price cell for it.
-    expect(rawData.line_items.find((l) => l.name === 'Seasonal special')).toEqual({
+    expect(
+      rawData.line_items.find((l) => l.name === 'Seasonal special'),
+    ).toEqual({
       name: 'Seasonal special',
       quantity: 1,
     })
@@ -732,36 +933,55 @@ describe('extractReportedOrder (orchestration gate)', () => {
   // days ago and reports a visit today had that visit dated three days back.
   // The uncertainty now lives in `precision` instead of in the timestamp.
   it('uses the inbound message timestamp as occurred_at, not the guest first_contacted_at', async () => {
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+    const threeDaysAgo = new Date(
+      Date.now() - 3 * 24 * 60 * 60 * 1000,
+    ).toISOString()
     currentState = newSupabaseState({
       guestRow: { created_at: threeDaysAgo, first_contacted_at: threeDaysAgo },
     })
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+      data: {
+        items: [{ name: 'Cortado', quantity: 1 }],
+        reportTiming: 'present',
+        promptVersion: 'v1',
+      },
     })
     await extractReportedOrder(makeCtx())
-    expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+    expect(currentState.insertPayload?.occurred_at).toBe(
+      DURING_SERVICE.toISOString(),
+    )
     expect(currentState.insertPayload?.occurred_at).not.toBe(threeDaysAgo)
   })
 
   it('returns failed when the existing-transaction lookup errors', async () => {
-    currentState = newSupabaseState({ existingTxnError: { message: 'db down' } })
+    currentState = newSupabaseState({
+      existingTxnError: { message: 'db down' },
+    })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'failed', error: 'db down' })
   })
 
   it('returns failed when the AI call fails', async () => {
-    extractReportedOrderAiMock.mockResolvedValue({ ok: false, error: 'anthropic down' })
+    extractReportedOrderAiMock.mockResolvedValue({
+      ok: false,
+      error: 'anthropic down',
+    })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'failed', error: 'anthropic down' })
   })
 
   it('treats a 23505 unique-violation on insert the same as already_reported', async () => {
-    currentState = newSupabaseState({ insertError: { message: 'duplicate key', code: '23505' } })
+    currentState = newSupabaseState({
+      insertError: { message: 'duplicate key', code: '23505' },
+    })
     extractReportedOrderAiMock.mockResolvedValue({
       ok: true,
-      data: { items: [{ name: 'Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+      data: {
+        items: [{ name: 'Cortado', quantity: 1 }],
+        reportTiming: 'present',
+        promptVersion: 'v1',
+      },
     })
     const outcome = await extractReportedOrder(makeCtx())
     expect(outcome).toEqual({ kind: 'already_reported' })
@@ -815,8 +1035,13 @@ describe('extractReportedOrder (orchestration gate)', () => {
           } as RuntimeContext['currentMessage'],
         }),
       )
-      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'approximate' })
-      expect(currentState.insertPayload?.occurred_at_precision).toBe('approximate')
+      expect(outcome).toMatchObject({
+        kind: 'recorded',
+        precision: 'approximate',
+      })
+      expect(currentState.insertPayload?.occurred_at_precision).toBe(
+        'approximate',
+      )
     })
 
     // TAC-325: 'specific_past_day' is ALWAYS approximate, whatever the
@@ -825,7 +1050,10 @@ describe('extractReportedOrder (orchestration gate)', () => {
     it('does NOT pin a specific-past-day report, even during open hours', async () => {
       mockSpecificPastDay('2026-06-03')
       const outcome = await extractReportedOrder(makeCtx())
-      expect(outcome).toMatchObject({ kind: 'recorded', precision: 'approximate' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded',
+        precision: 'approximate',
+      })
     })
 
     // The safe direction, and the one a future "tidy" is most likely to
@@ -879,7 +1107,13 @@ describe('extractReportedOrder (orchestration gate)', () => {
     it('writes last_visit_at for an approximate visit too — the profile is honest either way', async () => {
       mockSpecificPastDay('2026-06-03')
       await extractReportedOrder(makeCtx())
-      const expected = venueLocalInstant('America/Los_Angeles', 2026, 6, 3, 12 * 60)
+      const expected = venueLocalInstant(
+        'America/Los_Angeles',
+        2026,
+        6,
+        3,
+        12 * 60,
+      )
       expect(currentState.guestUpdatePayload).toMatchObject({
         last_visit_at: expected?.toISOString(),
         last_visit_precision: 'approximate',
@@ -899,10 +1133,15 @@ describe('extractReportedOrder (orchestration gate)', () => {
     // whole extraction over it would turn a recorded visit into a `failed`
     // outcome for nothing.
     it('still reports recorded when the last_visit_at update fails', async () => {
-      currentState = newSupabaseState({ guestUpdateError: { message: 'guests table down' } })
+      currentState = newSupabaseState({
+        guestUpdateError: { message: 'guests table down' },
+      })
       mockOrder('present')
       const outcome = await extractReportedOrder(makeCtx())
-      expect(outcome).toMatchObject({ kind: 'recorded', transactionId: 'tx-new' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded',
+        transactionId: 'tx-new',
+      })
     })
 
     it('does not touch guests.last_visit_at when nothing was recorded', async () => {
@@ -946,8 +1185,13 @@ describe('extractReportedOrder (orchestration gate)', () => {
         } as RuntimeContext['currentMessage'],
       })
 
-    function ineligibleForEnrollment(overrides: Partial<SupabaseMockState> = {}) {
-      currentState = newSupabaseState({ existingTxn: { id: 'tx-enrolled' }, ...overrides })
+    function ineligibleForEnrollment(
+      overrides: Partial<SupabaseMockState> = {},
+    ) {
+      currentState = newSupabaseState({
+        existingTxn: { id: 'tx-enrolled' },
+        ...overrides,
+      })
     }
 
     function mockCortadoOrder(overrides: Record<string, unknown> = {}) {
@@ -968,8 +1212,14 @@ describe('extractReportedOrder (orchestration gate)', () => {
       ineligibleForEnrollment({ recentOngoing: [] })
       mockCortadoOrder()
       const outcome = await extractReportedOrder(menuCtx())
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', amountCents: 500, itemCount: 1 })
-      expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        amountCents: 500,
+        itemCount: 1,
+      })
+      expect(currentState.insertPayload).toMatchObject({
+        source: 'guest_reported_ongoing',
+      })
     })
 
     it('merges new items into the same-local-day row when one exists', async () => {
@@ -981,7 +1231,9 @@ describe('extractReportedOrder (orchestration gate)', () => {
             raw_data: {
               pos_provider: 'guest_reported',
               amount_source: 'menu_estimate',
-              line_items: [{ name: 'Croissant', quantity: 1, unit_price_cents: 450 }],
+              line_items: [
+                { name: 'Croissant', quantity: 1, unit_price_cents: 450 },
+              ],
             },
           },
         ],
@@ -996,8 +1248,13 @@ describe('extractReportedOrder (orchestration gate)', () => {
         addedItemCount: 1,
       })
       expect(currentState.updateTargetId).toBe('tx-ongoing-1')
-      expect(currentState.updatePayload).toMatchObject({ item_count: 2, amount_cents: 950 })
-      const rawData = currentState.updatePayload?.raw_data as { line_items: unknown[] }
+      expect(currentState.updatePayload).toMatchObject({
+        item_count: 2,
+        amount_cents: 950,
+      })
+      const rawData = currentState.updatePayload?.raw_data as {
+        line_items: unknown[]
+      }
       expect(rawData.line_items).toEqual([
         { name: 'Croissant', quantity: 1, unit_price_cents: 450 },
         { name: 'Cortado', quantity: 1, unit_price_cents: 500 },
@@ -1015,7 +1272,9 @@ describe('extractReportedOrder (orchestration gate)', () => {
             raw_data: {
               pos_provider: 'guest_reported',
               amount_source: 'menu_estimate',
-              line_items: [{ name: 'Cortado', quantity: 1, unit_price_cents: 500 }],
+              line_items: [
+                { name: 'Cortado', quantity: 1, unit_price_cents: 500 },
+              ],
             },
           },
         ],
@@ -1048,7 +1307,9 @@ describe('extractReportedOrder (orchestration gate)', () => {
             raw_data: {
               pos_provider: 'guest_reported',
               amount_source: 'menu_estimate',
-              line_items: [{ name: 'Croissant', quantity: 1, unit_price_cents: 450 }],
+              line_items: [
+                { name: 'Croissant', quantity: 1, unit_price_cents: 450 },
+              ],
             },
           },
         ],
@@ -1057,24 +1318,48 @@ describe('extractReportedOrder (orchestration gate)', () => {
       const outcome = await extractReportedOrder(menuCtx())
       expect(outcome).toMatchObject({ kind: 'recorded_ongoing' })
       expect(currentState.updatePayload).toBeNull()
-      expect(currentState.insertPayload).toMatchObject({ source: 'guest_reported_ongoing' })
+      expect(currentState.insertPayload).toMatchObject({
+        source: 'guest_reported_ongoing',
+      })
     })
 
     it('resolves a specific past day in a different DST regime (PST) to the correct UTC instant', async () => {
       ineligibleForEnrollment()
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-01-15' })
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-01-15',
+      })
       const outcome = await extractReportedOrder(menuCtx())
-      const expected = venueLocalInstant('America/Los_Angeles', 2026, 1, 15, 12 * 60)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
-      expect(currentState.insertPayload?.occurred_at).toBe(expected?.toISOString())
+      const expected = venueLocalInstant(
+        'America/Los_Angeles',
+        2026,
+        1,
+        15,
+        12 * 60,
+      )
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
+      expect(currentState.insertPayload?.occurred_at).toBe(
+        expected?.toISOString(),
+      )
     })
 
     it('falls back to the message timestamp when the model returns a malformed occurredOnDate', async () => {
       ineligibleForEnrollment()
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: 'not-a-date' })
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: 'not-a-date',
+      })
       const outcome = await extractReportedOrder(menuCtx())
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
-      expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
+      expect(currentState.insertPayload?.occurred_at).toBe(
+        DURING_SERVICE.toISOString(),
+      )
     })
 
     // ------------------------------------------------------------------
@@ -1103,21 +1388,38 @@ describe('extractReportedOrder (orchestration gate)', () => {
     it('records a scan-day report with no timing cue as pinned at the message time', async () => {
       ineligibleForEnrollment()
       // 09:00 PDT the same venue-local day as DURING_SERVICE (10:00 PDT).
-      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-04T16:00:00Z')) }
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const ctx = {
+        ...menuCtx(),
+        guest: scanGuest(new Date('2026-06-04T16:00:00Z')),
+      }
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-04',
+      })
       const outcome = await extractReportedOrder(ctx)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'pinned' })
-      expect(currentState.insertPayload?.occurred_at).toBe(DURING_SERVICE.toISOString())
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'pinned',
+      })
+      expect(currentState.insertPayload?.occurred_at).toBe(
+        DURING_SERVICE.toISOString(),
+      )
     })
 
     // Case 2 of 2: an ordinary turn is untouched. Same report, same day, same
     // everything except how the guest was created.
-    it('leaves an ordinary guest\'s no-cue report loose at venue-local noon', async () => {
+    it("leaves an ordinary guest's no-cue report loose at venue-local noon", async () => {
       ineligibleForEnrollment()
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-04',
+      })
       const outcome = await extractReportedOrder(menuCtx())
       const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 4, 12 * 60)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
       expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
     })
 
@@ -1125,23 +1427,41 @@ describe('extractReportedOrder (orchestration gate)', () => {
     // talking, and the visit they name is not the one the scan witnessed.
     it('leaves a scan guest enrolled on an earlier day loose at venue-local noon', async () => {
       ineligibleForEnrollment()
-      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-01T16:00:00Z')) }
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      const ctx = {
+        ...menuCtx(),
+        guest: scanGuest(new Date('2026-06-01T16:00:00Z')),
+      }
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-04',
+      })
       const outcome = await extractReportedOrder(ctx)
       const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 4, 12 * 60)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
       expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
     })
 
     // Boundary: scanned today, but telling us about yesterday. The report's own
     // day is what the guest said, and it is not this visit.
-    it('leaves a scan-day guest\'s report about ANOTHER day loose at that day\'s noon', async () => {
+    it("leaves a scan-day guest's report about ANOTHER day loose at that day's noon", async () => {
       ineligibleForEnrollment()
-      const ctx = { ...menuCtx(), guest: scanGuest(new Date('2026-06-04T16:00:00Z')) }
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-03' })
+      const ctx = {
+        ...menuCtx(),
+        guest: scanGuest(new Date('2026-06-04T16:00:00Z')),
+      }
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-03',
+      })
       const outcome = await extractReportedOrder(ctx)
       const noon = venueLocalInstant('America/Los_Angeles', 2026, 6, 3, 12 * 60)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
       expect(currentState.insertPayload?.occurred_at).toBe(noon?.toISOString())
     })
 
@@ -1161,10 +1481,18 @@ describe('extractReportedOrder (orchestration gate)', () => {
           receivedAt: AFTER_CLOSE,
         } as RuntimeContext['currentMessage'],
       }
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-04',
+      })
       const outcome = await extractReportedOrder(ctx)
-      expect(outcome).toMatchObject({ kind: 'recorded_ongoing', precision: 'approximate' })
-      expect(currentState.insertPayload?.occurred_at).toBe(AFTER_CLOSE.toISOString())
+      expect(outcome).toMatchObject({
+        kind: 'recorded_ongoing',
+        precision: 'approximate',
+      })
+      expect(currentState.insertPayload?.occurred_at).toBe(
+        AFTER_CLOSE.toISOString(),
+      )
     })
 
     it('still advances last_visit_at when the new report is a different local day than a pinned last visit', async () => {
@@ -1195,7 +1523,10 @@ describe('extractReportedOrder (orchestration gate)', () => {
           last_visit_precision: 'pinned',
         },
       })
-      mockCortadoOrder({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-04' })
+      mockCortadoOrder({
+        reportTiming: 'specific_past_day',
+        occurredOnDate: '2026-06-04',
+      })
       await extractReportedOrder(menuCtx())
       expect(currentState.guestUpdatePayload).toBeNull()
     })
@@ -1204,8 +1535,14 @@ describe('extractReportedOrder (orchestration gate)', () => {
       ineligibleForEnrollment({ recentOngoing: [] })
       mockCortadoOrder()
       await extractReportedOrder(menuCtx())
-      expect(currentState.ongoingLookupFilters).toContainEqual(['source', 'guest_reported_ongoing'])
-      expect(currentState.ongoingLookupFilters).not.toContainEqual(['source', 'guest_reported'])
+      expect(currentState.ongoingLookupFilters).toContainEqual([
+        'source',
+        'guest_reported_ongoing',
+      ])
+      expect(currentState.ongoingLookupFilters).not.toContainEqual([
+        'source',
+        'guest_reported',
+      ])
     })
   })
 
@@ -1251,22 +1588,33 @@ describe('extractReportedOrder (orchestration gate)', () => {
             { name: 'Gibraltar / Cortado', quantity: 1 },
             { name: 'Almond Croissant', quantity: 1 },
           ],
-          reportTiming: 'present', promptVersion: 'v1',
+          reportTiming: 'present',
+          promptVersion: 'v1',
         },
       })
       const outcome = await extractReportedOrder(
         realMenuCtx('i got an oat cortado and a croissant'),
       )
       expect(extractReportedOrderAiMock).toHaveBeenCalled()
-      expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 500 + 450, itemCount: 2 })
+      expect(outcome).toMatchObject({
+        kind: 'recorded',
+        amountCents: 500 + 450,
+        itemCount: 2,
+      })
     })
 
     it('records an order for a modifier-prefixed fragment ("oat cortado")', async () => {
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
-        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+        data: {
+          items: [{ name: 'Gibraltar / Cortado', quantity: 1 }],
+          reportTiming: 'present',
+          promptVersion: 'v1',
+        },
       })
-      const outcome = await extractReportedOrder(realMenuCtx('the oat cortado was great today'))
+      const outcome = await extractReportedOrder(
+        realMenuCtx('the oat cortado was great today'),
+      )
       expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 500 })
     })
 
@@ -1274,9 +1622,15 @@ describe('extractReportedOrder (orchestration gate)', () => {
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
         // Hallucinated / non-canonical — not present in realMenuCtx's menu.
-        data: { items: [{ name: 'Oat Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+        data: {
+          items: [{ name: 'Oat Cortado', quantity: 1 }],
+          reportTiming: 'present',
+          promptVersion: 'v1',
+        },
       })
-      const outcome = await extractReportedOrder(realMenuCtx('i got an oat cortado'))
+      const outcome = await extractReportedOrder(
+        realMenuCtx('i got an oat cortado'),
+      )
       expect(outcome).toEqual({ kind: 'no_items_resolved' })
     })
 
@@ -1289,8 +1643,16 @@ describe('extractReportedOrder (orchestration gate)', () => {
             hours: OPEN_HOURS,
             menu: {
               items: [
-                makeMenuItem({ name: 'Gibraltar / Cortado', size: '8oz', price: 5 }),
-                makeMenuItem({ name: 'Gibraltar / Cortado', size: '12oz', price: 6 }),
+                makeMenuItem({
+                  name: 'Gibraltar / Cortado',
+                  size: '8oz',
+                  price: 5,
+                }),
+                makeMenuItem({
+                  name: 'Gibraltar / Cortado',
+                  size: '12oz',
+                  price: 6,
+                }),
               ],
             },
           },
@@ -1304,7 +1666,11 @@ describe('extractReportedOrder (orchestration gate)', () => {
       })
       extractReportedOrderAiMock.mockResolvedValue({
         ok: true,
-        data: { items: [{ name: 'Gibraltar / Cortado', quantity: 1 }], reportTiming: 'present', promptVersion: 'v1' },
+        data: {
+          items: [{ name: 'Gibraltar / Cortado', quantity: 1 }],
+          reportTiming: 'present',
+          promptVersion: 'v1',
+        },
       })
       const outcome = await extractReportedOrder(ctx)
       expect(outcome).toMatchObject({ kind: 'recorded', amountCents: 600 })

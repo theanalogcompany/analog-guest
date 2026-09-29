@@ -10,7 +10,10 @@ vi.mock('../../../../_lib/knowledge-corpus', () => ({
 }))
 
 import { requireKnowledgeEntryAdmin } from '@/lib/auth'
-import { editKnowledgeEntry, removeKnowledgeEntry } from '../../../../_lib/knowledge-corpus'
+import {
+  editKnowledgeEntry,
+  removeKnowledgeEntry,
+} from '../../../../_lib/knowledge-corpus'
 import { DELETE, PATCH } from './route'
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
@@ -69,7 +72,10 @@ describe('PATCH /admin/venues/api/knowledge/[entryId]', () => {
       corpusId: ENTRY_ID,
       reEmbedded: false,
     })
-    const res = await PATCH(buildRequest({ primaryTags: ['events'] }), buildParams())
+    const res = await PATCH(
+      buildRequest({ primaryTags: ['events'] }),
+      buildParams(),
+    )
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json).toMatchObject({ success: true, reEmbedded: false })
@@ -82,7 +88,10 @@ describe('PATCH /admin/venues/api/knowledge/[entryId]', () => {
   })
 
   it('400 on a non-canonical primary tag', async () => {
-    const res = await PATCH(buildRequest({ primaryTags: ['personality'] }), buildParams())
+    const res = await PATCH(
+      buildRequest({ primaryTags: ['personality'] }),
+      buildParams(),
+    )
     expect(res.status).toBe(400)
     expect(editKnowledgeEntry).not.toHaveBeenCalled()
   })
@@ -100,7 +109,10 @@ describe('PATCH /admin/venues/api/knowledge/[entryId]', () => {
   it('passes through 404 from auth helper', async () => {
     vi.mocked(requireKnowledgeEntryAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'knowledge entry not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'knowledge entry not found' },
+        { status: 404 },
+      ),
     })
     const res = await PATCH(buildRequest({ content: 'x' }), buildParams())
     expect(res.status).toBe(404)
@@ -119,7 +131,10 @@ describe('DELETE /admin/venues/api/knowledge/[entryId]', () => {
   })
 
   it('200 on successful delete', async () => {
-    vi.mocked(removeKnowledgeEntry).mockResolvedValue({ ok: true, corpusId: ENTRY_ID })
+    vi.mocked(removeKnowledgeEntry).mockResolvedValue({
+      ok: true,
+      corpusId: ENTRY_ID,
+    })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(200)
     expect(removeKnowledgeEntry).toHaveBeenCalledWith(ENTRY_ID)
@@ -138,7 +153,10 @@ describe('DELETE /admin/venues/api/knowledge/[entryId]', () => {
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireKnowledgeEntryAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(403)

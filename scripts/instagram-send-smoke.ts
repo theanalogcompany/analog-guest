@@ -41,11 +41,29 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import { insertOrReconcileEcho } from '@/lib/agent/dispatch-instagram-reply'
-import { graphRequest, type GraphFailure } from '@/lib/messaging/instagram/graph'
-import { INSTAGRAM_MAX_TEXT_BYTES, classifySendFailure, sendInstagramText } from '@/lib/messaging/instagram/send'
-import { loadInstagramSendTarget, type InstagramSendTarget } from '@/lib/messaging/instagram/send-target'
-import { instagramWindowState, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
-import { capVerdictBlocker, idForLog as idForLogPure, parseSmokeArgs, textOfBytes } from './lib/instagram-smoke'
+import {
+  graphRequest,
+  type GraphFailure,
+} from '@/lib/messaging/instagram/graph'
+import {
+  INSTAGRAM_MAX_TEXT_BYTES,
+  classifySendFailure,
+  sendInstagramText,
+} from '@/lib/messaging/instagram/send'
+import {
+  loadInstagramSendTarget,
+  type InstagramSendTarget,
+} from '@/lib/messaging/instagram/send-target'
+import {
+  instagramWindowState,
+  loadLastGuestActionAt,
+} from '@/lib/messaging/instagram/window'
+import {
+  capVerdictBlocker,
+  idForLog as idForLogPure,
+  parseSmokeArgs,
+  textOfBytes,
+} from './lib/instagram-smoke'
 
 type Verdict = 'PASS' | 'FAIL' | 'INCONCLUSIVE' | 'NOTE'
 
@@ -61,7 +79,8 @@ function record(check: string, verdict: Verdict, detail: string): void {
 
 const idForLog = (value: string): string => idForLogPure(value, showIds)
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Under this much window left, the run could start open and finish closed. */
 const TIGHT_WINDOW_MS = 10 * 60 * 1000
@@ -75,7 +94,10 @@ function closedAgo(closesAt: Date | null): string {
 type Supabase = ReturnType<typeof createAdminClient>
 
 /** Outbound rows saved for this mid, newest first. The echo arrives by webhook. */
-async function rowsForMid(supabase: Supabase, mid: string): Promise<Array<{ id: string; generated_by: string | null }>> {
+async function rowsForMid(
+  supabase: Supabase,
+  mid: string,
+): Promise<Array<{ id: string; generated_by: string | null }>> {
   const { data, error } = await supabase
     .from('messages')
     .select('id, generated_by')
@@ -86,7 +108,11 @@ async function rowsForMid(supabase: Supabase, mid: string): Promise<Array<{ id: 
 }
 
 /** Wait for the webhook to save the echo of `mid`. */
-async function waitForEcho(supabase: Supabase, mid: string, seconds: number): Promise<Array<{ id: string }>> {
+async function waitForEcho(
+  supabase: Supabase,
+  mid: string,
+  seconds: number,
+): Promise<Array<{ id: string }>> {
   for (let i = 0; i < seconds; i += 2) {
     const rows = await rowsForMid(supabase, mid)
     if (rows.length > 0) return rows
@@ -140,15 +166,25 @@ async function checkIdentity(
   guestId: string,
 ): Promise<string | null> {
   const startedAt = new Date(Date.now() - 5000)
-  const sent = await sendInstagramText({ ...target, fetchImpl: fetch, text: 'analog smoke test 1 of 3, please ignore' })
+  const sent = await sendInstagramText({
+    ...target,
+    fetchImpl: fetch,
+    text: 'analog smoke test 1 of 3, please ignore',
+  })
   if (!sent.ok) {
     // Not a FAIL: a send that never left says nothing about whether the
     // Send API's message_id and the echo's mid are the same string, and the
     // summary reads a check-A FAIL as "the design has to change".
-    record('A identity', 'INCONCLUSIVE', `the send itself failed (${sent.kind}), so nothing was asked of the identity question`)
+    record(
+      'A identity',
+      'INCONCLUSIVE',
+      `the send itself failed (${sent.kind}), so nothing was asked of the identity question`,
+    )
     return null
   }
-  console.log(`  sent, waiting up to 60s for the echo | message_id=${idForLog(sent.mid)}`)
+  console.log(
+    `  sent, waiting up to 60s for the echo | message_id=${idForLog(sent.mid)}`,
+  )
 
   const rows = await waitForEcho(supabase, sent.mid, 60)
   if (rows.length > 0) {
@@ -191,9 +227,17 @@ async function checkCap(target: InstagramSendTarget): Promise<void> {
   // BOTH verdicts below read a refusal as evidence about the message's SIZE,
   // so both must first establish that size is what Meta was judging. A refusal
   // for any other reason refuses 1000 and 1001 bytes identically.
-  const atCap = await sendInstagramText({ ...target, fetchImpl: fetch, text: textOfBytes(INSTAGRAM_MAX_TEXT_BYTES, 'analog smoke test 2 of 3') })
+  const atCap = await sendInstagramText({
+    ...target,
+    fetchImpl: fetch,
+    text: textOfBytes(INSTAGRAM_MAX_TEXT_BYTES, 'analog smoke test 2 of 3'),
+  })
   if (atCap.ok) {
-    record('B cap', 'PASS', `Meta accepted exactly ${INSTAGRAM_MAX_TEXT_BYTES} bytes, so the cap is right where it is`)
+    record(
+      'B cap',
+      'PASS',
+      `Meta accepted exactly ${INSTAGRAM_MAX_TEXT_BYTES} bytes, so the cap is right where it is`,
+    )
   } else {
     const blocker = capVerdictBlocker(atCap.kind)
     if (blocker !== null) {
@@ -215,11 +259,20 @@ async function checkCap(target: InstagramSendTarget): Promise<void> {
   // One byte over, posted straight at Graph: our own transport would refuse
   // this before the network, which is the behaviour under test everywhere
   // else, so the probe has to go around it.
-  const over = textOfBytes(INSTAGRAM_MAX_TEXT_BYTES + 1, 'analog smoke test 2b of 3')
-  const probe = await graphRequest('POST', `/${encodeURIComponent(target.accountId)}/messages`, target.token, fetch, {
-    body: { recipient: { id: target.recipientId }, message: { text: over } },
-    timeoutMs: 10_000,
-  })
+  const over = textOfBytes(
+    INSTAGRAM_MAX_TEXT_BYTES + 1,
+    'analog smoke test 2b of 3',
+  )
+  const probe = await graphRequest(
+    'POST',
+    `/${encodeURIComponent(target.accountId)}/messages`,
+    target.token,
+    fetch,
+    {
+      body: { recipient: { id: target.recipientId }, message: { text: over } },
+      timeoutMs: 10_000,
+    },
+  )
   if (probe.ok) {
     record(
       'B cap',
@@ -258,15 +311,28 @@ async function checkOneRowEitherWay(
   // C1, echo first: reuse the message from check A, whose echo is already
   // saved. Our write must fill that row in rather than make a second one.
   if (echoedMid === null) {
-    record('C1 echo first', 'INCONCLUSIVE', 'check A did not produce an echoed message to reuse')
+    record(
+      'C1 echo first',
+      'INCONCLUSIVE',
+      'check A did not produce an echoed message to reuse',
+    )
   } else {
     const reconciled = await insertOrReconcileEcho(
       supabase,
-      smokeRow(venueId, guestId, 'analog smoke test 1 of 3, please ignore', echoedMid),
+      smokeRow(
+        venueId,
+        guestId,
+        'analog smoke test 1 of 3, please ignore',
+        echoedMid,
+      ),
     )
     const after = await rowsForMid(supabase, echoedMid)
     if (reconciled.ok && reconciled.reconciled && after.length === 1) {
-      record('C1 echo first', 'PASS', `our write filled in the echo's row, still one row (${after[0]!.id})`)
+      record(
+        'C1 echo first',
+        'PASS',
+        `our write filled in the echo's row, still one row (${after[0]!.id})`,
+      )
     } else {
       record(
         'C1 echo first',
@@ -280,17 +346,34 @@ async function checkOneRowEitherWay(
 
   // C2, our write first: send, then write the row immediately, before the
   // echo can arrive. The webhook must then skip its own insert as a duplicate.
-  const sent = await sendInstagramText({ ...target, fetchImpl: fetch, text: 'analog smoke test 3 of 3, please ignore' })
+  const sent = await sendInstagramText({
+    ...target,
+    fetchImpl: fetch,
+    text: 'analog smoke test 3 of 3, please ignore',
+  })
   if (!sent.ok) {
-    record('C2 our write first', 'INCONCLUSIVE', `the send failed: ${sent.kind}`)
+    record(
+      'C2 our write first',
+      'INCONCLUSIVE',
+      `the send failed: ${sent.kind}`,
+    )
     return
   }
   const inserted = await insertOrReconcileEcho(
     supabase,
-    smokeRow(venueId, guestId, 'analog smoke test 3 of 3, please ignore', sent.mid),
+    smokeRow(
+      venueId,
+      guestId,
+      'analog smoke test 3 of 3, please ignore',
+      sent.mid,
+    ),
   )
   if (!inserted.ok) {
-    record('C2 our write first', 'FAIL', `our own write failed: ${inserted.error}`)
+    record(
+      'C2 our write first',
+      'FAIL',
+      `our own write failed: ${inserted.error}`,
+    )
     return
   }
   touchedRows.push(inserted.id)
@@ -305,9 +388,17 @@ async function checkOneRowEitherWay(
   await sleep(45_000)
   const after = await rowsForMid(supabase, sent.mid)
   if (after.length === 1 && after[0]!.id === inserted.id) {
-    record('C2 our write first', 'PASS', `the webhook skipped its insert as a duplicate, still one row (${inserted.id})`)
+    record(
+      'C2 our write first',
+      'PASS',
+      `the webhook skipped its insert as a duplicate, still one row (${inserted.id})`,
+    )
   } else {
-    record('C2 our write first', 'FAIL', `expected one row (${inserted.id}), found ${after.length}`)
+    record(
+      'C2 our write first',
+      'FAIL',
+      `expected one row (${inserted.id}), found ${after.length}`,
+    )
   }
 }
 
@@ -317,11 +408,15 @@ async function main(): Promise<void> {
   const args = parseSmokeArgs(process.argv.slice(2))
   showIds = args.showIds
   if (!args.venue || !args.guest) {
-    console.error('✗ usage: npm run instagram-smoke -- --venue <slug> --guest <guest-uuid> --confirm [--show-ids]')
+    console.error(
+      '✗ usage: npm run instagram-smoke -- --venue <slug> --guest <guest-uuid> --confirm [--show-ids]',
+    )
     process.exit(2)
   }
   if (!args.confirm) {
-    console.error('✗ this sends up to three real Instagram messages from the venue account. Re-run with --confirm.')
+    console.error(
+      '✗ this sends up to three real Instagram messages from the venue account. Re-run with --confirm.',
+    )
     process.exit(2)
   }
 
@@ -332,11 +427,16 @@ async function main(): Promise<void> {
     .eq('slug', args.venue)
     .maybeSingle()
   if (venueError || !venue) {
-    console.error(`✗ venue ${args.venue} not found${venueError ? `: ${venueError.message}` : ''}`)
+    console.error(
+      `✗ venue ${args.venue} not found${venueError ? `: ${venueError.message}` : ''}`,
+    )
     process.exit(1)
   }
 
-  const target = await loadInstagramSendTarget(supabase, { venueId: venue.id, guestId: args.guest })
+  const target = await loadInstagramSendTarget(supabase, {
+    venueId: venue.id,
+    guestId: args.guest,
+  })
   if (!target.ok) {
     console.error(
       `✗ cannot send: ${target.problem}. ` +
@@ -369,38 +469,70 @@ async function main(): Promise<void> {
     process.exit(3)
   }
 
-  console.log(`Instagram outbound smoke test | venue=${venue.slug} | guest=${args.guest}`)
-  console.log(`Reply window open, ${(windowState.remainingMs / 3_600_000).toFixed(1)}h left.`)
+  console.log(
+    `Instagram outbound smoke test | venue=${venue.slug} | guest=${args.guest}`,
+  )
+  console.log(
+    `Reply window open, ${(windowState.remainingMs / 3_600_000).toFixed(1)}h left.`,
+  )
   if (windowState.remainingMs < TIGHT_WINDOW_MS) {
-    console.log('  That is tight: this run takes about two minutes and could straddle the close.')
+    console.log(
+      '  That is tight: this run takes about two minutes and could straddle the close.',
+    )
   }
-  console.log('Sending up to three real messages. Each check prints its own verdict.\n')
+  console.log(
+    'Sending up to three real messages. Each check prints its own verdict.\n',
+  )
 
-  const echoedMid = await checkIdentity(supabase, target.target, venue.id, args.guest)
+  const echoedMid = await checkIdentity(
+    supabase,
+    target.target,
+    venue.id,
+    args.guest,
+  )
   await checkCap(target.target)
-  await checkOneRowEitherWay(supabase, target.target, venue.id, args.guest, echoedMid)
+  await checkOneRowEitherWay(
+    supabase,
+    target.target,
+    venue.id,
+    args.guest,
+    echoedMid,
+  )
 
   console.log('\n--- summary ---')
-  for (const r of results) console.log(`${r.verdict.padEnd(12)} ${r.check}: ${r.detail}`)
+  for (const r of results)
+    console.log(`${r.verdict.padEnd(12)} ${r.check}: ${r.detail}`)
   if (touchedRows.length > 0) {
-    console.log(`\nrows written or filled in: ${[...new Set(touchedRows)].join(', ')}`)
-    console.log('They are ordinary outbound rows for messages that really were sent; delete them if you want the thread clean.')
+    console.log(
+      `\nrows written or filled in: ${[...new Set(touchedRows)].join(', ')}`,
+    )
+    console.log(
+      'They are ordinary outbound rows for messages that really were sent; delete them if you want the thread clean.',
+    )
   }
 
   const failed = results.filter((r) => r.verdict === 'FAIL')
   const inconclusive = results.filter((r) => r.verdict === 'INCONCLUSIVE')
   if (failed.length > 0) {
-    console.log(`\n✗ ${failed.length} check(s) FAILED. Check A failing is the one that changes the design.`)
+    console.log(
+      `\n✗ ${failed.length} check(s) FAILED. Check A failing is the one that changes the design.`,
+    )
     process.exit(1)
   }
   if (inconclusive.length > 0) {
-    console.log(`\n· ${inconclusive.length} check(s) inconclusive. Nothing is disproved; re-run.`)
+    console.log(
+      `\n· ${inconclusive.length} check(s) inconclusive. Nothing is disproved; re-run.`,
+    )
     process.exit(3)
   }
-  console.log('\n✓ every check passed. The echo handling on both arms rests on check A, and it holds.')
+  console.log(
+    '\n✓ every check passed. The echo handling on both arms rests on check A, and it holds.',
+  )
 }
 
 main().catch((e: unknown) => {
-  console.error(`✗ unexpected error: ${e instanceof Error ? e.message : String(e)}`)
+  console.error(
+    `✗ unexpected error: ${e instanceof Error ? e.message : String(e)}`,
+  )
   process.exit(1)
 })

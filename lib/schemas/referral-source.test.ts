@@ -13,7 +13,7 @@ import { SCAN_REFERRAL_SOURCE, isScanReferral } from './referral-source'
 // (trim, lowercase, startsWith, "any non-null source") arms a first-touch path
 // for a guest who is not at the counter.
 describe('isScanReferral', () => {
-  it('accepts Meta\'s SHORTLINK source', () => {
+  it("accepts Meta's SHORTLINK source", () => {
     expect(isScanReferral('SHORTLINK')).toBe(true)
   })
 
@@ -26,22 +26,27 @@ describe('isScanReferral', () => {
   // Meta documents other sources. A guest arriving from an ad or the
   // customer-chat plugin genuinely is not standing at the pickup counter, so
   // these are correct negatives, not gaps.
-  it.each(['ADS', 'CUSTOMER_CHAT_PLUGIN', 'OPEN_THREAD', 'unknown-future-source'])(
-    'reads %s as not a scan',
-    (source) => {
-      expect(isScanReferral(source)).toBe(false)
-    },
-  )
+  it.each([
+    'ADS',
+    'CUSTOMER_CHAT_PLUGIN',
+    'OPEN_THREAD',
+    'unknown-future-source',
+  ])('reads %s as not a scan', (source) => {
+    expect(isScanReferral(source)).toBe(false)
+  })
 
   // Each of these is a "helpful" normalization someone will propose. Every one
   // of them admits a value Meta has never sent, on a signal that decides
   // whether the agent treats a guest as being in the shop.
-  it.each(['shortlink', 'ShortLink', ' SHORTLINK', 'SHORTLINK ', 'SHORTLINK_AD'])(
-    'does NOT accept %s',
-    (source) => {
-      expect(isScanReferral(source)).toBe(false)
-    },
-  )
+  it.each([
+    'shortlink',
+    'ShortLink',
+    ' SHORTLINK',
+    'SHORTLINK ',
+    'SHORTLINK_AD',
+  ])('does NOT accept %s', (source) => {
+    expect(isScanReferral(source)).toBe(false)
+  })
 
   it('exports the constant it matches on, so callers never respell it', () => {
     expect(SCAN_REFERRAL_SOURCE).toBe('SHORTLINK')
@@ -67,14 +72,18 @@ describe('both callers read the shared predicate, not their own copy', () => {
 
   it.each(CALLERS)('%s imports isScanReferral', (file) => {
     const src = readFileSync(join(REPO, file), 'utf-8')
-    expect(src).toMatch(/import \{[^}]*\bisScanReferral\b[^}]*\} from '@\/lib\/schemas\/referral-source'/)
+    expect(src).toMatch(
+      /import \{[^}]*\bisScanReferral\b[^}]*\} from '@\/lib\/schemas\/referral-source'/,
+    )
   })
 
   it.each(CALLERS)('%s spells the source value nowhere of its own', (file) => {
     const src = readFileSync(join(REPO, file), 'utf-8')
     // Comments may name it; code may not. Strip line and block comments first,
     // or the header explaining the rule would fail the rule.
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
     expect(code).not.toContain('SHORTLINK')
   })
 })

@@ -73,7 +73,10 @@ function die(message: string): never {
 
 async function main(): Promise<void> {
   const parsed = parseInsertArgs(process.argv.slice(2))
-  if (!parsed.ok) die(`${parsed.error}\n\n  npm run insert-instagram-credential -- --venue <slug> --confirm`)
+  if (!parsed.ok)
+    die(
+      `${parsed.error}\n\n  npm run insert-instagram-credential -- --venue <slug> --confirm`,
+    )
   const args = parsed.args
 
   // 1. The encryption key, before anything else: without it the write cannot
@@ -91,7 +94,9 @@ async function main(): Promise<void> {
 
   const envToken = (process.env.INSTAGRAM_ACCESS_TOKEN ?? '').trim()
   if (envToken === '') {
-    die('INSTAGRAM_ACCESS_TOKEN is not set in .env.local. That is the existing token this stores.')
+    die(
+      'INSTAGRAM_ACCESS_TOKEN is not set in .env.local. That is the existing token this stores.',
+    )
   }
 
   const supabase = createAdminClient()
@@ -108,7 +113,9 @@ async function main(): Promise<void> {
   const targetAccountId = venue.data.instagram_account_id
 
   console.log(`\nVenue:   ${venue.data.name} (${args.venueSlug})`)
-  console.log(`Pointer: venues.instagram_account_id = ${targetAccountId ?? '(unset)'}`)
+  console.log(
+    `Pointer: venues.instagram_account_id = ${targetAccountId ?? '(unset)'}`,
+  )
 
   // 3. Ask META who the token belongs to. Never assume it is the venue's.
   const account = await fetchConnectedAccount(envToken, fetch)
@@ -122,7 +129,9 @@ async function main(): Promise<void> {
     )
   }
   const tokenAccountId = account.value.userId
-  console.log(`Token:   belongs to account ${tokenAccountId} (@${account.value.username ?? 'unknown'})`)
+  console.log(
+    `Token:   belongs to account ${tokenAccountId} (@${account.value.username ?? 'unknown'})`,
+  )
 
   // 4. Who else holds that account. One row at most: the column is globally
   //    unique (migration 048).
@@ -131,7 +140,10 @@ async function main(): Promise<void> {
     .select('id')
     .eq('instagram_account_id', tokenAccountId)
     .maybeSingle()
-  if (holder.error) die(`could not check which venue holds that account: ${holder.error.message}`)
+  if (holder.error)
+    die(
+      `could not check which venue holds that account: ${holder.error.message}`,
+    )
 
   const decision = decideAccountClaim({
     targetVenueId: venueId,
@@ -140,7 +152,9 @@ async function main(): Promise<void> {
     tokenAccountId,
   })
   if (decision.action === 'refuse') die(decision.reason)
-  console.log(`Account: ${decision.action === 'claim' ? 'will be claimed by this venue' : 'already pointed here'}`)
+  console.log(
+    `Account: ${decision.action === 'claim' ? 'will be claimed by this venue' : 'already pointed here'}`,
+  )
 
   // Both exits sit HERE, above the refresh, and the ordering is the point: a
   // refresh ISSUES A NEW TOKEN at Meta, so it is not a read. A --dry-run that
@@ -160,7 +174,11 @@ async function main(): Promise<void> {
   // 5. Refresh, so the stored expiry is Meta's rather than a guess.
   let accessToken = envToken
   let expiresAt: Date
-  const refreshed = await refreshInstagramLongLivedToken(envToken, fetch, new Date())
+  const refreshed = await refreshInstagramLongLivedToken(
+    envToken,
+    fetch,
+    new Date(),
+  )
   if (refreshed.ok) {
     accessToken = refreshed.value.token
     expiresAt = refreshed.value.expiresAt
@@ -218,7 +236,9 @@ async function main(): Promise<void> {
         `  The row is not being used. Check is_active and deauthorized_at on the row.`,
     )
   }
-  console.log(`Verified: the venue now resolves its OWN credential (expires ${check.resolved.expiresAt?.toISOString()})`)
+  console.log(
+    `Verified: the venue now resolves its OWN credential (expires ${check.resolved.expiresAt?.toISOString()})`,
+  )
 
   console.log(
     `\n✓ Done. ${venue.data.name} sends with its own token from now on, and the daily\n` +
@@ -228,6 +248,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('\n✗ unexpected failure:', err instanceof Error ? err.message : err, '\n')
+  console.error(
+    '\n✗ unexpected failure:',
+    err instanceof Error ? err.message : err,
+    '\n',
+  )
   process.exit(1)
 })

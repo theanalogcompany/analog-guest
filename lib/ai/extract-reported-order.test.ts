@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // Relative import — matches classify-message.test.ts's convention for a
 // same-directory sibling module.
-import { EXTRACT_REPORTED_ORDER_PROMPT_VERSION, extractReportedOrder } from './extract-reported-order'
+import {
+  EXTRACT_REPORTED_ORDER_PROMPT_VERSION,
+  extractReportedOrder,
+} from './extract-reported-order'
 // Real (unmocked) resolver, for the enum-dedup/max-price composition test
 // below — only generateObject and the model client are mocked in this file,
 // so this is the actual production resolveReportedItems, not a stand-in.
@@ -52,7 +55,7 @@ describe('extractReportedOrder', () => {
     }
   })
 
-  it('returns an empty items array unchanged (question/future/hypothetical framing is the model\'s job)', async () => {
+  it("returns an empty items array unchanged (question/future/hypothetical framing is the model's job)", async () => {
     mockSuccess({ items: [], reportTiming: 'vague_past' })
 
     const result = await extractReportedOrder({
@@ -76,7 +79,8 @@ describe('extractReportedOrder', () => {
       todayInVenueTimezone: null,
     })
 
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { prompt?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { prompt?: string } | undefined
     expect(callArgs?.prompt).toContain('Cortado')
     expect(callArgs?.prompt).toContain('Croissant')
   })
@@ -92,7 +96,8 @@ describe('extractReportedOrder', () => {
       menuItemNames: ['Cortado'],
       todayInVenueTimezone: 'Thursday, 2026-06-04',
     })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { prompt?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { prompt?: string } | undefined
     expect(callArgs?.prompt).toContain('Thursday, 2026-06-04')
   })
 
@@ -103,7 +108,8 @@ describe('extractReportedOrder', () => {
       menuItemNames: ['Cortado'],
       todayInVenueTimezone: null,
     })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { prompt?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { prompt?: string } | undefined
     expect(callArgs?.prompt).toContain('not available')
   })
 
@@ -152,18 +158,27 @@ describe('extractReportedOrder', () => {
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
       | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
       | undefined
-    const base = { reportTiming: 'present', occurredOnDate: '', continuesRecentVisit: true }
+    const base = {
+      reportTiming: 'present',
+      occurredOnDate: '',
+      continuesRecentVisit: true,
+    }
     // Valid: a name literally in the given list.
     expect(
-      callArgs?.schema?.safeParse({ ...base, items: [{ name: 'Cortado', quantity: 1 }] }).success,
+      callArgs?.schema?.safeParse({
+        ...base,
+        items: [{ name: 'Cortado', quantity: 1 }],
+      }).success,
     ).toBe(true)
     // Invalid: this is the exact class of bug the enum constraint closes —
     // a hallucinated or reformatted name that a bare z.string() would have
     // silently accepted (and the resolver would have silently dropped one
     // layer down, with no visibility into why).
     expect(
-      callArgs?.schema?.safeParse({ ...base, items: [{ name: 'Not A Real Menu Item', quantity: 1 }] })
-        .success,
+      callArgs?.schema?.safeParse({
+        ...base,
+        items: [{ name: 'Not A Real Menu Item', quantity: 1 }],
+      }).success,
     ).toBe(false)
   })
 
@@ -208,7 +223,10 @@ describe('extractReportedOrder', () => {
   // 'specific_past_day' — the caller resolves it, this module only carries
   // it through unmodified.
   it('passes occurredOnDate through to the caller for a specific_past_day report', async () => {
-    mockSuccess({ reportTiming: 'specific_past_day', occurredOnDate: '2026-06-03' })
+    mockSuccess({
+      reportTiming: 'specific_past_day',
+      occurredOnDate: '2026-06-03',
+    })
     const result = await extractReportedOrder({
       inboundBody: 'got a cortado yesterday',
       menuItemNames: ['Cortado'],
@@ -244,14 +262,27 @@ describe('extractReportedOrder', () => {
       | undefined
     const base = { items: [], occurredOnDate: '', continuesRecentVisit: true }
     expect(callArgs?.schema?.safeParse({ ...base }).success).toBe(false)
-    expect(callArgs?.schema?.safeParse({ ...base, reportTiming: 'yesterday' }).success).toBe(false)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, reportTiming: 'yesterday' })
+        .success,
+    ).toBe(false)
     // TAC-377's retired two-state value is no longer accepted either.
-    expect(callArgs?.schema?.safeParse({ ...base, reportTiming: 'past' }).success).toBe(false)
-    expect(callArgs?.schema?.safeParse({ ...base, reportTiming: 'present' }).success).toBe(true)
-    expect(callArgs?.schema?.safeParse({ ...base, reportTiming: 'specific_past_day' }).success).toBe(
-      true,
-    )
-    expect(callArgs?.schema?.safeParse({ ...base, reportTiming: 'vague_past' }).success).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, reportTiming: 'past' }).success,
+    ).toBe(false)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, reportTiming: 'present' }).success,
+    ).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({
+        ...base,
+        reportTiming: 'specific_past_day',
+      }).success,
+    ).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, reportTiming: 'vague_past' })
+        .success,
+    ).toBe(true)
   })
 
   // TAC-325: occurredOnDate is a bare z.string(), never .regex() —
@@ -268,10 +299,22 @@ describe('extractReportedOrder', () => {
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
       | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
       | undefined
-    const base = { items: [], reportTiming: 'specific_past_day', continuesRecentVisit: true }
-    expect(callArgs?.schema?.safeParse({ ...base, occurredOnDate: '' }).success).toBe(true)
-    expect(callArgs?.schema?.safeParse({ ...base, occurredOnDate: '2026-06-03' }).success).toBe(true)
-    expect(callArgs?.schema?.safeParse({ ...base, occurredOnDate: 'not-a-date' }).success).toBe(true)
+    const base = {
+      items: [],
+      reportTiming: 'specific_past_day',
+      continuesRecentVisit: true,
+    }
+    expect(
+      callArgs?.schema?.safeParse({ ...base, occurredOnDate: '' }).success,
+    ).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, occurredOnDate: '2026-06-03' })
+        .success,
+    ).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, occurredOnDate: 'not-a-date' })
+        .success,
+    ).toBe(true)
     expect(callArgs?.schema?.safeParse({ ...base }).success).toBe(false) // still required
   })
 
@@ -286,10 +329,19 @@ describe('extractReportedOrder', () => {
       | { schema?: { safeParse: (v: unknown) => { success: boolean } } }
       | undefined
     const base = { items: [], reportTiming: 'present', occurredOnDate: '' }
-    expect(callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: true }).success).toBe(true)
-    expect(callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: false }).success).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: true })
+        .success,
+    ).toBe(true)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: false })
+        .success,
+    ).toBe(true)
     expect(callArgs?.schema?.safeParse({ ...base }).success).toBe(false)
-    expect(callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: 'yes' }).success).toBe(false)
+    expect(
+      callArgs?.schema?.safeParse({ ...base, continuesRecentVisit: 'yes' })
+        .success,
+    ).toBe(false)
   })
 
   // TAC-325 ruling 11: strengthens the existing "don't infer generic items"
@@ -307,7 +359,8 @@ describe('extractReportedOrder', () => {
       menuItemNames: ['Cortado'],
       todayInVenueTimezone: null,
     })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     expect(callArgs?.system).toContain('a pastry')
     expect(callArgs?.system).toContain('NOT a specific item')
   })
@@ -323,8 +376,7 @@ describe('extractReportedOrder', () => {
       todayInVenueTimezone: null,
     })
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-      | { maxOutputTokens?: number }
-      | undefined
+      { maxOutputTokens?: number } | undefined
     expect(callArgs?.maxOutputTokens).toBe(600)
   })
 
@@ -355,8 +407,16 @@ describe('extractReportedOrder', () => {
     // array — a completely separate variable the AI layer's dedup never
     // touches. This test exercises both real (unmocked) functions together
     // to prove the composition, not just each one in isolation.
-    function makeMenuItem(overrides: Partial<MenuItem> & { name: string }): MenuItem {
-      return { category: 'drinks', modifiers: [], dietary: [], isOffMenu: false, ...overrides }
+    function makeMenuItem(
+      overrides: Partial<MenuItem> & { name: string },
+    ): MenuItem {
+      return {
+        category: 'drinks',
+        modifiers: [],
+        dietary: [],
+        isOffMenu: false,
+        ...overrides,
+      }
     }
 
     it('dedupes the enum to one entry but still resolves against all underlying rows for max price', async () => {
@@ -380,8 +440,13 @@ describe('extractReportedOrder', () => {
 
       // Fed into the REAL resolver against the ORIGINAL (non-deduped, 3-row)
       // menu — the enum's deduping in the AI layer never touched this array.
-      const resolved = resolveReportedItems(extraction.data.items, duplicatedMenu)
-      expect(resolved).toEqual([{ name: 'Olipop', quantity: 1, unitPriceCents: 500 }])
+      const resolved = resolveReportedItems(
+        extraction.data.items,
+        duplicatedMenu,
+      )
+      expect(resolved).toEqual([
+        { name: 'Olipop', quantity: 1, unitPriceCents: 500 },
+      ])
     })
   })
 

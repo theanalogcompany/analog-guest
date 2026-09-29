@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { logger } from '@/lib/observability/logger'
+
 // TAC-385 PR 1: the shape of `messages.rendered_intentions` (migration 045).
 //
 // The intentions that RENDERED into the prompt which produced this draft, so
@@ -56,7 +58,7 @@ export function parseRenderedIntentions(value: unknown): RenderedIntention[] {
   if (value === null || value === undefined) return []
 
   if (!Array.isArray(value)) {
-    console.warn(
+    logger.warn(
       `[rendered-intentions] expected an array, got ${typeof value}. Recording nothing for this draft.`,
     )
     return []
@@ -66,7 +68,7 @@ export function parseRenderedIntentions(value: unknown): RenderedIntention[] {
   for (const raw of value) {
     const parsed = RenderedIntentionSchema.safeParse(raw)
     if (!parsed.success) {
-      console.warn(
+      logger.warn(
         `[rendered-intentions] dropping a malformed entry: ${parsed.error.message}`,
       )
       continue

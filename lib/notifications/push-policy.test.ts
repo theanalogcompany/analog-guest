@@ -25,7 +25,10 @@ import {
   GENERATION_FAILED_REVIEW_REASON,
 } from '@/lib/agent/stages'
 
-import { _PUSH_POLICY_FOR_TESTS, shouldSendDraftFlaggedPush } from './push-policy'
+import {
+  _PUSH_POLICY_FOR_TESTS,
+  shouldSendDraftFlaggedPush,
+} from './push-policy'
 
 describe('push-policy — exhaustiveness over APPROVAL_TRIGGERS', () => {
   it('decides push-or-skip for EVERY approval trigger, with no extras', () => {
@@ -37,7 +40,9 @@ describe('push-policy — exhaustiveness over APPROVAL_TRIGGERS', () => {
 
   it('assigns only valid decisions', () => {
     for (const [trigger, decision] of Object.entries(_PUSH_POLICY_FOR_TESTS)) {
-      expect(['push', 'skip'], `${trigger} has an invalid decision`).toContain(decision)
+      expect(['push', 'skip'], `${trigger} has an invalid decision`).toContain(
+        decision,
+      )
     }
   })
 
@@ -60,28 +65,42 @@ describe('shouldSendDraftFlaggedPush', () => {
   // Named explicitly so a future edit that flips either back to 'skip' has to
   // delete a test that says why it must not.
   it('pushes commitment_type_gated (TAC-297 / ff653be regression)', () => {
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)).toBe(true)
+    expect(
+      shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED),
+    ).toBe(true)
   })
 
   it('pushes hold_all_outbound (#95 / 0c1515c regression)', () => {
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)).toBe(true)
+    expect(
+      shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND),
+    ).toBe(true)
   })
 
   it('pushes the three original TAC-207 triggers', () => {
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.MODEL_FLAGGED)).toBe(true)
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)).toBe(true)
+    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.MODEL_FLAGGED)).toBe(
+      true,
+    )
     expect(
-      shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR),
+      shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP),
+    ).toBe(true)
+    expect(
+      shouldSendDraftFlaggedPush(
+        APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+      ),
     ).toBe(true)
   })
 
   it('skips previous_pending_held — regen UPDATEs the already-pushed row in place', () => {
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)).toBe(false)
+    expect(
+      shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD),
+    ).toBe(false)
   })
 
   // Fail-OPEN. This is the inversion: pre-fix, an unknown trigger was dropped.
   it('pushes an unrecognized trigger rather than dropping it (fail-open)', () => {
-    expect(shouldSendDraftFlaggedPush('some_trigger_shipped_next_quarter')).toBe(true)
+    expect(
+      shouldSendDraftFlaggedPush('some_trigger_shipped_next_quarter'),
+    ).toBe(true)
     expect(shouldSendDraftFlaggedPush('')).toBe(true)
   })
 })
@@ -91,7 +110,9 @@ describe('push-policy — knowledge_gap (TAC-308)', () => {
   // operator doesn't see the card before the timer elapses, the guest gets a
   // holding message instead of an answer.
   it('pushes on a knowledge gap', () => {
-    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)).toBe(true)
+    expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)).toBe(
+      true,
+    )
     expect(_PUSH_POLICY_FOR_TESTS[APPROVAL_TRIGGERS.KNOWLEDGE_GAP]).toBe('push')
   })
 })
@@ -109,10 +130,14 @@ describe('push-policy — generation_failed (TAC-364)', () => {
   // demand. So it is asserted, and it is asserted BY VALUE rather than via the
   // map, because the map genuinely has no entry to read.
   it('pushes the generation-failure card', () => {
-    expect(shouldSendDraftFlaggedPush(GENERATION_FAILED_REVIEW_REASON)).toBe(true)
+    expect(shouldSendDraftFlaggedPush(GENERATION_FAILED_REVIEW_REASON)).toBe(
+      true,
+    )
   })
 
   it('is deliberately absent from PUSH_POLICY, not silently mapped', () => {
-    expect(_PUSH_POLICY_FOR_TESTS[GENERATION_FAILED_REVIEW_REASON]).toBeUndefined()
+    expect(
+      _PUSH_POLICY_FOR_TESTS[GENERATION_FAILED_REVIEW_REASON],
+    ).toBeUndefined()
   })
 })

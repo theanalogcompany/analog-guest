@@ -16,16 +16,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const verifyOperatorRequestMock = vi.fn()
 vi.mock('@/lib/auth', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
-  return { ...actual, verifyOperatorRequest: (req: Request) => verifyOperatorRequestMock(req) }
+  const actual =
+    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
+  return {
+    ...actual,
+    verifyOperatorRequest: (req: Request) => verifyOperatorRequestMock(req),
+  }
 })
 
 const issueMock = vi.fn()
 vi.mock('@/lib/messaging/instagram/oauth-state-store', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/messaging/instagram/oauth-state-store')>(
-    '@/lib/messaging/instagram/oauth-state-store',
-  )
-  return { ...actual, issueInstagramOAuthState: (...args: unknown[]) => issueMock(...args) }
+  const actual = await vi.importActual<
+    typeof import('@/lib/messaging/instagram/oauth-state-store')
+  >('@/lib/messaging/instagram/oauth-state-store')
+  return {
+    ...actual,
+    issueInstagramOAuthState: (...args: unknown[]) => issueMock(...args),
+  }
 })
 
 vi.mock('@/lib/db/admin', () => ({ createAdminClient: () => ({}) }))
@@ -57,10 +64,13 @@ const ORIGINAL = {
 const APP_SECRET = 'app-secret-SHOULD-NEVER-REACH-A-BROWSER'
 
 function req(): Request {
-  return new Request('http://localhost/api/operator/venues/x/instagram/connect', {
-    method: 'POST',
-    headers: { authorization: 'Bearer token' },
-  })
+  return new Request(
+    'http://localhost/api/operator/venues/x/instagram/connect',
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer token' },
+    },
+  )
 }
 
 function call(venueId = VENUE_ID) {
@@ -70,7 +80,8 @@ function call(venueId = VENUE_ID) {
 beforeEach(() => {
   vi.clearAllMocks()
   process.env.INSTAGRAM_APP_ID = 'app-1227804829539686'
-  process.env.INSTAGRAM_OAUTH_REDIRECT_URL = 'https://webhooks.theanalog.company/api/instagram/callback'
+  process.env.INSTAGRAM_OAUTH_REDIRECT_URL =
+    'https://webhooks.theanalog.company/api/instagram/callback'
   process.env.INSTAGRAM_TOKEN_ENC_KEY = ENC_KEY
   process.env.INSTAGRAM_APP_SECRET = APP_SECRET
   verifyOperatorRequestMock.mockResolvedValue({
@@ -100,9 +111,13 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown>
     expect(Object.keys(body).sort()).toEqual(['authorizationUrl', 'expiresAt'])
-    expect(String(body.authorizationUrl)).toContain('https://www.instagram.com/oauth/authorize?')
+    expect(String(body.authorizationUrl)).toContain(
+      'https://www.instagram.com/oauth/authorize?',
+    )
     expect(typeof body.expiresAt).toBe('string')
-    expect(new Date(String(body.expiresAt)).getTime()).toBeGreaterThan(Date.now())
+    expect(new Date(String(body.expiresAt)).getTime()).toBeGreaterThan(
+      Date.now(),
+    )
   })
 
   it('asks for exactly the scopes the use case needs', async () => {
@@ -135,7 +150,10 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
 
     // The nonce in the signed state is the one written to the database. If
     // these diverged, every callback would fail to claim.
-    const [, issued] = issueMock.mock.calls[0] as [unknown, { nonce: string; venueId: string }]
+    const [, issued] = issueMock.mock.calls[0] as [
+      unknown,
+      { nonce: string; venueId: string },
+    ]
     expect(issued.nonce).toBe(verified.payload.nonce)
     expect(issued.venueId).toBe(VENUE_ID)
   })
@@ -149,7 +167,9 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
   })
 
   it('returns 401 with the Contract body when the bearer is bad', async () => {
-    verifyOperatorRequestMock.mockRejectedValue(new AuthError(401, 'JWT expired'))
+    verifyOperatorRequestMock.mockRejectedValue(
+      new AuthError(401, 'JWT expired'),
+    )
     const res = await call()
     expect(res.status).toBe(401)
     // The Contract's literal, not AuthError.message: "JWT expired" must not
@@ -157,7 +177,7 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
     expect(await res.json()).toEqual({ error: 'unauthorized' })
   })
 
-  it('returns 404 for a venue outside the operator\'s allowlist', async () => {
+  it("returns 404 for a venue outside the operator's allowlist", async () => {
     const res = await call(OTHER_VENUE_ID)
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'not_found' })
@@ -182,7 +202,10 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
   // never produces one, but a future admin surface passing a cookie scope
   // into this route would, and it must not be a grant.
   it('returns 404 for a fleet-wide scope, which this path must never honour', async () => {
-    verifyOperatorRequestMock.mockResolvedValue({ operatorId: OPERATOR_ID, venueScope: ALL_VENUES })
+    verifyOperatorRequestMock.mockResolvedValue({
+      operatorId: OPERATOR_ID,
+      venueScope: ALL_VENUES,
+    })
     const res = await call()
     expect(res.status).toBe(404)
     expect(issueMock).not.toHaveBeenCalled()
@@ -195,7 +218,11 @@ describe('POST /api/operator/venues/[venueId]/instagram/connect', () => {
     expect(issueMock).not.toHaveBeenCalled()
   })
 
-  it.each(['INSTAGRAM_APP_ID', 'INSTAGRAM_OAUTH_REDIRECT_URL', 'INSTAGRAM_TOKEN_ENC_KEY'] as const)(
+  it.each([
+    'INSTAGRAM_APP_ID',
+    'INSTAGRAM_OAUTH_REDIRECT_URL',
+    'INSTAGRAM_TOKEN_ENC_KEY',
+  ] as const)(
     'returns 500 with the Contract body when %s is unset',
     async (name) => {
       delete process.env[name]

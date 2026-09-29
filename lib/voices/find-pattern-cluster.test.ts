@@ -105,7 +105,12 @@ describe('findPatternClusterForCritique', () => {
       rpcResult: {
         data: [
           { id: ID_A, message_id: MSG_ID, critique_text: 'a', similarity: 0.9 },
-          { id: ID_B, message_id: MSG_ID, critique_text: 'b', similarity: 0.88 },
+          {
+            id: ID_B,
+            message_id: MSG_ID,
+            critique_text: 'b',
+            similarity: 0.88,
+          },
         ],
         error: null,
       },
@@ -133,7 +138,12 @@ describe('findPatternClusterForCritique', () => {
       rpcResult: {
         data: [
           { id: ID_A, message_id: MSG_ID, critique_text: 'a', similarity: 0.9 },
-          { id: ID_B, message_id: MSG_ID, critique_text: 'b', similarity: 0.88 },
+          {
+            id: ID_B,
+            message_id: MSG_ID,
+            critique_text: 'b',
+            similarity: 0.88,
+          },
         ],
         error: null,
       },
@@ -221,7 +231,12 @@ describe('findActiveClusters', () => {
     const state = newState({
       selectResult: {
         data: [
-          { id: NEW_ID, message_id: MSG_ID, critique_text: 'x', embedding: 'not-a-vector' },
+          {
+            id: NEW_ID,
+            message_id: MSG_ID,
+            critique_text: 'x',
+            embedding: 'not-a-vector',
+          },
         ],
         error: null,
       },

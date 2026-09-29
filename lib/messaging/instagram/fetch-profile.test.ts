@@ -25,7 +25,10 @@ function respondWith(status: number, body: unknown) {
   const calls: Call[] = []
   const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
     calls.push({ url, init })
-    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })
+    return new Response(
+      typeof body === 'string' ? body : JSON.stringify(body),
+      { status },
+    )
   })
   return { fetchImpl, calls }
 }
@@ -43,7 +46,10 @@ function graphError(code: number, subcode: number | null, igsid = IGSID_16) {
   return {
     error: {
       message: `Unsupported get request. Object with ID '${igsid}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`,
-      type: code === GRAPH_CODE_TOKEN_REJECTED ? 'OAuthException' : 'IGApiException',
+      type:
+        code === GRAPH_CODE_TOKEN_REJECTED
+          ? 'OAuthException'
+          : 'IGApiException',
       code,
       ...(subcode === null ? {} : { error_subcode: subcode }),
       fbtrace_id: 'AbCdEf123',
@@ -53,14 +59,24 @@ function graphError(code: number, subcode: number | null, igsid = IGSID_16) {
 
 describe('fetchInstagramProfile', () => {
   it('asks for the handle and display name only, with the token in the header and not the URL', async () => {
-    const { fetchImpl, calls } = respondWith(200, { username: 'maya.oakland', name: 'Maya' })
+    const { fetchImpl, calls } = respondWith(200, {
+      username: 'maya.oakland',
+      name: 'Maya',
+    })
     const result = await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)
 
-    expect(result).toEqual({ ok: true, value: { username: 'maya.oakland', name: 'Maya' } })
+    expect(result).toEqual({
+      ok: true,
+      value: { username: 'maya.oakland', name: 'Maya' },
+    })
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.url).toBe(`${INSTAGRAM_GRAPH_BASE_URL}/${IGSID_16}?fields=username,name`)
+    expect(calls[0]?.url).toBe(
+      `${INSTAGRAM_GRAPH_BASE_URL}/${IGSID_16}?fields=username,name`,
+    )
     expect(calls[0]?.url).not.toContain(TOKEN)
-    expect(calls[0]?.init.headers).toEqual({ authorization: `Bearer ${TOKEN}` })
+    expect(calls[0]?.init.headers).toEqual({
+      authorization: `Bearer ${TOKEN}`,
+    })
     expect(calls[0]?.init.signal).toBeInstanceOf(AbortSignal)
   })
 
@@ -68,14 +84,21 @@ describe('fetchInstagramProfile', () => {
     const { fetchImpl, calls } = respondWith(200, { username: 'short.id' })
     const result = await fetchInstagramProfile(IGSID_15, TOKEN, fetchImpl)
 
-    expect(result).toEqual({ ok: true, value: { username: 'short.id', name: null } })
-    expect(calls[0]?.url).toBe(`${INSTAGRAM_GRAPH_BASE_URL}/${IGSID_15}?fields=username,name`)
+    expect(result).toEqual({
+      ok: true,
+      value: { username: 'short.id', name: null },
+    })
+    expect(calls[0]?.url).toBe(
+      `${INSTAGRAM_GRAPH_BASE_URL}/${IGSID_15}?fields=username,name`,
+    )
   })
 
   it('encodes the scoped ID into the path rather than trusting it', async () => {
     const { fetchImpl, calls } = respondWith(200, { username: 'x' })
     await fetchInstagramProfile('1/../me?x=', TOKEN, fetchImpl)
-    expect(calls[0]?.url).toBe(`${INSTAGRAM_GRAPH_BASE_URL}/1%2F..%2Fme%3Fx%3D?fields=username,name`)
+    expect(calls[0]?.url).toBe(
+      `${INSTAGRAM_GRAPH_BASE_URL}/1%2F..%2Fme%3Fx%3D?fields=username,name`,
+    )
   })
 
   // Absent must always be NULL, never '', so a reader's `??` works (TAC-473).
@@ -94,7 +117,10 @@ describe('fetchInstagramProfile', () => {
   })
 
   it('trims the handle and the name', async () => {
-    const { fetchImpl } = respondWith(200, { username: ' maya.oakland ', name: ' Maya ' })
+    const { fetchImpl } = respondWith(200, {
+      username: ' maya.oakland ',
+      name: ' Maya ',
+    })
     expect(await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)).toEqual({
       ok: true,
       value: { username: 'maya.oakland', name: 'Maya' },
@@ -113,7 +139,7 @@ describe('fetchInstagramProfile', () => {
     })
   })
 
-  it('reports a Graph error by its codes and never carries Meta\'s message', async () => {
+  it("reports a Graph error by its codes and never carries Meta's message", async () => {
     const { fetchImpl } = respondWith(400, graphError(100, 33))
     const result = await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)
 
@@ -134,8 +160,16 @@ describe('fetchInstagramProfile', () => {
   })
 
   it('marks an expired or invalid token as a token rejection, and nothing else as one', async () => {
-    const expired = await fetchInstagramProfile(IGSID_16, TOKEN, respondWith(400, graphError(190, 463)).fetchImpl)
-    const refused = await fetchInstagramProfile(IGSID_16, TOKEN, respondWith(400, graphError(100, 33)).fetchImpl)
+    const expired = await fetchInstagramProfile(
+      IGSID_16,
+      TOKEN,
+      respondWith(400, graphError(190, 463)).fetchImpl,
+    )
+    const refused = await fetchInstagramProfile(
+      IGSID_16,
+      TOKEN,
+      respondWith(400, graphError(100, 33)).fetchImpl,
+    )
 
     expect(!expired.ok && isTokenRejected(expired.failure)).toBe(true)
     expect(!refused.ok && isTokenRejected(refused.failure)).toBe(false)
@@ -143,7 +177,9 @@ describe('fetchInstagramProfile', () => {
 
   it('reads a Graph error on a 200 as a failure', async () => {
     const { fetchImpl } = respondWith(200, graphError(10, null))
-    expect(await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)).toMatchObject({
+    expect(
+      await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl),
+    ).toMatchObject({
       ok: false,
       failure: { reason: 'graph_error', httpStatus: 200, code: 10 },
     })
@@ -158,15 +194,36 @@ describe('fetchInstagramProfile', () => {
   })
 
   it('reports a timeout as a timeout', async () => {
-    const { fetchImpl } = throwing(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
-    expect(await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)).toEqual({ ok: false, failure: { reason: 'timeout' } })
+    const { fetchImpl } = throwing(
+      new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError',
+      ),
+    )
+    expect(await fetchInstagramProfile(IGSID_16, TOKEN, fetchImpl)).toEqual({
+      ok: false,
+      failure: { reason: 'timeout' },
+    })
   })
 
   it('reports a network failure by name and cause code, without its message', async () => {
-    const error = new TypeError(`fetch failed for ${IGSID_16}`, { cause: { code: 'ECONNRESET' } })
-    const result = await fetchInstagramProfile(IGSID_16, TOKEN, throwing(error).fetchImpl)
+    const error = new TypeError(`fetch failed for ${IGSID_16}`, {
+      cause: { code: 'ECONNRESET' },
+    })
+    const result = await fetchInstagramProfile(
+      IGSID_16,
+      TOKEN,
+      throwing(error).fetchImpl,
+    )
 
-    expect(result).toEqual({ ok: false, failure: { reason: 'network', errorName: 'TypeError', causeCode: 'ECONNRESET' } })
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        reason: 'network',
+        errorName: 'TypeError',
+        causeCode: 'ECONNRESET',
+      },
+    })
     expect(JSON.stringify(result)).not.toContain(IGSID_16)
   })
 })
@@ -179,14 +236,19 @@ it('gives up on a Graph call after five seconds', () => {
 
 describe('fetchTokenAccountId', () => {
   it('asks /me for user_id, with the token in the header and not the URL', async () => {
-    const { fetchImpl, calls } = respondWith(200, { user_id: '17841400000000001', id: '9999' })
+    const { fetchImpl, calls } = respondWith(200, {
+      user_id: '17841400000000001',
+      id: '9999',
+    })
     const result = await fetchTokenAccountId(TOKEN, fetchImpl)
 
     // user_id, NOT id: id is app-scoped and matches nothing we store.
     expect(result).toEqual({ ok: true, value: '17841400000000001' })
     expect(calls[0]?.url).toBe(`${INSTAGRAM_GRAPH_BASE_URL}/me?fields=user_id`)
     expect(calls[0]?.url).not.toContain(TOKEN)
-    expect(calls[0]?.init.headers).toEqual({ authorization: `Bearer ${TOKEN}` })
+    expect(calls[0]?.init.headers).toEqual({
+      authorization: `Bearer ${TOKEN}`,
+    })
   })
 
   // 17 digits is past what a JSON number holds exactly, so a numeric user_id
@@ -195,14 +257,19 @@ describe('fetchTokenAccountId', () => {
     ['a numeric user_id', { user_id: 17841400000000001 }],
     ['no user_id', { id: '9999' }],
   ])('refuses %s', async (_label, body) => {
-    expect(await fetchTokenAccountId(TOKEN, respondWith(200, body).fetchImpl)).toEqual({
+    expect(
+      await fetchTokenAccountId(TOKEN, respondWith(200, body).fetchImpl),
+    ).toEqual({
       ok: false,
       failure: { reason: 'malformed_response', httpStatus: 200 },
     })
   })
 
   it('reports a rejected token', async () => {
-    const result = await fetchTokenAccountId(TOKEN, respondWith(400, graphError(190, 460)).fetchImpl)
+    const result = await fetchTokenAccountId(
+      TOKEN,
+      respondWith(400, graphError(190, 460)).fetchImpl,
+    )
     expect(!result.ok && isTokenRejected(result.failure)).toBe(true)
   })
 })

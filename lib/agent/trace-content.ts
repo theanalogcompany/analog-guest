@@ -41,7 +41,9 @@ const SIGNAL_KEYS = [
  * fall back to zeros when missing rather than crashing. The fallback is a
  * trace-only placeholder; nothing else in the agent path consumes it.
  */
-export function buildRecognitionContent(snapshot: RecognitionSnapshot): RecognitionContent {
+export function buildRecognitionContent(
+  snapshot: RecognitionSnapshot,
+): RecognitionContent {
   const weights = snapshot.weights
   const contributions = snapshot.contributions
   return {
@@ -138,7 +140,9 @@ const GENERATION_MODEL_LABEL = 'claude-sonnet-4-6'
  * If we add a runtime-selected model, surface it from generateMessage's
  * result and pass through here.
  */
-export function buildGenerateContent(result: GenerateMessageResult): GenerateParentContent {
+export function buildGenerateContent(
+  result: GenerateMessageResult,
+): GenerateParentContent {
   return {
     systemPrompt: result.systemPrompt,
     userPrompt: result.userPrompt,

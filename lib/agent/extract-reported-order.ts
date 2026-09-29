@@ -1,7 +1,11 @@
 import { extractReportedOrder as callExtractReportedOrder } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { toJson } from '@/lib/db/json'
-import { venueLocalDate, venueLocalInstant } from '@/lib/guests/commitment-expiry'
+import {
+  venueLocalDate,
+  venueLocalInstant,
+} from '@/lib/guests/commitment-expiry'
+import { logger } from '@/lib/observability/logger'
 import { normalizeMenuItemName } from '@/lib/recognition/extract-menu-exploration'
 import { resolveOpenState, type VisitTimePrecision } from '@/lib/schemas'
 import type { MenuItem } from '@/lib/schemas'
@@ -141,7 +145,11 @@ function stripDiacritics(value: string): string {
 function extractSignificantWords(name: string): string[] {
   const words = stripDiacritics(name.toLowerCase())
     .split(/[^a-z0-9]+/)
-    .filter((word) => word.length >= MIN_SIGNIFICANT_WORD_LENGTH && !MENU_WORD_STOPWORDS.has(word))
+    .filter(
+      (word) =>
+        word.length >= MIN_SIGNIFICANT_WORD_LENGTH &&
+        !MENU_WORD_STOPWORDS.has(word),
+    )
 
   const withSingularVariants = new Set(words)
   for (const word of words) {
@@ -187,7 +195,9 @@ function escapeRegExp(value: string): string {
 // matches like "ginger" alone for "Wild Wonder Peach Ginger").
 function bodyContainsWord(normalizedBody: string, word: string): boolean {
   const escaped = escapeRegExp(word)
-  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:es|s)?(?:$|[^a-z0-9])`).test(normalizedBody)
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:es|s)?(?:$|[^a-z0-9])`).test(
+    normalizedBody,
+  )
 }
 
 /**
@@ -227,7 +237,9 @@ export function bodyMentionsMenuItem(
   const normalizedBody = stripDiacritics(normalizeMenuItemName(body))
   if (normalizedBody.length === 0) return false
   return menuItems.some((item) =>
-    extractSignificantWords(item.name).some((word) => bodyContainsWord(normalizedBody, word)),
+    extractSignificantWords(item.name).some((word) =>
+      bodyContainsWord(normalizedBody, word),
+    ),
   )
 }
 
@@ -290,10 +302,15 @@ export function resolveReportedItems(
         : 1
     const highestPrice = group.reduce<number | undefined>(
       (max, item) =>
-        item.price === undefined ? max : max === undefined || item.price > max ? item.price : max,
+        item.price === undefined
+          ? max
+          : max === undefined || item.price > max
+            ? item.price
+            : max,
       undefined,
     )
-    const unitPriceCents = highestPrice !== undefined ? Math.round(highestPrice * 100) : null
+    const unitPriceCents =
+      highestPrice !== undefined ? Math.round(highestPrice * 100) : null
     resolved.push({ name: group[0].name, quantity, unitPriceCents })
   }
   return resolved
@@ -324,8 +341,15 @@ export function resolveReportedItems(
  * resolveOpenState also returns `unknown` for a timezone this runtime can't
  * use, which lands on the same safe side for the same reason.
  */
-function resolvePresentPrecision(ctx: RuntimeContext, reportedAt: Date): VisitTimePrecision {
-  const openState = resolveOpenState(ctx.venue.venueInfo.hours, ctx.venue.timezone, reportedAt)
+function resolvePresentPrecision(
+  ctx: RuntimeContext,
+  reportedAt: Date,
+): VisitTimePrecision {
+  const openState = resolveOpenState(
+    ctx.venue.venueInfo.hours,
+    ctx.venue.timezone,
+    reportedAt,
+  )
   return openState.state === 'closed' ? 'approximate' : 'pinned'
 }
 
@@ -348,13 +372,18 @@ function pad(value: number, width: number): string {
 // against a real calendar date. Null when the venue's timezone can't be
 // read — see venueLocalDate's own contract. The extractor's prompt is
 // written to fall back to 'vague_past' rather than guess when this is null.
-function formatTodayInVenueTimezone(timezone: string, receivedAt: Date): string | null {
+function formatTodayInVenueTimezone(
+  timezone: string,
+  receivedAt: Date,
+): string | null {
   const local = venueLocalDate(timezone, receivedAt)
   if (!local) return null
   return `${WEEKDAY_NAMES[local.dayIndex]}, ${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
 }
 
-function parseYmd(value: string): { year: number; month: number; day: number } | null {
+function parseYmd(
+  value: string,
+): { year: number; month: number; day: number } | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return null
   const year = Number(match[1])
@@ -376,8 +405,15 @@ function venueLocalDayKey(timezone: string, instant: Date): string {
   return `${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
 }
 
-function sameVenueLocalDay(aIso: string, bIso: string, timezone: string): boolean {
-  return venueLocalDayKey(timezone, new Date(aIso)) === venueLocalDayKey(timezone, new Date(bIso))
+function sameVenueLocalDay(
+  aIso: string,
+  bIso: string,
+  timezone: string,
+): boolean {
+  return (
+    venueLocalDayKey(timezone, new Date(aIso)) ===
+    venueLocalDayKey(timezone, new Date(bIso))
+  )
 }
 
 /**
@@ -421,7 +457,11 @@ function sameVenueLocalDay(aIso: string, bIso: string, timezone: string): boolea
  * or who scanned on an earlier day, or whose report resolves to another day,
  * takes the unchanged branch below.
  */
-function reportsTodaysScanVisit(ctx: RuntimeContext, occurredAt: Date, reportedAt: Date): boolean {
+function reportsTodaysScanVisit(
+  ctx: RuntimeContext,
+  occurredAt: Date,
+  reportedAt: Date,
+): boolean {
   if (ctx.guest.createdVia !== 'qr_scan') return false
   const timezone = ctx.venue.timezone
   const today = venueLocalDayKey(timezone, reportedAt)
@@ -454,18 +494,30 @@ function resolveOccurredAt(
   reportedAt: Date,
 ): { occurredAt: Date; precision: VisitTimePrecision } {
   if (reportTiming === 'present') {
-    return { occurredAt: reportedAt, precision: resolvePresentPrecision(ctx, reportedAt) }
+    return {
+      occurredAt: reportedAt,
+      precision: resolvePresentPrecision(ctx, reportedAt),
+    }
   }
   const parsed = parseYmd(occurredOnDate)
   if (!parsed) {
     return { occurredAt: reportedAt, precision: 'approximate' }
   }
-  const instant = venueLocalInstant(ctx.venue.timezone, parsed.year, parsed.month, parsed.day, 12 * 60)
+  const instant = venueLocalInstant(
+    ctx.venue.timezone,
+    parsed.year,
+    parsed.month,
+    parsed.day,
+    12 * 60,
+  )
   if (instant === null) {
     return { occurredAt: reportedAt, precision: 'approximate' }
   }
   if (reportsTodaysScanVisit(ctx, instant, reportedAt)) {
-    return { occurredAt: reportedAt, precision: resolvePresentPrecision(ctx, reportedAt) }
+    return {
+      occurredAt: reportedAt,
+      precision: resolvePresentPrecision(ctx, reportedAt),
+    }
   }
   return { occurredAt: instant, precision: 'approximate' }
 }
@@ -482,15 +534,22 @@ function buildStoredLineItems(items: readonly ResolvedReportedItem[]): Json[] {
     toJson({
       name: item.name,
       quantity: item.quantity,
-      ...(item.unitPriceCents !== null ? { unit_price_cents: item.unitPriceCents } : {}),
+      ...(item.unitPriceCents !== null
+        ? { unit_price_cents: item.unitPriceCents }
+        : {}),
     }),
   )
 }
 
 // Null when ANY item has no price — a partial sum looks complete and isn't.
-function computeAmountCents(items: readonly { unitPriceCents: number | null; quantity: number }[]): number | null {
+function computeAmountCents(
+  items: readonly { unitPriceCents: number | null; quantity: number }[],
+): number | null {
   if (items.some((i) => i.unitPriceCents === null)) return null
-  return items.reduce((sum, i) => sum + (i.unitPriceCents as number) * i.quantity, 0)
+  return items.reduce(
+    (sum, i) => sum + (i.unitPriceCents as number) * i.quantity,
+    0,
+  )
 }
 
 // TAC-325. Defensive read of a `guest_reported_ongoing` row's existing line
@@ -502,14 +561,19 @@ function parseStoredLineItems(
   if (typeof rawData !== 'object' || rawData === null) return []
   const lineItems = (rawData as Record<string, unknown>).line_items
   if (!Array.isArray(lineItems)) return []
-  const result: { name: string; quantity: number; unitPriceCents: number | null }[] = []
+  const result: {
+    name: string
+    quantity: number
+    unitPriceCents: number | null
+  }[] = []
   for (const raw of lineItems) {
     if (typeof raw !== 'object' || raw === null) continue
     const rec = raw as Record<string, unknown>
     const name = typeof rec.name === 'string' ? rec.name : null
     const quantity = typeof rec.quantity === 'number' ? rec.quantity : null
     if (name === null || quantity === null) continue
-    const unitPriceCents = typeof rec.unit_price_cents === 'number' ? rec.unit_price_cents : null
+    const unitPriceCents =
+      typeof rec.unit_price_cents === 'number' ? rec.unit_price_cents : null
     result.push({ name, quantity, unitPriceCents })
   }
   return result
@@ -526,8 +590,12 @@ function dropAlreadyRecordedItems(
   newItems: readonly ResolvedReportedItem[],
   existingItems: readonly { name: string }[],
 ): ResolvedReportedItem[] {
-  const existingNames = new Set(existingItems.map((i) => normalizeMenuItemName(i.name)))
-  return newItems.filter((item) => !existingNames.has(normalizeMenuItemName(item.name)))
+  const existingNames = new Set(
+    existingItems.map((i) => normalizeMenuItemName(i.name)),
+  )
+  return newItems.filter(
+    (item) => !existingNames.has(normalizeMenuItemName(item.name)),
+  )
 }
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>
@@ -576,10 +644,13 @@ async function advanceLastVisit(
     .eq('id', guestId)
     .or(`last_visit_at.is.null,last_visit_at.lt.${occurredAtIso}`)
   if (error) {
-    console.warn('[agent] guest_reported last_visit_at update failed (continuing)', {
-      guestId,
-      error: error.message,
-    })
+    logger.warn(
+      '[agent] guest_reported last_visit_at update failed (continuing)',
+      {
+        guestId,
+        error: error.message,
+      },
+    )
   }
 }
 
@@ -621,7 +692,10 @@ export async function extractReportedOrder(
       return { kind: 'failed', error: existingResult.error.message }
     }
     if (guestRowResult.error || !guestRowResult.data) {
-      return { kind: 'failed', error: guestRowResult.error?.message ?? 'guest not found' }
+      return {
+        kind: 'failed',
+        error: guestRowResult.error?.message ?? 'guest not found',
+      }
     }
 
     // TAC-325: gate 2+3 no longer terminate the run. Enrollment fires when
@@ -629,11 +703,15 @@ export async function extractReportedOrder(
     // stopping — see the module header.
     const createdAt = new Date(guestRowResult.data.created_at)
     const withinEnrollmentWindow =
-      Date.now() - createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+      Date.now() - createdAt.getTime() <=
+      REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
     const enrollmentEligible = !existingResult.data && withinEnrollmentWindow
 
     const reportedAt = ctx.currentMessage.receivedAt
-    const todayInVenueTimezone = formatTodayInVenueTimezone(ctx.venue.timezone, reportedAt)
+    const todayInVenueTimezone = formatTodayInVenueTimezone(
+      ctx.venue.timezone,
+      reportedAt,
+    )
 
     const extraction = await callExtractReportedOrder({
       inboundBody: ctx.currentMessage.body,
@@ -698,7 +776,10 @@ export async function extractReportedOrder(
         if (insertError?.code === '23505') {
           return { kind: 'already_reported' }
         }
-        return { kind: 'failed', error: insertError?.message ?? 'insert returned no row' }
+        return {
+          kind: 'failed',
+          error: insertError?.message ?? 'insert returned no row',
+        }
       }
 
       await advanceLastVisit(
@@ -742,13 +823,18 @@ export async function extractReportedOrder(
       ? (recentOngoing ?? []).find(
           (row) =>
             typeof row.occurred_at === 'string' &&
-            sameVenueLocalDay(row.occurred_at, occurredAtIso, ctx.venue.timezone),
+            sameVenueLocalDay(
+              row.occurred_at,
+              occurredAtIso,
+              ctx.venue.timezone,
+            ),
         )
       : undefined
 
     if (mergeTarget) {
       const existingRaw =
-        typeof mergeTarget.raw_data === 'object' && mergeTarget.raw_data !== null
+        typeof mergeTarget.raw_data === 'object' &&
+        mergeTarget.raw_data !== null
           ? (mergeTarget.raw_data as Record<string, Json>)
           : {}
       const existingLineItemsRaw: Json[] = Array.isArray(existingRaw.line_items)
@@ -761,7 +847,10 @@ export async function extractReportedOrder(
         return { kind: 'no_new_items_ongoing' }
       }
 
-      const mergedRawLineItems: Json[] = [...existingLineItemsRaw, ...buildStoredLineItems(itemsToAdd)]
+      const mergedRawLineItems: Json[] = [
+        ...existingLineItemsRaw,
+        ...buildStoredLineItems(itemsToAdd),
+      ]
       const amountCents = computeAmountCents([...existingParsed, ...itemsToAdd])
 
       const { error: updateError } = await supabase
@@ -818,7 +907,10 @@ export async function extractReportedOrder(
       .select('id')
       .single()
     if (insertOngoingError || !insertedOngoing) {
-      return { kind: 'failed', error: insertOngoingError?.message ?? 'insert returned no row' }
+      return {
+        kind: 'failed',
+        error: insertOngoingError?.message ?? 'insert returned no row',
+      }
     }
 
     await advanceLastVisit(
@@ -839,6 +931,9 @@ export async function extractReportedOrder(
       precision,
     }
   } catch (e) {
-    return { kind: 'failed', error: e instanceof Error ? e.message : String(e) }
+    return {
+      kind: 'failed',
+      error: e instanceof Error ? e.message : String(e),
+    }
   }
 }

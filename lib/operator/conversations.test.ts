@@ -61,7 +61,9 @@ describe('listOperatorConversations', () => {
 
   it('calls the RPC with venue_ids and projects rows to camelCase', async () => {
     rpcMock.mockResolvedValueOnce({ data: [RAW_ROW], error: null })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(rpcMock).toHaveBeenCalledWith('list_operator_conversations', {
       venue_ids: ['00000000-0000-0000-0000-00000000000a'],
     })
@@ -96,7 +98,9 @@ describe('listOperatorConversations', () => {
 
   it('projects an Instagram guest with the exact Contract field set', async () => {
     rpcMock.mockResolvedValueOnce({ data: [RAW_INSTAGRAM_ROW], error: null })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     // toEqual, not toMatchObject: "always present" is only enforceable if a
@@ -127,7 +131,9 @@ describe('listOperatorConversations', () => {
     // `phoneFallback: z.string()` and no .catch(), so one null empties the
     // conversations tab for every operator at that venue.
     rpcMock.mockResolvedValueOnce({ data: [RAW_INSTAGRAM_ROW], error: null })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].phoneFallback).toBe('')
@@ -156,7 +162,9 @@ describe('listOperatorConversations', () => {
       ],
       error: null,
     })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('instagram')
@@ -176,7 +184,9 @@ describe('listOperatorConversations', () => {
       ],
       error: null,
     })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('text')
@@ -187,7 +197,9 @@ describe('listOperatorConversations', () => {
       data: [{ ...RAW_INSTAGRAM_ROW, last_guest_action_at: null }],
       error: null,
     })
-    const result = await listOperatorConversations(grantedVenues(['00000000-0000-0000-0000-00000000000a']))
+    const result = await listOperatorConversations(
+      grantedVenues(['00000000-0000-0000-0000-00000000000a']),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.conversations[0].guestChannel).toBe('instagram')
@@ -224,7 +236,8 @@ describe('listOperatorConversations', () => {
     expect(result.conversations).toHaveLength(2)
     expect(result.conversations[0].phoneFallback).toBe('')
     expect(result.conversations[1].phoneFallback).toBe('+15551110001')
-    for (const c of result.conversations) expect(typeof c.phoneFallback).toBe('string')
+    for (const c of result.conversations)
+      expect(typeof c.phoneFallback).toBe('string')
   })
 
   it('normalizes an unrecognized recognition_state to null', async () => {
@@ -247,7 +260,10 @@ describe('listOperatorConversations', () => {
   })
 
   it('returns ok:false on RPC error', async () => {
-    rpcMock.mockResolvedValueOnce({ data: null, error: { message: 'connection lost' } })
+    rpcMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'connection lost' },
+    })
     const result = await listOperatorConversations(grantedVenues(['v1']))
     expect(result).toEqual({ ok: false, error: 'connection lost' })
   })

@@ -13,8 +13,7 @@
 // (lib/ai/types.ts) per the repo convention. Parallel alias rather than a
 // shared import so lib/pos stays decoupled from lib/rag.
 export type PosResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }
 
 export type PosProviderName = 'square' | 'toast' | 'clover'
 
@@ -44,7 +43,8 @@ export type Money = { amountCents: number; currency: string }
 // ingest layer is responsible for writing line items into raw_data in that shape.
 export type TransactionLineItem = { name: string; quantity: number }
 
-export type TransactionStatus = 'authorized' | 'completed' | 'voided' | 'refunded'
+export type TransactionStatus =
+  'authorized' | 'completed' | 'voided' | 'refunded'
 
 export type TransactionEvent = {
   provider: PosProviderName
@@ -80,7 +80,11 @@ export type InventoryCount = {
 // delivery id, used for idempotency against pos_webhook_events.
 export type NormalizedEvent =
   | { kind: 'transaction'; eventId: string; data: TransactionEvent }
-  | { kind: 'catalog_updated'; eventId: string; merchantExternalId: string | null }
+  | {
+      kind: 'catalog_updated'
+      eventId: string
+      merchantExternalId: string | null
+    }
   | { kind: 'inventory_updated'; eventId: string; counts: InventoryCount[] }
   | { kind: 'unknown'; eventId: string; type: string }
 
@@ -92,7 +96,11 @@ export interface PosProvider {
 
   // Verify a webhook delivery's signature. `rawBody` MUST be the unparsed
   // request body (Square's HMAC is computed over notificationUrl + rawBody).
-  verifyWebhook(rawBody: string, headers: Headers, notificationUrl: string): boolean
+  verifyWebhook(
+    rawBody: string,
+    headers: Headers,
+    notificationUrl: string,
+  ): boolean
 
   // Parse a verified webhook body into normalized events (one delivery can
   // carry one logical event; the array shape leaves room for batched providers).
@@ -102,9 +110,15 @@ export interface PosProvider {
   fetchCatalog(cred: PosCredential): Promise<PosResult<MenuItem[]>>
 
   // Inventory backfill; `catalogIds` narrows to specific variations when set.
-  fetchInventory(cred: PosCredential, catalogIds?: string[]): Promise<PosResult<InventoryCount[]>>
+  fetchInventory(
+    cred: PosCredential,
+    catalogIds?: string[],
+  ): Promise<PosResult<InventoryCount[]>>
 
   // Hydrate a transaction's line items from its order (line items live on the
   // Order, not the Payment, for Square).
-  fetchOrder(cred: PosCredential, orderExternalId: string): Promise<PosResult<TransactionLineItem[]>>
+  fetchOrder(
+    cred: PosCredential,
+    orderExternalId: string,
+  ): Promise<PosResult<TransactionLineItem[]>>
 }

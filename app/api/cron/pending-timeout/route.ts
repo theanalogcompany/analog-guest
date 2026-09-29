@@ -81,8 +81,10 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const summary = {
-    knowledgeGaps: knowledgeGaps.status === 'fulfilled' ? knowledgeGaps.value : null,
-    instagramWindows: instagramWindows.status === 'fulfilled' ? instagramWindows.value : null,
+    knowledgeGaps:
+      knowledgeGaps.status === 'fulfilled' ? knowledgeGaps.value : null,
+    instagramWindows:
+      instagramWindows.status === 'fulfilled' ? instagramWindows.value : null,
   }
   console.log('[cron pending-timeout] tick complete', summary)
 

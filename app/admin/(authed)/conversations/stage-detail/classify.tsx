@@ -39,7 +39,10 @@ export function ClassifyDetail({ stage }: { stage: TraceStage }) {
       <KvList>
         {category !== null ? <KvRow label="category" value={category} /> : null}
         {classifierConfidence !== null ? (
-          <KvRow label="classifierConfidence" value={classifierConfidence.toFixed(2)} />
+          <KvRow
+            label="classifierConfidence"
+            value={classifierConfidence.toFixed(2)}
+          />
         ) : null}
       </KvList>
 
@@ -60,7 +63,10 @@ export function ClassifyDetail({ stage }: { stage: TraceStage }) {
               <KvRow label="inboundLength" value={inboundLength} />
             ) : null}
             {inboundBody !== null ? (
-              <KvRow label="inboundBody" value={<LongText text={inboundBody} />} />
+              <KvRow
+                label="inboundBody"
+                value={<LongText text={inboundBody} />}
+              />
             ) : null}
           </KvList>
         </SubSection>

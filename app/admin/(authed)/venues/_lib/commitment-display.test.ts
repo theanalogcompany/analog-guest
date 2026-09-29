@@ -15,7 +15,9 @@ import {
 
 const NOW = new Date('2026-09-14T12:00:00.000Z')
 
-const row = (overrides: Partial<VenueCommitmentRow> = {}): VenueCommitmentRow => ({
+const row = (
+  overrides: Partial<VenueCommitmentRow> = {},
+): VenueCommitmentRow => ({
   id: 'c1',
   type: 'comp',
   status: 'open',
@@ -66,7 +68,9 @@ describe('isEscalated', () => {
     expect(isEscalated(row())).toBe(false)
   })
   it('is true once escalated_at is set', () => {
-    expect(isEscalated(row({ escalatedAt: '2026-09-13T09:00:00.000Z' }))).toBe(true)
+    expect(isEscalated(row({ escalatedAt: '2026-09-13T09:00:00.000Z' }))).toBe(
+      true,
+    )
   })
 })
 
@@ -74,7 +78,9 @@ describe('isUntimed', () => {
   // The whole point of the page. Both columns null means the row cannot match
   // the arrival cron and cannot reach the operator heads-up queue.
   it('is true only when BOTH arrival columns are null', () => {
-    expect(isUntimed(row({ expectedArrival: null, arrivalSignal: null }))).toBe(true)
+    expect(isUntimed(row({ expectedArrival: null, arrivalSignal: null }))).toBe(
+      true,
+    )
   })
 
   // Negative cases are the load-bearing half: loosening the predicate to an OR
@@ -82,11 +88,23 @@ describe('isUntimed', () => {
   // false alarm on the one signal this page adds.
   it('is false when either arrival column is populated', () => {
     expect(
-      isUntimed(row({ expectedArrival: '2026-09-15T09:00:00.000Z', arrivalSignal: null })),
+      isUntimed(
+        row({
+          expectedArrival: '2026-09-15T09:00:00.000Z',
+          arrivalSignal: null,
+        }),
+      ),
     ).toBe(false)
-    expect(isUntimed(row({ expectedArrival: null, arrivalSignal: 'imminent' }))).toBe(false)
     expect(
-      isUntimed(row({ expectedArrival: '2026-09-15T09:00:00.000Z', arrivalSignal: 'scheduled' })),
+      isUntimed(row({ expectedArrival: null, arrivalSignal: 'imminent' })),
+    ).toBe(false)
+    expect(
+      isUntimed(
+        row({
+          expectedArrival: '2026-09-15T09:00:00.000Z',
+          arrivalSignal: 'scheduled',
+        }),
+      ),
     ).toBe(false)
   })
 })
@@ -96,10 +114,12 @@ describe('sortForDisplay', () => {
   // own cases below. Previously filed under a sortForDisplay name it never
   // called.
   it('displayRank orders escalated obligations, then obligations, then recommendations', () => {
-    expect(displayRank(row({ escalatedAt: '2026-09-13T09:00:00.000Z' }))).toBeLessThan(
-      displayRank(row()),
+    expect(
+      displayRank(row({ escalatedAt: '2026-09-13T09:00:00.000Z' })),
+    ).toBeLessThan(displayRank(row()))
+    expect(displayRank(row())).toBeLessThan(
+      displayRank(row({ type: 'recommendation' })),
     )
-    expect(displayRank(row())).toBeLessThan(displayRank(row({ type: 'recommendation' })))
   })
 
   it('puts an escalated comp first even when it is the newest row', () => {
@@ -108,24 +128,30 @@ describe('sortForDisplay', () => {
       type: 'recommendation',
       createdAt: '2026-01-01T00:00:00.000Z',
     })
-    const plainComp = row({ id: 'comp', createdAt: '2026-02-01T00:00:00.000Z' })
+    const plainComp = row({
+      id: 'comp',
+      createdAt: '2026-02-01T00:00:00.000Z',
+    })
     const escalated = row({
       id: 'esc',
       createdAt: '2026-09-13T00:00:00.000Z',
       escalatedAt: '2026-09-13T18:00:00.000Z',
     })
 
-    expect(sortForDisplay([oldRecommendation, plainComp, escalated]).map((r) => r.id)).toEqual([
-      'esc',
-      'comp',
-      'rec',
-    ])
+    expect(
+      sortForDisplay([oldRecommendation, plainComp, escalated]).map(
+        (r) => r.id,
+      ),
+    ).toEqual(['esc', 'comp', 'rec'])
   })
 
   it('sorts oldest-first within a band', () => {
     const older = row({ id: 'older', createdAt: '2026-09-01T00:00:00.000Z' })
     const newer = row({ id: 'newer', createdAt: '2026-09-10T00:00:00.000Z' })
-    expect(sortForDisplay([newer, older]).map((r) => r.id)).toEqual(['older', 'newer'])
+    expect(sortForDisplay([newer, older]).map((r) => r.id)).toEqual([
+      'older',
+      'newer',
+    ])
   })
 
   // The input is a loader result other callers read; sorting it in place would
@@ -172,23 +198,27 @@ describe('formatAge', () => {
 
 describe('formatExpiry', () => {
   it('counts down to a real horizon', () => {
-    expect(formatExpiry(row({ expiresAt: '2026-09-14T18:00:00.000Z' }), NOW)).toBe(
-      'expires today',
-    )
-    expect(formatExpiry(row({ expiresAt: '2026-09-15T12:00:00.000Z' }), NOW)).toBe(
-      'expires in 1 day',
-    )
-    expect(formatExpiry(row({ expiresAt: '2026-11-07T12:00:00.000Z' }), NOW)).toBe(
-      'expires in 54 days',
-    )
+    expect(
+      formatExpiry(row({ expiresAt: '2026-09-14T18:00:00.000Z' }), NOW),
+    ).toBe('expires today')
+    expect(
+      formatExpiry(row({ expiresAt: '2026-09-15T12:00:00.000Z' }), NOW),
+    ).toBe('expires in 1 day')
+    expect(
+      formatExpiry(row({ expiresAt: '2026-11-07T12:00:00.000Z' }), NOW),
+    ).toBe('expires in 54 days')
   })
 
   it('says past due rather than a negative count', () => {
-    expect(formatExpiry(row({ expiresAt: '2026-09-01T12:00:00.000Z' }), NOW)).toBe('past due')
+    expect(
+      formatExpiry(row({ expiresAt: '2026-09-01T12:00:00.000Z' }), NOW),
+    ).toBe('past due')
   })
 
   it('renders an unparseable horizon as itself rather than as Invalid Date', () => {
-    expect(formatExpiry(row({ expiresAt: 'not a date' }), NOW)).toBe('not a date')
+    expect(formatExpiry(row({ expiresAt: 'not a date' }), NOW)).toBe(
+      'not a date',
+    )
   })
 
   // A null horizon means two different things and the page says which, rather
@@ -197,7 +227,11 @@ describe('formatExpiry', () => {
   // recommendations); an obligation without one is a pre-TAC-341 row awaiting
   // the hand-applied backfill.
   it('distinguishes a recommendation with no horizon from an obligation missing one', () => {
-    expect(formatExpiry(row({ type: 'recommendation', expiresAt: null }), NOW)).toBe('no horizon')
-    expect(formatExpiry(row({ type: 'comp', expiresAt: null }), NOW)).toBe('no horizon set')
+    expect(
+      formatExpiry(row({ type: 'recommendation', expiresAt: null }), NOW),
+    ).toBe('no horizon')
+    expect(formatExpiry(row({ type: 'comp', expiresAt: null }), NOW)).toBe(
+      'no horizon set',
+    )
   })
 })

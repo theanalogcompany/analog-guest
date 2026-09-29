@@ -42,16 +42,27 @@ describe('scoreUnit — the ruling', () => {
       intentionQuestion: "by the way, what's your name?",
       judge: { whole: ['learn_name'], last: ['learn_name'], earlier: [] },
     })
-    expect(v).toEqual({ raised: true, separateLastBubble: true, breaches: [], pass: true })
+    expect(v).toEqual({
+      raised: true,
+      separateLastBubble: true,
+      breaches: [],
+      pass: true,
+    })
   })
 
   // THE CASE-2 FAILURE from the ticket: one bubble, because splitIntoSentences
   // finds no boundary before "do". It raises, and it is not separate.
   it('fails a one-bubble reply that carries the question inline', () => {
     const v = scoreUnit({
-      bubbles: ['Foncii, nice to meet you 🙂 do you live or work around Polk Street?'],
+      bubbles: [
+        'Foncii, nice to meet you 🙂 do you live or work around Polk Street?',
+      ],
       intentionQuestion: '',
-      judge: { whole: ['are_they_local'], last: ['are_they_local'], earlier: [] },
+      judge: {
+        whole: ['are_they_local'],
+        last: ['are_they_local'],
+        earlier: [],
+      },
     })
     expect(v.raised).toBe(true)
     expect(v.separateLastBubble).toBe(false)
@@ -62,7 +73,10 @@ describe('scoreUnit — the ruling', () => {
   // too, so the question was not alone.
   it('fails when an earlier bubble also raises the intention', () => {
     const v = scoreUnit({
-      bubbles: ["nice! and by the way, what's your name?", 'anyway, open till 3'],
+      bubbles: [
+        "nice! and by the way, what's your name?",
+        'anyway, open till 3',
+      ],
       intentionQuestion: '',
       judge: { whole: ['learn_name'], last: [], earlier: ['learn_name'] },
     })
@@ -152,17 +166,25 @@ describe('scoreUnit — ceilings', () => {
 describe('answerRepeatsQuestion', () => {
   it('catches the question repeated at the end of the answer', () => {
     expect(
-      answerRepeatsQuestion("nice one. by the way, what's your name?", "what's your name?"),
+      answerRepeatsQuestion(
+        "nice one. by the way, what's your name?",
+        "what's your name?",
+      ),
     ).toBe(true)
   })
 
   it('ignores punctuation and case differences', () => {
-    expect(answerRepeatsQuestion('so, Whats your NAME', "what's your name?")).toBe(true)
+    expect(
+      answerRepeatsQuestion('so, Whats your NAME', "what's your name?"),
+    ).toBe(true)
   })
 
   it('does not fire when the answer merely mentions similar words earlier', () => {
     expect(
-      answerRepeatsQuestion("what's your name is a thing we ask later. open till 3", "what's your name?"),
+      answerRepeatsQuestion(
+        "what's your name is a thing we ask later. open till 3",
+        "what's your name?",
+      ),
     ).toBe(false)
   })
 

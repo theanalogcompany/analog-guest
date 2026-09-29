@@ -1,5 +1,8 @@
 import { createAdminClient } from '@/lib/db/admin'
-import { BrandPersonaSchema, type BrandPersona } from '@/lib/schemas/brand-persona'
+import {
+  BrandPersonaSchema,
+  type BrandPersona,
+} from '@/lib/schemas/brand-persona'
 import { VenueInfoSchema, type VenueInfo } from '@/lib/schemas/venue-info'
 
 /**
@@ -46,11 +49,19 @@ export async function loadVenueContext(slug: string): Promise<VenueContext> {
     .select('id, slug, is_test, status')
     .eq('slug', slug)
     .maybeSingle()
-  if (venueError) throw new Error(`loadVenueContext: venue lookup failed: ${venueError.message}`)
-  if (!venueRow) throw new Error(`loadVenueContext: no venue found for slug "${slug}"`)
+  if (venueError)
+    throw new Error(
+      `loadVenueContext: venue lookup failed: ${venueError.message}`,
+    )
+  if (!venueRow)
+    throw new Error(`loadVenueContext: no venue found for slug "${slug}"`)
 
   const [configResult, knowledgeResult, mechanicsResult] = await Promise.all([
-    supabase.from('venue_configs').select('venue_info').eq('venue_id', venueRow.id).maybeSingle(),
+    supabase
+      .from('venue_configs')
+      .select('venue_info')
+      .eq('venue_id', venueRow.id)
+      .maybeSingle(),
     supabase
       .from('knowledge_corpus')
       .select('id, content, primary_tags, is_processed')
@@ -64,26 +75,36 @@ export async function loadVenueContext(slug: string): Promise<VenueContext> {
   ])
 
   if (configResult.error) {
-    throw new Error(`loadVenueContext: venue_configs load failed: ${configResult.error.message}`)
+    throw new Error(
+      `loadVenueContext: venue_configs load failed: ${configResult.error.message}`,
+    )
   }
   if (!configResult.data) {
-    throw new Error(`loadVenueContext: no venue_configs row for venue ${venueRow.id}`)
+    throw new Error(
+      `loadVenueContext: no venue_configs row for venue ${venueRow.id}`,
+    )
   }
   if (knowledgeResult.error) {
-    throw new Error(`loadVenueContext: knowledge_corpus load failed: ${knowledgeResult.error.message}`)
+    throw new Error(
+      `loadVenueContext: knowledge_corpus load failed: ${knowledgeResult.error.message}`,
+    )
   }
   if (mechanicsResult.error) {
-    throw new Error(`loadVenueContext: mechanics load failed: ${mechanicsResult.error.message}`)
+    throw new Error(
+      `loadVenueContext: mechanics load failed: ${mechanicsResult.error.message}`,
+    )
   }
 
   const venueInfo = VenueInfoSchema.parse(configResult.data.venue_info)
 
-  const knowledgeRows: KnowledgeCorpusRow[] = (knowledgeResult.data ?? []).map((r) => ({
-    id: r.id,
-    content: r.content,
-    primaryTags: r.primary_tags,
-    isProcessed: r.is_processed,
-  }))
+  const knowledgeRows: KnowledgeCorpusRow[] = (knowledgeResult.data ?? []).map(
+    (r) => ({
+      id: r.id,
+      content: r.content,
+      primaryTags: r.primary_tags,
+      isProcessed: r.is_processed,
+    }),
+  )
 
   const mechanics: MechanicRow[] = (mechanicsResult.data ?? []).map((r) => ({
     id: r.id,
@@ -122,7 +143,10 @@ export async function loadBrandPersona(venueId: string): Promise<BrandPersona> {
     .eq('venue_id', venueId)
     .maybeSingle()
   if (error) throw new Error(`loadBrandPersona: read failed: ${error.message}`)
-  if (!data) throw new Error(`loadBrandPersona: no venue_configs row for venue ${venueId}`)
+  if (!data)
+    throw new Error(
+      `loadBrandPersona: no venue_configs row for venue ${venueId}`,
+    )
   return BrandPersonaSchema.parse(data.brand_persona)
 }
 

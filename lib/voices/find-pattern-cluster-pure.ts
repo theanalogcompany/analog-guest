@@ -25,7 +25,9 @@ export const ClusterVerificationOutputSchema = z.object({
   proposed_rule_text: z.string().optional(),
 })
 
-export type ClusterVerificationOutput = z.infer<typeof ClusterVerificationOutputSchema>
+export type ClusterVerificationOutput = z.infer<
+  typeof ClusterVerificationOutputSchema
+>
 
 export interface SimilarCritiqueMatch {
   id: string
@@ -71,7 +73,9 @@ export interface BuildVerificationPromptInput {
   candidates: ReadonlyArray<{ id: string; text: string }>
 }
 
-export function buildVerificationPrompt(input: BuildVerificationPromptInput): string {
+export function buildVerificationPrompt(
+  input: BuildVerificationPromptInput,
+): string {
   const candidatesBlock = input.candidates
     .map((c, i) => `${i + 1}. ${c.text}`)
     .join('\n')

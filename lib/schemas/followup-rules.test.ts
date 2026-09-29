@@ -120,7 +120,10 @@ describe('parseFollowupRules', () => {
     console.warn = () => {}
     try {
       expect(
-        parseFollowupRules({ ...FOLLOWUP_RULES_DEFAULT, cron_hour_local: 'noon' }),
+        parseFollowupRules({
+          ...FOLLOWUP_RULES_DEFAULT,
+          cron_hour_local: 'noon',
+        }),
       ).toEqual(FOLLOWUP_RULES_DEFAULT)
     } finally {
       console.warn = warn

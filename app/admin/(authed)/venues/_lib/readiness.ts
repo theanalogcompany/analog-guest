@@ -98,7 +98,10 @@ export interface ReadinessReport {
     met: boolean
   }
   brandPersona: { fields: BrandPersonaFieldStatus[] }
-  approvalPolicy: { default: ApprovalDisposition; perCategory: Record<string, ApprovalDisposition> }
+  approvalPolicy: {
+    default: ApprovalDisposition
+    perCategory: Record<string, ApprovalDisposition>
+  }
 }
 
 const BRAND_PERSONA_FIELDS: ReadonlyArray<{
@@ -115,13 +118,24 @@ const BRAND_PERSONA_FIELDS: ReadonlyArray<{
   { field: 'speakerName', isPopulated: (p) => Boolean(p.speakerName) },
   { field: 'emojiPolicy', isPopulated: () => true },
   { field: 'lengthGuide', isPopulated: (p) => p.lengthGuide.trim().length > 0 },
-  { field: 'signaturePhrases', isPopulated: (p) => p.signaturePhrases.length > 0 },
+  {
+    field: 'signaturePhrases',
+    isPopulated: (p) => p.signaturePhrases.length > 0,
+  },
   { field: 'bannedTopics', isPopulated: (p) => p.bannedTopics.length > 0 },
-  { field: 'voiceTouchstones', isPopulated: (p) => p.voiceTouchstones.length > 0 },
-  { field: 'voiceAntiPatterns', isPopulated: (p) => p.voiceAntiPatterns.length > 0 },
+  {
+    field: 'voiceTouchstones',
+    isPopulated: (p) => p.voiceTouchstones.length > 0,
+  },
+  {
+    field: 'voiceAntiPatterns',
+    isPopulated: (p) => p.voiceAntiPatterns.length > 0,
+  },
 ]
 
-function computeBrandPersonaFields(persona: BrandPersona | null): BrandPersonaFieldStatus[] {
+function computeBrandPersonaFields(
+  persona: BrandPersona | null,
+): BrandPersonaFieldStatus[] {
   return BRAND_PERSONA_FIELDS.map(({ field, isPopulated }) => ({
     field,
     populated: persona !== null && isPopulated(persona),
@@ -147,15 +161,24 @@ export function computeReadiness(input: ReadinessInput): ReadinessReport {
   const manualInviteWithoutApproval: ManualInviteWarning[] = []
   for (const m of activeMechanics) {
     const missing = findMissingMechanicFields(m)
-    if (missing.length > 0) issues.push({ id: m.id, name: m.name, missingFields: missing })
+    if (missing.length > 0)
+      issues.push({ id: m.id, name: m.name, missingFields: missing })
     const triggerType = parseMechanicTriggerType(m.trigger)
-    if (triggerType === 'manual_invite' && m.requiresOperatorApproval !== true) {
+    if (
+      triggerType === 'manual_invite' &&
+      m.requiresOperatorApproval !== true
+    ) {
       manualInviteWithoutApproval.push({ id: m.id, name: m.name })
     }
   }
 
-  const { active, expired } = partitionCurrentContext(input.currentContext, input.now)
-  const datedCount = [...active, ...expired].filter((e) => e.expiresAt !== undefined).length
+  const { active, expired } = partitionCurrentContext(
+    input.currentContext,
+    input.now,
+  )
+  const datedCount = [...active, ...expired].filter(
+    (e) => e.expiresAt !== undefined,
+  ).length
 
   // getEffectivePerCategoryPolicy is the exact same merge resolveCategoryPolicy
   // applies at runtime (TAC-343 Stage C extracted it so this display can't

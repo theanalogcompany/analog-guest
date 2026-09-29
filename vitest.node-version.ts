@@ -31,7 +31,10 @@ import { join } from 'node:path'
  * than throwing keeps the decision and the reporting separate — the caller
  * owns how a run dies.
  */
-export function checkNodeVersion(runningVersion: string, nvmrcContents: string): string | null {
+export function checkNodeVersion(
+  runningVersion: string,
+  nvmrcContents: string,
+): string | null {
   const wanted = nvmrcContents.trim().replace(/^v/, '').split('.')[0]
   const running = runningVersion.replace(/^v/, '').split('.')[0]
   if (wanted === '' || running === '') {

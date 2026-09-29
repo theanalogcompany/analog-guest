@@ -55,7 +55,8 @@ function isPrimitive(v: unknown): boolean {
 
 function formatScalar(v: unknown): string {
   if (v === null || v === undefined) return '—'
-  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3)
+  if (typeof v === 'number')
+    return Number.isInteger(v) ? String(v) : v.toFixed(3)
   if (typeof v === 'boolean') return v ? 'true' : 'false'
   if (typeof v === 'string') return v
   return JSON.stringify(v)

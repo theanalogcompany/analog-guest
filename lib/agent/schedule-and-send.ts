@@ -4,7 +4,10 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { Database } from '@/db/types'
 import type { GenerateMessageResult } from '@/lib/ai'
 import { captureCommitmentCancelled } from '@/lib/analytics/posthog'
-import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
+import {
+  cancelCommitmentForGuest,
+  createCommitmentFromPending,
+} from '@/lib/guests/commitments'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
 import {
   type PendingCancellation,
@@ -320,7 +323,9 @@ export function buildOutboundInsert(
     // text (the default's hazard). An unresolved channel omits the key, as
     // every row did before TAC-469: nothing routes a send on null, and TAC-472
     // makes the column required once every insert site names it.
-    ...(ctx.conversationChannel !== null ? { channel: ctx.conversationChannel } : {}),
+    ...(ctx.conversationChannel !== null
+      ? { channel: ctx.conversationChannel }
+      : {}),
     category: ctx.classification?.category ?? null,
     // TAC-313: the DEFAULT is the delimiter-free single-message form, which is
     // what the queue path wants — a draft is one row an operator reads and
@@ -489,7 +494,10 @@ export async function scheduleAndSend(
   const bubbles = resolveDispatchBubbles(
     generation.body,
     options.rng ?? Math.random,
-    intentionTailFor(generation.intentionQuestion, options.renderedIntentions?.length ?? 0),
+    intentionTailFor(
+      generation.intentionQuestion,
+      options.renderedIntentions?.length ?? 0,
+    ),
   )
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has
@@ -503,7 +511,9 @@ export async function scheduleAndSend(
       errorMessage: 'generated body produced no sendable bubbles',
       extra: { rawBodyLength: generation.body.length },
     })
-    throw new Error('scheduleAndSend: generated body produced no sendable bubbles')
+    throw new Error(
+      'scheduleAndSend: generated body produced no sendable bubbles',
+    )
   }
 
   // Shared by every row of this response. Minted fresh per dispatch rather
@@ -612,7 +622,9 @@ export async function scheduleAndSend(
         },
       })
       if (persistedIds.length === 0) {
-        throw new Error(`scheduleAndSend: sendMessage failed: ${sendResult.error}`)
+        throw new Error(
+          `scheduleAndSend: sendMessage failed: ${sendResult.error}`,
+        )
       }
       // Already committed: truncate rather than throw. See the contract above
       // — throwing here re-dispatches and duplicates the earlier bubbles.
@@ -668,7 +680,9 @@ export async function scheduleAndSend(
         },
       })
       if (persistedIds.length === 0) {
-        throw new Error(`scheduleAndSend: persist failed: ${insertResult.error}`)
+        throw new Error(
+          `scheduleAndSend: persist failed: ${insertResult.error}`,
+        )
       }
       // This bubble reached the guest but has no row, so its delivery status
       // has nowhere to land. Accepted over re-dispatching the whole response;
@@ -677,7 +691,8 @@ export async function scheduleAndSend(
     }
 
     persistedIds.push(insertResult.id)
-    if (firstProviderMessageId === null) firstProviderMessageId = providerMessageId
+    if (firstProviderMessageId === null)
+      firstProviderMessageId = providerMessageId
   }
 
   // Unreachable in practice: bubbles is non-empty, and every path that fails
@@ -739,7 +754,9 @@ export async function materializeInlineCommitment(
   generation: GenerateMessageResult,
   firstMessageId: string,
 ): Promise<void> {
-  const pending: PendingCommitment | null = pendingFromEmission(generation.commitment)
+  const pending: PendingCommitment | null = pendingFromEmission(
+    generation.commitment,
+  )
   if (pending === null) return
   const commitmentResult = await createCommitmentFromPending({
     guestId: ctx.guest.id,
@@ -894,7 +911,11 @@ export async function persistOrRegenQueuedDraft(
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions & { updateOnly: true },
-): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped | PersistQueuedDraftSilenced>
+): Promise<
+  | PersistQueuedDraftResult
+  | PersistQueuedDraftSkipped
+  | PersistQueuedDraftSilenced
+>
 export async function persistOrRegenQueuedDraft(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
@@ -916,7 +937,11 @@ export async function persistOrRegenQueuedDraft(
   primaryTrigger: string,
   initialExistingPendingDraftId: string | null,
   options: PersistQueuedDraftOptions = {},
-): Promise<PersistQueuedDraftResult | PersistQueuedDraftSkipped | PersistQueuedDraftSilenced> {
+): Promise<
+  | PersistQueuedDraftResult
+  | PersistQueuedDraftSkipped
+  | PersistQueuedDraftSilenced
+> {
   const supabase = createAdminClient()
   let existingId: string | null = initialExistingPendingDraftId
   // TAC-394: what race recovery needs to decide a card the gate never saw.
@@ -933,8 +958,12 @@ export async function persistOrRegenQueuedDraft(
   // the draft's own slot surfaces as another 23505. Both writes call clockFor
   // directly, so no second copy of this decision has to be kept in step.
   let seenRows: PendingRowsBySlot | null = null
-  const clockFor = (rows: PendingRowsBySlot | null): PersistQueuedDraftOptions =>
-    rows !== null && options.pendingUntil !== undefined && anyKnowledgeGapCard(rows)
+  const clockFor = (
+    rows: PendingRowsBySlot | null,
+  ): PersistQueuedDraftOptions =>
+    rows !== null &&
+    options.pendingUntil !== undefined &&
+    anyKnowledgeGapCard(rows)
       ? { ...options, pendingUntil: undefined }
       : options
 
@@ -963,7 +992,11 @@ export async function persistOrRegenQueuedDraft(
           // to freshen is gone, which means an operator already handled it.
           // Inserting a replacement would be actively harmful — see the
           // updateOnly doc comment. Report and stop.
-          return { outboundMessageId: null, action: 'skipped', priorReviewReason: null }
+          return {
+            outboundMessageId: null,
+            action: 'skipped',
+            priorReviewReason: null,
+          }
         }
         // The pending slot is now empty — drop the ID and retry as INSERT on
         // the next loop tick. TAC-394: the card is gone, so it no longer
@@ -974,11 +1007,16 @@ export async function persistOrRegenQueuedDraft(
         // one on the crash card, is recorded under TAC-404.
         if (seenRows !== null) {
           seenRows = {
-            obligation: seenRows.obligation?.id === existingId ? null : seenRows.obligation,
+            obligation:
+              seenRows.obligation?.id === existingId
+                ? null
+                : seenRows.obligation,
             // TAC-397: a filter, not a null-out. The conversation slot holds
             // many cards now, and only the one that vanished is forgotten;
             // the rest still withhold the clock.
-            conversation: seenRows.conversation.filter((row) => row.id !== existingId),
+            conversation: seenRows.conversation.filter(
+              (row) => row.id !== existingId,
+            ),
           }
         }
         existingId = null
@@ -1020,9 +1058,15 @@ export async function persistOrRegenQueuedDraft(
         kind: alertKind(ctx),
         stage: 'persist',
         errorMessage: upd.error,
-        extra: { primaryTrigger, attemptedPendingDraftId: existingId, regen: true },
+        extra: {
+          primaryTrigger,
+          attemptedPendingDraftId: existingId,
+          regen: true,
+        },
       })
-      throw new Error(`persistOrRegenQueuedDraft: regen update failed: ${upd.error}`)
+      throw new Error(
+        `persistOrRegenQueuedDraft: regen update failed: ${upd.error}`,
+      )
     }
 
     const ins = await tryQueueInsert(
@@ -1033,7 +1077,11 @@ export async function persistOrRegenQueuedDraft(
       clockFor(seenRows),
     )
     if (ins.kind === 'inserted') {
-      return { outboundMessageId: ins.id, action: 'inserted', priorReviewReason: null }
+      return {
+        outboundMessageId: ins.id,
+        action: 'inserted',
+        priorReviewReason: null,
+      }
     }
     if (ins.kind === 'unique_violation') {
       // A concurrent run for the same (venue, guest) just won this draft's
@@ -1069,12 +1117,18 @@ export async function persistOrRegenQueuedDraft(
       const ownDraft =
         rows === null || ownInboundId === null || callerPolicy !== 'regen'
           ? null
-          : (rows.conversation.find((row) => row.reply_to_message_id === ownInboundId) ?? null)
+          : (rows.conversation.find(
+              (row) => row.reply_to_message_id === ownInboundId,
+            ) ?? null)
       if (ownDraft !== null) {
         console.warn(
           `[agent] persistOrRegenQueuedDraft: 23505 on attempt=${attempt} venue=${ctx.venue.id} guest=${ctx.guest.id}: this message already has a card, reporting it`,
         )
-        return { outboundMessageId: ownDraft.id, action: 'inserted', priorReviewReason: null }
+        return {
+          outboundMessageId: ownDraft.id,
+          action: 'inserted',
+          priorReviewReason: null,
+        }
       }
       const decision =
         rows === null
@@ -1096,7 +1150,11 @@ export async function persistOrRegenQueuedDraft(
         continue
       }
       if (decision.action === 'silence') {
-        return { outboundMessageId: null, action: 'silenced', priorReviewReason: null }
+        return {
+          outboundMessageId: null,
+          action: 'silenced',
+          priorReviewReason: null,
+        }
       }
       if (decision.action === 'drop') {
         return {
@@ -1106,8 +1164,8 @@ export async function persistOrRegenQueuedDraft(
           reason: decision.reason,
           protectedDraftId: decision.protectedDraftId,
           protectedCommitment: commitmentIdentityOf(
-            (rows === null ? null : occupantOfSlot(rows, decision.slot))?.pending_commitment ??
-              null,
+            (rows === null ? null : occupantOfSlot(rows, decision.slot))
+              ?.pending_commitment ?? null,
           ),
           droppedCommitment: draftCommitment,
         }
@@ -1198,9 +1256,10 @@ async function tryQueueInsert(
           // TAC-513: the cancellation carrier. Nulled under `blankBody` with
           // everything else, for the reason below: an operator approving a
           // card they cannot read must not thereby cancel a guest's comp.
-          pending_cancellation: options.blankBody === true
-            ? null
-            : (options.pendingCancellation ?? null),
+          pending_cancellation:
+            options.blankBody === true
+              ? null
+              : (options.pendingCancellation ?? null),
           // TAC-308: arms the holding-message timer. Undefined stays null —
           // only a knowledge-gap draft gets a clock.
           pending_until: options.pendingUntil?.toISOString() ?? null,
@@ -1337,7 +1396,9 @@ async function tryRegenUpdate(
       // TAC-513: overwrite-wholesale, exactly like the line above and for the
       // same reason. A regen that no longer cancels anything must not keep the
       // previous attempt's cancellation sitting on the row.
-      pending_cancellation: blank ? null : (options.pendingCancellation ?? null),
+      pending_cancellation: blank
+        ? null
+        : (options.pendingCancellation ?? null),
       // TAC-364: OVERWRITE-WHOLESALE, like pending_commitment directly above
       // and UNLIKE pending_until directly below. The distinction is the point,
       // and the three columns sitting together is why it's written down: both
@@ -1368,7 +1429,9 @@ async function tryRegenUpdate(
       // Both columns move together, which is what lets the queue projection
       // treat a non-null body as a guarantee that the timestamp is there too.
       replaced_draft_body:
-        options.captureReplacedDraft === true && priorBody.length > 0 ? priorBody : null,
+        options.captureReplacedDraft === true && priorBody.length > 0
+          ? priorBody
+          : null,
       replaced_draft_at:
         options.captureReplacedDraft === true && priorBody.length > 0
           ? new Date().toISOString()
@@ -1395,7 +1458,8 @@ async function tryRegenUpdate(
     // TAC-469: the card belongs to the conversation this draft was written
     // for, so a regeneration names it too (a guest with both identifiers can
     // move between them). Omitted when unresolved, as on the INSERT path.
-    if (ctx.conversationChannel !== null) updatePayload.channel = ctx.conversationChannel
+    if (ctx.conversationChannel !== null)
+      updatePayload.channel = ctx.conversationChannel
     // TAC-308: pending_until is PRESERVE-BY-DEFAULT on regen — the key is
     // omitted from the payload unless the caller explicitly passed a new
     // clock. Two behaviors depend on the omission:

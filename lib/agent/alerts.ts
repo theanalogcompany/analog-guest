@@ -57,7 +57,9 @@ function formatSlackMessage(context: AlertContext): string {
  */
 export async function fireRedAlert(context: AlertContext): Promise<void> {
   const eventName =
-    context.kind === 'followup' ? 'followup_message_failed' : 'inbound_message_failed'
+    context.kind === 'followup'
+      ? 'followup_message_failed'
+      : 'inbound_message_failed'
 
   await capturePostHogEvent(eventName, context.guestId ?? context.agentRunId, {
     agentRunId: context.agentRunId,

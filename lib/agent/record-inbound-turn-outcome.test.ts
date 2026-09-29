@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { INBOUND_TURN_OUTCOMES, INBOUND_TURN_REASONS } from '@/lib/schemas/inbound-turn-outcome'
+import {
+  INBOUND_TURN_OUTCOMES,
+  INBOUND_TURN_REASONS,
+} from '@/lib/schemas/inbound-turn-outcome'
 
 /**
  * TAC-523. The orchestrator file mocks this module wholesale, so this is where
@@ -46,7 +49,9 @@ const GUEST_ID = '11111111-1111-4111-8111-111111111111'
 
 function insertedRow(): Record<string, unknown> {
   const call = insertMock.mock.calls.at(-1)
-  expect(call?.[0], 'inserted into the wrong table').toBe('inbound_turn_outcomes')
+  expect(call?.[0], 'inserted into the wrong table').toBe(
+    'inbound_turn_outcomes',
+  )
   return call?.[1] as Record<string, unknown>
 }
 
@@ -63,16 +68,37 @@ beforeEach(() => {
 describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', () => {
   // A literal table, not one derived from the code under test: a derived
   // expectation would pass against any mapping at all.
-  const CASES: Array<{ result: AgentResult; outcome: string; reason: string | null }> = [
-    { result: { status: 'sent', outboundMessageId: 'o1' }, outcome: 'sent', reason: null },
+  const CASES: Array<{
+    result: AgentResult
+    outcome: string
+    reason: string | null
+  }> = [
     {
-      result: { status: 'queued', outboundMessageId: 'c1', triggers: ['a'], primaryTrigger: 'a' },
+      result: { status: 'sent', outboundMessageId: 'o1' },
+      outcome: 'sent',
+      reason: null,
+    },
+    {
+      result: {
+        status: 'queued',
+        outboundMessageId: 'c1',
+        triggers: ['a'],
+        primaryTrigger: 'a',
+      },
       outcome: 'queued',
       reason: null,
     },
-    { result: { status: 'skipped_duplicate' }, outcome: 'skipped_duplicate', reason: null },
     {
-      result: { status: 'refused', reason: 'low_fidelity', attemptScores: [0.2] },
+      result: { status: 'skipped_duplicate' },
+      outcome: 'skipped_duplicate',
+      reason: null,
+    },
+    {
+      result: {
+        status: 'refused',
+        reason: 'low_fidelity',
+        attemptScores: [0.2],
+      },
       outcome: 'refused',
       reason: 'low_fidelity',
     },
@@ -86,7 +112,11 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
       outcome: 'dropped',
       reason: 'obligation_slot_taken',
     },
-    { result: { status: 'superseded', byMessageId: 'm1' }, outcome: 'superseded', reason: null },
+    {
+      result: { status: 'superseded', byMessageId: 'm1' },
+      outcome: 'superseded',
+      reason: null,
+    },
     // TAC-526. Shares the 'superseded' OUTCOME with the case above and is told
     // apart by the reason, which is the whole point of the reason existing: a
     // bare 'superseded' is staff answering by hand in the Instagram app, this
@@ -100,7 +130,11 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
     // which would have counted every coalesced message as a turn failure in
     // the denominator TAC-523 built the table to produce). Both die here now.
     {
-      result: { status: 'coalesced', intoAgentRunId: 'run-a', intoMessageId: 'm2' },
+      result: {
+        status: 'coalesced',
+        intoAgentRunId: 'run-a',
+        intoMessageId: 'm2',
+      },
       outcome: 'superseded',
       reason: 'coalesced_into_turn',
     },
@@ -195,7 +229,10 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
   })
 
   it('carries the outbound row id for sent and queued, and null otherwise', () => {
-    expect(ledgerEntryFor({ status: 'sent', outboundMessageId: 'o1' }).outboundMessageId).toBe('o1')
+    expect(
+      ledgerEntryFor({ status: 'sent', outboundMessageId: 'o1' })
+        .outboundMessageId,
+    ).toBe('o1')
     expect(
       ledgerEntryFor({
         status: 'queued',
@@ -204,7 +241,9 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
         primaryTrigger: 'x',
       }).outboundMessageId,
     ).toBe('c1')
-    expect(ledgerEntryFor({ status: 'skipped_duplicate' }).outboundMessageId).toBeNull()
+    expect(
+      ledgerEntryFor({ status: 'skipped_duplicate' }).outboundMessageId,
+    ).toBeNull()
   })
 
   it('maps a followup-only stage to unexpected rather than violating the CHECK', () => {
@@ -213,7 +252,9 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
     // lose the whole record.
     const entry = ledgerEntryFor({
       status: 'failed',
-      stage: 'venue_config_integrity' as AgentResult extends { stage: infer S } ? S : never,
+      stage: 'venue_config_integrity' as AgentResult extends { stage: infer S }
+        ? S
+        : never,
       error: 'x',
     } as AgentResult)
     expect(entry.reason).toBe('unexpected')
@@ -221,8 +262,14 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
   })
 
   it('truncates a long error rather than storing it whole', () => {
-    const entry = ledgerEntryFor({ status: 'failed', stage: 'send', error: 'x'.repeat(500) })
-    expect(String((entry.detail as { error: string }).error).length).toBeLessThanOrEqual(201)
+    const entry = ledgerEntryFor({
+      status: 'failed',
+      stage: 'send',
+      error: 'x'.repeat(500),
+    })
+    expect(
+      String((entry.detail as { error: string }).error).length,
+    ).toBeLessThanOrEqual(201)
   })
 
   it('ledgerEntryForUnexpected records the wrapper-caught throw', () => {
@@ -256,7 +303,11 @@ describe('recordInboundTurnOutcome — the row it writes', () => {
     // parseMessageChannel, not a pass-through: an unknown value would violate
     // the CHECK and take the whole record with it.
     messageSelectMock.mockResolvedValue({
-      data: { venue_id: VENUE_ID, guest_id: GUEST_ID, channel: 'carrier-pigeon' },
+      data: {
+        venue_id: VENUE_ID,
+        guest_id: GUEST_ID,
+        channel: 'carrier-pigeon',
+      },
       error: null,
     })
     await recordInboundTurnOutcome({
@@ -310,14 +361,19 @@ describe('recordInboundTurnOutcome — the row it writes', () => {
       agentRunId: 'run-1',
       result: { status: 'refused', reason: 'low_fidelity', attemptScores: [] },
     })
-    expect(insertedRow()).toMatchObject({ outcome: 'refused', reason: 'low_fidelity' })
+    expect(insertedRow()).toMatchObject({
+      outcome: 'refused',
+      reason: 'low_fidelity',
+    })
   })
 })
 
 describe('recordInboundTurnOutcome — never throws', () => {
   it('swallows an insert error and reports it to PostHog, not Slack', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    insertMock.mockReturnValue({ error: { message: 'relation does not exist', code: '42P01' } })
+    insertMock.mockReturnValue({
+      error: { message: 'relation does not exist', code: '42P01' },
+    })
 
     await expect(
       recordInboundTurnOutcome({
@@ -330,7 +386,10 @@ describe('recordInboundTurnOutcome — never throws', () => {
     expect(capturePostHogEventMock).toHaveBeenCalledWith(
       'inbound_turn_outcome_write_failed',
       expect.any(String),
-      expect.objectContaining({ error: 'relation does not exist', code: '42P01' }),
+      expect.objectContaining({
+        error: 'relation does not exist',
+        code: '42P01',
+      }),
     )
     err.mockRestore()
   })
@@ -410,7 +469,10 @@ describe('insertInboundTurnOutcome — the shared writer', () => {
         outcome: 'not_run',
         reason: 'venue_not_found',
         outboundMessageId: null,
-        detail: { payload: { from: '+1 (555) 555-0123' }, tried: ['15555550123'] },
+        detail: {
+          payload: { from: '+1 (555) 555-0123' },
+          tried: ['15555550123'],
+        },
       },
       venueId: null,
       guestId: null,
@@ -434,7 +496,10 @@ describe('insertInboundTurnOutcome — the shared writer', () => {
         outcome: 'failed',
         reason: 'context_build',
         outboundMessageId: null,
-        detail: { missingInboundMessageId: INBOUND_ID, note: `saw ${INBOUND_ID} go missing` },
+        detail: {
+          missingInboundMessageId: INBOUND_ID,
+          note: `saw ${INBOUND_ID} go missing`,
+        },
       },
       venueId: null,
       guestId: null,
@@ -477,7 +542,10 @@ describe('insertInboundTurnOutcome — the shared writer', () => {
         outcome: 'queued',
         reason: null,
         outboundMessageId: 'card-1',
-        detail: { primaryTrigger: 'model_flagged', triggers: ['model_flagged'] },
+        detail: {
+          primaryTrigger: 'model_flagged',
+          triggers: ['model_flagged'],
+        },
       },
       venueId: VENUE_ID,
       guestId: GUEST_ID,

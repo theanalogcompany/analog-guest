@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import {
   sendblueMarkAsRead,
   sendblueSendReaction,
@@ -25,7 +26,8 @@ const E164_RE = /^\+[1-9]\d{1,14}$/
 export async function sendReaction(
   input: SendReactionInput,
 ): Promise<MessagingResult<{ providerMessageId: string; status: string }>> {
-  const { venueId, to, reaction, messageHandle, replyToMessageId, guestId } = input
+  const { venueId, to, reaction, messageHandle, replyToMessageId, guestId } =
+    input
 
   if (!E164_RE.test(to)) {
     return { ok: false, error: 'invalid_recipient_phone_number' }
@@ -59,20 +61,26 @@ export async function sendReaction(
         sent_at: new Date().toISOString(),
       })
       if (insertError) {
-        console.error('orphaned reaction: db insert failed after sendblue success', {
+        logger.error(
+          'orphaned reaction: db insert failed after sendblue success',
+          {
+            venueId,
+            guestId,
+            providerMessageId: resp.message_handle,
+            error: insertError.message,
+          },
+        )
+      }
+    } catch (e) {
+      logger.error(
+        'orphaned reaction: db insert threw after sendblue success',
+        {
           venueId,
           guestId,
           providerMessageId: resp.message_handle,
-          error: insertError.message,
-        })
-      }
-    } catch (e) {
-      console.error('orphaned reaction: db insert threw after sendblue success', {
-        venueId,
-        guestId,
-        providerMessageId: resp.message_handle,
-        error: e instanceof Error ? e.message : String(e),
-      })
+          error: e instanceof Error ? e.message : String(e),
+        },
+      )
     }
 
     return {

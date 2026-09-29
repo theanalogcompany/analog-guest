@@ -91,9 +91,13 @@ describe('startAgentTrace — no-op cases', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-1' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-1',
+    })
     expect(trace.id).toBe('')
     expect(langfuseCtor).not.toHaveBeenCalled()
 
@@ -110,9 +114,13 @@ describe('startAgentTrace — no-op cases', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-2' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-2',
+    })
     expect(trace.id).toBe('')
     expect(langfuseCtor).not.toHaveBeenCalled()
   })
@@ -122,9 +130,13 @@ describe('startAgentTrace — no-op cases', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', '')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-3' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-3',
+    })
     expect(trace.id).toBe('')
     expect(langfuseCtor).not.toHaveBeenCalled()
   })
@@ -140,7 +152,8 @@ describe('startAgentTrace — live mode', () => {
   })
 
   it('initialises Langfuse with config and returns a real trace id', async () => {
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     const trace = startAgentTrace({
       name: 'agent.inbound',
@@ -162,9 +175,13 @@ describe('startAgentTrace — live mode', () => {
   })
 
   it('span / span / generation tree forwards through the SDK', async () => {
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.followup', agentRunId: 'run-B' })
+    const trace = startAgentTrace({
+      name: 'agent.followup',
+      agentRunId: 'run-B',
+    })
     const generate = trace.span('generate', { foo: 'bar' })
     const attempt = generate.span('generate.attempt_1', { i: 1 })
     const llm = attempt.generation('llm.call', { prompt: 'hi' })
@@ -176,7 +193,9 @@ describe('startAgentTrace — live mode', () => {
     attempt.end({ output: { score: 0.5 } })
     llm.end({ output: { tokens: 42 } })
 
-    expect(lastTrace!.spans[0].update).toHaveBeenCalledWith({ metadata: { strongCount: 3 } })
+    expect(lastTrace!.spans[0].update).toHaveBeenCalledWith({
+      metadata: { strongCount: 3 },
+    })
     expect(lastTrace!.spans[0].span).toHaveBeenCalledWith({
       name: 'generate.attempt_1',
       input: { i: 1 },
@@ -184,17 +203,25 @@ describe('startAgentTrace — live mode', () => {
   })
 
   it('flushAsync delegates to the SDK client', async () => {
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-C' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-C',
+    })
     await trace.flushAsync()
     expect(lastClient!.flushAsync).toHaveBeenCalledOnce()
   })
 
   it('swallows SDK errors and returns no-op spans', async () => {
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-D' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-D',
+    })
     // Force the next span call to throw — wrapper should swallow + return NOOP_SPAN.
     expect(lastTrace).not.toBeNull()
     const sdkTraceMock = lastClient!.trace.mock.results[0]?.value
@@ -210,7 +237,8 @@ describe('startAgentTrace — live mode', () => {
   })
 
   it('caches the client across calls (single Langfuse construction)', async () => {
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-E1' })
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-E2' })
@@ -232,7 +260,8 @@ describe('startAgentTrace — host env aliasing', () => {
   it('reads LANGFUSE_BASE_URL when only BASE_URL is set', async () => {
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
     vi.stubEnv('LANGFUSE_HOST', '')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h1' })
     expect(langfuseCtor).toHaveBeenCalledWith(
@@ -243,7 +272,8 @@ describe('startAgentTrace — host env aliasing', () => {
   it('reads LANGFUSE_HOST when only HOST is set (legacy alias)', async () => {
     vi.stubEnv('LANGFUSE_BASE_URL', '')
     vi.stubEnv('LANGFUSE_HOST', 'https://cloud.langfuse.com')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h2' })
     expect(langfuseCtor).toHaveBeenCalledWith(
@@ -254,7 +284,8 @@ describe('startAgentTrace — host env aliasing', () => {
   it('prefers LANGFUSE_BASE_URL when both are set', async () => {
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://us.cloud.langfuse.com')
     vi.stubEnv('LANGFUSE_HOST', 'https://cloud.langfuse.com')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h3' })
     expect(langfuseCtor).toHaveBeenCalledWith(
@@ -265,9 +296,13 @@ describe('startAgentTrace — host env aliasing', () => {
   it('no-ops when neither BASE_URL nor HOST is set', async () => {
     vi.stubEnv('LANGFUSE_BASE_URL', '')
     vi.stubEnv('LANGFUSE_HOST', '')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'run-h4' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'run-h4',
+    })
     expect(trace.id).toBe('')
     expect(langfuseCtor).not.toHaveBeenCalled()
   })
@@ -287,43 +322,70 @@ describe('startAgentTrace — content capture (THE-216)', () => {
 
   it('defaults captureContent to true when LANGFUSE_CAPTURE_CONTENT is unset', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-1' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-1',
+    })
     expect(trace.captureContent).toBe(true)
   })
 
   it('treats LANGFUSE_CAPTURE_CONTENT=true as on (any non-false value)', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'true')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-2' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-2',
+    })
     expect(trace.captureContent).toBe(true)
   })
 
   it('treats arbitrary values like "yes" as on (only "false" disables)', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'yes')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-3' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-3',
+    })
     expect(trace.captureContent).toBe(true)
   })
 
   it('disables when LANGFUSE_CAPTURE_CONTENT=false', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-4' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-4',
+    })
     expect(trace.captureContent).toBe(false)
   })
 
   it('with capture-on, span.end folds content into output.content', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-5' })
-    const span = trace.span('classify', { length: 10 }, { fullBody: 'hi there' })
-    span.end({ output: { category: 'reply' }, content: { reasoning: 'short greeting' } })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-5',
+    })
+    const span = trace.span(
+      'classify',
+      { length: 10 },
+      { fullBody: 'hi there' },
+    )
+    span.end({
+      output: { category: 'reply' },
+      content: { reasoning: 'short greeting' },
+    })
     // SDK end() received output with content folded in.
     const sdkSpan = lastTrace!.spans[0]
     expect(sdkSpan.end).toHaveBeenCalledWith({
@@ -338,11 +400,22 @@ describe('startAgentTrace — content capture (THE-216)', () => {
 
   it('with capture-off, span.end drops content entirely (metadata-only parity)', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-6' })
-    const span = trace.span('classify', { length: 10 }, { fullBody: 'hi there' })
-    span.end({ output: { category: 'reply' }, content: { reasoning: 'short greeting' } })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-6',
+    })
+    const span = trace.span(
+      'classify',
+      { length: 10 },
+      { fullBody: 'hi there' },
+    )
+    span.end({
+      output: { category: 'reply' },
+      content: { reasoning: 'short greeting' },
+    })
     const sdkSpan = lastTrace!.spans[0]
     // No `content` key under output. Output is exactly the metadata.
     expect(sdkSpan.end).toHaveBeenCalledWith({ output: { category: 'reply' } })
@@ -354,14 +427,20 @@ describe('startAgentTrace — content capture (THE-216)', () => {
 
   it('with capture-off, trace.update drops content from the SDK call', async () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', 'false')
-    const { startAgentTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { startAgentTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
-    const trace = startAgentTrace({ name: 'agent.inbound', agentRunId: 'cc-7' })
+    const trace = startAgentTrace({
+      name: 'agent.inbound',
+      agentRunId: 'cc-7',
+    })
     trace.update({
       metadata: { venueId: 'v1' },
       content: { inboundBody: 'private text' },
     })
-    expect(lastClient!.trace.mock.results[0]?.value.update).toHaveBeenCalledWith({
+    expect(
+      lastClient!.trace.mock.results[0]?.value.update,
+    ).toHaveBeenCalledWith({
       metadata: { venueId: 'v1' },
     })
   })
@@ -377,7 +456,8 @@ describe('fetchTrace (THE-201)', () => {
   })
 
   it('calls SDK api.traceGet and returns the result', async () => {
-    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     // Triggers client construction.
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-1' })
@@ -389,7 +469,8 @@ describe('fetchTrace (THE-201)', () => {
   })
 
   it('returns null on empty trace ID without calling the SDK', async () => {
-    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-2' })
     expect(await fetchTrace('')).toBeNull()
@@ -398,7 +479,8 @@ describe('fetchTrace (THE-201)', () => {
   })
 
   it('returns null when SDK throws (404, network, etc.)', async () => {
-    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } = await import('./langfuse')
+    const { fetchTrace, _resetLangfuseClientForTest, startAgentTrace } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     startAgentTrace({ name: 'agent.inbound', agentRunId: 'ft-3' })
     lastClient!.api.traceGet.mockRejectedValueOnce(new Error('not found'))
@@ -411,7 +493,8 @@ describe('fetchTrace (THE-201)', () => {
 
   it('returns null when wrapper is in no-op mode', async () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', '')
-    const { fetchTrace, _resetLangfuseClientForTest } = await import('./langfuse')
+    const { fetchTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
     _resetLangfuseClientForTest()
     const result = await fetchTrace('tr_xyz')
     expect(result).toBeNull()

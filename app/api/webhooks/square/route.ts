@@ -16,9 +16,13 @@ import { waitUntil } from '@vercel/functions'
 
 import { capturePostHogEvent } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { ingestTransaction } from '@/lib/pos/ingest-transaction'
 import { getProvider } from '@/lib/pos/registry'
-import { resolveVenueByLocation, resolveVenueByMerchant } from '@/lib/pos/resolve-venue'
+import {
+  resolveVenueByLocation,
+  resolveVenueByMerchant,
+} from '@/lib/pos/resolve-venue'
 import { syncCatalog } from '@/lib/pos/sync-catalog'
 import { applyInventoryCounts } from '@/lib/pos/sync-inventory'
 import type { InventoryCount, NormalizedEvent } from '@/lib/pos/types'
@@ -51,41 +55,56 @@ async function recordWebhookEvent(
   // Unexpected DB error: treat as not-recorded and let processing proceed once.
   // Logged so a persistent failure is visible; the transaction upsert is itself
   // idempotent, so a missed idempotency row can't double-create a transaction.
-  console.error('square webhook: idempotency insert failed', {
+  logger.error('square webhook: idempotency insert failed', {
     eventId: event.eventId,
     error: error.message,
   })
   return true
 }
 
-async function markProcessed(supabase: AdminClient, eventId: string): Promise<void> {
+async function markProcessed(
+  supabase: AdminClient,
+  eventId: string,
+): Promise<void> {
   const { error } = await supabase
     .from('pos_webhook_events')
     .update({ processed_at: new Date().toISOString() })
     .eq('provider', 'square')
     .eq('event_id', eventId)
   if (error) {
-    console.error('square webhook: mark-processed failed', { eventId, error: error.message })
+    logger.error('square webhook: mark-processed failed', {
+      eventId,
+      error: error.message,
+    })
   }
 }
 
 // Latency instrumentation: the empirical answer to "how long until
 // a transaction reaches us" — the dataset that tunes tap↔transaction
 // reconciliation. Keys on the merchant so it can be sliced per venue later.
-function captureLatency(event: Extract<NormalizedEvent, { kind: 'transaction' }>): void {
+function captureLatency(
+  event: Extract<NormalizedEvent, { kind: 'transaction' }>,
+): void {
   const occurredMs = Date.parse(event.data.occurredAt)
   if (Number.isNaN(occurredMs)) return
   const latencyMs = Date.now() - occurredMs
-  void capturePostHogEvent('square_webhook_latency', event.data.merchantExternalId ?? 'square', {
-    latencyMs,
-    eventId: event.eventId,
-    status: event.data.status,
-  })
+  void capturePostHogEvent(
+    'square_webhook_latency',
+    event.data.merchantExternalId ?? 'square',
+    {
+      latencyMs,
+      eventId: event.eventId,
+      status: event.data.status,
+    },
+  )
 }
 
 // Inventory counts can span locations; group by location, resolve each to its
 // venue, and apply per venue. A location with no connected venue is skipped.
-async function processInventory(supabase: AdminClient, counts: InventoryCount[]): Promise<void> {
+async function processInventory(
+  supabase: AdminClient,
+  counts: InventoryCount[],
+): Promise<void> {
   const byLocation = new Map<string, InventoryCount[]>()
   for (const c of counts) {
     const group = byLocation.get(c.locationExternalId) ?? []
@@ -94,7 +113,8 @@ async function processInventory(supabase: AdminClient, counts: InventoryCount[])
   }
   for (const [location, group] of byLocation) {
     const venueId = await resolveVenueByLocation(supabase, 'square', location)
-    if (venueId) await applyInventoryCounts({ venueId, counts: group, supabase })
+    if (venueId)
+      await applyInventoryCounts({ venueId, counts: group, supabase })
   }
 }
 
@@ -107,18 +127,21 @@ export async function POST(request: Request): Promise<Response> {
     if (!notificationUrl) {
       // Misconfiguration, not a bad request — 500 so it's loud (and Square
       // retries until the env var is set). Mirrors the missing-env posture.
-      console.error('square webhook: SQUARE_WEBHOOK_URL not set')
+      logger.error('square webhook: SQUARE_WEBHOOK_URL not set')
       return new Response('Server misconfigured', { status: 500 })
     }
 
     if (!provider.verifyWebhook(rawBody, request.headers, notificationUrl)) {
-      console.warn('square webhook: invalid signature', { url: request.url })
+      logger.warn('square webhook: invalid signature', { url: request.url })
       return new Response('Invalid signature', { status: 401 })
     }
 
     const parsed = provider.parseWebhook(rawBody)
     if (!parsed.ok) {
-      console.error('square webhook: parse failed', { url: request.url, error: parsed.error })
+      logger.error('square webhook: parse failed', {
+        url: request.url,
+        error: parsed.error,
+      })
       return new Response('Invalid payload', { status: 400 })
     }
 
@@ -134,19 +157,29 @@ export async function POST(request: Request): Promise<Response> {
       if (event.kind === 'transaction') {
         captureLatency(event)
         const { data, eventId } = event
-        waitUntil(ingestTransaction(data).then(() => markProcessed(supabase, eventId)))
+        waitUntil(
+          ingestTransaction(data).then(() => markProcessed(supabase, eventId)),
+        )
       } else if (event.kind === 'catalog_updated') {
         const { eventId, merchantExternalId } = event
         waitUntil(
           (async () => {
-            const venueId = await resolveVenueByMerchant(supabase, 'square', merchantExternalId)
+            const venueId = await resolveVenueByMerchant(
+              supabase,
+              'square',
+              merchantExternalId,
+            )
             if (venueId) await syncCatalog({ venueId, supabase })
             await markProcessed(supabase, eventId)
           })(),
         )
       } else if (event.kind === 'inventory_updated') {
         const { eventId, counts } = event
-        waitUntil(processInventory(supabase, counts).then(() => markProcessed(supabase, eventId)))
+        waitUntil(
+          processInventory(supabase, counts).then(() =>
+            markProcessed(supabase, eventId),
+          ),
+        )
       } else {
         // unknown — recorded above for idempotency/audit; nothing to do.
         waitUntil(markProcessed(supabase, event.eventId))
@@ -157,7 +190,11 @@ export async function POST(request: Request): Promise<Response> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     const stack = e instanceof Error ? e.stack : undefined
-    console.error('square webhook: unexpected error', { url: request.url, error: message, stack })
+    logger.error('square webhook: unexpected error', {
+      url: request.url,
+      error: message,
+      stack,
+    })
     return new Response('Internal error', { status: 500 })
   }
 }

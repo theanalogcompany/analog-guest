@@ -47,6 +47,7 @@
 // it's holding is part of the gate.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { handleHoldingMessage } from './handle-holding-message'
 import { loadInboundQuestion } from './pending-question'
 
@@ -151,7 +152,7 @@ export async function processDueKnowledgeGaps(
     // anyway so the scan doesn't return it every five minutes forever — the
     // clock has served its purpose and there is nothing to send.
     if (!card.reply_to_message_id) {
-      console.warn(
+      logger.warn(
         `[cron pending-timeout] card=${card.id} has no reply_to_message_id, clearing its clock`,
       )
       await claimCard(card.id)
@@ -161,7 +162,7 @@ export async function processDueKnowledgeGaps(
 
     const question = await loadQuestion(card.reply_to_message_id)
     if (question === null) {
-      console.warn(
+      logger.warn(
         `[cron pending-timeout] card=${card.id} inbound ${card.reply_to_message_id} unreadable, clearing its clock`,
       )
       await claimCard(card.id)
@@ -194,7 +195,7 @@ export async function processDueKnowledgeGaps(
         questionMessageId: card.reply_to_message_id,
       })
       if (result.status === 'failed') {
-        console.error('[cron pending-timeout] holding message failed', {
+        logger.error('[cron pending-timeout] holding message failed', {
           cardId: card.id,
           stage: result.stage,
           error: result.error,
@@ -205,7 +206,7 @@ export async function processDueKnowledgeGaps(
       if (result.status === 'suppressed') {
         // Policy, not breakage: the guest opted out, or the venue holds all
         // outbound. The clock is already cleared, so this won't re-fire.
-        console.log('[cron pending-timeout] holding message suppressed', {
+        logger.info('[cron pending-timeout] holding message suppressed', {
           cardId: card.id,
           reason: result.reason,
         })
@@ -221,7 +222,7 @@ export async function processDueKnowledgeGaps(
       // retrieval and generation per timed-out card to write nothing.
     } catch (e) {
       // handleHoldingMessage is fail-closed, so a throw is unexpected.
-      console.error('[cron pending-timeout] handleHoldingMessage threw', {
+      logger.error('[cron pending-timeout] handleHoldingMessage threw', {
         cardId: card.id,
         error: e instanceof Error ? e.message : String(e),
       })
@@ -262,12 +263,14 @@ async function findDueCards(now: Date): Promise<DueCard[] | null> {
       .order('pending_until', { ascending: true })
       .limit(MAX_CARDS_PER_TICK)
     if (error) {
-      console.error('[cron pending-timeout] due scan failed', { error: error.message })
+      logger.error('[cron pending-timeout] due scan failed', {
+        error: error.message,
+      })
       return null
     }
     return data ?? []
   } catch (e) {
-    console.error('[cron pending-timeout] due scan threw', {
+    logger.error('[cron pending-timeout] due scan threw', {
       error: e instanceof Error ? e.message : String(e),
     })
     return null
@@ -301,12 +304,15 @@ async function claimCard(cardId: string): Promise<'won' | 'lost' | 'error'> {
       .select('id')
       .maybeSingle()
     if (error) {
-      console.error('[cron pending-timeout] claim failed', { cardId, error: error.message })
+      logger.error('[cron pending-timeout] claim failed', {
+        cardId,
+        error: error.message,
+      })
       return 'error'
     }
     return data ? 'won' : 'lost'
   } catch (e) {
-    console.error('[cron pending-timeout] claim threw', {
+    logger.error('[cron pending-timeout] claim threw', {
       cardId,
       error: e instanceof Error ? e.message : String(e),
     })
@@ -320,7 +326,9 @@ async function claimCard(cardId: string): Promise<'won' | 'lost' | 'error'> {
  * Delegates to the shared reader in pending-question.ts so the empty-body
  * guard and fail-null posture can't drift from the prompt-block path.
  */
-async function loadQuestion(inboundMessageId: string): Promise<PendingQuestionRow | null> {
+async function loadQuestion(
+  inboundMessageId: string,
+): Promise<PendingQuestionRow | null> {
   const inbound = await loadInboundQuestion(inboundMessageId)
   if (inbound === null) return null
   return {
@@ -330,4 +338,3 @@ async function loadQuestion(inboundMessageId: string): Promise<PendingQuestionRo
     askedAt: inbound.askedAt,
   }
 }
-

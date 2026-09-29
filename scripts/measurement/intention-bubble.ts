@@ -66,7 +66,10 @@ import { renderableIntentions } from '@/lib/agent/intentions/derive'
 import type { OpenIntention } from '@/lib/agent/intentions/derive'
 import { INTENTION_DEFINITION_BY_KEY } from '@/lib/agent/intentions/definitions'
 import type { IntentionKey } from '@/lib/agent/intentions/definitions'
-import { resolveDispatchBubbles, splitIntoSentences } from '@/lib/agent/sentence-split'
+import {
+  resolveDispatchBubbles,
+  splitIntoSentences,
+} from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
   retrieveCorpusStage,
@@ -86,7 +89,10 @@ import { createRunLog } from './run-log'
 type Arm = 'control' | 'after'
 type Channel = 'text' | 'instagram'
 
-const TARGETS = ['learn_name', 'are_they_local'] as const satisfies readonly IntentionKey[]
+const TARGETS = [
+  'learn_name',
+  'are_they_local',
+] as const satisfies readonly IntentionKey[]
 
 /**
  * The guest turns. Each is an ordinary message that leaves the reply finished
@@ -109,21 +115,111 @@ const SCENARIOS: readonly {
   intention: IntentionKey | 'none'
   shape: string
 }[] = [
-  { id: 's01', body: 'are you open on sundays?', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's02', body: 'what time do you close today', category: 'new_question', intention: 'are_they_local', shape: 'answerable_question' },
-  { id: 's03', body: 'just moved to the neighborhood and trying coffee places', category: 'reply', intention: 'learn_name', shape: 'said_something_about_self' },
-  { id: 's04', body: 'that cortado was so good', category: 'reply', intention: 'are_they_local', shape: 'chatting_nothing_needed' },
-  { id: 's05', body: 'do you have oat milk?', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's06', body: 'i work from home so im always looking for somewhere to sit', category: 'reply', intention: 'are_they_local', shape: 'said_something_about_self' },
-  { id: 's07', body: 'whats good here', category: 'recommendation_request', intention: 'learn_name', shape: 'recommendation' },
-  { id: 's08', body: 'saw your sign outside, cool space', category: 'casual_chatter', intention: 'are_they_local', shape: 'chatting_nothing_needed' },
-  { id: 's09', body: 'do you do decaf', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's10', body: 'been meaning to come in for weeks', category: 'casual_chatter', intention: 'are_they_local', shape: 'said_something_about_self' },
-  { id: 's11', body: 'is there wifi', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's12', body: 'my friend told me to try the blossom tonic', category: 'reply', intention: 'are_they_local', shape: 'said_something_about_self' },
-  { id: 's13', body: 'what are your hours during the week', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's14', body: 'coffee was great today thanks', category: 'casual_chatter', intention: 'are_they_local', shape: 'chatting_nothing_needed' },
-  { id: 's15', body: 'do you have any pastries left', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
+  {
+    id: 's01',
+    body: 'are you open on sundays?',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's02',
+    body: 'what time do you close today',
+    category: 'new_question',
+    intention: 'are_they_local',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's03',
+    body: 'just moved to the neighborhood and trying coffee places',
+    category: 'reply',
+    intention: 'learn_name',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's04',
+    body: 'that cortado was so good',
+    category: 'reply',
+    intention: 'are_they_local',
+    shape: 'chatting_nothing_needed',
+  },
+  {
+    id: 's05',
+    body: 'do you have oat milk?',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's06',
+    body: 'i work from home so im always looking for somewhere to sit',
+    category: 'reply',
+    intention: 'are_they_local',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's07',
+    body: 'whats good here',
+    category: 'recommendation_request',
+    intention: 'learn_name',
+    shape: 'recommendation',
+  },
+  {
+    id: 's08',
+    body: 'saw your sign outside, cool space',
+    category: 'casual_chatter',
+    intention: 'are_they_local',
+    shape: 'chatting_nothing_needed',
+  },
+  {
+    id: 's09',
+    body: 'do you do decaf',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's10',
+    body: 'been meaning to come in for weeks',
+    category: 'casual_chatter',
+    intention: 'are_they_local',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's11',
+    body: 'is there wifi',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's12',
+    body: 'my friend told me to try the blossom tonic',
+    category: 'reply',
+    intention: 'are_they_local',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's13',
+    body: 'what are your hours during the week',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's14',
+    body: 'coffee was great today thanks',
+    category: 'casual_chatter',
+    intention: 'are_they_local',
+    shape: 'chatting_nothing_needed',
+  },
+  {
+    id: 's15',
+    body: 'do you have any pastries left',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
   // s16-s21 were added after a first run yielded 17 raising turns against a
   // pre-registered denominator of 20. They deliberately repeat the SAME shape
   // mix as s01-s15 (two answerable questions, two self-disclosures, two
@@ -131,15 +227,69 @@ const SCENARIOS: readonly {
   // Picking the reliable raisers would grow the denominator by making the
   // fixture easier, which is fitting the evidence to the answer; this grows it
   // by spending more attempts at the same difficulty.
-  { id: 's16', body: 'do you have soy milk too', category: 'new_question', intention: 'are_they_local', shape: 'answerable_question' },
-  { id: 's17', body: 'are you open early on weekdays', category: 'new_question', intention: 'learn_name', shape: 'answerable_question' },
-  { id: 's18', body: 'i come past here on my way to work every day', category: 'reply', intention: 'learn_name', shape: 'said_something_about_self' },
-  { id: 's19', body: 'im new to the city and dont know anywhere yet', category: 'reply', intention: 'are_they_local', shape: 'said_something_about_self' },
-  { id: 's20', body: 'this place smells incredible', category: 'casual_chatter', intention: 'learn_name', shape: 'chatting_nothing_needed' },
-  { id: 's21', body: 'love the music youre playing', category: 'casual_chatter', intention: 'are_they_local', shape: 'chatting_nothing_needed' },
-  { id: 'n01', body: 'what time do you open tomorrow?', category: 'new_question', intention: 'none', shape: 'no_intention_control' },
-  { id: 'n02', body: 'do you take card', category: 'new_question', intention: 'none', shape: 'no_intention_control' },
-  { id: 'n03', body: 'thanks!', category: 'acknowledgment', intention: 'none', shape: 'no_intention_control' },
+  {
+    id: 's16',
+    body: 'do you have soy milk too',
+    category: 'new_question',
+    intention: 'are_they_local',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's17',
+    body: 'are you open early on weekdays',
+    category: 'new_question',
+    intention: 'learn_name',
+    shape: 'answerable_question',
+  },
+  {
+    id: 's18',
+    body: 'i come past here on my way to work every day',
+    category: 'reply',
+    intention: 'learn_name',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's19',
+    body: 'im new to the city and dont know anywhere yet',
+    category: 'reply',
+    intention: 'are_they_local',
+    shape: 'said_something_about_self',
+  },
+  {
+    id: 's20',
+    body: 'this place smells incredible',
+    category: 'casual_chatter',
+    intention: 'learn_name',
+    shape: 'chatting_nothing_needed',
+  },
+  {
+    id: 's21',
+    body: 'love the music youre playing',
+    category: 'casual_chatter',
+    intention: 'are_they_local',
+    shape: 'chatting_nothing_needed',
+  },
+  {
+    id: 'n01',
+    body: 'what time do you open tomorrow?',
+    category: 'new_question',
+    intention: 'none',
+    shape: 'no_intention_control',
+  },
+  {
+    id: 'n02',
+    body: 'do you take card',
+    category: 'new_question',
+    intention: 'none',
+    shape: 'no_intention_control',
+  },
+  {
+    id: 'n03',
+    body: 'thanks!',
+    category: 'acknowledgment',
+    intention: 'none',
+    shape: 'no_intention_control',
+  },
 ]
 
 /**
@@ -185,11 +335,19 @@ function splitWithTail(body: string, flip: number, tail: string): string[] {
   return fn(body, () => flip, tail)
 }
 
-async function judge(sentBody: string, key: IntentionKey): Promise<{ keys: string[]; error: string | null }> {
+async function judge(
+  sentBody: string,
+  key: IntentionKey,
+): Promise<{ keys: string[]; error: string | null }> {
   if (sentBody.trim() === '') return { keys: [], error: null }
   const res = await classifyIntentionPrompts({
     sentBody,
-    openIntentions: [{ key, description: INTENTION_DEFINITION_BY_KEY[key].classifierDescription }],
+    openIntentions: [
+      {
+        key,
+        description: INTENTION_DEFINITION_BY_KEY[key].classifierDescription,
+      },
+    ],
   })
   if (!res.ok) return { keys: [], error: res.error }
   return { keys: [...res.data.raisedKeys], error: null }
@@ -198,7 +356,9 @@ async function judge(sentBody: string, key: IntentionKey): Promise<{ keys: strin
 async function main(): Promise<void> {
   const arm = process.env.MEASURE_ARM as Arm | undefined
   if (arm !== 'control' && arm !== 'after') {
-    console.error('✗ set MEASURE_ARM=control or MEASURE_ARM=after. A run log with no arm is unreadable afterwards.')
+    console.error(
+      '✗ set MEASURE_ARM=control or MEASURE_ARM=after. A run log with no arm is unreadable afterwards.',
+    )
     process.exit(2)
   }
   const venueSlug = process.env.MEASURE_VENUE ?? 'le-mils-coffee'
@@ -258,7 +418,8 @@ async function main(): Promise<void> {
       .select('*', { count: 'exact', head: true })
       .eq('guest_id', g.id)
     const n = count ?? 0
-    if ((guestFor[ch]?.messages ?? -1) < n) guestFor[ch] = { id: g.id, messages: n }
+    if ((guestFor[ch]?.messages ?? -1) < n)
+      guestFor[ch] = { id: g.id, messages: n }
   }
   if (!guestFor.text || !guestFor.instagram) {
     throw new Error(
@@ -289,13 +450,20 @@ async function main(): Promise<void> {
     },
   })
 
-  console.log(`[tac554] arm=${arm} schemaHasField=${hasField} prompt=${PROMPT_VERSION}`)
+  console.log(
+    `[tac554] arm=${arm} schemaHasField=${hasField} prompt=${PROMPT_VERSION}`,
+  )
   console.log(`[tac554] venue ${venueSlug} (status=${venue.status})`)
-  console.log(`[tac554] guest text=${guestFor.text.id.slice(0, 8)} (${guestFor.text.messages} msgs), instagram=${guestFor.instagram.id.slice(0, 8)} (${guestFor.instagram.messages} msgs)`)
+  console.log(
+    `[tac554] guest text=${guestFor.text.id.slice(0, 8)} (${guestFor.text.messages} msgs), instagram=${guestFor.instagram.id.slice(0, 8)} (${guestFor.instagram.messages} msgs)`,
+  )
   console.log(`[tac554] guest_states rows before: ${statesBefore}`)
   console.log(`[tac554] run log: ${log.path}\n`)
 
-  const trace = startAgentTrace({ name: 'tac554-measure', agentRunId: randomUUID() })
+  const trace = startAgentTrace({
+    name: 'tac554-measure',
+    agentRunId: randomUUID(),
+  })
 
   type Row = {
     scenarioId: string
@@ -366,8 +534,11 @@ async function main(): Promise<void> {
           : [
               {
                 key: scenario.intention,
-                promptLine: INTENTION_DEFINITION_BY_KEY[scenario.intention].promptLine,
-                eligibleAt: new Date(startedAt.getTime() - 7 * 24 * 60 * 60 * 1000),
+                promptLine:
+                  INTENTION_DEFINITION_BY_KEY[scenario.intention].promptLine,
+                eligibleAt: new Date(
+                  startedAt.getTime() - 7 * 24 * 60 * 60 * 1000,
+                ),
               },
             ]
 
@@ -479,7 +650,10 @@ async function main(): Promise<void> {
           row.bubbles = splitWithTail(row.body, row.flip, tail)
           row.bubbleCount = row.bubbles.length
 
-          const answer = tail === '' ? row.body : row.body.slice(0, row.body.length - tail.length)
+          const answer =
+            tail === ''
+              ? row.body
+              : row.body.slice(0, row.body.length - tail.length)
           row.answerSentences = splitIntoSentences(answer).length
           // An INDEPENDENT second opinion on the duplicate guard. The guard
           // itself reports that it fired (duplicateGuardFired, read off the
@@ -511,7 +685,11 @@ async function main(): Promise<void> {
             const verdict = scoreUnit({
               bubbles: row.bubbles,
               intentionQuestion: tail,
-              judge: { whole: jWhole.keys, last: jLast.keys, earlier: jEarlier.keys },
+              judge: {
+                whole: jWhole.keys,
+                last: jLast.keys,
+                earlier: jEarlier.keys,
+              },
             })
             row.raised = verdict.raised
             row.separateLastBubble = verdict.separateLastBubble
@@ -525,7 +703,14 @@ async function main(): Promise<void> {
 
       rows.push(row)
       log.appendUnit(row)
-      const mark = row.error !== null ? 'INVALID' : row.pass ? 'pass' : row.raised ? 'FAIL' : 'not-raised'
+      const mark =
+        row.error !== null
+          ? 'INVALID'
+          : row.pass
+            ? 'pass'
+            : row.raised
+              ? 'FAIL'
+              : 'not-raised'
       console.log(
         `  ${channel.padEnd(9)} ${row.scenarioId} ${String(row.intention).padEnd(15)} bubbles=${row.bubbleCount} ${mark}${row.breaches.length > 0 ? ` breach=${row.breaches.join(',')}` : ''}${row.error ? ` (${row.error})` : ''}`,
       )
@@ -547,11 +732,19 @@ async function main(): Promise<void> {
   const noIntention = valid.filter((r) => r.intention === 'none')
 
   console.log(`\n${'='.repeat(72)}`)
-  console.log(`ARM: ${arm}   prompt ${PROMPT_VERSION}   schema field: ${hasField}`)
+  console.log(
+    `ARM: ${arm}   prompt ${PROMPT_VERSION}   schema field: ${hasField}`,
+  )
   console.log(`${'='.repeat(72)}`)
-  console.log(`units: ${rows.length}   INVALID (errored, meet no expectation): ${invalid.length}`)
-  console.log(`targeted units: ${targeted.length}   of which raised an intention: ${raised.length}`)
-  console.log(`\nBAR — the question is its own bubble, sent last: ${passed.length}/${raised.length}`)
+  console.log(
+    `units: ${rows.length}   INVALID (errored, meet no expectation): ${invalid.length}`,
+  )
+  console.log(
+    `targeted units: ${targeted.length}   of which raised an intention: ${raised.length}`,
+  )
+  console.log(
+    `\nBAR — the question is its own bubble, sent last: ${passed.length}/${raised.length}`,
+  )
 
   // Why a failure failed. On the control arm these are different kinds of
   // thing and collapsing them would overstate what a coin could ever fix.
@@ -566,39 +759,65 @@ async function main(): Promise<void> {
 
   const breached = valid.filter((r) => r.breaches.length > 0)
   const dupes = valid.filter((r) => r.duplicateInAnswer)
-  const bubbledWithoutBlock = noIntention.filter((r) => r.bubbleCount > 1 && r.intentionQuestion !== '')
+  const bubbledWithoutBlock = noIntention.filter(
+    (r) => r.bubbleCount > 1 && r.intentionQuestion !== '',
+  )
 
   console.log(`\nCEILINGS`)
-  console.log(`  bubbles over the cap / empty / contentless / tail-not-last: ${breached.length}`)
-  for (const r of breached) console.log(`    ${r.channel} ${r.scenarioId}: ${r.breaches.join(', ')}`)
+  console.log(
+    `  bubbles over the cap / empty / contentless / tail-not-last: ${breached.length}`,
+  )
+  for (const r of breached)
+    console.log(`    ${r.channel} ${r.scenarioId}: ${r.breaches.join(', ')}`)
   console.log(`  a duplicate SURVIVED the guard (must be 0): ${dupes.length}`)
   for (const r of dupes) console.log(`    ${r.channel} ${r.scenarioId}`)
   const guardFired = valid.filter((r) => r.duplicateGuardFired)
-  console.log(`  duplicate guard FIRED and edited the answer: ${guardFired.length}`)
+  console.log(
+    `  duplicate guard FIRED and edited the answer: ${guardFired.length}`,
+  )
   for (const r of guardFired) console.log(`    ${r.channel} ${r.scenarioId}`)
-  console.log(`  separate bubble on a turn with no rendered intention: ${bubbledWithoutBlock.length}`)
+  console.log(
+    `  separate bubble on a turn with no rendered intention: ${bubbledWithoutBlock.length}`,
+  )
 
   console.log(`\nno-intention control units: ${noIntention.length}`)
   for (const r of noIntention) {
-    console.log(`  ${r.channel.padEnd(9)} ${r.scenarioId} bubbles=${r.bubbleCount} field="${r.intentionQuestion}"`)
+    console.log(
+      `  ${r.channel.padEnd(9)} ${r.scenarioId} bubbles=${r.bubbleCount} field="${r.intentionQuestion}"`,
+    )
   }
 
-  console.log(`\nguest_states rows: ${statesBefore} before, ${statesAfter} after`)
+  console.log(
+    `\nguest_states rows: ${statesBefore} before, ${statesAfter} after`,
+  )
   if (statesBefore !== statesAfter) {
-    console.log(`  NOTE: the count moved. buildRuntimeContext runs computeGuestState, which persists a row on a band change.`)
+    console.log(
+      `  NOTE: the count moved. buildRuntimeContext runs computeGuestState, which persists a row on a band change.`,
+    )
   }
 
   console.log(`\n${'='.repeat(72)}`)
-  console.log('VERBATIM BODIES — read these. A rate cannot tell a clean split from')
-  console.log('one that cut the answer short, and "the answer bubble still reads')
+  console.log(
+    'VERBATIM BODIES — read these. A rate cannot tell a clean split from',
+  )
+  console.log(
+    'one that cut the answer short, and "the answer bubble still reads',
+  )
   console.log('complete" is a judgement, not a count.')
   console.log(`${'='.repeat(72)}`)
   for (const r of valid) {
-    console.log(`\n--- ${r.channel} ${r.scenarioId} [${r.intention}] flip=${r.flip.toFixed(3)} fidelity=${r.voiceFidelity ?? '-'}`)
+    console.log(
+      `\n--- ${r.channel} ${r.scenarioId} [${r.intention}] flip=${r.flip.toFixed(3)} fidelity=${r.voiceFidelity ?? '-'}`,
+    )
     console.log(`    guest: ${r.inbound}`)
-    r.bubbles.forEach((b, i) => console.log(`    bubble ${i + 1}: ${JSON.stringify(b)}`))
-    if (r.intentionQuestion !== '') console.log(`    field:    ${JSON.stringify(r.intentionQuestion)}`)
-    console.log(`    judge: whole=[${r.judgeWhole}] last=[${r.judgeLast}] earlier=[${r.judgeEarlier}]`)
+    r.bubbles.forEach((b, i) =>
+      console.log(`    bubble ${i + 1}: ${JSON.stringify(b)}`),
+    )
+    if (r.intentionQuestion !== '')
+      console.log(`    field:    ${JSON.stringify(r.intentionQuestion)}`)
+    console.log(
+      `    judge: whole=[${r.judgeWhole}] last=[${r.judgeLast}] earlier=[${r.judgeEarlier}]`,
+    )
   }
 
   console.log(`\nrun log: ${log.path}`)

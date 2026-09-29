@@ -119,7 +119,11 @@ export async function getGuestContext(
       return { ok: false, error: error.message, errorCode: 'db_read_failed' }
     }
     if (!data) {
-      return { ok: false, error: `guest not found: ${guestId}`, errorCode: 'guest_not_found' }
+      return {
+        ok: false,
+        error: `guest not found: ${guestId}`,
+        errorCode: 'guest_not_found',
+      }
     }
     const parsed = GuestContextSchema.safeParse(data.context)
     if (!parsed.success) {
@@ -172,7 +176,11 @@ export async function updateGuestContext(opts: {
   if (isEmptyContextUpdate(update)) {
     return {
       ok: true,
-      data: { hasStructured: false, hasObservation: false, identityColumnsChanged: [] },
+      data: {
+        hasStructured: false,
+        hasObservation: false,
+        identityColumnsChanged: [],
+      },
     }
   }
 

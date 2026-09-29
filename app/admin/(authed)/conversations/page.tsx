@@ -4,8 +4,13 @@ import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { type ApiTraceWithFullDetails, fetchTrace } from '@/lib/observability'
+import { logger } from '@/lib/observability/logger'
 import { type GuestState } from '@/lib/recognition'
-import { BrandPersonaSchema, VenueInfoSchema, filterActiveContext } from '@/lib/schemas'
+import {
+  BrandPersonaSchema,
+  VenueInfoSchema,
+  filterActiveContext,
+} from '@/lib/schemas'
 import { guestNameWithPhone } from '../_lib/guest-name'
 import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
@@ -13,8 +18,16 @@ import { Filters } from './_components/filters'
 import type { RecentActivityRow } from './_components/recent-activity'
 import { loadVenueGuestsByActivity } from '../_lib/load-venue-guests'
 import { computeMessageStats } from './lib/compute-message-stats'
-import { type ConversationMessageRow, projectThread, wasDispatched } from './lib/project-thread'
-import { allowsVenue, venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  type ConversationMessageRow,
+  projectThread,
+  wasDispatched,
+} from './lib/project-thread'
+import {
+  allowsVenue,
+  venueFilterIds,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 // Server orchestrator. Fetches everything the client needs in one render path
 // so initial paint is one network round trip. The client is responsible for
@@ -70,15 +83,27 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   const venues = (venuesRaw ?? []).filter((v) => allowsVenue(venueScope, v.id))
 
   // Validate filter ids against the allowlist — reject foreign IDs cleanly.
-  const venueId = params.venue && venues.some((v) => v.id === params.venue) ? params.venue : null
+  const venueId =
+    params.venue && venues.some((v) => v.id === params.venue)
+      ? params.venue
+      : null
   const guestId = params.guest ?? null
 
   // Pre-filter / venue-only path: render empty-state with recent activity.
   if (!venueId) {
-    const recent = await loadRecentActivity({ supabase, venueScope, venueId: null })
+    const recent = await loadRecentActivity({
+      supabase,
+      venueScope,
+      venueId: null,
+    })
     return (
       <FullShell>
-        <Filters venues={venues} guests={[]} selectedVenueId={null} selectedGuestId={null} />
+        <Filters
+          venues={venues}
+          guests={[]}
+          selectedVenueId={null}
+          selectedGuestId={null}
+        />
         <EmptyState variant="pre-filter" recentRows={recent} />
       </FullShell>
     )
@@ -107,7 +132,12 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     const recent = await loadRecentActivity({ supabase, venueScope, venueId })
     return (
       <FullShell>
-        <Filters venues={venues} guests={guests} selectedVenueId={venueId} selectedGuestId={null} />
+        <Filters
+          venues={venues}
+          guests={guests}
+          selectedVenueId={venueId}
+          selectedGuestId={null}
+        />
         <EmptyState variant="venue-only" recentRows={recent} />
       </FullShell>
     )
@@ -124,7 +154,12 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
   if (!initialData) {
     return (
       <FullShell>
-        <Filters venues={venues} guests={guests} selectedVenueId={venueId} selectedGuestId={guestId} />
+        <Filters
+          venues={venues}
+          guests={guests}
+          selectedVenueId={venueId}
+          selectedGuestId={guestId}
+        />
         <div className="flex-1 flex items-center justify-center text-sm text-ink-soft">
           Guest not found at this venue.
         </div>
@@ -134,7 +169,12 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
 
   return (
     <FullShell>
-      <Filters venues={venues} guests={guests} selectedVenueId={venueId} selectedGuestId={guestId} />
+      <Filters
+        venues={venues}
+        guests={guests}
+        selectedVenueId={venueId}
+        selectedGuestId={guestId}
+      />
       {/* key forces a fresh mount on every (venue, guest) change so the
           client component's useState initializers re-run with the new
           initialData. Without this, App Router soft-navigation can reuse
@@ -201,14 +241,18 @@ async function loadConversationData({
 }: LoadConversationArgs): Promise<InitialData | null> {
   const { data: guestRow, error: guestErr } = await supabase
     .from('guests')
-    .select('id, first_name, last_name, phone_number, instagram_username, distance_to_venue_miles, created_via, last_visit_at')
+    .select(
+      'id, first_name, last_name, phone_number, instagram_username, distance_to_venue_miles, created_via, last_visit_at',
+    )
     .eq('id', guestId)
     .eq('venue_id', venueRow.id)
     .maybeSingle()
   if (guestErr) throw new Error(`guest load failed: ${guestErr.message}`)
   if (!guestRow) return null
 
-  const lookbackIso = new Date(Date.now() - VISIT_LOOKBACK_DAYS * MS_PER_DAY).toISOString()
+  const lookbackIso = new Date(
+    Date.now() - VISIT_LOOKBACK_DAYS * MS_PER_DAY,
+  ).toISOString()
 
   const [
     messagesResult,
@@ -321,23 +365,43 @@ async function loadConversationData({
     supabase.from('operators').select('id, email'),
   ])
 
-  if (messagesResult.error) throw new Error(`messages load failed: ${messagesResult.error.message}`)
-  if (venueConfigResult.error) throw new Error(`venue_configs load failed: ${venueConfigResult.error.message}`)
-  if (mechanicsResult.error) throw new Error(`mechanics load failed: ${mechanicsResult.error.message}`)
-  if (stateResult.error) throw new Error(`guest_states load failed: ${stateResult.error.message}`)
-  if (transactionsResult.error) throw new Error(`transactions load failed: ${transactionsResult.error.message}`)
-  if (eventsResult.error) throw new Error(`engagement_events load failed: ${eventsResult.error.message}`)
+  if (messagesResult.error)
+    throw new Error(`messages load failed: ${messagesResult.error.message}`)
+  if (venueConfigResult.error)
+    throw new Error(
+      `venue_configs load failed: ${venueConfigResult.error.message}`,
+    )
+  if (mechanicsResult.error)
+    throw new Error(`mechanics load failed: ${mechanicsResult.error.message}`)
+  if (stateResult.error)
+    throw new Error(`guest_states load failed: ${stateResult.error.message}`)
+  if (transactionsResult.error)
+    throw new Error(
+      `transactions load failed: ${transactionsResult.error.message}`,
+    )
+  if (eventsResult.error)
+    throw new Error(
+      `engagement_events load failed: ${eventsResult.error.message}`,
+    )
   if (messageCountResult.error) {
-    throw new Error(`message count load failed: ${messageCountResult.error.message}`)
+    throw new Error(
+      `message count load failed: ${messageCountResult.error.message}`,
+    )
   }
   if (earliestMessageResult.error) {
-    throw new Error(`earliest message load failed: ${earliestMessageResult.error.message}`)
+    throw new Error(
+      `earliest message load failed: ${earliestMessageResult.error.message}`,
+    )
   }
   if (earliestTransactionResult.error) {
-    throw new Error(`earliest transaction load failed: ${earliestTransactionResult.error.message}`)
+    throw new Error(
+      `earliest transaction load failed: ${earliestTransactionResult.error.message}`,
+    )
   }
   if (transactionsListResult.error) {
-    throw new Error(`transactions list load failed: ${transactionsListResult.error.message}`)
+    throw new Error(
+      `transactions list load failed: ${transactionsListResult.error.message}`,
+    )
   }
   if (operatorsResult.error) {
     throw new Error(`operators load failed: ${operatorsResult.error.message}`)
@@ -350,12 +414,20 @@ async function loadConversationData({
   if (venueConfigResult.data) {
     const p = BrandPersonaSchema.safeParse(venueConfigResult.data.brand_persona)
     if (p.success) persona = p.data
-    else console.warn('[conversations] brand_persona parse failed', p.error.message)
+    else
+      logger.warn('[conversations] brand_persona parse failed', {
+        error: p.error.message,
+      })
     const vi = VenueInfoSchema.safeParse(venueConfigResult.data.venue_info)
     if (vi.success) {
-      venueInfo = { ...vi.data, currentContext: filterActiveContext(vi.data.currentContext, new Date()) }
+      venueInfo = {
+        ...vi.data,
+        currentContext: filterActiveContext(vi.data.currentContext, new Date()),
+      }
     } else {
-      console.warn('[conversations] venue_info parse failed', vi.error.message)
+      logger.warn('[conversations] venue_info parse failed', {
+        error: vi.error.message,
+      })
     }
   }
 
@@ -374,7 +446,11 @@ async function loadConversationData({
   const pricedVisitDates = new Set<string>()
   let spendCents90d = 0
   for (const t of transactionsResult.data ?? []) {
-    const dateKey = formatInTimeZone(new Date(t.occurred_at), venueRow.timezone, 'yyyy-MM-dd')
+    const dateKey = formatInTimeZone(
+      new Date(t.occurred_at),
+      venueRow.timezone,
+      'yyyy-MM-dd',
+    )
     visitDates.add(dateKey)
     if (t.amount_cents !== null) {
       pricedVisitDates.add(dateKey)
@@ -384,7 +460,9 @@ async function loadConversationData({
   const visitCount90d = visitDates.size
   const pricedVisitCount90d = pricedVisitDates.size
   const avgPerVisitCents =
-    pricedVisitCount90d > 0 ? Math.round(spendCents90d / pricedVisitCount90d) : null
+    pricedVisitCount90d > 0
+      ? Math.round(spendCents90d / pricedVisitCount90d)
+      : null
 
   // "Since" = earliest signal we have on this guest at this venue, considering
   // both transactions and messages. A guest may have texted before transacting
@@ -400,7 +478,7 @@ async function loadConversationData({
       ? earliestMessageAt < earliestTransactionAt
         ? earliestMessageAt
         : earliestTransactionAt
-      : earliestMessageAt ?? earliestTransactionAt
+      : (earliestMessageAt ?? earliestTransactionAt)
 
   // TAC-316: group raw rows into responses once here — stats and trace
   // prefetch below are response-grained; the client re-derives the same
@@ -426,7 +504,11 @@ async function loadConversationData({
     if (f.status === 'fulfilled') traceMap[f.value.messageId] = f.value.trace
   }
 
-  const todayLocalIso = formatInTimeZone(new Date(), venueRow.timezone, 'yyyy-MM-dd')
+  const todayLocalIso = formatInTimeZone(
+    new Date(),
+    venueRow.timezone,
+    'yyyy-MM-dd',
+  )
 
   // Build operator display-name map. email local-part (jaipal@x → jaipal) is
   // the cheapest stable display label since the operators table has no
@@ -443,7 +525,9 @@ async function loadConversationData({
   // Never-sent drafts, pending cards, and failed sends are excluded: a guest
   // can't reply to a message they never received.
   const responseStats = computeMessageStats(
-    responses.filter(wasDispatched).map((r) => ({ direction: r.direction, createdAt: r.createdAt })),
+    responses
+      .filter(wasDispatched)
+      .map((r) => ({ direction: r.direction, createdAt: r.createdAt })),
   )
   // Total messages is from the dedicated count query (all-time, not capped),
   // so the headline number on the guest card stays accurate even when the
@@ -488,7 +572,9 @@ async function loadConversationData({
       createdVia: guestRow.created_via,
     },
     state: (stateResult.data?.state ?? null) as GuestState | null,
-    lastVisitAt: guestRow.last_visit_at ? new Date(guestRow.last_visit_at) : null,
+    lastVisitAt: guestRow.last_visit_at
+      ? new Date(guestRow.last_visit_at)
+      : null,
     sinceAt,
     visitCountLast90Days: visitCount90d,
     spendCents90d,
@@ -526,7 +612,9 @@ async function loadRecentActivity({
   // and dedupe in memory by (venue_id, guest_id). Cheap given the cap.
   let q = supabase
     .from('messages')
-    .select('venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number, instagram_username)')
+    .select(
+      'venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number, instagram_username)',
+    )
     .neq('body', '')
     .order('created_at', { ascending: false })
     .limit(200)
@@ -540,7 +628,9 @@ async function loadRecentActivity({
   }
   const { data, error } = await q
   if (error) {
-    console.warn('[conversations] recent activity load failed', error.message)
+    logger.warn('[conversations] recent activity load failed', {
+      error: error.message,
+    })
     return []
   }
 

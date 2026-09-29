@@ -53,7 +53,11 @@ export async function POST(request: Request): Promise<NextResponse> {
             ? 403
             : 500
     return NextResponse.json(
-      { error: 'regenerate failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'regenerate failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

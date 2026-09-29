@@ -14,11 +14,11 @@
  * nothing outside Node's standard library.
  */
 
-import { readFileSync } from 'node:fs';
-import { run } from './lib/reconcile-needs-decision.mjs';
+import { readFileSync } from 'node:fs'
+import { run } from './lib/reconcile-needs-decision.mjs'
 
 process.exitCode = run({
   stdin: readFileSync(0, 'utf8'),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
-});
+})

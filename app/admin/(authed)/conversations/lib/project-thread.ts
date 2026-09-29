@@ -91,9 +91,13 @@ export interface ThreadResponse {
  * made it inside — the same boundary truncation the row cap has always
  * applied, one bubble finer.
  */
-export function projectThread(rows: readonly ConversationMessageRow[]): ThreadResponse[] {
+export function projectThread(
+  rows: readonly ConversationMessageRow[],
+): ThreadResponse[] {
   const newestFirst = [...rows].sort(
-    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || a.id.localeCompare(b.id),
+    (a, b) =>
+      Date.parse(b.created_at) - Date.parse(a.created_at) ||
+      a.id.localeCompare(b.id),
   )
 
   const groups = new Map<string, ConversationMessageRow[]>()
@@ -107,7 +111,9 @@ export function projectThread(rows: readonly ConversationMessageRow[]): ThreadRe
   return Array.from(groups.values())
     .map((groupRows) => {
       const ordered = [...groupRows].sort(
-        (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id.localeCompare(b.id),
+        (a, b) =>
+          Date.parse(a.created_at) - Date.parse(b.created_at) ||
+          a.id.localeCompare(b.id),
       )
       const first = ordered[0]
       return {
@@ -123,16 +129,18 @@ export function projectThread(rows: readonly ConversationMessageRow[]): ThreadRe
           .filter((b) => b.length > 0)
           .join('\n'),
         direction: (first.direction === 'outbound' ? 'outbound' : 'inbound') as
-          | 'inbound'
-          | 'outbound',
+          'inbound' | 'outbound',
         createdAt: new Date(first.created_at),
         // First non-null wins — bubbles of one generation share a trace, but be
         // defensive about which row carries the pointer.
-        langfuseTraceId: ordered.find((r) => r.langfuse_trace_id)?.langfuse_trace_id ?? null,
+        langfuseTraceId:
+          ordered.find((r) => r.langfuse_trace_id)?.langfuse_trace_id ?? null,
         replyToMessageId: first.reply_to_message_id,
         providerMessageId: first.provider_message_id,
         category: first.category,
-        responseReview: ordered.find((r) => r.response_review !== null)?.response_review ?? null,
+        responseReview:
+          ordered.find((r) => r.response_review !== null)?.response_review ??
+          null,
         status: first.status,
         reviewState: first.review_state,
         reviewReason: first.review_reason,
@@ -162,7 +170,8 @@ function derivePlaceholder(row: ConversationMessageRow): string | null {
  * `normal` — dispatched happy path, renders exactly as before TAC-316.
  * `annotated` — anything else: a muted bubble plus a caption with the label.
  */
-export type ThreadResponseState = { kind: 'normal' } | { kind: 'annotated'; label: string }
+export type ThreadResponseState =
+  { kind: 'normal' } | { kind: 'annotated'; label: string }
 
 // Statuses that mean "this message actually traveled" — inbound rows are
 // 'received'; dispatched outbound rows are 'sending' (Sendblue QUEUED, see
@@ -173,7 +182,12 @@ const TRAVELED_STATUSES = new Set(['received', 'sending', 'sent', 'delivered'])
 
 // Review states that coexist with a genuinely dispatched row (migration 018).
 // null covers inbound rows and pre-TAC-258 history.
-const DISPATCHED_REVIEW_STATES = new Set([null, 'approved', 'edited', 'auto_sent'])
+const DISPATCHED_REVIEW_STATES = new Set([
+  null,
+  'approved',
+  'edited',
+  'auto_sent',
+])
 
 /**
  * Map (status, review_state) to an operator-facing delivery-state label.
@@ -185,20 +199,28 @@ export function deriveResponseState(response: {
   reviewState: string | null
 }): ThreadResponseState {
   const { status, reviewState } = response
-  if (reviewState === 'skipped') return { kind: 'annotated', label: 'never sent — superseded' }
-  if (reviewState === 'pending') return { kind: 'annotated', label: 'pending review' }
+  if (reviewState === 'skipped')
+    return { kind: 'annotated', label: 'never sent — superseded' }
+  if (reviewState === 'pending')
+    return { kind: 'annotated', label: 'pending review' }
   if (status === 'failed') return { kind: 'annotated', label: 'failed to send' }
   // Deliberately NO `status === 'pending_review'` clause: with review_state
   // not pending/skipped, the only real occupant of that combo is the
   // documented v1 failure-recovery gap (operator approved, Sendblue dispatch
   // threw, row stranded). "pending review" would be the one thing it isn't —
   // the literal fallback below tells the operator the truth.
-  if (TRAVELED_STATUSES.has(status) && DISPATCHED_REVIEW_STATES.has(reviewState)) {
+  if (
+    TRAVELED_STATUSES.has(status) &&
+    DISPATCHED_REVIEW_STATES.has(reviewState)
+  ) {
     return { kind: 'normal' }
   }
   // Unknown combination — render it verbatim so the operator sees the truth
   // and the thread keeps rendering (TAC-316 contract).
-  return { kind: 'annotated', label: `status=${status} · review_state=${reviewState ?? 'null'}` }
+  return {
+    kind: 'annotated',
+    label: `status=${status} · review_state=${reviewState ?? 'null'}`,
+  }
 }
 
 /**
@@ -207,6 +229,9 @@ export function deriveResponseState(response: {
  * thread but excluded from response-rate stats — a guest can't reply to a
  * message they never received.
  */
-export function wasDispatched(response: { status: string; reviewState: string | null }): boolean {
+export function wasDispatched(response: {
+  status: string
+  reviewState: string | null
+}): boolean {
   return deriveResponseState(response).kind === 'normal'
 }

@@ -1,7 +1,11 @@
 import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
-import type { AIResult, VerifyProsePromiseInput, VerifyProsePromiseResult } from './types'
+import type {
+  AIResult,
+  VerifyProsePromiseInput,
+  VerifyProsePromiseResult,
+} from './types'
 
 // TAC-401. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this verifier never touches the classify/generate contract, same
@@ -40,7 +44,8 @@ export const VERIFY_PROSE_PROMISE_MAX_OUTPUT_TOKENS = 1000
  * `undefined` would make the no-retry branch silently unreachable in every
  * test — the same reasoning VERIFY_GROUNDING_TRUNCATED_ERROR_CODE carries.
  */
-export const VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE = 'ai_verify_prose_promise_truncated'
+export const VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE =
+  'ai_verify_prose_promise_truncated'
 
 const SYSTEM_PROMPT_TEMPLATE = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest. Your job is to decide one thing: does this reply commit the venue to giving this guest something of value that the guest has not paid for?
 
@@ -91,11 +96,16 @@ function buildSystemPrompt(hasGuestMessage: boolean): string {
   return SYSTEM_PROMPT_TEMPLATE.replace(
     '{{GUEST_MESSAGE_SCOPE}}',
     hasGuestMessage ? GUEST_MESSAGE_SCOPE : '',
-  ).replace('{{ELLIPTICAL_CARVE_OUT}}', hasGuestMessage ? ELLIPTICAL_CARVE_OUT : '')
+  ).replace(
+    '{{ELLIPTICAL_CARVE_OUT}}',
+    hasGuestMessage ? ELLIPTICAL_CARVE_OUT : '',
+  )
 }
 
 function hasGuestMessage(input: VerifyProsePromiseInput): boolean {
-  return input.guestInboundBody !== null && input.guestInboundBody.trim().length > 0
+  return (
+    input.guestInboundBody !== null && input.guestInboundBody.trim().length > 0
+  )
 }
 
 function buildUserPrompt(input: VerifyProsePromiseInput): string {
@@ -160,7 +170,10 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
 export async function verifyProsePromise(
   input: VerifyProsePromiseInput,
 ): Promise<AIResult<VerifyProsePromiseResult>> {
-  if (typeof input.replyBody !== 'string' || input.replyBody.trim().length === 0) {
+  if (
+    typeof input.replyBody !== 'string' ||
+    input.replyBody.trim().length === 0
+  ) {
     return { ok: false, error: 'invalid_input' }
   }
 
@@ -211,7 +224,8 @@ export async function verifyProsePromise(
     // in guest_commitments.description on operator approval and renders in
     // "## Active commitments" on every later turn, so an invented one becomes
     // a fact about the venue that nobody wrote.
-    const namedType = object.commitmentType === 'none' ? null : object.commitmentType
+    const namedType =
+      object.commitmentType === 'none' ? null : object.commitmentType
     const description = object.commitmentDescription.trim()
     const usable = namedType !== null && description.length > 0
 
@@ -238,6 +252,10 @@ export async function verifyProsePromise(
         errorCode: VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE,
       }
     }
-    return { ok: false, error: message, errorCode: 'ai_verify_prose_promise_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_verify_prose_promise_failed',
+    }
   }
 }

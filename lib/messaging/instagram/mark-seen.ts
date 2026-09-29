@@ -44,8 +44,14 @@ import type { Database } from '@/db/types'
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 
-import { sendInstagramSenderAction, type InstagramSenderActionResult } from './sender-actions'
-import { loadInstagramSendTarget, type InstagramSendTargetResult } from './send-target'
+import {
+  sendInstagramSenderAction,
+  type InstagramSenderActionResult,
+} from './sender-actions'
+import {
+  loadInstagramSendTarget,
+  type InstagramSendTargetResult,
+} from './send-target'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -88,7 +94,12 @@ export interface MarkSeenDeps {
 function defaultDeps(supabase: AdminSupabaseClient): MarkSeenDeps {
   return {
     loadTarget: (input) => loadInstagramSendTarget(supabase, input),
-    sendAction: (input) => sendInstagramSenderAction({ ...input, action: 'mark_seen', fetchImpl: fetch }),
+    sendAction: (input) =>
+      sendInstagramSenderAction({
+        ...input,
+        action: 'mark_seen',
+        fetchImpl: fetch,
+      }),
   }
 }
 

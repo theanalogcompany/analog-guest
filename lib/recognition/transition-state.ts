@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import type { GuestState, RecognitionResult } from './types'
 
 /**
@@ -43,14 +44,18 @@ export async function transitionState({
       .eq('venue_id', venueId)
       .is('exited_at', null)
     if (closeError) {
-      console.error('transitionState: failed to close current state row', {
+      logger.error('transitionState: failed to close current state row', {
         guestId,
         venueId,
         fromState,
         toState,
         error: closeError.message,
       })
-      return { ok: false, error: closeError.message, errorCode: 'close_current_state_failed' }
+      return {
+        ok: false,
+        error: closeError.message,
+        errorCode: 'close_current_state_failed',
+      }
     }
   }
 
@@ -61,24 +66,30 @@ export async function transitionState({
     entered_at: now,
   })
   if (insertError) {
-    console.error('transitionState: failed to insert new state row', {
+    logger.error('transitionState: failed to insert new state row', {
       guestId,
       venueId,
       fromState,
       toState,
       error: insertError.message,
     })
-    return { ok: false, error: insertError.message, errorCode: 'insert_new_state_failed' }
+    return {
+      ok: false,
+      error: insertError.message,
+      errorCode: 'insert_new_state_failed',
+    }
   }
 
-  const { error: eventError } = await supabase.from('engagement_events').insert({
-    guest_id: guestId,
-    venue_id: venueId,
-    event_type: 'state_transition',
-    data: { from: fromState, to: toState, reason },
-  })
+  const { error: eventError } = await supabase
+    .from('engagement_events')
+    .insert({
+      guest_id: guestId,
+      venue_id: venueId,
+      event_type: 'state_transition',
+      data: { from: fromState, to: toState, reason },
+    })
   if (eventError) {
-    console.error(
+    logger.error(
       'transitionState: state_transition audit event failed after state row was applied',
       {
         guestId,

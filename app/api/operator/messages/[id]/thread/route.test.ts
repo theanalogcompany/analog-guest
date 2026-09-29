@@ -21,7 +21,8 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 // so route tests don't have to re-stage the supabase fluent builder.
 const loadMock = vi.fn()
 vi.mock('@/lib/operator', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
+  const actual =
+    await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
   return {
     ...actual,
     loadGuestThread: (...args: unknown[]) => loadMock(...args),
@@ -35,10 +36,13 @@ const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 
 function makeRequest(): Request {
-  return new Request(`https://example.test/api/operator/messages/${VALID_UUID}/thread`, {
-    method: 'GET',
-    headers: { authorization: 'Bearer fake-jwt' },
-  })
+  return new Request(
+    `https://example.test/api/operator/messages/${VALID_UUID}/thread`,
+    {
+      method: 'GET',
+      headers: { authorization: 'Bearer fake-jwt' },
+    },
+  )
 }
 
 function params(id = VALID_UUID): { params: Promise<{ id: string }> } {
@@ -47,7 +51,10 @@ function params(id = VALID_UUID): { params: Promise<{ id: string }> } {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
   loadMock.mockReset()
 })
 
@@ -72,7 +79,9 @@ describe('GET /api/operator/messages/[id]/thread', () => {
 
     it('also returns unauthorized on missing-header AuthError (does not leak header detail)', async () => {
       const { AuthError } = await import('@/lib/auth/types')
-      verifyMock.mockRejectedValueOnce(new AuthError(401, 'missing Authorization header'))
+      verifyMock.mockRejectedValueOnce(
+        new AuthError(401, 'missing Authorization header'),
+      )
       const res = await GET(makeRequest(), params())
       expect(res.status).toBe(401)
       expect(await res.json()).toEqual({ error: 'unauthorized' })
@@ -88,14 +97,20 @@ describe('GET /api/operator/messages/[id]/thread', () => {
     })
 
     it('returns 404 not_found when helper reports message_not_found', async () => {
-      loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'message_not_found' })
+      loadMock.mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'message_not_found',
+      })
       const res = await GET(makeRequest(), params())
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ error: 'not_found' })
     })
 
     it('returns 404 not_found when helper reports out_of_allowlist (indistinguishable on wire)', async () => {
-      loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+      loadMock.mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'out_of_allowlist',
+      })
       const res = await GET(makeRequest(), params())
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ error: 'not_found' })
@@ -198,8 +213,14 @@ describe('GET /api/operator/messages/[id]/thread', () => {
     })
 
     it('handles an operator with empty allowedVenueIds (helper returns out_of_allowlist)', async () => {
-      verifyMock.mockResolvedValueOnce({ operatorId: 'op-3', venueScope: grantedVenues([]) })
-      loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+      verifyMock.mockResolvedValueOnce({
+        operatorId: 'op-3',
+        venueScope: grantedVenues([]),
+      })
+      loadMock.mockResolvedValueOnce({
+        ok: false,
+        errorCode: 'out_of_allowlist',
+      })
       const res = await GET(makeRequest(), params())
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ error: 'not_found' })

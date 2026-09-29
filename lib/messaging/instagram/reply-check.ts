@@ -88,10 +88,21 @@ export function findAnsweringOutbound(
   namedInbounds: ReadonlyMap<string, ReplyCheckInbound>,
 ): ReplyCheckOutbound | null {
   for (const row of outbound) {
-    if (!isAfter({ providerSentAt: row.providerSentAt, ours: row.sentAt }, inboundClock(inbound))) continue
-    if (row.replyToMessageId === null || row.replyToMessageId === inbound.id) return row
+    if (
+      !isAfter(
+        { providerSentAt: row.providerSentAt, ours: row.sentAt },
+        inboundClock(inbound),
+      )
+    )
+      continue
+    if (row.replyToMessageId === null || row.replyToMessageId === inbound.id)
+      return row
     const named = namedInbounds.get(row.replyToMessageId)
-    if (named !== undefined && isAfter(inboundClock(named), inboundClock(inbound))) return row
+    if (
+      named !== undefined &&
+      isAfter(inboundClock(named), inboundClock(inbound))
+    )
+      return row
   }
   return null
 }
@@ -105,10 +116,18 @@ function dateOrNull(value: unknown): Date | null {
   return Number.isNaN(at.getTime()) ? null : at
 }
 
-function toInbound(row: { id: string; created_at: string; provider_sent_at: string | null }): ReplyCheckInbound | null {
+function toInbound(row: {
+  id: string
+  created_at: string
+  provider_sent_at: string | null
+}): ReplyCheckInbound | null {
   const receivedAt = dateOrNull(row.created_at)
   if (receivedAt === null) return null
-  return { id: row.id, providerSentAt: dateOrNull(row.provider_sent_at), receivedAt }
+  return {
+    id: row.id,
+    providerSentAt: dateOrNull(row.provider_sent_at),
+    receivedAt,
+  }
 }
 
 /**
@@ -120,7 +139,9 @@ function toInbound(row: { id: string; created_at: string; provider_sent_at: stri
 export async function findReplyToInbound(
   supabase: AdminSupabaseClient,
   input: { venueId: string; guestId: string; inboundMessageId: string },
-): Promise<{ ok: true; value: { id: string } | null } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; value: { id: string } | null } | { ok: false; error: string }
+> {
   const { data: inboundRow, error: inboundError } = await supabase
     .from('messages')
     .select('id, created_at, provider_sent_at')
@@ -132,18 +153,23 @@ export async function findReplyToInbound(
   if (inboundError) return { ok: false, error: inboundError.message }
   if (!inboundRow) return { ok: false, error: 'inbound message not found' }
   const inbound = toInbound(inboundRow)
-  if (inbound === null) return { ok: false, error: 'inbound message has no readable created_at' }
+  if (inbound === null)
+    return { ok: false, error: 'inbound message has no readable created_at' }
 
   // Candidates: anything that could be after the inbound on either clock. The
   // pure check decides; this only keeps the read small.
   const since = inbound.receivedAt.toISOString()
   const afterFilters = [`created_at.gt.${since}`, `sent_at.gt.${since}`]
   if (inbound.providerSentAt !== null) {
-    afterFilters.push(`provider_sent_at.gt.${inbound.providerSentAt.toISOString()}`)
+    afterFilters.push(
+      `provider_sent_at.gt.${inbound.providerSentAt.toISOString()}`,
+    )
   }
   const { data: rows, error: rowsError } = await supabase
     .from('messages')
-    .select('id, reply_to_message_id, provider_sent_at, sent_at, created_at, review_state')
+    .select(
+      'id, reply_to_message_id, provider_sent_at, sent_at, created_at, review_state',
+    )
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
     .eq('direction', 'outbound')

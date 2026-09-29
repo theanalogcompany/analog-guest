@@ -28,7 +28,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 
-export type FakeTable = 'venues' | 'guests' | 'messages' | 'inbound_turn_outcomes'
+export type FakeTable =
+  'venues' | 'guests' | 'messages' | 'inbound_turn_outcomes'
 export type FakeRow = { id: string; [column: string]: unknown }
 /** `details` is PostgREST's, which holds the failing row's values: what a store failure must never log. */
 export type FakeError = { code?: string; message: string; details?: string }
@@ -83,14 +84,27 @@ function isTable(name: string): name is FakeTable {
 function project(row: FakeRow, columns: string): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   // A column the row was seeded without reads as NULL, as Postgres returns it.
-  for (const column of columns.split(',').map((c) => c.trim())) out[column] = row[column] ?? null
+  for (const column of columns.split(',').map((c) => c.trim()))
+    out[column] = row[column] ?? null
   return out
 }
 
-function conflicts(table: FakeTable, rows: FakeRow[], candidate: Record<string, unknown>): boolean {
+function conflicts(
+  table: FakeTable,
+  rows: FakeRow[],
+  candidate: Record<string, unknown>,
+): boolean {
   return UNIQUE_KEYS[table].some((key) => {
-    if (key.some((column) => candidate[column] === null || candidate[column] === undefined)) return false
-    return rows.some((row) => key.every((column) => row[column] === candidate[column]))
+    if (
+      key.some(
+        (column) =>
+          candidate[column] === null || candidate[column] === undefined,
+      )
+    )
+      return false
+    return rows.some((row) =>
+      key.every((column) => row[column] === candidate[column]),
+    )
   })
 }
 
@@ -108,13 +122,19 @@ export function createInstagramDbFake(
     inbound_turn_outcomes: [...(seed.inbound_turn_outcomes ?? [])],
   }
   const calls: FakeCall[] = []
-  const queuedErrors: Array<{ table: FakeTable; op: FakeOp; error: FakeError }> = []
+  const queuedErrors: Array<{
+    table: FakeTable
+    op: FakeOp
+    error: FakeError
+  }> = []
   const beforeInsert: Array<{ table: FakeTable; run: () => void }> = []
   const beforeUpdate: Array<{ table: FakeTable; run: () => void }> = []
   let nextId = 1
 
   function takeError(table: FakeTable, op: FakeOp): FakeError | null {
-    const index = queuedErrors.findIndex((q) => q.table === table && q.op === op)
+    const index = queuedErrors.findIndex(
+      (q) => q.table === table && q.op === op,
+    )
     if (index === -1) return null
     const [queued] = queuedErrors.splice(index, 1)
     return queued?.error ?? null
@@ -159,7 +179,10 @@ export function createInstagramDbFake(
         )
         const matches = limit === null ? all : all.slice(0, limit)
         if (matches.length > 1) {
-          return { data: null, error: { code: 'PGRST116', message: 'multiple rows returned' } }
+          return {
+            data: null,
+            error: { code: 'PGRST116', message: 'multiple rows returned' },
+          }
         }
         const [match] = matches
         return { data: match ? project(match, columns) : null, error: null }
@@ -181,12 +204,18 @@ export function createInstagramDbFake(
       if (conflicts(table, tables[table], row)) {
         return {
           data: null,
-          error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+          error: {
+            code: '23505',
+            message: 'duplicate key value violates unique constraint',
+          },
         }
       }
       const stored: FakeRow = { id: `${table}-${nextId++}`, ...row }
       tables[table].push(stored)
-      return { data: columns === null ? null : project(stored, columns), error: null }
+      return {
+        data: columns === null ? null : project(stored, columns),
+        error: null,
+      }
     }
 
     return {
@@ -203,7 +232,10 @@ export function createInstagramDbFake(
       // how a fire-and-forget insert can look like it succeeded and store
       // nothing at all.
       then<R>(
-        onFulfilled: (value: { data: Record<string, unknown> | null; error: FakeError | null }) => R,
+        onFulfilled: (value: {
+          data: Record<string, unknown> | null
+          error: FakeError | null
+        }) => R,
       ): Promise<R> {
         return Promise.resolve(onFulfilled(runInsert(null)))
       },
@@ -213,7 +245,10 @@ export function createInstagramDbFake(
   function updateBuilder(table: FakeTable, patch: Record<string, unknown>) {
     const filters: Array<[string, 'eq' | 'is', unknown]> = []
     let columns: string | null = null
-    async function run(): Promise<{ data: Record<string, unknown>[] | null; error: FakeError | null }> {
+    async function run(): Promise<{
+      data: Record<string, unknown>[] | null
+      error: FakeError | null
+    }> {
       calls.push({ op: 'update', table, patch, filters: [...filters] })
       const hookIndex = beforeUpdate.findIndex((h) => h.table === table)
       if (hookIndex !== -1) beforeUpdate.splice(hookIndex, 1)[0]?.run()
@@ -221,10 +256,18 @@ export function createInstagramDbFake(
       if (error) return { data: null, error }
       // `is` matches a missing column as NULL, as Postgres would.
       const matches = tables[table].filter((row) =>
-        filters.every(([column, op, value]) => (op === 'is' ? (row[column] ?? null) === value : row[column] === value)),
+        filters.every(([column, op, value]) =>
+          op === 'is' ? (row[column] ?? null) === value : row[column] === value,
+        ),
       )
       for (const row of matches) Object.assign(row, patch)
-      return { data: columns === null ? null : matches.map((row) => project(row, columns ?? '')), error: null }
+      return {
+        data:
+          columns === null
+            ? null
+            : matches.map((row) => project(row, columns ?? '')),
+        error: null,
+      }
     }
     const builder = {
       eq(column: string, value: unknown) {
@@ -239,7 +282,10 @@ export function createInstagramDbFake(
         columns = cols
         return builder
       },
-      then<T>(resolve: (value: Awaited<ReturnType<typeof run>>) => T, reject?: (reason: unknown) => T) {
+      then<T>(
+        resolve: (value: Awaited<ReturnType<typeof run>>) => T,
+        reject?: (reason: unknown) => T,
+      ) {
         return run().then(resolve, reject)
       },
     }
@@ -252,7 +298,12 @@ export function createInstagramDbFake(
       return {
         select: (columns: string) => selectBuilder(table, columns),
         insert: (row: Record<string, unknown>) => insertBuilder(table, row),
-        ...(updatable.has(table) ? { update: (patch: Record<string, unknown>) => updateBuilder(table, patch) } : {}),
+        ...(updatable.has(table)
+          ? {
+              update: (patch: Record<string, unknown>) =>
+                updateBuilder(table, patch),
+            }
+          : {}),
       }
     },
   }
@@ -263,11 +314,20 @@ export function createInstagramDbFake(
     calls,
     /** Rows passed to insert on `table`, in order, whether or not they were stored. */
     inserts(table: FakeTable): Record<string, unknown>[] {
-      return calls.flatMap((c) => (c.op === 'insert' && c.table === table ? [c.row] : []))
+      return calls.flatMap((c) =>
+        c.op === 'insert' && c.table === table ? [c.row] : [],
+      )
     },
     /** Patches passed to update on `table`, in order, with their filters. */
-    updates(table: FakeTable): Array<{ patch: Record<string, unknown>; filters: Array<[string, 'eq' | 'is', unknown]> }> {
-      return calls.flatMap((c) => (c.op === 'update' && c.table === table ? [{ patch: c.patch, filters: c.filters }] : []))
+    updates(table: FakeTable): Array<{
+      patch: Record<string, unknown>
+      filters: Array<[string, 'eq' | 'is', unknown]>
+    }> {
+      return calls.flatMap((c) =>
+        c.op === 'update' && c.table === table
+          ? [{ patch: c.patch, filters: c.filters }]
+          : [],
+      )
     },
     /** The next select, insert or update on `table` returns `error` instead. One-shot. */
     failNext(table: FakeTable, op: FakeOp, error: FakeError): void {

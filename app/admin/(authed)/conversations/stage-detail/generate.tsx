@@ -32,7 +32,8 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
   const userPrompt = readString(content?.userPrompt)
   const model = readString(content?.model)
 
-  const hasCaptured = systemPrompt !== null || userPrompt !== null || model !== null
+  const hasCaptured =
+    systemPrompt !== null || userPrompt !== null || model !== null
   const hasAttempts = stage.attempts && stage.attempts.length > 0
 
   return (
@@ -48,8 +49,12 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
             value={attemptScores.map((n) => n.toFixed(2)).join(' · ')}
           />
         ) : null}
-        {promptVersion !== null ? <KvRow label="promptVersion" value={promptVersion} /> : null}
-        {bodyLength !== null ? <KvRow label="bodyLength" value={bodyLength} /> : null}
+        {promptVersion !== null ? (
+          <KvRow label="promptVersion" value={promptVersion} />
+        ) : null}
+        {bodyLength !== null ? (
+          <KvRow label="bodyLength" value={bodyLength} />
+        ) : null}
       </KvList>
 
       {hasCaptured ? (
@@ -57,10 +62,16 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
           <KvList>
             {model !== null ? <KvRow label="model" value={model} /> : null}
             {systemPrompt !== null ? (
-              <KvRow label="systemPrompt" value={<LongText text={systemPrompt} />} />
+              <KvRow
+                label="systemPrompt"
+                value={<LongText text={systemPrompt} />}
+              />
             ) : null}
             {userPrompt !== null ? (
-              <KvRow label="userPrompt" value={<LongText text={userPrompt} />} />
+              <KvRow
+                label="userPrompt"
+                value={<LongText text={userPrompt} />}
+              />
             ) : null}
           </KvList>
         </SubSection>
@@ -69,7 +80,7 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
       {hasAttempts ? (
         <SubSection
           title={`Attempts · ${stage.attempts!.length}`}
-          defaultOpen={(stage.attempts!.length > 1)}
+          defaultOpen={stage.attempts!.length > 1}
         >
           <div className="flex flex-col gap-2">
             {stage.attempts!.map((a, i) => (
@@ -82,7 +93,13 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
   )
 }
 
-function AttemptRow({ attempt, index }: { attempt: TraceObservation; index: number }) {
+function AttemptRow({
+  attempt,
+  index,
+}: {
+  attempt: TraceObservation
+  index: number
+}) {
   const output = readRecord(attempt.output)
   const fidelity = readNumber(output?.voiceFidelity)
   const content = readContent(attempt.output)
@@ -98,15 +115,21 @@ function AttemptRow({ attempt, index }: { attempt: TraceObservation; index: numb
         </span>
         <span className="flex items-center gap-2">
           {fidelity !== null ? (
-            <span className="text-ink-soft tabular-nums">fidelity {fidelity.toFixed(2)}</span>
+            <span className="text-ink-soft tabular-nums">
+              fidelity {fidelity.toFixed(2)}
+            </span>
           ) : null}
           {isError ? (
-            <span className="px-1.5 py-0.5 rounded bg-clay/15 text-clay">ERROR</span>
+            <span className="px-1.5 py-0.5 rounded bg-clay/15 text-clay">
+              ERROR
+            </span>
           ) : null}
         </span>
       </div>
       {body !== null ? (
-        <span className="text-sm text-ink whitespace-pre-wrap break-words">{body}</span>
+        <span className="text-sm text-ink whitespace-pre-wrap break-words">
+          {body}
+        </span>
       ) : null}
       {reasoning !== null ? (
         <span className="text-xs text-ink-soft whitespace-pre-wrap break-words italic">
@@ -119,5 +142,7 @@ function AttemptRow({ attempt, index }: { attempt: TraceObservation; index: numb
 
 function parseScores(value: unknown): number[] {
   if (!Array.isArray(value)) return []
-  return value.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+  return value.filter(
+    (n): n is number => typeof n === 'number' && Number.isFinite(n),
+  )
 }

@@ -27,12 +27,14 @@
 import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
+import { logger } from '@/lib/observability/logger'
 import { loadGuestThread } from '@/lib/operator'
 
 // Canonical UUID regex: app/api/operator/messages/[id]/approve/route.ts:19.
 // Inlined rather than imported to avoid coupling route handlers; extract
 // to lib/operator/uuid.ts if a third caller appears.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +75,7 @@ export async function GET(
         // 500 body is the literal 'internal_error' per Contract; surface the
         // underlying message to Vercel logs so a transient DB error leaves a
         // breadcrumb instead of going silent.
-        console.warn(
+        logger.warn(
           `[/api/operator/messages/:id/thread] loadGuestThread failed errorCode=${result.errorCode} error=${result.error ?? '<no detail>'}`,
         )
         return NextResponse.json({ error: 'internal_error' }, { status: 500 })

@@ -1,5 +1,6 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-343: shared loader for the /admin/venues list page. Mirrors
@@ -31,7 +32,7 @@ async function _loadVenues(venueScope: VenueScope): Promise<VenueListRow[]> {
   }
   const { data, error } = await query
   if (error) {
-    console.warn('[loadVenues] venues query failed', error.message)
+    logger.warn('[loadVenues] venues query failed', { error: error.message })
     return []
   }
 

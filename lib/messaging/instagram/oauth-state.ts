@@ -57,8 +57,13 @@ function sign(payloadB64: string, key: Buffer): string {
   return createHmac('sha256', key).update(payloadB64).digest('base64url')
 }
 
-export function signInstagramOAuthState(payload: InstagramOAuthStatePayload, key: Buffer): string {
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+export function signInstagramOAuthState(
+  payload: InstagramOAuthStatePayload,
+  key: Buffer,
+): string {
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+    'base64url',
+  )
   return `${payloadB64}.${sign(payloadB64, key)}`
 }
 
@@ -68,7 +73,8 @@ export function verifyInstagramOAuthState(
   now: Date,
 ): VerifyInstagramOAuthStateResult {
   const parts = state.split('.')
-  if (parts.length !== 2 || parts[0] === '' || parts[1] === '') return { ok: false, reason: 'malformed' }
+  if (parts.length !== 2 || parts[0] === '' || parts[1] === '')
+    return { ok: false, reason: 'malformed' }
   const [payloadB64, presented] = parts
 
   // Compare the SIGNATURE before parsing the payload: an unverified payload is
@@ -89,8 +95,12 @@ export function verifyInstagramOAuthState(
     // Signed by us and still unparseable: not an attack, but not usable.
     return { ok: false, reason: 'malformed' }
   }
-  if (typeof parsed !== 'object' || parsed === null) return { ok: false, reason: 'malformed' }
-  const { venueId, operatorId, nonce, expiresAtMs } = parsed as Record<string, unknown>
+  if (typeof parsed !== 'object' || parsed === null)
+    return { ok: false, reason: 'malformed' }
+  const { venueId, operatorId, nonce, expiresAtMs } = parsed as Record<
+    string,
+    unknown
+  >
   if (
     typeof venueId !== 'string' ||
     typeof operatorId !== 'string' ||

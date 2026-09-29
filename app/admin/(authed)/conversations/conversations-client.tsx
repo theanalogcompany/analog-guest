@@ -133,15 +133,18 @@ export function ConversationsClient({
     // Default selection: most recent outbound response, or most recent
     // response overall. Derived from the same projection the thread renders.
     const responses = projectThread(initialData.messageRows)
-    const outbound = [...responses].reverse().find((r) => r.direction === 'outbound')
+    const outbound = [...responses]
+      .reverse()
+      .find((r) => r.direction === 'outbound')
     return outbound?.id ?? responses[responses.length - 1]?.id ?? null
   })
-  const [traceCache, setTraceCache] = useState<Record<string, ApiTraceWithFullDetails | null>>(
-    () => ({ ...initialData.traceMap }),
-  )
+  const [traceCache, setTraceCache] = useState<
+    Record<string, ApiTraceWithFullDetails | null>
+  >(() => ({ ...initialData.traceMap }))
 
   const selected = useMemo(
-    () => (selectedId ? messages.find((m) => m.id === selectedId) ?? null : null),
+    () =>
+      selectedId ? (messages.find((m) => m.id === selectedId) ?? null) : null,
     [selectedId, messages],
   )
 
@@ -159,10 +162,17 @@ export function ConversationsClient({
   // Cache is keyed by response id (not trace id) so re-renders with the same
   // selection don't re-fetch.
   useEffect(() => {
-    if (!selected || selected.direction !== 'outbound' || !selected.langfuseTraceId) return
+    if (
+      !selected ||
+      selected.direction !== 'outbound' ||
+      !selected.langfuseTraceId
+    )
+      return
     if (selected.id in traceCache) return
     let cancelled = false
-    fetch(`/admin/conversations/api/trace/${encodeURIComponent(selected.langfuseTraceId)}`)
+    fetch(
+      `/admin/conversations/api/trace/${encodeURIComponent(selected.langfuseTraceId)}`,
+    )
       .then(async (r) => {
         if (!r.ok) return null
         const json = (await r.json()) as { trace?: ApiTraceWithFullDetails }
@@ -200,7 +210,8 @@ export function ConversationsClient({
           filter: `venue_id=eq.${venueId}`,
         },
         (payload) => {
-          const row = (payload.new ?? payload.old) as RealtimeMessageRow | undefined
+          const row = (payload.new ?? payload.old) as
+            RealtimeMessageRow | undefined
           if (!row || row.guest_id !== guestId) return
           if (payload.eventType === 'INSERT' && payload.new) {
             const m = payload.new as RealtimeMessageRow
@@ -236,7 +247,10 @@ export function ConversationsClient({
   }, [messages])
 
   const onSelectMessage = useCallback((id: string) => setSelectedId(id), [])
-  const guestName = useMemo(() => guestDisplayName(initialData.guest), [initialData.guest])
+  const guestName = useMemo(
+    () => guestDisplayName(initialData.guest),
+    [initialData.guest],
+  )
 
   // Layout: ConversationsClient occupies the post-Filters slot of
   // FullShell's flex-col, and stacks vertically into:
@@ -293,7 +307,8 @@ export function ConversationsClient({
           />
         ) : (
           <div className="text-sm text-ink-soft italic p-4">
-            Venue config could not be parsed (see server logs). Showing partial detail.
+            Venue config could not be parsed (see server logs). Showing partial
+            detail.
           </div>
         )}
         <GuestContext

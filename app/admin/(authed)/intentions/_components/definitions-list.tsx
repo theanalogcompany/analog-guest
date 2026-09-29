@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react'
 import { INTENTION_DEFINITIONS } from '@/lib/agent/intentions/definitions'
 import { Eyebrow } from '@/lib/ui'
-import { formatArmsOn, formatExpiryWindow, formatGate } from '../_lib/definition-display'
+import {
+  formatArmsOn,
+  formatExpiryWindow,
+  formatGate,
+} from '../_lib/definition-display'
 
 // TAC-379. Renders INTENTION_DEFINITIONS directly — never a copy. A hardcoded
 // duplicate of `promptLine` here would misreport what the model actually
@@ -33,8 +37,9 @@ export function DefinitionsList() {
             <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
               <code className="text-sm text-ink font-medium">{def.key}</code>
               <span className="text-xs text-ink-faint tabular-nums">
-                priority {def.priority} · open for {formatExpiryWindow(def.expiresAfterMs)} after it
-                becomes eligible
+                priority {def.priority} · open for{' '}
+                {formatExpiryWindow(def.expiresAfterMs)} after it becomes
+                eligible
               </span>
             </div>
 
@@ -48,19 +53,27 @@ export function DefinitionsList() {
 
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label="Becomes eligible on">
-                <p className="text-sm text-ink-soft leading-snug">{formatArmsOn(def.armsOn)}</p>
+                <p className="text-sm text-ink-soft leading-snug">
+                  {formatArmsOn(def.armsOn)}
+                </p>
               </Field>
               <Field label="Gate">
-                <p className="text-sm text-ink-soft leading-snug">{formatGate(def.gate)}</p>
+                <p className="text-sm text-ink-soft leading-snug">
+                  {formatGate(def.gate)}
+                </p>
               </Field>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label="Closes when">
-                <p className="text-sm text-ink-soft leading-snug">{def.satisfactionLabel}</p>
+                <p className="text-sm text-ink-soft leading-snug">
+                  {def.satisfactionLabel}
+                </p>
               </Field>
               <Field label="Post-send classifier looks for">
-                <p className="text-sm text-ink-soft leading-snug">{def.classifierDescription}</p>
+                <p className="text-sm text-ink-soft leading-snug">
+                  {def.classifierDescription}
+                </p>
               </Field>
             </div>
           </article>

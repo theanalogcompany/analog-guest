@@ -47,14 +47,18 @@ const MAX_HINT_LENGTH = 500
 // TAC-394: what the operator sees when the pipeline refused to overwrite a card.
 // Total over the drop reasons, so a new one fails tsc here until it has words.
 const DROPPED_DETAIL: Record<
-  Extract<Awaited<ReturnType<typeof handleFollowup>>, { status: 'dropped' }>['reason'],
+  Extract<
+    Awaited<ReturnType<typeof handleFollowup>>,
+    { status: 'dropped' }
+  >['reason'],
   string
 > = {
   slot_occupied:
     'A card for this guest is already waiting. Approve, edit or skip it, then send the follow-up.',
   obligation_slot_taken:
     'This guest already has a card waiting with a different offer. Decide that card first.',
-  knowledge_gap_card_protected: "A pending question is holding this guest's review slot.",
+  knowledge_gap_card_protected:
+    "A pending question is holding this guest's review slot.",
 }
 
 const BodySchema = z.object({
@@ -147,7 +151,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
   if (!guestRow) {
-    return NextResponse.json({ error: 'guest not found at venue' }, { status: 404 })
+    return NextResponse.json(
+      { error: 'guest not found at venue' },
+      { status: 404 },
+    )
   }
   if (guestRow.opted_out_at !== null) {
     return NextResponse.json({ error: 'guest opted out' }, { status: 403 })
@@ -164,7 +171,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     hasPhone,
     hasInstagramId,
     lastInboundChannel:
-      hasPhone && hasInstagramId ? await loadLastInboundChannel(body.venueId, body.guestId, supabase) : undefined,
+      hasPhone && hasInstagramId
+        ? await loadLastInboundChannel(body.venueId, body.guestId, supabase)
+        : undefined,
   })
   if (channel !== 'text') {
     return NextResponse.json(
@@ -182,7 +191,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       {
         error: 'venue not configured',
-        detail: 'venue has no messaging_phone_number; assign a Sendblue number before sending',
+        detail:
+          'venue has no messaging_phone_number; assign a Sendblue number before sending',
       },
       { status: 400 },
     )
@@ -205,7 +215,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   })
 
   if (result.status === 'sent') {
-    return NextResponse.json({ success: true, messageId: result.outboundMessageId })
+    return NextResponse.json({
+      success: true,
+      messageId: result.outboundMessageId,
+    })
   }
   if (result.status === 'refused') {
     return NextResponse.json(
@@ -266,7 +279,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       {
         error: 'silenced',
-        detail: 'the pipeline decided this turn needed no reply; nothing was written',
+        detail:
+          'the pipeline decided this turn needed no reply; nothing was written',
       },
       { status: 409 },
     )

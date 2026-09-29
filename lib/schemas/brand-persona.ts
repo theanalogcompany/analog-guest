@@ -35,30 +35,34 @@ export const VoiceAntiPatternSchema = z
 
 export type VoiceAntiPattern = z.output<typeof VoiceAntiPatternSchema>
 
-export const BrandPersonaSchema = z.object({
-  // Human-readable label for the voice. Editable from the Voices
-  // command-center persona pane; rendered in the topbar + sidebar voice
-  // list. Optional — venues onboarded before this field landed fall back
-  // to the venue display name in the UI. JSONB-additive so no migration;
-  // will move to a `voices` table whenever the 1-voice-per-venue
-  // assumption finally breaks.
-  voiceName: z.string().min(1).optional(),
-  tone: z.string().min(1),
-  formality: z.enum(['casual', 'warm', 'formal']),
-  speakerFraming: z.enum(['venue', 'named_person', 'owner']),
-  speakerName: z.string().optional(),
-  signaturePhrases: z.array(z.string()).default([]),
-  bannedTopics: z.array(z.string()).default([]),
-  emojiPolicy: z.enum(['never', 'sparingly', 'frequent']),
-  lengthGuide: z.string().min(1),
-  voiceAntiPatterns: z.array(VoiceAntiPatternSchema).default([]),
-  voiceTouchstones: z.array(z.string()).default([]),
-}).refine(
-  (data) => data.speakerFraming !== 'named_person' || (data.speakerName && data.speakerName.length > 0),
-  {
-    message: 'speakerName is required when speakerFraming is "named_person"',
-    path: ['speakerName'],
-  }
-)
+export const BrandPersonaSchema = z
+  .object({
+    // Human-readable label for the voice. Editable from the Voices
+    // command-center persona pane; rendered in the topbar + sidebar voice
+    // list. Optional — venues onboarded before this field landed fall back
+    // to the venue display name in the UI. JSONB-additive so no migration;
+    // will move to a `voices` table whenever the 1-voice-per-venue
+    // assumption finally breaks.
+    voiceName: z.string().min(1).optional(),
+    tone: z.string().min(1),
+    formality: z.enum(['casual', 'warm', 'formal']),
+    speakerFraming: z.enum(['venue', 'named_person', 'owner']),
+    speakerName: z.string().optional(),
+    signaturePhrases: z.array(z.string()).default([]),
+    bannedTopics: z.array(z.string()).default([]),
+    emojiPolicy: z.enum(['never', 'sparingly', 'frequent']),
+    lengthGuide: z.string().min(1),
+    voiceAntiPatterns: z.array(VoiceAntiPatternSchema).default([]),
+    voiceTouchstones: z.array(z.string()).default([]),
+  })
+  .refine(
+    (data) =>
+      data.speakerFraming !== 'named_person' ||
+      (data.speakerName && data.speakerName.length > 0),
+    {
+      message: 'speakerName is required when speakerFraming is "named_person"',
+      path: ['speakerName'],
+    },
+  )
 
 export type BrandPersona = z.infer<typeof BrandPersonaSchema>

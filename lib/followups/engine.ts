@@ -150,7 +150,9 @@ const PRIMARY_REASON_PRIORITY: readonly EngineFollowupReason[] = [
   'post_visit_day_1',
 ]
 
-function pickPrimaryReason(reasons: readonly EngineFollowupReason[]): EngineFollowupReason {
+function pickPrimaryReason(
+  reasons: readonly EngineFollowupReason[],
+): EngineFollowupReason {
   for (const r of PRIMARY_REASON_PRIORITY) {
     if (reasons.includes(r)) return r
   }
@@ -275,16 +277,14 @@ export async function processDueFollowups(
   }
 
   const supabase = createAdminClient()
-  const venuesResult = await supabase
-    .from('venues')
-    .select(
-      // TAC-529: status and both channel columns. Dropping any of them from
-      // this string makes the corresponding gate read `undefined` and go
-      // inert, which no behavioural test can see because the test double
-      // ignores its select argument — engine.test.ts captures this string for
-      // exactly that reason.
-      'id, timezone, status, messaging_phone_number, instagram_account_id, venue_configs(followup_rules, messaging_cadence)',
-    )
+  const venuesResult = await supabase.from('venues').select(
+    // TAC-529: status and both channel columns. Dropping any of them from
+    // this string makes the corresponding gate read `undefined` and go
+    // inert, which no behavioural test can see because the test double
+    // ignores its select argument — engine.test.ts captures this string for
+    // exactly that reason.
+    'id, timezone, status, messaging_phone_number, instagram_account_id, venue_configs(followup_rules, messaging_cadence)',
+  )
   if (venuesResult.error || !venuesResult.data) {
     console.error('[followup-engine] venues load failed', {
       error: venuesResult.error?.message,
@@ -367,7 +367,7 @@ function projectVenueScanContext(venueRow: {
     | null
 }): VenueScanContext | null {
   const configRaw = venueRow.venue_configs
-  const config = Array.isArray(configRaw) ? configRaw[0] ?? null : configRaw
+  const config = Array.isArray(configRaw) ? (configRaw[0] ?? null) : configRaw
   if (!config) {
     console.warn(
       `[followup-engine] venue ${venueRow.id} has no venue_configs row, skipping`,
@@ -392,9 +392,12 @@ function projectVenueScanContext(venueRow: {
     // cannot be blank, but `instagram_account_id` has only a UNIQUE
     // constraint and is set BY HAND in Studio, so `''` is reachable and would
     // otherwise suppress the venuesNoChannel signal.
-    hasPhone: typeof venueRow.messaging_phone_number === 'string' && venueRow.messaging_phone_number.trim() !== '',
+    hasPhone:
+      typeof venueRow.messaging_phone_number === 'string' &&
+      venueRow.messaging_phone_number.trim() !== '',
     hasInstagramAccount:
-      typeof venueRow.instagram_account_id === 'string' && venueRow.instagram_account_id.trim() !== '',
+      typeof venueRow.instagram_account_id === 'string' &&
+      venueRow.instagram_account_id.trim() !== '',
     rules,
     cadence: cadenceParsed,
     // Filled in scanVenue (per-venue mechanic load) — typed here so the
@@ -497,39 +500,40 @@ async function scanVenue(
 
   const supabase = createAdminClient()
 
-  const [guestsResult, activityResult, mechanicsResult, redemptionsResult] = await Promise.all([
-    supabase
-      .from('guests')
-      .select(
-        'id, opted_out_at, last_visit_at, last_visit_precision, phone_number, instagram_scoped_id',
-      )
-      .eq('venue_id', ctx.id)
-      // A guest reachable on EITHER channel. Instagram guests were excluded
-      // entirely until TAC-469 PR B, so the engine could not even see them;
-      // now they are scanned like anyone else and their follow-up is recorded
-      // as a task instead of sent (rule 2: outbound splits by origin).
-      .or('phone_number.not.is.null,instagram_scoped_id.not.is.null')
-      .is('opted_out_at', null)
-      .in('status', ['new', 'active']),
-    // TAC-476: the recent-conversation gate's input, derived from `messages`
-    // rather than read off `guests.last_inbound_at`. One round trip for the
-    // whole venue, alongside the three queries already here — deliberately not
-    // a per-guest read, which would be an N+1 inside the guest loop below.
-    supabase.rpc('venue_guest_activity', { p_venue_id: ctx.id }),
-    supabase
-      .from('mechanics')
-      .select(
-        'id, type, name, description, qualification, reward_description, min_state, redemption_policy, redemption_window_days, requires_operator_approval',
-      )
-      .eq('venue_id', ctx.id)
-      .eq('is_active', true),
-    supabase
-      .from('engagement_events')
-      .select('guest_id, mechanic_id, created_at')
-      .eq('venue_id', ctx.id)
-      .eq('event_type', 'mechanic_redeemed')
-      .not('mechanic_id', 'is', null),
-  ])
+  const [guestsResult, activityResult, mechanicsResult, redemptionsResult] =
+    await Promise.all([
+      supabase
+        .from('guests')
+        .select(
+          'id, opted_out_at, last_visit_at, last_visit_precision, phone_number, instagram_scoped_id',
+        )
+        .eq('venue_id', ctx.id)
+        // A guest reachable on EITHER channel. Instagram guests were excluded
+        // entirely until TAC-469 PR B, so the engine could not even see them;
+        // now they are scanned like anyone else and their follow-up is recorded
+        // as a task instead of sent (rule 2: outbound splits by origin).
+        .or('phone_number.not.is.null,instagram_scoped_id.not.is.null')
+        .is('opted_out_at', null)
+        .in('status', ['new', 'active']),
+      // TAC-476: the recent-conversation gate's input, derived from `messages`
+      // rather than read off `guests.last_inbound_at`. One round trip for the
+      // whole venue, alongside the three queries already here — deliberately not
+      // a per-guest read, which would be an N+1 inside the guest loop below.
+      supabase.rpc('venue_guest_activity', { p_venue_id: ctx.id }),
+      supabase
+        .from('mechanics')
+        .select(
+          'id, type, name, description, qualification, reward_description, min_state, redemption_policy, redemption_window_days, requires_operator_approval',
+        )
+        .eq('venue_id', ctx.id)
+        .eq('is_active', true),
+      supabase
+        .from('engagement_events')
+        .select('guest_id, mechanic_id, created_at')
+        .eq('venue_id', ctx.id)
+        .eq('event_type', 'mechanic_redeemed')
+        .not('mechanic_id', 'is', null),
+    ])
 
   if (guestsResult.error || !guestsResult.data) {
     console.error('[followup-engine] guests load failed', {
@@ -598,12 +602,16 @@ async function scanVenue(
     lastInboundAt: lastInboundByGuest.get(g.id) ?? null,
     lastVisitAt: g.last_visit_at ? new Date(g.last_visit_at) : null,
     lastVisitPrecision: parseVisitPrecision(g.last_visit_precision),
-    hasPhone: typeof g.phone_number === 'string' && g.phone_number.trim() !== '',
+    hasPhone:
+      typeof g.phone_number === 'string' && g.phone_number.trim() !== '',
     hasInstagramId:
-      typeof g.instagram_scoped_id === 'string' && g.instagram_scoped_id.trim() !== '',
+      typeof g.instagram_scoped_id === 'string' &&
+      g.instagram_scoped_id.trim() !== '',
   }))
 
-  const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
+  const mechanicCandidates: EligibilityCandidate[] = (
+    mechanicsResult.data ?? []
+  ).map((m) => ({
     id: m.id,
     type: m.type as MechanicType,
     name: m.name,
@@ -624,11 +632,18 @@ async function scanVenue(
       list = []
       redemptionsByGuest.set(row.guest_id, list)
     }
-    list.push({ mechanicId: row.mechanic_id, createdAt: new Date(row.created_at) })
+    list.push({
+      mechanicId: row.mechanic_id,
+      createdAt: new Date(row.created_at),
+    })
   }
 
   const guestIds = enrolledGuests.map((g) => g.id)
-  const snapshotsResult = await loadFollowupSnapshotsForVenue(ctx.id, guestIds, now)
+  const snapshotsResult = await loadFollowupSnapshotsForVenue(
+    ctx.id,
+    guestIds,
+    now,
+  )
   if (!snapshotsResult.ok) {
     console.error('[followup-engine] followup_log snapshots load failed', {
       venueId: ctx.id,
@@ -727,8 +742,9 @@ async function scanVenue(
       )
       continue
     }
-    const perkMechanicAfterFilter =
-      allowedReasons.includes('perk_unlock') ? detected.perkMechanic : undefined
+    const perkMechanicAfterFilter = allowedReasons.includes('perk_unlock')
+      ? detected.perkMechanic
+      : undefined
 
     // TAC-529 gate 3: this venue cannot reach THIS guest.
     //
@@ -829,7 +845,10 @@ async function scanVenue(
     })
 
     if (dispatchResult.kind === 'sent' || dispatchResult.kind === 'queued') {
-      const finalize = await finalizeFollowupLogClaim(claimIds, dispatchResult.messageId)
+      const finalize = await finalizeFollowupLogClaim(
+        claimIds,
+        dispatchResult.messageId,
+      )
       if (!finalize.ok) {
         console.warn(
           `[followup-engine] finalize failed for guest=${guest.id} message=${dispatchResult.messageId}: ${finalize.error}`,
@@ -931,9 +950,7 @@ interface DispatchOutcomeKeepClaim {
   kind: 'keep_claim'
 }
 type DispatchOutcome =
-  | DispatchOutcomeSent
-  | DispatchOutcomeReleaseClaim
-  | DispatchOutcomeKeepClaim
+  DispatchOutcomeSent | DispatchOutcomeReleaseClaim | DispatchOutcomeKeepClaim
 
 /**
  * Build a FollowupTrigger from the detected reasons + perkMechanic and
@@ -1013,9 +1030,12 @@ async function dispatchOnce(input: {
     // handleFollowup is supposed to be fail-closed (catches its own
     // errors), so a throw here is unexpected. We don't know whether a
     // side-effect occurred — keep the claim as audit row.
-    console.error(`[followup-engine] handleFollowup threw for guest=${input.guestId}`, {
-      error: e instanceof Error ? e.message : String(e),
-    })
+    console.error(
+      `[followup-engine] handleFollowup threw for guest=${input.guestId}`,
+      {
+        error: e instanceof Error ? e.message : String(e),
+      },
+    )
     return { kind: 'keep_claim' }
   }
 }

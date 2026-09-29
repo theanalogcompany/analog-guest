@@ -8,6 +8,7 @@ import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { isMessageChannel } from '@/lib/schemas/message-channel'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { captureGenerationTruncated } from '@/lib/analytics/posthog'
+import { logger } from '@/lib/observability/logger'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
@@ -348,7 +349,10 @@ function normalizeForDuplicate(text: string): string {
  * the question, which is sound because prepending characters can only keep or
  * grow a normalized length.
  */
-export function stripTrailingDuplicate(answer: string, question: string): string {
+export function stripTrailingDuplicate(
+  answer: string,
+  question: string,
+): string {
   const q = normalizeForDuplicate(question)
   if (q === '') return answer
   for (let i = answer.length - 1; i >= 0; i -= 1) {
@@ -394,7 +398,11 @@ export function composeReplyWithIntention(
     return { body: question, intentionQuestion: question, duplicateStripped }
   }
 
-  return { body: `${answer} ${question}`, intentionQuestion: question, duplicateStripped }
+  return {
+    body: `${answer} ${question}`,
+    intentionQuestion: question,
+    duplicateStripped,
+  }
 }
 
 /**
@@ -441,8 +449,12 @@ export async function generateMessage(
   // may be sent at all.
   const allowedUrls = parseVenueLinks(input.venueInfo.links).map((l) => l.url)
 
-  const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix, userPrompt } =
-    composePrompt(input)
+  const {
+    systemPrompt,
+    cacheableSystemPrefix,
+    volatileSystemSuffix,
+    userPrompt,
+  } = composePrompt(input)
   const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
   // Same bytes as augmentedSystemPrompt, split at the stability boundary so a
   // cache breakpoint can sit between them. The voice-fidelity instruction
@@ -519,7 +531,11 @@ export async function generateMessage(
       const userPromptForAttempt = regenFeedback
         ? `${userPrompt}\n\n${regenFeedback}`
         : userPrompt
-      const { object: rawObject, usage, providerMetadata } = await generateObject({
+      const {
+        object: rawObject,
+        usage,
+        providerMetadata,
+      } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
         // maps each to its own Anthropic system text block and honours a
@@ -578,7 +594,8 @@ export async function generateMessage(
       // a provider that does not cache, hence the ?? 0.
       cacheReadTokens += usage?.cachedInputTokens ?? 0
       cacheWriteTokens +=
-        (providerMetadata?.anthropic?.cacheCreationInputTokens as number | null | undefined) ?? 0
+        (providerMetadata?.anthropic?.cacheCreationInputTokens as
+          number | null | undefined) ?? 0
       // Dashes are substituted, never regenerated. Done HERE rather than at
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
@@ -588,9 +605,14 @@ export async function generateMessage(
       // condition, the attempt history, the shipped body, and every backstop
       // downstream — sees ONE body carrying the question, exactly as it did
       // before this field existed.
-      const composed = composeReplyWithIntention(rawObject.body, rawObject.intentionQuestion)
+      const composed = composeReplyWithIntention(
+        rawObject.body,
+        rawObject.intentionQuestion,
+      )
       if (composed.duplicateStripped) {
-        console.warn('[ai] generateMessage: stripped a duplicated intention question from the answer')
+        console.warn(
+          '[ai] generateMessage: stripped a duplicated intention question from the answer',
+        )
       }
       const object = {
         ...rawObject,
@@ -614,7 +636,9 @@ export async function generateMessage(
         cancelsCommitmentId: object.cancelsCommitmentId,
         intentionQuestion: object.intentionQuestion,
         userPromptOverride:
-          userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
+          userPromptForAttempt !== userPrompt
+            ? userPromptForAttempt
+            : undefined,
       })
       // No dash check here on purpose: replaceDashes already ran on this body,
       // so there is nothing left to catch and nothing a further attempt could
@@ -637,11 +661,16 @@ export async function generateMessage(
       }
       // feedbackParts is non-empty here whenever any check has ever fired, so
       // this only stays null while every failure so far has been fidelity.
-      regenFeedback = feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
+      regenFeedback =
+        feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
 
     if (lastResult === null) {
-      return { ok: false, error: 'no_result_returned', errorCode: 'ai_generation_failed' }
+      return {
+        ok: false,
+        error: 'no_result_returned',
+        errorCode: 'ai_generation_failed',
+      }
     }
 
     return {
@@ -725,7 +754,8 @@ export async function generateMessage(
         // PostHog observation so a change in that rate announces itself
         // instead of being discovered in a UAT session.
         emojiDirectiveViolated:
-          input.runtime.emojiDirective === 'none' && containsEmoji(lastResult.body),
+          input.runtime.emojiDirective === 'none' &&
+          containsEmoji(lastResult.body),
       },
     }
   } catch (e) {
@@ -742,12 +772,17 @@ export async function generateMessage(
       const causeName = cause instanceof Error ? cause.name : null
       const causeMessage = cause instanceof Error ? cause.message : null
       const innerCause =
-        cause instanceof Error ? (cause as Error & { cause?: unknown }).cause : undefined
+        cause instanceof Error
+          ? (cause as Error & { cause?: unknown }).cause
+          : undefined
       const issues =
-        innerCause && typeof innerCause === 'object' && innerCause !== null && 'issues' in innerCause
+        innerCause &&
+        typeof innerCause === 'object' &&
+        innerCause !== null &&
+        'issues' in innerCause
           ? (innerCause as { issues: unknown }).issues
           : undefined
-      console.log('[agent] generation diagnostic', {
+      logger.info('[agent] generation diagnostic', {
         attempts,
         text: e.text ? e.text.slice(0, 1000) : null,
         finishReason: e.finishReason,

@@ -18,11 +18,14 @@ const ENTRY_ID = '33333333-3333-4333-8333-333333333333'
 const KNOWLEDGE_ID = '44444444-4444-4444-8444-444444444444'
 
 function buildRequest(body: unknown): Request {
-  return new Request('http://test/admin/venues/api/venues/x/current-context/y/promote', {
-    method: 'POST',
-    body: JSON.stringify(body),
-    headers: { 'content-type': 'application/json' },
-  })
+  return new Request(
+    'http://test/admin/venues/api/venues/x/current-context/y/promote',
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json' },
+    },
+  )
 }
 
 function buildParams() {
@@ -54,7 +57,10 @@ describe('POST .../current-context/[entryId]/promote', () => {
     )
     expect(res.status).toBe(200)
     const json = await res.json()
-    expect(json).toMatchObject({ success: true, knowledgeCorpusId: KNOWLEDGE_ID })
+    expect(json).toMatchObject({
+      success: true,
+      knowledgeCorpusId: KNOWLEDGE_ID,
+    })
     expect(promoteCurrentContextEntry).toHaveBeenCalledWith({
       venueId: VENUE_ID,
       entryId: ENTRY_ID,
@@ -64,7 +70,10 @@ describe('POST .../current-context/[entryId]/promote', () => {
   })
 
   it('400 on a non-canonical primary tag', async () => {
-    const res = await POST(buildRequest({ primaryTag: 'personality' }), buildParams())
+    const res = await POST(
+      buildRequest({ primaryTag: 'personality' }),
+      buildParams(),
+    )
     expect(res.status).toBe(400)
     expect(promoteCurrentContextEntry).not.toHaveBeenCalled()
   })
@@ -75,7 +84,10 @@ describe('POST .../current-context/[entryId]/promote', () => {
       error: 'not found',
       errorCode: 'not_found',
     })
-    const res = await POST(buildRequest({ primaryTag: 'logistics' }), buildParams())
+    const res = await POST(
+      buildRequest({ primaryTag: 'logistics' }),
+      buildParams(),
+    )
     expect(res.status).toBe(404)
   })
 
@@ -85,16 +97,25 @@ describe('POST .../current-context/[entryId]/promote', () => {
       error: 'voyage 502',
       errorCode: 'embed_failed',
     })
-    const res = await POST(buildRequest({ primaryTag: 'logistics' }), buildParams())
+    const res = await POST(
+      buildRequest({ primaryTag: 'logistics' }),
+      buildParams(),
+    )
     expect(res.status).toBe(502)
   })
 
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
-    const res = await POST(buildRequest({ primaryTag: 'logistics' }), buildParams())
+    const res = await POST(
+      buildRequest({ primaryTag: 'logistics' }),
+      buildParams(),
+    )
     expect(res.status).toBe(403)
     expect(promoteCurrentContextEntry).not.toHaveBeenCalled()
   })

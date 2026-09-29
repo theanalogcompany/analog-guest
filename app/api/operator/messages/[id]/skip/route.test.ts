@@ -114,7 +114,10 @@ async function skip(
     }),
     { params: Promise.resolve({ id }) },
   )
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, unknown>,
+  }
 }
 
 beforeEach(() => {
@@ -124,14 +127,20 @@ beforeEach(() => {
   claimPatch = {}
   script = {}
   fromCalls = 0
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
 })
 
 describe('POST /api/operator/messages/[id]/skip', () => {
   // The fixture is a card that WOULD match if the filter were skipped. A
   // fixture with no matching row passes whether or not the guard exists.
   it('answers 404 and touches nothing when the operator is allowlisted for no venue', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+    })
     script = { claimed: [PENDING_CARD] }
     expect(await skip()).toEqual({ status: 404, body: { error: 'not found' } })
     expect(fromCalls).toBe(0)
@@ -160,7 +169,10 @@ describe('POST /api/operator/messages/[id]/skip', () => {
   })
 
   it('answers the same 404 for an out-of-allowlist card as for one that does not exist', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_B]) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([VENUE_B]),
+    })
     script = { claimed: [], current: null }
     const outOfScope = await skip()
     script = { claimed: [], current: null }
@@ -173,7 +185,11 @@ describe('POST /api/operator/messages/[id]/skip', () => {
     script = { claimed: [PENDING_CARD] }
     expect(await skip()).toEqual({
       status: 200,
-      body: { status: 'skipped', messageId: VALID_UUID, reviewState: 'skipped' },
+      body: {
+        status: 'skipped',
+        messageId: VALID_UUID,
+        reviewState: 'skipped',
+      },
     })
     expect(claimPatch.review_state).toBe('skipped')
     expect(claimPatch.previous_review_state).toBe('pending')
@@ -184,11 +200,20 @@ describe('POST /api/operator/messages/[id]/skip', () => {
   it('reports already_acted when the claim matched nothing but the row is visible', async () => {
     script = {
       claimed: [],
-      current: { id: VALID_UUID, venue_id: VENUE_A, review_state: 'approved', direction: 'outbound' },
+      current: {
+        id: VALID_UUID,
+        venue_id: VENUE_A,
+        review_state: 'approved',
+        direction: 'outbound',
+      },
     }
     expect(await skip()).toEqual({
       status: 200,
-      body: { status: 'already_acted', messageId: VALID_UUID, reviewState: 'approved' },
+      body: {
+        status: 'already_acted',
+        messageId: VALID_UUID,
+        reviewState: 'approved',
+      },
     })
     expect(captureMock).not.toHaveBeenCalled()
   })
@@ -196,7 +221,12 @@ describe('POST /api/operator/messages/[id]/skip', () => {
   it('answers 404 for an inbound row', async () => {
     script = {
       claimed: [],
-      current: { id: VALID_UUID, venue_id: VENUE_A, review_state: null, direction: 'inbound' },
+      current: {
+        id: VALID_UUID,
+        venue_id: VENUE_A,
+        review_state: null,
+        direction: 'inbound',
+      },
     }
     expect(await skip()).toEqual({ status: 404, body: { error: 'not found' } })
   })

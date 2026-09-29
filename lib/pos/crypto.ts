@@ -31,7 +31,10 @@ function getKey(): Buffer {
 export function encryptToken(plaintext: string): string {
   const iv = randomBytes(IV_BYTES)
   const cipher = createCipheriv(ALGO, getKey(), iv)
-  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ])
   const tag = cipher.getAuthTag()
   return `${iv.toString('base64')}.${tag.toString('base64')}.${ciphertext.toString('base64')}`
 }
@@ -40,7 +43,11 @@ export function decryptToken(encoded: string): string {
   const parts = encoded.split('.')
   if (parts.length !== 3) throw new Error('malformed encrypted token')
   const [ivB64, tagB64, ctB64] = parts
-  const decipher = createDecipheriv(ALGO, getKey(), Buffer.from(ivB64, 'base64'))
+  const decipher = createDecipheriv(
+    ALGO,
+    getKey(),
+    Buffer.from(ivB64, 'base64'),
+  )
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'))
   return Buffer.concat([
     decipher.update(Buffer.from(ctB64, 'base64')),

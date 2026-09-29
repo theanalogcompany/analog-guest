@@ -17,7 +17,8 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 
 const loadMock = vi.fn()
 vi.mock('@/lib/operator', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
+  const actual =
+    await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
   return {
     ...actual,
     loadGuestThreadByGuestId: (...args: unknown[]) => loadMock(...args),
@@ -37,13 +38,18 @@ function makeRequest(): Request {
   )
 }
 
-function params(guestId = VALID_GUEST_ID): { params: Promise<{ guestId: string }> } {
+function params(guestId = VALID_GUEST_ID): {
+  params: Promise<{ guestId: string }>
+} {
   return { params: Promise.resolve({ guestId }) }
 }
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
   loadMock.mockReset()
 })
 
@@ -54,14 +60,16 @@ afterEach(() => {
 describe('GET /api/operator/guests/[guestId]/thread', () => {
   it("returns 401 {error:'unauthorized'} when AuthError is thrown", async () => {
     const { AuthError } = await import('@/lib/auth/types')
-    verifyMock.mockRejectedValueOnce(new AuthError(401, 'invalid or expired token'))
+    verifyMock.mockRejectedValueOnce(
+      new AuthError(401, 'invalid or expired token'),
+    )
     const res = await GET(makeRequest(), params())
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ error: 'unauthorized' })
     expect(loadMock).not.toHaveBeenCalled()
   })
 
-  it("returns 404 not_found when guestId is not a uuid (no helper call)", async () => {
+  it('returns 404 not_found when guestId is not a uuid (no helper call)', async () => {
     const res = await GET(makeRequest(), params('not-a-uuid'))
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'not_found' })
@@ -76,14 +84,21 @@ describe('GET /api/operator/guests/[guestId]/thread', () => {
   })
 
   it('returns 404 not_found when helper reports out_of_allowlist', async () => {
-    loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+    loadMock.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'out_of_allowlist',
+    })
     const res = await GET(makeRequest(), params())
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'not_found' })
   })
 
   it("returns 500 {error:'internal_error'} on db_error", async () => {
-    loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'db_error', error: 'timeout' })
+    loadMock.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'db_error',
+      error: 'timeout',
+    })
     const res = await GET(makeRequest(), params())
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'internal_error' })
@@ -120,15 +135,22 @@ describe('GET /api/operator/guests/[guestId]/thread', () => {
   })
 })
 
-
 // TAC-530. loadGuestThreadByGuestId is mocked here and denies on an empty
 // allowlist in lib/operator/guest-thread.test.ts. What this route owns is
 // forwarding the scope verbatim.
 describe('GET /api/operator/guests/[guestId]/thread \u2014 venue scope pass-through (TAC-530)', () => {
   it('passes the operator\u2019s allowlist to the loader unchanged, including when empty', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
-    loadMock.mockResolvedValueOnce({ ok: false, errorCode: 'out_of_allowlist' })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+    })
+    loadMock.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'out_of_allowlist',
+    })
     await GET(makeRequest(), params())
-    expect(loadMock.mock.calls[0]![0]).toMatchObject({ venueScope: grantedVenues([]) })
+    expect(loadMock.mock.calls[0]![0]).toMatchObject({
+      venueScope: grantedVenues([]),
+    })
   })
 })

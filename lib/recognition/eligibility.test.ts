@@ -9,7 +9,9 @@ import {
 const NOW = new Date('2026-04-29T12:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
 
-const candidate = (overrides: Partial<EligibilityCandidate> = {}): EligibilityCandidate => ({
+const candidate = (
+  overrides: Partial<EligibilityCandidate> = {},
+): EligibilityCandidate => ({
   id: 'mech-1',
   type: 'perk',
   name: 'The Joey',
@@ -42,41 +44,75 @@ describe('isRedemptionActive', () => {
 
   it('returns false when redemptions exist for a different mechanic', () => {
     const other = redemption({ mechanicId: 'mech-2' })
-    expect(isRedemptionActive([other], candidate({ id: 'mech-1' }), NOW)).toBe(false)
+    expect(isRedemptionActive([other], candidate({ id: 'mech-1' }), NOW)).toBe(
+      false,
+    )
   })
 
   it('one_time: any redemption blocks forever', () => {
-    expect(isRedemptionActive([redemption()], candidate({ redemptionPolicy: 'one_time' }), NOW)).toBe(true)
+    expect(
+      isRedemptionActive(
+        [redemption()],
+        candidate({ redemptionPolicy: 'one_time' }),
+        NOW,
+      ),
+    ).toBe(true)
   })
 
   it('one_time: multiple redemptions also block', () => {
     const r1 = redemption({ createdAt: new Date('2025-01-01T00:00:00Z') })
     const r2 = redemption({ createdAt: new Date('2026-04-01T00:00:00Z') })
-    expect(isRedemptionActive([r1, r2], candidate({ redemptionPolicy: 'one_time' }), NOW)).toBe(true)
+    expect(
+      isRedemptionActive(
+        [r1, r2],
+        candidate({ redemptionPolicy: 'one_time' }),
+        NOW,
+      ),
+    ).toBe(true)
   })
 
   it('renewable: returns true when last redemption is inside the window', () => {
-    const inside = redemption({ createdAt: new Date(NOW.getTime() - 5 * DAY_MS) })
-    const mech = candidate({ redemptionPolicy: 'renewable', redemptionWindowDays: 30 })
+    const inside = redemption({
+      createdAt: new Date(NOW.getTime() - 5 * DAY_MS),
+    })
+    const mech = candidate({
+      redemptionPolicy: 'renewable',
+      redemptionWindowDays: 30,
+    })
     expect(isRedemptionActive([inside], mech, NOW)).toBe(true)
   })
 
   it('renewable: returns false when last redemption is outside the window', () => {
-    const outside = redemption({ createdAt: new Date(NOW.getTime() - 31 * DAY_MS) })
-    const mech = candidate({ redemptionPolicy: 'renewable', redemptionWindowDays: 30 })
+    const outside = redemption({
+      createdAt: new Date(NOW.getTime() - 31 * DAY_MS),
+    })
+    const mech = candidate({
+      redemptionPolicy: 'renewable',
+      redemptionWindowDays: 30,
+    })
     expect(isRedemptionActive([outside], mech, NOW)).toBe(false)
   })
 
   it('renewable: uses the most-recent redemption when multiple exist', () => {
-    const old = redemption({ createdAt: new Date(NOW.getTime() - 60 * DAY_MS) })
-    const recent = redemption({ createdAt: new Date(NOW.getTime() - 5 * DAY_MS) })
-    const mech = candidate({ redemptionPolicy: 'renewable', redemptionWindowDays: 30 })
+    const old = redemption({
+      createdAt: new Date(NOW.getTime() - 60 * DAY_MS),
+    })
+    const recent = redemption({
+      createdAt: new Date(NOW.getTime() - 5 * DAY_MS),
+    })
+    const mech = candidate({
+      redemptionPolicy: 'renewable',
+      redemptionWindowDays: 30,
+    })
     expect(isRedemptionActive([old, recent], mech, NOW)).toBe(true)
   })
 
   it('renewable with null window logs and treats as blocked (defensive)', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const mech = candidate({ redemptionPolicy: 'renewable', redemptionWindowDays: null })
+    const mech = candidate({
+      redemptionPolicy: 'renewable',
+      redemptionWindowDays: null,
+    })
     expect(isRedemptionActive([redemption()], mech, NOW)).toBe(true)
     expect(warnSpy).toHaveBeenCalledOnce()
     expect(warnSpy.mock.calls[0][0]).toContain('mech-1')
@@ -99,7 +135,11 @@ describe('filterEligibleMechanics', () => {
   })
 
   it('drops mechanics with an active one_time redemption even if state qualifies', () => {
-    const mech = candidate({ id: 'used', minState: null, redemptionPolicy: 'one_time' })
+    const mech = candidate({
+      id: 'used',
+      minState: null,
+      redemptionPolicy: 'one_time',
+    })
     const r = redemption({ mechanicId: 'used' })
     const out = filterEligibleMechanics([mech], [r], 'regular', NOW)
     expect(out).toEqual([])
@@ -118,14 +158,23 @@ describe('filterEligibleMechanics', () => {
   })
 
   it('preserves original order when filtering a mixed list', () => {
-    const stateBlocked = candidate({ id: 'state-blocked', minState: 'regular' })
+    const stateBlocked = candidate({
+      id: 'state-blocked',
+      minState: 'regular',
+    })
     const redemptionBlocked = candidate({
       id: 'redemption-blocked',
       minState: null,
       redemptionPolicy: 'one_time',
     })
-    const eligibleGated = candidate({ id: 'eligible-gated', minState: 'returning' })
-    const eligibleUngated = candidate({ id: 'eligible-ungated', minState: null })
+    const eligibleGated = candidate({
+      id: 'eligible-gated',
+      minState: 'returning',
+    })
+    const eligibleUngated = candidate({
+      id: 'eligible-ungated',
+      minState: null,
+    })
     const r = redemption({ mechanicId: 'redemption-blocked' })
 
     const out = filterEligibleMechanics(

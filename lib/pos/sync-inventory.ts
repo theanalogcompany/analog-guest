@@ -27,11 +27,15 @@ export async function applyInventoryCounts(opts: {
     state: c.state,
   }))
 
-  const { error } = await supabase
-    .from('pos_inventory_counts')
-    .upsert(rows, { onConflict: 'venue_id,provider,catalog_external_id,location_external_id' })
+  const { error } = await supabase.from('pos_inventory_counts').upsert(rows, {
+    onConflict: 'venue_id,provider,catalog_external_id,location_external_id',
+  })
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'inventory_upsert_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'inventory_upsert_failed',
+    }
   }
   return { ok: true, data: { upserted: rows.length } }
 }

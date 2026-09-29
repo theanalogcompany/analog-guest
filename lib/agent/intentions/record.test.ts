@@ -3,20 +3,32 @@ import type { OpenIntention } from './derive'
 
 const classifyIntentionPromptsMock = vi.fn()
 vi.mock('@/lib/ai', () => ({
-  classifyIntentionPrompts: (...a: unknown[]) => classifyIntentionPromptsMock(...a),
+  classifyIntentionPrompts: (...a: unknown[]) =>
+    classifyIntentionPromptsMock(...a),
 }))
 
 type Filter = [method: string, args: unknown[]]
 
 interface SupabaseMockState {
-  upsertCalls: { payload: Record<string, unknown>[]; options: Record<string, unknown> }[]
+  upsertCalls: {
+    payload: Record<string, unknown>[]
+    options: Record<string, unknown>
+  }[]
   updateCalls: { payload: Record<string, unknown>; filters: Filter[] }[]
   upsertError: { message: string } | null
   updateError: { message: string } | null
 }
 
-function newSupabaseState(overrides: Partial<SupabaseMockState> = {}): SupabaseMockState {
-  return { upsertCalls: [], updateCalls: [], upsertError: null, updateError: null, ...overrides }
+function newSupabaseState(
+  overrides: Partial<SupabaseMockState> = {},
+): SupabaseMockState {
+  return {
+    upsertCalls: [],
+    updateCalls: [],
+    upsertError: null,
+    updateError: null,
+    ...overrides,
+  }
 }
 
 function makeSupabaseMock(state: SupabaseMockState) {
@@ -26,7 +38,10 @@ function makeSupabaseMock(state: SupabaseMockState) {
         throw new Error(`unexpected table in test mock: ${table}`)
       }
       return {
-        upsert: (payload: Record<string, unknown>[], options: Record<string, unknown>) => {
+        upsert: (
+          payload: Record<string, unknown>[],
+          options: Record<string, unknown>,
+        ) => {
           state.upsertCalls.push({ payload, options })
           return Promise.resolve({ error: state.upsertError })
         },
@@ -84,7 +99,11 @@ const anchoredStampFilters = (key: string, anchor: string): Filter[] => [
 ]
 
 const twoOpen: OpenIntention[] = [
-  { key: 'learn_name', promptLine: "You don't know this guest's name yet.", eligibleAt: NAME_ELIGIBLE },
+  {
+    key: 'learn_name',
+    promptLine: "You don't know this guest's name yet.",
+    eligibleAt: NAME_ELIGIBLE,
+  },
   {
     key: 'are_they_local',
     promptLine: "You don't know whether this guest lives or works nearby.",
@@ -101,7 +120,10 @@ const base = {
   now: NOW,
 }
 
-const raised = (keys: string[]) => ({ ok: true, data: { raisedKeys: keys, promptVersion: 'v1.0.0' } })
+const raised = (keys: string[]) => ({
+  ok: true,
+  data: { raisedKeys: keys, promptVersion: 'v1.0.0' },
+})
 
 const stampFilters = (keys: string[]): Filter[] => [
   ['eq', ['venue_id', 'v1']],
@@ -143,7 +165,11 @@ describe('buildEligibilityRow (trap 3)', () => {
 
 describe('recordIntentionEligibility', () => {
   it('writes nothing when there is nothing newly eligible', async () => {
-    const result = await recordIntentionEligibility({ venueId: 'v1', guestId: 'g1', entries: [] })
+    const result = await recordIntentionEligibility({
+      venueId: 'v1',
+      guestId: 'g1',
+      entries: [],
+    })
     expect(result).toEqual({ kind: 'nothing_to_record' })
     expect(currentState.upsertCalls).toEqual([])
   })
@@ -159,11 +185,19 @@ describe('recordIntentionEligibility', () => {
     expect(currentState.upsertCalls).toStrictEqual([
       {
         payload: [
-          buildEligibilityRow({ venueId: 'v1', guestId: 'g1', key: 'learn_name', eligibleAt: NAME_ELIGIBLE }),
+          buildEligibilityRow({
+            venueId: 'v1',
+            guestId: 'g1',
+            key: 'learn_name',
+            eligibleAt: NAME_ELIGIBLE,
+          }),
         ],
         // ignoreDuplicates keeps the EARLIEST eligible_at: a second observation
         // must not slide an expiry window later.
-        options: { onConflict: 'guest_id,intention_key', ignoreDuplicates: true },
+        options: {
+          onConflict: 'guest_id,intention_key',
+          ignoreDuplicates: true,
+        },
       },
     ])
     expect(currentState.updateCalls).toEqual([])
@@ -176,10 +210,19 @@ describe('recordIntentionEligibility', () => {
     const result = await recordIntentionEligibility({
       venueId: 'v1',
       guestId: 'g1',
-      entries: [{ key: 'got_the_recommendation', eligibleAt: REC_ELIGIBLE, rearm: true }],
+      entries: [
+        {
+          key: 'got_the_recommendation',
+          eligibleAt: REC_ELIGIBLE,
+          rearm: true,
+        },
+      ],
     })
 
-    expect(result).toEqual({ kind: 'recorded', keys: ['got_the_recommendation'] })
+    expect(result).toEqual({
+      kind: 'recorded',
+      keys: ['got_the_recommendation'],
+    })
     expect(currentState.upsertCalls).toEqual([])
     expect(currentState.updateCalls).toStrictEqual([
       {
@@ -202,14 +245,23 @@ describe('recordIntentionEligibility', () => {
       guestId: 'g1',
       entries: [
         { key: 'learn_name', eligibleAt: NAME_ELIGIBLE, rearm: false },
-        { key: 'got_the_recommendation', eligibleAt: REC_ELIGIBLE, rearm: true },
+        {
+          key: 'got_the_recommendation',
+          eligibleAt: REC_ELIGIBLE,
+          rearm: true,
+        },
       ],
     })
 
-    expect(result).toEqual({ kind: 'recorded', keys: ['learn_name', 'got_the_recommendation'] })
-    expect(currentState.upsertCalls.flatMap((c) => c.payload.map((row) => row.intention_key))).toEqual([
-      'learn_name',
-    ])
+    expect(result).toEqual({
+      kind: 'recorded',
+      keys: ['learn_name', 'got_the_recommendation'],
+    })
+    expect(
+      currentState.upsertCalls.flatMap((c) =>
+        c.payload.map((row) => row.intention_key),
+      ),
+    ).toEqual(['learn_name'])
     expect(currentState.updateCalls.map((c) => c.filters[2])).toEqual([
       ['eq', ['intention_key', 'got_the_recommendation']],
     ])
@@ -220,7 +272,13 @@ describe('recordIntentionEligibility', () => {
     const result = await recordIntentionEligibility({
       venueId: 'v1',
       guestId: 'g1',
-      entries: [{ key: 'got_the_recommendation', eligibleAt: REC_ELIGIBLE, rearm: true }],
+      entries: [
+        {
+          key: 'got_the_recommendation',
+          eligibleAt: REC_ELIGIBLE,
+          rearm: true,
+        },
+      ],
     })
     expect(result).toEqual({ kind: 'failed', error: 'db down' })
   })
@@ -238,7 +296,10 @@ describe('recordIntentionEligibility', () => {
 
 describe('recordIntentionPrompts', () => {
   it('short-circuits with no_open_intentions and never calls the classifier', async () => {
-    const result = await recordIntentionPrompts({ ...base, openIntentions: [] })
+    const result = await recordIntentionPrompts({
+      ...base,
+      openIntentions: [],
+    })
     expect(result).toEqual({ kind: 'no_open_intentions' })
     expect(classifyIntentionPromptsMock).not.toHaveBeenCalled()
   })
@@ -252,13 +313,25 @@ describe('recordIntentionPrompts', () => {
 
     const result = await recordIntentionPrompts(base)
 
-    expect(result).toEqual({ kind: 'recorded', raisedKeys: ['learn_name'], classifierAttempts: 1 })
+    expect(result).toEqual({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 1,
+    })
     expect(currentState.upsertCalls).toStrictEqual([
       {
         payload: [
-          buildEligibilityRow({ venueId: 'v1', guestId: 'g1', key: 'learn_name', eligibleAt: NAME_ELIGIBLE }),
+          buildEligibilityRow({
+            venueId: 'v1',
+            guestId: 'g1',
+            key: 'learn_name',
+            eligibleAt: NAME_ELIGIBLE,
+          }),
         ],
-        options: { onConflict: 'guest_id,intention_key', ignoreDuplicates: true },
+        options: {
+          onConflict: 'guest_id,intention_key',
+          ignoreDuplicates: true,
+        },
       },
     ])
     expect(currentState.updateCalls).toHaveLength(1)
@@ -267,13 +340,17 @@ describe('recordIntentionPrompts', () => {
       message_id: 'm1',
       prompt_source: 'classified',
     })
-    expect(currentState.updateCalls[0].filters).toEqual(stampFilters(['learn_name']))
+    expect(currentState.updateCalls[0].filters).toEqual(
+      stampFilters(['learn_name']),
+    )
   })
 
   // The other half of trap 2: no upsert may carry a prompted_at value. If the
   // stamp ever moves back into an ignoreDuplicates upsert, this fails.
   it('never stamps prompted_at through an upsert', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue(raised(['learn_name', 'are_they_local']))
+    classifyIntentionPromptsMock.mockResolvedValue(
+      raised(['learn_name', 'are_they_local']),
+    )
 
     await recordIntentionPrompts(base)
 
@@ -290,33 +367,48 @@ describe('recordIntentionPrompts', () => {
     await recordIntentionPrompts(base)
 
     const callArgs = classifyIntentionPromptsMock.mock.calls[0]?.[0] as
-      | { openIntentions?: { key: string; description: string }[] }
-      | undefined
-    expect(callArgs?.openIntentions?.map((o) => o.key)).toEqual(['learn_name', 'are_they_local'])
+      { openIntentions?: { key: string; description: string }[] } | undefined
+    expect(callArgs?.openIntentions?.map((o) => o.key)).toEqual([
+      'learn_name',
+      'are_they_local',
+    ])
     for (const o of callArgs?.openIntentions ?? []) {
       expect(o.description.trim().length).toBeGreaterThan(0)
     }
   })
 
   it('stamps every raised key in one guarded update', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue(raised(['learn_name', 'are_they_local']))
+    classifyIntentionPromptsMock.mockResolvedValue(
+      raised(['learn_name', 'are_they_local']),
+    )
 
     const result = await recordIntentionPrompts(base)
 
     expect(result.kind).toBe('recorded')
     expect(currentState.updateCalls).toHaveLength(1)
-    expect(currentState.updateCalls[0].filters).toEqual(stampFilters(['learn_name', 'are_they_local']))
+    expect(currentState.updateCalls[0].filters).toEqual(
+      stampFilters(['learn_name', 'are_they_local']),
+    )
   })
 
   // Event-armed intentions re-arm, so the stamp records WHICH arming it closed.
   // The guard makes the stamp and the re-arm write safe in either order on the
   // same turn, and stops a prompt from a superseded arming closing a newer one.
   it('stamps an event-armed intention with its own anchor, guarded against a newer arming', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue(raised(['got_the_recommendation']))
+    classifyIntentionPromptsMock.mockResolvedValue(
+      raised(['got_the_recommendation']),
+    )
 
-    const result = await recordIntentionPrompts({ ...base, openIntentions: [REC_OPEN] })
+    const result = await recordIntentionPrompts({
+      ...base,
+      openIntentions: [REC_OPEN],
+    })
 
-    expect(result).toEqual({ kind: 'recorded', raisedKeys: ['got_the_recommendation'], classifierAttempts: 1 })
+    expect(result).toEqual({
+      kind: 'recorded',
+      raisedKeys: ['got_the_recommendation'],
+      classifierAttempts: 1,
+    })
     expect(currentState.updateCalls).toStrictEqual([
       {
         payload: {
@@ -331,9 +423,14 @@ describe('recordIntentionPrompts', () => {
   })
 
   it('stamps first-contact and event-armed intentions separately when one send raises both', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue(raised(['learn_name', 'got_the_recommendation']))
+    classifyIntentionPromptsMock.mockResolvedValue(
+      raised(['learn_name', 'got_the_recommendation']),
+    )
 
-    await recordIntentionPrompts({ ...base, openIntentions: [twoOpen[0], REC_OPEN] })
+    await recordIntentionPrompts({
+      ...base,
+      openIntentions: [twoOpen[0], REC_OPEN],
+    })
 
     expect(currentState.updateCalls.map((c) => c.filters)).toEqual([
       stampFilters(['learn_name']),
@@ -342,14 +439,21 @@ describe('recordIntentionPrompts', () => {
   })
 
   it('closes an event-armed intention pessimistically under the same anchor guard', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue({ ok: false, error: 'anthropic timeout' })
+    classifyIntentionPromptsMock.mockResolvedValue({
+      ok: false,
+      error: 'anthropic timeout',
+    })
 
     await recordIntentionPrompts({ ...base, openIntentions: [REC_OPEN] })
 
     expect(currentState.updateCalls).toHaveLength(1)
-    expect(currentState.updateCalls[0].payload.prompt_source).toBe('pessimistic')
+    expect(currentState.updateCalls[0].payload.prompt_source).toBe(
+      'pessimistic',
+    )
     expect(currentState.updateCalls[0].payload.eligible_at).toBe(REC_ANCHOR)
-    expect(currentState.updateCalls[0].filters).toEqual(anchoredStampFilters('got_the_recommendation', REC_ANCHOR))
+    expect(currentState.updateCalls[0].filters).toEqual(
+      anchoredStampFilters('got_the_recommendation', REC_ANCHOR),
+    )
   })
 
   it('writes nothing when the classifier raises nothing', async () => {
@@ -363,11 +467,20 @@ describe('recordIntentionPrompts', () => {
   })
 
   it('filters out a classifier-returned key that was not rendered', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue(raised(['learn_name', 'some_future_key']))
+    classifyIntentionPromptsMock.mockResolvedValue(
+      raised(['learn_name', 'some_future_key']),
+    )
 
-    const result = await recordIntentionPrompts({ ...base, openIntentions: [twoOpen[0]] })
+    const result = await recordIntentionPrompts({
+      ...base,
+      openIntentions: [twoOpen[0]],
+    })
 
-    expect(result).toEqual({ kind: 'recorded', raisedKeys: ['learn_name'], classifierAttempts: 1 })
+    expect(result).toEqual({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 1,
+    })
   })
 
   // Ruling 4: retry once, then close pessimistically. The read in
@@ -384,13 +497,20 @@ describe('recordIntentionPrompts', () => {
 
     const result = await recordIntentionPrompts(base)
 
-    expect(result).toEqual({ kind: 'recorded', raisedKeys: ['learn_name'], classifierAttempts: 2 })
+    expect(result).toEqual({
+      kind: 'recorded',
+      raisedKeys: ['learn_name'],
+      classifierAttempts: 2,
+    })
     expect(classifyIntentionPromptsMock).toHaveBeenCalledTimes(2)
     expect(currentState.updateCalls[0].payload.prompt_source).toBe('classified')
   })
 
   it('closes every rendered intention pessimistically after the retry also fails', async () => {
-    classifyIntentionPromptsMock.mockResolvedValue({ ok: false, error: 'anthropic timeout' })
+    classifyIntentionPromptsMock.mockResolvedValue({
+      ok: false,
+      error: 'anthropic timeout',
+    })
 
     const result = await recordIntentionPrompts(base)
 
@@ -399,14 +519,18 @@ describe('recordIntentionPrompts', () => {
       closedKeys: ['learn_name', 'are_they_local'],
       classifierError: 'anthropic timeout',
     })
-    expect(classifyIntentionPromptsMock).toHaveBeenCalledTimes(CLASSIFIER_ATTEMPTS)
+    expect(classifyIntentionPromptsMock).toHaveBeenCalledTimes(
+      CLASSIFIER_ATTEMPTS,
+    )
     expect(currentState.updateCalls).toHaveLength(1)
     expect(currentState.updateCalls[0].payload).toStrictEqual({
       prompted_at: NOW.toISOString(),
       message_id: 'm1',
       prompt_source: 'pessimistic',
     })
-    expect(currentState.updateCalls[0].filters).toEqual(stampFilters(['learn_name', 'are_they_local']))
+    expect(currentState.updateCalls[0].filters).toEqual(
+      stampFilters(['learn_name', 'are_they_local']),
+    )
   })
 
   it('treats a thrown classifier error as a failure, not a crash', async () => {
@@ -454,7 +578,10 @@ describe('recordIntentionPrompts', () => {
   // AND the pessimistic write failed too.
   it('returns write_failed with source pessimistic when the pessimistic write fails', async () => {
     currentState = newSupabaseState({ updateError: { message: 'db down' } })
-    classifyIntentionPromptsMock.mockResolvedValue({ ok: false, error: 'anthropic timeout' })
+    classifyIntentionPromptsMock.mockResolvedValue({
+      ok: false,
+      error: 'anthropic timeout',
+    })
 
     const result = await recordIntentionPrompts(base)
 
@@ -485,15 +612,22 @@ describe('re-arm and stamp, applied to a row in either order', () => {
       case 'in':
         return (value as unknown[]).includes(row[column])
       case 'lt':
-        return row[column] !== null && time(row[column] as string) < time(value as string)
+        return (
+          row[column] !== null &&
+          time(row[column] as string) < time(value as string)
+        )
       case 'lte':
-        return row[column] !== null && time(row[column] as string) <= time(value as string)
+        return (
+          row[column] !== null &&
+          time(row[column] as string) <= time(value as string)
+        )
       case 'or':
         return (args[0] as string).split(',').some((clause) => {
           const [col, op, ...rest] = clause.split('.')
           const v = rest.join('.')
           if (op === 'is' && v === 'null') return row[col] === null
-          if (op === 'lt') return row[col] !== null && time(row[col] as string) < time(v)
+          if (op === 'lt')
+            return row[col] !== null && time(row[col] as string) < time(v)
           throw new Error(`unsupported or clause in test evaluator: ${clause}`)
         })
       default:
@@ -504,7 +638,8 @@ describe('re-arm and stamp, applied to a row in either order', () => {
   function applyUpdates(row: Row): Row {
     let next = { ...row }
     for (const call of currentState.updateCalls) {
-      if (call.filters.every((f) => matches(next, f))) next = { ...next, ...(call.payload as Row) }
+      if (call.filters.every((f) => matches(next, f)))
+        next = { ...next, ...(call.payload as Row) }
     }
     return next
   }
@@ -526,15 +661,29 @@ describe('re-arm and stamp, applied to a row in either order', () => {
     await recordIntentionEligibility({
       venueId: 'v1',
       guestId: 'g1',
-      entries: [{ key: 'got_the_recommendation', eligibleAt: REC_ELIGIBLE, rearm: true }],
+      entries: [
+        {
+          key: 'got_the_recommendation',
+          eligibleAt: REC_ELIGIBLE,
+          rearm: true,
+        },
+      ],
     })
     return applyUpdates(row)
   }
 
-  async function stamp(row: Row, intention: OpenIntention, messageId: string): Promise<Row> {
+  async function stamp(
+    row: Row,
+    intention: OpenIntention,
+    messageId: string,
+  ): Promise<Row> {
     currentState = newSupabaseState()
     classifyIntentionPromptsMock.mockResolvedValue(raised([intention.key]))
-    await recordIntentionPrompts({ ...base, messageId, openIntentions: [intention] })
+    await recordIntentionPrompts({
+      ...base,
+      messageId,
+      openIntentions: [intention],
+    })
     return applyUpdates(row)
   }
 
@@ -546,9 +695,15 @@ describe('re-arm and stamp, applied to a row in either order', () => {
 
   it('re-arm first: the row keeps its old prompt until the stamp closes the new arming', async () => {
     const rearmed = await rearm(ROW)
-    expect(rearmed).toMatchObject({ eligible_at: REC_ANCHOR, prompted_at: ROW.prompted_at, message_id: 'm-old' })
+    expect(rearmed).toMatchObject({
+      eligible_at: REC_ANCHOR,
+      prompted_at: ROW.prompted_at,
+      message_id: 'm-old',
+    })
 
-    expect(await stamp(rearmed, REC_OPEN, 'm-new')).toMatchObject(askedAboutNewArming)
+    expect(await stamp(rearmed, REC_OPEN, 'm-new')).toMatchObject(
+      askedAboutNewArming,
+    )
   })
 
   it('stamp first: same end state, and the late re-arm reopens nothing', async () => {
@@ -560,7 +715,10 @@ describe('re-arm and stamp, applied to a row in either order', () => {
 
   it('a stamp from the superseded arming cannot close the re-armed one', async () => {
     const rearmed = await rearm(ROW)
-    const stale: OpenIntention = { ...REC_OPEN, eligibleAt: new Date(OLD_ARMING_AT) }
+    const stale: OpenIntention = {
+      ...REC_OPEN,
+      eligibleAt: new Date(OLD_ARMING_AT),
+    }
 
     expect(await stamp(rearmed, stale, 'm-stale')).toEqual(rearmed)
   })
@@ -572,11 +730,21 @@ describe('re-arm and stamp, applied to a row in either order', () => {
   })
 
   it('from a row that ran out unraised: the re-arm reopens it and the stamp closes it', async () => {
-    const ranOut: Row = { ...ROW, prompted_at: null, prompt_source: null, message_id: null }
+    const ranOut: Row = {
+      ...ROW,
+      prompted_at: null,
+      prompt_source: null,
+      message_id: null,
+    }
     const rearmed = await rearm(ranOut)
-    expect(rearmed).toMatchObject({ eligible_at: REC_ANCHOR, prompted_at: null })
+    expect(rearmed).toMatchObject({
+      eligible_at: REC_ANCHOR,
+      prompted_at: null,
+    })
 
-    expect(await stamp(rearmed, REC_OPEN, 'm-new')).toMatchObject(askedAboutNewArming)
+    expect(await stamp(rearmed, REC_OPEN, 'm-new')).toMatchObject(
+      askedAboutNewArming,
+    )
   })
 
   it('repeating a re-arm changes nothing', async () => {

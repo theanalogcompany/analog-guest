@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { buildItemsPreview, formatPosProvider, parseTicket } from './parse-ticket'
+import {
+  buildItemsPreview,
+  formatPosProvider,
+  parseTicket,
+} from './parse-ticket'
 
 const FIXTURE = {
   pos_provider: 'mock',
   ticket_id: 'TKT-786-0003',
   line_items: [
-    { name: 'Mocha', quantity: 1, unit_price_cents: 300, category: 'drinks-coffee' },
+    {
+      name: 'Mocha',
+      quantity: 1,
+      unit_price_cents: 300,
+      category: 'drinks-coffee',
+    },
     { name: 'Bagel + cream cheese', quantity: 1, unit_price_cents: 300 },
     { name: 'Banana bread', quantity: 1, unit_price_cents: 250 },
   ],
@@ -104,7 +113,11 @@ describe('buildItemsPreview', () => {
     const items = [
       { name: 'Cappuccino', quantity: 1, unitPriceCents: 100 },
       { name: 'Banana bread', quantity: 1, unitPriceCents: 100 },
-      { name: 'A very long pastry name that exceeds the cap', quantity: 1, unitPriceCents: 100 },
+      {
+        name: 'A very long pastry name that exceeds the cap',
+        quantity: 1,
+        unitPriceCents: 100,
+      },
     ]
     const preview = buildItemsPreview(items, 4, 30)
     // Cappuccino (10) + ", " (2) + Banana bread (12) = 24 chars. Adding the
@@ -120,7 +133,11 @@ describe('buildItemsPreview', () => {
     // Edge case: don't return empty if the first item is too long; just
     // return that one item unchanged. Better than empty preview.
     const items = [
-      { name: 'A very long pastry name that exceeds the cap', quantity: 1, unitPriceCents: 100 },
+      {
+        name: 'A very long pastry name that exceeds the cap',
+        quantity: 1,
+        unitPriceCents: 100,
+      },
     ]
     const preview = buildItemsPreview(items, 4, 10)
     expect(preview).toBe('A very long pastry name that exceeds the cap')

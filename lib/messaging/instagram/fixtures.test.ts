@@ -39,8 +39,11 @@ function firstItem(name: FixtureName): { entryId: string; item: Item } {
  * as `ZDZD`. Anything else fails loudly rather than decoding short.
  */
 function decodeMid(mid: string): string[] {
-  if (!mid.endsWith('ZDZD')) throw new Error(`unexpected mid padding: ${mid.slice(-8)}`)
-  return Buffer.from(`${mid.slice(34, -4)}==`, 'base64').toString('ascii').split(':')
+  if (!mid.endsWith('ZDZD'))
+    throw new Error(`unexpected mid padding: ${mid.slice(-8)}`)
+  return Buffer.from(`${mid.slice(34, -4)}==`, 'base64')
+    .toString('ascii')
+    .split(':')
 }
 
 describe('recorded Instagram payloads: what Meta sends', () => {
@@ -87,7 +90,8 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     for (const name of FIXTURE_NAMES) {
       const { entryId, item } = firstItem(name)
       expect(entryId).toMatch(/^\d{17}$/)
-      const guest = item.sender.id === entryId ? item.recipient.id : item.sender.id
+      const guest =
+        item.sender.id === entryId ? item.recipient.id : item.sender.id
       expect(guest).toMatch(/^\d+$/)
     }
   })
@@ -106,7 +110,11 @@ describe('recorded Instagram payloads: what Meta sends', () => {
     const postback = item.postback as Record<string, unknown>
     expect(postback.title).toBe('What are your hours?')
     expect(postback.payload).toBe('ICEBREAKER_HOURS')
-    expect(postback.referral).toEqual({ ref: 'TESTVENUE', source: 'SHORTLINK', type: 'OPEN_THREAD' })
+    expect(postback.referral).toEqual({
+      ref: 'TESTVENUE',
+      source: 'SHORTLINK',
+      type: 'OPEN_THREAD',
+    })
     expect(postback.mid).toEqual(expect.stringMatching(/ZDZD$/))
   })
 
@@ -119,7 +127,9 @@ describe('recorded Instagram payloads: what Meta sends', () => {
   // thread id can't be what spots a returning guest; the referral is. Other
   // ways back in weren't captured.
   it('kept the thread id after the guest deleted and reopened the thread in this capture', () => {
-    const postback = firstItem('postback-referral').item.postback as { mid: string }
+    const postback = firstItem('postback-referral').item.postback as {
+      mid: string
+    }
     const message = firstItem('message').item.message as { mid: string }
     const [, , postbackThread, postbackItem] = decodeMid(postback.mid)
     const [, , messageThread, messageItem] = decodeMid(message.mid)
@@ -133,8 +143,12 @@ describe('recorded Instagram payloads: what Meta sends', () => {
   it('encodes the account id and a per-conversation thread id inside every mid', () => {
     const message = firstItem('message')
     const echo = firstItem('echo')
-    const [, msgAccount, msgThread, msgItem] = decodeMid((message.item.message as { mid: string }).mid)
-    const [, echoAccount, echoThread, echoItem] = decodeMid((echo.item.message as { mid: string }).mid)
+    const [, msgAccount, msgThread, msgItem] = decodeMid(
+      (message.item.message as { mid: string }).mid,
+    )
+    const [, echoAccount, echoThread, echoItem] = decodeMid(
+      (echo.item.message as { mid: string }).mid,
+    )
 
     expect(msgAccount).toBe(message.entryId)
     expect(echoAccount).toBe(echo.entryId)
@@ -163,11 +177,18 @@ describe('summarizeInstagramPayload on recorded payloads', () => {
     expect(summary.events).toEqual([{ time: expect.any(Number), types }])
   })
 
-  it.each(FIXTURE_NAMES)('keeps every id, mid, text, ref, title and payload of the %s delivery out of the summary', (name) => {
-    const body = raw(name)
-    const serialized = JSON.stringify(summarizeInstagramPayload(JSON.parse(body)))
-    const values = [...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g)].map((m) => m[1])
-    expect(values.length).toBeGreaterThan(0)
-    for (const value of values) expect(serialized).not.toContain(value)
-  })
+  it.each(FIXTURE_NAMES)(
+    'keeps every id, mid, text, ref, title and payload of the %s delivery out of the summary',
+    (name) => {
+      const body = raw(name)
+      const serialized = JSON.stringify(
+        summarizeInstagramPayload(JSON.parse(body)),
+      )
+      const values = [
+        ...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g),
+      ].map((m) => m[1])
+      expect(values.length).toBeGreaterThan(0)
+      for (const value of values) expect(serialized).not.toContain(value)
+    },
+  )
 })

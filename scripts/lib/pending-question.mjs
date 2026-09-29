@@ -45,16 +45,22 @@
  * No I/O at module load, and none outside run's injected stdin/stdout.
  */
 
-import { auditHasQuestions, isBookkeepingComment, isBotComment, isContextChatComment, commentMarker } from './comment-provenance.mjs';
+import {
+  auditHasQuestions,
+  isBookkeepingComment,
+  isBotComment,
+  isContextChatComment,
+  commentMarker,
+} from './comment-provenance.mjs'
 
-export const EXIT = { OK: 0, USAGE: 2 };
+export const EXIT = { OK: 0, USAGE: 2 }
 
 export const USAGE = [
   'usage: node scripts/pending-question.mjs < candidates.json',
   'stdin: candidates, each with id, identifier, comments { body createdAt }',
   'stdout: tickets whose blocking label was cleared without an answer,',
   '  as [{ id, identifier, label }]',
-].join('\n');
+].join('\n')
 
 // The label that belongs on a ticket when this marker is the still-
 // unanswered tip of the thread. AUDIT is handled separately below, since
@@ -63,10 +69,10 @@ export const LABEL_FOR_MARKER = {
   'NEEDS-INPUT': 'Needs Decision',
   PLAN: 'Needs Decision',
   'NEEDS-ACTION': 'Needs Action',
-};
+}
 
 function commentAt(comment) {
-  return Date.parse(comment?.createdAt ?? '');
+  return Date.parse(comment?.createdAt ?? '')
 }
 
 /**
@@ -79,13 +85,15 @@ function commentAt(comment) {
  * one of those two shapes.
  */
 export function newestTurn(comments) {
-  const sorted = [...(comments ?? [])].sort((a, b) => commentAt(a) - commentAt(b));
+  const sorted = [...(comments ?? [])].sort(
+    (a, b) => commentAt(a) - commentAt(b),
+  )
   for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    const body = sorted[i]?.body ?? '';
-    if (isBookkeepingComment(body) || isContextChatComment(body)) continue;
-    return sorted[i];
+    const body = sorted[i]?.body ?? ''
+    if (isBookkeepingComment(body) || isContextChatComment(body)) continue
+    return sorted[i]
   }
-  return null;
+  return null
 }
 
 /**
@@ -94,14 +102,15 @@ export function newestTurn(comments) {
  * or otherwise), or a CC comment whose marker isn't one this module tracks.
  */
 export function pendingQuestionLabel(comments) {
-  const turn = newestTurn(comments);
-  if (!turn) return null;
-  const body = turn.body ?? '';
-  if (!isBotComment(body)) return null;
-  const marker = commentMarker(body);
-  if (marker === null) return null;
-  if (marker === 'AUDIT') return auditHasQuestions(body) ? 'Needs Decision' : null;
-  return LABEL_FOR_MARKER[marker] ?? null;
+  const turn = newestTurn(comments)
+  if (!turn) return null
+  const body = turn.body ?? ''
+  if (!isBotComment(body)) return null
+  const marker = commentMarker(body)
+  if (marker === null) return null
+  if (marker === 'AUDIT')
+    return auditHasQuestions(body) ? 'Needs Decision' : null
+  return LABEL_FOR_MARKER[marker] ?? null
 }
 
 /**
@@ -110,12 +119,13 @@ export function pendingQuestionLabel(comments) {
  * pendingQuestionLabel is non-null, in the order given.
  */
 export function reconcile(candidates) {
-  const out = [];
+  const out = []
   for (const candidate of candidates ?? []) {
-    const label = pendingQuestionLabel(candidate?.comments);
-    if (label) out.push({ id: candidate.id, identifier: candidate.identifier, label });
+    const label = pendingQuestionLabel(candidate?.comments)
+    if (label)
+      out.push({ id: candidate.id, identifier: candidate.identifier, label })
   }
-  return out;
+  return out
 }
 
 /**
@@ -127,18 +137,18 @@ export function reconcile(candidates) {
  */
 export function run({ stdin, stdout, stderr }) {
   const usage = (why) => {
-    stderr(`${why}\n${USAGE}\n`);
-    return EXIT.USAGE;
-  };
-
-  let candidates;
-  try {
-    candidates = JSON.parse(stdin);
-  } catch {
-    return usage('stdin is not JSON');
+    stderr(`${why}\n${USAGE}\n`)
+    return EXIT.USAGE
   }
-  if (!Array.isArray(candidates)) return usage('stdin is not a JSON array');
 
-  stdout(`${JSON.stringify(reconcile(candidates))}\n`);
-  return EXIT.OK;
+  let candidates
+  try {
+    candidates = JSON.parse(stdin)
+  } catch {
+    return usage('stdin is not JSON')
+  }
+  if (!Array.isArray(candidates)) return usage('stdin is not a JSON array')
+
+  stdout(`${JSON.stringify(reconcile(candidates))}\n`)
+  return EXIT.OK
 }

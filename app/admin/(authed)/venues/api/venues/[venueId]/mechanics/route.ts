@@ -36,7 +36,11 @@ export async function POST(
   const result = await addMechanic({ venueId, mechanic: body })
   if (!result.ok) {
     return NextResponse.json(
-      { error: 'mechanic add failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'mechanic add failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status: 500 },
     )
   }

@@ -120,7 +120,9 @@ describe('MessageReviewSchema', () => {
     expect(parsed.success).toBe(true)
     if (parsed.success) {
       expect(parsed.data.reviewedVia).toBe('mobile_operator')
-      expect(parsed.data.originalAiBody).toBe('the AI draft before the operator edit')
+      expect(parsed.data.originalAiBody).toBe(
+        'the AI draft before the operator edit',
+      )
     }
   })
 

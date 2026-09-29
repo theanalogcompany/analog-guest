@@ -9,6 +9,7 @@
 // not through a shared add/edit/remove layer) — see the TAC-343 plan review.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { ingestKnowledgeCorpusEntry } from '@/lib/rag'
 
 export interface AddKnowledgeEntryInput {
@@ -61,9 +62,14 @@ export async function addKnowledgeEntry(
       .delete()
       .eq('id', inserted.id)
     if (cleanupErr) {
-      console.error(
+      logger.error(
         '[knowledge-corpus] add: cleanup-after-embed-failure failed; row stranded',
-        { corpusId: inserted.id, venueId: input.venueId, embedError: embedResult.error, cleanupError: cleanupErr.message },
+        {
+          corpusId: inserted.id,
+          venueId: input.venueId,
+          embedError: embedResult.error,
+          cleanupError: cleanupErr.message,
+        },
       )
     }
     return {
@@ -90,7 +96,11 @@ export interface EditKnowledgeEntryInput {
 
 export type EditKnowledgeEntryResult =
   | { ok: true; corpusId: string; reEmbedded: boolean }
-  | { ok: false; error: string; errorCode: 'embed_failed' | 'db_error' | 'no_op' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'embed_failed' | 'db_error' | 'no_op'
+    }
 
 /**
  * Editing an entry with content is the fix path for a knowledge_corpus row
@@ -111,7 +121,8 @@ export async function editKnowledgeEntry(
   ) {
     return {
       ok: false,
-      error: 'no_op: pass at least one of content, primaryTags, or secondaryTags',
+      error:
+        'no_op: pass at least one of content, primaryTags, or secondaryTags',
       errorCode: 'no_op',
     }
   }
@@ -128,8 +139,10 @@ export async function editKnowledgeEntry(
     updatePayload.content = input.content
     updatePayload.is_processed = false
   }
-  if (input.primaryTags !== undefined) updatePayload.primary_tags = input.primaryTags
-  if (input.secondaryTags !== undefined) updatePayload.secondary_tags = input.secondaryTags
+  if (input.primaryTags !== undefined)
+    updatePayload.primary_tags = input.primaryTags
+  if (input.secondaryTags !== undefined)
+    updatePayload.secondary_tags = input.secondaryTags
 
   const { error: updateErr } = await supabase
     .from('knowledge_corpus')
@@ -178,7 +191,11 @@ export async function removeKnowledgeEntry(
     return { ok: false, error: error.message, errorCode: 'db_error' }
   }
   if (!data) {
-    return { ok: false, error: `knowledge entry not found: ${corpusId}`, errorCode: 'not_found' }
+    return {
+      ok: false,
+      error: `knowledge entry not found: ${corpusId}`,
+      errorCode: 'not_found',
+    }
   }
   return { ok: true, corpusId }
 }
@@ -197,7 +214,11 @@ export interface SplitKnowledgeEntryInput {
 
 export type SplitKnowledgeEntryResult =
   | { ok: true; newIds: string[] }
-  | { ok: false; error: string; errorCode: 'embed_failed' | 'db_error' | 'invalid_input' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'embed_failed' | 'db_error' | 'invalid_input'
+    }
 
 /**
  * Split one knowledge_corpus row into N. Atomicity without a transaction:
@@ -216,7 +237,11 @@ export async function splitKnowledgeEntry(
   input: SplitKnowledgeEntryInput,
 ): Promise<SplitKnowledgeEntryResult> {
   if (input.pieces.length < 2) {
-    return { ok: false, error: 'split requires at least 2 pieces', errorCode: 'invalid_input' }
+    return {
+      ok: false,
+      error: 'split requires at least 2 pieces',
+      errorCode: 'invalid_input',
+    }
   }
 
   const supabase = createAdminClient()
@@ -279,9 +304,14 @@ export async function splitKnowledgeEntry(
         .delete()
         .in('id', newIds)
       if (cleanupErr) {
-        console.error(
+        logger.error(
           '[knowledge-corpus] split: cleanup-after-embed-failure failed; rows stranded',
-          { originalId: input.originalId, newIds, embedError: embedResult.error, cleanupError: cleanupErr.message },
+          {
+            originalId: input.originalId,
+            newIds,
+            embedError: embedResult.error,
+            cleanupError: cleanupErr.message,
+          },
         )
       }
       return {
@@ -297,7 +327,7 @@ export async function splitKnowledgeEntry(
     .delete()
     .eq('id', input.originalId)
   if (deleteErr) {
-    console.error(
+    logger.error(
       '[knowledge-corpus] split: original delete failed after every piece embedded; original and new rows both live until manually cleaned up',
       { originalId: input.originalId, newIds, deleteError: deleteErr.message },
     )
@@ -316,7 +346,11 @@ export interface MergeKnowledgeEntriesInput {
 
 export type MergeKnowledgeEntriesResult =
   | { ok: true; newId: string }
-  | { ok: false; error: string; errorCode: 'embed_failed' | 'db_error' | 'invalid_input' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'embed_failed' | 'db_error' | 'invalid_input'
+    }
 
 /**
  * Merge N knowledge_corpus rows into one. Same atomicity shape as split,
@@ -328,7 +362,11 @@ export async function mergeKnowledgeEntries(
   input: MergeKnowledgeEntriesInput,
 ): Promise<MergeKnowledgeEntriesResult> {
   if (input.originalIds.length < 2) {
-    return { ok: false, error: 'merge requires at least 2 source entries', errorCode: 'invalid_input' }
+    return {
+      ok: false,
+      error: 'merge requires at least 2 source entries',
+      errorCode: 'invalid_input',
+    }
   }
 
   const supabase = createAdminClient()
@@ -360,9 +398,14 @@ export async function mergeKnowledgeEntries(
       .delete()
       .eq('id', inserted.id)
     if (cleanupErr) {
-      console.error(
+      logger.error(
         '[knowledge-corpus] merge: cleanup-after-embed-failure failed; row stranded',
-        { originalIds: input.originalIds, newId: inserted.id, embedError: embedResult.error, cleanupError: cleanupErr.message },
+        {
+          originalIds: input.originalIds,
+          newId: inserted.id,
+          embedError: embedResult.error,
+          cleanupError: cleanupErr.message,
+        },
       )
     }
     return {
@@ -377,9 +420,13 @@ export async function mergeKnowledgeEntries(
     .delete()
     .in('id', input.originalIds)
   if (deleteErr) {
-    console.error(
+    logger.error(
       '[knowledge-corpus] merge: originals delete failed after the merged row embedded; originals and the new row both live until manually cleaned up',
-      { originalIds: input.originalIds, newId: inserted.id, deleteError: deleteErr.message },
+      {
+        originalIds: input.originalIds,
+        newId: inserted.id,
+        deleteError: deleteErr.message,
+      },
     )
   }
 

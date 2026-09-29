@@ -41,7 +41,12 @@ interface FiltersProps {
   selectedGuestId: string | null
 }
 
-export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: FiltersProps) {
+export function Filters({
+  venues,
+  guests,
+  selectedVenueId,
+  selectedGuestId,
+}: FiltersProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
@@ -93,7 +98,9 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
       <Field label="Guest">
         <Select
           value={selectedGuestId ?? NONE_VALUE}
-          onValueChange={(v) => setParams({ guest: v === NONE_VALUE ? null : v })}
+          onValueChange={(v) =>
+            setParams({ guest: v === NONE_VALUE ? null : v })
+          }
           disabled={!selectedVenueId || isPending}
         >
           <SelectTrigger className="min-w-[18rem]">
@@ -121,12 +128,20 @@ export function Filters({ venues, guests, selectedVenueId, selectedGuestId }: Fi
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
   // <div> not <label>: the control is now a Radix Select trigger (a button),
   // and wrapping a button in a <label> would forward stray clicks into it.
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs text-ink-soft uppercase tracking-wider">{label}</span>
+      <span className="text-xs text-ink-soft uppercase tracking-wider">
+        {label}
+      </span>
       {children}
     </div>
   )

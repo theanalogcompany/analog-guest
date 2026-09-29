@@ -51,10 +51,16 @@ describe('deleteInstagramVenueData', () => {
   it('redacts every identifying column on the guest, and keeps the operational ones', async () => {
     const { client, queries } = scripted(['guest-1'])
     const result = await deleteInstagramVenueData(client, ACCOUNT_ID)
-    expect(result).toMatchObject({ ok: true, venueId: VENUE_ID, guestsAffected: 1 })
+    expect(result).toMatchObject({
+      ok: true,
+      venueId: VENUE_ID,
+      guestsAffected: 1,
+    })
 
     const guestUpdate = queries.filter((q) => q.table === 'guests')[1]
-    const [[patch]] = callsNamed(guestUpdate, 'update') as [[Record<string, unknown>]]
+    const [[patch]] = callsNamed(guestUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
 
     // Pinned exactly. A column added to guests that carries identity has to
     // be decided about here rather than quietly surviving a deletion.
@@ -91,7 +97,9 @@ describe('deleteInstagramVenueData', () => {
     const { client, queries } = scripted(['guest-1'])
     await deleteInstagramVenueData(client, ACCOUNT_ID)
 
-    const fingerprints = queries.find((q) => q.table === 'guest_card_fingerprints')!
+    const fingerprints = queries.find(
+      (q) => q.table === 'guest_card_fingerprints',
+    )!
     expect(callsNamed(fingerprints, 'delete')).toHaveLength(1)
     expect(callsNamed(fingerprints, 'eq')).toEqual([['venue_id', VENUE_ID]])
     expect(callsNamed(fingerprints, 'in')).toEqual([['guest_id', ['guest-1']]])
@@ -123,7 +131,9 @@ describe('deleteInstagramVenueData', () => {
 
     const ledger = queries.find((q) => q.table === 'inbound_turn_outcomes')!
     expect(callsNamed(ledger, 'delete')).toHaveLength(0)
-    const [[patch]] = callsNamed(ledger, 'update') as [[Record<string, unknown>]]
+    const [[patch]] = callsNamed(ledger, 'update') as [
+      [Record<string, unknown>],
+    ]
     expect(patch).toEqual({ detail: {} })
     expect(callsNamed(ledger, 'in')).toEqual([['guest_id', ['guest-1']]])
   })
@@ -136,7 +146,9 @@ describe('deleteInstagramVenueData', () => {
     await deleteInstagramVenueData(client, ACCOUNT_ID)
 
     const guestUpdate = queries.filter((q) => q.table === 'guests')[1]
-    const [[patch]] = callsNamed(guestUpdate, 'update') as [[Record<string, unknown>]]
+    const [[patch]] = callsNamed(guestUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
     expect(patch.phone_number).toBeNull()
     expect(patch.instagram_scoped_id).not.toBeNull()
     expect(String(patch.instagram_scoped_id)).toMatch(/^deleted:/)
@@ -150,7 +162,9 @@ describe('deleteInstagramVenueData', () => {
 
     const updates = queries.filter((q) => q.table === 'guests').slice(1)
     const tombstones = updates.map(
-      (q) => (callsNamed(q, 'update')[0][0] as Record<string, unknown>).instagram_scoped_id,
+      (q) =>
+        (callsNamed(q, 'update')[0][0] as Record<string, unknown>)
+          .instagram_scoped_id,
     )
     expect(tombstones).toHaveLength(2)
     expect(new Set(tombstones).size).toBe(2)
@@ -161,7 +175,9 @@ describe('deleteInstagramVenueData', () => {
     await deleteInstagramVenueData(client, ACCOUNT_ID)
 
     const messageUpdate = queries.find((q) => q.table === 'messages')!
-    const [[patch]] = callsNamed(messageUpdate, 'update') as [[Record<string, unknown>]]
+    const [[patch]] = callsNamed(messageUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
     expect(patch).toEqual({
       body: REDACTED_MESSAGE_BODY,
       media_urls: [],
@@ -189,7 +205,9 @@ describe('deleteInstagramVenueData', () => {
     expect(callsNamed(credential, 'eq')).toEqual([['venue_id', VENUE_ID]])
 
     const venueUpdate = queries.filter((q) => q.table === 'venues')[1]
-    const [[patch]] = callsNamed(venueUpdate, 'update') as [[Record<string, unknown>]]
+    const [[patch]] = callsNamed(venueUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
     expect(patch).toEqual({ instagram_account_id: null })
   })
 
@@ -200,7 +218,9 @@ describe('deleteInstagramVenueData', () => {
     await deleteInstagramVenueData(client, ACCOUNT_ID)
 
     const tables = queries.map((q) => q.table)
-    expect(tables.indexOf('messages')).toBeLessThan(tables.lastIndexOf('guests'))
+    expect(tables.indexOf('messages')).toBeLessThan(
+      tables.lastIndexOf('guests'),
+    )
   })
 
   it('scopes the guest scan to this venue and to Instagram guests only', async () => {
@@ -209,15 +229,23 @@ describe('deleteInstagramVenueData', () => {
 
     const scan = queries.filter((q) => q.table === 'guests')[0]
     expect(callsNamed(scan, 'eq')).toEqual([['venue_id', VENUE_ID]])
-    expect(callsNamed(scan, 'not')).toEqual([['instagram_scoped_id', 'is', null]])
+    expect(callsNamed(scan, 'not')).toEqual([
+      ['instagram_scoped_id', 'is', null],
+    ])
   })
 
   // Meta can send a request for an account we never finished connecting.
   // Zero affected is a legitimate answer, not a failure.
   it('answers cleanly for an account no venue owns, touching nothing', async () => {
-    const { client, queries } = queryRecorder({ venues: [{ data: null, error: null }] })
+    const { client, queries } = queryRecorder({
+      venues: [{ data: null, error: null }],
+    })
     const result = await deleteInstagramVenueData(client, 'unknown-account')
-    expect(result).toMatchObject({ ok: true, venueId: null, guestsAffected: 0 })
+    expect(result).toMatchObject({
+      ok: true,
+      venueId: null,
+      guestsAffected: 0,
+    })
     expect(queries).toHaveLength(1)
   })
 
@@ -228,7 +256,9 @@ describe('deleteInstagramVenueData', () => {
   })
 
   it('always returns a confirmation code, including on failure', async () => {
-    const { client } = queryRecorder({ venues: [{ data: null, error: { message: 'timeout' } }] })
+    const { client } = queryRecorder({
+      venues: [{ data: null, error: { message: 'timeout' } }],
+    })
     const result = await deleteInstagramVenueData(client, ACCOUNT_ID)
     expect(result.ok).toBe(false)
     expect(result.confirmationCode).toMatch(/^[0-9a-f]{32}$/)

@@ -1,10 +1,7 @@
 'use client'
 
 import { guestNameWithPhone } from '../../../_lib/guest-name'
-import type {
-  VoicePageData,
-  VoicePageMessage,
-} from '../_lib/load-voice-page'
+import type { VoicePageData, VoicePageMessage } from '../_lib/load-voice-page'
 
 // Thread pane — full conversation in iMessage bubbles. Click an outbound
 // to "flag" it (clay halo); the playground below picks up the flagged

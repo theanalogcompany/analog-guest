@@ -56,24 +56,32 @@ describe('ProposalSchema', () => {
   // import is load-bearing: a hand-copied list would drift and this would
   // keep passing against the stale copy.
   it('rejects a non-canonical primary tag', () => {
-    const r = ProposalSchema.safeParse({ ...VALID, primary_tags: ['personality'] })
+    const r = ProposalSchema.safeParse({
+      ...VALID,
+      primary_tags: ['personality'],
+    })
     expect(r.success).toBe(false)
   })
 
   it('accepts the namespaced form the canonical checker allows', () => {
-    expect(ProposalSchema.parse({ ...VALID, primary_tags: ['staff_phoebe'] }).primary_tags).toEqual([
-      'staff_phoebe',
-    ])
+    expect(
+      ProposalSchema.parse({ ...VALID, primary_tags: ['staff_phoebe'] })
+        .primary_tags,
+    ).toEqual(['staff_phoebe'])
   })
 })
 
 describe('findDuplicateRowIds', () => {
   it('finds a repeated row_id', () => {
-    expect(findDuplicateRowIds([VALID, { ...VALID }, { ...VALID, row_id: 'P02' }])).toEqual(['P01'])
+    expect(
+      findDuplicateRowIds([VALID, { ...VALID }, { ...VALID, row_id: 'P02' }]),
+    ).toEqual(['P01'])
   })
 
   it('returns nothing when every row_id is distinct', () => {
-    expect(findDuplicateRowIds([VALID, { ...VALID, row_id: 'P02' }])).toEqual([])
+    expect(findDuplicateRowIds([VALID, { ...VALID, row_id: 'P02' }])).toEqual(
+      [],
+    )
   })
 })
 
@@ -91,7 +99,9 @@ describe('parseArgs', () => {
   })
 
   it('rejects an unknown flag rather than ignoring it', () => {
-    expect(() => parseArgs(['--venue', 'x', '--fource'])).toThrow(/unrecognized/)
+    expect(() => parseArgs(['--venue', 'x', '--fource'])).toThrow(
+      /unrecognized/,
+    )
   })
 })
 
@@ -194,12 +204,18 @@ describe('extractSpecifics', () => {
   })
 
   it('keeps a decimal price whole', () => {
-    expect(extractSpecifics('for $9.99 on lemils.com.').money).toEqual(['$9.99'])
+    expect(extractSpecifics('for $9.99 on lemils.com.').money).toEqual([
+      '$9.99',
+    ])
   })
 
   it('separates centuries, which is the pair embeddings cannot tell apart', () => {
-    expect(extractSpecifics('in the 16th century').ordinals).toEqual(['16thcentury'])
-    expect(extractSpecifics('in the 17th century').ordinals).toEqual(['17thcentury'])
+    expect(extractSpecifics('in the 16th century').ordinals).toEqual([
+      '16thcentury',
+    ])
+    expect(extractSpecifics('in the 17th century').ordinals).toEqual([
+      '17thcentury',
+    ])
   })
 
   it('keeps a range whole rather than splitting it into two numbers', () => {
@@ -213,7 +229,9 @@ describe('extractSpecifics', () => {
   })
 
   it('reads percentages', () => {
-    expect(extractSpecifics('80% Indian Arabica and 20% Robusta').percentages).toEqual(['20%', '80%'])
+    expect(
+      extractSpecifics('80% Indian Arabica and 20% Robusta').percentages,
+    ).toEqual(['20%', '80%'])
     // A spaced form must normalise to the SAME token, or two entries writing
     // the fact differently read as a numeric divergence when they agree.
     expect(extractSpecifics('20 % chicory').percentages).toEqual(['20%'])
@@ -226,7 +244,9 @@ describe('extractSpecifics', () => {
   })
 
   it('reads a year', () => {
-    expect(extractSpecifics('started selling in January 2024.').years).toEqual(['2024'])
+    expect(extractSpecifics('started selling in January 2024.').years).toEqual([
+      '2024',
+    ])
   })
 
   it('collects proper nouns but drops sentence-start filler', () => {
@@ -247,8 +267,12 @@ describe('diffSpecifics', () => {
 
   it('flags the 16th/17th century pair as a numeric divergence', () => {
     const d = diffSpecifics(
-      extractSpecifics('Baba Budan brought coffee to India in the 17th century.'),
-      extractSpecifics('Baba Budan brought coffee to India in the 16th century.'),
+      extractSpecifics(
+        'Baba Budan brought coffee to India in the 17th century.',
+      ),
+      extractSpecifics(
+        'Baba Budan brought coffee to India in the 16th century.',
+      ),
     )
     expect(d.numericDivergence).toBe(true)
     expect(d.onlyLeft.ordinals).toEqual(['17thcentury'])
@@ -317,9 +341,20 @@ describe('suggestVerdict', () => {
 
 describe('checkSplitSafety', () => {
   const bodies = [
-    { rowId: 'P05', content: 'Estate Secret is a chicory blend. 1 lb for $26 on lemils.com.' },
-    { rowId: 'P15', content: 'Every coffee can be browsed on lemils.com, and orders over $50 ship free.' },
-    { rowId: 'P20', content: 'All coffee sales on lemils.com are final. Items can be returned within 30 days.' },
+    {
+      rowId: 'P05',
+      content: 'Estate Secret is a chicory blend. 1 lb for $26 on lemils.com.',
+    },
+    {
+      rowId: 'P15',
+      content:
+        'Every coffee can be browsed on lemils.com, and orders over $50 ship free.',
+    },
+    {
+      rowId: 'P20',
+      content:
+        'All coffee sales on lemils.com are final. Items can be returned within 30 days.',
+    },
   ]
 
   it('finds nothing against the real splitter', () => {
@@ -331,14 +366,19 @@ describe('checkSplitSafety', () => {
   // (it has no whitespace, and the splitter needs whitespace after the
   // punctuation), so the seam is the only way to exercise the failure branch.
   it('reports a break when the splitter does cut a domain', () => {
-    const breaking = (body: string): string[] => body.split('.com').map((p, i) => (i === 0 ? p : `com${p}`))
+    const breaking = (body: string): string[] =>
+      body.split('.com').map((p, i) => (i === 0 ? p : `com${p}`))
     const found = checkSplitSafety(bodies, breaking)
     expect(found.length).toBeGreaterThan(0)
     expect(found[0]!.brokenToken).toBe('lemils.com')
   })
 
   it('ignores bodies with no domain in them', () => {
-    expect(checkSplitSafety([{ rowId: 'P21', content: 'Coffee grows in Chikmagalur.' }])).toEqual([])
+    expect(
+      checkSplitSafety([
+        { rowId: 'P21', content: 'Coffee grows in Chikmagalur.' },
+      ]),
+    ).toEqual([])
   })
 })
 
@@ -353,18 +393,30 @@ const IDS = [
 describe('resolveReplacesId', () => {
   it('resolves a full uuid', () => {
     const r = resolveReplacesId('1c973b3e-5466-4ee5-8df7-cb07ab8996a1', IDS)
-    expect(r).toEqual({ ok: true, id: '1c973b3e-5466-4ee5-8df7-cb07ab8996a1', viaPrefix: false })
+    expect(r).toEqual({
+      ok: true,
+      id: '1c973b3e-5466-4ee5-8df7-cb07ab8996a1',
+      viaPrefix: false,
+    })
   })
 
   it('resolves an 8-char prefix that matches exactly one row', () => {
     const r = resolveReplacesId('1c973b3e', IDS)
-    expect(r).toEqual({ ok: true, id: '1c973b3e-5466-4ee5-8df7-cb07ab8996a1', viaPrefix: true })
+    expect(r).toEqual({
+      ok: true,
+      id: '1c973b3e-5466-4ee5-8df7-cb07ab8996a1',
+      viaPrefix: true,
+    })
   })
 
   // Both refusals matter: this resolves the target of an in-place overwrite
   // of reviewed content, so guessing is never acceptable.
   it('refuses a prefix that matches nothing', () => {
-    expect(resolveReplacesId('deadbeef', IDS)).toEqual({ ok: false, reason: 'no_match', matches: [] })
+    expect(resolveReplacesId('deadbeef', IDS)).toEqual({
+      ok: false,
+      reason: 'no_match',
+      matches: [],
+    })
   })
 
   it('refuses a prefix that matches more than one row', () => {
@@ -380,7 +432,9 @@ describe('resolveReplacesId', () => {
   // caller ever passed unscoped ids, a prefix could reach another venue's
   // row — so the test states the contract the caller has to keep.
   it('can only ever return an id it was given', () => {
-    const r = resolveReplacesId('1c973b3e', ['1c973b3e-5466-4ee5-8df7-cb07ab8996a1'])
+    const r = resolveReplacesId('1c973b3e', [
+      '1c973b3e-5466-4ee5-8df7-cb07ab8996a1',
+    ])
     expect(r.ok && IDS.includes(r.id)).toBe(true)
     expect(resolveReplacesId('1c973b3e', []).ok).toBe(false)
   })
@@ -388,34 +442,56 @@ describe('resolveReplacesId', () => {
 
 describe('ProposalSchema replaces_id forms', () => {
   it('accepts the 8-char prefix form P68 uses', () => {
-    const r = ProposalSchema.safeParse({ ...VALID, action: 'replace', replaces_id: 'c2d7be4c' })
+    const r = ProposalSchema.safeParse({
+      ...VALID,
+      action: 'replace',
+      replaces_id: 'c2d7be4c',
+    })
     expect(r.success).toBe(true)
   })
 
   it('rejects a prefix shorter than 8 chars', () => {
-    const r = ProposalSchema.safeParse({ ...VALID, action: 'replace', replaces_id: 'c2d7be' })
+    const r = ProposalSchema.safeParse({
+      ...VALID,
+      action: 'replace',
+      replaces_id: 'c2d7be',
+    })
     expect(r.success).toBe(false)
   })
 
   it('rejects a non-hex id', () => {
-    const r = ProposalSchema.safeParse({ ...VALID, action: 'replace', replaces_id: 'not-an-id-at-all' })
+    const r = ProposalSchema.safeParse({
+      ...VALID,
+      action: 'replace',
+      replaces_id: 'not-an-id-at-all',
+    })
     expect(r.success).toBe(false)
   })
 })
 
 // ── load decision table ─────────────────────────────────────────────────────
 
-const UNRELATED: LoadableRow = { id: 'row-unrelated', isProcessed: true, proposalRowId: null }
+const UNRELATED: LoadableRow = {
+  id: 'row-unrelated',
+  isProcessed: true,
+  proposalRowId: null,
+}
 
 describe('decideLoadAction', () => {
   it('inserts a new proposal the venue has never seen', () => {
-    expect(decideLoadAction({ row_id: 'P01', action: 'new' }, null, [UNRELATED])).toEqual({
+    expect(
+      decideLoadAction({ row_id: 'P01', action: 'new' }, null, [UNRELATED]),
+    ).toEqual({
       kind: 'insert',
     })
   })
 
   it('updates the resolved target for a replacement', () => {
-    expect(decideLoadAction({ row_id: 'P68', action: 'replace' }, 'target-id', [UNRELATED])).toEqual({
+    expect(
+      decideLoadAction({ row_id: 'P68', action: 'replace' }, 'target-id', [
+        UNRELATED,
+      ]),
+    ).toEqual({
       kind: 'update',
       id: 'target-id',
       reason: 'replace',
@@ -423,13 +499,19 @@ describe('decideLoadAction', () => {
   })
 
   it('throws rather than guessing when a replacement has no resolved target', () => {
-    expect(() => decideLoadAction({ row_id: 'P68', action: 'replace' }, null, [])).toThrow(/P68/)
+    expect(() =>
+      decideLoadAction({ row_id: 'P68', action: 'replace' }, null, []),
+    ).toThrow(/P68/)
   })
 
   // The re-run no-op.
   it('skips a proposal already loaded and embedded', () => {
-    const rows: LoadableRow[] = [{ id: 'row-1', isProcessed: true, proposalRowId: 'P01' }]
-    expect(decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows)).toEqual({
+    const rows: LoadableRow[] = [
+      { id: 'row-1', isProcessed: true, proposalRowId: 'P01' },
+    ]
+    expect(
+      decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows),
+    ).toEqual({
       kind: 'skip',
       reason: 'already_loaded',
       id: 'row-1',
@@ -437,8 +519,12 @@ describe('decideLoadAction', () => {
   })
 
   it('skips an already-applied replacement too, rather than replacing twice', () => {
-    const rows: LoadableRow[] = [{ id: 'target-id', isProcessed: true, proposalRowId: 'P68' }]
-    expect(decideLoadAction({ row_id: 'P68', action: 'replace' }, 'target-id', rows)).toEqual({
+    const rows: LoadableRow[] = [
+      { id: 'target-id', isProcessed: true, proposalRowId: 'P68' },
+    ]
+    expect(
+      decideLoadAction({ row_id: 'P68', action: 'replace' }, 'target-id', rows),
+    ).toEqual({
       kind: 'skip',
       reason: 'already_loaded',
       id: 'target-id',
@@ -449,8 +535,12 @@ describe('decideLoadAction', () => {
   // written but never embedded — present in the table, invisible to
   // retrieval, and skipped forever by every later run.
   it('resumes a stamped row whose embedding never landed', () => {
-    const rows: LoadableRow[] = [{ id: 'row-1', isProcessed: false, proposalRowId: 'P01' }]
-    expect(decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows)).toEqual({
+    const rows: LoadableRow[] = [
+      { id: 'row-1', isProcessed: false, proposalRowId: 'P01' },
+    ]
+    expect(
+      decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows),
+    ).toEqual({
       kind: 'update',
       id: 'row-1',
       reason: 'resume_unprocessed',
@@ -458,8 +548,12 @@ describe('decideLoadAction', () => {
   })
 
   it('does not confuse one proposal row_id with another', () => {
-    const rows: LoadableRow[] = [{ id: 'row-1', isProcessed: true, proposalRowId: 'P02' }]
-    expect(decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows).kind).toBe('insert')
+    const rows: LoadableRow[] = [
+      { id: 'row-1', isProcessed: true, proposalRowId: 'P02' },
+    ]
+    expect(
+      decideLoadAction({ row_id: 'P01', action: 'new' }, null, rows).kind,
+    ).toBe('insert')
   })
 
   it('a whole second run over an applied load is entirely skips', () => {
@@ -480,22 +574,33 @@ describe('decideLoadAction', () => {
 
 describe('embeddingCacheKey', () => {
   it('is stable for the same model and text', () => {
-    expect(embeddingCacheKey('voyage-3-large', 'hello')).toBe(embeddingCacheKey('voyage-3-large', 'hello'))
+    expect(embeddingCacheKey('voyage-3-large', 'hello')).toBe(
+      embeddingCacheKey('voyage-3-large', 'hello'),
+    )
   })
 
   it('differs on text', () => {
-    expect(embeddingCacheKey('voyage-3-large', 'a')).not.toBe(embeddingCacheKey('voyage-3-large', 'b'))
+    expect(embeddingCacheKey('voyage-3-large', 'a')).not.toBe(
+      embeddingCacheKey('voyage-3-large', 'b'),
+    )
   })
 
   // Without the model in the key, switching models would silently serve
   // vectors from a different space and every score would be meaningless.
   it('differs on model', () => {
-    expect(embeddingCacheKey('voyage-3-large', 'a')).not.toBe(embeddingCacheKey('voyage-3', 'a'))
+    expect(embeddingCacheKey('voyage-3-large', 'a')).not.toBe(
+      embeddingCacheKey('voyage-3', 'a'),
+    )
   })
 })
 
 describe('diffAgainstBaseline', () => {
-  const row = (rowId: string, suggested: string, topLabel: string | null, topScore: number | null): BaselineRow => ({
+  const row = (
+    rowId: string,
+    suggested: string,
+    topLabel: string | null,
+    topScore: number | null,
+  ): BaselineRow => ({
     rowId,
     suggested,
     topLabel,
@@ -523,11 +628,19 @@ describe('diffAgainstBaseline', () => {
   // Re-embedding identical text can move a score in the last decimals.
   // Reporting that would bury the changes that mean something.
   it('ignores score drift alone', () => {
-    expect(diffAgainstBaseline([row('P05', 'NEW', 'n', 0.7)], [row('P05', 'NEW', 'n', 0.7004)])).toEqual([])
+    expect(
+      diffAgainstBaseline(
+        [row('P05', 'NEW', 'n', 0.7)],
+        [row('P05', 'NEW', 'n', 0.7004)],
+      ),
+    ).toEqual([])
   })
 
   it('reports added and removed rows', () => {
-    const c = diffAgainstBaseline([row('P54', 'NEW', 'n', 0.5)], [row('P68', 'REPLACES', null, null)])
+    const c = diffAgainstBaseline(
+      [row('P54', 'NEW', 'n', 0.5)],
+      [row('P68', 'REPLACES', null, null)],
+    )
     expect(c.map((x) => [x.rowId, x.kind])).toEqual([
       ['P54', 'removed'],
       ['P68', 'added'],

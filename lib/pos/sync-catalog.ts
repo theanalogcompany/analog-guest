@@ -17,9 +17,15 @@ export async function syncCatalog(opts: {
   const supabase = opts.supabase ?? createAdminClient()
   const provider = getProvider('square')
 
-  const res = await provider.fetchCatalog(squareEnvCredential(opts.venueId, null))
+  const res = await provider.fetchCatalog(
+    squareEnvCredential(opts.venueId, null),
+  )
   if (!res.ok) {
-    return { ok: false, error: res.error, errorCode: res.errorCode ?? 'fetch_catalog_failed' }
+    return {
+      ok: false,
+      error: res.error,
+      errorCode: res.errorCode ?? 'fetch_catalog_failed',
+    }
   }
   if (res.data.length === 0) {
     return { ok: true, data: { upserted: 0 } }
@@ -42,7 +48,11 @@ export async function syncCatalog(opts: {
     .from('pos_catalog_items')
     .upsert(rows, { onConflict: 'venue_id,provider,external_id' })
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'catalog_upsert_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'catalog_upsert_failed',
+    }
   }
   return { ok: true, data: { upserted: rows.length } }
 }

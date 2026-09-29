@@ -11,9 +11,9 @@
  * only wires it to the process. Uses nothing outside Node's standard library.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { run } from './lib/run-report.mjs';
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { run } from './lib/run-report.mjs'
 
 process.exitCode = run({
   argv: process.argv.slice(2),
@@ -21,11 +21,14 @@ process.exitCode = run({
   readFile: (path) => readFileSync(path, 'utf8'),
   git: (args) => {
     try {
-      return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return execFileSync('git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
     } catch {
-      return null;
+      return null
     }
   },
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
-});
+})

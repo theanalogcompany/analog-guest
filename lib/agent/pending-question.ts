@@ -29,6 +29,7 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { PendingQuestion } from '@/lib/ai'
+import { logger } from '@/lib/observability/logger'
 import { looksLikeQuestion } from './looks-like-question'
 import { KNOWLEDGE_GAP_CARD_REVIEW_REASONS, isKnowledgeGapCard } from './stages'
 
@@ -87,7 +88,9 @@ export async function findPendingQuestion(
       .or(
         [
           'pending_until.not.is.null',
-          ...KNOWLEDGE_GAP_CARD_REVIEW_REASONS.map((r) => `review_reason.eq.${r}`),
+          ...KNOWLEDGE_GAP_CARD_REVIEW_REASONS.map(
+            (r) => `review_reason.eq.${r}`,
+          ),
         ].join(','),
       )
       // TAC-394: an explicit order, because there can now be two. A guest holds
@@ -107,12 +110,13 @@ export async function findPendingQuestion(
       .maybeSingle()
 
     if (cardError) {
-      console.warn(
+      logger.warn(
         `[agent] findPendingQuestion card lookup degraded for venue=${venueId} guest=${guestId}: ${cardError.message}`,
       )
       return null
     }
-    if (!card || !isKnowledgeGapCard(card) || !card.reply_to_message_id) return null
+    if (!card || !isKnowledgeGapCard(card) || !card.reply_to_message_id)
+      return null
 
     const inbound = await loadInboundQuestion(card.reply_to_message_id)
     if (inbound === null) return null
@@ -135,7 +139,7 @@ export async function findPendingQuestion(
       },
     }
   } catch (e) {
-    console.warn(
+    logger.warn(
       `[agent] findPendingQuestion threw for venue=${venueId} guest=${guestId}: ${
         e instanceof Error ? e.message : String(e)
       }`,
@@ -183,7 +187,7 @@ export async function loadInboundQuestion(
       .eq('id', inboundMessageId)
       .maybeSingle()
     if (error) {
-      console.warn(
+      logger.warn(
         `[agent] loadInboundQuestion degraded for message=${inboundMessageId}: ${error.message}`,
       )
       return null
@@ -197,7 +201,7 @@ export async function loadInboundQuestion(
       providerMessageId: data.provider_message_id ?? '',
     }
   } catch (e) {
-    console.warn(
+    logger.warn(
       `[agent] loadInboundQuestion threw for message=${inboundMessageId}: ${
         e instanceof Error ? e.message : String(e)
       }`,

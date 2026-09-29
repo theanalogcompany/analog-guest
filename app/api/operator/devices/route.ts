@@ -25,6 +25,7 @@ import { z } from 'zod'
 
 import { withOperatorAuth } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +50,10 @@ export const POST = withOperatorAuth(async (request, { operator }) => {
   const parsed = BodySchema.safeParse(raw)
   if (!parsed.success) {
     return NextResponse.json(
-      { error: 'invalid body', detail: parsed.error.issues.map((i) => i.message).join('; ') },
+      {
+        error: 'invalid body',
+        detail: parsed.error.issues.map((i) => i.message).join('; '),
+      },
       { status: 400 },
     )
   }
@@ -63,7 +67,7 @@ export const POST = withOperatorAuth(async (request, { operator }) => {
     })
     .eq('id', operator.operatorId)
   if (error) {
-    console.error('apns: device-token upsert failed', {
+    logger.error('apns: device-token upsert failed', {
       operatorId: operator.operatorId,
       error: error.message,
     })

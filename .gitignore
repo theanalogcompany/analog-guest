@@ -24,6 +24,13 @@
 .DS_Store
 *.pem
 
+# IDE configs — per-developer state, never shared
+.vscode/
+.idea/
+
+# per-test timing report ci.yml writes and uploads as an artifact
+vitest-junit.xml
+
 # Google OAuth client secret (Drive ADC) — never committed, per CLAUDE.md
 # "Drive integration → ADC token refresh"
 client_secret_*.json

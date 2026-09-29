@@ -120,7 +120,11 @@ const SCENARIOS: ReadonlyArray<{ id: string; body: string; why: string }> = [
 
 const ARMS: readonly MessageChannel[] = ['instagram', 'text']
 
-function parseArgs(argv: readonly string[]): { venue?: string; guest?: string; reps: number } {
+function parseArgs(argv: readonly string[]): {
+  venue?: string
+  guest?: string
+  reps: number
+} {
   const out: { venue?: string; guest?: string; reps: number } = { reps: 3 }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--venue') out.venue = argv[++i]
@@ -132,7 +136,12 @@ function parseArgs(argv: readonly string[]): { venue?: string; guest?: string; r
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
-  if (!args.venue || !args.guest || !Number.isInteger(args.reps) || args.reps < 1) {
+  if (
+    !args.venue ||
+    !args.guest ||
+    !Number.isInteger(args.reps) ||
+    args.reps < 1
+  ) {
     console.error(
       '✗ usage: npm run measure-instagram-copy -- --venue <slug> --guest <guest-uuid> [--reps N]',
     )
@@ -165,7 +174,9 @@ async function main(): Promise<void> {
     },
   })
   console.log(`run log: ${log.path}`)
-  console.log(`${SCENARIOS.length} scenarios x ${ARMS.length} arms x ${args.reps} reps\n`)
+  console.log(
+    `${SCENARIOS.length} scenarios x ${ARMS.length} arms x ${args.reps} reps\n`,
+  )
 
   const trace = startAgentTrace({
     name: 'measurement.instagram-channel-copy',
@@ -198,13 +209,18 @@ async function main(): Promise<void> {
       ctx.classification = classification
       ctx.corpus = await retrieveCorpusStage(ctx)
       ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-        ? await retrieveKnowledgeStage(ctx, classification.category, scenario.body)
+        ? await retrieveKnowledgeStage(
+            ctx,
+            classification.category,
+            scenario.body,
+          )
         : []
 
       for (const arm of ARMS) {
         ctx.conversationChannel = arm
         const generated = await generateStage(ctx, classification.category)
-        const body = generated.status === 'success' ? generated.result.body : null
+        const body =
+          generated.status === 'success' ? generated.result.body : null
         const matches = body ? findChannelLanguage(body) : []
 
         // THE BACKSTOP IN THE LOOP. Without this the run measures GENERATION,
@@ -228,25 +244,34 @@ async function main(): Promise<void> {
           category: classification.category,
           status: generated.status,
           body,
-          voiceFidelity: generated.status === 'success' ? generated.result.voiceFidelity : null,
+          voiceFidelity:
+            generated.status === 'success'
+              ? generated.result.voiceFidelity
+              : null,
           // The first run could not say why `regeneration_triggered` fired so
           // often, because it recorded neither of these. attempts > 1 IS that
           // event; attemptScores shows whether the first draft was under the
           // 0.7 regen floor or whether something else (a dash, self-talk)
           // forced the retry.
-          attempts: generated.status === 'success' ? generated.result.attempts : null,
-          attemptScores: generated.status === 'success' ? generated.result.attemptScores : null,
+          attempts:
+            generated.status === 'success' ? generated.result.attempts : null,
+          attemptScores:
+            generated.status === 'success'
+              ? generated.result.attemptScores
+              : null,
           // skipped | clean | flagged | truncated. `flagged` means production
           // would have queued this rather than sent it.
           groundingStatus: grounding?.status ?? null,
-          groundingClaims: grounding?.status === 'flagged' ? grounding.claims : [],
+          groundingClaims:
+            grounding?.status === 'flagged' ? grounding.claims : [],
           phoneClaims: matches.filter((m) => m.kind === 'phone_claim'),
           instagramIdioms: matches.filter((m) => m.kind === 'instagram_idiom'),
         })
 
         const claims = matches.filter((m) => m.kind === 'phone_claim')
         const held = grounding?.status === 'flagged' ? ' [backstop HELD]' : ''
-        const mark = generated.status !== 'success' ? '·' : claims.length > 0 ? '✗' : '✓'
+        const mark =
+          generated.status !== 'success' ? '·' : claims.length > 0 ? '✗' : '✓'
         console.log(
           `${mark} ${scenario.id} rep${rep} ${arm.padEnd(9)} ${
             generated.status !== 'success'
@@ -262,7 +287,9 @@ async function main(): Promise<void> {
 
   await trace.flushAsync()
   console.log(`\nDone. Read the run log and count by arm: ${log.path}`)
-  console.log('A phone claim in the instagram arm is the finding; the text arm is the control.')
+  console.log(
+    'A phone claim in the instagram arm is the finding; the text arm is the control.',
+  )
 }
 
 main().catch((e: unknown) => {

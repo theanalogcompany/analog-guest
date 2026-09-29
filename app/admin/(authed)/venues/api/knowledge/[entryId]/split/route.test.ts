@@ -55,7 +55,10 @@ describe('POST /admin/venues/api/knowledge/[entryId]/split', () => {
       ok: true,
       newIds: [NEW_ID_1, NEW_ID_2],
     })
-    const res = await POST(buildRequest({ pieces: VALID_PIECES }), buildParams())
+    const res = await POST(
+      buildRequest({ pieces: VALID_PIECES }),
+      buildParams(),
+    )
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json).toMatchObject({ success: true, newIds: [NEW_ID_1, NEW_ID_2] })
@@ -68,7 +71,11 @@ describe('POST /admin/venues/api/knowledge/[entryId]/split', () => {
 
   it('400 on fewer than 2 pieces', async () => {
     const res = await POST(
-      buildRequest({ pieces: [{ content: 'only one', primaryTags: ['other'], secondaryTags: [] }] }),
+      buildRequest({
+        pieces: [
+          { content: 'only one', primaryTags: ['other'], secondaryTags: [] },
+        ],
+      }),
       buildParams(),
     )
     expect(res.status).toBe(400)
@@ -95,16 +102,25 @@ describe('POST /admin/venues/api/knowledge/[entryId]/split', () => {
       error: 'voyage 502',
       errorCode: 'embed_failed',
     })
-    const res = await POST(buildRequest({ pieces: VALID_PIECES }), buildParams())
+    const res = await POST(
+      buildRequest({ pieces: VALID_PIECES }),
+      buildParams(),
+    )
     expect(res.status).toBe(502)
   })
 
   it('passes through 404 from auth helper', async () => {
     vi.mocked(requireKnowledgeEntryAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'knowledge entry not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'knowledge entry not found' },
+        { status: 404 },
+      ),
     })
-    const res = await POST(buildRequest({ pieces: VALID_PIECES }), buildParams())
+    const res = await POST(
+      buildRequest({ pieces: VALID_PIECES }),
+      buildParams(),
+    )
     expect(res.status).toBe(404)
     expect(splitKnowledgeEntry).not.toHaveBeenCalled()
   })

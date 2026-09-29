@@ -10,7 +10,10 @@ vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
 
-import { SEND_FIDELITY_FLOOR, STRONG_MATCH_SIMILARITY } from '@/lib/agent/stages'
+import {
+  SEND_FIDELITY_FLOOR,
+  STRONG_MATCH_SIMILARITY,
+} from '@/lib/agent/stages'
 import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
 import { TUNABLES, type TunableCategory, type TunableType } from './manifest'
 

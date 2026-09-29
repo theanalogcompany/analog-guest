@@ -118,7 +118,10 @@ function normalizeBody(body: string): string {
  * Exported for the measurement harness and the tests; `buildContextQuery` is
  * what callers use.
  */
-export function contextTurns(ctx: RuntimeContext, turns = CONTEXT_TURNS): RecentMessage[] {
+export function contextTurns(
+  ctx: RuntimeContext,
+  turns = CONTEXT_TURNS,
+): RecentMessage[] {
   if (turns <= 0) return []
   // Measured from the CURRENT MESSAGE, not from wall-clock now. The question
   // is whether a prior turn belongs to the same conversation as the message
@@ -131,7 +134,9 @@ export function contextTurns(ctx: RuntimeContext, turns = CONTEXT_TURNS): Recent
   // empty context and the contextual arm is silently dead — the TAC-367
   // re-dating trap ("historyEndIso pins message history, NOT the clock")
   // arriving through a second consumer. Found in code review, by mutant.
-  const now = (ctx.currentMessage?.receivedAt ?? ctx.recognition.computedAt).getTime()
+  const now = (
+    ctx.currentMessage?.receivedAt ?? ctx.recognition.computedAt
+  ).getTime()
   const windowMs = ctx.conversationWindowMs
   return ctx.recentMessages
     .filter((m) => m.body.trim().length > 0)
@@ -149,12 +154,18 @@ export function contextTurns(ctx: RuntimeContext, turns = CONTEXT_TURNS): Recent
  * second arm at all"**, which is what makes a first message byte-identical to
  * today: no second embed, no second RPC, no merge.
  */
-export function buildContextQuery(ctx: RuntimeContext, turns = CONTEXT_TURNS): string {
+export function buildContextQuery(
+  ctx: RuntimeContext,
+  turns = CONTEXT_TURNS,
+): string {
   const current = ctx.currentMessage?.body?.trim()
   if (!current) return ''
   const prior = contextTurns(ctx, turns)
   if (prior.length === 0) return ''
-  return [...prior.map((m) => normalizeBody(m.body)), normalizeBody(current)].join('\n')
+  return [
+    ...prior.map((m) => normalizeBody(m.body)),
+    normalizeBody(current),
+  ].join('\n')
 }
 
 /**
@@ -207,12 +218,15 @@ export function mergeKnowledgeMatches(
   for (const arm of arms) {
     for (const row of arm) {
       const seen = best.get(row.id)
-      if (seen === undefined || row.similarity > seen.similarity) best.set(row.id, row)
+      if (seen === undefined || row.similarity > seen.similarity)
+        best.set(row.id, row)
     }
   }
 
   const selected =
-    opts.rule === 'best-score' ? selectByScore(arms, best) : selectByRank(arms, best)
+    opts.rule === 'best-score'
+      ? selectByScore(arms, best)
+      : selectByRank(arms, best)
   return selected.slice(0, opts.limit).filter((r) => r.similarity >= opts.floor)
 }
 

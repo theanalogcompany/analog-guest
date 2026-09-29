@@ -2,7 +2,11 @@ import { createAdminClient } from '@/lib/db/admin'
 
 type VenueLookupResult =
   | { ok: true; data: { id: string; slug: string; name: string } }
-  | { ok: false; error: 'venue_not_found' | 'venue_lookup_failed'; details?: string }
+  | {
+      ok: false
+      error: 'venue_not_found' | 'venue_lookup_failed'
+      details?: string
+    }
 
 /**
  * Find a venue by its slug.

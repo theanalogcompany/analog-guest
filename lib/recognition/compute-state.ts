@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { computeRelationshipStrength } from './compute-strength'
 import { evaluateState } from './evaluate-state'
 import { transitionState } from './transition-state'
@@ -23,21 +24,31 @@ async function loadThresholds(
     .maybeSingle()
 
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'load_thresholds_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'load_thresholds_failed',
+    }
   }
 
   const raw = data?.state_thresholds
   if (
     raw === null ||
     raw === undefined ||
-    (typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 0)
+    (typeof raw === 'object' &&
+      !Array.isArray(raw) &&
+      Object.keys(raw).length === 0)
   ) {
     return { ok: true, data: DEFAULT_STATE_THRESHOLDS }
   }
 
   const parsed = StateThresholdsSchema.safeParse(raw)
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.message, errorCode: 'invalid_thresholds' }
+    return {
+      ok: false,
+      error: parsed.error.message,
+      errorCode: 'invalid_thresholds',
+    }
   }
   return { ok: true, data: parsed.data }
 }
@@ -56,7 +67,11 @@ async function loadCurrentState(
     .maybeSingle()
 
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'load_current_state_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'load_current_state_failed',
+    }
   }
   if (!data) {
     return { ok: true, data: null }
@@ -85,7 +100,8 @@ export async function computeGuestState(
 
   const strengthResult = await computeRelationshipStrength(input)
   if (!strengthResult.ok) return strengthResult
-  const { score, signals, weights, contributions, repliedMessageCount } = strengthResult.data
+  const { score, signals, weights, contributions, repliedMessageCount } =
+    strengthResult.data
 
   const newState = evaluateState(score, thresholds)
 
@@ -107,7 +123,7 @@ export async function computeGuestState(
       reason: 'recompute',
     })
     if (!transitionResult.ok) {
-      console.error(
+      logger.error(
         'computeGuestState: state transition persistence failed; returning computed state with stateChanged=true',
         {
           guestId: input.guestId,

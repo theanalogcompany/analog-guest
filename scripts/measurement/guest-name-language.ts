@@ -62,7 +62,10 @@ function escapeRe(s: string): string {
  * non-word character, and no such name is expected; it is used because it is
  * correct for every name that is a plain word, which the guard below enforces.
  */
-export function countNameUses(body: string, firstName: string): { count: number; matches: string[] } {
+export function countNameUses(
+  body: string,
+  firstName: string,
+): { count: number; matches: string[] } {
   const name = firstName.trim()
   if (name.length < 2 || !/^[\p{L}][\p{L}\p{M}'-]*$/u.test(name)) {
     // A name that is not a plain word (empty, one character, or carrying
@@ -71,7 +74,10 @@ export function countNameUses(body: string, firstName: string): { count: number;
     // make every reported body wrong.
     return { count: 0, matches: [] }
   }
-  const re = new RegExp(`(?<![\\p{L}\\p{M}])${escapeRe(name)}(?:'s|'s|s)?(?![\\p{L}\\p{M}])`, 'giu')
+  const re = new RegExp(
+    `(?<![\\p{L}\\p{M}])${escapeRe(name)}(?:'s|'s|s)?(?![\\p{L}\\p{M}])`,
+    'giu',
+  )
   const matches = collapse(body).match(re) ?? []
   return { count: matches.length, matches: [...matches] }
 }
@@ -110,7 +116,9 @@ export function findThirdPersonVenue(
   const m = pronoun.exec(text)
   if (m) return m[0]
 
-  const theirHours = /\btheir\s+(?:hours|menu|baristas?|staff|prices?)\b/i.exec(text)
+  const theirHours = /\btheir\s+(?:hours|menu|baristas?|staff|prices?)\b/i.exec(
+    text,
+  )
   if (theirHours) return theirHours[0]
 
   return null
@@ -134,7 +142,10 @@ export function classifyGuestName(
  * The ticket's headline bar, computed over ONE conversation's replies in order.
  * A pair counts when both replies in it use the name at least once.
  */
-export function consecutiveNamePairs(replies: readonly string[], firstName: string): number {
+export function consecutiveNamePairs(
+  replies: readonly string[],
+  firstName: string,
+): number {
   const uses = replies.map((r) => countNameUses(r, firstName).count > 0)
   let pairs = 0
   for (let i = 1; i < uses.length; i += 1) {
@@ -164,27 +175,40 @@ export type GuestTurnShape = 'small_talk' | 'hours' | 'menu' | 'heading_over'
  *
  * `small_talk` asks nothing, so it is never flagged.
  */
-const BARE_DEFLECTION = /^(?:\s*(?:not sure|no idea|i don'?t know|dunno|can'?t say|hard to say)\b[\s.!?,]*)+$/i
+const BARE_DEFLECTION =
+  /^(?:\s*(?:not sure|no idea|i don'?t know|dunno|can'?t say|hard to say)\b[\s.!?,]*)+$/i
 
-export function looksLikeDodge(shape: GuestTurnShape, guestBody: string, reply: string): boolean {
+export function looksLikeDodge(
+  shape: GuestTurnShape,
+  guestBody: string,
+  reply: string,
+): boolean {
   const t = reply.toLowerCase().trim()
   switch (shape) {
     case 'hours':
-      return !/\d|\b(?:noon|midnight|close|closed|closing|open|opens|opening|today|tomorrow|morning|tonight)\b/.test(t)
+      return !/\d|\b(?:noon|midnight|close|closed|closing|open|opens|opening|today|tomorrow|morning|tonight)\b/.test(
+        t,
+      )
     case 'menu': {
       // "do you ...", "do ya ...", "have you got ..." want a yes or a no.
-      const closed = /^\s*(?:do|does|did|are|is|can|could|have|got)\b/i.test(guestBody.trim())
+      const closed = /^\s*(?:do|does|did|are|is|can|could|have|got)\b/i.test(
+        guestBody.trim(),
+      )
       if (closed) {
         // "don't" / "doesn't" are how a no most often arrives ("we don't have
         // decaf beans, but the Almost Latte is caffeine-free"), and \bnot\b
         // does not match inside them. That body was the last false positive
         // this heuristic produced on the TAC-544 run.
-        return !/\b(?:yes|yeah|yep|yup|we do|we've|we have|got|no|nope|not|don'?t|doesn'?t|only|sorry|sure|afraid)\b/.test(t)
+        return !/\b(?:yes|yeah|yep|yup|we do|we've|we have|got|no|nope|not|don'?t|doesn'?t|only|sorry|sure|afraid)\b/.test(
+          t,
+        )
       }
       return BARE_DEFLECTION.test(t) || t.length === 0
     }
     case 'heading_over':
-      return !/\b(?:see you|come|see ya|sounds good|perfect|great|we'?re|closed|open|here|ready|nice)\b/.test(t)
+      return !/\b(?:see you|come|see ya|sounds good|perfect|great|we'?re|closed|open|here|ready|nice)\b/.test(
+        t,
+      )
     case 'small_talk':
       return false
   }

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { type MessageCategory } from '@/lib/ai/types'
+import { logger } from '@/lib/observability/logger'
 import { type MessageReview, MessageReviewSchema } from '@/lib/schemas'
 import { Eyebrow } from '@/lib/ui'
 import {
@@ -105,7 +106,9 @@ function preFillFromReview(
         parsed: r,
       }
     }
-    console.warn('[review-form] response_review parse failed, treating as unreviewed')
+    logger.warn(
+      '[review-form] response_review parse failed, treating as unreviewed',
+    )
   }
   return {
     state: { ...EMPTY_STATE, category: fallbackCategory ?? '' },
@@ -137,7 +140,9 @@ export function ReviewForm({
   const initial = preFillFromReview(responseReview, messageCategory)
   const [state, setState] = useState<ReviewFormState>(() => initial.state)
   const [parsedReview] = useState<MessageReview | null>(() => initial.parsed)
-  const [showEdit, setShowEdit] = useState(() => initial.state.editedMessage !== '')
+  const [showEdit, setShowEdit] = useState(
+    () => initial.state.editedMessage !== '',
+  )
   const [showRule, setShowRule] = useState(() => initial.state.rule !== '')
   const [showExpectedFailure, setShowExpectedFailure] = useState(
     () => initial.state.expectedFailure !== '',
@@ -185,9 +190,10 @@ export function ReviewForm({
         },
       )
       if (!res.ok) {
-        const errBody = (await res.json().catch(() => null)) as
-          | { error?: string; detail?: string }
-          | null
+        const errBody = (await res.json().catch(() => null)) as {
+          error?: string
+          detail?: string
+        } | null
         const msg =
           errBody?.detail ?? errBody?.error ?? `${res.status} ${res.statusText}`
         setSaveError(msg)
@@ -218,14 +224,19 @@ export function ReviewForm({
         />
       </div>
 
-      <fieldset disabled={saving} className="flex flex-col gap-3 disabled:opacity-60">
+      <fieldset
+        disabled={saving}
+        className="flex flex-col gap-3 disabled:opacity-60"
+      >
         <div className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-[0.18em] text-ink-soft">
             Category
           </span>
           <Select
             value={state.category === '' ? NO_CATEGORY : state.category}
-            onValueChange={(v) => update('category', v === NO_CATEGORY ? '' : v)}
+            onValueChange={(v) =>
+              update('category', v === NO_CATEGORY ? '' : v)
+            }
           >
             <SelectTrigger className="text-[13px]">
               <SelectValue placeholder="(none)" />
@@ -266,7 +277,8 @@ export function ReviewForm({
             className="text-[13px]"
           />
           <p className="mt-1 text-[11px] text-ink-soft">
-            Pre-filled with the original. Only this corrected text is embedded into the corpus.
+            Pre-filled with the original. Only this corrected text is embedded
+            into the corpus.
           </p>
         </Disclosure>
 
@@ -331,9 +343,14 @@ interface StatusRowProps {
 
 function StatusRow({ parsed, operatorMap, venueTimezone }: StatusRowProps) {
   if (!parsed) {
-    return <span className="text-[11px] text-ink-soft tabular-nums">Not reviewed</span>
+    return (
+      <span className="text-[11px] text-ink-soft tabular-nums">
+        Not reviewed
+      </span>
+    )
   }
-  const reviewerLabel = operatorMap[parsed.reviewedBy] ?? parsed.reviewedBy.slice(0, 8)
+  const reviewerLabel =
+    operatorMap[parsed.reviewedBy] ?? parsed.reviewedBy.slice(0, 8)
   const date = new Date(parsed.reviewedAt)
   const formattedDate = Number.isNaN(date.getTime())
     ? parsed.reviewedAt

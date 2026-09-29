@@ -4,10 +4,7 @@
 // (final-review cleanup, conversations-endpoints branch).
 
 export type GuestRecognitionState =
-  | 'new'
-  | 'returning'
-  | 'regular'
-  | 'raving_fan'
+  'new' | 'returning' | 'regular' | 'raving_fan'
 
 const RECOGNITION_STATE_VALUES: ReadonlySet<string> = new Set([
   'new',
@@ -16,7 +13,9 @@ const RECOGNITION_STATE_VALUES: ReadonlySet<string> = new Set([
   'raving_fan',
 ])
 
-export function normalizeRecognitionState(s: string | null): GuestRecognitionState | null {
+export function normalizeRecognitionState(
+  s: string | null,
+): GuestRecognitionState | null {
   if (s === null) return null
   return RECOGNITION_STATE_VALUES.has(s) ? (s as GuestRecognitionState) : null
 }

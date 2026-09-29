@@ -47,7 +47,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { verifyProsePromise, VERIFY_PROSE_PROMISE_PROMPT_VERSION } from '@/lib/ai/verify-prose-promise'
+import {
+  verifyProsePromise,
+  VERIFY_PROSE_PROMISE_PROMPT_VERSION,
+} from '@/lib/ai/verify-prose-promise'
 import { createRunLog } from './run-log'
 
 /** Repeats per body. One verdict at temperature 0.2 is a draw, not a property. */
@@ -102,7 +105,10 @@ async function judgeOnce(body: string): Promise<Verdict> {
   // cost is stated rather than buried: on the inbound path they no longer
   // describe the shipped configuration. The inbound-bearing cases live in the
   // sibling scripts/measurement/prose-promise-elliptical.ts, not below.
-  const r = await verifyProsePromise({ replyBody: body, guestInboundBody: null })
+  const r = await verifyProsePromise({
+    replyBody: body,
+    guestInboundBody: null,
+  })
   if (!r.ok) {
     return {
       flagged: false,
@@ -144,7 +150,11 @@ async function judgeRow(row: FixtureRow): Promise<RowResult> {
 }
 
 /** Run `work` over `items` with a fixed number of workers. */
-async function pooled<T, R>(items: T[], size: number, work: (t: T) => Promise<R>): Promise<R[]> {
+async function pooled<T, R>(
+  items: T[],
+  size: number,
+  work: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   await Promise.all(
@@ -215,7 +225,11 @@ async function main(): Promise<void> {
 
   console.log('\n=== The four cases (ruling 4: four cases, not a rate) ===')
   for (const r of byLabel('genuine_promise')) {
-    const types = [...new Set(r.verdicts.filter((v) => v.flagged).map((v) => v.commitmentType))]
+    const types = [
+      ...new Set(
+        r.verdicts.filter((v) => v.flagged).map((v) => v.commitmentType),
+      ),
+    ]
     const named = r.verdicts.filter((v) => v.flagged && v.namedCarrier).length
     console.log(
       `\n  ${r.row.arm} #${r.row.run}  held ${r.flaggedCount}/${REPEATS}, named a carrier ${named}/${REPEATS}  types: ${types.join(', ') || 'none'}`,
@@ -233,13 +247,21 @@ async function main(): Promise<void> {
   }
 
   console.log('\n=== False positives, per category (never one number) ===')
-  for (const label of ['apology_idiom', 'offers_nothing', 'do_better_borderline'] as Label[]) {
+  for (const label of [
+    'apology_idiom',
+    'offers_nothing',
+    'do_better_borderline',
+  ] as Label[]) {
     const rows = byLabel(label)
     const totalCalls = rows.length * REPEATS
     const flagged = rows.reduce((a, r) => a + r.flaggedCount, 0)
-    console.log(`\n  ${label}: ${flagged}/${totalCalls} calls flagged (${pct(flagged, totalCalls)})`)
+    console.log(
+      `\n  ${label}: ${flagged}/${totalCalls} calls flagged (${pct(flagged, totalCalls)})`,
+    )
     for (const r of rows.filter((r) => r.flaggedCount > 0)) {
-      console.log(`     ${r.row.arm} #${r.row.run}  ${r.flaggedCount}/${REPEATS}  ${r.row.body}`)
+      console.log(
+        `     ${r.row.arm} #${r.row.run}  ${r.flaggedCount}/${REPEATS}  ${r.row.body}`,
+      )
     }
   }
 
@@ -250,7 +272,9 @@ async function main(): Promise<void> {
     `\n  clean (${clean.length} bodies): ${cleanFlagged}/${cleanCalls} calls flagged (${pct(cleanFlagged, cleanCalls)})`,
   )
   for (const r of clean.filter((r) => r.flaggedCount > 0)) {
-    console.log(`     ${r.row.arm} #${r.row.run}  ${r.flaggedCount}/${REPEATS}  ${r.row.body}`)
+    console.log(
+      `     ${r.row.arm} #${r.row.run}  ${r.flaggedCount}/${REPEATS}  ${r.row.body}`,
+    )
   }
 
   console.log('\n=== By arm: both fail-open paths ===')

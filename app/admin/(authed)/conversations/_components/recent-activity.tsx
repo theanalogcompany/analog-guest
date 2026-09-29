@@ -14,7 +14,7 @@ export interface RecentActivityRow {
   venueId: string
   venueName: string
   guestId: string
-  guestLabel: string  // "First Last · +1..." or just phone
+  guestLabel: string // "First Last · +1..." or just phone
   lastActivityAt: Date
 }
 
@@ -40,7 +40,10 @@ export function RecentActivity({ rows, emptyMessage }: RecentActivityProps) {
           <Eyebrow>Recent activity</Eyebrow>
         </div>
         {rows.map((r, i) => (
-          <HairlineRow key={`${r.venueId}-${r.guestId}`} last={i === rows.length - 1}>
+          <HairlineRow
+            key={`${r.venueId}-${r.guestId}`}
+            last={i === rows.length - 1}
+          >
             <button
               type="button"
               disabled={isPending}
@@ -55,10 +58,14 @@ export function RecentActivity({ rows, emptyMessage }: RecentActivityProps) {
             >
               <span className="flex flex-col gap-0.5 min-w-0">
                 <span className="text-sm text-ink truncate">{r.venueName}</span>
-                <span className="text-xs text-ink-soft truncate">{r.guestLabel}</span>
+                <span className="text-xs text-ink-soft truncate">
+                  {r.guestLabel}
+                </span>
               </span>
               <span className="text-xs text-ink-soft tabular-nums shrink-0">
-                {formatDistanceToNowStrict(r.lastActivityAt, { addSuffix: true })}
+                {formatDistanceToNowStrict(r.lastActivityAt, {
+                  addSuffix: true,
+                })}
               </span>
             </button>
           </HairlineRow>

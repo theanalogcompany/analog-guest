@@ -28,7 +28,11 @@ function scenario(overrides: Partial<ScenarioSheetRow> = {}): ScenarioSheetRow {
   }
 }
 
-function graded(overrides: Partial<GradedScenario> & { scenarioOverrides?: Partial<ScenarioSheetRow> } = {}): GradedScenario {
+function graded(
+  overrides: Partial<GradedScenario> & {
+    scenarioOverrides?: Partial<ScenarioSheetRow>
+  } = {},
+): GradedScenario {
   const { scenarioOverrides, ...rest } = overrides
   return {
     scenario: scenario(scenarioOverrides),
@@ -82,7 +86,8 @@ describe('buildOwnerReviewRows', () => {
 
   it('leaves verdict/edited_message/comment blank', () => {
     const rows = buildOwnerReviewRows([graded()], '2026-09-11T18:42:00.000Z')
-    const idx = (col: (typeof SHEET_HEADERS)[number]) => SHEET_HEADERS.indexOf(col)
+    const idx = (col: (typeof SHEET_HEADERS)[number]) =>
+      SHEET_HEADERS.indexOf(col)
     const dataRow = rows[1]
     expect(dataRow[idx('verdict')]).toBe('')
     expect(dataRow[idx('edited_message')]).toBe('')
@@ -91,7 +96,8 @@ describe('buildOwnerReviewRows', () => {
 
   it('maps scenario and result fields into the correct columns', () => {
     const rows = buildOwnerReviewRows([graded()], '2026-09-11T18:42:00.000Z')
-    const idx = (col: (typeof SHEET_HEADERS)[number]) => SHEET_HEADERS.indexOf(col)
+    const idx = (col: (typeof SHEET_HEADERS)[number]) =>
+      SHEET_HEADERS.indexOf(col)
     const dataRow = rows[1]
     expect(dataRow[idx('sample_id')]).toBe('id-1')
     expect(dataRow[idx('run_date')]).toBe('2026-09-11T18:42:00.000Z')
@@ -99,7 +105,9 @@ describe('buildOwnerReviewRows', () => {
     expect(dataRow[idx('guest_state')]).toBe('new')
     expect(dataRow[idx('scenario')]).toBe('guest asks about the oat milk latte')
     expect(dataRow[idx('inbound_message')]).toBe('do you have oat milk?')
-    expect(dataRow[idx('generated_message')]).toBe('Yep, oat milk is available.')
+    expect(dataRow[idx('generated_message')]).toBe(
+      'Yep, oat milk is available.',
+    )
     expect(dataRow[idx('voice_fidelity')]).toBe('0.85')
   })
 
@@ -130,8 +138,18 @@ describe('rowsToCsv + parseReviewSheet round trip', () => {
   })
 
   it('round-trips multiple rows without cross-contamination', () => {
-    const a = graded({ scenarioOverrides: { sample_id: 'a' }, result: { ...graded().result, sampleId: 'a', replyBody: 'reply, with comma' } })
-    const b = graded({ scenarioOverrides: { sample_id: 'b' }, result: { ...graded().result, sampleId: 'b', replyBody: 'plain reply' } })
+    const a = graded({
+      scenarioOverrides: { sample_id: 'a' },
+      result: {
+        ...graded().result,
+        sampleId: 'a',
+        replyBody: 'reply, with comma',
+      },
+    })
+    const b = graded({
+      scenarioOverrides: { sample_id: 'b' },
+      result: { ...graded().result, sampleId: 'b', replyBody: 'plain reply' },
+    })
     const rows = buildOwnerReviewRows([a, b], '2026-09-11T18:42:00.000Z')
     const parsed = parseReviewSheet(rowsToCsv(rows))
     expect(parsed).toHaveLength(2)

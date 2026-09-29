@@ -21,7 +21,8 @@ import { captureOperatorMessageSkipped } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { venueFilterIds } from '@/lib/auth/venue-scope'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const ParamsSchema = z.object({ id: z.string().regex(UUID_RE) })
 
@@ -100,7 +101,10 @@ export const POST = withOperatorAuth<{ id: string }>(
       guestId: row.guest_id,
       messageId: row.id,
       operatorId: operator.operatorId,
-      timeToActionMs: Math.max(0, Date.now() - new Date(row.created_at).getTime()),
+      timeToActionMs: Math.max(
+        0,
+        Date.now() - new Date(row.created_at).getTime(),
+      ),
       voiceFidelity: row.voice_fidelity,
       category: row.category,
       recognitionState: null,

@@ -67,13 +67,15 @@ const POV_INSTRUCTION =
   'Point of view: guests are texting the venue directly, so when a message could plausibly address "you" (the person texting back) rather than referring to them in the third person, prefer second person ("how long did it take you to learn to roast") in roughly 85% of messages. Keep about 15% third person ("how long did it take Himanshu to learn to roast") as a deliberate test that the agent still answers correctly in first person even when asked that way. This matters most for messages about the owner or staff.'
 
 const TopicTaxonomySchema = z.object({
-  topics: z.array(
-    z.object({
-      topic: z.string().min(1),
-      label: z.string().min(1),
-      subtopics: z.array(z.string()),
-    }),
-  ).min(1),
+  topics: z
+    .array(
+      z.object({
+        topic: z.string().min(1),
+        label: z.string().min(1),
+        subtopics: z.array(z.string()),
+      }),
+    )
+    .min(1),
   rowMapping: z.array(
     z.object({
       rowId: z.string().min(1),
@@ -121,7 +123,8 @@ ${rowsBlock}`
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You generate topic taxonomies for a hospitality messaging agent test suite.',
+    system:
+      'You generate topic taxonomies for a hospitality messaging agent test suite.',
     prompt,
     schema: TopicTaxonomySchema,
     temperature: 0.7,
@@ -210,10 +213,14 @@ ${POV_INSTRUCTION}
 ${rowsBlock}`
 }
 
-export async function generateTopicScenarios(topic: TopicDef, rows: CoverableRow[]): Promise<Scenario[]> {
+export async function generateTopicScenarios(
+  topic: TopicDef,
+  rows: CoverableRow[],
+): Promise<Scenario[]> {
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write realistic guest text messages for a hospitality messaging agent test suite.',
+    system:
+      'You write realistic guest text messages for a hospitality messaging agent test suite.',
     prompt: topicScenarioPrompt(topic, rows),
     schema: TopicScenariosSchema,
     temperature: 0.8,
@@ -241,11 +248,15 @@ export async function generateAllTopicScenarios(
   topics: TopicDef[],
   rowsByTopic: Map<string, CoverableRow[]>,
 ): Promise<Scenario[]> {
-  const results = await mapWithConcurrency(topics, GENERATION_CONCURRENCY, async (topic) => {
-    const rows = rowsByTopic.get(topic.topic) ?? []
-    if (rows.length === 0) return []
-    return generateTopicScenarios(topic, rows)
-  })
+  const results = await mapWithConcurrency(
+    topics,
+    GENERATION_CONCURRENCY,
+    async (topic) => {
+      const rows = rowsByTopic.get(topic.topic) ?? []
+      if (rows.length === 0) return []
+      return generateTopicScenarios(topic, rows)
+    },
+  )
   return results.flat()
 }
 
@@ -283,7 +294,8 @@ ${transcriptText}`
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You extract guest-question mentions from a venue onboarding interview transcript.',
+    system:
+      'You extract guest-question mentions from a venue onboarding interview transcript.',
     prompt,
     schema: TranscriptScenariosSchema,
     temperature: 0.5,
@@ -367,7 +379,8 @@ ${venueDigest}`
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write realistic edge-case guest text messages for a hospitality messaging agent test suite.',
+    system:
+      'You write realistic edge-case guest text messages for a hospitality messaging agent test suite.',
     prompt,
     schema: EdgeCaseScenariosSchema,
     temperature: 0.8,
@@ -433,7 +446,9 @@ const ADVERSARIAL_EXPECTED_BEHAVIOR_INSTRUCTION =
  * other's scenarios aren't lost with it. Run concurrently since they're
  * independent.
  */
-export async function generateAdversarialScenarios(venueLabel: string): Promise<Scenario[]> {
+export async function generateAdversarialScenarios(
+  venueLabel: string,
+): Promise<Scenario[]> {
   const [highCount, standard] = await Promise.all([
     generateAdversarialBatch(
       venueLabel,
@@ -462,12 +477,17 @@ export async function generateAdversarialScenarios(venueLabel: string): Promise<
   const scenarios = [...highCount, ...standard]
   const perCategoryCounts = new Map<string, number>()
   for (const s of scenarios) {
-    perCategoryCounts.set(s.category, (perCategoryCounts.get(s.category) ?? 0) + 1)
+    perCategoryCounts.set(
+      s.category,
+      (perCategoryCounts.get(s.category) ?? 0) + 1,
+    )
   }
   for (const cat of ADVERSARIAL_HIGH_COUNT_CATEGORIES) {
     const count = perCategoryCounts.get(`adversarial_${cat}`) ?? 0
     if (count < 15) {
-      console.warn(`[generate-adversarial] "${cat}" only got ${count} scenarios, below the 15 floor`)
+      console.warn(
+        `[generate-adversarial] "${cat}" only got ${count} scenarios, below the 15 floor`,
+      )
     }
   }
   return scenarios
@@ -490,7 +510,8 @@ ${REGISTER_INSTRUCTION}`
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write stress-test and adversarial guest text messages for a hospitality messaging agent test suite. This is defensive testing for a real product — generate realistic hostile/adversarial input so the agent\'s handling of it can be verified before launch.',
+    system:
+      "You write stress-test and adversarial guest text messages for a hospitality messaging agent test suite. This is defensive testing for a real product — generate realistic hostile/adversarial input so the agent's handling of it can be verified before launch.",
     prompt,
     schema: z.object({
       scenarios: z.array(
@@ -523,7 +544,10 @@ ${REGISTER_INSTRUCTION}`
       sample_id: `adversarial:${s.subcategory}:${i + 1}`,
       topic: 'stress_and_adversarial',
       category: `adversarial_${s.subcategory}`,
-      mode: isOptOut || isSafetyCritical ? ('graded' as const) : ('exploratory' as const),
+      mode:
+        isOptOut || isSafetyCritical
+          ? ('graded' as const)
+          : ('exploratory' as const),
       guest_state: 'regular' as const,
       scenario: s.scenario,
       inbound_message: s.inbound_message,
@@ -532,7 +556,8 @@ ${REGISTER_INSTRUCTION}`
       expected_facts: [],
       forbidden_claims: [],
       source_row_ids: [],
-      expected_route: isOptOut || isSafetyCritical ? ('send' as const) : ('unknown' as const),
+      expected_route:
+        isOptOut || isSafetyCritical ? ('send' as const) : ('unknown' as const),
       expected_behavior: s.expected_behavior,
     }
   })
@@ -545,7 +570,13 @@ ${REGISTER_INSTRUCTION}`
 // complaints_refunds venue topic).
 // ---------------------------------------------------------------------------
 
-const COMPLAINT_SEVERITIES = ['mild', 'angry', 'health_or_safety', 'refund_demand', 'staff_behavior'] as const
+const COMPLAINT_SEVERITIES = [
+  'mild',
+  'angry',
+  'health_or_safety',
+  'refund_demand',
+  'staff_behavior',
+] as const
 
 const ComplaintScenariosSchema = z.object({
   scenarios: z.array(
@@ -559,7 +590,10 @@ const ComplaintScenariosSchema = z.object({
   ),
 })
 
-export async function generateComplaintScenarios(venueLabel: string, venueDigest: string): Promise<Scenario[]> {
+export async function generateComplaintScenarios(
+  venueLabel: string,
+  venueDigest: string,
+): Promise<Scenario[]> {
   const prompt = `Generate realistic guest complaints and refund requests for "${venueLabel}", a café's guest-messaging agent. This is the owner's top priority test area — generate AT LEAST 10 distinct examples per severity below (50+ total), spread across guest states (new, returning, regular, raving_fan):
 
 - mild: a small, low-stakes gripe (drink was a bit weak, order took a little long, wrong milk) — not asking for anything, just mentioning it
@@ -580,7 +614,8 @@ ${venueDigest}`
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write realistic guest complaint and refund-request text messages for a hospitality messaging agent test suite.',
+    system:
+      'You write realistic guest complaint and refund-request text messages for a hospitality messaging agent test suite.',
     prompt,
     schema: ComplaintScenariosSchema,
     temperature: 0.85,
@@ -588,7 +623,9 @@ ${venueDigest}`
   })
 
   if (object.scenarios.length < 50) {
-    console.warn(`[generate-complaints] only got ${object.scenarios.length} scenarios, below the 50 floor`)
+    console.warn(
+      `[generate-complaints] only got ${object.scenarios.length} scenarios, below the 50 floor`,
+    )
   }
 
   return object.scenarios.map((s, i) => ({
@@ -632,7 +669,9 @@ const MechanicPhrasingSchema = z.object({
   ),
 })
 
-export async function generateMechanicScenarios(ctx: VenueContext): Promise<Scenario[]> {
+export async function generateMechanicScenarios(
+  ctx: VenueContext,
+): Promise<Scenario[]> {
   const active = ctx.mechanics.filter((m) => m.isActive)
   if (active.length === 0) return []
 
@@ -648,17 +687,21 @@ export async function generateMechanicScenarios(ctx: VenueContext): Promise<Scen
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write natural-sounding guest text messages requesting a venue perk.',
+    system:
+      'You write natural-sounding guest text messages requesting a venue perk.',
     prompt: `For each mechanic below, write ONE natural-sounding text a guest would send asking for it — the way a real person asks, not by naming or describing the mechanic's internal reward text. For example "do you ever do roasting sessions people can join?" rather than pasting a reward description. Most requests should be phrased without knowledge of the mechanic's rules; a minority can explicitly reference a perk where realistic ("isn't my first drink free?"), but that shouldn't be the default. Pay attention to any referral note — a referral perk's eligible asker is the person referring, not the person being referred.\n\n${REGISTER_INSTRUCTION}\n\n## Mechanics\n\n${mechanicsBlock}`,
     schema: MechanicPhrasingSchema,
     temperature: 0.7,
   })
 
-  const phraseByMechanicId = new Map(object.phrasings.map((p) => [p.mechanic_id, p.natural_request]))
+  const phraseByMechanicId = new Map(
+    object.phrasings.map((p) => [p.mechanic_id, p.natural_request]),
+  )
 
   const scenarios: Scenario[] = []
   for (const mechanic of active) {
-    const ask = phraseByMechanicId.get(mechanic.id) ?? `can I get ${mechanic.name}`
+    const ask =
+      phraseByMechanicId.get(mechanic.id) ?? `can I get ${mechanic.name}`
     for (const state of GUEST_STATES) {
       const eligible = isStateAtLeast(state, mechanic.minState)
       const isBoundary = state === mechanic.minState
@@ -680,10 +723,18 @@ export async function generateMechanicScenarios(ctx: VenueContext): Promise<Scen
         inbound_message: ask,
         expected_failure: null,
         scenario_source: 'mechanic',
-        expected_facts: eligible ? [mechanic.rewardDescription ?? mechanic.name] : [],
-        forbidden_claims: eligible ? [] : [mechanic.rewardDescription ?? mechanic.name],
+        expected_facts: eligible
+          ? [mechanic.rewardDescription ?? mechanic.name]
+          : [],
+        forbidden_claims: eligible
+          ? []
+          : [mechanic.rewardDescription ?? mechanic.name],
         source_row_ids: [`mechanic:${mechanic.id}`],
-        expected_route: eligible ? (mechanic.requiresOperatorApproval ? 'queue' : 'send') : 'send',
+        expected_route: eligible
+          ? mechanic.requiresOperatorApproval
+            ? 'queue'
+            : 'send'
+          : 'send',
         expected_behavior: '',
       })
     }
@@ -718,7 +769,8 @@ export async function generateUnansweredProbes(
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You phrase gaps in venue documentation as natural guest questions.',
+    system:
+      'You phrase gaps in venue documentation as natural guest questions.',
     prompt: `Each item below is a detail this venue's documentation doesn't cover. Phrase each as a natural, specific guest question — not a restatement of the gap description. For example, a gap noting "the four SoFi drink variations aren't all named" becomes "what are the four SoFi variations?", not "do you know about the SoFi variations gap".
 
 Ask ONLY about the missing part. Below is everything the venue's data DOES document — if a gap is adjacent to something already documented, do not fold the documented part into the question. For example, if the venue's data already says a drink's foam is hard-whipped cream but doesn't name the drink's full recipe, ask only about the recipe ("what's in the Blossom Tonic exactly?"), not a compound question that also asks about the foam ("what's in it, and what's the foam made of?") — the foam part is already answered and mixing it in makes a correct reply that only addresses the genuinely unknown part look incomplete.
@@ -750,7 +802,8 @@ ${needsConfirmationItems.map((i) => `- ${i}`).join('\n')}`,
       for (const chunk of retrieval.data) {
         const check = await generateObject({
           model: anthropic(MODEL),
-          system: 'You judge whether a piece of venue documentation actually answers a specific guest question.',
+          system:
+            'You judge whether a piece of venue documentation actually answers a specific guest question.',
           prompt: `Question: "${probe.inbound_message}"\n\nCandidate documentation: "${chunk.text}"\n\nDoes the candidate documentation actually answer the question with the specific information asked for — not just relate to the same general topic? A row can mention the topic without naming the specific answer (e.g. mentioning "four variations" without naming them does NOT answer "what are the four variations?").`,
           schema: AnswerCheckSchema,
           temperature: 0,
@@ -800,10 +853,14 @@ const BackfillScenarioSchema = z.object({
   key_facts: z.array(z.string()).min(1),
 })
 
-export async function generateBackfillScenario(row: CoverableRow, topic: string): Promise<Scenario> {
+export async function generateBackfillScenario(
+  row: CoverableRow,
+  topic: string,
+): Promise<Scenario> {
   const { object } = await generateObject({
     model: anthropic(MODEL),
-    system: 'You write one realistic guest text message targeting a specific fact.',
+    system:
+      'You write one realistic guest text message targeting a specific fact.',
     prompt: `Write ONE realistic guest text message that specifically asks about this fact, and 1-3 short key facts a correct reply must contain.\n\n${REGISTER_INSTRUCTION}\n\nFact (${row.label}): ${row.content}`,
     schema: BackfillScenarioSchema,
     temperature: 0.7,

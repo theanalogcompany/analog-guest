@@ -207,9 +207,12 @@ function normalizeHomeBase(
     const trimmed = value.trim()
     return trimmed.length > 0 ? trimmed : undefined
   }
-  const parts = [value.neighborhood, value.city, value.zip, value.address].filter(
-    (p): p is string => typeof p === 'string' && p.trim().length > 0,
-  )
+  const parts = [
+    value.neighborhood,
+    value.city,
+    value.zip,
+    value.address,
+  ].filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
   return parts.length > 0 ? parts.join(', ') : undefined
 }
 

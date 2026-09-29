@@ -47,7 +47,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveConversationChannel } from '@/lib/agent/conversation-channel'
 import { computeFirstTouchAfterQrScan } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
-import { firstTouchOpenerFor, runtimeToProse } from '@/lib/ai/prompts/serializers'
+import {
+  firstTouchOpenerFor,
+  runtimeToProse,
+} from '@/lib/ai/prompts/serializers'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 
 import { processInstagramDelivery } from './handle-events'
@@ -63,11 +66,15 @@ const ACCOUNT_ID = '17841400000000001'
 const NOW = '2026-09-18T08:00:00.000Z'
 
 function fixture(name: 'message' | 'postback-referral'): unknown {
-  return JSON.parse(readFileSync(join(__dirname, 'fixtures', `${name}.json`), 'utf8'))
+  return JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', `${name}.json`), 'utf8'),
+  )
 }
 
 function withoutReferral(delivery: unknown): unknown {
-  const copy = structuredClone(delivery) as { entry: Array<{ messaging: Array<{ postback: Record<string, unknown> }> }> }
+  const copy = structuredClone(delivery) as {
+    entry: Array<{ messaging: Array<{ postback: Record<string, unknown> }> }>
+  }
   const postback = copy.entry[0]?.messaging[0]?.postback
   if (!postback) throw new Error('fixture has no postback')
   delete postback.referral
@@ -80,15 +87,22 @@ function withoutReferral(delivery: unknown): unknown {
  * database default (now), which the handler relies on exactly as Sendblue does.
  */
 async function firstTurnContext(delivery: unknown): Promise<RuntimeContext> {
-  const db = createInstagramDbFake({ venues: [{ id: 'venue-1', instagram_account_id: ACCOUNT_ID }] })
+  const db = createInstagramDbFake({
+    venues: [{ id: 'venue-1', instagram_account_id: ACCOUNT_ID }],
+  })
   await processInstagramDelivery(delivery, db.client)
 
   const [guest] = db.tables.guests as FakeRow[]
   const [message] = db.tables.messages as FakeRow[]
-  if (!guest || !message) throw new Error('the handler saved no guest or no message')
+  if (!guest || !message)
+    throw new Error('the handler saved no guest or no message')
 
   return {
-    guest: { id: guest.id, createdVia: guest.created_via, createdAt: new Date(NOW) },
+    guest: {
+      id: guest.id,
+      createdVia: guest.created_via,
+      createdAt: new Date(NOW),
+    },
     currentMessage: { id: message.id, body: message.body },
     recentMessages: [],
   } as unknown as RuntimeContext
@@ -111,7 +125,9 @@ describe('the first-visit opener for an Instagram guest', () => {
   })
 
   it('does not fire on the same tap without the referral', async () => {
-    const ctx = await firstTurnContext(withoutReferral(fixture('postback-referral')))
+    const ctx = await firstTurnContext(
+      withoutReferral(fixture('postback-referral')),
+    )
     expect(computeFirstTouchAfterQrScan(ctx, new Date(NOW))).toBe(false)
   })
 
@@ -129,7 +145,14 @@ describe('the first-visit opener for an Instagram guest', () => {
     const ctx = await firstTurnContext(fixture('postback-referral'))
     const withReply = {
       ...ctx,
-      recentMessages: [{ direction: 'outbound', body: 'ECHO', createdAt: new Date(NOW), delivery: 'delivered' }],
+      recentMessages: [
+        {
+          direction: 'outbound',
+          body: 'ECHO',
+          createdAt: new Date(NOW),
+          delivery: 'delivered',
+        },
+      ],
     } as RuntimeContext
     expect(computeFirstTouchAfterQrScan(withReply, new Date(NOW))).toBe(false)
   })
@@ -141,7 +164,9 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
   // parsed channel, and whether the guest row holds each identifier.
   function channelFor(guest: FakeRow, message: FakeRow) {
     return resolveConversationChannel({
-      inboundChannel: parseMessageChannel(message.channel as string | null | undefined),
+      inboundChannel: parseMessageChannel(
+        message.channel as string | null | undefined,
+      ),
       hasPhone: typeof guest.phone_number === 'string',
       hasInstagramId: typeof guest.instagram_scoped_id === 'string',
     }).channel
@@ -162,11 +187,14 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
   }
 
   it("resolves the recorded icebreaker tap's rows to the instagram channel and renders its opener", async () => {
-    const db = createInstagramDbFake({ venues: [{ id: 'venue-1', instagram_account_id: ACCOUNT_ID }] })
+    const db = createInstagramDbFake({
+      venues: [{ id: 'venue-1', instagram_account_id: ACCOUNT_ID }],
+    })
     await processInstagramDelivery(fixture('postback-referral'), db.client)
     const [guest] = db.tables.guests as FakeRow[]
     const [message] = db.tables.messages as FakeRow[]
-    if (!guest || !message) throw new Error('the handler saved no guest or no message')
+    if (!guest || !message)
+      throw new Error('the handler saved no guest or no message')
 
     const channel = channelFor(guest, message)
     expect(channel).toBe('instagram')
@@ -179,7 +207,11 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
   // The control: a guest who texted a phone number, shaped as the Sendblue
   // route saves them, still gets the SMS opener word for word.
   it('a Sendblue guest and message resolve to text and keep the SMS opener', () => {
-    const guest: FakeRow = { id: 'guest-sms', phone_number: '+15555550123', instagram_scoped_id: null }
+    const guest: FakeRow = {
+      id: 'guest-sms',
+      phone_number: '+15555550123',
+      instagram_scoped_id: null,
+    }
     const message: FakeRow = { id: 'msg-sms', channel: 'text' }
 
     const channel = channelFor(guest, message)
@@ -190,14 +222,18 @@ describe('the first-visit opener an Instagram guest gets is the Instagram one', 
   })
 })
 
-
 // TAC-518. Two guarantees this ticket must not break, and the second is the
 // shape of its own ruling.
 describe('SMS first touch is untouched by the referral (TAC-518)', () => {
   function smsFirstTurn(over: Partial<RuntimeContext> = {}): RuntimeContext {
     return {
       guest: { createdVia: 'qr_scan', createdAt: new Date(NOW) },
-      currentMessage: { id: 'in-1', body: 'Hi Sana!', channel: 'text', referralSource: null },
+      currentMessage: {
+        id: 'in-1',
+        body: 'Hi Sana!',
+        channel: 'text',
+        referralSource: null,
+      },
       recentMessages: [],
       ...over,
     } as unknown as RuntimeContext
@@ -206,13 +242,17 @@ describe('SMS first touch is untouched by the referral (TAC-518)', () => {
   // A venue on Sendblue has a dedicated number and no referral will ever
   // arrive. The opener has to fire on created_via alone, exactly as before.
   it('fires for a Sendblue QR guest with no referral anywhere', () => {
-    expect(computeFirstTouchAfterQrScan(smsFirstTurn(), new Date(NOW))).toBe(true)
+    expect(computeFirstTouchAfterQrScan(smsFirstTurn(), new Date(NOW))).toBe(
+      true,
+    )
   })
 
   // And it is not the referral doing it: the same guest without the qr_scan
   // label gets nothing, on either channel.
   it('does not fire for an SMS guest who was not enrolled by the sign', () => {
-    const ctx = smsFirstTurn({ guest: { createdVia: 'inbound_message', createdAt: new Date(NOW) } } as Partial<RuntimeContext>)
+    const ctx = smsFirstTurn({
+      guest: { createdVia: 'inbound_message', createdAt: new Date(NOW) },
+    } as Partial<RuntimeContext>)
     expect(computeFirstTouchAfterQrScan(ctx, new Date(NOW))).toBe(false)
   })
 
@@ -223,7 +263,10 @@ describe('SMS first touch is untouched by the referral (TAC-518)', () => {
   // guest who has been messaging the venue for weeks — the thing the ruling
   // forbids — and the wording for that case is TAC-423's, not this ticket's.
   it('the opener gate does not read the referral at all', () => {
-    const src = readFileSync(join(__dirname, '..', '..', 'agent', 'stages.ts'), 'utf-8')
+    const src = readFileSync(
+      join(__dirname, '..', '..', 'agent', 'stages.ts'),
+      'utf-8',
+    )
     const gate = src.slice(
       src.indexOf('export function computeFirstTouchAfterQrScan('),
       src.indexOf('Map orchestrator RuntimeContext'),

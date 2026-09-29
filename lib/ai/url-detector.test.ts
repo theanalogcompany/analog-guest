@@ -26,12 +26,18 @@ describe('extractUrls — what counts as a link', () => {
   })
 
   it('treats a scheme-prefixed homepage as a link even with no real path', () => {
-    expect(extractUrls('see https://lemils.com/')).toEqual(['https://lemils.com/'])
-    expect(extractUrls('see https://lemils.com')).toEqual(['https://lemils.com'])
+    expect(extractUrls('see https://lemils.com/')).toEqual([
+      'https://lemils.com/',
+    ])
+    expect(extractUrls('see https://lemils.com')).toEqual([
+      'https://lemils.com',
+    ])
   })
 
   it('ignores ordinary prose that looks dotted', () => {
-    expect(extractUrls('Open 7am-3pm, e.g. Mon.Tue, drinks are 3.50 each.')).toEqual([])
+    expect(
+      extractUrls('Open 7am-3pm, e.g. Mon.Tue, drinks are 3.50 each.'),
+    ).toEqual([])
   })
 
   it('ignores an email address', () => {
@@ -78,7 +84,9 @@ describe('findUnverifiedUrls — matching against the curated list', () => {
     // The allowlist is curated, never derived: appearing in a retrieved
     // knowledge chunk earns a link nothing.
     const inKnowledgeOnly = 'https://lemils.com/blogs/blog/so-whats-chicory'
-    expect(findUnverifiedUrls(`Read ${inKnowledgeOnly}`, LIST)).toEqual([inKnowledgeOnly])
+    expect(findUnverifiedUrls(`Read ${inKnowledgeOnly}`, LIST)).toEqual([
+      inKnowledgeOnly,
+    ])
   })
 
   it('reports every link when the list is empty', () => {
@@ -98,11 +106,15 @@ describe('findUnverifiedUrls — matching against the curated list', () => {
 
 describe('findUnverifiedUrls — a single trailing slash is insignificant', () => {
   it('matches a draft with no slash against a listed url with one', () => {
-    expect(findUnverifiedUrls('see https://lemils.com', ['https://lemils.com/'])).toEqual([])
+    expect(
+      findUnverifiedUrls('see https://lemils.com', ['https://lemils.com/']),
+    ).toEqual([])
   })
 
   it('matches a draft with a slash against a listed url without one', () => {
-    expect(findUnverifiedUrls('see https://lemils.com/', ['https://lemils.com'])).toEqual([])
+    expect(
+      findUnverifiedUrls('see https://lemils.com/', ['https://lemils.com']),
+    ).toEqual([])
   })
 
   it('reconciles the slash on a real path too', () => {
@@ -111,25 +123,31 @@ describe('findUnverifiedUrls — a single trailing slash is insignificant', () =
   })
 
   it('does NOT match across a different scheme', () => {
-    expect(findUnverifiedUrls('see http://lemils.com/', ['https://lemils.com/'])).toEqual([
-      'http://lemils.com/',
-    ])
+    expect(
+      findUnverifiedUrls('see http://lemils.com/', ['https://lemils.com/']),
+    ).toEqual(['http://lemils.com/'])
   })
 
   it('normalizes nothing else: case, query and path stay exact', () => {
-    expect(findUnverifiedUrls('see https://lemils.com/Products/Budan', [
-      'https://lemils.com/products/budan',
-    ])).toEqual(['https://lemils.com/Products/Budan'])
-    expect(findUnverifiedUrls('see https://lemils.com/products/budan?v=1', [
-      'https://lemils.com/products/budan',
-    ])).toEqual(['https://lemils.com/products/budan?v=1'])
+    expect(
+      findUnverifiedUrls('see https://lemils.com/Products/Budan', [
+        'https://lemils.com/products/budan',
+      ]),
+    ).toEqual(['https://lemils.com/Products/Budan'])
+    expect(
+      findUnverifiedUrls('see https://lemils.com/products/budan?v=1', [
+        'https://lemils.com/products/budan',
+      ]),
+    ).toEqual(['https://lemils.com/products/budan?v=1'])
   })
 
   it('does not collapse a doubled trailing slash onto a listed single one', () => {
     // Exactly one slash is removed, so "…/budan//" stays "…/budan/", which is
     // still not the listed "…/budan". A doubled slash is a different path and
     // holding it is the safe direction.
-    expect(findUnverifiedUrls(`see ${LISTED}//`, [LISTED])).toEqual([`${LISTED}//`])
+    expect(findUnverifiedUrls(`see ${LISTED}//`, [LISTED])).toEqual([
+      `${LISTED}//`,
+    ])
   })
 
   it('tolerates whitespace around a stored list entry', () => {
@@ -154,16 +172,22 @@ describe('findUnverifiedUrls — a missing scheme is https', () => {
     // than special-cased on one. A hand-typed list entry with no scheme is
     // the same destination as the https:// link the model writes.
     expect(
-      findUnverifiedUrls(`see ${LISTED}`, ['lemils.com/products/le-mils-budan-bold']),
+      findUnverifiedUrls(`see ${LISTED}`, [
+        'lemils.com/products/le-mils-budan-bold',
+      ]),
     ).toEqual([])
   })
 
   it('reconciles the missing scheme and the trailing slash together', () => {
     expect(
-      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold/', [LISTED]),
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold/', [
+        LISTED,
+      ]),
     ).toEqual([])
     expect(
-      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold', [`${LISTED}/`]),
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold', [
+        `${LISTED}/`,
+      ]),
     ).toEqual([])
   })
 
@@ -172,24 +196,32 @@ describe('findUnverifiedUrls — a missing scheme is https', () => {
     // or stripping the scheme from both sides before comparing. http is a
     // different destination, not an omission, and only an ABSENT scheme is
     // supplied.
-    expect(findUnverifiedUrls('see http://lemils.com/products/le-mils-budan-bold', [LISTED])).toEqual(
-      ['http://lemils.com/products/le-mils-budan-bold'],
-    )
     expect(
-      findUnverifiedUrls(`see ${LISTED}`, ['http://lemils.com/products/le-mils-budan-bold']),
+      findUnverifiedUrls('see http://lemils.com/products/le-mils-budan-bold', [
+        LISTED,
+      ]),
+    ).toEqual(['http://lemils.com/products/le-mils-budan-bold'])
+    expect(
+      findUnverifiedUrls(`see ${LISTED}`, [
+        'http://lemils.com/products/le-mils-budan-bold',
+      ]),
     ).toEqual([LISTED])
   })
 
   it('still holds a schemeless link whose path, case or query differs', () => {
     // Supplying the scheme must not loosen anything else.
-    expect(findUnverifiedUrls('see lemils.com/products/budan', [LISTED])).toEqual([
-      'lemils.com/products/budan',
-    ])
-    expect(findUnverifiedUrls('see lemils.com/Products/Le-Mils-Budan-Bold', [LISTED])).toEqual([
-      'lemils.com/Products/Le-Mils-Budan-Bold',
-    ])
     expect(
-      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold?v=1', [LISTED]),
+      findUnverifiedUrls('see lemils.com/products/budan', [LISTED]),
+    ).toEqual(['lemils.com/products/budan'])
+    expect(
+      findUnverifiedUrls('see lemils.com/Products/Le-Mils-Budan-Bold', [
+        LISTED,
+      ]),
+    ).toEqual(['lemils.com/Products/Le-Mils-Budan-Bold'])
+    expect(
+      findUnverifiedUrls('see lemils.com/products/le-mils-budan-bold?v=1', [
+        LISTED,
+      ]),
     ).toEqual(['lemils.com/products/le-mils-budan-bold?v=1'])
   })
 
@@ -207,8 +239,16 @@ describe('findUnverifiedUrls — a missing scheme is https', () => {
     // Supplying the scheme happens at COMPARISON time. Extraction is
     // unchanged, so "lemils.com" is still prose and never reaches the
     // comparison at all.
-    expect(findUnverifiedUrls('order on lemils.com whenever', ['https://lemils.com'])).toEqual([])
-    expect(findUnverifiedUrls('order on lemils.com/ whenever', ['https://lemils.com'])).toEqual([])
+    expect(
+      findUnverifiedUrls('order on lemils.com whenever', [
+        'https://lemils.com',
+      ]),
+    ).toEqual([])
+    expect(
+      findUnverifiedUrls('order on lemils.com/ whenever', [
+        'https://lemils.com',
+      ]),
+    ).toEqual([])
     expect(extractUrls('order on lemils.com whenever')).toEqual([])
   })
 })

@@ -29,10 +29,14 @@ export type VisitTimePrecision = 'pinned' | 'approximate'
  * can't be written in the first place, so this only ever fires on a
  * hand-edited row.
  */
-export function parseVisitPrecision(value: string | null | undefined): VisitTimePrecision | null {
+export function parseVisitPrecision(
+  value: string | null | undefined,
+): VisitTimePrecision | null {
   if (value === 'pinned' || value === 'approximate') return value
   if (value !== null && value !== undefined) {
-    console.warn(`[visit-precision] unrecognized precision "${value}", treating as unrecorded`)
+    console.warn(
+      `[visit-precision] unrecognized precision "${value}", treating as unrecorded`,
+    )
   }
   return null
 }

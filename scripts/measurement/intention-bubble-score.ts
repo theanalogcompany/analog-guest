@@ -79,7 +79,10 @@ export function scoreUnit(input: UnitInput): UnitVerdict {
   if (bubbles.length > MAX_BUBBLES_CEILING) breaches.push('too_many_bubbles')
   if (bubbles.some((b) => b.trim() === '')) breaches.push('empty_bubble')
   if (bubbles.some((b) => !hasContent(b))) breaches.push('contentless_bubble')
-  if (intentionQuestion !== '' && bubbles[bubbles.length - 1] !== intentionQuestion) {
+  if (
+    intentionQuestion !== '' &&
+    bubbles[bubbles.length - 1] !== intentionQuestion
+  ) {
     breaches.push('tail_not_last_bubble')
   }
 
@@ -106,9 +109,7 @@ export function scoreUnit(input: UnitInput): UnitVerdict {
  * prevent structurally.
  */
 export function normalizeForDuplicate(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '')
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 }
 
 /**
@@ -117,7 +118,10 @@ export function normalizeForDuplicate(text: string): string {
  * composed reply is guest-facing text, and a guard that quietly edits it
  * should be countable.
  */
-export function answerRepeatsQuestion(answer: string, question: string): boolean {
+export function answerRepeatsQuestion(
+  answer: string,
+  question: string,
+): boolean {
   if (question.trim() === '') return false
   const a = normalizeForDuplicate(answer)
   const q = normalizeForDuplicate(question)

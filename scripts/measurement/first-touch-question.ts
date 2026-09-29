@@ -76,7 +76,10 @@ import { startAgentTrace } from '@/lib/observability/langfuse'
 import { createRunLog } from './run-log'
 import { classifyFirstTouchReply } from './first-touch-question-detector'
 import { moveIntentionBlockLate } from './intention-block-move'
-import { selectOrdinaryTurns, type OrdinaryTurn } from './ordinary-turn-selection'
+import {
+  selectOrdinaryTurns,
+  type OrdinaryTurn,
+} from './ordinary-turn-selection'
 
 // THE QUESTION-REMOVED OPENER, DERIVED RATHER THAN TRANSCRIBED.
 //
@@ -111,7 +114,8 @@ function openerWithoutQuestion(shipped: string): string {
 // end. Anchoring on two single-occurrence sentences means no 25-line transcript
 // to drift against the source.
 const BALANCE_SPAN_START = 'A natural opening is ordinary and small.'
-const BALANCE_SPAN_END = 'If nothing fits, let it wait. There will be other conversations.'
+const BALANCE_SPAN_END =
+  'If nothing fits, let it wait. There will be other conversations.'
 
 const BALANCE_REPLACEMENT = [
   'Most replies have room for one. A short question on the end of a',
@@ -163,7 +167,10 @@ function shapePromptForArm(
   const openerHits = prompt.split(shippedOpener).length - 1
   if (expectOpener) {
     if (openerHits !== 1) {
-      return { ok: false, reason: `opener matched ${openerHits} times, expected 1` }
+      return {
+        ok: false,
+        reason: `opener matched ${openerHits} times, expected 1`,
+      }
     }
     prompt = prompt.replace(shippedOpener, openerWithoutQuestion(shippedOpener))
   } else if (openerHits !== 0) {
@@ -177,15 +184,24 @@ function shapePromptForArm(
     const startAt = prompt.indexOf(BALANCE_SPAN_START)
     const endAt = prompt.indexOf(BALANCE_SPAN_END)
     if (prompt.split(BALANCE_SPAN_START).length - 1 !== 1) {
-      return { ok: false, reason: 'balance span start did not match exactly once' }
+      return {
+        ok: false,
+        reason: 'balance span start did not match exactly once',
+      }
     }
     if (prompt.split(BALANCE_SPAN_END).length - 1 !== 1) {
-      return { ok: false, reason: 'balance span end did not match exactly once' }
+      return {
+        ok: false,
+        reason: 'balance span end did not match exactly once',
+      }
     }
     if (startAt >= endAt) {
       return { ok: false, reason: 'balance span anchors are out of order' }
     }
-    prompt = prompt.slice(0, startAt) + BALANCE_REPLACEMENT + prompt.slice(endAt + BALANCE_SPAN_END.length)
+    prompt =
+      prompt.slice(0, startAt) +
+      BALANCE_REPLACEMENT +
+      prompt.slice(endAt + BALANCE_SPAN_END.length)
   }
 
   if (arm === 'position' || arm === 'both') {
@@ -224,7 +240,13 @@ const SCENARIOS = [
 //
 // The four real arms differ from each other in EXACTLY ONE variable: which of
 // the two candidate transformations is applied to the block.
-const ARMS = ['scripted_control', 'before', 'position', 'balance', 'both'] as const
+const ARMS = [
+  'scripted_control',
+  'before',
+  'position',
+  'balance',
+  'both',
+] as const
 type Arm = (typeof ARMS)[number]
 
 interface Args {
@@ -249,16 +271,26 @@ interface Args {
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = { reps: 20, mode: 'first-touch', turns: 12, arms: [], scenarios: [], dumpBlocks: false }
+  const out: Args = {
+    reps: 20,
+    mode: 'first-touch',
+    turns: 12,
+    arms: [],
+    scenarios: [],
+    dumpBlocks: false,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--venue') out.venue = argv[++i]
     else if (argv[i] === '--guest') out.guest = argv[++i]
     else if (argv[i] === '--reps') out.reps = Number(argv[++i])
-    else if (argv[i] === '--mode') out.mode = argv[++i] === 'ordinary' ? 'ordinary' : 'first-touch'
+    else if (argv[i] === '--mode')
+      out.mode = argv[++i] === 'ordinary' ? 'ordinary' : 'first-touch'
     else if (argv[i] === '--turns') out.turns = Number(argv[++i])
     else if (argv[i] === '--dump-blocks') out.dumpBlocks = true
-    else if (argv[i] === '--arms') out.arms = (argv[++i] ?? '').split(',').filter(Boolean)
-    else if (argv[i] === '--scenarios') out.scenarios = (argv[++i] ?? '').split(',').filter(Boolean)
+    else if (argv[i] === '--arms')
+      out.arms = (argv[++i] ?? '').split(',').filter(Boolean)
+    else if (argv[i] === '--scenarios')
+      out.scenarios = (argv[++i] ?? '').split(',').filter(Boolean)
   }
   return out
 }
@@ -300,11 +332,13 @@ async function prepareFirstTouchTurn(input: {
   ctx.recentMessages = []
   ctx.recentVisits = []
   ctx.activeCommitments = []
-  ctx.openIntentions = (['understand_order', 'learn_name'] as const).map((key) => ({
-    key,
-    promptLine: INTENTION_DEFINITION_BY_KEY[key].promptLine,
-    eligibleAt: now,
-  }))
+  ctx.openIntentions = (['understand_order', 'learn_name'] as const).map(
+    (key) => ({
+      key,
+      promptLine: INTENTION_DEFINITION_BY_KEY[key].promptLine,
+      eligibleAt: now,
+    }),
+  )
   return finishPrepare(ctx, input.scenario.body)
 }
 
@@ -441,11 +475,23 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
     const key = `${u.groupId}|${arm}`
     const t = u.bump(key)
 
-    const shaped = shapePromptForArm(u.composed.userPrompt, arm, u.openerAfter, u.expectOpener)
+    const shaped = shapePromptForArm(
+      u.composed.userPrompt,
+      arm,
+      u.openerAfter,
+      u.expectOpener,
+    )
     if (!shaped.ok) {
       t.invalid += 1
-      u.log.appendUnit({ groupId: u.groupId, rep: u.rep, arm, invalid: shaped.reason })
-      console.log(`! ${u.groupId} rep${u.rep} ${arm} INVALID (${shaped.reason})`)
+      u.log.appendUnit({
+        groupId: u.groupId,
+        rep: u.rep,
+        arm,
+        invalid: shaped.reason,
+      })
+      console.log(
+        `! ${u.groupId} rep${u.rep} ${arm} INVALID (${shaped.reason})`,
+      )
       return
     }
     const userPrompt = shaped.prompt
@@ -473,7 +519,14 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
     // Failures are counted separately and excluded from every denominator.
     if (body === null) {
       t.failed += 1
-      u.log.appendUnit({ groupId: u.groupId, inbound: u.inbound, rep: u.rep, arm, body, error })
+      u.log.appendUnit({
+        groupId: u.groupId,
+        inbound: u.inbound,
+        rep: u.rep,
+        arm,
+        body,
+        error,
+      })
       console.log(`· ${u.groupId} rep${u.rep} ${arm.padEnd(16)} (${error})`)
       return
     }
@@ -550,7 +603,12 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
-  if (!args.venue || !args.guest || !Number.isInteger(args.reps) || args.reps < 1) {
+  if (
+    !args.venue ||
+    !args.guest ||
+    !Number.isInteger(args.reps) ||
+    args.reps < 1
+  ) {
     console.error(
       '✗ usage: tsx scripts/measurement/first-touch-question.ts --venue <slug> --guest <uuid> [--reps N] [--mode first-touch|ordinary] [--turns N] [--arms a,b] [--scenarios x,y]',
     )
@@ -572,17 +630,25 @@ async function main(): Promise<void> {
   // 20/20. On an ordinary turn there is no opener to script, so it would be
   // byte-identical to `before` and would just spend generations twice.
   const defaultArms: readonly Arm[] =
-    args.mode === 'ordinary' ? ARMS.filter((a) => a !== 'scripted_control') : ARMS
+    args.mode === 'ordinary'
+      ? ARMS.filter((a) => a !== 'scripted_control')
+      : ARMS
   const arms: readonly Arm[] =
-    args.arms.length === 0 ? defaultArms : defaultArms.filter((a) => args.arms.includes(a))
+    args.arms.length === 0
+      ? defaultArms
+      : defaultArms.filter((a) => args.arms.includes(a))
   if (arms.length === 0) {
     console.error(`✗ --arms matched none of: ${ARMS.join(', ')}`)
     process.exit(2)
   }
   const scenarios =
-    args.scenarios.length === 0 ? SCENARIOS : SCENARIOS.filter((x) => args.scenarios.includes(x.id))
+    args.scenarios.length === 0
+      ? SCENARIOS
+      : SCENARIOS.filter((x) => args.scenarios.includes(x.id))
   if (scenarios.length === 0) {
-    console.error(`✗ --scenarios matched none of: ${SCENARIOS.map((x) => x.id).join(', ')}`)
+    console.error(
+      `✗ --scenarios matched none of: ${SCENARIOS.map((x) => x.id).join(', ')}`,
+    )
     process.exit(2)
   }
 
@@ -647,7 +713,8 @@ async function main(): Promise<void> {
       args.mode === 'ordinary'
         ? await prepareOrdinaryTurn({
             venueId: venue.id,
-            turn: (await selectOrdinaryTurns(supabase, venue.id, sinceIso)).turns[0],
+            turn: (await selectOrdinaryTurns(supabase, venue.id, sinceIso))
+              .turns[0],
             trace,
           })
         : await prepareFirstTouchTurn({
@@ -662,14 +729,26 @@ async function main(): Promise<void> {
       .filter((l) => l.startsWith('## '))
     console.log(`\nuser-prompt blocks, in order (${args.mode}):`)
     headings.forEach((h, i) => console.log(`  ${i + 1}. ${h}`))
-    const b = shapePromptForArm(prepared.composed.userPrompt, 'before', openerAfter, args.mode !== 'ordinary')
-    const pos = shapePromptForArm(prepared.composed.userPrompt, 'position', openerAfter, args.mode !== 'ordinary')
+    const b = shapePromptForArm(
+      prepared.composed.userPrompt,
+      'before',
+      openerAfter,
+      args.mode !== 'ordinary',
+    )
+    const pos = shapePromptForArm(
+      prepared.composed.userPrompt,
+      'position',
+      openerAfter,
+      args.mode !== 'ordinary',
+    )
     if (b.ok && pos.ok) {
       console.log(
         `\nbefore vs position shaped prompts: ${b.prompt === pos.prompt ? 'BYTE-IDENTICAL (position is a no-op here)' : `DIFFER by ${Math.abs(b.prompt.length - pos.prompt.length)} chars in length`}`,
       )
     } else {
-      console.log(`\nshaping refused: before=${b.ok ? 'ok' : b.reason} position=${pos.ok ? 'ok' : pos.reason}`)
+      console.log(
+        `\nshaping refused: before=${b.ok ? 'ok' : b.reason} position=${pos.ok ? 'ok' : pos.reason}`,
+      )
     }
     await trace.flushAsync()
     return
@@ -710,7 +789,8 @@ async function main(): Promise<void> {
     console.log(
       `selected ${selection.turns.length} replayable turns of ${selection.candidates} candidates (${selection.skipped.length} skipped)`,
     )
-    for (const s of selection.skipped) console.log(`  skip ${s.outboundId}: ${s.reason}`)
+    for (const s of selection.skipped)
+      console.log(`  skip ${s.outboundId}: ${s.reason}`)
     log.appendUnit({
       selection: {
         candidates: selection.candidates,
@@ -727,7 +807,11 @@ async function main(): Promise<void> {
       const groupId = `turn:${turn.outboundId.slice(0, 8)}`
       groups.push(groupId)
       for (let rep = 0; rep < args.reps; rep += 1) {
-        const prepared = await prepareOrdinaryTurn({ venueId: venue.id, turn, trace })
+        const prepared = await prepareOrdinaryTurn({
+          venueId: venue.id,
+          turn,
+          trace,
+        })
         await runArms({
           groupId,
           inbound: turn.inboundBody,
@@ -751,7 +835,8 @@ async function main(): Promise<void> {
     for (const arm of arms) {
       const t = tally[`${groupId}|${arm}`]
       if (!t) continue
-      const pct = (x: number) => (t.n ? `${x}/${t.n} (${Math.round((100 * x) / t.n)}%)` : '0/0')
+      const pct = (x: number) =>
+        t.n ? `${x}/${t.n} (${Math.round((100 * x) / t.n)}%)` : '0/0'
       console.log(
         `${groupId.padEnd(22)} ${arm.padEnd(16)} raised ${pct(t.raised).padEnd(15)} asks anything ${pct(t.question).padEnd(15)} order ${pct(t.order).padEnd(15)}${t.failed ? ` FAILED ${t.failed}` : ''}${t.invalid ? ` INVALID ${t.invalid}` : ''}`,
       )
@@ -782,7 +867,8 @@ async function main(): Promise<void> {
   for (const arm of arms) {
     const t = pooled[arm]
     if (!t) continue
-    const pct = (x: number) => (t.n ? `${x}/${t.n} (${Math.round((100 * x) / t.n)}%)` : '0/0')
+    const pct = (x: number) =>
+      t.n ? `${x}/${t.n} (${Math.round((100 * x) / t.n)}%)` : '0/0'
     console.log(
       `${arm.padEnd(16)} raised ${pct(t.raised).padEnd(15)} asks anything ${pct(t.question).padEnd(15)} order ${pct(t.order).padEnd(15)}${t.failed ? ` FAILED ${t.failed}` : ''}${t.invalid ? ` INVALID ${t.invalid}` : ''}`,
     )
@@ -845,7 +931,9 @@ async function main(): Promise<void> {
     }
   }
   if (!anyCeilingBreach) {
-    console.log('PASS  ceilings: no arm asked two things in one reply, or raised on an apology')
+    console.log(
+      'PASS  ceilings: no arm asked two things in one reply, or raised on an apology',
+    )
   }
 
   // 3. THE BARS.
@@ -853,7 +941,8 @@ async function main(): Promise<void> {
   const metric = args.mode === 'ordinary' ? 'raised' : 'order'
   for (const arm of arms) {
     const t = pooled[arm]
-    if (!t || t.n === 0 || arm === 'scripted_control' || arm === 'before') continue
+    if (!t || t.n === 0 || arm === 'scripted_control' || arm === 'before')
+      continue
     const rate = (metric === 'raised' ? t.raised : t.order) / t.n
     console.log(
       `${rate >= bar ? 'PASS' : 'MISS'}  bar: ${arm} ${metric} ${Math.round(rate * 100)}% vs ${Math.round(bar * 100)}%`,

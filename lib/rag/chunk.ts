@@ -19,7 +19,10 @@ export function chunkText(text: string, maxTokens: number = 300): string[] {
   if (trimmed.length === 0) return []
   if (estimateTokens(trimmed) <= maxTokens) return [trimmed]
 
-  const paragraphs = trimmed.split(/\n\s*\n+/).map((p) => p.trim()).filter((p) => p.length > 0)
+  const paragraphs = trimmed
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
 
   const chunks: string[] = []
   for (const para of paragraphs) {

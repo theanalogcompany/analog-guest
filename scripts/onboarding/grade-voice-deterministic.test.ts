@@ -12,18 +12,27 @@ const base = {
 
 describe('gradeVoiceDeterministic', () => {
   it('passes a clean reply', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'yeah we ship anywhere in the US, lemils.com has details 🙌' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'yeah we ship anywhere in the US, lemils.com has details 🙌',
+    })
     expect(result.pass).toBe(true)
     expect(result.findings).toEqual([])
   })
 
   it('flags an em dash', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'sure — we can do that' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'sure — we can do that',
+    })
     expect(result.findings.map((f) => f.check)).toContain('dash')
   })
 
   it('flags an en dash', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'open 9–5 today' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'open 9–5 today',
+    })
     expect(result.findings.map((f) => f.check)).toContain('dash')
   })
 
@@ -47,7 +56,8 @@ describe('gradeVoiceDeterministic', () => {
   it('flags a reply over three sentences (of 5+ words each)', () => {
     const result = gradeVoiceDeterministic({
       ...base,
-      replyBody: 'This is sentence number one here. This is sentence number two here. This is sentence number three here. This is sentence number four here.',
+      replyBody:
+        'This is sentence number one here. This is sentence number two here. This is sentence number three here. This is sentence number four here.',
     })
     expect(result.findings.map((f) => f.check)).toContain('length')
   })
@@ -55,7 +65,8 @@ describe('gradeVoiceDeterministic', () => {
   it('does not flag exactly three long sentences', () => {
     const result = gradeVoiceDeterministic({
       ...base,
-      replyBody: 'This is sentence number one here. This is sentence number two here. This is sentence number three here.',
+      replyBody:
+        'This is sentence number one here. This is sentence number two here. This is sentence number three here.',
     })
     expect(result.findings.map((f) => f.check)).not.toContain('length')
   })
@@ -65,7 +76,8 @@ describe('gradeVoiceDeterministic', () => {
     // and "are you doing okay right now" would count, well under the cap.
     const result = gradeVoiceDeterministic({
       ...base,
-      replyBody: "hey. I'm glad you texted. that sounds heavy. are you doing okay right now?",
+      replyBody:
+        "hey. I'm glad you texted. that sounds heavy. are you doing okay right now?",
     })
     expect(result.findings.map((f) => f.check)).not.toContain('length')
   })
@@ -98,17 +110,29 @@ describe('gradeVoiceDeterministic', () => {
   })
 
   it('never policy fails on any emoji', () => {
-    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'never', replyBody: 'sure thing 🙌' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'never',
+      replyBody: 'sure thing 🙌',
+    })
     expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
   })
 
   it('sparingly policy allows exactly one emoji', () => {
-    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'sparingly', replyBody: 'sure thing 🙌' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'sparingly',
+      replyBody: 'sure thing 🙌',
+    })
     expect(result.findings.map((f) => f.check)).not.toContain('emoji_policy')
   })
 
   it('sparingly policy fails on two or more emoji', () => {
-    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'sparingly', replyBody: 'sure thing 🙌 ☕' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'sparingly',
+      replyBody: 'sure thing 🙌 ☕',
+    })
     expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
   })
 
@@ -117,12 +141,20 @@ describe('gradeVoiceDeterministic', () => {
   // most one", so an unlimited grader would let a four-emoji reply violate the
   // prompt and pass the grade.
   it('frequent policy now fails past one emoji (was unlimited before TAC-362)', () => {
-    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'frequent', replyBody: '🙌 ☕ 😄 🎉' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'frequent',
+      replyBody: '🙌 ☕ 😄 🎉',
+    })
     expect(result.findings.map((f) => f.check)).toContain('emoji_policy')
   })
 
   it('frequent policy still allows exactly one emoji', () => {
-    const result = gradeVoiceDeterministic({ ...base, emojiPolicy: 'frequent', replyBody: 'sure thing 🙌' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      emojiPolicy: 'frequent',
+      replyBody: 'sure thing 🙌',
+    })
     expect(result.findings.map((f) => f.check)).not.toContain('emoji_policy')
   })
 
@@ -160,12 +192,18 @@ describe('gradeVoiceDeterministic', () => {
   })
 
   it('flags an email-style sign-off', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'sure thing, come by anytime.\n- Himanshu' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'sure thing, come by anytime.\n- Himanshu',
+    })
     expect(result.findings.map((f) => f.check)).toContain('signed_name')
   })
 
   it('flags a phone number not in venue data', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'call us at 415-555-0123' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'call us at 415-555-0123',
+    })
     expect(result.findings.map((f) => f.check)).toContain('phone_or_link')
   })
 
@@ -179,23 +217,37 @@ describe('gradeVoiceDeterministic', () => {
   })
 
   it('flags a link not in venue data', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'check out competitorcafe.com for that' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'check out competitorcafe.com for that',
+    })
     expect(result.findings.map((f) => f.check)).toContain('phone_or_link')
   })
 
   it('does not flag a link that matches venue data', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'order at lemils.com anytime' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'order at lemils.com anytime',
+    })
     expect(result.findings.map((f) => f.check)).not.toContain('phone_or_link')
   })
 
   it('flags third-person self-reference', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: 'best to check with Himanshu about that' })
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: 'best to check with Himanshu about that',
+    })
     expect(result.findings.map((f) => f.check)).toContain('third_person_self')
   })
 
   it('does not flag first-person self-introduction', () => {
-    const result = gradeVoiceDeterministic({ ...base, replyBody: "that's me, I'm Himanshu, happy to help" })
-    expect(result.findings.map((f) => f.check)).not.toContain('third_person_self')
+    const result = gradeVoiceDeterministic({
+      ...base,
+      replyBody: "that's me, I'm Himanshu, happy to help",
+    })
+    expect(result.findings.map((f) => f.check)).not.toContain(
+      'third_person_self',
+    )
   })
 
   it('skips third-person check entirely when speakerFraming is venue', () => {
@@ -205,7 +257,9 @@ describe('gradeVoiceDeterministic', () => {
       speakerName: undefined,
       replyBody: 'best to check with Himanshu about that',
     })
-    expect(result.findings.map((f) => f.check)).not.toContain('third_person_self')
+    expect(result.findings.map((f) => f.check)).not.toContain(
+      'third_person_self',
+    )
   })
 
   it('accumulates multiple findings on one bad reply', () => {

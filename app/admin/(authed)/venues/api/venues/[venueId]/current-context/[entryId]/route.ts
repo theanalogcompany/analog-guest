@@ -20,7 +20,11 @@ export async function DELETE(
   if (!result.ok) {
     const status = result.errorCode === 'not_found' ? 404 : 500
     return NextResponse.json(
-      { error: 'currentContext drop failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'currentContext drop failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

@@ -70,7 +70,8 @@ describe('verifyCancellationClaim (TAC-513)', () => {
     // The 2026-09-21 reply, verbatim.
     generateObjectMock.mockResolvedValue({
       object: {
-        reasoning: 'The reply states the comp for the blossom tonic is cancelled.',
+        reasoning:
+          'The reply states the comp for the blossom tonic is cancelled.',
         claimsCancellation: true,
       },
     })
@@ -81,7 +82,9 @@ describe('verifyCancellationClaim (TAC-513)', () => {
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.data.claimsCancellation).toBe(true)
-      expect(r.data.promptVersion).toBe(VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION)
+      expect(r.data.promptVersion).toBe(
+        VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION,
+      )
     }
   })
 
@@ -93,10 +96,15 @@ describe('verifyCancellationClaim (TAC-513)', () => {
     generateObjectMock.mockResolvedValue({
       object: { reasoning: 'yes', claimsCancellation: true },
     })
-    const r = await verifyCancellationClaim({ replyBody: "that one's off then" })
+    const r = await verifyCancellationClaim({
+      replyBody: "that one's off then",
+    })
     expect(r.ok).toBe(true)
     if (r.ok) {
-      expect(Object.keys(r.data).sort()).toEqual(['claimsCancellation', 'promptVersion'])
+      expect(Object.keys(r.data).sort()).toEqual([
+        'claimsCancellation',
+        'promptVersion',
+      ])
     }
   })
 
@@ -105,7 +113,7 @@ describe('verifyCancellationClaim (TAC-513)', () => {
       object: { reasoning: 'Nothing is withdrawn.', claimsCancellation: false },
     })
     const r = await verifyCancellationClaim({
-      replyBody: "the cortado comp still stands, come by whenever",
+      replyBody: 'the cortado comp still stands, come by whenever',
     })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data.claimsCancellation).toBe(false)
@@ -121,7 +129,10 @@ describe('verifyCancellationClaim (TAC-513)', () => {
       object: { reasoning: 'no', claimsCancellation: false },
     })
     await verifyCancellationClaim({ replyBody: 'hello there' })
-    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      prompt: string
+      system: string
+    }
     expect(call.prompt).toContain('hello there')
     expect(call.prompt).not.toContain('id:')
     expect(call.system).toContain('no longer happening')
@@ -138,14 +149,18 @@ describe('verifyCancellationClaim (TAC-513)', () => {
     const call = generateObjectMock.mock.calls[0]?.[0] as {
       schema: { shape: Record<string, unknown> }
     }
-    expect(Object.keys(call.schema.shape)).toEqual(['reasoning', 'claimsCancellation'])
+    expect(Object.keys(call.schema.shape)).toEqual([
+      'reasoning',
+      'claimsCancellation',
+    ])
   })
 
   it('reports truncation under its own error code', async () => {
     generateObjectMock.mockRejectedValue(truncationError())
     const r = await verifyCancellationClaim({ replyBody: 'anything' })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.errorCode).toBe(VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE)
+    if (!r.ok)
+      expect(r.errorCode).toBe(VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE)
   })
 
   it('does NOT report a parse failure that stopped normally as truncation', async () => {
@@ -156,7 +171,9 @@ describe('verifyCancellationClaim (TAC-513)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.errorCode).toBe('ai_verify_cancellation_claim_failed')
-      expect(r.errorCode).not.toBe(VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE)
+      expect(r.errorCode).not.toBe(
+        VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE,
+      )
     }
   })
 
@@ -180,8 +197,12 @@ describe('verifyCancellationClaim (TAC-513)', () => {
       object: { reasoning: 'r', claimsCancellation: false },
     })
     await verifyCancellationClaim({ replyBody: 'anything' })
-    const call = generateObjectMock.mock.calls[0]?.[0] as { maxOutputTokens: number }
-    expect(call.maxOutputTokens).toBe(VERIFY_CANCELLATION_CLAIM_MAX_OUTPUT_TOKENS)
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      maxOutputTokens: number
+    }
+    expect(call.maxOutputTokens).toBe(
+      VERIFY_CANCELLATION_CLAIM_MAX_OUTPUT_TOKENS,
+    )
   })
 })
 

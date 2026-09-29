@@ -197,7 +197,9 @@ describe('canAutoSendComplaintTurn — direction of failure', () => {
       for (const body of bodies) {
         for (const commitment of commitments) {
           if (canAutoSendComplaintTurn({ complaintIntent, body, commitment })) {
-            sends.push(`${complaintIntent}|${body}|${JSON.stringify(commitment)}`)
+            sends.push(
+              `${complaintIntent}|${body}|${JSON.stringify(commitment)}`,
+            )
           }
         }
       }

@@ -134,7 +134,7 @@ None. Proceeding to build on approval.`,
   },
   {
     createdAt: '2026-09-17T20:43:50.522Z',
-    body: '**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35271049290 count=8\n\nThis run\'s session did its work on this ticket but hit 8 permission denials on the way.',
+    body: "**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35271049290 count=8\n\nThis run's session did its work on this ticket but hit 8 permission denials on the way.",
   },
   {
     // Real: a bot comment with NO bracket marker directly after the
@@ -160,7 +160,7 @@ Note the consequence: the \`workflows\` token permission stays unverified after 
   },
   {
     createdAt: '2026-09-17T23:13:20.002Z',
-    body: '**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35284910437 count=3\n\nThis run\'s session did its work on this ticket but hit 3 permission denials on the way.',
+    body: "**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35284910437 count=3\n\nThis run's session did its work on this ticket but hit 3 permission denials on the way.",
   },
   {
     createdAt: '2026-09-18T00:13:09.365Z',
@@ -172,7 +172,7 @@ The buildable part of the approved plan is done and pushed. What's NOT in that P
   },
   {
     createdAt: '2026-09-18T00:13:42.078Z',
-    body: '**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35288433905 count=23\n\nThis run\'s session did its work on this ticket but hit 23 permission denials on the way.',
+    body: "**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-396 run=35288433905 count=23\n\nThis run's session did its work on this ticket but hit 23 permission denials on the way.",
   },
   {
     createdAt: '2026-09-18T01:33:27.001Z',
@@ -256,7 +256,7 @@ None. Every ruling maps to a concrete design decision above.`,
   },
   {
     createdAt: '2026-09-17T23:13:20.523Z',
-    body: '**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-325 run=35284910437 count=3\n\nThis run\'s session did its work on this ticket but hit 3 permission denials on the way.',
+    body: "**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-325 run=35284910437 count=3\n\nThis run's session did its work on this ticket but hit 3 permission denials on the way.",
   },
   {
     createdAt: '2026-09-17T23:45:27.093Z',
@@ -310,7 +310,7 @@ Build finished pending a Studio migration.`,
   },
   {
     createdAt: '2026-09-18T04:22:08.190Z',
-    body: '**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-325 run=35306017791 count=9\n\nThis run\'s session did its work on this ticket but hit 9 permission denials on the way.',
+    body: "**[FROM CLAUDE CODE]**\n\n[DENIALS] TAC-325 run=35306017791 count=9\n\nThis run's session did its work on this ticket but hit 9 permission denials on the way.",
   },
   {
     createdAt: '2026-09-18T04:28:02.514Z',
@@ -436,19 +436,29 @@ describe('deriveNeedsDecision', () => {
   })
 
   it('TAC-396: goes true the moment [BUILD-SKIPPED] posts (incident: never removed after a plan with no open questions is the mirror; this is the other direction)', () => {
-    const upToBuildSkipped = TAC_396_THREAD.filter((c) => c.createdAt <= '2026-09-17T17:18:04.424Z')
+    const upToBuildSkipped = TAC_396_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-17T17:18:04.424Z',
+    )
     expect(deriveNeedsDecision(upToBuildSkipped)).toBe(true)
   })
 
   it('TAC-396: goes false the moment the 23:10:24 approval ruling posts — the exact moment incident #2 says it should have cleared and did not', () => {
-    const upToApproval = TAC_396_THREAD.filter((c) => c.createdAt <= '2026-09-17T23:10:24.406Z')
+    const upToApproval = TAC_396_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-17T23:10:24.406Z',
+    )
     expect(deriveNeedsDecision(upToApproval)).toBe(false)
   })
 
   it('TAC-396: a bot comment with no marker at all ("Resume check, no new turn") never changes the state', () => {
-    const upToNoMarkerComment = TAC_396_THREAD.filter((c) => c.createdAt <= '2026-09-17T23:04:40.616Z')
-    const upToJustBefore = TAC_396_THREAD.filter((c) => c.createdAt < '2026-09-17T23:04:40.616Z')
-    expect(deriveNeedsDecision(upToNoMarkerComment)).toBe(deriveNeedsDecision(upToJustBefore))
+    const upToNoMarkerComment = TAC_396_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-17T23:04:40.616Z',
+    )
+    const upToJustBefore = TAC_396_THREAD.filter(
+      (c) => c.createdAt < '2026-09-17T23:04:40.616Z',
+    )
+    expect(deriveNeedsDecision(upToNoMarkerComment)).toBe(
+      deriveNeedsDecision(upToJustBefore),
+    )
   })
 
   it('TAC-325: ends false — matches the ticket, which reached Ready For QA with no label', () => {
@@ -456,21 +466,31 @@ describe('deriveNeedsDecision', () => {
   })
 
   it('TAC-325: the [PLAN] ending "Open questions: None" sets it true — the label should have gone on and, per incident #3, never came off wrongly either since the very next comment is a ruling', () => {
-    const upToPlan = TAC_325_THREAD.filter((c) => c.createdAt <= '2026-09-17T23:12:23.473Z')
+    const upToPlan = TAC_325_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-17T23:12:23.473Z',
+    )
     expect(deriveNeedsDecision(upToPlan)).toBe(true)
   })
 
   it('TAC-325: [TURN-LIMIT] and [SILENT-RUN] both set it true, same as [PLAN]', () => {
-    const upToSilentRun = TAC_325_THREAD.filter((c) => c.createdAt <= '2026-09-18T01:46:36.677Z')
+    const upToSilentRun = TAC_325_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-18T01:46:36.677Z',
+    )
     expect(deriveNeedsDecision(upToSilentRun)).toBe(true)
-    const upToTurnLimit = TAC_325_THREAD.filter((c) => c.createdAt <= '2026-09-18T03:25:53.500Z')
+    const upToTurnLimit = TAC_325_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-18T03:25:53.500Z',
+    )
     expect(deriveNeedsDecision(upToTurnLimit)).toBe(true)
   })
 
   it('TAC-389: the two [AUDIT]s each set it true — both have real numbered questions', () => {
-    const upToFirstAudit = TAC_389_THREAD.filter((c) => c.createdAt <= '2026-09-15T02:45:20.803Z')
+    const upToFirstAudit = TAC_389_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-15T02:45:20.803Z',
+    )
     expect(deriveNeedsDecision(upToFirstAudit)).toBe(true)
-    const upToSecondAudit = TAC_389_THREAD.filter((c) => c.createdAt <= '2026-09-16T00:20:36.242Z')
+    const upToSecondAudit = TAC_389_THREAD.filter(
+      (c) => c.createdAt <= '2026-09-16T00:20:36.242Z',
+    )
     expect(deriveNeedsDecision(upToSecondAudit)).toBe(true)
   })
 
@@ -496,17 +516,23 @@ describe('deriveNeedsDecision', () => {
 
 describe('auditHasOpenQuestions', () => {
   it('TAC-396: the real audit with seven numbered questions (B1-B7) is detected as having open questions', () => {
-    const audit = TAC_396_THREAD.find((c) => c.body.includes('[AUDIT] TAC-396'))!
+    const audit = TAC_396_THREAD.find((c) =>
+      c.body.includes('[AUDIT] TAC-396'),
+    )!
     expect(auditHasOpenQuestions(audit.body)).toBe(true)
   })
 
   it('TAC-325: the real audit with numbered questions using nested lettered sub-options is detected', () => {
-    const audit = TAC_325_THREAD.find((c) => c.body.includes('[AUDIT] TAC-325'))!
+    const audit = TAC_325_THREAD.find((c) =>
+      c.body.includes('[AUDIT] TAC-325'),
+    )!
     expect(auditHasOpenQuestions(audit.body)).toBe(true)
   })
 
   it('TAC-389: both real audits, one with a "## 3. QUESTIONS" markdown heading, are detected', () => {
-    for (const audit of TAC_389_THREAD.filter((c) => c.body.includes('[AUDIT] TAC-389'))) {
+    for (const audit of TAC_389_THREAD.filter((c) =>
+      c.body.includes('[AUDIT] TAC-389'),
+    )) {
       expect(auditHasOpenQuestions(audit.body)).toBe(true)
     }
   })
@@ -565,26 +591,64 @@ None.
 // A ticket whose newest comment (at this point in the thread) is
 // [BUILD-SKIPPED] — derives true — but which never got the label written,
 // same shape as incident #1 (a denied or skipped write).
-const TAC_396_AT_BUILD_SKIPPED = TAC_396_THREAD.filter((c) => c.createdAt <= '2026-09-17T17:18:04.424Z')
+const TAC_396_AT_BUILD_SKIPPED = TAC_396_THREAD.filter(
+  (c) => c.createdAt <= '2026-09-17T17:18:04.424Z',
+)
 
 describe('reconcile', () => {
   it('AC5: writes the add action when a plan or notice that asks something never got the label', () => {
-    const candidates = [{ id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: false, hasNeedsAction: false, comments: TAC_396_AT_BUILD_SKIPPED }]
-    expect(reconcile(candidates)).toEqual([{ id: 'id-1', identifier: 'TAC-1', action: 'add' }])
+    const candidates = [
+      {
+        id: 'id-1',
+        identifier: 'TAC-1',
+        hasNeedsDecision: false,
+        hasNeedsAction: false,
+        comments: TAC_396_AT_BUILD_SKIPPED,
+      },
+    ]
+    expect(reconcile(candidates)).toEqual([
+      { id: 'id-1', identifier: 'TAC-1', action: 'add' },
+    ])
   })
 
   it('AC5: writes the remove action when a stale label disagrees with a cleared derived state', () => {
-    const candidates = [{ id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: true, hasNeedsAction: false, comments: TAC_396_THREAD }]
-    expect(reconcile(candidates)).toEqual([{ id: 'id-1', identifier: 'TAC-1', action: 'remove' }])
+    const candidates = [
+      {
+        id: 'id-1',
+        identifier: 'TAC-1',
+        hasNeedsDecision: true,
+        hasNeedsAction: false,
+        comments: TAC_396_THREAD,
+      },
+    ]
+    expect(reconcile(candidates)).toEqual([
+      { id: 'id-1', identifier: 'TAC-1', action: 'remove' },
+    ])
   })
 
   it('writes nothing when the stored label already matches the derived state', () => {
-    const candidates = [{ id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: false, hasNeedsAction: false, comments: TAC_396_THREAD }]
+    const candidates = [
+      {
+        id: 'id-1',
+        identifier: 'TAC-1',
+        hasNeedsDecision: false,
+        hasNeedsAction: false,
+        comments: TAC_396_THREAD,
+      },
+    ]
     expect(reconcile(candidates)).toEqual([])
   })
 
   it('skips a candidate carrying Needs Action, whatever the derived state', () => {
-    const candidates = [{ id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: false, hasNeedsAction: true, comments: TAC_396_AT_BUILD_SKIPPED }]
+    const candidates = [
+      {
+        id: 'id-1',
+        identifier: 'TAC-1',
+        hasNeedsDecision: false,
+        hasNeedsAction: true,
+        comments: TAC_396_AT_BUILD_SKIPPED,
+      },
+    ]
     expect(reconcile(candidates)).toEqual([])
   })
 
@@ -595,9 +659,27 @@ describe('reconcile', () => {
 
   it('reconciles every candidate independently, in order', () => {
     const candidates = [
-      { id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: false, hasNeedsAction: false, comments: TAC_396_AT_BUILD_SKIPPED },
-      { id: 'id-2', identifier: 'TAC-2', hasNeedsDecision: false, hasNeedsAction: false, comments: TAC_396_THREAD },
-      { id: 'id-3', identifier: 'TAC-3', hasNeedsDecision: true, hasNeedsAction: false, comments: TAC_325_THREAD },
+      {
+        id: 'id-1',
+        identifier: 'TAC-1',
+        hasNeedsDecision: false,
+        hasNeedsAction: false,
+        comments: TAC_396_AT_BUILD_SKIPPED,
+      },
+      {
+        id: 'id-2',
+        identifier: 'TAC-2',
+        hasNeedsDecision: false,
+        hasNeedsAction: false,
+        comments: TAC_396_THREAD,
+      },
+      {
+        id: 'id-3',
+        identifier: 'TAC-3',
+        hasNeedsDecision: true,
+        hasNeedsAction: false,
+        comments: TAC_325_THREAD,
+      },
     ]
     expect(reconcile(candidates)).toEqual([
       { id: 'id-1', identifier: 'TAC-1', action: 'add' },
@@ -619,9 +701,21 @@ describe('run', () => {
   }
 
   it('prints the writes to make, in the shape the workflow reads', () => {
-    const r = invoke(JSON.stringify([{ id: 'id-1', identifier: 'TAC-1', hasNeedsDecision: false, hasNeedsAction: false, comments: TAC_396_AT_BUILD_SKIPPED }]))
+    const r = invoke(
+      JSON.stringify([
+        {
+          id: 'id-1',
+          identifier: 'TAC-1',
+          hasNeedsDecision: false,
+          hasNeedsAction: false,
+          comments: TAC_396_AT_BUILD_SKIPPED,
+        },
+      ]),
+    )
     expect(r.code).toBe(EXIT.OK)
-    expect(JSON.parse(r.out)).toEqual([{ id: 'id-1', identifier: 'TAC-1', action: 'add' }])
+    expect(JSON.parse(r.out)).toEqual([
+      { id: 'id-1', identifier: 'TAC-1', action: 'add' },
+    ])
     expect(r.err).toBe('')
   })
 

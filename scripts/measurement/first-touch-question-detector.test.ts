@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { classifyFirstTouchReply, sentencesOf } from './first-touch-question-detector'
+import {
+  classifyFirstTouchReply,
+  sentencesOf,
+} from './first-touch-question-detector'
 
 describe('classifyFirstTouchReply (TAC-423)', () => {
   it('reads a reply with no question mark as asking nothing', () => {
-    const v = classifyFirstTouchReply("Hey, welcome in. You've got Le Mil's here.")
+    const v = classifyFirstTouchReply(
+      "Hey, welcome in. You've got Le Mil's here.",
+    )
     expect(v.hasQuestion).toBe(false)
     expect(v.isOrderQuestion).toBe(false)
     expect(v.questionSentences).toEqual([])
@@ -23,7 +28,9 @@ describe('classifyFirstTouchReply (TAC-423)', () => {
   // about the order still counts as a question and must not count as the
   // order question.
   it('separates asking something from asking about the order', () => {
-    const v = classifyFirstTouchReply("Hey! First time in, or have you been coming a while?")
+    const v = classifyFirstTouchReply(
+      'Hey! First time in, or have you been coming a while?',
+    )
     expect(v.hasQuestion).toBe(true)
     expect(v.isOrderQuestion).toBe(false)
     expect(v.orderPhrase).toBeNull()
@@ -33,19 +40,21 @@ describe('classifyFirstTouchReply (TAC-423)', () => {
   // cannot make a non-order question read as one.
   it('does not count an order phrase that sits outside the question', () => {
     const v = classifyFirstTouchReply(
-      "Hope what you got is good. Are you around this afternoon?",
+      'Hope what you got is good. Are you around this afternoon?',
     )
     expect(v.hasQuestion).toBe(true)
     expect(v.isOrderQuestion).toBe(false)
   })
 
   it('matches an order question through curly apostrophes and casing', () => {
-    const v = classifyFirstTouchReply("hey — WHAT’S IN YOUR HAND?")
+    const v = classifyFirstTouchReply('hey — WHAT’S IN YOUR HAND?')
     expect(v.isOrderQuestion).toBe(true)
   })
 
   it('reports an ask with no question mark as implied only, never as a question', () => {
-    const v = classifyFirstTouchReply('Welcome in. Let me know what you went with.')
+    const v = classifyFirstTouchReply(
+      'Welcome in. Let me know what you went with.',
+    )
     expect(v.hasQuestion).toBe(false)
     expect(v.impliedAsk).toBe(true)
   })
@@ -59,7 +68,9 @@ describe('classifyFirstTouchReply (TAC-423)', () => {
   })
 
   it('records the introduction and the thank-you separately from the question', () => {
-    const v = classifyFirstTouchReply("Thanks for coming in! You've reached Himanshu.")
+    const v = classifyFirstTouchReply(
+      "Thanks for coming in! You've reached Himanshu.",
+    )
     expect(v.namesSomeone).toBe(true)
     expect(v.thanks).toBe(true)
     expect(v.hasQuestion).toBe(false)
@@ -95,11 +106,14 @@ describe('contractions (regression from the 2026-09-22 run)', () => {
   it.each([
     "Hey, welcome! I'm Himanshu 👋 how was everything?",
     'hey! how was it?',
-  ])('does not read a how-was-it question as the order question: %s', (body) => {
-    const v = classifyFirstTouchReply(body)
-    expect(v.hasQuestion).toBe(true)
-    expect(v.isOrderQuestion).toBe(false)
-  })
+  ])(
+    'does not read a how-was-it question as the order question: %s',
+    (body) => {
+      const v = classifyFirstTouchReply(body)
+      expect(v.hasQuestion).toBe(true)
+      expect(v.isOrderQuestion).toBe(false)
+    },
+  )
 })
 
 // SECOND REGRESSION, from the confirmation run of the restored wording, and
@@ -119,9 +133,12 @@ describe('adverb slot (regression from the 2026-09-23 confirmation run)', () => 
     "Hey, hi! I'm Himanshu 👋 what did you just get?",
     'hey! what did you end up getting today?',
     'what did you already pick up?',
-  ])('reads an order question with an adverb as the order question: %s', (body) => {
-    expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(true)
-  })
+  ])(
+    'reads an order question with an adverb as the order question: %s',
+    (body) => {
+      expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(true)
+    },
+  )
 
   // The control that keeps the pattern from swallowing a different intention.
   // "whatever you got" must not read as "what you got".
@@ -129,9 +146,12 @@ describe('adverb slot (regression from the 2026-09-23 confirmation run)', () => 
     'Hey, welcome! how was whatever you got?',
     "hope you enjoyed whatever you grabbed. how'd it go?",
     'how was everything?',
-  ])('still does not read a how-was-it question as the order question: %s', (body) => {
-    expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(false)
-  })
+  ])(
+    'still does not read a how-was-it question as the order question: %s',
+    (body) => {
+      expect(classifyFirstTouchReply(body).isOrderQuestion).toBe(false)
+    },
+  )
 })
 
 // TAC-519: the apology ceiling. The real body that prompted it is the first
@@ -157,7 +177,9 @@ describe('carriesApology', () => {
     ['we messed up the order', true],
     ['sorry about that', true],
   ])('treats %j as apologetic: %s', (body, expected) => {
-    expect(classifyFirstTouchReply(body as string).carriesApology).toBe(expected)
+    expect(classifyFirstTouchReply(body as string).carriesApology).toBe(
+      expected,
+    )
   })
 
   it.each([

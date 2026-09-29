@@ -71,7 +71,10 @@ interface CorpusEntry {
 
 function gitSha(): string | null {
   try {
-    return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    return execSync('git rev-parse HEAD', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
   } catch {
     return null
   }
@@ -92,7 +95,9 @@ function loadEmbeddingCache(path: string): EmbeddingCache {
   if (!existsSync(path)) return {}
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    return typeof parsed === 'object' && parsed !== null ? (parsed as EmbeddingCache) : {}
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as EmbeddingCache)
+      : {}
   } catch {
     // A corrupt cache must not stop a run; the cost of ignoring it is one
     // round of embedding.
@@ -108,7 +113,8 @@ async function embedEntry(
   stats: { hits: number; misses: number },
 ): Promise<number[][]> {
   const chunks = chunkText(content)
-  if (chunks.length === 0) throw new Error(`${label}: content chunked to nothing`)
+  if (chunks.length === 0)
+    throw new Error(`${label}: content chunked to nothing`)
   const out: number[][] = []
   for (const chunk of chunks) {
     const key = embeddingCacheKey(EMBEDDING_MODEL, chunk)
@@ -142,12 +148,16 @@ function textDefects(entries: readonly Proposal[]): string[] {
   const defects: string[] = []
   for (const p of entries) {
     const c = p.content
-    if (/https?:\/\//.test(c)) defects.push(`${p.row_id}: content contains a full URL`)
-    if (/,,|\.\.(?!\.)|;;/.test(c)) defects.push(`${p.row_id}: doubled punctuation`)
+    if (/https?:\/\//.test(c))
+      defects.push(`${p.row_id}: content contains a full URL`)
+    if (/,,|\.\.(?!\.)|;;/.test(c))
+      defects.push(`${p.row_id}: doubled punctuation`)
     if (/[—–]/.test(c)) defects.push(`${p.row_id}: contains an em or en dash`)
     if (/\s{2,}/.test(c)) defects.push(`${p.row_id}: contains a double space`)
-    if (c.trim() !== c) defects.push(`${p.row_id}: content has leading or trailing whitespace`)
-    if (!/[.!?]$/.test(c.trim())) defects.push(`${p.row_id}: content does not end in terminal punctuation`)
+    if (c.trim() !== c)
+      defects.push(`${p.row_id}: content has leading or trailing whitespace`)
+    if (!/[.!?]$/.test(c.trim()))
+      defects.push(`${p.row_id}: content does not end in terminal punctuation`)
     if (p.contains_url && !/https?:\/\//.test(c)) {
       defects.push(`${p.row_id}: contains_url is true but no URL is present`)
     }
@@ -171,7 +181,8 @@ async function main(): Promise<void> {
     )
   }
   const dupes = findDuplicateRowIds(file.entries)
-  if (dupes.length > 0) throw new Error(`duplicate row_ids in the input: ${dupes.join(', ')}`)
+  if (dupes.length > 0)
+    throw new Error(`duplicate row_ids in the input: ${dupes.join(', ')}`)
 
   const supabase = createAdminClient()
 
@@ -180,24 +191,32 @@ async function main(): Promise<void> {
     .select('id, slug')
     .eq('slug', args.venueSlug)
     .single()
-  if (venueErr || !venue) throw new Error(`venue lookup failed: ${venueErr?.message ?? 'not found'}`)
+  if (venueErr || !venue)
+    throw new Error(`venue lookup failed: ${venueErr?.message ?? 'not found'}`)
 
   const { data: existingRows, error: rowsErr } = await supabase
     .from('knowledge_corpus')
-    .select('id, content, source_type, primary_tags, secondary_tags, is_processed, metadata')
+    .select(
+      'id, content, source_type, primary_tags, secondary_tags, is_processed, metadata',
+    )
     .eq('venue_id', venue.id)
-  if (rowsErr || !existingRows) throw new Error(`knowledge_corpus read failed: ${rowsErr?.message}`)
+  if (rowsErr || !existingRows)
+    throw new Error(`knowledge_corpus read failed: ${rowsErr?.message}`)
 
   const { data: embRows, error: embErr } = await supabase
     .from('knowledge_embeddings')
     .select('corpus_id, chunk_index, embedding')
     .eq('venue_id', venue.id)
-  if (embErr || !embRows) throw new Error(`knowledge_embeddings read failed: ${embErr?.message}`)
+  if (embErr || !embRows)
+    throw new Error(`knowledge_embeddings read failed: ${embErr?.message}`)
 
   // Group stored chunk embeddings by corpus row.
   const storedChunks = new Map<string, number[][]>()
   for (const r of embRows) {
-    const vec = parseEmbedding((r as { embedding: unknown }).embedding, `embedding for ${r.corpus_id}`)
+    const vec = parseEmbedding(
+      (r as { embedding: unknown }).embedding,
+      `embedding for ${r.corpus_id}`,
+    )
     const list = storedChunks.get(r.corpus_id) ?? []
     list.push(vec)
     storedChunks.set(r.corpus_id, list)
@@ -230,7 +249,9 @@ async function main(): Promise<void> {
     }
     resolvedTargets.set(r.row_id, resolved.id)
     if (resolved.viaPrefix) {
-      console.log(`[dedup] ${r.row_id}: prefix "${r.replaces_id}" resolved to ${resolved.id}`)
+      console.log(
+        `[dedup] ${r.row_id}: prefix "${r.replaces_id}" resolved to ${resolved.id}`,
+      )
     }
   }
   const replacedIds = new Set(resolvedTargets.values())
@@ -245,7 +266,11 @@ async function main(): Promise<void> {
   // write path uses, so the dry run's forecast cannot drift from the load.
   const plan = file.entries.map((p) => ({
     rowId: p.row_id,
-    action: decideLoadAction(p, resolvedTargets.get(p.row_id) ?? null, loadableRows),
+    action: decideLoadAction(
+      p,
+      resolvedTargets.get(p.row_id) ?? null,
+      loadableRows,
+    ),
   }))
   const planned = {
     insert: plan.filter((x) => x.action.kind === 'insert').length,
@@ -280,7 +305,9 @@ async function main(): Promise<void> {
     console.log(
       `[apply] DONE inserted=${result.inserted} updated=${result.updated} skipped=${result.skipped}`,
     )
-    console.log(`[apply] ${venue.slug} knowledge_corpus total now: ${countErr ? 'unreadable' : count}`)
+    console.log(
+      `[apply] ${venue.slug} knowledge_corpus total now: ${countErr ? 'unreadable' : count}`,
+    )
     return
   }
 
@@ -291,15 +318,22 @@ async function main(): Promise<void> {
   const cachePath = join(dirname(args.outputPath), '.embedding-cache.json')
   const cache = loadEmbeddingCache(cachePath)
   const cacheStats = { hits: 0, misses: 0 }
-  console.log(`[dedup] embedding ${file.entries.length} proposals via ${EMBEDDING_MODEL}...`)
+  console.log(
+    `[dedup] embedding ${file.entries.length} proposals via ${EMBEDDING_MODEL}...`,
+  )
 
   const proposalChunks = new Map<string, number[][]>()
   for (const p of file.entries) {
-    proposalChunks.set(p.row_id, await embedEntry(p.content, p.row_id, cache, cacheStats))
+    proposalChunks.set(
+      p.row_id,
+      await embedEntry(p.content, p.row_id, cache, cacheStats),
+    )
   }
   mkdirSync(dirname(cachePath), { recursive: true })
   writeFileSync(cachePath, JSON.stringify(cache), 'utf8')
-  console.log(`[dedup] embeddings: ${cacheStats.hits} cached, ${cacheStats.misses} computed`)
+  console.log(
+    `[dedup] embeddings: ${cacheStats.hits} cached, ${cacheStats.misses} computed`,
+  )
 
   // ── control distribution: existing vs existing, unaffected by the load ──
   const existingKeys = existingRows.map((r) => r.id)
@@ -307,7 +341,10 @@ async function main(): Promise<void> {
   for (let i = 0; i < existingKeys.length; i++) {
     for (let j = i + 1; j < existingKeys.length; j++) {
       controlScores.push(
-        entrySimilarity(storedChunks.get(existingKeys[i]!)!, storedChunks.get(existingKeys[j]!)!),
+        entrySimilarity(
+          storedChunks.get(existingKeys[i]!)!,
+          storedChunks.get(existingKeys[j]!)!,
+        ),
       )
     }
   }
@@ -331,7 +368,8 @@ async function main(): Promise<void> {
   }
   for (const p of file.entries) {
     postLoad.push({
-      label: p.action === 'replace' ? `${p.row_id} → ${p.replaces_id}` : p.row_id,
+      label:
+        p.action === 'replace' ? `${p.row_id} → ${p.replaces_id}` : p.row_id,
       kind: p.action === 'replace' ? 'replacement' : 'proposal',
       content: p.content,
       chunks: proposalChunks.get(p.row_id)!,
@@ -341,7 +379,10 @@ async function main(): Promise<void> {
 
   const untouchedExisting = postLoad.filter((e) => e.kind === 'existing')
 
-  function nearest(self: CorpusEntry, pool: readonly CorpusEntry[]): Neighbour[] {
+  function nearest(
+    self: CorpusEntry,
+    pool: readonly CorpusEntry[],
+  ): Neighbour[] {
     return pool
       .filter((o) => o.label !== self.label)
       .map((o) => ({
@@ -357,10 +398,13 @@ async function main(): Promise<void> {
   const results: ProposalResult[] = file.entries.map((p) => {
     const self = postLoad.find((e) => e.rowId === p.row_id)!
     const neighbours = nearest(self, postLoad)
-    const existingNeighbours = p.action === 'replace' ? nearest(self, untouchedExisting) : []
+    const existingNeighbours =
+      p.action === 'replace' ? nearest(self, untouchedExisting) : []
     const specifics = extractSpecifics(p.content)
     const top = neighbours[0]
-    const diff = top ? diffSpecifics(specifics, extractSpecifics(top.content)) : null
+    const diff = top
+      ? diffSpecifics(specifics, extractSpecifics(top.content))
+      : null
     return {
       proposal: p,
       neighbours,
@@ -374,10 +418,20 @@ async function main(): Promise<void> {
   // ── ruling 8 + ruling 9 supporting data ─────────────────────────────────
   const rulingEight = ['bhadra', 'chikka']
     .map((needle) => {
-      const row = existingRows.find((r) => r.content.toLowerCase().startsWith(needle))
-      return row ? { id: row.id, label: row.content.split(' ')[0]!, content: row.content } : null
+      const row = existingRows.find((r) =>
+        r.content.toLowerCase().startsWith(needle),
+      )
+      return row
+        ? {
+            id: row.id,
+            label: row.content.split(' ')[0]!,
+            content: row.content,
+          }
+        : null
     })
-    .filter((x): x is { id: string; label: string; content: string } => x !== null)
+    .filter(
+      (x): x is { id: string; label: string; content: string } => x !== null,
+    )
 
   const bareDomain = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|co|io|uk)\b/i
   const bareDomainExistingRows = existingRows
@@ -406,7 +460,12 @@ async function main(): Promise<void> {
     results,
     replacementTargets: replacements.map((p) => {
       const id = resolvedTargets.get(p.row_id)!
-      return { rowId: p.row_id, id, oldContent: byId.get(id)!.content, newContent: p.content }
+      return {
+        rowId: p.row_id,
+        id,
+        oldContent: byId.get(id)!.content,
+        newContent: p.content,
+      }
     }),
     rulingEightRows: rulingEight,
     bareDomainExistingRows,
@@ -420,7 +479,10 @@ async function main(): Promise<void> {
   // Timestamped raw cache alongside the report. The expensive half of this
   // run is the Voyage calls; per CLAUDE.md § "Measurement harness convention"
   // a rerun must never be the only way to re-read the evidence.
-  const rawPath = args.outputPath.replace(/\.md$/, `-raw-${generatedAt.replace(/[:.]/g, '-')}.json`)
+  const rawPath = args.outputPath.replace(
+    /\.md$/,
+    `-raw-${generatedAt.replace(/[:.]/g, '-')}.json`,
+  )
   writeFileSync(
     rawPath,
     JSON.stringify(
@@ -458,9 +520,14 @@ async function main(): Promise<void> {
   if (args.baselinePath !== null) {
     const prior: unknown = JSON.parse(readFileSync(args.baselinePath, 'utf8'))
     const priorResults = (prior as { results?: unknown }).results
-    if (!Array.isArray(priorResults)) throw new Error('baseline file has no results array')
+    if (!Array.isArray(priorResults))
+      throw new Error('baseline file has no results array')
     const beforeRows: BaselineRow[] = priorResults.map((r) => {
-      const row = r as { rowId: string; suggested: string; neighbours?: Array<{ label: string; score: number }> }
+      const row = r as {
+        rowId: string
+        suggested: string
+        neighbours?: Array<{ label: string; score: number }>
+      }
       return {
         rowId: row.rowId,
         suggested: row.suggested,
@@ -469,10 +536,14 @@ async function main(): Promise<void> {
       }
     })
     const changes = diffAgainstBaseline(beforeRows, nowRows)
-    console.log(`[dedup] baseline ${args.baselinePath}: ${changes.length} change(s)`)
+    console.log(
+      `[dedup] baseline ${args.baselinePath}: ${changes.length} change(s)`,
+    )
     for (const c of changes) {
       if (c.kind === 'added') {
-        console.log(`  + ${c.rowId}: ${c.now.suggested} (top ${c.now.topScore?.toFixed(4)} vs ${c.now.topLabel})`)
+        console.log(
+          `  + ${c.rowId}: ${c.now.suggested} (top ${c.now.topScore?.toFixed(4)} vs ${c.now.topLabel})`,
+        )
       } else if (c.kind === 'removed') {
         console.log(`  - ${c.rowId}: was ${c.before.suggested}`)
       } else if (c.kind === 'verdict') {
@@ -490,9 +561,14 @@ async function main(): Promise<void> {
   }
 
   const counts = new Map<string, number>()
-  for (const r of results) counts.set(r.suggested, (counts.get(r.suggested) ?? 0) + 1)
-  console.log(`[dedup] control pairs=${control.count} p99(band)=${band.toFixed(4)} max=${control.max.toFixed(4)}`)
-  console.log(`[dedup] suggested: ${[...counts].map(([k, v]) => `${k}=${v}`).join(' ')}`)
+  for (const r of results)
+    counts.set(r.suggested, (counts.get(r.suggested) ?? 0) + 1)
+  console.log(
+    `[dedup] control pairs=${control.count} p99(band)=${band.toFixed(4)} max=${control.max.toFixed(4)}`,
+  )
+  console.log(
+    `[dedup] suggested: ${[...counts].map(([k, v]) => `${k}=${v}`).join(' ')}`,
+  )
   console.log(`[dedup] split-safety findings: ${splitFindings.length}`)
   console.log(
     `[dedup] --apply would: insert=${planned.insert} update=${planned.update} skip=${planned.skip} ` +

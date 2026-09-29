@@ -167,7 +167,12 @@ describe('extractRecentVisits — items extraction (per row)', () => {
     const rows = [
       makeRow(
         daysAgo(1),
-        makeRawData([{ name: '  Latte  ' }, { name: '' }, { name: '   ' }, { name: 'scone' }]),
+        makeRawData([
+          { name: '  Latte  ' },
+          { name: '' },
+          { name: '   ' },
+          { name: 'scone' },
+        ]),
       ),
     ]
     expect(extractRecentVisits(rows, NOW)[0].items).toEqual(['latte', 'scone'])
@@ -175,10 +180,9 @@ describe('extractRecentVisits — items extraction (per row)', () => {
 
   it('drops non-object line item entries silently', () => {
     const rows = [
-      makeRow(
-        daysAgo(1),
-        { line_items: ['cappuccino', null, 42, { name: 'scone' }] },
-      ),
+      makeRow(daysAgo(1), {
+        line_items: ['cappuccino', null, 42, { name: 'scone' }],
+      }),
     ]
     expect(extractRecentVisits(rows, NOW)[0].items).toEqual(['scone'])
   })
@@ -190,7 +194,9 @@ describe('extractRecentVisits — visitedAt', () => {
     const rows = [makeRow(occurredAt, makeRawData([{ name: 'cappuccino' }]))]
     const out = extractRecentVisits(rows, NOW)
     expect(out[0].visitedAt).toBeInstanceOf(Date)
-    expect(out[0].visitedAt.toISOString()).toBe(occurredAt.replace('Z', '.000Z'))
+    expect(out[0].visitedAt.toISOString()).toBe(
+      occurredAt.replace('Z', '.000Z'),
+    )
   })
 })
 

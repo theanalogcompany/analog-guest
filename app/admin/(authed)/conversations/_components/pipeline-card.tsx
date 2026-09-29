@@ -47,7 +47,9 @@ export function PipelineCard({ stages, langfuseUrl }: PipelineCardProps) {
     <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-3">
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>Pipeline</Eyebrow>
-        <span className="text-xs text-ink-soft tabular-nums">{formatDuration(totalMs)}</span>
+        <span className="text-xs text-ink-soft tabular-nums">
+          {formatDuration(totalMs)}
+        </span>
       </header>
       <div className="flex flex-col gap-1.5">
         {rows.map(({ stage, durationMs }) => (
@@ -99,12 +101,14 @@ function PipelineRow({
         // one" without competing with the bar's clay highlight.
         className={[
           'w-full flex items-center gap-3 text-left cursor-pointer rounded',
-          'px-1.5 py-0.5 -mx-1.5 -my-0.5',  // Hit area expansion + bg padding without affecting layout
+          'px-1.5 py-0.5 -mx-1.5 -my-0.5', // Hit area expansion + bg padding without affecting layout
           open ? 'bg-white/35' : '',
         ].join(' ')}
         aria-expanded={open}
       >
-        <span className={`text-xs w-3 shrink-0 ${open ? 'text-clay' : 'text-ink-faint'}`}>
+        <span
+          className={`text-xs w-3 shrink-0 ${open ? 'text-clay' : 'text-ink-faint'}`}
+        >
           {open ? '▾' : '▸'}
         </span>
         <span

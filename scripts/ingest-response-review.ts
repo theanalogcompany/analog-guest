@@ -1,5 +1,8 @@
 import { createAdminClient } from '@/lib/db/admin'
-import { dedupeAndAppendAntiPatterns, upsertCorpusEdit } from '@/lib/voice-training'
+import {
+  dedupeAndAppendAntiPatterns,
+  upsertCorpusEdit,
+} from '@/lib/voice-training'
 import {
   findByPrefix,
   findVenueFolder,
@@ -49,7 +52,9 @@ async function resolveVenueId(slug: string): Promise<string> {
     .eq('slug', slug)
     .maybeSingle()
   if (error) {
-    throw new Error(`[ingest-response-review] venue lookup failed for "${slug}": ${error.message}`)
+    throw new Error(
+      `[ingest-response-review] venue lookup failed for "${slug}": ${error.message}`,
+    )
   }
   if (!data) {
     throw new Error(
@@ -74,7 +79,9 @@ async function main(): Promise<void> {
   }
 
   const drive = getDrive()
-  console.log(`[ingest-response-review] looking up venue folder for "${slug}"...`)
+  console.log(
+    `[ingest-response-review] looking up venue folder for "${slug}"...`,
+  )
   const folder = await findVenueFolder(drive, parentFolderId, slug)
   console.log(`[ingest-response-review] folder: ${folder.name} (${folder.id})`)
 
@@ -87,7 +94,9 @@ async function main(): Promise<void> {
       `[ingest-response-review] no 08-${slug}-response-review found in folder ${folder.name}. Run npm run run-test-scenarios -- ${slug} first.`,
     )
   }
-  console.log(`[ingest-response-review] reading review sheet: ${sheetFile.name}`)
+  console.log(
+    `[ingest-response-review] reading review sheet: ${sheetFile.name}`,
+  )
   const sheetCsv = await readDriveFileAsText(drive, sheetFile)
   const rows = parseReviewSheet(sheetCsv)
   console.log(`[ingest-response-review] parsed ${rows.length} data rows`)
@@ -119,7 +128,9 @@ async function main(): Promise<void> {
     const kind = classifyRow(row)
     if (kind === 'approve') {
       approveCount++
-      console.log(`[ingest-response-review] ${row.sample_id}: skipped (approve)`)
+      console.log(
+        `[ingest-response-review] ${row.sample_id}: skipped (approve)`,
+      )
       continue
     }
     if (kind === 'expected_failure') {
@@ -150,7 +161,10 @@ async function main(): Promise<void> {
           // Helper auto-deletes the corpus row on embed failure (no orphan).
           // Skip the markdown summary entry for this row and surface in the
           // tail warning so the operator knows to re-run.
-          embedFailures.push({ sample_id: row.sample_id, category: row.category })
+          embedFailures.push({
+            sample_id: row.sample_id,
+            category: row.category,
+          })
           console.error(
             `[ingest-response-review] ${row.sample_id}: embed failed (${result.error}). Row not added.`,
           )
@@ -206,10 +220,15 @@ async function main(): Promise<void> {
       newCorpusEntries,
       sourceFileName: sheetFile.name,
     })
-    const { newMarkdown, alreadyHadSection } = appendPhase5Section(existingSpec, subsection)
+    const { newMarkdown, alreadyHadSection } = appendPhase5Section(
+      existingSpec,
+      subsection,
+    )
     try {
       await writeMarkdownFile(drive, folder.id, specFile.name, newMarkdown)
-      markdownStatus = alreadyHadSection ? 'yes (appended subsection)' : 'yes (new section)'
+      markdownStatus = alreadyHadSection
+        ? 'yes (appended subsection)'
+        : 'yes (new section)'
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
       console.error(
@@ -251,6 +270,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  console.error(e instanceof Error ? e.stack ?? e.message : String(e))
+  console.error(e instanceof Error ? (e.stack ?? e.message) : String(e))
   process.exit(1)
 })

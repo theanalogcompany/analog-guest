@@ -6,7 +6,9 @@ const SECRET = 's3cr3t-key'
 
 describe('OAuth state signing', () => {
   it('round-trips the venue id', () => {
-    expect(verifyOAuthState(signOAuthState('venue-1', SECRET), SECRET)).toBe('venue-1')
+    expect(verifyOAuthState(signOAuthState('venue-1', SECRET), SECRET)).toBe(
+      'venue-1',
+    )
   })
 
   it('rejects a tampered venue payload', () => {
@@ -16,7 +18,9 @@ describe('OAuth state signing', () => {
   })
 
   it('rejects a different signing secret', () => {
-    expect(verifyOAuthState(signOAuthState('v', SECRET), 'other-secret')).toBeNull()
+    expect(
+      verifyOAuthState(signOAuthState('v', SECRET), 'other-secret'),
+    ).toBeNull()
   })
 
   it('rejects malformed state', () => {

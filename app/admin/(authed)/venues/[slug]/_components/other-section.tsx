@@ -1,4 +1,7 @@
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
 import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // The 'other' primary tag's own named section — distinct from the

@@ -26,10 +26,14 @@ export function isMessageChannel(value: unknown): value is MessageChannel {
  * list moving too. Null is not a guess at either channel: the caller decides
  * what an unknown channel means.
  */
-export function parseMessageChannel(value: string | null | undefined): MessageChannel | null {
+export function parseMessageChannel(
+  value: string | null | undefined,
+): MessageChannel | null {
   if (isMessageChannel(value)) return value
   if (value !== null && value !== undefined) {
-    console.warn(`[message-channel] unrecognized channel "${value}", treating as unknown`)
+    console.warn(
+      `[message-channel] unrecognized channel "${value}", treating as unknown`,
+    )
   }
   return null
 }

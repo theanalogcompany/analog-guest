@@ -90,9 +90,7 @@ export function MessageBubble({
         : `${base} rounded-tl-[4px] rounded-bl-[4px]`
     }
     // 'last'
-    return isOutbound
-      ? `${base} rounded-tr-[4px]`
-      : `${base} rounded-tl-[4px]`
+    return isOutbound ? `${base} rounded-tr-[4px]` : `${base} rounded-tl-[4px]`
   })()
 
   // Outbound (venue/agent = self) blue; inbound (guest = other) gray. See

@@ -16,9 +16,9 @@
  * look at it.
  */
 
-const CC_PREFIX = /^\s*\*\*\[FROM CLAUDE CODE\]\*\*/;
-const CHAT_RULING_PREFIX = /^\s*\*\*\[FROM CLAUDE CHAT\s*[—-]\s*RULING/;
-const CHAT_PLAIN_PREFIX = /^\s*\*\*\[FROM CLAUDE CHAT\]\*\*/;
+const CC_PREFIX = /^\s*\*\*\[FROM CLAUDE CODE\]\*\*/
+const CHAT_RULING_PREFIX = /^\s*\*\*\[FROM CLAUDE CHAT\s*[—-]\s*RULING/
+const CHAT_PLAIN_PREFIX = /^\s*\*\*\[FROM CLAUDE CHAT\]\*\*/
 
 // The first bracketed marker directly after the CC prefix. An optional run
 // of literal asterisks between the prefix and the bracket is tolerated
@@ -27,7 +27,7 @@ const CHAT_PLAIN_PREFIX = /^\s*\*\*\[FROM CLAUDE CHAT\]\*\*/;
 // per .claude/process.md, "A comment's marker is the first [MARKER] after
 // the prefix," not a substring match anywhere in the body.
 const MARKER_AFTER_PREFIX =
-  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[([A-Z][A-Z-]*)\]/;
+  /^\s*\*\*\[FROM CLAUDE CODE\]\*\*\s*\**\[([A-Z][A-Z-]*)\]/
 
 /**
  * Linear stores a ticket description's brackets escaped (`\[AUDIT\]`), but
@@ -37,12 +37,12 @@ const MARKER_AFTER_PREFIX =
  * to "unrecognised = human."
  */
 export function unescapeBrackets(text) {
-  return text.replace(/\\([[\]])/g, '$1');
+  return text.replace(/\\([[\]])/g, '$1')
 }
 
 /** True when the comment opens with the `**[FROM CLAUDE CODE]**` prefix. */
 export function isBotComment(body) {
-  return CC_PREFIX.test(unescapeBrackets(body));
+  return CC_PREFIX.test(unescapeBrackets(body))
 }
 
 /**
@@ -50,7 +50,7 @@ export function isBotComment(body) {
  * null when the comment isn't CC's own or carries no marker there.
  */
 export function commentMarker(body) {
-  return unescapeBrackets(body).match(MARKER_AFTER_PREFIX)?.[1] ?? null;
+  return unescapeBrackets(body).match(MARKER_AFTER_PREFIX)?.[1] ?? null
 }
 
 /**
@@ -65,7 +65,7 @@ export function commentMarker(body) {
  * rather than code that imports this. Not dead code to clean up.
  */
 export function isRulingComment(body) {
-  return CHAT_RULING_PREFIX.test(unescapeBrackets(body));
+  return CHAT_RULING_PREFIX.test(unescapeBrackets(body))
 }
 
 /**
@@ -75,7 +75,7 @@ export function isRulingComment(body) {
  * No call site in code either, same reason as isRulingComment above.
  */
 export function isContextChatComment(body) {
-  return CHAT_PLAIN_PREFIX.test(unescapeBrackets(body));
+  return CHAT_PLAIN_PREFIX.test(unescapeBrackets(body))
 }
 
 /**
@@ -87,7 +87,13 @@ export function isContextChatComment(body) {
  * the jq copy stays, since there is no way to share code between bash and
  * this module.
  */
-export const BOOKKEEPING_MARKERS = ['CLAIM', 'RESUME-CLAIM', 'SLACK', 'DENIALS', 'OVER-LIMIT'];
+export const BOOKKEEPING_MARKERS = [
+  'CLAIM',
+  'RESUME-CLAIM',
+  'SLACK',
+  'DENIALS',
+  'OVER-LIMIT',
+]
 
 /**
  * A bot comment whose marker is one of BOOKKEEPING_MARKERS. False for a
@@ -96,8 +102,8 @@ export const BOOKKEEPING_MARKERS = ['CLAIM', 'RESUME-CLAIM', 'SLACK', 'DENIALS',
  * bookkeeping," never "is this comment safe to ignore" in general.
  */
 export function isBookkeepingComment(body) {
-  const marker = commentMarker(body);
-  return marker !== null && BOOKKEEPING_MARKERS.includes(marker);
+  const marker = commentMarker(body)
+  return marker !== null && BOOKKEEPING_MARKERS.includes(marker)
 }
 
 // A section heading in the shape audit-ticket.md's own sections use: an
@@ -107,18 +113,24 @@ export function isBookkeepingComment(body) {
 // line such as "1. **What counts...**" does not, because its name would
 // have to be entirely uppercase letters/spaces/slashes/dashes to the end
 // of the line, and prose isn't.
-const SECTION_HEADING = /^[ \t]*#{0,6}[ \t]*\**[ \t]*(?:\d+\.[ \t]*)?([A-Z][A-Z /-]*?)[ \t]*\**[ \t]*$/;
+const SECTION_HEADING =
+  /^[ \t]*#{0,6}[ \t]*\**[ \t]*(?:\d+\.[ \t]*)?([A-Z][A-Z /-]*?)[ \t]*\**[ \t]*$/
 
 function sections(text) {
-  const lines = text.split('\n');
-  const found = [];
-  let offset = 0;
+  const lines = text.split('\n')
+  const found = []
+  let offset = 0
   for (const line of lines) {
-    const m = line.match(SECTION_HEADING);
-    if (m) found.push({ headingStart: offset, contentStart: offset + line.length + 1, name: m[1].trim() });
-    offset += line.length + 1;
+    const m = line.match(SECTION_HEADING)
+    if (m)
+      found.push({
+        headingStart: offset,
+        contentStart: offset + line.length + 1,
+        name: m[1].trim(),
+      })
+    offset += line.length + 1
   }
-  return found;
+  return found
 }
 
 /**
@@ -134,13 +146,13 @@ function sections(text) {
  * look, not silently lose its label.
  */
 export function auditHasQuestions(body) {
-  const text = unescapeBrackets(body);
-  const found = sections(text);
-  const i = found.findIndex((s) => s.name.toUpperCase() === 'QUESTIONS');
-  if (i === -1) return true;
-  const start = found[i].contentStart;
-  const end = i + 1 < found.length ? found[i + 1].headingStart : text.length;
-  const section = text.slice(start, end);
-  const beforeDecided = section.split(/decided without asking/i)[0];
-  return /^[ \t]*\d+\.[ \t]/m.test(beforeDecided);
+  const text = unescapeBrackets(body)
+  const found = sections(text)
+  const i = found.findIndex((s) => s.name.toUpperCase() === 'QUESTIONS')
+  if (i === -1) return true
+  const start = found[i].contentStart
+  const end = i + 1 < found.length ? found[i + 1].headingStart : text.length
+  const section = text.slice(start, end)
+  const beforeDecided = section.split(/decided without asking/i)[0]
+  return /^[ \t]*\d+\.[ \t]/m.test(beforeDecided)
 }

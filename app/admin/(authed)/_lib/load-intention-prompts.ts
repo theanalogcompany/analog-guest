@@ -86,7 +86,9 @@ function firstOrNull<T>(raw: T | T[] | null): T | null {
 
 export const loadIntentionPrompts = cache(_loadIntentionPrompts)
 
-async function _loadIntentionPrompts(venueScope: VenueScope): Promise<IntentionPromptsPage> {
+async function _loadIntentionPrompts(
+  venueScope: VenueScope,
+): Promise<IntentionPromptsPage> {
   const supabase = createAdminClient()
   let query = supabase
     .from('guest_intention_prompts')
@@ -109,35 +111,46 @@ async function _loadIntentionPrompts(venueScope: VenueScope): Promise<IntentionP
 
   const { data, error } = await query
   if (error) {
-    console.warn('[loadIntentionPrompts] guest_intention_prompts query failed', error.message)
+    console.warn(
+      '[loadIntentionPrompts] guest_intention_prompts query failed',
+      error.message,
+    )
     return { rows: [], hasMore: false }
   }
 
   const all = data ?? []
   const hasMore = all.length > RECORDED_PROMPTS_LIMIT
-  const rows = all.slice(0, RECORDED_PROMPTS_LIMIT).flatMap((row): IntentionPromptRow[] => {
-    // The SQL filter above guarantees a timestamp. This narrows the type, and
-    // drops rather than mislabels a row if the filter is ever removed.
-    if (row.prompted_at === null) return []
-    const guest = firstOrNull(row.guest as JoinedGuestShape | JoinedGuestShape[] | null)
-    const venue = firstOrNull(row.venue as JoinedVenueShape | JoinedVenueShape[] | null)
-    return [{
-      id: row.id,
-      intentionKey: row.intention_key,
-      promptedAt: row.prompted_at,
-      messageId: row.message_id,
-      promptSource: row.prompt_source,
-      guestLabel: guest
-        ? guestNameWithPhone({
-            firstName: guest.first_name,
-            lastName: guest.last_name,
-            phoneNumber: guest.phone_number,
-            instagramUsername: guest.instagram_username,
-          })
-        : '(unknown guest)',
-      venueName: venue?.name ?? '(unknown venue)',
-    }]
-  })
+  const rows = all
+    .slice(0, RECORDED_PROMPTS_LIMIT)
+    .flatMap((row): IntentionPromptRow[] => {
+      // The SQL filter above guarantees a timestamp. This narrows the type, and
+      // drops rather than mislabels a row if the filter is ever removed.
+      if (row.prompted_at === null) return []
+      const guest = firstOrNull(
+        row.guest as JoinedGuestShape | JoinedGuestShape[] | null,
+      )
+      const venue = firstOrNull(
+        row.venue as JoinedVenueShape | JoinedVenueShape[] | null,
+      )
+      return [
+        {
+          id: row.id,
+          intentionKey: row.intention_key,
+          promptedAt: row.prompted_at,
+          messageId: row.message_id,
+          promptSource: row.prompt_source,
+          guestLabel: guest
+            ? guestNameWithPhone({
+                firstName: guest.first_name,
+                lastName: guest.last_name,
+                phoneNumber: guest.phone_number,
+                instagramUsername: guest.instagram_username,
+              })
+            : '(unknown guest)',
+          venueName: venue?.name ?? '(unknown venue)',
+        },
+      ]
+    })
 
   return { rows, hasMore }
 }

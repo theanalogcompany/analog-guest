@@ -37,7 +37,10 @@
 // once, not one card pushing on every tick for an hour.
 
 import { createAdminClient } from '@/lib/db/admin'
-import { INSTAGRAM_WINDOW_MS, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
+import {
+  INSTAGRAM_WINDOW_MS,
+  loadLastGuestActionAt,
+} from '@/lib/messaging/instagram/window'
 import { sendInstagramWindowWarningPush } from '@/lib/notifications/send-instagram-window-push'
 
 /**
@@ -116,7 +119,9 @@ export async function processInstagramWindowWarnings(
     .eq('channel', 'instagram')
     .is('window_warning_pushed_at', null)
   if (error) {
-    console.error('[cron instagram-window] scan failed', { error: error.message })
+    console.error('[cron instagram-window] scan failed', {
+      error: error.message,
+    })
     summary.errored += 1
     return summary
   }
@@ -135,12 +140,19 @@ export async function processInstagramWindowWarnings(
         // loadLastGuestActionAt, not a second copy of that query. It is what
         // the SEND GATE consults, so reading the anchor any other way here
         // would let the warning disagree with the thing it is warning about.
-        const anchor = await loadLastGuestActionAt(supabase, draft.venue_id, draft.guest_id)
+        const anchor = await loadLastGuestActionAt(
+          supabase,
+          draft.venue_id,
+          draft.guest_id,
+        )
         // A failed read is NOT null. Null means "no guest action"; a read that
         // failed has not established that, so it is an error for this draft and
         // the next tick tries again.
         if (!anchor.ok) throw new Error(anchor.error)
-        anchorByGuest.set(anchorKey, anchor.value === null ? null : anchor.value.getTime())
+        anchorByGuest.set(
+          anchorKey,
+          anchor.value === null ? null : anchor.value.getTime(),
+        )
       }
 
       const anchor = anchorByGuest.get(anchorKey) ?? null

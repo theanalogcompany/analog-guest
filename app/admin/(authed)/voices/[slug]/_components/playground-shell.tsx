@@ -27,9 +27,7 @@ interface PlaygroundShellProps {
    * + clear the bubble selection. Receives an optional patternCluster
    * payload when the just-committed critique formed a verified cluster.
    */
-  onCommitted: (info: {
-    patternClusterDetected: boolean
-  }) => void
+  onCommitted: (info: { patternClusterDetected: boolean }) => void
 }
 
 interface RegenerateResponse {
@@ -66,7 +64,9 @@ export function PlaygroundShell({
 }: PlaygroundShellProps) {
   const [critique, setCritique] = useState('')
   const [attempts, setAttempts] = useState<PlaygroundAttempt[]>([])
-  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null)
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(
+    null,
+  )
   const [regenBusy, setRegenBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
@@ -218,9 +218,7 @@ export function PlaygroundShell({
           </div>
 
           <div className="flex justify-between items-center">
-            <span
-              className="text-[11px] text-ink-faint italic font-fraunces font-fraunces-text"
-            >
+            <span className="text-[11px] text-ink-faint italic font-fraunces font-fraunces-text">
               {attempts.length === 0
                 ? 'Type the critique, then regenerate'
                 : `${attempts.length} ${attempts.length === 1 ? 'attempt' : 'attempts'} · using current rules + corpus`}
@@ -265,7 +263,8 @@ export function PlaygroundShell({
               inboundBody={flaggedPair.inbound.body}
               flaggedResponse={flaggedPair.outbound.body}
               selectedResponse={
-                attempts.find((a) => a.attemptId === selectedAttemptId)?.body ?? ''
+                attempts.find((a) => a.attemptId === selectedAttemptId)?.body ??
+                ''
               }
               critique={critique.trim()}
               onConfirm={performCommit}
@@ -275,8 +274,8 @@ export function PlaygroundShell({
         </>
       ) : (
         <div className="bg-paper/60 border border-stone-light/60 rounded-[4px] px-4 py-6 text-center text-[12px] text-ink-faint italic font-fraunces font-fraunces-text">
-          No outbound flagged. Click an agent message in the thread to see
-          its inbound + flagged response here.
+          No outbound flagged. Click an agent message in the thread to see its
+          inbound + flagged response here.
         </div>
       )}
     </div>

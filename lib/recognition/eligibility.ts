@@ -2,7 +2,8 @@ import { z } from 'zod'
 import { isStateAtLeast } from './state-bands'
 import type { GuestState } from './types'
 
-export type MechanicType = 'perk' | 'referral' | 'content_unlock' | 'event_invite' | 'merch'
+export type MechanicType =
+  'perk' | 'referral' | 'content_unlock' | 'event_invite' | 'merch'
 export type RedemptionPolicy = 'one_time' | 'renewable'
 
 /**
@@ -68,10 +69,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  */
 export function isRedemptionActive(
   redemptions: readonly RedemptionRecord[],
-  mechanic: Pick<EligibilityCandidate, 'id' | 'redemptionPolicy' | 'redemptionWindowDays'>,
+  mechanic: Pick<
+    EligibilityCandidate,
+    'id' | 'redemptionPolicy' | 'redemptionWindowDays'
+  >,
   now: Date,
 ): boolean {
-  const forThisMechanic = redemptions.filter((r) => r.mechanicId === mechanic.id)
+  const forThisMechanic = redemptions.filter(
+    (r) => r.mechanicId === mechanic.id,
+  )
   if (forThisMechanic.length === 0) return false
   if (mechanic.redemptionPolicy === 'one_time') return true
   if (mechanic.redemptionWindowDays === null) {

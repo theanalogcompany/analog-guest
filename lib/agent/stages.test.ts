@@ -24,7 +24,12 @@ import {
   verifyProsePromiseStage,
   verifyCancellationClaimStage,
 } from './stages'
-import type { CorpusMatch, FollowupTrigger, RuntimeContext, Visit } from './types'
+import type {
+  CorpusMatch,
+  FollowupTrigger,
+  RuntimeContext,
+  Visit,
+} from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 import type { RecentMessage } from '@/lib/ai/types'
 // TAC-367: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
@@ -108,7 +113,8 @@ vi.mock('@/lib/db/admin', () => ({
 
 vi.mock('@/lib/rag', () => ({
   retrieveContext: (...args: unknown[]) => retrieveContextMock(...args),
-  retrieveKnowledgeContext: (...args: unknown[]) => retrieveKnowledgeContextMock(...args),
+  retrieveKnowledgeContext: (...args: unknown[]) =>
+    retrieveKnowledgeContextMock(...args),
 }))
 
 vi.mock('@/lib/ai', () => ({
@@ -126,8 +132,10 @@ vi.mock('@/lib/ai', () => ({
   // site and the branch that uses it is silently unreachable in every test in
   // this file, which is the trap CLAUDE.md documents on this exact mock.
   verifyProsePromise: (...args: unknown[]) => verifyProsePromiseMock(...args),
-  verifyCancellationClaim: (...args: unknown[]) => verifyCancellationClaimMock(...args),
-  verifyClosedVenueArrival: (...args: unknown[]) => verifyClosedVenueArrivalMock(...args),
+  verifyCancellationClaim: (...args: unknown[]) =>
+    verifyCancellationClaimMock(...args),
+  verifyClosedVenueArrival: (...args: unknown[]) =>
+    verifyClosedVenueArrivalMock(...args),
 }))
 
 vi.mock('@/lib/analytics/posthog', () => ({
@@ -137,17 +145,22 @@ vi.mock('@/lib/analytics/posthog', () => ({
   // load.
   captureClassificationLowConfidence: (...args: unknown[]) =>
     captureClassificationLowMock(...args),
-  captureCorpusRetrievalBelowThreshold: (...args: unknown[]) => captureLowMock(...args),
+  captureCorpusRetrievalBelowThreshold: (...args: unknown[]) =>
+    captureLowMock(...args),
   captureDashViolationPersisted: vi.fn(),
-  captureDemoBypassedApprovalGate: (...args: unknown[]) => captureDemoBypassMock(...args),
+  captureDemoBypassedApprovalGate: (...args: unknown[]) =>
+    captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
-  captureUngroundedClaimCaught: (...args: unknown[]) => captureUngroundedClaimCaughtMock(...args),
-  captureUnverifiedUrlHeld: (...args: unknown[]) => captureUnverifiedUrlHeldMock(...args),
+  captureUngroundedClaimCaught: (...args: unknown[]) =>
+    captureUngroundedClaimCaughtMock(...args),
+  captureUnverifiedUrlHeld: (...args: unknown[]) =>
+    captureUnverifiedUrlHeldMock(...args),
   captureGroundingVerifierUnavailable: (...args: unknown[]) =>
     captureGroundingVerifierUnavailableMock(...args),
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
-  captureProsePromiseCaught: (...args: unknown[]) => captureProsePromiseCaughtMock(...args),
+  captureProsePromiseCaught: (...args: unknown[]) =>
+    captureProsePromiseCaughtMock(...args),
   captureClosedVenueArrivalCaught: (...args: unknown[]) =>
     captureClosedVenueArrivalCaughtMock(...args),
   captureCancellationClaimUnbacked: (...args: unknown[]) =>
@@ -194,7 +207,12 @@ const TEST_BRAND_PERSONA = BrandPersonaSchema.parse({
 })
 
 const TEST_VENUE_INFO: RuntimeContext['venue']['venueInfo'] = {
-  address: { line1: '1 Test St', city: 'Testville', region: 'CA', postalCode: '90000' },
+  address: {
+    line1: '1 Test St',
+    city: 'Testville',
+    region: 'CA',
+    postalCode: '90000',
+  },
   contact: {},
   hours: {},
   menu: { highlights: [], items: [] },
@@ -211,7 +229,9 @@ const TEST_VENUE_INFO: RuntimeContext['venue']['venueInfo'] = {
  * An unrelated second question gets its OWN card instead, which is the point
  * of the ticket and is covered by its own tests rather than by widening these.
  */
-function correctingClassification(category = 'new_question'): RuntimeContext['classification'] {
+function correctingClassification(
+  category = 'new_question',
+): RuntimeContext['classification'] {
   return {
     category,
     classifierConfidence: 0.95,
@@ -282,7 +302,8 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
   // always a real object there), so the fixtures are fixed rather than the
   // source made defensive against a state its own type forbids.
   const brandPersona =
-    (ctx.venue as Partial<RuntimeContext['venue']>).brandPersona ?? TEST_BRAND_PERSONA
+    (ctx.venue as Partial<RuntimeContext['venue']>).brandPersona ??
+    TEST_BRAND_PERSONA
   return { ...ctx, venue: { ...ctx.venue, venueInfo, brandPersona } }
 }
 
@@ -313,16 +334,26 @@ describe('retrieveCorpusStage — inbound path (existing behavior)', () => {
       data: [makeMatch(0.2), makeMatch(0.15)], // none ≥ 0.3
     })
     const ctx = makeCtx({
-      currentMessage: { id: 'm1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
-    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(/insufficient_corpus_matches/)
+    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(
+      /insufficient_corpus_matches/,
+    )
   })
 
   it('returns matches when at least one crosses the strong-match floor', async () => {
     const matches = [makeMatch(0.45), makeMatch(0.2)]
     retrieveContextMock.mockResolvedValueOnce({ ok: true, data: matches })
     const ctx = makeCtx({
-      currentMessage: { id: 'm1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
     const out = await retrieveCorpusStage(ctx)
     expect(out).toEqual(matches)
@@ -395,7 +426,10 @@ describe('retrieveCorpusStage — followup path (THE-231)', () => {
   })
 
   it('still throws on rag-layer failure regardless of inbound vs followup', async () => {
-    retrieveContextMock.mockResolvedValueOnce({ ok: false, error: 'voyage timeout' })
+    retrieveContextMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'voyage timeout',
+    })
     const ctx = makeCtx({
       followupTrigger: {
         reason: 'manual',
@@ -414,21 +448,31 @@ describe('retrieveCorpusStage — followup path (THE-231)', () => {
 describe('shouldRetrieveKnowledge', () => {
   it('returns true on the inbound path (currentMessage present)', () => {
     const ctx = makeCtx({
-      currentMessage: { id: 'm1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
     expect(shouldRetrieveKnowledge(ctx)).toBe(true)
   })
 
   it('returns true for followup reason="event" (substantive outbound)', () => {
     const ctx = makeCtx({
-      followupTrigger: { reason: 'event', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      followupTrigger: {
+        reason: 'event',
+        triggeredAt: new Date(),
+      } as RuntimeContext['followupTrigger'],
     })
     expect(shouldRetrieveKnowledge(ctx)).toBe(true)
   })
 
   it('returns true for followup reason="manual" (operator-authored)', () => {
     const ctx = makeCtx({
-      followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      followupTrigger: {
+        reason: 'manual',
+        triggeredAt: new Date(),
+      } as RuntimeContext['followupTrigger'],
     })
     expect(shouldRetrieveKnowledge(ctx)).toBe(true)
   })
@@ -436,7 +480,10 @@ describe('shouldRetrieveKnowledge', () => {
   it('returns false for routine cron followups (day_1/day_3/day_7/day_14)', () => {
     for (const reason of ['day_1', 'day_3', 'day_7', 'day_14'] as const) {
       const ctx = makeCtx({
-        followupTrigger: { reason, triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+        followupTrigger: {
+          reason,
+          triggeredAt: new Date(),
+        } as RuntimeContext['followupTrigger'],
       })
       expect(shouldRetrieveKnowledge(ctx)).toBe(false)
     }
@@ -743,7 +790,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       ok: true,
       data: [row('k1', ['mechanic'])],
     })
-    await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+    await retrieveKnowledgeStage(
+      makeKnowledgeCtx(),
+      'mechanic_request',
+      KNOWLEDGE_QUERY,
+    )
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
     const args = retrieveKnowledgeContextMock.mock.calls[0][0] as {
       primaryTagPreference?: string[]
@@ -776,7 +827,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       .mockResolvedValueOnce({ ok: true, data: [] })
       .mockResolvedValueOnce({ ok: true, data: [row('fallback', ['menu'])] })
 
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+    const out = await retrieveKnowledgeStage(
+      makeKnowledgeCtx(),
+      'mechanic_request',
+      KNOWLEDGE_QUERY,
+    )
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
 
     const firstArgs = retrieveKnowledgeContextMock.mock.calls[0][0] as {
@@ -794,7 +849,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
   it('does NOT fall back when no preference was set even on zero matches', async () => {
     // No preference → no fallback retry. One call total.
     retrieveKnowledgeContextMock.mockResolvedValueOnce({ ok: true, data: [] })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
+    const out = await retrieveKnowledgeStage(
+      makeKnowledgeCtx(),
+      'reply',
+      KNOWLEDGE_QUERY,
+    )
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
     expect(out).toEqual([])
   })
@@ -806,7 +865,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       error: 'voyage timeout',
       errorCode: 'embedding_failed',
     })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+    const out = await retrieveKnowledgeStage(
+      makeKnowledgeCtx(),
+      'mechanic_request',
+      KNOWLEDGE_QUERY,
+    )
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalled()
   })
@@ -816,7 +879,11 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
     retrieveKnowledgeContextMock
       .mockResolvedValueOnce({ ok: true, data: [] })
       .mockResolvedValueOnce({ ok: false, error: 'voyage timeout' })
-    const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+    const out = await retrieveKnowledgeStage(
+      makeKnowledgeCtx(),
+      'mechanic_request',
+      KNOWLEDGE_QUERY,
+    )
     expect(out).toEqual([])
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
@@ -836,16 +903,26 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
           similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.01,
         })),
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
+      const out = await retrieveKnowledgeStage(
+        makeKnowledgeCtx(),
+        'reply',
+        KNOWLEDGE_QUERY,
+      )
       expect(out).toEqual([])
     })
 
     it('keeps chunks at or above the floor', async () => {
       retrieveKnowledgeContextMock.mockResolvedValueOnce({
         ok: true,
-        data: [{ ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR }],
+        data: [
+          { ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR },
+        ],
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
+      const out = await retrieveKnowledgeStage(
+        makeKnowledgeCtx(),
+        'reply',
+        KNOWLEDGE_QUERY,
+      )
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('strong')
     })
@@ -859,11 +936,21 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       retrieveKnowledgeContextMock.mockResolvedValueOnce({
         ok: true,
         data: [
-          { ...row('strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.18 },
-          { ...row('weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05 },
+          {
+            ...row('strong', ['menu']),
+            similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.18,
+          },
+          {
+            ...row('weak', ['menu']),
+            similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05,
+          },
         ],
       })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'reply', KNOWLEDGE_QUERY)
+      const out = await retrieveKnowledgeStage(
+        makeKnowledgeCtx(),
+        'reply',
+        KNOWLEDGE_QUERY,
+      )
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('strong')
     })
@@ -872,27 +959,49 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       retrieveKnowledgeContextMock
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('weak', ['mechanic']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05 }],
+          data: [
+            {
+              ...row('weak', ['mechanic']),
+              similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.05,
+            },
+          ],
         })
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('fallback-strong', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.1 }],
+          data: [
+            {
+              ...row('fallback-strong', ['menu']),
+              similarity: KNOWLEDGE_RELEVANCE_FLOOR + 0.1,
+            },
+          ],
         })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+      const out = await retrieveKnowledgeStage(
+        makeKnowledgeCtx(),
+        'mechanic_request',
+        KNOWLEDGE_QUERY,
+      )
       expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
       expect(out).toHaveLength(1)
       expect(out[0].id).toBe('fallback-strong')
     })
-
 
     it('filters the fallback result by the floor too, not just the preferenced call', async () => {
       retrieveKnowledgeContextMock
         .mockResolvedValueOnce({ ok: true, data: [] })
         .mockResolvedValueOnce({
           ok: true,
-          data: [{ ...row('fallback-weak', ['menu']), similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.02 }],
+          data: [
+            {
+              ...row('fallback-weak', ['menu']),
+              similarity: KNOWLEDGE_RELEVANCE_FLOOR - 0.02,
+            },
+          ],
         })
-      const out = await retrieveKnowledgeStage(makeKnowledgeCtx(), 'mechanic_request', KNOWLEDGE_QUERY)
+      const out = await retrieveKnowledgeStage(
+        makeKnowledgeCtx(),
+        'mechanic_request',
+        KNOWLEDGE_QUERY,
+      )
       expect(out).toEqual([])
     })
 
@@ -979,8 +1088,12 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR])
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.triggers).toEqual([
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    ])
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    )
     expect(decision.compMatchedPattern).toBeNull()
   })
 
@@ -1020,7 +1133,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
       makeCtx({}),
       makeGenerationResult({
         voiceFidelity: 0.85,
-        body: "no charge for this round",
+        body: 'no charge for this round',
         requiresOperatorApproval: true,
         approvalReason: 'comp for unhappy guest',
       }),
@@ -1053,7 +1166,10 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
   })
 
   it('returns existingPendingDraftId=null on the queue path when no prior pending exists', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValueOnce({ data: null, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+      data: null,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
@@ -1062,7 +1178,9 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR])
+    expect(decision.triggers).toEqual([
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    ])
     expect(decision.existingPendingDraftId).toBeNull()
   })
 
@@ -1083,7 +1201,9 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toHaveLength(4)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    )
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
@@ -1110,7 +1230,9 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
 
   it('fails OPEN when the pending-slot read throws — sends rather than refusing', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    pendingDraftMaybeSingleMock.mockRejectedValueOnce(new Error('admin client init failed'))
+    pendingDraftMaybeSingleMock.mockRejectedValueOnce(
+      new Error('admin client init failed'),
+    )
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({ voiceFidelity: 0.85 }),
@@ -1137,9 +1259,14 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
 
   // makeCtx casts `venue`, so holdAllOutbound isn't set by default. These
   // helpers make the venue-flag + compliance-category intent explicit.
-  function holdVenueCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
+  function holdVenueCtx(
+    overrides: Partial<RuntimeContext> = {},
+  ): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', holdAllOutbound: true } as RuntimeContext['venue'],
+      venue: {
+        id: 'venue-1',
+        holdAllOutbound: true,
+      } as RuntimeContext['venue'],
       ...overrides,
     })
   }
@@ -1199,7 +1326,10 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
   it('composes with comp regex; a co-firing comp wins primaryTrigger (hold is ranked lowest)', async () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('reply') }),
-      makeGenerationResult({ voiceFidelity: 0.85, body: "that one's on us today" }),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        body: "that one's on us today",
+      }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1213,7 +1343,10 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     // unchanged. A comp-bearing opt_out reply still queues, just not via hold.
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('opt_out') }),
-      makeGenerationResult({ voiceFidelity: 0.85, body: "no charge for this round" }),
+      makeGenerationResult({
+        voiceFidelity: 0.85,
+        body: 'no charge for this round',
+      }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1250,7 +1383,11 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({
         classification: classification('follow_up'),
-        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+        guest: {
+          id: 'guest-1',
+          firstName: 'Sam',
+          isDemo: true,
+        } as RuntimeContext['guest'],
       }),
       makeGenerationResult({ voiceFidelity: 0.85 }),
     )
@@ -1259,8 +1396,12 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     expect(decision.reason).toBe('demo_bypass')
     // The would-have-queued set still records the hold trigger for analytics.
     expect(captureDemoBypassMock).toHaveBeenCalledTimes(1)
-    const payload = captureDemoBypassMock.mock.calls[0][0] as { wouldHaveQueuedTriggers: string[] }
-    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
+    const payload = captureDemoBypassMock.mock.calls[0][0] as {
+      wouldHaveQueuedTriggers: string[]
+    }
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND,
+    )
   })
 })
 
@@ -1283,7 +1424,11 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
   // make the demo-flag intent explicit at each call site.
   function demoCtx(): RuntimeContext {
     return makeCtx({
-      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        isDemo: true,
+      } as RuntimeContext['guest'],
       // TAC-397: these tests assert the full would-have-queued set, which
       // includes previous_pending_held — and that trigger now fires only on a
       // correction. Without this the set is one short and the tests would be
@@ -1339,8 +1484,12 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     expect(payload.wouldHaveQueuedTriggers).toContain(
       APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
     )
-    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
-    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.MODEL_FLAGGED,
+    )
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+    )
     expect(payload.wouldHaveQueuedTriggers).toContain(
       APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
     )
@@ -1365,7 +1514,9 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     const payload = captureDemoBypassMock.mock.calls[0][0] as {
       wouldHaveQueuedTriggers: string[]
     }
-    expect(payload.wouldHaveQueuedTriggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
+    expect(payload.wouldHaveQueuedTriggers).toContain(
+      APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+    )
   })
 
   it('does NOT fire the event for a clean demo reply that would have auto-sent anyway', async () => {
@@ -1387,30 +1538,33 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     ['undefined', undefined],
     ['null', null],
     ['false', false],
-  ])('fails CLOSED — isDemo=%s with every trigger still queues', async (_label, isDemoValue) => {
-    pendingDraftMaybeSingleMock.mockResolvedValueOnce({
-      data: { id: 'existing-pending-id', body: 'earlier draft body' },
-      error: null,
-    })
-    const ctx = makeCtx({
-      guest: {
-        id: 'guest-1',
-        firstName: 'Sam',
-        isDemo: isDemoValue,
-      } as unknown as RuntimeContext['guest'],
-    })
-    const decision = await applyApprovalPolicyStage(
-      ctx,
-      makeGenerationResult({
-        voiceFidelity: 0.45,
-        body: "the next round's on the house",
-        requiresOperatorApproval: true,
-        approvalReason: 'comp',
-      }),
-    )
-    expect(decision.action).toBe('queue')
-    expect(captureDemoBypassMock).not.toHaveBeenCalled()
-  })
+  ])(
+    'fails CLOSED — isDemo=%s with every trigger still queues',
+    async (_label, isDemoValue) => {
+      pendingDraftMaybeSingleMock.mockResolvedValueOnce({
+        data: { id: 'existing-pending-id', body: 'earlier draft body' },
+        error: null,
+      })
+      const ctx = makeCtx({
+        guest: {
+          id: 'guest-1',
+          firstName: 'Sam',
+          isDemo: isDemoValue,
+        } as unknown as RuntimeContext['guest'],
+      })
+      const decision = await applyApprovalPolicyStage(
+        ctx,
+        makeGenerationResult({
+          voiceFidelity: 0.45,
+          body: "the next round's on the house",
+          requiresOperatorApproval: true,
+          approvalReason: 'comp',
+        }),
+      )
+      expect(decision.action).toBe('queue')
+      expect(captureDemoBypassMock).not.toHaveBeenCalled()
+    },
+  )
 
   it('non-demo guest with every trigger still queues (TAC-212 regression guard)', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
@@ -1466,7 +1620,12 @@ describe('deriveFollowupContext (TAC-244)', () => {
   })
 
   it('maps day_7 → post_visit_day_7 with recentVisits[0] as anchor', () => {
-    const out = deriveFollowupContext(trigger('day_7'), [visit7()], null, NOW_DERIVE)
+    const out = deriveFollowupContext(
+      trigger('day_7'),
+      [visit7()],
+      null,
+      NOW_DERIVE,
+    )
     expect(out).toEqual({
       reasons: ['post_visit_day_7'],
       daysSinceLastVisit: 7,
@@ -1478,20 +1637,30 @@ describe('deriveFollowupContext (TAC-244)', () => {
   })
 
   it('maps day_1 / day_3 / day_14 correctly', () => {
-    expect(deriveFollowupContext(trigger('day_1'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
-      'post_visit_day_1',
-    ])
-    expect(deriveFollowupContext(trigger('day_3'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
-      'post_visit_day_3',
-    ])
-    expect(deriveFollowupContext(trigger('day_14'), [visit7()], null, NOW_DERIVE)?.reasons).toEqual([
-      'post_visit_day_14',
-    ])
+    expect(
+      deriveFollowupContext(trigger('day_1'), [visit7()], null, NOW_DERIVE)
+        ?.reasons,
+    ).toEqual(['post_visit_day_1'])
+    expect(
+      deriveFollowupContext(trigger('day_3'), [visit7()], null, NOW_DERIVE)
+        ?.reasons,
+    ).toEqual(['post_visit_day_3'])
+    expect(
+      deriveFollowupContext(trigger('day_14'), [visit7()], null, NOW_DERIVE)
+        ?.reasons,
+    ).toEqual(['post_visit_day_14'])
   })
 
   it('anchors cold_lapsed from lastVisitAt (items omitted, date-only)', () => {
-    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000)
-    const out = deriveFollowupContext(trigger('cold_lapsed'), [], lastVisitAt, NOW_DERIVE)
+    const lastVisitAt = new Date(
+      NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000,
+    )
+    const out = deriveFollowupContext(
+      trigger('cold_lapsed'),
+      [],
+      lastVisitAt,
+      NOW_DERIVE,
+    )
     expect(out).toEqual({
       reasons: ['cold_lapsed'],
       daysSinceLastVisit: 60,
@@ -1501,17 +1670,29 @@ describe('deriveFollowupContext (TAC-244)', () => {
   })
 
   it('cold_lapsed ignores recentVisits[0] (the deep-lapsed case may have stale recentVisits)', () => {
-    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000)
+    const lastVisitAt = new Date(
+      NOW_DERIVE.getTime() - 60 * 24 * 60 * 60 * 1000,
+    )
     // recentVisits is non-empty (a 7-day-old visit) but cold_lapsed still
     // anchors on lastVisitAt — the trigger reason is the source of truth for
     // which anchor to use.
-    const out = deriveFollowupContext(trigger('cold_lapsed'), [visit7()], lastVisitAt, NOW_DERIVE)
+    const out = deriveFollowupContext(
+      trigger('cold_lapsed'),
+      [visit7()],
+      lastVisitAt,
+      NOW_DERIVE,
+    )
     expect(out?.anchorVisit?.visitedAt).toEqual(lastVisitAt)
     expect(out?.daysSinceLastVisit).toBe(60)
   })
 
   it('returns context with no anchor (defensive) when cold_lapsed + lastVisitAt is null', () => {
-    const out = deriveFollowupContext(trigger('cold_lapsed'), [], null, NOW_DERIVE)
+    const out = deriveFollowupContext(
+      trigger('cold_lapsed'),
+      [],
+      null,
+      NOW_DERIVE,
+    )
     expect(out).toEqual({
       reasons: ['cold_lapsed'],
       daysSinceLastVisit: 0,
@@ -1533,18 +1714,29 @@ describe('deriveFollowupContext (TAC-244)', () => {
   })
 
   it('returns undefined for event trigger (dedicated eventBeingInvited surface)', () => {
-    expect(deriveFollowupContext(trigger('event'), [visit7()], null, NOW_DERIVE)).toBeUndefined()
+    expect(
+      deriveFollowupContext(trigger('event'), [visit7()], null, NOW_DERIVE),
+    ).toBeUndefined()
   })
 
   it('returns undefined for manual trigger (dedicated operatorInstruction surface)', () => {
-    expect(deriveFollowupContext(trigger('manual'), [visit7()], null, NOW_DERIVE)).toBeUndefined()
+    expect(
+      deriveFollowupContext(trigger('manual'), [visit7()], null, NOW_DERIVE),
+    ).toBeUndefined()
   })
 
   // TAC-123: deriveFollowupContext gained array intake — the engine
   // aggregates multiple FollowupReasons for one guest on one pass.
   it('maps perk_unlock → perk_unlock with lastVisitAt as anchor (no items)', () => {
-    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 14 * 24 * 60 * 60 * 1000)
-    const out = deriveFollowupContext(trigger('perk_unlock'), [], lastVisitAt, NOW_DERIVE)
+    const lastVisitAt = new Date(
+      NOW_DERIVE.getTime() - 14 * 24 * 60 * 60 * 1000,
+    )
+    const out = deriveFollowupContext(
+      trigger('perk_unlock'),
+      [],
+      lastVisitAt,
+      NOW_DERIVE,
+    )
     expect(out).toEqual({
       reasons: ['perk_unlock'],
       daysSinceLastVisit: 14,
@@ -1586,7 +1778,9 @@ describe('deriveFollowupContext (TAC-244)', () => {
   })
 
   it('cold_lapsed + perk_unlock anchors on lastVisitAt (no post_visit_* in the set)', () => {
-    const lastVisitAt = new Date(NOW_DERIVE.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const lastVisitAt = new Date(
+      NOW_DERIVE.getTime() - 30 * 24 * 60 * 60 * 1000,
+    )
     const out = deriveFollowupContext(
       {
         reason: 'cold_lapsed',
@@ -1636,14 +1830,20 @@ describe('buildAiRuntime — open/closed wiring (TAC-301)', () => {
     sunday: '7:00 AM – 3:00 PM',
   }
 
-  function ctxWithHours(hours: Record<string, string>, timezone = 'America/Los_Angeles') {
+  function ctxWithHours(
+    hours: Record<string, string>,
+    timezone = 'America/Los_Angeles',
+  ) {
     return makeCtx({
       venue: {
         id: 'venue-1',
         timezone,
         venueInfo: { ...TEST_VENUE_INFO, hours },
       } as RuntimeContext['venue'],
-      currentMessage: { id: 'm1', body: 'omw' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'omw',
+      } as RuntimeContext['currentMessage'],
       recognition: { state: 'returning' } as RuntimeContext['recognition'],
     })
   }
@@ -1656,7 +1856,10 @@ describe('buildAiRuntime — open/closed wiring (TAC-301)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-11T17:30:00Z')) // Friday 10:30 LA
     const aiRuntime = buildAiRuntime(ctxWithHours(LE_MILS_HOURS))
-    expect(aiRuntime.today?.openState).toEqual({ state: 'open', closesAt: '3:00 PM' })
+    expect(aiRuntime.today?.openState).toEqual({
+      state: 'open',
+      closesAt: '3:00 PM',
+    })
   })
 
   it('resolves CLOSED after hours — the UAT repro moment', () => {
@@ -1673,9 +1876,12 @@ describe('buildAiRuntime — open/closed wiring (TAC-301)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-11T17:30:00Z'))
     // Same instant: 10:30 in LA (open), 03:30 in Berlin (closed).
-    expect(buildAiRuntime(ctxWithHours(LE_MILS_HOURS)).today?.openState?.state).toBe('open')
     expect(
-      buildAiRuntime(ctxWithHours(LE_MILS_HOURS, 'Europe/Berlin')).today?.openState?.state,
+      buildAiRuntime(ctxWithHours(LE_MILS_HOURS)).today?.openState?.state,
+    ).toBe('open')
+    expect(
+      buildAiRuntime(ctxWithHours(LE_MILS_HOURS, 'Europe/Berlin')).today
+        ?.openState?.state,
     ).toBe('closed')
   })
 
@@ -1724,7 +1930,10 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
         firstName: 'Sam',
         lastVisitAt: null,
       } as RuntimeContext['guest'],
-      followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      followupTrigger: {
+        reason: 'day_7',
+        triggeredAt: new Date(),
+      } as RuntimeContext['followupTrigger'],
       recentVisits: [{ items: ['espresso'], visitedAt }],
       recognition: { state: 'returning' } as RuntimeContext['recognition'],
     })
@@ -1839,8 +2048,16 @@ describe('buildAiRuntime — followup field wiring (TAC-244)', () => {
         firstName: 'Sam',
         lastVisitAt: null,
       } as RuntimeContext['guest'],
-      followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
-      recentVisits: [{ items: ['espresso'], visitedAt: new Date(Date.now() - 7 * 86_400_000) }],
+      followupTrigger: {
+        reason: 'day_7',
+        triggeredAt: new Date(),
+      } as RuntimeContext['followupTrigger'],
+      recentVisits: [
+        {
+          items: ['espresso'],
+          visitedAt: new Date(Date.now() - 7 * 86_400_000),
+        },
+      ],
       recognition: { state: 'returning' } as RuntimeContext['recognition'],
     })
     const aiRuntime = buildAiRuntime(ctx)
@@ -1896,7 +2113,10 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
 
   function qrScanCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', timezone: 'America/New_York' } as RuntimeContext['venue'],
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/New_York',
+      } as RuntimeContext['venue'],
       guest: {
         id: 'guest-1',
         firstName: 'Sam',
@@ -1915,7 +2135,7 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
     })
   }
 
-  it('is true for a fresh qr_scan guest\'s first inbound', () => {
+  it("is true for a fresh qr_scan guest's first inbound", () => {
     const aiRuntime = buildAiRuntime(qrScanCtx())
     expect(aiRuntime.firstTouchAfterQrScan).toBe(true)
   })
@@ -1937,7 +2157,14 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
   it('is false when the guest has other recent messages (not their first inbound)', () => {
     const aiRuntime = buildAiRuntime(
       qrScanCtx({
-        recentMessages: [{ direction: 'inbound', body: 'earlier', createdAt: new Date(), delivery: 'delivered' }],
+        recentMessages: [
+          {
+            direction: 'inbound',
+            body: 'earlier',
+            createdAt: new Date(),
+            delivery: 'delivered',
+          },
+        ],
       }),
     )
     expect(aiRuntime.firstTouchAfterQrScan).toBe(false)
@@ -1958,7 +2185,11 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
       promptLine: "You haven't heard what this guest ordered yet.",
       eligibleAt: FRESH,
     },
-    { key: 'learn_name', promptLine: "You don't know this guest's name yet.", eligibleAt: FRESH },
+    {
+      key: 'learn_name',
+      promptLine: "You don't know this guest's name yet.",
+      eligibleAt: FRESH,
+    },
   ]
 
   it('maps ctx.openIntentions promptLines onto aiRuntime.openIntentions, in order', () => {
@@ -1993,7 +2224,11 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
     const aiRuntime = buildAiRuntime(
       qrScanCtx({
         openIntentions: TWO_OPEN,
-        pendingQuestion: { question: 'is rayan working', askedAt: new Date(), mode: 'outstanding' },
+        pendingQuestion: {
+          question: 'is rayan working',
+          askedAt: new Date(),
+          mode: 'outstanding',
+        },
       }),
     )
     expect(aiRuntime.openIntentions).toBeUndefined()
@@ -2057,9 +2292,15 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     // caught it. The floor still wins primaryTrigger because it names a
     // concrete promise in this specific message, which is more useful to an
     // operator than "the category is routed."
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
+    )
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
+    )
   })
 
   it('fires without consulting the model self-flag or the commitment emission', async () => {
@@ -2108,7 +2349,9 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL,
+    )
   })
 
   // The regression guard that matters most: a widened gate that queues
@@ -2144,10 +2387,14 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
+    )
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
     // More specific signal wins the operator-facing review_reason.
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 
   it('outranks previous_pending_held so a regenerated promise still pushes', async () => {
@@ -2161,7 +2408,9 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
+    )
   })
 })
 
@@ -2243,7 +2492,9 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
     // ...but it still gets a clock. The label and the timer are independent,
     // which is the entire reason the scan keys on pending_until.
     expect(decision.pendingUntil).toBeInstanceOf(Date)
@@ -2361,12 +2612,19 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { status: 'flagged' as const, claims: ['invents four SoFi variation names not in the corpus'] },
+      {
+        status: 'flagged' as const,
+        claims: ['invents four SoFi variation names not in the corpus'],
+      },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
     expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
   })
@@ -2381,8 +2639,12 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
   })
 
   // TAC-367. The load-bearing negative. A truncated check is an ABSENCE of
@@ -2404,7 +2666,9 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
     expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
   })
 
   // TAC-367: a truncated check reports nothing about the draft, so any
@@ -2417,8 +2681,12 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    )
   })
 
   // TAC-367 REGRESSION GUARD (code review, MAJOR). Excluding `truncated` from
@@ -2433,7 +2701,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -2459,14 +2730,19 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
   it('outranks hold_all_outbound for the operator-facing label', async () => {
     const ctx = inboundCtx()
     const decision = await applyApprovalPolicyStage(
-      { ...ctx, venue: { ...ctx.venue, holdAllOutbound: true } } as RuntimeContext,
+      {
+        ...ctx,
+        venue: { ...ctx.venue, holdAllOutbound: true },
+      } as RuntimeContext,
       makeGenerationResult({ knowledgeGap: false }),
       { status: 'truncated' as const },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
   })
 
   // TAC-367: a truncation card carries no clock and its own review_reason, so
@@ -2479,7 +2755,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       pending_until: null,
       review_reason: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: truncationCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: truncationCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -2534,7 +2813,9 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(degraded.action).toBe('queue')
     expect(clean.action).toBe('send')
     if (degraded.action !== 'queue') return
-    expect(degraded.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(degraded.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
   })
 
   // TAC-424: same consequences the truncated case is exempt from. A degraded
@@ -2551,7 +2832,9 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.pendingUntil).toBeUndefined()
     expect(decision.blankBody).toBe(false)
     expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
   })
 
   // TAC-424 REGRESSION GUARD, and the load-bearing test of this ticket.
@@ -2572,7 +2855,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -2602,15 +2888,24 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
   it('records the degraded sub-cause without letting it win the operator label', async () => {
     const ctx = inboundCtx()
     const decision = await applyApprovalPolicyStage(
-      { ...ctx, venue: { ...ctx.venue, holdAllOutbound: true } } as RuntimeContext,
+      {
+        ...ctx,
+        venue: { ...ctx.venue, holdAllOutbound: true },
+      } as RuntimeContext,
       makeGenerationResult({ knowledgeGap: false }),
       { status: 'degraded' as const },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
   })
 
   // TAC-424: the marker never fires alone. If it ever did, a card would be
@@ -2620,7 +2915,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     for (const status of ['clean', 'truncated', 'skipped'] as const) {
       const decision = await applyApprovalPolicyStage(
         inboundCtx(),
-        makeGenerationResult({ knowledgeGap: status === 'skipped', voiceFidelity: 0.5 }),
+        makeGenerationResult({
+          knowledgeGap: status === 'skipped',
+          voiceFidelity: 0.5,
+        }),
         { status },
       )
       // `expect(...).toBe('queue')` rather than `continue`, matching every
@@ -2628,7 +2926,9 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       // green if the gate ever stopped queueing these cases.
       expect(decision.action).toBe('queue')
       if (decision.action !== 'queue') return
-      expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
+      expect(decision.triggers).not.toContain(
+        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
+      )
     }
   })
 
@@ -2692,8 +2992,12 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
     // TAC-484: the label and the clock are independent, and this turn's gap
     // came from the backstop, not a self-report, so no clock arms — the
     // label winning to COMMITMENT_TYPE_GATED doesn't change that.
@@ -2713,24 +3017,32 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
   })
 
   // A backstop-caught turn must protect the card and preserve the clock on
   // regen, identically to a self-reported gap turn (TAC-308 case 3 / case 2
   // shape, now exercised via the backstop path).
-  it('preserves an existing gap card\'s clock when regenerated via a fresh backstop catch', async () => {
+  it("preserves an existing gap card's clock when regenerated via a fresh backstop catch", async () => {
     const gapCard = {
       id: 'gap-card-1',
       body: 'best guess at the answer',
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
-      { status: 'flagged' as const, claims: ['invents a different fact this turn'] },
+      {
+        status: 'flagged' as const,
+        claims: ['invents a different fact this turn'],
+      },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -2753,7 +3065,10 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false }),
@@ -2826,7 +3141,9 @@ describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () =>
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
     // TAC-301 part 1.5: the backstop path keeps the body — the operator needs
     // to see the invented number to know what to strike, not an empty card.
     expect(decision.blankBody).toBe(false)
@@ -2872,7 +3189,11 @@ describe('verifyGroundingStage (TAC-350)', () => {
     })
 
   function makeGen(
-    overrides: { knowledgeGap?: boolean; body?: string; userPrompt?: string } = {},
+    overrides: {
+      knowledgeGap?: boolean
+      body?: string
+      userPrompt?: string
+    } = {},
   ) {
     return {
       knowledgeGap: false,
@@ -2891,9 +3212,16 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the outbound (followup) path with isProactive: true and an empty inboundBody', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
-    const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'day_7', triggeredAt: new Date() } })
+    const ctx = makeCtx({
+      currentMessage: null,
+      followupTrigger: { reason: 'day_7', triggeredAt: new Date() },
+    })
     const result = await verifyGroundingStage(ctx, makeGen())
     expect(result).toEqual({ status: 'clean' })
     expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
@@ -2910,12 +3238,21 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model for a holding-message-shaped ctx (manual trigger, no inbound) with isProactive: true', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
-    const ctx = makeCtx({ currentMessage: null, followupTrigger: { reason: 'manual', triggeredAt: new Date() } })
+    const ctx = makeCtx({
+      currentMessage: null,
+      followupTrigger: { reason: 'manual', triggeredAt: new Date() },
+    })
     const result = await verifyGroundingStage(ctx, makeGen())
     expect(result).toEqual({ status: 'clean' })
-    const args = verifyGroundingMock.mock.calls[0][0] as { isProactive: boolean }
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      isProactive: boolean
+    }
     expect(args.isProactive).toBe(true)
   })
 
@@ -2926,7 +3263,11 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('calls the model on the inbound path with isProactive: false and the real inbound body', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -2939,14 +3280,23 @@ describe('verifyGroundingStage (TAC-350)', () => {
   })
 
   it('returns skipped without calling the model for a demo guest', async () => {
-    const ctx = inboundCtx({ guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'] })
+    const ctx = inboundCtx({
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        isDemo: true,
+      } as RuntimeContext['guest'],
+    })
     const result = await verifyGroundingStage(ctx, makeGen())
     expect(result).toEqual({ status: 'skipped' })
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
 
   it('returns skipped without calling the model when the generation already self-reported a gap', async () => {
-    const result = await verifyGroundingStage(inboundCtx(), makeGen({ knowledgeGap: true }))
+    const result = await verifyGroundingStage(
+      inboundCtx(),
+      makeGen({ knowledgeGap: true }),
+    )
     expect(result).toEqual({ status: 'skipped' })
     expect(verifyGroundingMock).not.toHaveBeenCalled()
   })
@@ -2992,7 +3342,11 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+        data: {
+          hasUngroundedClaim: false,
+          ungroundedClaims: [],
+          promptVersion: 'v1.6.0',
+        },
       })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -3016,11 +3370,17 @@ describe('verifyGroundingStage (TAC-350)', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+        data: {
+          hasUngroundedClaim: false,
+          ungroundedClaims: [],
+          promptVersion: 'v1.6.0',
+        },
       })
     await verifyGroundingStage(inboundCtx(), makeGen())
     expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
-    expect(verifyGroundingMock.mock.calls[1][0]).toEqual(verifyGroundingMock.mock.calls[0][0])
+    expect(verifyGroundingMock.mock.calls[1][0]).toEqual(
+      verifyGroundingMock.mock.calls[0][0],
+    )
   })
 
   // TAC-424: a degraded turn now HOLDS the reply, so the event must say so.
@@ -3123,7 +3483,11 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('returns clean and does NOT fire the PostHog event when nothing is found', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.0.0',
+      },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
     expect(result).toEqual({ status: 'clean' })
@@ -3138,7 +3502,11 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it("passes the generator's own composed userPrompt through verbatim", async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.1.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.1.0',
+      },
     })
     const userPrompt =
       '## Right now\n- Status: CLOSED right now. Next open tomorrow at 7:00 AM.\n\n## Visit history\n- cortado [3 days ago]'
@@ -3160,10 +3528,15 @@ describe('verifyGroundingStage (TAC-350)', () => {
       },
     })
     const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'flagged' as const, claims: ['invents a wifi network name and password'] })
+    expect(result).toEqual({
+      status: 'flagged' as const,
+      claims: ['invents a wifi network name and password'],
+    })
     expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
     const call = captureUngroundedClaimCaughtMock.mock.calls[0][0]
-    expect(call.ungroundedClaims).toEqual(['invents a wifi network name and password'])
+    expect(call.ungroundedClaims).toEqual([
+      'invents a wifi network name and password',
+    ])
     expect(call.replyBody).toBe('Le Mils Guest')
   })
 
@@ -3176,20 +3549,35 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('passes the conversation channel through to the verifier', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
     await verifyGroundingStage(inboundCtx(), makeGen())
-    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      conversationChannel: unknown
+    }
     expect(args.conversationChannel).toBe('text')
   })
 
   it('passes an instagram conversation through as instagram, not the default', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
-    await verifyGroundingStage(inboundCtx({ conversationChannel: 'instagram' }), makeGen())
-    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    await verifyGroundingStage(
+      inboundCtx({ conversationChannel: 'instagram' }),
+      makeGen(),
+    )
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      conversationChannel: unknown
+    }
     expect(args.conversationChannel).toBe('instagram')
   })
 
@@ -3200,17 +3588,30 @@ describe('verifyGroundingStage (TAC-350)', () => {
   it('passes an unresolved channel through as null rather than substituting one', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.6.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.6.0',
+      },
     })
-    await verifyGroundingStage(inboundCtx({ conversationChannel: null }), makeGen())
-    const args = verifyGroundingMock.mock.calls[0][0] as { conversationChannel: unknown }
+    await verifyGroundingStage(
+      inboundCtx({ conversationChannel: null }),
+      makeGen(),
+    )
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      conversationChannel: unknown
+    }
     expect(args.conversationChannel).toBeNull()
   })
 
   it('passes ctx.knowledgeCorpus through to the verifier as knowledgeChunks', async () => {
     verifyGroundingMock.mockResolvedValueOnce({
       ok: true,
-      data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+      data: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        promptVersion: 'v1.0.0',
+      },
     })
     const chunk = {
       id: 'k1',
@@ -3222,34 +3623,53 @@ describe('verifyGroundingStage (TAC-350)', () => {
       secondaryTags: [],
       similarity: 0.6,
     }
-    await verifyGroundingStage(inboundCtx({ knowledgeCorpus: [chunk] as RuntimeContext['knowledgeCorpus'] }), makeGen())
+    await verifyGroundingStage(
+      inboundCtx({
+        knowledgeCorpus: [chunk] as RuntimeContext['knowledgeCorpus'],
+      }),
+      makeGen(),
+    )
     expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
-    const args = verifyGroundingMock.mock.calls[0][0] as { knowledgeChunks?: unknown[] }
+    const args = verifyGroundingMock.mock.calls[0][0] as {
+      knowledgeChunks?: unknown[]
+    }
     expect(args.knowledgeChunks).toEqual([chunk])
   })
 })
 
 describe('isModelFlagged / isCommitmentTypeGated (TAC-355)', () => {
   it('isModelFlagged is true only when requiresOperatorApproval is true', () => {
-    expect(isModelFlagged(makeGenerationResult({ requiresOperatorApproval: true }))).toBe(true)
-    expect(isModelFlagged(makeGenerationResult({ requiresOperatorApproval: false }))).toBe(false)
+    expect(
+      isModelFlagged(makeGenerationResult({ requiresOperatorApproval: true })),
+    ).toBe(true)
+    expect(
+      isModelFlagged(makeGenerationResult({ requiresOperatorApproval: false })),
+    ).toBe(false)
   })
 
   it('isCommitmentTypeGated requires both a gated type AND a non-empty description', () => {
     expect(
       isCommitmentTypeGated(
-        makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+        makeGenerationResult({
+          commitment: { type: 'comp', description: 'oat latte' },
+        }),
       ),
     ).toBe(true)
     expect(
-      isCommitmentTypeGated(makeGenerationResult({ commitment: { type: 'comp', description: '' } })),
+      isCommitmentTypeGated(
+        makeGenerationResult({ commitment: { type: 'comp', description: '' } }),
+      ),
     ).toBe(false)
     expect(
       isCommitmentTypeGated(
-        makeGenerationResult({ commitment: { type: 'recommendation', description: 'the duck' } }),
+        makeGenerationResult({
+          commitment: { type: 'recommendation', description: 'the duck' },
+        }),
       ),
     ).toBe(false)
-    expect(isCommitmentTypeGated(makeGenerationResult({ commitment: {} }))).toBe(false)
+    expect(
+      isCommitmentTypeGated(makeGenerationResult({ commitment: {} })),
+    ).toBe(false)
   })
 })
 
@@ -3290,7 +3710,9 @@ describe('applyApprovalPolicyStage — self_talk_detected trigger (TAC-355)', ()
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.SELF_TALK_DETECTED)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 })
 
@@ -3304,7 +3726,9 @@ describe('applyApprovalPolicyStage — unverified_url trigger (TAC-509)', () => 
   it('queues with unverified_url when a link survived every attempt', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
-      makeGenerationResult({ unverifiedUrls: ['https://lemils.com/products/invented'] }),
+      makeGenerationResult({
+        unverifiedUrls: ['https://lemils.com/products/invented'],
+      }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -3325,7 +3749,10 @@ describe('applyApprovalPolicyStage — unverified_url trigger (TAC-509)', () => 
     // allowedUrlCount is what separates "the model invented a link" from
     // "this venue has no list yet". The two look identical on the card.
     const urls = ['https://lemils.com/products/invented']
-    await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({ unverifiedUrls: urls }))
+    await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({ unverifiedUrls: urls }),
+    )
     expect(captureUnverifiedUrlHeldMock).toHaveBeenCalledTimes(1)
     const props = captureUnverifiedUrlHeldMock.mock.calls[0][0]
     expect(props.unverifiedUrls).toEqual(urls)
@@ -3357,7 +3784,9 @@ describe('applyApprovalPolicyStage — unverified_url trigger (TAC-509)', () => 
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNVERIFIED_URL)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 })
 
@@ -3376,8 +3805,12 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+    )
   })
 
   it('FAILS CLOSED — queues with mechanic_offer_backstop when the stage result is "check_failed"', async () => {
@@ -3389,7 +3822,9 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+    )
   })
 
   it('does not queue when the stage result is "clean"', async () => {
@@ -3403,7 +3838,10 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
   })
 
   it('does not queue when the stage result is "skipped" (default when omitted)', async () => {
-    const decision = await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({}))
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(decision.action).toBe('send')
   })
 
@@ -3419,7 +3857,9 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
+    )
 
     const decisionWithCommitment = await applyApprovalPolicyStage(
       makeCtx({}),
@@ -3431,7 +3871,9 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     )
     expect(decisionWithCommitment.action).toBe('queue')
     if (decisionWithCommitment.action !== 'queue') return
-    expect(decisionWithCommitment.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decisionWithCommitment.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 })
 
@@ -3462,7 +3904,11 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
   it('skips without calling the model for a demo guest', async () => {
     const ctx = makeCtx({
       mechanics: [gatedMechanic],
-      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        isDemo: true,
+      } as RuntimeContext['guest'],
     })
     const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
     expect(result).toEqual({ status: 'skipped' })
@@ -3483,7 +3929,9 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
     const ctx = makeCtx({ mechanics: [gatedMechanic] })
     const result = await verifyMechanicOfferStage(
       ctx,
-      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
     )
     expect(result).toEqual({ status: 'skipped' })
     expect(verifyMechanicOfferMock).not.toHaveBeenCalled()
@@ -3492,7 +3940,11 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
   it('returns "clean" when the model finds nothing', async () => {
     verifyMechanicOfferMock.mockResolvedValueOnce({
       ok: true,
-      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: false,
+        mechanicId: 'none',
+        promptVersion: 'v1.0.0',
+      },
     })
     const ctx = makeCtx({ mechanics: [gatedMechanic] })
     const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
@@ -3503,12 +3955,18 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
   it('returns "flagged" with the mechanicId and fires the PostHog event when the model catches an offer', async () => {
     verifyMechanicOfferMock.mockResolvedValueOnce({
       ok: true,
-      data: { offersGatedMechanic: true, mechanicId: 'mech-1', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: true,
+        mechanicId: 'mech-1',
+        promptVersion: 'v1.0.0',
+      },
     })
     const ctx = makeCtx({ mechanics: [gatedMechanic] })
     const result = await verifyMechanicOfferStage(
       ctx,
-      makeGenerationResult({ body: 'since your friend came in, something special is on us' }),
+      makeGenerationResult({
+        body: 'since your friend came in, something special is on us',
+      }),
     )
     expect(result).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
     expect(captureMechanicOfferBackstopCaughtMock).toHaveBeenCalledTimes(1)
@@ -3525,7 +3983,11 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
   it('still resolves to "flagged" (not "clean") on the ambiguous raw shape offersGatedMechanic=true + mechanicId="none"', async () => {
     verifyMechanicOfferMock.mockResolvedValueOnce({
       ok: true,
-      data: { offersGatedMechanic: true, mechanicId: 'none', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: true,
+        mechanicId: 'none',
+        promptVersion: 'v1.0.0',
+      },
     })
     const ctx = makeCtx({ mechanics: [gatedMechanic] })
     const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
@@ -3534,7 +3996,10 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
 
   it('FAILS CLOSED — returns "check_failed" and logs a warning when the model call degrades', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyMechanicOfferMock.mockResolvedValueOnce({ ok: false, error: 'model unavailable' })
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: false,
+      error: 'model unavailable',
+    })
     const ctx = makeCtx({ mechanics: [gatedMechanic] })
     const result = await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
     expect(result).toEqual({ status: 'check_failed' })
@@ -3544,9 +4009,17 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
   it('only passes requires_operator_approval mechanics to the verifier, not the full eligible set', async () => {
     verifyMechanicOfferMock.mockResolvedValueOnce({
       ok: true,
-      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: false,
+        mechanicId: 'none',
+        promptVersion: 'v1.0.0',
+      },
     })
-    const ungatedMechanic = { ...gatedMechanic, id: 'mech-2', requiresOperatorApproval: false }
+    const ungatedMechanic = {
+      ...gatedMechanic,
+      id: 'mech-2',
+      requiresOperatorApproval: false,
+    }
     const ctx = makeCtx({ mechanics: [gatedMechanic, ungatedMechanic] })
     await verifyMechanicOfferStage(ctx, makeGenerationResult({}))
     const args = verifyMechanicOfferMock.mock.calls[0][0] as {
@@ -3596,7 +4069,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
   // question while a gap card is pending, and today that reply is both
   // silenced AND allowed to overwrite the card. Narrowed to gap cards only.
   it('sends an independently sendable reply instead of evicting the card', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
@@ -3615,7 +4091,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
   // (the gap card survives an unrelated turn) still holds; only the mechanism
   // changed, from discarding the reply to giving it a card.
   it('gives a draft that would queue for some other reason its OWN card, never dropping it', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
@@ -3625,7 +4104,9 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     expect(decision.slot).toBe('conversation')
     // Nothing is regenerated: the gap card keeps its text and its clock.
     expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+    )
     // And no second clock, so the guest still gets at most one holding message.
     expect(decision.pendingUntil).toBeUndefined()
   })
@@ -3635,7 +4116,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
   // becomes a second card, in the obligation slot, and the gap card is not
   // touched.
   it('queues a comp beside a gap card as a second card instead of dropping it', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({
@@ -3648,7 +4132,9 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     expect(decision.slot).toBe('obligation')
     expect(decision.existingPendingDraftId).toBeNull()
     expect(decision.otherSlotOccupied).toBe(true)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+    )
   })
 
   // CASE 3 — TAC-397 splits this in two, because "a second unanswerable
@@ -3659,7 +4145,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
   // per card — and that now comes from anyKnowledgeGapCard rather than from
   // preserving the column on a regen.
   it('a second unanswerable question gets its own card and arms NO second clock', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
       makeGenerationResult({ knowledgeGap: true }),
@@ -3673,7 +4162,10 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
   // A CORRECTION of the stuck question still regenerates the card in place,
   // and still must not push the deadline out.
   it('a correction regenerates the gap card in place and preserves its original clock', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: gapCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: gapCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(true),
       makeGenerationResult({ knowledgeGap: true }),
@@ -3749,13 +4241,19 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
 describe('isKnowledgeGapCard (TAC-308)', () => {
   it('identifies a card by a running clock', () => {
     expect(
-      isKnowledgeGapCard({ pending_until: new Date().toISOString(), review_reason: 'anything' }),
+      isKnowledgeGapCard({
+        pending_until: new Date().toISOString(),
+        review_reason: 'anything',
+      }),
     ).toBe(true)
   })
 
   it('identifies a fired card by its review_reason', () => {
     expect(
-      isKnowledgeGapCard({ pending_until: null, review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP }),
+      isKnowledgeGapCard({
+        pending_until: null,
+        review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+      }),
     ).toBe(true)
   })
 
@@ -3772,7 +4270,12 @@ describe('isKnowledgeGapCard (TAC-308)', () => {
   })
 
   it('treats an ordinary pending draft as not a card', () => {
-    expect(isKnowledgeGapCard({ pending_until: null, review_reason: 'model_flagged' })).toBe(false)
+    expect(
+      isKnowledgeGapCard({
+        pending_until: null,
+        review_reason: 'model_flagged',
+      }),
+    ).toBe(false)
   })
 
   // The direction here is the safe one, and it is the point of the test:
@@ -3847,7 +4350,9 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
     expect(decision.blankBody).toBe(true)
   })
 })
@@ -3857,11 +4362,22 @@ describe('generateStage — hands the conversation channel to generateMessage (T
   // every path goes through here (or the Voices regen, tested in its own file),
   // so this is where a dropped or hardcoded channel would give every guest
   // the same copy again.
-  it.each(['text', 'instagram', null] as const)('passes %s through unchanged', async (channel) => {
-    generateMessageMock.mockResolvedValue({ ok: true, data: makeGenerationResult({ voiceFidelity: 0.8 }) })
-    await generateStage(makeCtx({ corpus: [], conversationChannel: channel }), 'reply')
-    expect(generateMessageMock).toHaveBeenCalledWith(expect.objectContaining({ channel }))
-  })
+  it.each(['text', 'instagram', null] as const)(
+    'passes %s through unchanged',
+    async (channel) => {
+      generateMessageMock.mockResolvedValue({
+        ok: true,
+        data: makeGenerationResult({ voiceFidelity: 0.8 }),
+      })
+      await generateStage(
+        makeCtx({ corpus: [], conversationChannel: channel }),
+        'reply',
+      )
+      expect(generateMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({ channel }),
+      )
+    },
+  )
 })
 
 describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)', () => {
@@ -3916,7 +4432,11 @@ describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)
       makeCtx({
         corpus: [],
         currentMessage: inbound,
-        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+        guest: {
+          id: 'guest-1',
+          firstName: 'Sam',
+          isDemo: true,
+        } as RuntimeContext['guest'],
       }),
       'new_question',
     )
@@ -3942,8 +4462,12 @@ describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)
       data: makeGenerationResult({ voiceFidelity: 0.9, knowledgeGap: true }),
     })
     expect(
-      (await generateStage(makeCtx({ corpus: [], currentMessage: inbound }), 'new_question'))
-        .status,
+      (
+        await generateStage(
+          makeCtx({ corpus: [], currentMessage: inbound }),
+          'new_question',
+        )
+      ).status,
     ).toBe('success')
   })
 })
@@ -3953,19 +4477,27 @@ describe('knowledgeGapWillQueue (TAC-309)', () => {
   const inbound = { id: 'i' } as RuntimeContext['currentMessage']
 
   it('is true only for a non-demo inbound gap turn', () => {
-    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, true)).toBe(true)
+    expect(
+      knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, true),
+    ).toBe(true)
   })
 
   it('is false on the outbound path', () => {
-    expect(knowledgeGapWillQueue({ currentMessage: null, guest: g() }, true)).toBe(false)
+    expect(
+      knowledgeGapWillQueue({ currentMessage: null, guest: g() }, true),
+    ).toBe(false)
   })
 
   it('is false for a demo guest', () => {
-    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g(true) }, true)).toBe(false)
+    expect(
+      knowledgeGapWillQueue({ currentMessage: inbound, guest: g(true) }, true),
+    ).toBe(false)
   })
 
   it('is false when the model did not report a gap', () => {
-    expect(knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, false)).toBe(false)
+    expect(
+      knowledgeGapWillQueue({ currentMessage: inbound, guest: g() }, false),
+    ).toBe(false)
   })
 })
 
@@ -3981,7 +4513,10 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
     category: string = 'comp_complaint',
   ): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      venue: {
+        id: 'venue-1',
+        approvalPolicy: policy,
+      } as RuntimeContext['venue'],
       classification: {
         category,
         classifierConfidence: 0.95,
@@ -4010,7 +4545,10 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
     // The behaviour this ticket exists to add: a box a human ticked is
     // ABSOLUTE. A control with exceptions is not a control.
     const decision = await applyApprovalPolicyStage(
-      ctxWithPolicy({ default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } }),
+      ctxWithPolicy({
+        default: 'auto_send',
+        perCategory: { comp_complaint: 'operator_approval' },
+      }),
       makeGenerationResult(CLARIFYING),
     )
     expect(decision.action).toBe('queue')
@@ -4028,7 +4566,10 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
 
   it('holds an ordinary category under the master switch', async () => {
     const decision = await applyApprovalPolicyStage(
-      ctxWithPolicy({ default: 'operator_approval', perCategory: {} }, 'casual_chatter'),
+      ctxWithPolicy(
+        { default: 'operator_approval', perCategory: {} },
+        'casual_chatter',
+      ),
       makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
     )
     expect(decision.action).toBe('queue')
@@ -4040,8 +4581,14 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
     // TCPA. The exemption is enforced in the resolver, so it holds regardless
     // of what the UI does or does not render.
     const decision = await applyApprovalPolicyStage(
-      ctxWithPolicy({ default: 'operator_approval', perCategory: {} }, 'opt_out'),
-      makeGenerationResult({ body: "You're unsubscribed. No more texts.", voiceFidelity: 0.95 }),
+      ctxWithPolicy(
+        { default: 'operator_approval', perCategory: {} },
+        'opt_out',
+      ),
+      makeGenerationResult({
+        body: "You're unsubscribed. No more texts.",
+        voiceFidelity: 0.95,
+      }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4052,7 +4599,10 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
         { default: 'auto_send', perCategory: { opt_out: 'operator_approval' } },
         'opt_out',
       ),
-      makeGenerationResult({ body: "You're unsubscribed. No more texts.", voiceFidelity: 0.95 }),
+      makeGenerationResult({
+        body: "You're unsubscribed. No more texts.",
+        voiceFidelity: 0.95,
+      }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4060,7 +4610,10 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
   it('still auto-sends an unheld category when the venue holds a different one', async () => {
     const decision = await applyApprovalPolicyStage(
       ctxWithPolicy(
-        { default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } },
+        {
+          default: 'auto_send',
+          perCategory: { comp_complaint: 'operator_approval' },
+        },
         'casual_chatter',
       ),
       makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
@@ -4077,8 +4630,14 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
   // operator was about to approve. These pin the two halves apart.
   function manualCtx(policy?: unknown): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
-      followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+      venue: {
+        id: 'venue-1',
+        approvalPolicy: policy,
+      } as RuntimeContext['venue'],
+      followupTrigger: {
+        reason: 'manual',
+        triggeredAt: new Date(),
+      } as RuntimeContext['followupTrigger'],
     })
   }
 
@@ -4109,7 +4668,10 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
     const decision = await applyApprovalPolicyStage(
       makeCtx({
         venue: { id: 'venue-1' } as RuntimeContext['venue'],
-        followupTrigger: { reason: 'day_7', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+        followupTrigger: {
+          reason: 'day_7',
+          triggeredAt: new Date(),
+        } as RuntimeContext['followupTrigger'],
       }),
       makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
     )
@@ -4132,7 +4694,10 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
   // read, INSERTed, hit the unique index, and race recovery overwrote the card.
   // The gate now reads the slot and refuses, explicitly.
   it('REFUSES a manual followup that would queue into an occupied slot', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: waitingCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: waitingCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       manualCtx({ default: 'operator_approval', perCategory: {} }),
       makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
@@ -4148,7 +4713,10 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
   })
 
   it('still SENDS a manual followup beside a pending card when nothing holds it', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: waitingCard, error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: waitingCard,
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       manualCtx(),
       makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
@@ -4163,7 +4731,10 @@ describe('willBeReviewed is scoped to complaint categories (TAC-307)', () => {
   // formatMechanicEligibility to its generosity-inviting branch venue-wide.
   function ctxFor(category: string, policy: unknown): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      venue: {
+        id: 'venue-1',
+        approvalPolicy: policy,
+      } as RuntimeContext['venue'],
       classification: {
         category,
         classifierConfidence: 0.95,
@@ -4188,7 +4759,10 @@ describe('willBeReviewed is scoped to complaint categories (TAC-307)', () => {
 
   it('is false for a complaint turn the venue does not hold', () => {
     const runtime = buildAiRuntime(
-      ctxFor('comp_complaint', { default: 'auto_send', perCategory: { comp_complaint: 'auto_send' } }),
+      ctxFor('comp_complaint', {
+        default: 'auto_send',
+        perCategory: { comp_complaint: 'auto_send' },
+      }),
     )
     expect(runtime.willBeReviewed).toBe(false)
   })
@@ -4213,7 +4787,10 @@ describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
           lengthGuide: 'short',
         }),
       } as RuntimeContext['venue'],
-      currentMessage: { id: 'm1', body: 'what time do you close?' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: 'what time do you close?',
+      } as RuntimeContext['currentMessage'],
       recognition: { state: 'returning' } as RuntimeContext['recognition'],
     })
   }
@@ -4224,13 +4801,21 @@ describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
   // it. This asserts the behaviour the optionality relies on, for every enum
   // value, so "the producer always sets it" is guarded rather than assumed.
   it('resolves a directive for every emojiPolicy value', () => {
-    expect(buildAiRuntime(ctxWithPolicy('frequent'), () => 0).emojiDirective).toBe('allowed')
-    expect(buildAiRuntime(ctxWithPolicy('frequent'), () => 0.99).emojiDirective).toBe('none')
+    expect(
+      buildAiRuntime(ctxWithPolicy('frequent'), () => 0).emojiDirective,
+    ).toBe('allowed')
+    expect(
+      buildAiRuntime(ctxWithPolicy('frequent'), () => 0.99).emojiDirective,
+    ).toBe('none')
     // The two non-varying policies resolve to undefined BY DESIGN — the
     // serializer then renders no per-message block and the persona's own
     // standing statement governs the turn, unchanged. See EMOJI_PROBABILITY.
-    expect(buildAiRuntime(ctxWithPolicy('never'), () => 0).emojiDirective).toBeUndefined()
-    expect(buildAiRuntime(ctxWithPolicy('sparingly'), () => 0).emojiDirective).toBeUndefined()
+    expect(
+      buildAiRuntime(ctxWithPolicy('never'), () => 0).emojiDirective,
+    ).toBeUndefined()
+    expect(
+      buildAiRuntime(ctxWithPolicy('sparingly'), () => 0).emojiDirective,
+    ).toBeUndefined()
   })
 
   // The injected rng has to actually reach the decision. A version that
@@ -4253,7 +4838,9 @@ describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
   // so there is no draw that could permit one.
   it('never yields an emoji licence for a never venue, at any draw', () => {
     for (const draw of [0, 0.25, 0.5, 0.75, 0.999]) {
-      expect(buildAiRuntime(ctxWithPolicy('never'), () => draw).emojiDirective).not.toBe('allowed')
+      expect(
+        buildAiRuntime(ctxWithPolicy('never'), () => draw).emojiDirective,
+      ).not.toBe('allowed')
     }
   })
 
@@ -4349,7 +4936,9 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
     expect(decision.ungroundedClaims).toBeNull()
   })
 
@@ -4364,7 +4953,9 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+    )
     expect(decision.ungroundedClaims).toBeNull()
   })
 
@@ -4405,12 +4996,18 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
       if (decision.action !== 'queue') throw new Error('expected queue')
       return {
         ungroundedClaims: decision.ungroundedClaims,
-        held: decision.triggers.includes(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED),
-        degradedMarker: decision.triggers.includes(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED),
+        held: decision.triggers.includes(
+          APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
+        ),
+        degradedMarker: decision.triggers.includes(
+          APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
+        ),
       }
     }
 
-    const claims = ['states a wifi password that appears nowhere in venue knowledge']
+    const claims = [
+      'states a wifi password that appears nowhere in venue knowledge',
+    ]
     expect(await mapped({ status: 'flagged', claims })).toEqual({
       ungroundedClaims: claims,
       held: false,
@@ -4464,7 +5061,8 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
       makeGenerationResult({ knowledgeGap: true }),
       { status: 'skipped' as const },
     )
-    if (ran.action !== 'queue' || neverRan.action !== 'queue') throw new Error('both queue')
+    if (ran.action !== 'queue' || neverRan.action !== 'queue')
+      throw new Error('both queue')
     expect(ran.ungroundedClaims).not.toEqual(neverRan.ungroundedClaims)
     expect(ran.ungroundedClaims).toEqual([])
     expect(neverRan.ungroundedClaims).toBeNull()
@@ -4493,7 +5091,10 @@ describe('isKnowledgeGapCard — generation_failed (TAC-364)', () => {
 
   it('still refuses an ordinary pending draft', () => {
     expect(
-      isKnowledgeGapCard({ review_reason: 'commitment_type_gated', pending_until: null }),
+      isKnowledgeGapCard({
+        review_reason: 'commitment_type_gated',
+        pending_until: null,
+      }),
     ).toBe(false)
   })
 })
@@ -4517,7 +5118,9 @@ describe('KNOWLEDGE_GAP_CARD_REVIEW_REASONS (TAC-364)', () => {
 
   it('is what isKnowledgeGapCard actually accepts', () => {
     for (const reason of KNOWLEDGE_GAP_CARD_REVIEW_REASONS) {
-      expect(isKnowledgeGapCard({ review_reason: reason, pending_until: null })).toBe(true)
+      expect(
+        isKnowledgeGapCard({ review_reason: reason, pending_until: null }),
+      ).toBe(true)
     }
   })
 })
@@ -4565,9 +5168,16 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
 
   // TAC-397: `corrects` says whether this turn amends the pending card's
   // question. Default false — an unrelated turn, which gets its own card.
-  function inbound(category: string, policy?: unknown, corrects = false): RuntimeContext {
+  function inbound(
+    category: string,
+    policy?: unknown,
+    corrects = false,
+  ): RuntimeContext {
     return makeCtx({
-      venue: { id: 'venue-1', approvalPolicy: policy } as RuntimeContext['venue'],
+      venue: {
+        id: 'venue-1',
+        approvalPolicy: policy,
+      } as RuntimeContext['venue'],
       currentMessage: {
         id: 'inbound-2',
         body: 'what time do you open on sundaus',
@@ -4595,24 +5205,37 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   // commitment, not the same type: a comp for a different item is a different
   // obligation, and the pending card wins.
   it('comp A pending, replacement carries comp B: the existing card wins', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
       makeGenerationResult({
-        commitment: { type: 'comp', description: 'a free croissant', code: 'Q4X9' },
+        commitment: {
+          type: 'comp',
+          description: 'a free croissant',
+          code: 'Q4X9',
+        },
       }),
     )
     expect(decision).toEqual({
       action: 'drop',
       reason: 'obligation_slot_taken',
-      triggers: expect.arrayContaining([APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED]),
+      triggers: expect.arrayContaining([
+        APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+      ]),
       protectedDraftId: 'card-a',
       protectedCommitment: {
         type: 'comp',
         description: 'a free cortado on your next visit',
         code: '7K2P',
       },
-      droppedCommitment: { type: 'comp', description: 'a free croissant', code: 'Q4X9' },
+      droppedCommitment: {
+        type: 'comp',
+        description: 'a free croissant',
+        code: 'Q4X9',
+      },
     })
   })
 
@@ -4624,7 +5247,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
       makeGenerationResult({
-        commitment: { type: 'comp', description: '  A Free Cortado on your next visit ' },
+        commitment: {
+          type: 'comp',
+          description: '  A Free Cortado on your next visit ',
+        },
       }),
     )
     expect(decision.action).toBe('queue')
@@ -4638,10 +5264,15 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   // Accepted consequence (ruled 2026-09-14): rewording beyond case and
   // whitespace is a different commitment. Pinned so it stays deliberate.
   it('the same comp in different words is dropped, and the existing card stays', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
-      makeGenerationResult({ commitment: { type: 'comp', description: 'your next cortado is free' } }),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'your next cortado is free' },
+      }),
     )
     expect(decision.action).toBe('drop')
     if (decision.action !== 'drop') return
@@ -4650,11 +5281,17 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   })
 
   it('a hold for the same item is a different obligation', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
       makeGenerationResult({
-        commitment: { type: 'hold', description: 'a free cortado on your next visit' },
+        commitment: {
+          type: 'hold',
+          description: 'a free cortado on your next visit',
+        },
       }),
     )
     expect(decision.action).toBe('drop')
@@ -4664,7 +5301,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
 
   // The 2026-09-14 incident, fixed. Nothing holds the hours answer, so it sends.
   it('an untriggered reply to the next question SENDS beside a pending comp card', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('new_question'),
       makeGenerationResult({ body: '7am on Sundays' }),
@@ -4673,7 +5313,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   })
 
   it('a held reply to the next question becomes a second card, never a regen of the comp card', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('new_question', HELD),
       makeGenerationResult({ body: '7am on Sundays' }),
@@ -4711,7 +5354,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   // 2026-09-14). TAC-309 nulls the carrier with the body, so the draft is a
   // conversation card and never competes with the comp.
   it('a blanked comp B draft gives up its obligation and lands in the conversation slot', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('new_question'),
       makeGenerationResult({
@@ -4733,11 +5379,17 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compGapCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compGapCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
       makeGenerationResult({
-        commitment: { type: 'comp', description: 'a free cortado on your next visit' },
+        commitment: {
+          type: 'comp',
+          description: 'a free cortado on your next visit',
+        },
       }),
       { status: 'clean' as const },
     )
@@ -4763,11 +5415,17 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   // fires once per card, so a gap turn that armed a clock beside a gap card in
   // the OTHER slot would send the guest a second holding message.
   it('a gap turn in the obligation slot arms no clock beside a gap card in the conversation slot', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [conversationGapCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [conversationGapCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('comp_complaint'),
       makeGenerationResult({
-        commitment: { type: 'comp', description: 'a free cortado on your next visit' },
+        commitment: {
+          type: 'comp',
+          description: 'a free cortado on your next visit',
+        },
       }),
       { status: 'flagged' as const, claims: ['invents a fact'] },
     )
@@ -4775,7 +5433,9 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
     if (decision.action !== 'queue') return
     expect(decision.slot).toBe('obligation')
     expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+    )
     expect(decision.pendingUntil).toBeUndefined()
   })
 
@@ -4785,7 +5445,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
       pending_until: new Date(Date.now() + 60_000).toISOString(),
       review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
     }
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compGapCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compGapCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('new_question'),
       makeGenerationResult({ knowledgeGap: true }),
@@ -4799,7 +5462,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
 
   // The control: an ordinary comp card is not a gap card, so it arms nothing.
   it('a gap turn beside an ordinary comp card still arms its clock', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: [compCard], error: null })
+    pendingDraftMaybeSingleMock.mockResolvedValue({
+      data: [compCard],
+      error: null,
+    })
     const decision = await applyApprovalPolicyStage(
       inbound('new_question'),
       makeGenerationResult({ knowledgeGap: true }),
@@ -4820,7 +5486,10 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({
         venue: { id: 'venue-1' } as RuntimeContext['venue'],
-        followupTrigger: { reason: 'manual', triggeredAt: new Date() } as RuntimeContext['followupTrigger'],
+        followupTrigger: {
+          reason: 'manual',
+          triggeredAt: new Date(),
+        } as RuntimeContext['followupTrigger'],
         currentMessage: null,
       }),
       makeGenerationResult({ body: 'Still looking into that for you.' }),
@@ -4847,11 +5516,15 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
       isGapTurn: true,
       checkDidNotComplete: false,
     })
-    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP])).toEqual({
+    expect(
+      gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]),
+    ).toEqual({
       isGapTurn: true,
       checkDidNotComplete: false,
     })
-    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED])).toEqual({
+    expect(
+      gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]),
+    ).toEqual({
       isGapTurn: false,
       checkDidNotComplete: true,
     })
@@ -4866,7 +5539,9 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
         APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
       ]),
     ).toEqual({ isGapTurn: false, checkDidNotComplete: true })
-    expect(gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED])).toEqual({
+    expect(
+      gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]),
+    ).toEqual({
       isGapTurn: false,
       checkDidNotComplete: true,
     })
@@ -4876,10 +5551,12 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
         APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
       ]),
     ).toEqual({ isGapTurn: false, checkDidNotComplete: false })
-    expect(gapFlagsFromTriggers(undefined)).toEqual({ isGapTurn: false, checkDidNotComplete: false })
+    expect(gapFlagsFromTriggers(undefined)).toEqual({
+      isGapTurn: false,
+      checkDidNotComplete: false,
+    })
   })
 })
-
 
 describe('verifyProsePromiseStage (TAC-401)', () => {
   beforeEach(() => {
@@ -4916,7 +5593,11 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
 
   it('skips without calling the model for a demo guest', async () => {
     const ctx = makeCtx({
-      guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+      guest: {
+        id: 'guest-1',
+        firstName: 'Sam',
+        isDemo: true,
+      } as RuntimeContext['guest'],
     })
     const result = await verifyProsePromiseStage(ctx, makeGenerationResult({}))
     expect(result).toEqual({ status: 'skipped' })
@@ -4928,7 +5609,9 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
   it('skips without calling the model when the draft already carries an obligation', async () => {
     const result = await verifyProsePromiseStage(
       makeCtx({}),
-      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
     )
     expect(result).toEqual({ status: 'skipped' })
     expect(verifyProsePromiseMock).not.toHaveBeenCalled()
@@ -4941,7 +5624,9 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     verifyProsePromiseMock.mockResolvedValueOnce(clean)
     const result = await verifyProsePromiseStage(
       makeCtx({}),
-      makeGenerationResult({ commitment: { type: 'recommendation', description: 'the cortado' } }),
+      makeGenerationResult({
+        commitment: { type: 'recommendation', description: 'the cortado' },
+      }),
     )
     expect(result).toEqual({ status: 'clean' })
     expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
@@ -4961,13 +5646,18 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
 
   it('returns "clean" when the check finds no promise', async () => {
     verifyProsePromiseMock.mockResolvedValueOnce(clean)
-    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(result).toEqual({ status: 'clean' })
     expect(captureProsePromiseCaughtMock).not.toHaveBeenCalled()
   })
 
   it('mints the carrier ONCE, with a verification code, on a flagged promise', async () => {
-    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement cortado'),
+    )
     const result = await verifyProsePromiseStage(
       makeCtx({}),
       makeGenerationResult({ body: "sorry about that, next one's on us" }),
@@ -4987,7 +5677,10 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
   // 'clean' is the false negative the fail-closed posture exists to prevent.
   it('stays flagged with a null carrier when the check cannot name the commitment', async () => {
     verifyProsePromiseMock.mockResolvedValueOnce(flagged(null, null))
-    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(result).toEqual({ status: 'flagged', commitment: null })
   })
 
@@ -4995,7 +5688,9 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
   // false one, because for an elliptical promise the item in the description
   // comes from the guest's message and never appears in the reply.
   it("emits the caught event with the guest's message the verdict was formed against", async () => {
-    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement gulab jamun'),
+    )
     await verifyProsePromiseStage(
       makeCtx({
         currentMessage: {
@@ -5008,25 +5703,33 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
       }),
       makeGenerationResult({ body: "ugh, that's on us too" }),
     )
-    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBe(
-      'the gulab jamun was stale too',
-    )
+    expect(
+      captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody,
+    ).toBe('the gulab jamun was stale too')
   })
 
   it('emits a NULL inbound on the caught event for a proactive turn', async () => {
-    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement cortado'),
+    )
     await verifyProsePromiseStage(
       makeCtx({ currentMessage: null }),
-      makeGenerationResult({ body: "we still owe you a good cortado" }),
+      makeGenerationResult({ body: 'we still owe you a good cortado' }),
     )
-    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody).toBeNull()
+    expect(
+      captureProsePromiseCaughtMock.mock.calls[0]?.[0].guestInboundBody,
+    ).toBeNull()
   })
 
   it('emits the caught event with what is owed and whether it displaced a recommendation', async () => {
-    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement cortado'))
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement cortado'),
+    )
     await verifyProsePromiseStage(
       makeCtx({}),
-      makeGenerationResult({ commitment: { type: 'recommendation', description: 'the cortado' } }),
+      makeGenerationResult({
+        commitment: { type: 'recommendation', description: 'the cortado' },
+      }),
     )
     expect(captureProsePromiseCaughtMock).toHaveBeenCalledTimes(1)
     const props = captureProsePromiseCaughtMock.mock.calls[0]?.[0]
@@ -5038,7 +5741,9 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
   // ---- The guest's own message (TAC-527) ----
 
   it("hands the check the guest's inbound body on a reply turn", async () => {
-    verifyProsePromiseMock.mockResolvedValueOnce(flagged('comp', 'a replacement gulab jamun'))
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement gulab jamun'),
+    )
     await verifyProsePromiseStage(
       makeCtx({
         currentMessage: {
@@ -5114,9 +5819,16 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
 
   it('retries ONCE on a transient fault and uses the retry verdict', async () => {
     verifyProsePromiseMock
-      .mockResolvedValueOnce({ ok: false, error: 'fetch failed', errorCode: 'ai_verify_prose_promise_failed' })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
       .mockResolvedValueOnce(clean)
-    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(result).toEqual({ status: 'clean' })
     expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
     expect(captureProsePromiseCheckUnavailableMock).not.toHaveBeenCalled()
@@ -5127,9 +5839,20 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
   // could not run.
   it('FAILS CLOSED when the retry also fails', async () => {
     verifyProsePromiseMock
-      .mockResolvedValueOnce({ ok: false, error: 'fetch failed', errorCode: 'ai_verify_prose_promise_failed' })
-      .mockResolvedValueOnce({ ok: false, error: 'fetch failed again', errorCode: 'ai_verify_prose_promise_failed' })
-    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed again',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(result).toEqual({ status: 'check_failed' })
     expect(verifyProsePromiseMock).toHaveBeenCalledTimes(2)
     const props = captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0]
@@ -5146,7 +5869,10 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
       error: 'no object generated',
       errorCode: 'ai_verify_prose_promise_truncated',
     })
-    const result = await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}))
+    const result = await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(result).toEqual({ status: 'check_failed' })
     expect(verifyProsePromiseMock).toHaveBeenCalledTimes(1)
     const props = captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0]
@@ -5181,7 +5907,9 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+    )
     expect(decision.promisedCommitment).toEqual(promisedComp)
   })
 
@@ -5195,8 +5923,12 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED])
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.triggers).toEqual([
+      APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
+    ])
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+    )
     expect(decision.promisedCommitment).toBeNull()
   })
 
@@ -5214,7 +5946,10 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
   // The default keeps every caller that predates this parameter behaving
   // exactly as before — the harness and the Voices path both omit it.
   it('defaults to skipped when the caller omits the parameter', async () => {
-    const decision = await applyApprovalPolicyStage(makeCtx({}), makeGenerationResult({}))
+    const decision = await applyApprovalPolicyStage(
+      makeCtx({}),
+      makeGenerationResult({}),
+    )
     expect(decision.action).toBe('send')
   })
 
@@ -5272,7 +6007,9 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+    )
   })
 
   // The failed-check trigger is the opposite: it reports an absence, so any
@@ -5280,15 +6017,21 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
   it('lets a concrete trigger win the label over a failed check', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
-      makeGenerationResult({ commitment: { type: 'comp', description: 'oat latte' } }),
+      makeGenerationResult({
+        commitment: { type: 'comp', description: 'oat latte' },
+      }),
       { status: 'skipped' },
       { status: 'skipped' },
       { status: 'check_failed' },
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 })
 
@@ -5348,7 +6091,11 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     const result = await verifyCancellationClaimStage(
       makeCtx({
         activeCommitments: [TONIC],
-        guest: { id: 'guest-1', firstName: 'Sam', isDemo: true } as RuntimeContext['guest'],
+        guest: {
+          id: 'guest-1',
+          firstName: 'Sam',
+          isDemo: true,
+        } as RuntimeContext['guest'],
       }),
       makeGenerationResult({ cancelsCommitmentId: TONIC.id }),
     )
@@ -5367,7 +6114,10 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
         cancelsCommitmentId: '',
       }),
     )
-    expect(result).toEqual({ resolution: { status: 'none' }, claim: 'flagged' })
+    expect(result).toEqual({
+      resolution: { status: 'none' },
+      claim: 'flagged',
+    })
     expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledTimes(1)
   })
 
@@ -5378,7 +6128,10 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     verifyCancellationClaimMock.mockResolvedValueOnce(claims)
     const result = await verifyCancellationClaimStage(
       makeCtx({ activeCommitments: [] }),
-      makeGenerationResult({ body: "that one's off then", cancelsCommitmentId: '' }),
+      makeGenerationResult({
+        body: "that one's off then",
+        cancelsCommitmentId: '',
+      }),
     )
     expect(result.claim).toBe('flagged')
     expect(verifyCancellationClaimMock).toHaveBeenCalledTimes(1)
@@ -5390,7 +6143,9 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     verifyCancellationClaimMock.mockResolvedValueOnce(clean)
     const result = await verifyCancellationClaimStage(
       makeCtx({ activeCommitments: [TONIC] }),
-      makeGenerationResult({ cancelsCommitmentId: 'deadbeef-0000-4000-8000-000000000000' }),
+      makeGenerationResult({
+        cancelsCommitmentId: 'deadbeef-0000-4000-8000-000000000000',
+      }),
     )
     expect(result.resolution).toEqual({
       status: 'unresolved',
@@ -5433,7 +6188,10 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     verifyCancellationClaimMock.mockResolvedValueOnce(claims)
     await verifyCancellationClaimStage(
       makeCtx({ activeCommitments: [TONIC] }),
-      makeGenerationResult({ body: 'the comp is off', cancelsCommitmentId: '' }),
+      makeGenerationResult({
+        body: 'the comp is off',
+        cancelsCommitmentId: '',
+      }),
     )
     expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
       expect.objectContaining({ unresolvedCommitmentId: null }),
@@ -5472,7 +6230,10 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
     verifyCancellationClaimMock.mockResolvedValueOnce(claims)
     await verifyCancellationClaimStage(
       makeCtx({ activeCommitments: [TONIC] }),
-      makeGenerationResult({ body: 'the comp is off', cancelsCommitmentId: '' }),
+      makeGenerationResult({
+        body: 'the comp is off',
+        cancelsCommitmentId: '',
+      }),
     )
     expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledWith(
       expect.objectContaining({ bodyClaimedIt: true }),
@@ -5481,8 +6242,16 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
 
   it('retries once on a transient fault, then fails CLOSED', async () => {
     verifyCancellationClaimMock
-      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
-      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'x',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'x',
+      })
     const result = await verifyCancellationClaimStage(
       makeCtx({}),
       makeGenerationResult({ cancelsCommitmentId: '' }),
@@ -5496,7 +6265,11 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
 
   it('recovers when the retry succeeds', async () => {
     verifyCancellationClaimMock
-      .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'x' })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'x',
+      })
       .mockResolvedValueOnce(clean)
     const result = await verifyCancellationClaimStage(
       makeCtx({}),
@@ -5539,7 +6312,9 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
       makeCtx({ activeCommitments: [TONIC] }),
       makeGenerationResult({ body: 'hello there', cancelsCommitmentId: '' }),
     )
-    expect(verifyCancellationClaimMock).toHaveBeenCalledWith({ replyBody: 'hello there' })
+    expect(verifyCancellationClaimMock).toHaveBeenCalledWith({
+      replyBody: 'hello there',
+    })
   })
 })
 
@@ -5569,7 +6344,10 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     },
     claim: 'skipped' as const,
   }
-  const NO_CANCELLATION = { resolution: { status: 'none' as const }, claim: 'clean' as const }
+  const NO_CANCELLATION = {
+    resolution: { status: 'none' as const },
+    claim: 'clean' as const,
+  }
 
   async function gate(
     cancellation: Parameters<typeof applyApprovalPolicyStage>[5],
@@ -5577,7 +6355,10 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   ) {
     return applyApprovalPolicyStage(
       makeCtx({ activeCommitments: [TONIC] }),
-      makeGenerationResult({ body: "that one's off then", ...generationOverrides }),
+      makeGenerationResult({
+        body: "that one's off then",
+        ...generationOverrides,
+      }),
       { status: 'skipped' },
       { status: 'skipped' },
       { status: 'skipped' },
@@ -5589,7 +6370,9 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     const decision = await gate(RESOLVED)
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
+    )
     expect(decision.pendingCancellation).toEqual({ commitmentId: TONIC.id })
   })
 
@@ -5609,7 +6392,9 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
     expect(decision.pendingCancellation).toBeNull()
   })
 
@@ -5621,17 +6406,26 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     // An emission pointing at a commitment that is not there is the model
     // reaching for something. The safe reading of that is a card, not a send.
     const decision = await gate({
-      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      resolution: {
+        status: 'unresolved',
+        claimedId: 'deadbeef-0000-4000-8000-000000000000',
+      },
       claim: 'clean',
     })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
     // The load-bearing half. Without this, a mutant swapping the two
     // conditions passes: both shapes queue either way, and only the ABSENCE of
     // the other trigger tells them apart.
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
     expect(decision.pendingCancellation).toBeNull()
   })
 
@@ -5640,12 +6434,21 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   // arrangement of these two conditions and proves nothing about which card
   // the operator gets.
   it('queues a CLAIMED cancellation under the prose trigger, never the id one', async () => {
-    const decision = await gate({ resolution: { status: 'none' }, claim: 'flagged' })
+    const decision = await gate({
+      resolution: { status: 'none' },
+      claim: 'flagged',
+    })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
   })
 
   // The incident's own shape: the body claims it AND the id resolves to
@@ -5654,13 +6457,20 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   // usually-disjoint.
   it('shows the CLAIMED copy when both shapes are true at once', async () => {
     const decision = await gate({
-      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      resolution: {
+        status: 'unresolved',
+        claimedId: 'deadbeef-0000-4000-8000-000000000000',
+      },
       claim: 'flagged',
     })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
   })
 
   // An unreadable check does not make the unresolved id any less unresolved,
@@ -5668,22 +6478,38 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   // absence of one.
   it('co-fires with a failed check, and the id finding takes the label', async () => {
     const decision = await gate({
-      resolution: { status: 'unresolved', claimedId: 'deadbeef-0000-4000-8000-000000000000' },
+      resolution: {
+        status: 'unresolved',
+        claimedId: 'deadbeef-0000-4000-8000-000000000000',
+      },
       claim: 'check_failed',
     })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID,
+    )
   })
 
   it('queues a failed check under its OWN trigger', async () => {
-    const decision = await gate({ resolution: { status: 'none' }, claim: 'check_failed' })
+    const decision = await gate({
+      resolution: { status: 'none' },
+      claim: 'check_failed',
+    })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+    )
+    expect(decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
   })
 
   it('does not fire any cancellation trigger on an ordinary reply', async () => {
@@ -5723,16 +6549,24 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
+    )
   })
 
   it('ranks a carried cancellation ABOVE every softer co-firing signal', async () => {
     const decision = await gate(RESOLVED, { voiceFidelity: 0.5 })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED)
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+    )
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
+    )
   })
 
   it('ranks the unbacked claim above fidelity, below the promise backstop', async () => {
@@ -5746,8 +6580,12 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP)
+    expect(decision.primaryTrigger).toBe(
+      APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP,
+    )
+    expect(decision.triggers).toContain(
+      APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP,
+    )
   })
 
   it('nulls the carrier on a blank knowledge-gap card', async () => {
@@ -5804,7 +6642,10 @@ describe('closed-venue arrival (TAC-363)', () => {
   const DURING_SERVICE = new Date('2026-09-22T17:00:00Z')
   const AFTER_CLOSE = new Date('2026-09-22T08:00:00Z')
 
-  const IMMINENT = { signal: 'imminent' as const, referencesCommitmentId: 'c-1' }
+  const IMMINENT = {
+    signal: 'imminent' as const,
+    referencesCommitmentId: 'c-1',
+  }
   const SCHEDULED = {
     signal: 'scheduled' as const,
     expectedArrival: '2026-09-22T15:00:00Z',
@@ -5880,10 +6721,15 @@ describe('closed-venue arrival (TAC-363)', () => {
     it('reports the catch with source "structured"', async () => {
       await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
-        makeGenerationResult({ arrivalCapture: IMMINENT, body: 'See you soon!' }),
+        makeGenerationResult({
+          arrivalCapture: IMMINENT,
+          body: 'See you soon!',
+        }),
       )
       expect(captureClosedVenueArrivalCaughtMock).toHaveBeenCalledTimes(1)
-      expect(captureClosedVenueArrivalCaughtMock.mock.calls[0][0]).toMatchObject({
+      expect(
+        captureClosedVenueArrivalCaughtMock.mock.calls[0][0],
+      ).toMatchObject({
         source: 'structured',
         venueId: 'venue-1',
         replyBody: 'See you soon!',
@@ -5936,7 +6782,10 @@ describe('closed-venue arrival (TAC-363)', () => {
     })
 
     it('defaults to skipped when the caller passes nothing', async () => {
-      const d = await applyApprovalPolicyStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      const d = await applyApprovalPolicyStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+      )
       expect(d.action).toBe('send')
     })
   })
@@ -5971,7 +6820,10 @@ describe('closed-venue arrival (TAC-363)', () => {
       expect(d.action).toBe('queue')
       if (d.action !== 'queue') return
       expect(d.triggers).toEqual(
-        expect.arrayContaining(['closed_venue_arrival_emitted', 'unverified_url']),
+        expect.arrayContaining([
+          'closed_venue_arrival_emitted',
+          'unverified_url',
+        ]),
       )
       expect(d.primaryTrigger).toBe('closed_venue_arrival_emitted')
     })
@@ -6081,7 +6933,9 @@ describe('closed-venue arrival (TAC-363)', () => {
         ctxAt(AFTER_CLOSE),
         makeGenerationResult({ body: 'See you soon!' }),
       )
-      expect(captureClosedVenueArrivalCaughtMock.mock.calls[0][0]).toMatchObject({
+      expect(
+        captureClosedVenueArrivalCaughtMock.mock.calls[0][0],
+      ).toMatchObject({
         source: 'text_backstop',
       })
     })
@@ -6101,21 +6955,39 @@ describe('closed-venue arrival (TAC-363)', () => {
 
     it('retries ONCE on a transient fault, then fails closed', async () => {
       verifyClosedVenueArrivalMock
-        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
-        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
-      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'socket hang up',
+          errorCode: 'ai_verify_closed_venue_arrival_failed',
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'socket hang up',
+          errorCode: 'ai_verify_closed_venue_arrival_failed',
+        })
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+      )
       expect(r).toEqual({ status: 'check_failed' })
       expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(2)
     })
 
     it('a retry that succeeds is used', async () => {
       verifyClosedVenueArrivalMock
-        .mockResolvedValueOnce({ ok: false, error: 'socket hang up', errorCode: 'ai_verify_closed_venue_arrival_failed' })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'socket hang up',
+          errorCode: 'ai_verify_closed_venue_arrival_failed',
+        })
         .mockResolvedValueOnce({
           ok: true,
           data: { confirmsArrival: false, promptVersion: 'v1.0.0' },
         })
-      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+      )
       expect(r).toEqual({ status: 'clean' })
     })
 
@@ -6126,7 +6998,10 @@ describe('closed-venue arrival (TAC-363)', () => {
         error: 'no object generated',
         errorCode: 'ai_verify_closed_venue_arrival_truncated',
       })
-      const r = await verifyClosedVenueArrivalStage(ctxAt(AFTER_CLOSE), makeGenerationResult())
+      const r = await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult(),
+      )
       expect(r).toEqual({ status: 'check_failed' })
       expect(verifyClosedVenueArrivalMock).toHaveBeenCalledTimes(1)
     })
@@ -6162,8 +7037,18 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
   ): RuntimeContext {
     return makeCtx({
       venue: venue(venueOver),
-      classification: { category, classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false } as RuntimeContext['classification'],
-      recognition: { score: 0.5, state: 'regular', signals: {}, computedAt } as RuntimeContext['recognition'],
+      classification: {
+        category,
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        crisisSafety: false,
+      } as RuntimeContext['classification'],
+      recognition: {
+        score: 0.5,
+        state: 'regular',
+        signals: {},
+        computedAt,
+      } as RuntimeContext['recognition'],
     })
   }
 
@@ -6176,7 +7061,10 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
     expect(
       mayAutoSendAfterClassification(
         ctxFor('new_question', {
-          approvalPolicy: { default: 'auto_send', perCategory: { new_question: 'operator_approval' } },
+          approvalPolicy: {
+            default: 'auto_send',
+            perCategory: { new_question: 'operator_approval' },
+          },
         }),
       ),
     ).toBe(false)
@@ -6194,9 +7082,11 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
 
   /** Mirrors trigger 6. Not in the ticket's wording; strictly narrowing. */
   it('is false at a venue holding all outbound', () => {
-    expect(mayAutoSendAfterClassification(ctxFor('new_question', { holdAllOutbound: true }))).toBe(
-      false,
-    )
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor('new_question', { holdAllOutbound: true }),
+      ),
+    ).toBe(false)
   })
 
   /**
@@ -6206,7 +7096,11 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
    * is guaranteed to send.
    */
   it('still allows an opt_out confirmation at a venue holding all outbound', () => {
-    expect(mayAutoSendAfterClassification(ctxFor('opt_out', { holdAllOutbound: true }))).toBe(true)
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor('opt_out', { holdAllOutbound: true }),
+      ),
+    ).toBe(true)
   })
 
   it('is false while the venue is positively closed', () => {
@@ -6214,7 +7108,10 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
       mayAutoSendAfterClassification(
         ctxFor(
           'new_question',
-          { timezone: 'America/Los_Angeles', venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } } },
+          {
+            timezone: 'America/Los_Angeles',
+            venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+          },
           // Monday 21:00 in Los Angeles.
           new Date('2026-09-22T04:00:00.000Z'),
         ),
@@ -6241,7 +7138,10 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
       mayAutoSendAfterClassification(
         ctxFor(
           'new_question',
-          { timezone: 'America/Los_Angeles', venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } } },
+          {
+            timezone: 'America/Los_Angeles',
+            venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+          },
           // Monday 10:00 in Los Angeles.
           new Date('2026-09-21T17:00:00.000Z'),
         ),
@@ -6274,10 +7174,16 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
     }
   }
 
-  function ctxWithHistory(history: Array<Partial<RecentMessage>>): RuntimeContext {
+  function ctxWithHistory(
+    history: Array<Partial<RecentMessage>>,
+  ): RuntimeContext {
     const now = new Date('2026-09-28T12:00:00Z')
     return makeCtx({
-      currentMessage: { id: 'm1', body: CURRENT, providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+      currentMessage: {
+        id: 'm1',
+        body: CURRENT,
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
       recentMessages: history.map((h, i) => ({
         direction: 'inbound',
         body: `turn ${i}`,
@@ -6293,15 +7199,25 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
   // The absolute half of the no-lost-result claim: a turn with no usable
   // prior runs ONE arm, so it is byte-identical to pre-TAC-547.
   it('runs exactly ONE arm when there is no prior turn', async () => {
-    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
-    const out = await retrieveKnowledgeWithContextStage(ctxWithHistory([]), null, CURRENT)
+    retrieveKnowledgeContextMock.mockResolvedValue({
+      ok: true,
+      data: [row('a', 0.6)],
+    })
+    const out = await retrieveKnowledgeWithContextStage(
+      ctxWithHistory([]),
+      null,
+      CURRENT,
+    )
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(1)
     expect(retrieveKnowledgeContextMock.mock.calls[0][0].query).toBe(CURRENT)
     expect(out.map((r) => r.id)).toEqual(['a'])
   })
 
   it('runs ONE arm when every prior turn is outside the conversation window', async () => {
-    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    retrieveKnowledgeContextMock.mockResolvedValue({
+      ok: true,
+      data: [row('a', 0.6)],
+    })
     await retrieveKnowledgeWithContextStage(
       ctxWithHistory([{ createdAt: new Date('2026-09-19T12:00:00Z') }]),
       null,
@@ -6311,7 +7227,10 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
   })
 
   it('runs ONE arm when the only prior turn never reached the guest', async () => {
-    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    retrieveKnowledgeContextMock.mockResolvedValue({
+      ok: true,
+      data: [row('a', 0.6)],
+    })
     await retrieveKnowledgeWithContextStage(
       ctxWithHistory([{ direction: 'outbound', delivery: 'awaiting_review' }]),
       null,
@@ -6321,21 +7240,32 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
   })
 
   it('runs TWO arms with the bare and the contextual query when a prior turn exists', async () => {
-    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    retrieveKnowledgeContextMock.mockResolvedValue({
+      ok: true,
+      data: [row('a', 0.6)],
+    })
     await retrieveKnowledgeWithContextStage(
       ctxWithHistory([{ body: 'does the bhadra taste good' }]),
       null,
       CURRENT,
     )
     expect(retrieveKnowledgeContextMock).toHaveBeenCalledTimes(2)
-    const queries = retrieveKnowledgeContextMock.mock.calls.map((c) => c[0].query)
+    const queries = retrieveKnowledgeContextMock.mock.calls.map(
+      (c) => c[0].query,
+    )
     expect(queries).toEqual([CURRENT, `does the bhadra taste good\n${CURRENT}`])
   })
 
   it('merges the two arms, interleaved by rank', async () => {
     retrieveKnowledgeContextMock
-      .mockResolvedValueOnce({ ok: true, data: [row('a0', 0.40), row('a1', 0.39)] })
-      .mockResolvedValueOnce({ ok: true, data: [row('b0', 0.99), row('b1', 0.98)] })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [row('a0', 0.4), row('a1', 0.39)],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [row('b0', 0.99), row('b1', 0.98)],
+      })
     const out = await retrieveKnowledgeWithContextStage(
       ctxWithHistory([{ body: 'prev' }]),
       null,
@@ -6347,27 +7277,31 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
   // The arms must not be sequential: arm A's promise is held open until arm B
   // has been called, so a sequential implementation deadlocks and this test
   // fails by TIMEOUT rather than passing slowly.
-  it('runs the two arms in PARALLEL, not one after the other', { timeout: 2000 }, async () => {
-    let releaseArmA: () => void = () => {}
-    const armACalled = new Promise<void>((resolve) => {
-      releaseArmA = resolve
-    })
-    retrieveKnowledgeContextMock
-      .mockImplementationOnce(async () => {
-        await armACalled
-        return { ok: true, data: [row('a', 0.6)] }
+  it(
+    'runs the two arms in PARALLEL, not one after the other',
+    { timeout: 2000 },
+    async () => {
+      let releaseArmA: () => void = () => {}
+      const armACalled = new Promise<void>((resolve) => {
+        releaseArmA = resolve
       })
-      .mockImplementationOnce(async () => {
-        releaseArmA()
-        return { ok: true, data: [row('b', 0.7)] }
-      })
-    const out = await retrieveKnowledgeWithContextStage(
-      ctxWithHistory([{ body: 'prev' }]),
-      null,
-      CURRENT,
-    )
-    expect(out.map((r) => r.id)).toEqual(['a', 'b'])
-  })
+      retrieveKnowledgeContextMock
+        .mockImplementationOnce(async () => {
+          await armACalled
+          return { ok: true, data: [row('a', 0.6)] }
+        })
+        .mockImplementationOnce(async () => {
+          releaseArmA()
+          return { ok: true, data: [row('b', 0.7)] }
+        })
+      const out = await retrieveKnowledgeWithContextStage(
+        ctxWithHistory([{ body: 'prev' }]),
+        null,
+        CURRENT,
+      )
+      expect(out.map((r) => r.id)).toEqual(['a', 'b'])
+    },
+  )
 
   it('falls back to arm A alone when the contextual arm rejects — exactly today', async () => {
     retrieveKnowledgeContextMock
@@ -6433,13 +7367,18 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
   })
 
   it('honours an explicit turns override, so the measurement arms are real', async () => {
-    retrieveKnowledgeContextMock.mockResolvedValue({ ok: true, data: [row('a', 0.6)] })
+    retrieveKnowledgeContextMock.mockResolvedValue({
+      ok: true,
+      data: [row('a', 0.6)],
+    })
     await retrieveKnowledgeWithContextStage(
       ctxWithHistory([{ body: 'older' }, { body: 'newer' }]),
       null,
       CURRENT,
       { turns: 1 },
     )
-    expect(retrieveKnowledgeContextMock.mock.calls[1][0].query).toBe(`newer\n${CURRENT}`)
+    expect(retrieveKnowledgeContextMock.mock.calls[1][0].query).toBe(
+      `newer\n${CURRENT}`,
+    )
   })
 })

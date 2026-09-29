@@ -146,13 +146,18 @@ import type { Database } from '@/db/types'
 type AdminSupabaseClient = SupabaseClient<Database>
 
 /** What a redacted message body is replaced with. Fixed, carries nothing. */
-export const REDACTED_MESSAGE_BODY = '[removed at the account holder\'s request]'
+export const REDACTED_MESSAGE_BODY = "[removed at the account holder's request]"
 
 /** Prefix for a tombstoned scoped id, so the column is readable in Studio. */
 const TOMBSTONE_PREFIX = 'deleted:'
 
 export type DeleteInstagramVenueDataResult =
-  | { ok: true; venueId: string | null; guestsAffected: number; confirmationCode: string }
+  | {
+      ok: true
+      venueId: string | null
+      guestsAffected: number
+      confirmationCode: string
+    }
   | { ok: false; error: string; confirmationCode: string }
 
 /** Opaque, unique, and related to nothing about the person. */
@@ -171,7 +176,8 @@ export async function deleteInstagramVenueData(
     .select('id')
     .eq('instagram_account_id', instagramAccountId)
     .maybeSingle()
-  if (venue.error) return { ok: false, error: venue.error.message, confirmationCode }
+  if (venue.error)
+    return { ok: false, error: venue.error.message, confirmationCode }
 
   const venueId = venue.data?.id ?? null
   let guestsAffected = 0
@@ -184,9 +190,12 @@ export async function deleteInstagramVenueData(
       .select('id')
       .eq('venue_id', venueId)
       .not('instagram_scoped_id', 'is', null)
-    if (guests.error) return { ok: false, error: guests.error.message, confirmationCode }
+    if (guests.error)
+      return { ok: false, error: guests.error.message, confirmationCode }
 
-    const guestIds = (guests.data ?? []).map((row) => (row as { id: string }).id)
+    const guestIds = (guests.data ?? []).map(
+      (row) => (row as { id: string }).id,
+    )
     guestsAffected = guestIds.length
 
     if (guestIds.length > 0) {
@@ -212,7 +221,8 @@ export async function deleteInstagramVenueData(
         })
         .eq('venue_id', venueId)
         .in('guest_id', guestIds)
-      if (messages.error) return { ok: false, error: messages.error.message, confirmationCode }
+      if (messages.error)
+        return { ok: false, error: messages.error.message, confirmationCode }
 
       // One UPDATE per guest, because each needs its OWN tombstone: a shared
       // value would violate (venue_id, instagram_scoped_id) on the second row.
@@ -251,7 +261,11 @@ export async function deleteInstagramVenueData(
         .eq('venue_id', venueId)
         .in('guest_id', guestIds)
       if (fingerprints.error) {
-        return { ok: false, error: fingerprints.error.message, confirmationCode }
+        return {
+          ok: false,
+          error: fingerprints.error.message,
+          confirmationCode,
+        }
       }
 
       // TAC-536's pending scan greetings. Deleted rather than redacted: the
@@ -265,7 +279,11 @@ export async function deleteInstagramVenueData(
         .eq('venue_id', venueId)
         .in('guest_id', guestIds)
       if (scanArrivals.error) {
-        return { ok: false, error: scanArrivals.error.message, confirmationCode }
+        return {
+          ok: false,
+          error: scanArrivals.error.message,
+          confirmationCode,
+        }
       }
 
       // TAC-523's ledger. `detail` carries a phone's last four digits, which
@@ -276,19 +294,25 @@ export async function deleteInstagramVenueData(
         .update({ detail: {} })
         .eq('venue_id', venueId)
         .in('guest_id', guestIds)
-      if (ledger.error) return { ok: false, error: ledger.error.message, confirmationCode }
+      if (ledger.error)
+        return { ok: false, error: ledger.error.message, confirmationCode }
     }
 
     // The credential is pure secret material with nothing worth keeping once
     // the account that granted it is gone: hard-deleted, not deactivated.
-    const credential = await supabase.from('instagram_credentials').delete().eq('venue_id', venueId)
-    if (credential.error) return { ok: false, error: credential.error.message, confirmationCode }
+    const credential = await supabase
+      .from('instagram_credentials')
+      .delete()
+      .eq('venue_id', venueId)
+    if (credential.error)
+      return { ok: false, error: credential.error.message, confirmationCode }
 
     const cleared = await supabase
       .from('venues')
       .update({ instagram_account_id: null })
       .eq('id', venueId)
-    if (cleared.error) return { ok: false, error: cleared.error.message, confirmationCode }
+    if (cleared.error)
+      return { ok: false, error: cleared.error.message, confirmationCode }
   }
 
   return { ok: true, venueId, guestsAffected, confirmationCode }

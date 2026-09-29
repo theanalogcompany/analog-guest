@@ -37,7 +37,10 @@
 // join between two separately generated strings, which is why this cannot cut
 // a sentence in half.
 
-import { MAX_BUBBLES_PER_RESPONSE, collapseToSingleMessage } from './split-message'
+import {
+  MAX_BUBBLES_PER_RESPONSE,
+  collapseToSingleMessage,
+} from './split-message'
 
 /**
  * Probability that a 2–3 sentence body splits into per-sentence bubbles.
@@ -161,7 +164,11 @@ export function hasRenderableContent(piece: string): boolean {
  * rather than a claim: the no-tail path calls this with the same text, the
  * same rng and the original cap.
  */
-function splitToBubbles(text: string, rng: () => number, maxBubbles: number): string[] {
+function splitToBubbles(
+  text: string,
+  rng: () => number,
+  maxBubbles: number,
+): string[] {
   const sentences = splitIntoSentences(text)
   if (sentences.length < 2 || sentences.length > maxBubbles) return [text]
   if (rng() < SPLIT_PROBABILITY) return sentences.map(stripTerminalPeriod)
@@ -187,7 +194,10 @@ function splitToBubbles(text: string, rng: () => number, maxBubbles: number): st
  * nothing rendered, it is folded into the body and sent as one message rather
  * than bubbled. Takes primitives so this module stays import-free.
  */
-export function intentionTailFor(intentionQuestion: string, renderedCount: number): string {
+export function intentionTailFor(
+  intentionQuestion: string,
+  renderedCount: number,
+): string {
   return renderedCount > 0 ? intentionQuestion : ''
 }
 
@@ -263,8 +273,10 @@ export function resolveDispatchBubbles(
   // behind it the answer IS a separate message, and TAC-319's rule is that a
   // piece dispatching as its own bubble does not end in a period. Idempotent:
   // splitToBubbles already stripped them if it split.
-  const answerBubbles = splitToBubbles(answer, rng, MAX_BUBBLES_PER_RESPONSE - 1).map(
-    stripTerminalPeriod,
-  )
+  const answerBubbles = splitToBubbles(
+    answer,
+    rng,
+    MAX_BUBBLES_PER_RESPONSE - 1,
+  ).map(stripTerminalPeriod)
   return [...answerBubbles, stripTerminalPeriod(tail)]
 }

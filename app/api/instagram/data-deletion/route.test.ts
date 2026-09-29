@@ -14,12 +14,15 @@ vi.mock('@/lib/messaging/instagram/delete-venue-data', () => ({
 
 const unmatchedMock = vi.fn()
 vi.mock('@/lib/analytics/posthog', () => ({
-  captureInstagramDeletionUnmatchedAccount: (...a: unknown[]) => unmatchedMock(...a),
+  captureInstagramDeletionUnmatchedAccount: (...a: unknown[]) =>
+    unmatchedMock(...a),
 }))
 
 const insertMock = vi.fn()
 vi.mock('@/lib/db/admin', () => ({
-  createAdminClient: () => ({ from: () => ({ insert: (row: unknown) => insertMock(row) }) }),
+  createAdminClient: () => ({
+    from: () => ({ insert: (row: unknown) => insertMock(row) }),
+  }),
 }))
 
 import { POST } from './route'
@@ -31,8 +34,12 @@ const CODE = 'abcdef0123456789abcdef0123456789'
 const ORIGINAL = { ...process.env }
 
 function signedRequest(payload: unknown, secret = SECRET): string {
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-  const signature = createHmac('sha256', secret).update(payloadB64).digest('base64url')
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+    'base64url',
+  )
+  const signature = createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64url')
   return `${signature}.${payloadB64}`
 }
 
@@ -40,10 +47,13 @@ function call(body: string | null): Promise<Response> {
   const form = new FormData()
   if (body !== null) form.set('signed_request', body)
   return POST(
-    new Request('https://webhooks.theanalog.company/api/instagram/data-deletion', {
-      method: 'POST',
-      body: form,
-    }),
+    new Request(
+      'https://webhooks.theanalog.company/api/instagram/data-deletion',
+      {
+        method: 'POST',
+        body: form,
+      },
+    ),
   )
 }
 
@@ -55,7 +65,12 @@ function loggedText(): string {
   return logged
     .map((args) =>
       formatWithOptions(
-        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        {
+          depth: Infinity,
+          maxArrayLength: Infinity,
+          maxStringLength: Infinity,
+          breakLength: Infinity,
+        },
         ...args,
       ),
     )
@@ -65,7 +80,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   logged.length = 0
   process.env.INSTAGRAM_APP_SECRET = SECRET
-  process.env.INSTAGRAM_OAUTH_REDIRECT_URL = 'https://webhooks.theanalog.company/api/instagram/callback'
+  process.env.INSTAGRAM_OAUTH_REDIRECT_URL =
+    'https://webhooks.theanalog.company/api/instagram/callback'
   deleteMock.mockResolvedValue({
     ok: true,
     venueId: VENUE_ID,
@@ -120,7 +136,11 @@ describe('POST /api/instagram/data-deletion', () => {
   // A failed redaction still owes the requester a code, and the receipt must
   // record that it did NOT complete rather than leaving no trace.
   it('records an incomplete request when the redaction fails, and still answers in shape', async () => {
-    deleteMock.mockResolvedValue({ ok: false, error: 'write conflict', confirmationCode: CODE })
+    deleteMock.mockResolvedValue({
+      ok: false,
+      error: 'write conflict',
+      confirmationCode: CODE,
+    })
     const res = await call(signedRequest({ user_id: ACCOUNT_ID }))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ confirmation_code: CODE })
@@ -132,7 +152,12 @@ describe('POST /api/instagram/data-deletion', () => {
 
   // Legitimate on its own, and also what a wrong id assumption looks like.
   it('alerts when the account matched no venue', async () => {
-    deleteMock.mockResolvedValue({ ok: true, venueId: null, guestsAffected: 0, confirmationCode: CODE })
+    deleteMock.mockResolvedValue({
+      ok: true,
+      venueId: null,
+      guestsAffected: 0,
+      confirmationCode: CODE,
+    })
     const res = await call(signedRequest({ user_id: 'unknown' }))
     expect(res.status).toBe(200)
     expect(unmatchedMock).toHaveBeenCalledWith({ confirmationCode: CODE })
@@ -144,7 +169,10 @@ describe('POST /api/instagram/data-deletion', () => {
   })
 
   it.each([
-    ['a forged signature', () => signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret')],
+    [
+      'a forged signature',
+      () => signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret'),
+    ],
     ['a malformed value', () => 'garbage'],
   ])('refuses %s with 403 and deletes nothing', async (_label, make) => {
     const res = await call(make())

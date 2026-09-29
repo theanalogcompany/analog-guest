@@ -17,7 +17,9 @@ export function EmptyState({ variant, recentRows }: EmptyStateProps) {
       <div className="flex flex-col gap-2">
         <Eyebrow>Conversations</Eyebrow>
         <SectionHeader
-          title={variant === 'pre-filter' ? 'Pick a venue and guest' : 'Pick a guest'}
+          title={
+            variant === 'pre-filter' ? 'Pick a venue and guest' : 'Pick a guest'
+          }
           subtitle={
             variant === 'pre-filter'
               ? 'Select a venue to see active guests, then pick one to load the conversation.'

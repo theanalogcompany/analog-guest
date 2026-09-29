@@ -1,3 +1,4 @@
+import { logger } from '@/lib/observability/logger'
 import type { GuestState, StateThresholds } from './types'
 
 const FALLBACK_STATE: GuestState = 'new'
@@ -16,13 +17,16 @@ function clampScore(score: number): number {
  * band), a console.warn is emitted and the lowest matching state — by
  * minScore — is returned. If nothing matches at all, falls back to 'new'.
  */
-export function evaluateState(score: number, thresholds: StateThresholds): GuestState {
+export function evaluateState(
+  score: number,
+  thresholds: StateThresholds,
+): GuestState {
   const clamped = clampScore(score)
   const matches = thresholds.thresholds.filter(
     (t) => clamped >= t.minScore && clamped <= t.maxScore,
   )
   if (matches.length === 0) {
-    console.warn('evaluateState: no threshold band matched', {
+    logger.warn('evaluateState: no threshold band matched', {
       score,
       clamped,
       thresholds,
@@ -30,11 +34,14 @@ export function evaluateState(score: number, thresholds: StateThresholds): Guest
     return FALLBACK_STATE
   }
   if (matches.length > 1) {
-    console.warn('evaluateState: multiple threshold bands matched, picking lowest minScore', {
-      score,
-      clamped,
-      matches: matches.map((m) => m.state),
-    })
+    logger.warn(
+      'evaluateState: multiple threshold bands matched, picking lowest minScore',
+      {
+        score,
+        clamped,
+        matches: matches.map((m) => m.state),
+      },
+    )
   }
 
   let lowest = matches[0]

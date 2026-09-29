@@ -7,9 +7,11 @@
 import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
+import { logger } from '@/lib/observability/logger'
 import { loadGuestThreadByGuestId } from '@/lib/operator'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +46,7 @@ export async function GET(
         return NextResponse.json({ error: 'not_found' }, { status: 404 })
       case 'db_error':
       default:
-        console.warn(
+        logger.warn(
           `[/api/operator/guests/:guestId/thread] loadGuestThreadByGuestId failed errorCode=${result.errorCode} error=${result.error ?? '<no detail>'}`,
         )
         return NextResponse.json({ error: 'internal_error' }, { status: 500 })

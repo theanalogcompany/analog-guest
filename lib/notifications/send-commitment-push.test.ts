@@ -6,17 +6,16 @@ import type {
 } from '@/lib/analytics/posthog'
 import type { ApnsClientResult, ApnsRequestPayload } from './apns/client'
 
-const sendApnsRequestMock = vi.fn<
-  (payload: ApnsRequestPayload) => Promise<ApnsClientResult>
->()
+const sendApnsRequestMock =
+  vi.fn<(payload: ApnsRequestPayload) => Promise<ApnsClientResult>>()
 vi.mock('./apns/client', () => ({
-  sendApnsRequest: (payload: ApnsRequestPayload) => sendApnsRequestMock(payload),
+  sendApnsRequest: (payload: ApnsRequestPayload) =>
+    sendApnsRequestMock(payload),
 }))
 
 const capturePushSentMock = vi.fn<(props: PushSentProps) => Promise<void>>()
-const capturePushTokenInvalidMock = vi.fn<
-  (props: PushTokenInvalidProps) => Promise<void>
->()
+const capturePushTokenInvalidMock =
+  vi.fn<(props: PushTokenInvalidProps) => Promise<void>>()
 vi.mock('@/lib/analytics/posthog', () => ({
   capturePushSent: (props: PushSentProps) => capturePushSentMock(props),
   capturePushTokenInvalid: (props: PushTokenInvalidProps) =>
@@ -89,9 +88,15 @@ function queue(table: string, result: unknown): void {
 
 describe('buildArrivalContext', () => {
   it('returns "now" for imminent regardless of expectedArrival', () => {
-    expect(buildArrivalContext('imminent', null, 'America/Los_Angeles')).toBe('now')
+    expect(buildArrivalContext('imminent', null, 'America/Los_Angeles')).toBe(
+      'now',
+    )
     expect(
-      buildArrivalContext('imminent', '2026-05-29T09:00:00Z', 'America/Los_Angeles'),
+      buildArrivalContext(
+        'imminent',
+        '2026-05-29T09:00:00Z',
+        'America/Los_Angeles',
+      ),
     ).toBe('now')
   })
 
@@ -99,48 +104,74 @@ describe('buildArrivalContext', () => {
     // 09:00 UTC = 02:00 LA on a non-DST date — wait, let's use a clearer one.
     // 16:00 UTC = 09:00 LA → morning.
     expect(
-      buildArrivalContext('scheduled', '2026-05-29T16:00:00Z', 'America/Los_Angeles'),
+      buildArrivalContext(
+        'scheduled',
+        '2026-05-29T16:00:00Z',
+        'America/Los_Angeles',
+      ),
     ).toBe('this morning')
   })
 
   it('buckets scheduled afternoon correctly', () => {
     // 21:00 UTC = 14:00 LA → afternoon.
     expect(
-      buildArrivalContext('scheduled', '2026-05-29T21:00:00Z', 'America/Los_Angeles'),
+      buildArrivalContext(
+        'scheduled',
+        '2026-05-29T21:00:00Z',
+        'America/Los_Angeles',
+      ),
     ).toBe('this afternoon')
   })
 
   it('buckets scheduled evening correctly', () => {
     // 02:00 UTC next day = 19:00 LA → evening.
     expect(
-      buildArrivalContext('scheduled', '2026-05-30T02:00:00Z', 'America/Los_Angeles'),
+      buildArrivalContext(
+        'scheduled',
+        '2026-05-30T02:00:00Z',
+        'America/Los_Angeles',
+      ),
     ).toBe('this evening')
   })
 
   it('falls back to "soon" on missing or malformed expectedArrival', () => {
-    expect(buildArrivalContext('scheduled', null, 'America/Los_Angeles')).toBe('soon')
-    expect(buildArrivalContext('scheduled', 'not-a-date', 'America/Los_Angeles')).toBe(
+    expect(buildArrivalContext('scheduled', null, 'America/Los_Angeles')).toBe(
       'soon',
     )
+    expect(
+      buildArrivalContext('scheduled', 'not-a-date', 'America/Los_Angeles'),
+    ).toBe('soon')
   })
 })
 
 describe('buildCommitmentPushBody', () => {
   it('renders comp with description and code', () => {
-    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', 'oat latte')).toBe(
-      'Jaipal arriving now, comp for oat latte, code 7K2P',
-    )
+    expect(
+      buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', 'oat latte'),
+    ).toBe('Jaipal arriving now, comp for oat latte, code 7K2P')
   })
 
   it('renders hold with description and code', () => {
     expect(
-      buildCommitmentPushBody('Sarah', 'hold', 'X3MN', 'this morning', 'almond croissant'),
+      buildCommitmentPushBody(
+        'Sarah',
+        'hold',
+        'X3MN',
+        'this morning',
+        'almond croissant',
+      ),
     ).toBe('Sarah arriving this morning, hold for almond croissant, code X3MN')
   })
 
   it('renders recommendation without code', () => {
     expect(
-      buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'blossom tonic'),
+      buildCommitmentPushBody(
+        'Alex',
+        'recommendation',
+        null,
+        'now',
+        'blossom tonic',
+      ),
     ).toBe('Alex arriving now, ready for blossom tonic')
   })
 
@@ -149,8 +180,20 @@ describe('buildCommitmentPushBody', () => {
   // one guest pushed identically, which is this ticket's collision on the
   // arrival surface.
   it('tells two same-type commitments for one guest apart', () => {
-    const a = buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'blossom tonic')
-    const b = buildCommitmentPushBody('Alex', 'recommendation', null, 'now', 'pink panther')
+    const a = buildCommitmentPushBody(
+      'Alex',
+      'recommendation',
+      null,
+      'now',
+      'blossom tonic',
+    )
+    const b = buildCommitmentPushBody(
+      'Alex',
+      'recommendation',
+      null,
+      'now',
+      'pink panther',
+    )
     expect(a).not.toBe(b)
   })
 
@@ -158,31 +201,48 @@ describe('buildCommitmentPushBody', () => {
     expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', '')).toBe(
       'Jaipal arriving now, comp, code 7K2P',
     )
-    expect(buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', '   ')).toBe(
-      'Jaipal arriving now, comp, code 7K2P',
-    )
+    expect(
+      buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', '   '),
+    ).toBe('Jaipal arriving now, comp, code 7K2P')
   })
 
   it('carries no em dash or en dash, including from the description', () => {
-    const out = buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'now', 'oat latte \u2014 large')
+    const out = buildCommitmentPushBody(
+      'Jaipal',
+      'comp',
+      '7K2P',
+      'now',
+      'oat latte \u2014 large',
+    )
     expect(out).not.toMatch(/[\u2013\u2014]/)
   })
 
   it('falls back to "a guest" when firstName is null', () => {
-    expect(buildCommitmentPushBody(null, 'comp', '9XYZ', 'now', 'oat latte')).toBe(
-      'a guest arriving now, comp for oat latte, code 9XYZ',
-    )
+    expect(
+      buildCommitmentPushBody(null, 'comp', '9XYZ', 'now', 'oat latte'),
+    ).toBe('a guest arriving now, comp for oat latte, code 9XYZ')
   })
 
   it('trims the DESCRIPTION first, keeping name, type and code intact', () => {
     const longDescription =
       'a very long description of the drink that the venue has promised this guest and then some more words'
-    const out = buildCommitmentPushBody('Jaipal', 'comp', '7K2P', 'this afternoon', longDescription)
+    const out = buildCommitmentPushBody(
+      'Jaipal',
+      'comp',
+      '7K2P',
+      'this afternoon',
+      longDescription,
+    )
     expect(out.length).toBeLessThanOrEqual(120)
-    expect(out.startsWith('Jaipal arriving this afternoon, comp for ')).toBe(true)
+    expect(out.startsWith('Jaipal arriving this afternoon, comp for ')).toBe(
+      true,
+    )
     expect(out).toContain('code 7K2P')
     // Cut at a word boundary, so the kept text is a prefix of the original.
-    const shown = out.slice('Jaipal arriving this afternoon, comp for '.length, out.indexOf(', code'))
+    const shown = out.slice(
+      'Jaipal arriving this afternoon, comp for '.length,
+      out.indexOf(', code'),
+    )
     expect(longDescription.startsWith(shown)).toBe(true)
     // startsWith alone is satisfied by a MID-WORD cut, because that is also a
     // prefix. This is the assertion that actually pins the word boundary, and
@@ -201,7 +261,13 @@ describe('buildCommitmentPushBody', () => {
   it('drops the description rather than render a useless fragment of it', () => {
     const longName = 'Bartholomew'.repeat(6)
     expect(longName.length).toBe(66)
-    const out = buildCommitmentPushBody(longName, 'discount', '7K2P', 'this afternoon', 'oat latte')
+    const out = buildCommitmentPushBody(
+      longName,
+      'discount',
+      '7K2P',
+      'this afternoon',
+      'oat latte',
+    )
     expect(out).not.toContain(' for ')
     expect(out).not.toContain('oat')
     expect(out).toContain('discount, code 7K2P')
@@ -210,15 +276,28 @@ describe('buildCommitmentPushBody', () => {
   // Kept as a separate case: room < 0, where there is no space for a
   // description at any threshold.
   it('drops the description when there is no room at all', () => {
-    const longName = 'VeryLongFirstNameWayBeyondTheReasonableBudgetForAPushNotificationBodyIndeed'
-    const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon', 'oat latte')
+    const longName =
+      'VeryLongFirstNameWayBeyondTheReasonableBudgetForAPushNotificationBodyIndeed'
+    const out = buildCommitmentPushBody(
+      longName,
+      'comp',
+      '7K2P',
+      'this afternoon',
+      'oat latte',
+    )
     expect(out).not.toContain(' for ')
     expect(out).toContain('comp, code 7K2P')
   })
 
   it('truncates an over-long firstName instead of dropping the type/code', () => {
     const longName = 'VeryLongFirstName'.repeat(12)
-    const out = buildCommitmentPushBody(longName, 'comp', '7K2P', 'this afternoon', '')
+    const out = buildCommitmentPushBody(
+      longName,
+      'comp',
+      '7K2P',
+      'this afternoon',
+      '',
+    )
     expect(out.length).toBeLessThanOrEqual(120)
     expect(out).toContain('comp, code 7K2P')
   })
@@ -238,7 +317,11 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
           },
     )
   }
-  function queueBadge(operatorId: string, drafts: number, commitments: number): void {
+  function queueBadge(
+    operatorId: string,
+    drafts: number,
+    commitments: number,
+  ): void {
     // operator_venues lookup
     queue('operator_venues', {
       data: [{ venue_id: 'venue-1' }],
@@ -283,7 +366,11 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     expect(sendApnsRequestMock).toHaveBeenCalledOnce()
     const call = sendApnsRequestMock.mock.calls[0][0]
     const payload = call.body as {
-      aps: { alert: { title: string; body: string }; badge: number; sound: string }
+      aps: {
+        alert: { title: string; body: string }
+        badge: number
+        sound: string
+      }
       commitmentId: string
       guestId: string
       operatorId: string
@@ -294,7 +381,9 @@ describe('sendCommitmentArrivalPush — privacy invariant + payload shape', () =
     expect(payload.aps.sound).toBe('default')
     expect(payload.aps.badge).toBe(1)
     expect(payload.aps.alert.title).toBe('Guest arriving')
-    expect(payload.aps.alert.body).toBe('Jaipal arriving now, comp for oat latte, code 7K2P')
+    expect(payload.aps.alert.body).toBe(
+      'Jaipal arriving now, comp for oat latte, code 7K2P',
+    )
     // What stays true, and the honest way to say it: the guest's own message has
     // no PARAMETER on this function, so no call can put it here. That is a
     // property of the signature, checked by tsc, not something an assertion on

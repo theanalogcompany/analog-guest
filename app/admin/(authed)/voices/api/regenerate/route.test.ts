@@ -48,12 +48,12 @@ describe('POST /admin/voices/api/regenerate', () => {
         hasUngroundedClaim: false,
         ungroundedClaims: [],
         selfTalkViolationPersisted: false,
-      emojiDirectiveViolated: false,
+        emojiDirectiveViolated: false,
         offersGatedMechanic: false,
         offeredMechanicId: null,
-      promisesSomething: false,
-      promisedCommitmentType: null,
-      promisedCommitmentDescription: null,
+        promisesSomething: false,
+        promisedCommitmentType: null,
+        promisedCommitmentDescription: null,
       },
     })
 
@@ -97,12 +97,12 @@ describe('POST /admin/voices/api/regenerate', () => {
         hasUngroundedClaim: true,
         ungroundedClaims: ['invents a wifi network name not in venue facts'],
         selfTalkViolationPersisted: false,
-      emojiDirectiveViolated: false,
+        emojiDirectiveViolated: false,
         offersGatedMechanic: false,
         offeredMechanicId: null,
-      promisesSomething: false,
-      promisedCommitmentType: null,
-      promisedCommitmentDescription: null,
+        promisesSomething: false,
+        promisedCommitmentType: null,
+        promisedCommitmentDescription: null,
       },
     })
 
@@ -115,7 +115,9 @@ describe('POST /admin/voices/api/regenerate', () => {
     )
     const json = await res.json()
     expect(json.hasUngroundedClaim).toBe(true)
-    expect(json.ungroundedClaims).toEqual(['invents a wifi network name not in venue facts'])
+    expect(json.ungroundedClaims).toEqual([
+      'invents a wifi network name not in venue facts',
+    ])
   })
 
   // TAC-355
@@ -132,12 +134,12 @@ describe('POST /admin/voices/api/regenerate', () => {
         hasUngroundedClaim: false,
         ungroundedClaims: [],
         selfTalkViolationPersisted: false,
-      emojiDirectiveViolated: false,
+        emojiDirectiveViolated: false,
         offersGatedMechanic: true,
         offeredMechanicId: 'mech-1',
-      promisesSomething: false,
-      promisedCommitmentType: null,
-      promisedCommitmentDescription: null,
+        promisesSomething: false,
+        promisedCommitmentType: null,
+        promisedCommitmentDescription: null,
       },
     })
 
@@ -201,7 +203,8 @@ describe('POST /admin/voices/api/regenerate', () => {
     vi.mocked(regenerateWithCritique).mockResolvedValue({
       ok: false,
       errorCode: 'crisis_safety_ineligible',
-      error: 'This message was a crisis-safety reply and is not eligible for voice regeneration.',
+      error:
+        'This message was a crisis-safety reply and is not eligible for voice regeneration.',
     })
     const res = await POST(
       buildRequest({

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { INTENTION_RULES_DEFAULT, IntentionRulesSchema, parseIntentionRules } from './intention-rules'
+import {
+  INTENTION_RULES_DEFAULT,
+  IntentionRulesSchema,
+  parseIntentionRules,
+} from './intention-rules'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -37,15 +41,24 @@ describe('parseIntentionRules', () => {
   })
 
   it('keeps per-intention min_replies overrides', () => {
-    expect(parseIntentionRules({ min_replies: { learn_name: 6 } }).min_replies).toEqual({ learn_name: 6 })
+    expect(
+      parseIntentionRules({ min_replies: { learn_name: 6 } }).min_replies,
+    ).toEqual({ learn_name: 6 })
   })
 
   // Loose keys at the live boundary: a retired intention key left in a stored
   // row must not fail the whole parse and drop the venue's other settings.
   it('tolerates a min_replies key that matches no intention', () => {
     expect(
-      parseIntentionRules({ response_rate_floor: 60, min_replies: { invite_contact_save: 2 } }),
-    ).toEqual({ ...INTENTION_RULES_DEFAULT, response_rate_floor: 60, min_replies: { invite_contact_save: 2 } })
+      parseIntentionRules({
+        response_rate_floor: 60,
+        min_replies: { invite_contact_save: 2 },
+      }),
+    ).toEqual({
+      ...INTENTION_RULES_DEFAULT,
+      response_rate_floor: 60,
+      min_replies: { invite_contact_save: 2 },
+    })
   })
 
   it.each([

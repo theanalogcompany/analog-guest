@@ -22,16 +22,20 @@
 //     regardless of result count, and keeps both queries indexed.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { GUEST_STATES, type GuestState } from '@/lib/recognition/types'
-import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  venueFilterIds,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 import type {
   CommitmentType,
   HeadsUpCommitment,
 } from '@/lib/schemas/guest-commitment'
 
 export type ListHeadsUpQueueResult =
-  | { ok: true; commitments: HeadsUpCommitment[] }
-  | { ok: false; error: string }
+  { ok: true; commitments: HeadsUpCommitment[] } | { ok: false; error: string }
 
 interface JoinedGuestShape {
   first_name: string | null
@@ -116,7 +120,7 @@ export async function listHeadsUpQueue(
       // log + leave the map empty so every commitment projects with
       // recognitionState=null. The heads-up card still renders; just
       // without the recognition pill.
-      console.warn(
+      logger.warn(
         `[lib/operator/heads-up-queue] guest_states lookup degraded: ${stateError.message}`,
       )
     } else {
@@ -138,7 +142,7 @@ export async function listHeadsUpQueue(
     // PostgREST may return the embedded relation as either an object (1:1
     // FK) or an array; normalize to object-or-null.
     const guestRaw = row.guest as JoinedGuestShape | JoinedGuestShape[] | null
-    const guest = Array.isArray(guestRaw) ? guestRaw[0] ?? null : guestRaw
+    const guest = Array.isArray(guestRaw) ? (guestRaw[0] ?? null) : guestRaw
     return {
       id: row.id,
       // TAC-364. guest_id was already SELECTed and simply dropped here;

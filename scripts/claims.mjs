@@ -10,17 +10,20 @@
  * wires it to the process. Uses nothing outside Node's standard library.
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { run } from './lib/claims.mjs';
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { run } from './lib/claims.mjs'
 
 const exec = (command) => (args) => {
   try {
-    return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return execFileSync(command, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
   } catch {
-    return null;
+    return null
   }
-};
+}
 
 process.exitCode = run({
   env: process.env,
@@ -30,4 +33,4 @@ process.exitCode = run({
   now: Date.now(),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
-});
+})

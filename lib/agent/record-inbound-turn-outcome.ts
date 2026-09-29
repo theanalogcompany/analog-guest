@@ -54,7 +54,8 @@ const REDACTED = '[redacted]'
  * prevents — the ids are what the table is FOR. Caught by an existing test
  * failing, not by the new ones.
  */
-const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+const UUID_LIKE =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 
 /**
  * Migration 055's header says this table never holds a full phone number. That
@@ -68,7 +69,9 @@ const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/
  * inherits it instead of having to remember it. Keys are left alone; only
  * string values are scrubbed.
  */
-export function redactDetail(detail: Record<string, unknown>): Record<string, unknown> {
+export function redactDetail(
+  detail: Record<string, unknown>,
+): Record<string, unknown> {
   const scrubString = (value: string): string => {
     const preserved: string[] = []
     const masked = value.replace(UUID_LIKE, (uuid) => {
@@ -83,7 +86,9 @@ export function redactDetail(detail: Record<string, unknown>): Record<string, un
     if (typeof value === 'string') return scrubString(value)
     if (Array.isArray(value)) return value.map(scrub)
     if (value !== null && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrub(v)]))
+      return Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [k, scrub(v)]),
+      )
     }
     return value
   }
@@ -108,7 +113,9 @@ interface LedgerEntry {
  * someone decides what it records.
  */
 type LedgerDerivers = {
-  [S in AgentResult['status']]: (result: Extract<AgentResult, { status: S }>) => LedgerEntry
+  [S in AgentResult['status']]: (
+    result: Extract<AgentResult, { status: S }>,
+  ) => LedgerEntry
 }
 
 const LEDGER_DERIVERS: LedgerDerivers = {
@@ -171,7 +178,10 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     outboundMessageId: null,
     // Vocabulary and ids only, never guest text. The run id is what joins this
     // row to the turn that actually replied.
-    detail: { coalescedIntoAgentRunId: r.intoAgentRunId, coalescedIntoMessageId: r.intoMessageId },
+    detail: {
+      coalescedIntoAgentRunId: r.intoAgentRunId,
+      coalescedIntoMessageId: r.intoMessageId,
+    },
   }),
   // TAC-397, mapped when the rebase made `tsc` refuse to compile without it —
   // the total map firing on a real merge rather than on a mutant. A decision,
@@ -241,7 +251,9 @@ export function ledgerEntryFor(result: AgentResult): LedgerEntry {
   // guarantee. TypeScript cannot carry the per-key narrowing through an index
   // access, so the call is cast; the map's own type is what a new member
   // breaks.
-  const derive = LEDGER_DERIVERS[result.status] as (result: AgentResult) => LedgerEntry
+  const derive = LEDGER_DERIVERS[result.status] as (
+    result: AgentResult,
+  ) => LedgerEntry
   return derive(result)
 }
 
@@ -251,7 +263,9 @@ export function ledgerEntryForUnexpected(error: unknown): LedgerEntry {
     outcome: 'failed',
     reason: 'unexpected',
     outboundMessageId: null,
-    detail: { error: truncate(error instanceof Error ? error.message : String(error)) },
+    detail: {
+      error: truncate(error instanceof Error ? error.message : String(error)),
+    },
   }
 }
 
@@ -301,7 +315,11 @@ export async function insertInboundTurnOutcome(
     // everything, and that is a guarantee in another file.
     if (reported) return
     try {
-      await reportWriteFailure(input, e instanceof Error ? e.message : String(e), null)
+      await reportWriteFailure(
+        input,
+        e instanceof Error ? e.message : String(e),
+        null,
+      )
     } catch {
       // Nothing left to report with.
     }
@@ -354,13 +372,20 @@ async function reportWriteFailure(
  * changed" true by construction rather than by review.
  */
 type InboundIdentity =
-  | { kind: 'found'; venueId: string | null; guestId: string | null; channel: string | null }
+  | {
+      kind: 'found'
+      venueId: string | null
+      guestId: string | null
+      channel: string | null
+    }
   /** The read succeeded and the row is not there. */
   | { kind: 'absent' }
   /** The read did not complete, so whether the row exists is unknown. */
   | { kind: 'read_failed'; error: string }
 
-async function loadInboundIdentity(inboundMessageId: string): Promise<InboundIdentity> {
+async function loadInboundIdentity(
+  inboundMessageId: string,
+): Promise<InboundIdentity> {
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -377,7 +402,10 @@ async function loadInboundIdentity(inboundMessageId: string): Promise<InboundIde
       channel: data.channel,
     }
   } catch (e) {
-    return { kind: 'read_failed', error: truncate(e instanceof Error ? e.message : String(e)) }
+    return {
+      kind: 'read_failed',
+      error: truncate(e instanceof Error ? e.message : String(e)),
+    }
   }
 }
 
@@ -389,7 +417,9 @@ export async function recordInboundTurnOutcome(input: {
   unexpected?: unknown
 }): Promise<void> {
   const entry =
-    input.result === null ? ledgerEntryForUnexpected(input.unexpected) : ledgerEntryFor(input.result)
+    input.result === null
+      ? ledgerEntryForUnexpected(input.unexpected)
+      : ledgerEntryFor(input.result)
 
   // THREE states, not two. supabase-js returns a network failure as `{ error }`
   // rather than throwing (CLAUDE.md's own gotcha, which is why the Sendblue
@@ -414,9 +444,12 @@ export async function recordInboundTurnOutcome(input: {
             ...entry,
             detail: {
               ...entry.detail,
-              [identity.kind === 'absent' ? 'missingInboundMessageId' : 'unverifiedInboundMessageId']:
-                input.inboundMessageId,
-              ...(identity.kind === 'read_failed' ? { identityReadError: identity.error } : {}),
+              [identity.kind === 'absent'
+                ? 'missingInboundMessageId'
+                : 'unverifiedInboundMessageId']: input.inboundMessageId,
+              ...(identity.kind === 'read_failed'
+                ? { identityReadError: identity.error }
+                : {}),
             },
           },
     venueId: identity.kind === 'found' ? identity.venueId : null,

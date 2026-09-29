@@ -80,7 +80,13 @@ function makeAdminMock(opts: AdminMockOpts) {
     error: opts.venueError ?? null,
   }
   const guestResult = {
-    data: opts.guestRow ? { phone_number: '+15557654321', instagram_scoped_id: null, ...opts.guestRow } : null,
+    data: opts.guestRow
+      ? {
+          phone_number: '+15557654321',
+          instagram_scoped_id: null,
+          ...opts.guestRow,
+        }
+      : null,
     error: opts.guestError ?? null,
   }
 
@@ -138,9 +144,13 @@ describe('POST /admin/conversations/api/follow-up', () => {
   })
 
   it('returns 401 when there is no session', async () => {
-    vi.mocked(createServerClient).mockResolvedValue(makeSessionMock(null) as never)
+    vi.mocked(createServerClient).mockResolvedValue(
+      makeSessionMock(null) as never,
+    )
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ error: 'unauthorized' })
     expect(handleFollowup).not.toHaveBeenCalled()
@@ -154,7 +164,9 @@ describe('POST /admin/conversations/api/follow-up', () => {
       new AuthError(403, 'not an analog admin'),
     )
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: 'not an analog admin' })
     expect(handleFollowup).not.toHaveBeenCalled()
@@ -166,7 +178,9 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(verifyAnalogAdminAccess).mockRejectedValue(new Error('db down'))
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'auth check failed' })
   })
@@ -217,7 +231,11 @@ describe('POST /admin/conversations/api/follow-up', () => {
     })
 
     const res = await POST(
-      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: 'x'.repeat(501) }),
+      makeRequest({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        hint: 'x'.repeat(501),
+      }),
     )
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('invalid body')
@@ -250,7 +268,9 @@ describe('POST /admin/conversations/api/follow-up', () => {
       venueScope: adminVenueScope([VENUE_ID]),
       isAnalogAdmin: true,
     })
-    vi.mocked(createAdminClient).mockReturnValue(makeAdminMock({ guestRow: null }) as never)
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminMock({ guestRow: null }) as never,
+    )
 
     const res = await POST(
       makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
@@ -318,7 +338,12 @@ describe('POST /admin/conversations/api/follow-up', () => {
     })
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
-        guestRow: { id: GUEST_ID, opted_out_at: null, phone_number: null, instagram_scoped_id: '1000000000000001' },
+        guestRow: {
+          id: GUEST_ID,
+          opted_out_at: null,
+          phone_number: null,
+          instagram_scoped_id: '1000000000000001',
+        },
       }) as never,
     )
 
@@ -348,11 +373,18 @@ describe('POST /admin/conversations/api/follow-up', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock({
         venueRow: { id: VENUE_ID, messaging_phone_number: null },
-        guestRow: { id: GUEST_ID, opted_out_at: null, phone_number: null, instagram_scoped_id: '1000000000000001' },
+        guestRow: {
+          id: GUEST_ID,
+          opted_out_at: null,
+          phone_number: null,
+          instagram_scoped_id: '1000000000000001',
+        },
       }) as never,
     )
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe('not a text conversation')
     expect(handleFollowup).not.toHaveBeenCalled()
@@ -518,32 +550,40 @@ describe('POST /admin/conversations/api/follow-up', () => {
       'obligation_slot_taken',
       'This guest already has a card waiting with a different offer. Decide that card first.',
     ],
-    ['knowledge_gap_card_protected', "A pending question is holding this guest's review slot."],
-  ] as const)('returns 409 with the reason and detail when the pipeline dropped the draft (%s)', async (reason, detail) => {
-    vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
-    )
-    vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
-      operatorId: 'op-1',
-      venueScope: adminVenueScope([VENUE_ID]),
-      isAnalogAdmin: true,
-    })
-    vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock({
-        guestRow: { id: GUEST_ID, opted_out_at: null },
-      }) as never,
-    )
-    vi.mocked(handleFollowup).mockResolvedValue({
-      status: 'dropped',
-      reason,
-      protectedDraftId: 'waiting-card',
-      triggers: ['category_requires_approval'],
-    })
+    [
+      'knowledge_gap_card_protected',
+      "A pending question is holding this guest's review slot.",
+    ],
+  ] as const)(
+    'returns 409 with the reason and detail when the pipeline dropped the draft (%s)',
+    async (reason, detail) => {
+      vi.mocked(createServerClient).mockResolvedValue(
+        makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
+      )
+      vi.mocked(verifyAnalogAdminAccess).mockResolvedValue({
+        operatorId: 'op-1',
+        venueScope: adminVenueScope([VENUE_ID]),
+        isAnalogAdmin: true,
+      })
+      vi.mocked(createAdminClient).mockReturnValue(
+        makeAdminMock({
+          guestRow: { id: GUEST_ID, opted_out_at: null },
+        }) as never,
+      )
+      vi.mocked(handleFollowup).mockResolvedValue({
+        status: 'dropped',
+        reason,
+        protectedDraftId: 'waiting-card',
+        triggers: ['category_requires_approval'],
+      })
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: 'dropped', reason, detail })
-  })
+      const res = await POST(
+        makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+      )
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'dropped', reason, detail })
+    },
+  )
 
   it('returns 200 with queued:true when the approval gate holds the draft', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
@@ -566,7 +606,9 @@ describe('POST /admin/conversations/api/follow-up', () => {
       primaryTrigger: 'category_requires_approval',
     })
 
-    const res = await POST(makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }))
+    const res = await POST(
+      makeRequest({ venueId: VENUE_ID, guestId: GUEST_ID, hint: null }),
+    )
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.success).toBe(true)

@@ -32,7 +32,11 @@ describe('groupKnowledgeByTag', () => {
       entry('b', ['policies']),
       entry('c', ['logistics']),
     ])
-    expect(bySection.room_rules_logistics.map((e) => e.id)).toEqual(['a', 'b', 'c'])
+    expect(bySection.room_rules_logistics.map((e) => e.id)).toEqual([
+      'a',
+      'b',
+      'c',
+    ])
   })
 
   it('groups events into events_merch', () => {
@@ -41,7 +45,9 @@ describe('groupKnowledgeByTag', () => {
   })
 
   it('groups the other tag into its own named "other" section, visibly', () => {
-    const { bySection, unclaimed } = groupKnowledgeByTag([entry('a', ['other'])])
+    const { bySection, unclaimed } = groupKnowledgeByTag([
+      entry('a', ['other']),
+    ])
     expect(bySection.other.map((e) => e.id)).toEqual(['a'])
     expect(unclaimed).toEqual([])
   })
@@ -65,7 +71,9 @@ describe('groupKnowledgeByTag', () => {
   })
 
   it('places a multi-tag entry once, under the first matching section', () => {
-    const { bySection } = groupKnowledgeByTag([entry('a', ['sourcing', 'history'])])
+    const { bySection } = groupKnowledgeByTag([
+      entry('a', ['sourcing', 'history']),
+    ])
     expect(bySection.menu_knowledge.map((e) => e.id)).toEqual(['a'])
     expect(bySection.the_story).toEqual([])
   })

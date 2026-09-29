@@ -17,22 +17,30 @@ describe('buildRuntimeContext: brake history horizon (TAC-380)', () => {
   const call = src.slice(callStart, src.indexOf('})', callStart))
 
   it('derives inboundHistoryFrom through resolveInboundHistoryFrom', () => {
-    expect(src).toMatch(/const inboundHistoryFrom = resolveInboundHistoryFrom\(\{/)
+    expect(src).toMatch(
+      /const inboundHistoryFrom = resolveInboundHistoryFrom\(\{/,
+    )
   })
 
   it('passes the caps and cutoff the history query itself uses', () => {
     expect(call).toContain('recentMessages,')
     expect(call).toContain('responseCap: MAX_HISTORY_MESSAGES,')
     expect(call).toContain('rowsFetched: messagesResult.data?.length ?? 0,')
-    expect(call).toContain('rowCap: MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE,')
+    expect(call).toContain(
+      'rowCap: MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE,',
+    )
     expect(call).toContain('historyCutoff: new Date(historyCutoffIso),')
     // And the history query really is bounded by that row cap and cutoff.
-    expect(src).toContain('.limit(MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE)')
+    expect(src).toContain(
+      '.limit(MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE)',
+    )
     expect(src).toContain(".gte('created_at', historyCutoffIso)")
   })
 
   it('hands the result to the derivation', () => {
-    expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+inboundHistoryFrom,\n/)
+    expect(src).toMatch(
+      /deriveOpenIntentions\(\{[\s\S]*?\n\s+inboundHistoryFrom,\n/,
+    )
   })
 })
 
@@ -45,8 +53,12 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
   // Parsed visits, not raw rows: the model can only ask how an order went when
   // the order appears in ## Visit history, which is built from recentVisits.
   it('derives recordedOrderTimes from the parsed visit history and hands them to the derivation', () => {
-    expect(src).toMatch(/const recordedOrderTimes = recentVisits\.map\(\(v\) => v\.visitedAt\)/)
-    expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+recordedOrderTimes,\n/)
+    expect(src).toMatch(
+      /const recordedOrderTimes = recentVisits\.map\(\(v\) => v\.visitedAt\)/,
+    )
+    expect(src).toMatch(
+      /deriveOpenIntentions\(\{[\s\S]*?\n\s+recordedOrderTimes,\n/,
+    )
   })
 
   // The cap keeps the newest orders only while the query sorts newest first.
@@ -54,7 +66,9 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
   // order would never arm anything.
   it('loads visit history newest first', () => {
     const query = src.slice(src.indexOf(".from('transactions')"))
-    expect(query.slice(0, query.indexOf('.limit('))).toContain(".order('occurred_at', { ascending: false })")
+    expect(query.slice(0, query.indexOf('.limit('))).toContain(
+      ".order('occurred_at', { ascending: false })",
+    )
   })
 
   // The hold reads recommendation updated_at, which a TAC-318 dedup bumps. The
@@ -64,10 +78,18 @@ describe('buildRuntimeContext: recorded-order arming input (TAC-380)', () => {
     const start = src.indexOf('const openRecommendationTouchedTimes =')
     expect(start).toBeGreaterThan(-1)
     const block = src.slice(start, src.indexOf('\n\n', start))
-    expect(block).toContain('(activeCommitmentsResult.ok ? activeCommitmentsResult.data : [])')
+    expect(block).toContain(
+      [
+        'const openRecommendationTouchedTimes = (',
+        '      activeCommitmentsResult.ok ? activeCommitmentsResult.data : []',
+        '    )',
+      ].join('\n'),
+    )
     expect(block).toContain(".filter((row) => row.type === 'recommendation')")
     expect(block).toContain('.map((row) => new Date(row.updated_at))')
-    expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationTouchedTimes,\n/)
+    expect(src).toMatch(
+      /deriveOpenIntentions\(\{[\s\S]*?\n\s+openRecommendationTouchedTimes,\n/,
+    )
   })
 
   // Fail closed, as the read at build-runtime-context.ts:203 does: a failed commitments
@@ -87,13 +109,16 @@ describe('buildRuntimeContext: history delivery (TAC-394)', () => {
   const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
   const query = src.slice(
     src.indexOf('let messagesQuery = supabase'),
-    src.indexOf('const visitHistoryCutoffIso', src.indexOf('let messagesQuery = supabase')),
+    src.indexOf(
+      'const visitHistoryCutoffIso',
+      src.indexOf('let messagesQuery = supabase'),
+    ),
   )
 
   it('selects the columns deriveDelivery reads', () => {
     expect(query.length).toBeGreaterThan(0)
     for (const column of ['status', 'review_state']) {
-      expect(query).toMatch(new RegExp(`\\.select\\('[^']*\\b${column}\\b`))
+      expect(query).toMatch(new RegExp(`\\.select\\(\\s*'[^']*\\b${column}\\b`))
     }
   })
 
@@ -101,7 +126,9 @@ describe('buildRuntimeContext: history delivery (TAC-394)', () => {
   // model cannot see is one it offers again (TAC-398).
   it('does not filter the history query on delivery', () => {
     expect(query).toContain('historyEndIso')
-    expect(query).not.toMatch(/\.(eq|neq|in|not|is|filter|or|match)\([^)]*\b(status|review_state)\b/)
+    expect(query).not.toMatch(
+      /\.(eq|neq|in|not|is|filter|or|match)\([^)]*\b(status|review_state)\b/,
+    )
   })
 
   // A filter on the rows before grouping, or chained after it, is the same
@@ -119,11 +146,15 @@ describe('buildRuntimeContext: history delivery (TAC-394)', () => {
     )
     // The call above, and the rowsFetched count in the trace span.
     expect([...src.matchAll(/messagesResult\.data\b/g)]).toHaveLength(2)
-    const filters = [...src.matchAll(/recentMessages\.filter\(/g)]
+    const filters = [...src.matchAll(/recentMessages\s*\.filter\(/g)]
     expect(filters).toHaveLength(1)
     // The one allowed filter reads inbound timestamps for the intention brake.
-    expect(src.slice(filters[0]!.index!, filters[0]!.index! + 80)).toContain("m.direction === 'inbound'")
-    const returned = src.slice(src.indexOf('  return {\n    agentRunId: input.agentRunId,'))
+    expect(src.slice(filters[0]!.index!, filters[0]!.index! + 80)).toContain(
+      "m.direction === 'inbound'",
+    )
+    const returned = src.slice(
+      src.indexOf('  return {\n    agentRunId: input.agentRunId,'),
+    )
     expect(returned.length).toBeGreaterThan(0)
     expect(returned).toMatch(/\n\s+recentMessages,\n/)
   })
@@ -139,8 +170,12 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
 
   it('resolves it from QR enrollment and the earliest acknowledged arrival', () => {
     expect(src).toContain('findEarliestAcknowledgedArrival({')
-    expect(block).toContain("guest.createdVia === 'qr_scan' ? guest.createdAt : null")
-    expect(block).toContain('acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null')
+    expect(block).toContain(
+      "guest.createdVia === 'qr_scan' ? guest.createdAt : null",
+    )
+    expect(block).toContain(
+      'acknowledgedArrivalResult.ok ? acknowledgedArrivalResult.data : null',
+    )
   })
 
   it('takes the EARLIEST of the confirmed visits', () => {
@@ -150,7 +185,9 @@ describe('buildRuntimeContext: visit_confirmed resolution (TAC-436)', () => {
   })
 
   it('hands it to the derivation', () => {
-    expect(src).toMatch(/deriveOpenIntentions\(\{[\s\S]*?\n\s+visitConfirmedAt,\n/)
+    expect(src).toMatch(
+      /deriveOpenIntentions\(\{[\s\S]*?\n\s+visitConfirmedAt,\n/,
+    )
   })
 
   // THE FINDING, AS A GUARD. guests.last_visit_at reads like the obvious source
@@ -219,7 +256,11 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
         '      !isScanReferral(input.currentMessage?.referralSource) &&',
         "      input.currentMessage?.channel === 'instagram'",
         '    ) {',
-        '      const carry = await loadScanCarryForward(supabase, input.venueId, input.guestId)',
+        '      const carry = await loadScanCarryForward(',
+        '        supabase,',
+        '        input.venueId,',
+        '        input.guestId,',
+        '      )',
         '      carriedScanAt = scanCarryForwardAt({',
       ].join('\n'),
     )
@@ -238,8 +279,13 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
   // through Math.min and a returning scanner would keep their old, expired
   // anchor — the defect this ticket exists to fix, reintroduced silently.
   it('overrides the earliest-wins reduction rather than joining it', () => {
-    expect(resolution).toContain('const visitConfirmedAt = scanAt ?? earliestConfirmedVisit')
-    const list = src.slice(src.indexOf('const confirmedVisitTimes = ['), src.indexOf('const earliestConfirmedVisit'))
+    expect(resolution).toContain(
+      'const visitConfirmedAt = scanAt ?? earliestConfirmedVisit',
+    )
+    const list = src.slice(
+      src.indexOf('const confirmedVisitTimes = ['),
+      src.indexOf('const earliestConfirmedVisit'),
+    )
     expect(list).not.toContain('referralSource')
     expect(list).not.toContain('scanAt')
   })
@@ -255,7 +301,9 @@ describe('buildRuntimeContext: a scan on this turn confirms a visit (TAC-518)', 
     )
     expect(emit).toContain('captureInstagramScanConfirmedVisit({')
     expect(emit).toContain('returningGuest: recentMessages.length > 0,')
-    expect(emit).toContain('overrodeExistingAnchor: earliestConfirmedVisit !== null,')
+    expect(emit).toContain(
+      'overrodeExistingAnchor: earliestConfirmedVisit !== null,',
+    )
   })
 
   // TAC-436's rule for the two historical sources is untouched. A mutant that
@@ -279,7 +327,9 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
   // an Instagram guest with no inbound message would resolve as unknown.
   it('selects instagram_scoped_id with the guest', () => {
     const guestQuery = src.slice(src.indexOf(".from('guests')"))
-    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(/\binstagram_scoped_id\b/)
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(
+      /\binstagram_scoped_id\b/,
+    )
   })
 
   it('resolves from the inbound message and the guest identifiers', () => {
@@ -287,15 +337,23 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     // A message whose channel is missing resolves as unparseable (null),
     // never as "no inbound message" (undefined).
     expect(src).toContain(
-      'const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined',
+      [
+        'const inboundChannel = input.currentMessage',
+        '    ? (input.currentMessage.channel ?? null)',
+        '    : undefined',
+      ].join('\n'),
     )
     expect(call).toContain('inboundChannel,')
     expect(call).toContain('hasPhone,')
     expect(call).toContain('hasInstagramId,')
     // typeof, never `!== null`: an undefined (a column dropped from the
     // select) must read as absent, not as a phone number.
-    expect(src).toContain("const hasPhone = typeof guestRow.phone_number === 'string'")
-    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
+    expect(src).toContain(
+      "const hasPhone = typeof guestRow.phone_number === 'string'",
+    )
+    expect(src).toContain(
+      "const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'",
+    )
   })
 
   it('returns the resolved channel on the context', () => {
@@ -307,7 +365,12 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
   // channel has to be resolved before it runs.
   it('requires the venue messaging number only when the channel needs it, after resolving the channel', () => {
     expect(src).toContain(
-      'if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {',
+      [
+        'if (',
+        '    !venueRow.messaging_phone_number &&',
+        '    venueMessagingNumberRequired(channelResolution.channel)',
+        '  ) {',
+      ].join('\n'),
     )
     expect(src.indexOf('resolveConversationChannel({')).toBeLessThan(
       src.indexOf('venueMessagingNumberRequired(channelResolution.channel)'),
@@ -324,15 +387,22 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
     expect(src).not.toMatch(/instagramScopedId\s*:/)
     expect(src.match(/guestRow\.instagram_scoped_id\b/g)).toHaveLength(1)
     expect(src.match(/\binstagram_scoped_id\b/g)).toHaveLength(2)
-    expect(src).toContain("const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'")
+    expect(src).toContain(
+      "const hasInstagramId = typeof guestRow.instagram_scoped_id === 'string'",
+    )
   })
 
   // The warning is the only place an unresolved channel shows up, and its main
   // cause is migration 048's 'text' default on an Instagram row.
   it('warns, with the reason, whenever the channel is unresolved', () => {
-    const start = src.indexOf('if (channelResolution.channel === null) {\n    console.warn(')
+    const start = src.indexOf(
+      'if (channelResolution.channel === null) {\n    console.warn(',
+    )
     expect(start).toBeGreaterThan(-1)
-    const warn = src.slice(start, src.indexOf('})', start))
+    const warn = src.slice(
+      start,
+      src.indexOf('\n    )', start) + '\n    )'.length,
+    )
     expect(warn).toContain('conversation channel unresolved')
     expect(warn).toContain('reason: channelResolution.unresolvedReason,')
     // Not the row itself, which would log the Instagram ID and the phone
@@ -348,7 +418,9 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
       .map((line) => line.trim())
       .filter((line) => line !== '')
     expect(lines).toEqual([
-      "console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {",
+      'console.warn(',
+      "'[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number',",
+      '{',
       'agentRunId: input.agentRunId,',
       'venueId: input.venueId,',
       'guestId: input.guestId,',
@@ -357,6 +429,8 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
       'hasPhone,',
       'hasInstagramId,',
       'reason: channelResolution.unresolvedReason,',
+      '},',
+      ')',
     ])
   })
 
@@ -366,8 +440,10 @@ describe('buildRuntimeContext: conversation channel (TAC-495)', () => {
   // the same reason: the guest row must never ride along.
   it('raises the Slack-relayed event, with the same fields as the warning, whenever the channel is unresolved', () => {
     const block = src.slice(
-      src.indexOf('if (channelResolution.channel === null) {\n    console.warn('),
-      src.indexOf('// TAC-495: a venue\'s messaging phone number is required'),
+      src.indexOf(
+        'if (channelResolution.channel === null) {\n    console.warn(',
+      ),
+      src.indexOf("// TAC-495: a venue's messaging phone number is required"),
     )
     const start = block.indexOf('await captureConversationChannelUnresolved({')
     expect(start).toBeGreaterThan(-1)
@@ -421,7 +497,7 @@ describe('buildRuntimeContext: conversation window (TAC-547)', () => {
 
   it('derives the window from followup_rules, not from a literal', () => {
     expect(src).toMatch(
-      /const conversationWindowMs =\s*\n?\s*parseFollowupRules\(config\.followup_rules\)\.recent_conversation_hours \* 60 \* 60 \* 1000/,
+      /const conversationWindowMs =\s*parseFollowupRules\(config\.followup_rules\)\.recent_conversation_hours \*\s*60 \*\s*60 \*\s*1000/,
     )
   })
 

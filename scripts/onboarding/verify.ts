@@ -194,7 +194,8 @@ export function countVoiceCorpusEntries(draftMarkdown: string): number {
   for (let i = 0; i < headings.length; i++) {
     if (/^6\.\s*voice_corpus/i.test(headings[i].title)) {
       sectionStart = headings[i].index
-      sectionEnd = i + 1 < headings.length ? headings[i + 1].index : draftMarkdown.length
+      sectionEnd =
+        i + 1 < headings.length ? headings[i + 1].index : draftMarkdown.length
       break
     }
   }
@@ -205,7 +206,9 @@ export function countVoiceCorpusEntries(draftMarkdown: string): number {
   return (sectionText.match(jsonBlockRe) ?? []).length
 }
 
-function renderMechanicLine(m: VerifyResult['mechanicApprovalReview'][number]): string {
+function renderMechanicLine(
+  m: VerifyResult['mechanicApprovalReview'][number],
+): string {
   const quote = m.sourceQuote ? `"${m.sourceQuote}"` : 'none, defaulted'
   const mismatch =
     m.recommendedValue !== undefined && m.recommendedValue !== m.draftValue
@@ -219,7 +222,9 @@ function renderMechanicLine(m: VerifyResult['mechanicApprovalReview'][number]): 
  * Guards the qualifying-count math (and the rendered list) against a
  * duplicate report of the same entry pushing the count below reality.
  */
-function dedupeByLocation<T extends { location: string }>(items: readonly T[]): T[] {
+function dedupeByLocation<T extends { location: string }>(
+  items: readonly T[],
+): T[] {
   const seen = new Set<string>()
   const result: T[] = []
   for (const item of items) {
@@ -230,7 +235,9 @@ function dedupeByLocation<T extends { location: string }>(items: readonly T[]): 
   return result
 }
 
-function renderVoiceDisqualificationLine(d: VerifyResult['voiceDisqualifications'][number]): string {
+function renderVoiceDisqualificationLine(
+  d: VerifyResult['voiceDisqualifications'][number],
+): string {
   return `- **[${d.location}]** (${d.source}): ${d.reason.replace(/_/g, ' ')} — "${d.content}"`
 }
 
@@ -250,7 +257,10 @@ function renderVoiceDisqualificationLine(d: VerifyResult['voiceDisqualifications
  * floor, or when any disqualification exists at all (visibility even when
  * the corpus still clears the floor).
  */
-export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpusCount: number): string {
+export function formatNeedsConfirmationSection(
+  result: VerifyResult,
+  voiceCorpusCount: number,
+): string {
   const lines: string[] = []
   lines.push('## Needs confirmation')
   lines.push('')
@@ -265,7 +275,9 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
   } else {
     for (const c of result.unsupportedClaims) {
       const quote = c.sourceQuote ? ` Source: "${c.sourceQuote}"` : ''
-      lines.push(`- **[${c.section}]** "${c.claim}" — ${c.reason.replace(/_/g, ' ')}.${quote}`)
+      lines.push(
+        `- **[${c.section}]** "${c.claim}" — ${c.reason.replace(/_/g, ' ')}.${quote}`,
+      )
     }
   }
   lines.push('')
@@ -275,7 +287,9 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
     lines.push('*(none)*')
   } else {
     for (const p of result.placementViolations) {
-      lines.push(`- **[${p.section}]** "${p.claim}" — source: "${p.sourceQuote}"`)
+      lines.push(
+        `- **[${p.section}]** "${p.claim}" — source: "${p.sourceQuote}"`,
+      )
     }
   }
   lines.push('')
@@ -306,7 +320,9 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
   } else {
     for (const d of result.resolvedDates) {
       const anchor = d.anchorUsed ? ` (anchor: ${d.anchorUsed})` : ''
-      lines.push(`- **[${d.section}]** resolved to ${d.resolvedDate} — source: "${d.sourceText}"${anchor}`)
+      lines.push(
+        `- **[${d.section}]** resolved to ${d.resolvedDate} — source: "${d.sourceText}"${anchor}`,
+      )
     }
   }
   lines.push('')
@@ -330,9 +346,15 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
   const signaturePhraseDisqualifications = result.voiceDisqualifications.filter(
     (d) => d.source === 'signaturePhrase',
   )
-  const qualifyingVoiceCount = Math.max(0, voiceCorpusCount - voiceCorpusDisqualifications.length)
+  const qualifyingVoiceCount = Math.max(
+    0,
+    voiceCorpusCount - voiceCorpusDisqualifications.length,
+  )
 
-  if (qualifyingVoiceCount < VOICE_CORPUS_FLOOR || result.voiceDisqualifications.length > 0) {
+  if (
+    qualifyingVoiceCount < VOICE_CORPUS_FLOOR ||
+    result.voiceDisqualifications.length > 0
+  ) {
     lines.push('')
     lines.push('### Voice corpus & signature phrases')
     if (qualifyingVoiceCount < VOICE_CORPUS_FLOOR) {
@@ -340,7 +362,10 @@ export function formatNeedsConfirmationSection(result: VerifyResult, voiceCorpus
         `- ${qualifyingVoiceCount} of ${VOICE_CORPUS_FLOOR} minimum real texting entries. Seeding will fail until at least ${VOICE_CORPUS_FLOOR} are present.`,
       )
     }
-    for (const d of [...voiceCorpusDisqualifications, ...signaturePhraseDisqualifications]) {
+    for (const d of [
+      ...voiceCorpusDisqualifications,
+      ...signaturePhraseDisqualifications,
+    ]) {
       lines.push(renderVoiceDisqualificationLine(d))
     }
   }
@@ -370,7 +395,9 @@ async function attemptVerification(input: VerifyInput) {
  * on catch and exits non-zero. Every 06 in Drive must have passed
  * verification; a failed verify is not a degraded-but-usable draft.
  */
-export async function runVerification(input: VerifyInput): Promise<VerifyResult> {
+export async function runVerification(
+  input: VerifyInput,
+): Promise<VerifyResult> {
   try {
     const object = await attemptVerification(input)
     return { ...object, promptVersion: VERIFY_PROMPT_VERSION }

@@ -76,7 +76,10 @@ export type ParseSignedRequestResult =
   | { ok: true; payload: SignedRequestPayload }
   | { ok: false; reason: SignedRequestRejection }
 
-export function parseSignedRequest(raw: string, secret: string): ParseSignedRequestResult {
+export function parseSignedRequest(
+  raw: string,
+  secret: string,
+): ParseSignedRequestResult {
   // See rule 2. This must stay here even though the routes check too.
   if (secret === '') return { ok: false, reason: 'secret_unset' }
 
@@ -96,7 +99,10 @@ export function parseSignedRequest(raw: string, secret: string): ParseSignedRequ
   }
   // An unequal length is itself a mismatch, and timingSafeEqual requires
   // equal lengths. This leaks only the length of what the caller sent.
-  if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
+  if (
+    presented.length !== expected.length ||
+    !timingSafeEqual(presented, expected)
+  ) {
     return { ok: false, reason: 'mismatch' }
   }
 
@@ -122,6 +128,7 @@ export function parseSignedRequest(raw: string, secret: string): ParseSignedRequ
         : null
   if (userId === null) return { ok: false, reason: 'unreadable_payload' }
 
-  const issuedAt = typeof record.issued_at === 'number' ? record.issued_at : null
+  const issuedAt =
+    typeof record.issued_at === 'number' ? record.issued_at : null
   return { ok: true, payload: { userId, issuedAt } }
 }

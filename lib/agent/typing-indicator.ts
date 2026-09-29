@@ -68,7 +68,10 @@ export interface TypingIndicatorTarget {
  * thing a stub that ignored its arguments would let a call site get wrong.
  */
 export interface TypingIndicatorDeps {
-  loadTarget: (input: { venueId: string; guestId: string }) => Promise<InstagramSendTargetResult>
+  loadTarget: (input: {
+    venueId: string
+    guestId: string
+  }) => Promise<InstagramSendTargetResult>
   sendAction: (input: {
     accountId: string
     recipientId: string
@@ -80,7 +83,8 @@ export interface TypingIndicatorDeps {
 function defaultDeps(): TypingIndicatorDeps {
   return {
     loadTarget: (input) => loadInstagramSendTarget(createAdminClient(), input),
-    sendAction: (input) => sendInstagramSenderAction({ ...input, fetchImpl: fetch }),
+    sendAction: (input) =>
+      sendInstagramSenderAction({ ...input, fetchImpl: fetch }),
   }
 }
 
@@ -103,7 +107,10 @@ export async function signalTyping(
     case null:
       return { status: 'not_applicable', channel }
     case 'instagram':
-      return sendInstagramTyping(target, signal, { ...defaultDeps(), ...injected })
+      return sendInstagramTyping(target, signal, {
+        ...defaultDeps(),
+        ...injected,
+      })
     default: {
       const unreachable: never = channel
       throw new Error(`signalTyping: unhandled channel ${String(unreachable)}`)
@@ -116,7 +123,8 @@ async function sendInstagramTyping(
   signal: TypingSignal,
   deps: TypingIndicatorDeps,
 ): Promise<TypingIndicatorOutcome> {
-  const action: InstagramSenderAction = signal === 'on' ? 'typing_on' : 'typing_off'
+  const action: InstagramSenderAction =
+    signal === 'on' ? 'typing_on' : 'typing_off'
   try {
     const targetResult = await deps.loadTarget({
       venueId: target.venueId,

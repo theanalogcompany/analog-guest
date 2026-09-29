@@ -7,7 +7,8 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 
 const listMock = vi.fn()
 vi.mock('@/lib/operator', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
+  const actual =
+    await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
   return {
     ...actual,
     listOperatorConversations: (...args: unknown[]) => listMock(...args),
@@ -28,7 +29,10 @@ function makeRequest(): Request {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
   listMock.mockReset()
 })
 
@@ -39,7 +43,9 @@ afterEach(() => {
 describe('GET /api/operator/conversations', () => {
   it("returns 401 {error:'unauthorized'} when AuthError is thrown", async () => {
     const { AuthError } = await import('@/lib/auth/types')
-    verifyMock.mockRejectedValueOnce(new AuthError(401, 'invalid or expired token'))
+    verifyMock.mockRejectedValueOnce(
+      new AuthError(401, 'invalid or expired token'),
+    )
     const res = await GET(makeRequest())
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ error: 'unauthorized' })
@@ -83,7 +89,10 @@ describe('GET /api/operator/conversations', () => {
   })
 
   it('returns {conversations: []} for an operator with no venue grants', async () => {
-    verifyMock.mockResolvedValueOnce({ operatorId: 'op-2', venueScope: grantedVenues([]) })
+    verifyMock.mockResolvedValueOnce({
+      operatorId: 'op-2',
+      venueScope: grantedVenues([]),
+    })
     listMock.mockResolvedValueOnce({ ok: true, conversations: [] })
     const res = await GET(makeRequest())
     expect(res.status).toBe(200)

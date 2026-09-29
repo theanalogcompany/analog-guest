@@ -54,9 +54,9 @@ export default async function VoicesIndexPage() {
 
         {voices.length === 0 ? (
           <p className="text-sm text-ink-soft max-w-md">
-            No voices yet. Voices materialize when a venue&apos;s persona has
-            at least a <span className="font-mono text-xs">voiceName</span> set
-            or any anti-pattern present.
+            No voices yet. Voices materialize when a venue&apos;s persona has at
+            least a <span className="font-mono text-xs">voiceName</span> set or
+            any anti-pattern present.
           </p>
         ) : (
           <ul className="flex flex-col">

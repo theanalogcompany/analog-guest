@@ -32,20 +32,30 @@ function extractRepoRule(text: string): string {
   const secondEnd = text.indexOf('end;', firstEnd + 1)
   if (firstEnd < 0 || secondEnd < 0) throw new Error('end; anchors not found')
   if (!text.slice(start, secondEnd).includes('def owner:')) {
-    throw new Error('def owner: not between the two end; anchors — extraction moved')
+    throw new Error(
+      'def owner: not between the two end; anchors — extraction moved',
+    )
   }
   return text.slice(start, secondEnd + 'end;'.length)
 }
 
-const RULES = Object.fromEntries(Object.entries(FILES).map(([name, text]) => [name, extractRepoRule(text)]))
+const RULES = Object.fromEntries(
+  Object.entries(FILES).map(([name, text]) => [name, extractRepoRule(text)]),
+)
 
 // The assignment: everything before the first sentence-ending period. A
 // fixture's `labels` is set to whatever the real ticket carries, so `owner`
 // resolves to the repo name itself, not just "not a defect".
 function owner(rules: string, description: string, labelNames: string[]) {
   const program = `${rules}\nrepo_labels as $labels | owner`
-  const input = { description, labels: { nodes: labelNames.map((name) => ({ name })) } }
-  const r = spawnSync('jq', ['-r', program], { input: JSON.stringify(input), encoding: 'utf8' })
+  const input = {
+    description,
+    labels: { nodes: labelNames.map((name) => ({ name })) },
+  }
+  const r = spawnSync('jq', ['-r', program], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+  })
   if (r.status !== 0) throw new Error(`jq failed: ${r.stderr}`)
   return r.stdout.trim()
 }
@@ -55,11 +65,14 @@ function owner(rules: string, description: string, labelNames: string[]) {
 // this ticket's concern) — so the drift guard below compares from
 // `def repo_line_names:` on, which is the part TAC-443 touches and the part
 // that must not silently diverge again.
-const fromLineNames = (rules: string) => rules.slice(rules.indexOf('def repo_line_names:'))
+const fromLineNames = (rules: string) =>
+  rules.slice(rules.indexOf('def repo_line_names:'))
 
 describe('both workflows extract the identical repo-assignment rule', () => {
   it('is byte-identical in build-ready.yml and audit-new-todo.yml, from repo_line_names on', () => {
-    expect(fromLineNames(RULES['audit-new-todo.yml'])).toBe(fromLineNames(RULES['build-ready.yml']))
+    expect(fromLineNames(RULES['audit-new-todo.yml'])).toBe(
+      fromLineNames(RULES['build-ready.yml']),
+    )
   })
 
   it('actually contains the TAC-443 fix, not a stale extraction', () => {
@@ -74,7 +87,12 @@ describe('both workflows extract the identical repo-assignment rule', () => {
 // (before both tickets were hand-edited on 2026-09-17 to route around the
 // bug) — not re-fetched from Linear, since the live descriptions no longer
 // carry the wording this ticket exists to fix.
-const ACCEPT: Array<{ label: string; description: string; labels: string[]; expectOwner: string }> = [
+const ACCEPT: Array<{
+  label: string
+  description: string
+  labels: string[]
+  expectOwner: string
+}> = [
   {
     label: 'bare single-repo assignment',
     description: '**Repo:** analog-guest',
@@ -88,43 +106,63 @@ const ACCEPT: Array<{ label: string; description: string; labels: string[]; expe
     expectOwner: 'analog-guest',
   },
   {
-    label: "TAC-389's original line — parenthetical then an explanatory clause naming the other repo",
-    description: '**Repo:** analog-guest (the endpoint). Reached from analog-operator, but the defect is server-side.',
+    label:
+      "TAC-389's original line — parenthetical then an explanatory clause naming the other repo",
+    description:
+      '**Repo:** analog-guest (the endpoint). Reached from analog-operator, but the defect is server-side.',
     labels: ['analog-guest'],
     expectOwner: 'analog-guest',
   },
   {
-    label: "TAC-386's original line — a clause stating the other repo is NOT touched",
-    description: '**Repo:** analog-guest. No analog-operator changes, so no ## Contract section.',
+    label:
+      "TAC-386's original line — a clause stating the other repo is NOT touched",
+    description:
+      '**Repo:** analog-guest. No analog-operator changes, so no ## Contract section.',
     labels: ['analog-guest'],
     expectOwner: 'analog-guest',
   },
   {
-    label: "TAC-412's exact line — a second repo named conditionally, pending an open question",
-    description: '**Repo:** analog-operator. Possibly analog-guest too, depending on Open question 1.',
+    label:
+      "TAC-412's exact line — a second repo named conditionally, pending an open question",
+    description:
+      '**Repo:** analog-operator. Possibly analog-guest too, depending on Open question 1.',
     labels: ['analog-operator'],
     expectOwner: 'analog-operator',
   },
 ]
 
 const REFUSE: Array<{ label: string; description: string }> = [
-  { label: '"and"-joined two-repo assignment', description: '**Repo:** analog-guest and analog-operator' },
-  { label: 'comma-joined two-repo assignment', description: '**Repo:** analog-guest, analog-operator' },
-  { label: '"+"-joined two-repo assignment', description: '**Repo:** analog-guest + analog-operator' },
+  {
+    label: '"and"-joined two-repo assignment',
+    description: '**Repo:** analog-guest and analog-operator',
+  },
+  {
+    label: 'comma-joined two-repo assignment',
+    description: '**Repo:** analog-guest, analog-operator',
+  },
+  {
+    label: '"+"-joined two-repo assignment',
+    description: '**Repo:** analog-guest + analog-operator',
+  },
 ]
 
 describe.each(Object.keys(RULES))('%s', (file) => {
   const rules = RULES[file]
 
-  describe.each(ACCEPT)('accepts: $label', ({ description, labels, expectOwner }) => {
-    it(`resolves to ${expectOwner}, not defect:multi-repo-line`, () => {
-      expect(owner(rules, description, labels)).toBe(expectOwner)
-    })
-  })
+  describe.each(ACCEPT)(
+    'accepts: $label',
+    ({ description, labels, expectOwner }) => {
+      it(`resolves to ${expectOwner}, not defect:multi-repo-line`, () => {
+        expect(owner(rules, description, labels)).toBe(expectOwner)
+      })
+    },
+  )
 
   describe.each(REFUSE)('refuses: $label', ({ description }) => {
     it('resolves to defect:multi-repo-line', () => {
-      expect(owner(rules, description, ['analog-guest'])).toBe('defect:multi-repo-line')
+      expect(owner(rules, description, ['analog-guest'])).toBe(
+        'defect:multi-repo-line',
+      )
     })
   })
 })

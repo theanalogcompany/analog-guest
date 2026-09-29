@@ -60,7 +60,10 @@ async function authenticateAdmin(): Promise<
     }
     return {
       ok: false,
-      response: NextResponse.json({ error: 'auth check failed' }, { status: 500 }),
+      response: NextResponse.json(
+        { error: 'auth check failed' },
+        { status: 500 },
+      ),
     }
   }
 }
@@ -79,13 +82,19 @@ export async function requireVenueAdmin(
   if (!UuidSchema.safeParse(venueId).success) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'invalid venueId' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'invalid venueId' },
+        { status: 400 },
+      ),
     }
   }
   if (!allowsVenue(auth.venueScope, venueId)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     }
   }
   return { ok: true, operatorId: auth.operatorId, venueId }
@@ -108,7 +117,10 @@ export async function requireCorpusEntryAdmin(
   if (!UuidSchema.safeParse(entryId).success) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'invalid entryId' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'invalid entryId' },
+        { status: 400 },
+      ),
     }
   }
 
@@ -130,13 +142,19 @@ export async function requireCorpusEntryAdmin(
   if (!row) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'corpus entry not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'corpus entry not found' },
+        { status: 404 },
+      ),
     }
   }
   if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     }
   }
 
@@ -166,7 +184,10 @@ export async function requireKnowledgeEntryAdmin(
   if (!UuidSchema.safeParse(entryId).success) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'invalid entryId' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'invalid entryId' },
+        { status: 400 },
+      ),
     }
   }
 
@@ -188,13 +209,19 @@ export async function requireKnowledgeEntryAdmin(
   if (!row) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'knowledge entry not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'knowledge entry not found' },
+        { status: 404 },
+      ),
     }
   }
   if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     }
   }
 
@@ -227,7 +254,10 @@ export async function requireKnowledgeEntriesAdmin(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'invalid entryIds', detail: 'at least 2 valid UUIDs required' },
+        {
+          error: 'invalid entryIds',
+          detail: 'at least 2 valid UUIDs required',
+        },
         { status: 400 },
       ),
     }
@@ -250,7 +280,10 @@ export async function requireKnowledgeEntriesAdmin(
   if (!rows || rows.length !== parsedIds.data.length) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'one or more knowledge entries not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'one or more knowledge entries not found' },
+        { status: 404 },
+      ),
     }
   }
 
@@ -269,7 +302,10 @@ export async function requireKnowledgeEntriesAdmin(
   if (!allowsVenue(auth.venueScope, venueId)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     }
   }
 
@@ -299,7 +335,10 @@ export async function requireMechanicAdmin(
   if (!UuidSchema.safeParse(mechanicId).success) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'invalid mechanicId' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'invalid mechanicId' },
+        { status: 400 },
+      ),
     }
   }
 
@@ -321,13 +360,19 @@ export async function requireMechanicAdmin(
   if (!row) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'mechanic not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'mechanic not found' },
+        { status: 404 },
+      ),
     }
   }
   if (!allowsVenue(auth.venueScope, row.venue_id)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     }
   }
 

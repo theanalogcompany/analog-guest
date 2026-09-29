@@ -117,7 +117,10 @@ function buildUserPrompt(input: VerifyCancellationClaimInput): string {
 export async function verifyCancellationClaim(
   input: VerifyCancellationClaimInput,
 ): Promise<AIResult<VerifyCancellationClaimResult>> {
-  if (typeof input.replyBody !== 'string' || input.replyBody.trim().length === 0) {
+  if (
+    typeof input.replyBody !== 'string' ||
+    input.replyBody.trim().length === 0
+  ) {
     return { ok: false, error: 'invalid_input' }
   }
 
@@ -162,6 +165,10 @@ export async function verifyCancellationClaim(
         errorCode: VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE,
       }
     }
-    return { ok: false, error: message, errorCode: 'ai_verify_cancellation_claim_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_verify_cancellation_claim_failed',
+    }
   }
 }

@@ -65,7 +65,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // voice sample, and should never be mistaken for one or fed back as a
     // corpus exemplar."
     voiceFidelity: 0,
-    reasoning: 'TAC-348: crisis-safety signal detected; fixed reply, not generated',
+    reasoning:
+      'TAC-348: crisis-safety signal detected; fixed reply, not generated',
     // TAC-509: the fixed crisis body is a hardcoded constant with no link in
     // it, so there is nothing to verify. Never derived here, because this
     // path deliberately never generates.
@@ -90,7 +91,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
       {
         body: CRISIS_SAFETY_REPLY_BODY,
         voiceFidelity: 0,
-        reasoning: 'TAC-348: crisis-safety signal detected; fixed reply, not generated',
+        reasoning:
+          'TAC-348: crisis-safety signal detected; fixed reply, not generated',
         requiresOperatorApproval: false,
         approvalReason: '',
         complaintIntent: 'none',

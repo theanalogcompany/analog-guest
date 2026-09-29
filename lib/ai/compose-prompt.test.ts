@@ -27,7 +27,12 @@ function makePersona(): BrandPersona {
 
 function makeVenueInfo(): VenueInfo {
   return VenueInfoSchema.parse({
-    address: { line1: '1 Test St', city: 'Test', region: 'CA', postalCode: '94000' },
+    address: {
+      line1: '1 Test St',
+      city: 'Test',
+      region: 'CA',
+      postalCode: '94000',
+    },
   })
 }
 
@@ -58,7 +63,9 @@ describe('composePrompt — knowledge block rendering (TAC-242)', () => {
   it('OMITS the ## Venue knowledge block when knowledgeChunks is undefined', () => {
     // undefined = retrieval was gated off (e.g., day_* cron). The block
     // should not appear at all.
-    const { systemPrompt } = composePrompt(makeInput({ knowledgeChunks: undefined }))
+    const { systemPrompt } = composePrompt(
+      makeInput({ knowledgeChunks: undefined }),
+    )
     expect(systemPrompt).not.toContain('## Venue knowledge')
   })
 
@@ -67,7 +74,9 @@ describe('composePrompt — knowledge block rendering (TAC-242)', () => {
     // lacked grounding so R9 (admit uncertainty) fires reliably.
     const { systemPrompt } = composePrompt(makeInput({ knowledgeChunks: [] }))
     expect(systemPrompt).toContain('## Venue knowledge')
-    expect(systemPrompt).toContain('No specific venue knowledge matched this query')
+    expect(systemPrompt).toContain(
+      'No specific venue knowledge matched this query',
+    )
   })
 
   it('RENDERS chunks with their primary/secondary tag lines when non-empty', () => {
@@ -79,7 +88,9 @@ describe('composePrompt — knowledge block rendering (TAC-242)', () => {
     expect(systemPrompt).toContain('[secondary: ethiopia]')
     expect(systemPrompt).toContain('> flagship blend story')
     // Non-empty path does not render the no-match framing.
-    expect(systemPrompt).not.toContain('No specific venue knowledge matched this query')
+    expect(systemPrompt).not.toContain(
+      'No specific venue knowledge matched this query',
+    )
   })
 })
 
@@ -96,7 +107,11 @@ describe('composePrompt — knowledge block rendering (TAC-242)', () => {
 
 // The three categories from the TAC-314 UAT table: the two that failed and the
 // one that passed. The promoted rules must render on ALL of them.
-const UAT_CATEGORIES = ['reply', 'recommendation_request', 'new_question'] as const
+const UAT_CATEGORIES = [
+  'reply',
+  'recommendation_request',
+  'new_question',
+] as const
 
 function systemPromptFor(category: MessageCategory): string {
   return composePrompt(makeInput({ category })).systemPrompt
@@ -109,17 +124,25 @@ describe('composePrompt — promoted universal rules render on every category (T
     )
   })
 
-  it.each(UAT_CATEGORIES)('nearby-places carve-out (R18) renders for %s', (category) => {
-    expect(systemPromptFor(category)).toContain(
-      "speak with the same confidence you'd use about the menu",
-    )
-  })
+  it.each(UAT_CATEGORIES)(
+    'nearby-places carve-out (R18) renders for %s',
+    (category) => {
+      expect(systemPromptFor(category)).toContain(
+        "speak with the same confidence you'd use about the menu",
+      )
+    },
+  )
 
-  it.each(UAT_CATEGORIES)('mirroring (R19) and length authority (R20) render for %s', (category) => {
-    const prompt = systemPromptFor(category)
-    expect(prompt).toContain('Match the register and length of what the guest sent')
-    expect(prompt).toContain('only authority on how long a message should be')
-  })
+  it.each(UAT_CATEGORIES)(
+    'mirroring (R19) and length authority (R20) render for %s',
+    (category) => {
+      const prompt = systemPromptFor(category)
+      expect(prompt).toContain(
+        'Match the register and length of what the guest sent',
+      )
+      expect(prompt).toContain('only authority on how long a message should be')
+    },
+  )
 
   it('category instructions still render after the universal block, per assembly order', () => {
     // The layering TAC-314 legislates for: universal rules render, then the
@@ -156,7 +179,9 @@ describe('composePrompt — promoted universal rules render on every category (T
     // not carry a length or sentence-count prescription.
     for (const category of UAT_CATEGORIES) {
       const prompt = systemPromptFor(category)
-      const tail = prompt.slice(prompt.indexOf('## Category-specific instructions:'))
+      const tail = prompt.slice(
+        prompt.indexOf('## Category-specific instructions:'),
+      )
       expect(tail).not.toMatch(
         /keep it short|short sentences? total|one short (line|message)|stay short|at or below the length/i,
       )
@@ -188,9 +213,13 @@ describe('composePrompt — recommendation-request references known order histor
     )
 
     // The instruction reaches the model.
-    expect(systemPrompt).toContain('## Category-specific instructions: recommendation_request')
+    expect(systemPrompt).toContain(
+      '## Category-specific instructions: recommendation_request',
+    )
     expect(systemPrompt).toContain('"## Visit history"')
-    expect(systemPrompt).toContain("Say so in one short clause naming what they've had")
+    expect(systemPrompt).toContain(
+      "Say so in one short clause naming what they've had",
+    )
 
     // The history it's being told to use actually reached the model too —
     // this is the half that fails if the plumbing regresses even though the
@@ -230,17 +259,18 @@ describe('composePrompt — recommendation-request references known order histor
 
 const SENDBLUE_OPENING_LINE =
   "You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's."
-const SENDBLUE_REGISTER_LINE = '- Sound like whichever of those would actually text: short, native, human.'
+const SENDBLUE_REGISTER_LINE =
+  '- Sound like whichever of those would actually text: short, native, human.'
 const SENDBLUE_PLAIN_TEXT_RULE =
   '- Plain text suitable for iMessage. No HTML, no markdown formatting in the message body, no headers or bullet points.'
 const SENDBLUE_HEADS_UP_EXAMPLES =
   'When your reply offers a comp, hold, or discount, ASK FOR THE HEADS-UP IN THE SAME BREATH AS THE OFFER, in the venue\'s voice. Examples: "comped you an oat latte, give me a heads up when you\'re heading over" / "next one\'s on us. text me when you\'re close." Do NOT ask the heads-up question separately or in a follow-up turn. For recommendations, only ask about arrival if timing actually matters for the item (e.g. "the duck is ready when you are. text me a heads-up if you want it tonight.").'
 const SENDBLUE_R1 =
-  '- Don\'t reference actions the guest didn\'t take. Don\'t say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest\'s history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest\'s first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know which number they just texted and why. Greet them on that basis, without assuming they\'re still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn\'t confirm.'
+  "- Don't reference actions the guest didn't take. Don't say \"you tapped in,\" \"thanks for stopping by,\" or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest's history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest's first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know which number they just texted and why. Greet them on that basis, without assuming they're still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm."
 const SENDBLUE_R5 =
-  '- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don\'t tell them to email, call, DM Instagram, or "ask next time you\'re in" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don\'t yet manage (e.g., "for reservations, use Resy" if Resy is the venue\'s booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don\'t push the guest to another channel.'
+  "- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don't tell them to email, call, DM Instagram, or \"ask next time you're in\" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don't yet manage (e.g., \"for reservations, use Resy\" if Resy is the venue's booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don't push the guest to another channel."
 const SENDBLUE_R32 =
-  "- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation."
+  '- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation.'
 const SENDBLUE_OPENER =
   "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
 const FIRST_TOUCH_SIGNAL =
@@ -253,14 +283,15 @@ const SENDBLUE_NAMED_PERSON =
 // the channel phrases; the scope guards in system-template.test.ts and
 // serializers.test.ts pin that nothing else moved.
 const INSTAGRAM_R1 =
-  '- Don\'t reference actions the guest didn\'t take. Don\'t say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest\'s history confirms it. If the only signal is an inbound message with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest\'s first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know who they just messaged and why. Greet them on that basis, without assuming they\'re still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn\'t confirm.'
+  "- Don't reference actions the guest didn't take. Don't say \"you tapped in,\" \"thanks for stopping by,\" or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest's history confirms it. If the only signal is an inbound message with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest's first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know who they just messaged and why. Greet them on that basis, without assuming they're still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm."
 const INSTAGRAM_R5 =
-  '- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don\'t tell them to email, call, text, or "ask next time you\'re in" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don\'t yet manage (e.g., "for reservations, use Resy" if Resy is the venue\'s booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don\'t push the guest to another channel.'
+  "- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don't tell them to email, call, text, or \"ask next time you're in\" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don't yet manage (e.g., \"for reservations, use Resy\" if Resy is the venue's booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don't push the guest to another channel."
 const INSTAGRAM_R32 =
   '- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already messaging you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to message again in the future for a different visit. That is a distinct, legitimate invitation.'
 const INSTAGRAM_OPENING_LINE =
   "You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests through Instagram messages, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's."
-const INSTAGRAM_REGISTER_LINE = '- Sound like whichever of those would actually message: short, native, human.'
+const INSTAGRAM_REGISTER_LINE =
+  '- Sound like whichever of those would actually message: short, native, human.'
 const INSTAGRAM_PLAIN_TEXT_RULE =
   '- Plain text. No HTML, no markdown formatting in the message body, no headers or bullet points.'
 const INSTAGRAM_HEADS_UP_EXAMPLES =
@@ -269,8 +300,10 @@ const INSTAGRAM_NAMED_PERSON =
   'You are Sana, staff at the venue, messaging as yourself. Do not sign messages with your name. You ARE that person, not an outside service representing it.'
 // The last two lines ruled on (2026-09-19). SMS transcribed from 40fc720;
 // Instagram from the approved wording.
-const SENDBLUE_UNKNOWN_CLOSE = 'It should sound like a real busy person texting back in their own natural voice.'
-const INSTAGRAM_UNKNOWN_CLOSE = 'It should sound like a real busy person messaging back in their own natural voice.'
+const SENDBLUE_UNKNOWN_CLOSE =
+  'It should sound like a real busy person texting back in their own natural voice.'
+const INSTAGRAM_UNKNOWN_CLOSE =
+  'It should sound like a real busy person messaging back in their own natural voice.'
 const SENDBLUE_CASUAL_FORMALITY =
   'casual — Use contractions; lowercase starts are fine; write the way you would text a friend.'
 const INSTAGRAM_CASUAL_FORMALITY =
@@ -278,7 +311,9 @@ const INSTAGRAM_CASUAL_FORMALITY =
 const INSTAGRAM_OPENER =
   "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
 
-function firstTouchInput(overrides: Partial<GenerateMessageInput> = {}): GenerateMessageInput {
+function firstTouchInput(
+  overrides: Partial<GenerateMessageInput> = {},
+): GenerateMessageInput {
   return makeInput({
     // Explicit, not inherited from makeInput: this is the Sendblue fixture,
     // and the pins below are the proof that a Sendblue guest still gets the
@@ -332,7 +367,9 @@ describe('composePrompt — Sendblue channel copy is pinned (TAC-495)', () => {
 
 describe('composePrompt — each channel gets its own channel copy (TAC-495)', () => {
   it('an Instagram conversation gets the Instagram R1, R5 and R32, and none of the SMS ones', () => {
-    const { systemPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    const { systemPrompt } = composePrompt(
+      firstTouchInput({ channel: 'instagram' }),
+    )
     expect(systemPrompt).toContain(`\n${INSTAGRAM_R1}\n`)
     expect(systemPrompt).toContain(`\n${INSTAGRAM_R5}\n`)
     expect(systemPrompt).toContain(`\n${INSTAGRAM_R32}\n`)
@@ -342,7 +379,9 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   })
 
   it('an Instagram conversation gets the Instagram opening line, register line, plain-text rule, heads-up examples and persona line', () => {
-    const { systemPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    const { systemPrompt } = composePrompt(
+      firstTouchInput({ channel: 'instagram' }),
+    )
     expect(systemPrompt.startsWith(`${INSTAGRAM_OPENING_LINE}\n`)).toBe(true)
     expect(systemPrompt).toContain(`\n${INSTAGRAM_REGISTER_LINE}\n`)
     expect(systemPrompt).toContain(`\n${INSTAGRAM_PLAIN_TEXT_RULE}\n`)
@@ -375,7 +414,11 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
     const residual = new Set<string>()
     for (const category of MESSAGE_CATEGORIES) {
       for (const formality of ['casual', 'warm', 'formal'] as const) {
-        for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
+        for (const speakerFraming of [
+          'venue',
+          'named_person',
+          'owner',
+        ] as const) {
           const { systemPrompt, userPrompt } = composePrompt(
             firstTouchInput({
               channel: 'instagram',
@@ -391,7 +434,10 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
             }),
           )
           for (const line of `${systemPrompt}\n${userPrompt}`.split('\n')) {
-            const unruled = SHARED_BY_RULING.reduce((rest, phrase) => rest.replace(phrase, ''), line)
+            const unruled = SHARED_BY_RULING.reduce(
+              (rest, phrase) => rest.replace(phrase, ''),
+              line,
+            )
             if (CHANNEL_CLAIM.test(unruled)) residual.add(line)
           }
         }
@@ -403,12 +449,16 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   // The two lines ruled on last, on the paths that render them: the unknown
   // category, and a casual venue.
   it('an unknown turn at a casual venue gets the Instagram category close and formality line, and none of the SMS ones', () => {
-    const ig = composePrompt(firstTouchInput({ channel: 'instagram', category: 'unknown' })).systemPrompt
+    const ig = composePrompt(
+      firstTouchInput({ channel: 'instagram', category: 'unknown' }),
+    ).systemPrompt
     expect(ig).toContain(INSTAGRAM_UNKNOWN_CLOSE)
     expect(ig).toContain(`\n${INSTAGRAM_CASUAL_FORMALITY}\n`)
     expect(ig).not.toContain(SENDBLUE_UNKNOWN_CLOSE)
     expect(ig).not.toContain(SENDBLUE_CASUAL_FORMALITY)
-    const sms = composePrompt(firstTouchInput({ channel: 'text', category: 'unknown' })).systemPrompt
+    const sms = composePrompt(
+      firstTouchInput({ channel: 'text', category: 'unknown' }),
+    ).systemPrompt
     expect(sms).toContain(SENDBLUE_UNKNOWN_CLOSE)
     expect(sms).toContain(`\n${SENDBLUE_CASUAL_FORMALITY}\n`)
     expect(sms).not.toContain(INSTAGRAM_UNKNOWN_CLOSE)
@@ -416,7 +466,9 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
   })
 
   it('an Instagram conversation gets the Instagram opener, and not the SMS one', () => {
-    const { userPrompt } = composePrompt(firstTouchInput({ channel: 'instagram' }))
+    const { userPrompt } = composePrompt(
+      firstTouchInput({ channel: 'instagram' }),
+    )
     expect(userPrompt).toContain(`\n${INSTAGRAM_OPENER}\n`)
     expect(userPrompt).not.toContain(SENDBLUE_OPENER)
   })
@@ -467,8 +519,12 @@ describe('composePrompt — each channel gets its own channel copy (TAC-495)', (
         .replace(INSTAGRAM_UNKNOWN_CLOSE, SENDBLUE_UNKNOWN_CLOSE)
     expect(backToSms(ig.systemPrompt)).toBe(sms.systemPrompt)
     expect(backToSms(ig.userPrompt)).toBe(sms.userPrompt)
-    const smsUnknown = composePrompt(firstTouchInput({ channel: 'text', category: 'unknown' }))
-    const igUnknown = composePrompt(firstTouchInput({ channel: 'instagram', category: 'unknown' }))
+    const smsUnknown = composePrompt(
+      firstTouchInput({ channel: 'text', category: 'unknown' }),
+    )
+    const igUnknown = composePrompt(
+      firstTouchInput({ channel: 'instagram', category: 'unknown' }),
+    )
     expect(backToSms(igUnknown.systemPrompt)).toBe(smsUnknown.systemPrompt)
     expect(backToSms(igUnknown.userPrompt)).toBe(smsUnknown.userPrompt)
   })
@@ -486,11 +542,16 @@ describe('composePrompt — R1 exception and the first-touch signal line move to
   const R1_TRIGGER =
     "when the context says this is the guest's first message after they scanned a sign at the venue"
 
-  it.each(['text', 'instagram', null] as const)('on channel %s, both halves render', (channel) => {
-    const { systemPrompt, userPrompt } = composePrompt(firstTouchInput({ channel }))
-    expect(systemPrompt).toContain(R1_TRIGGER)
-    expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
-  })
+  it.each(['text', 'instagram', null] as const)(
+    'on channel %s, both halves render',
+    (channel) => {
+      const { systemPrompt, userPrompt } = composePrompt(
+        firstTouchInput({ channel }),
+      )
+      expect(systemPrompt).toContain(R1_TRIGGER)
+      expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
+    },
+  )
 
   // Read from the production strings, not the literals above, so rewording
   // either side fails here.
@@ -498,7 +559,9 @@ describe('composePrompt — R1 exception and the first-touch signal line move to
     for (const channel of ['text', 'instagram'] as const) {
       const r1 = systemTemplateFor(channel)
         .split('\n')
-        .find((line) => line.startsWith("- Don't reference actions the guest didn't take."))
+        .find((line) =>
+          line.startsWith("- Don't reference actions the guest didn't take."),
+        )
       expect(r1).toBeDefined()
       for (const word of ['first message', 'scanned', 'sign']) {
         expect(r1).toContain(word)
@@ -512,7 +575,9 @@ describe('composePrompt — R1 exception and the first-touch signal line move to
   // the only thing that can trigger R1's exception.
   it('on a comp_complaint first touch, the signal line still renders without the opener', () => {
     for (const channel of ['text', 'instagram'] as const) {
-      const { userPrompt } = composePrompt(firstTouchInput({ channel, category: 'comp_complaint' }))
+      const { userPrompt } = composePrompt(
+        firstTouchInput({ channel, category: 'comp_complaint' }),
+      )
       expect(userPrompt).toContain(`\n${FIRST_TOUCH_SIGNAL}\n`)
       expect(userPrompt).not.toContain(SENDBLUE_OPENER)
       expect(userPrompt).not.toContain(INSTAGRAM_OPENER)
@@ -550,11 +615,14 @@ describe('composePrompt — R35 governs a challenge turn whatever category it la
     )
   })
 
-  it.each(CHALLENGE_CATEGORIES)('the boundary clause renders for %s', (category) => {
-    expect(systemPromptFor(category)).toContain(
-      "A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
-    )
-  })
+  it.each(CHALLENGE_CATEGORIES)(
+    'the boundary clause renders for %s',
+    (category) => {
+      expect(systemPromptFor(category)).toContain(
+        "A category's register guidance, whether it frames the turn as a close or as a holding response, is never authority over whether you correct the record.",
+      )
+    },
+  )
 
   it.each(CHALLENGE_CATEGORIES)(
     'the two prohibitions render for %s, so "ignore me, we are good" is banned on this turn',
@@ -573,7 +641,9 @@ describe('composePrompt — R35 governs a challenge turn whatever category it la
     'the %s block really does render after R35, which is why the clause exists',
     (category) => {
       const prompt = systemPromptFor(category)
-      const r35 = prompt.indexOf('When a guest questions or pushes back on something you said')
+      const r35 = prompt.indexOf(
+        'When a guest questions or pushes back on something you said',
+      )
       const categoryBlock = prompt.indexOf('## Category-specific instructions')
       expect(r35).toBeGreaterThan(-1)
       expect(categoryBlock).toBeGreaterThan(r35)
@@ -587,7 +657,9 @@ describe('composePrompt — R35 governs a challenge turn whatever category it la
   })
 
   it('acknowledgment still carries its own close framing, unchanged', () => {
-    expect(systemPromptFor('acknowledgment')).toContain('This is a close, not an opening')
+    expect(systemPromptFor('acknowledgment')).toContain(
+      'This is a close, not an opening',
+    )
   })
 })
 
@@ -603,10 +675,11 @@ describe('composePrompt — cacheable system split', () => {
     // someone reorders sections or changes a separator, this fails before the
     // behaviour reaches a model.
     for (const category of MESSAGE_CATEGORIES) {
-      const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } = composePrompt(
-        makeInput({ category, knowledgeChunks: [exampleChunk] }),
+      const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } =
+        composePrompt(makeInput({ category, knowledgeChunks: [exampleChunk] }))
+      expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(
+        systemPrompt,
       )
-      expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(systemPrompt)
     }
   })
 
@@ -614,17 +687,20 @@ describe('composePrompt — cacheable system split', () => {
     // The suffix is built by slicing off the first N sections, so an input
     // that omits the two optional blocks is the case where an off-by-one in
     // that slice would show up as a prefix swallowing the category block.
-    const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } = composePrompt(
-      makeInput({ ragChunks: [], knowledgeChunks: undefined }),
+    const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix } =
+      composePrompt(makeInput({ ragChunks: [], knowledgeChunks: undefined }))
+    expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(
+      systemPrompt,
     )
-    expect(`${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`).toBe(systemPrompt)
     expect(volatileSystemSuffix).toContain('## Category-specific instructions')
   })
 
   it('the prefix carries the venue-stable blocks and nothing per-message', () => {
     const { cacheableSystemPrefix } = composePrompt(
       makeInput({
-        ragChunks: [{ id: 'c1', text: 'RAG_MARKER_TEXT', sourceType: 'sample_text' }],
+        ragChunks: [
+          { id: 'c1', text: 'RAG_MARKER_TEXT', sourceType: 'sample_text' },
+        ],
         knowledgeChunks: [exampleChunk],
       }),
     )
@@ -636,7 +712,9 @@ describe('composePrompt — cacheable system split', () => {
     // invalidate the cache on every message and make the feature a pure cost.
     expect(cacheableSystemPrefix).not.toContain('RAG_MARKER_TEXT')
     expect(cacheableSystemPrefix).not.toContain('flagship blend story')
-    expect(cacheableSystemPrefix).not.toContain('## Category-specific instructions')
+    expect(cacheableSystemPrefix).not.toContain(
+      '## Category-specific instructions',
+    )
   })
 
   it('CACHE HITS: the prefix is byte-identical across messages to the same venue', () => {
@@ -646,7 +724,9 @@ describe('composePrompt — cacheable system split', () => {
     const a = composePrompt(
       makeInput({
         category: 'reply',
-        ragChunks: [{ id: 'c1', text: 'first chunk', sourceType: 'sample_text' }],
+        ragChunks: [
+          { id: 'c1', text: 'first chunk', sourceType: 'sample_text' },
+        ],
         knowledgeChunks: [exampleChunk],
         runtime: { inboundMessage: 'are you open' },
       }),
@@ -654,7 +734,13 @@ describe('composePrompt — cacheable system split', () => {
     const b = composePrompt(
       makeInput({
         category: 'acknowledgment',
-        ragChunks: [{ id: 'c2', text: 'a completely different chunk', sourceType: 'sample_text' }],
+        ragChunks: [
+          {
+            id: 'c2',
+            text: 'a completely different chunk',
+            sourceType: 'sample_text',
+          },
+        ],
         knowledgeChunks: undefined,
         runtime: { inboundMessage: 'thanks!' },
       }),
@@ -673,16 +759,25 @@ describe('composePrompt — cacheable system split', () => {
     const otherVenue = composePrompt(
       makeInput({
         venueInfo: VenueInfoSchema.parse({
-          address: { line1: '999 Other Ave', city: 'Elsewhere', region: 'NY', postalCode: '10001' },
+          address: {
+            line1: '999 Other Ave',
+            city: 'Elsewhere',
+            region: 'NY',
+            postalCode: '10001',
+          },
         }),
       }),
     )
     const otherChannel = composePrompt(makeInput({ channel: 'instagram' }))
-    expect(otherVenue.cacheableSystemPrefix).not.toBe(base.cacheableSystemPrefix)
-    expect(otherChannel.cacheableSystemPrefix).not.toBe(base.cacheableSystemPrefix)
+    expect(otherVenue.cacheableSystemPrefix).not.toBe(
+      base.cacheableSystemPrefix,
+    )
+    expect(otherChannel.cacheableSystemPrefix).not.toBe(
+      base.cacheableSystemPrefix,
+    )
   })
 
-  it('the prefix clears Sonnet 4.6\'s 1024-token cacheable minimum', () => {
+  it("the prefix clears Sonnet 4.6's 1024-token cacheable minimum", () => {
     // A prefix under the model's minimum silently does not cache: no error,
     // just cache_creation_input_tokens: 0 forever. The system template alone
     // is ~37k characters, so this has enormous headroom — the assertion exists

@@ -91,7 +91,12 @@ export function countSpecificHits(
       }
     }
   }
-  return { hits: hitLabels.length, available: specifics.length, hitLabels, matches }
+  return {
+    hits: hitLabels.length,
+    available: specifics.length,
+    hitLabels,
+    matches,
+  }
 }
 
 /**
@@ -174,7 +179,10 @@ export function repeatedPhrases(
   const threshold = Math.max(replies.length * maxShare, 1)
 
   const perReply = replies.map((r) => {
-    const words = fold(r).replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean)
+    const words = fold(r)
+      .replace(/[^a-z0-9' ]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
     const grams = new Set<string>()
     for (let i = 0; i + n <= words.length; i += 1) {
       grams.add(words.slice(i, i + n).join(' '))
@@ -234,7 +242,11 @@ export function repeatedPhrases(
   // inside a longer one is the same template.
   return merged
     .filter(
-      (p) => !merged.some((q) => q !== p && q.phrase.includes(p.phrase) && q.replies >= p.replies),
+      (p) =>
+        !merged.some(
+          (q) =>
+            q !== p && q.phrase.includes(p.phrase) && q.replies >= p.replies,
+        ),
     )
     .sort((a, b) => b.replies - a.replies || a.phrase.localeCompare(b.phrase))
 }

@@ -69,15 +69,20 @@ async function resolveCreatedVia(
     .eq('venue_id', venueId)
     .maybeSingle()
   if (error || !data) {
-    console.warn('webhook inbound: venue_configs lookup failed for enrollment check', {
-      venueId,
-      error: error?.message,
-    })
+    console.warn(
+      'webhook inbound: venue_configs lookup failed for enrollment check',
+      {
+        venueId,
+        error: error?.message,
+      },
+    )
     return 'inbound_message'
   }
 
   const parsed = VenueInfoSchema.safeParse(data.venue_info)
-  const enrollmentMessage = parsed.success ? parsed.data.qrEnrollmentMessage?.trim() : undefined
+  const enrollmentMessage = parsed.success
+    ? parsed.data.qrEnrollmentMessage?.trim()
+    : undefined
   if (!enrollmentMessage) return 'inbound_message'
 
   return trimmedBody === enrollmentMessage ? 'qr_scan' : 'inbound_message'
@@ -142,7 +147,11 @@ async function handleInbound(
     const nowIso = new Date().toISOString()
     // TAC-323: resolves to 'qr_scan' when the trimmed body exactly matches
     // this venue's qrEnrollmentMessage, else 'inbound_message'.
-    const createdVia = await resolveCreatedVia(supabase, venue.id, payload.content ?? null)
+    const createdVia = await resolveCreatedVia(
+      supabase,
+      venue.id,
+      payload.content ?? null,
+    )
     const { data: newGuest, error: insertGuestError } = await supabase
       .from('guests')
       .insert({
@@ -186,14 +195,18 @@ async function handleInbound(
 
   const mediaUrl = payload.media_url ?? null
   const hasContent = Boolean(payload.content && payload.content.length > 0)
-  const mediaUrls: string[] = mediaUrl !== null && mediaUrl.length > 0 ? [mediaUrl] : []
+  const mediaUrls: string[] =
+    mediaUrl !== null && mediaUrl.length > 0 ? [mediaUrl] : []
   const hasMedia = mediaUrls.length > 0
   if (!hasContent && !hasMedia) {
-    console.warn('webhook inbound: empty content (no body, no media); skipping insert', {
-      messageHandle: payload.message_handle,
-      venueId: venue.id,
-      guestId,
-    })
+    console.warn(
+      'webhook inbound: empty content (no body, no media); skipping insert',
+      {
+        messageHandle: payload.message_handle,
+        venueId: venue.id,
+        guestId,
+      },
+    )
     return new Response('OK', { status: 200 })
   }
 
@@ -248,9 +261,12 @@ async function handleStatusUpdate(
   if (payload.status === 'RECEIVED') {
     // Shouldn't happen — RECEIVED is for inbound messages, but Sendblue's
     // schema doesn't formally couple status to is_outbound, so guard it.
-    console.warn('webhook status: RECEIVED status on outbound webhook path; ignoring', {
-      messageHandle: payload.message_handle,
-    })
+    console.warn(
+      'webhook status: RECEIVED status on outbound webhook path; ignoring',
+      {
+        messageHandle: payload.message_handle,
+      },
+    )
     return new Response('OK', { status: 200 })
   }
 
@@ -288,7 +304,9 @@ async function handleStatusUpdate(
   }
   if (newStatus === 'failed') {
     // error_code can be string or number per Sendblue docs; coerce to string.
-    update.failure_reason = String(payload.error_message ?? payload.error_code ?? 'unknown')
+    update.failure_reason = String(
+      payload.error_message ?? payload.error_code ?? 'unknown',
+    )
   }
 
   const { error: updateError } = await supabase
@@ -348,7 +366,10 @@ export async function POST(request: Request): Promise<Response> {
       parsedJson = JSON.parse(rawBody)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      console.error('webhook: invalid JSON', { url: request.url, error: message })
+      console.error('webhook: invalid JSON', {
+        url: request.url,
+        error: message,
+      })
       return new Response('Invalid payload', { status: 400 })
     }
 
@@ -386,7 +407,11 @@ export async function POST(request: Request): Promise<Response> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     const stack = e instanceof Error ? e.stack : undefined
-    console.error('webhook: unexpected error', { url: request.url, error: message, stack })
+    console.error('webhook: unexpected error', {
+      url: request.url,
+      error: message,
+      stack,
+    })
     return new Response('Internal error', { status: 500 })
   }
 }

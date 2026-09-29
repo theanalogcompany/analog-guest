@@ -23,8 +23,12 @@ const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const ORIGINAL = process.env.INSTAGRAM_APP_SECRET
 
 function signedRequest(payload: unknown, secret = SECRET): string {
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-  const signature = createHmac('sha256', secret).update(payloadB64).digest('base64url')
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+    'base64url',
+  )
+  const signature = createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64url')
   return `${signature}.${payloadB64}`
 }
 
@@ -32,10 +36,13 @@ function call(body: string | null): Promise<Response> {
   const form = new FormData()
   if (body !== null) form.set('signed_request', body)
   return POST(
-    new Request('https://webhooks.theanalog.company/api/instagram/deauthorize', {
-      method: 'POST',
-      body: form,
-    }),
+    new Request(
+      'https://webhooks.theanalog.company/api/instagram/deauthorize',
+      {
+        method: 'POST',
+        body: form,
+      },
+    ),
   )
 }
 
@@ -47,7 +54,12 @@ function loggedText(): string {
   return logged
     .map((args) =>
       formatWithOptions(
-        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        {
+          depth: Infinity,
+          maxArrayLength: Infinity,
+          maxStringLength: Infinity,
+          breakLength: Infinity,
+        },
         ...args,
       ),
     )
@@ -75,7 +87,11 @@ describe('POST /api/instagram/deauthorize', () => {
   it('marks the venue disconnected for the account Meta named', async () => {
     const res = await call(signedRequest({ user_id: ACCOUNT_ID }))
     expect(res.status).toBe(200)
-    expect(deauthorizeMock).toHaveBeenCalledWith(expect.anything(), ACCOUNT_ID, expect.any(Date))
+    expect(deauthorizeMock).toHaveBeenCalledWith(
+      expect.anything(),
+      ACCOUNT_ID,
+      expect.any(Date),
+    )
   })
 
   // A revoked connection says nothing about past data. Erasure is the
@@ -87,14 +103,20 @@ describe('POST /api/instagram/deauthorize', () => {
   })
 
   it.each([
-    ['a forged signature', () => signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret')],
+    [
+      'a forged signature',
+      () => signedRequest({ user_id: ACCOUNT_ID }, 'wrong-secret'),
+    ],
     ['a malformed value', () => 'not-a-signed-request'],
-  ])('refuses %s with 403 and an empty body, writing nothing', async (_label, make) => {
-    const res = await call(make())
-    expect(res.status).toBe(403)
-    expect(await res.text()).toBe('')
-    expect(deauthorizeMock).not.toHaveBeenCalled()
-  })
+  ])(
+    'refuses %s with 403 and an empty body, writing nothing',
+    async (_label, make) => {
+      const res = await call(make())
+      expect(res.status).toBe(403)
+      expect(await res.text()).toBe('')
+      expect(deauthorizeMock).not.toHaveBeenCalled()
+    },
+  )
 
   it('refuses a request with no signed_request field', async () => {
     const res = await call(null)

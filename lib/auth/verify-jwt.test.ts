@@ -54,14 +54,10 @@ function makeSupabaseMock(opts: {
     },
     from: vi.fn((table: string) => {
       if (table === 'operators') {
-        return makeBuilder(
-          opts.operatorsResult ?? { data: null, error: null },
-        )
+        return makeBuilder(opts.operatorsResult ?? { data: null, error: null })
       }
       if (table === 'operator_venues') {
-        return makeBuilder(
-          opts.venuesResult ?? { data: [], error: null },
-        )
+        return makeBuilder(opts.venuesResult ?? { data: [], error: null })
       }
       throw new Error(`unexpected table in test: ${table}`)
     }),
@@ -104,7 +100,9 @@ describe('verifyOperatorRequest', () => {
   })
 
   it('throws AuthError(401) when Authorization header is missing', async () => {
-    await expect(verifyOperatorRequest(bearerRequest(null))).rejects.toMatchObject({
+    await expect(
+      verifyOperatorRequest(bearerRequest(null)),
+    ).rejects.toMatchObject({
       name: 'AuthError',
       status: 401,
       message: expect.stringContaining('missing'),
@@ -114,7 +112,10 @@ describe('verifyOperatorRequest', () => {
   it('throws AuthError(401) when header is malformed (no "Bearer")', async () => {
     await expect(
       verifyOperatorRequest(bearerRequest('blah-token')),
-    ).rejects.toMatchObject({ status: 401, message: expect.stringContaining('malformed') })
+    ).rejects.toMatchObject({
+      status: 401,
+      message: expect.stringContaining('malformed'),
+    })
   })
 
   it('throws AuthError(401) when the bearer token is empty after trim', async () => {
@@ -123,7 +124,10 @@ describe('verifyOperatorRequest', () => {
     // after the spaces.
     await expect(
       verifyOperatorRequest(bearerRequest('Bearer    ')),
-    ).rejects.toMatchObject({ status: 401, message: expect.stringContaining('malformed') })
+    ).rejects.toMatchObject({
+      status: 401,
+      message: expect.stringContaining('malformed'),
+    })
   })
 
   it('throws AuthError(401) when auth.getUser returns an error', async () => {
@@ -148,7 +152,10 @@ describe('verifyOperatorRequest', () => {
 
     await expect(
       verifyOperatorRequest(bearerRequest('Bearer x')),
-    ).rejects.toMatchObject({ status: 401, message: expect.stringContaining('no user') })
+    ).rejects.toMatchObject({
+      status: 401,
+      message: expect.stringContaining('no user'),
+    })
   })
 
   it('throws AuthError(401) when no matching operator row exists and lazy-link fails', async () => {
@@ -172,7 +179,10 @@ describe('verifyOperatorRequest', () => {
 
   it('lazy-links and returns operatorId when the OR lookup misses but linkOperator succeeds', async () => {
     const mock = makeSupabaseMock({
-      authUserResult: { data: { user: { id: 'auth-newly-linked' } }, error: null },
+      authUserResult: {
+        data: { user: { id: 'auth-newly-linked' } },
+        error: null,
+      },
       operatorsResult: { data: null, error: null }, // miss on initial lookup
       venuesResult: { data: [{ venue_id: 'venue-x' }], error: null },
     })
@@ -245,7 +255,10 @@ describe('verifyOperatorRequest', () => {
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
 
     const out = await verifyOperatorRequest(bearerRequest('Bearer good-jwt'))
-    expect(out).toEqual({ operatorId: 'operator-1', venueScope: grantedVenues([]) })
+    expect(out).toEqual({
+      operatorId: 'operator-1',
+      venueScope: grantedVenues([]),
+    })
   })
 
   it('uses AuthError class instances (instanceof check)', async () => {

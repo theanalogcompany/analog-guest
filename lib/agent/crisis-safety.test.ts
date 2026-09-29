@@ -25,7 +25,9 @@ describe('CRISIS_SAFETY_REPLY_BODY (TAC-348)', () => {
   it('does not name a venue, staff member, or menu item', () => {
     // Loose guard: the fixed body is short and hand-authored, so this is a
     // content sanity check rather than an exhaustive scan.
-    expect(CRISIS_SAFETY_REPLY_BODY).not.toMatch(/menu|perk|drink|latte|cortado|cafe|café/i)
+    expect(CRISIS_SAFETY_REPLY_BODY).not.toMatch(
+      /menu|perk|drink|latte|cortado|cafe|café/i,
+    )
   })
 
   it('does not ask a clarifying question', () => {

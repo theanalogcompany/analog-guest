@@ -38,7 +38,9 @@ interface AdminMockState {
   updateError: { message: string } | null
 }
 
-function newAdminState(overrides: Partial<AdminMockState> = {}): AdminMockState {
+function newAdminState(
+  overrides: Partial<AdminMockState> = {},
+): AdminMockState {
   return {
     persona: { ...validPersona },
     readError: null,
@@ -135,7 +137,10 @@ describe('PATCH /admin/voices/api/persona/[venueId] — happy path', () => {
     )
     expect(res.status).toBe(200)
     expect(state.updateCalls).toHaveLength(1)
-    const persona = state.updateCalls[0].payload.brand_persona as Record<string, unknown>
+    const persona = state.updateCalls[0].payload.brand_persona as Record<
+      string,
+      unknown
+    >
     expect(persona.voiceName).toBe('Sana')
     expect(persona.formality).toBe('formal')
     // Untouched fields preserved.
@@ -149,7 +154,10 @@ describe('PATCH /admin/voices/api/persona/[venueId] — happy path', () => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const res = await PATCH(buildRequest({ tone: 'updated tone' }), buildParams(VENUE_ID))
+    const res = await PATCH(
+      buildRequest({ tone: 'updated tone' }),
+      buildParams(VENUE_ID),
+    )
     expect(res.status).toBe(200)
     const persona = state.updateCalls[0].payload.brand_persona as {
       voiceAntiPatterns: Array<Record<string, unknown>>

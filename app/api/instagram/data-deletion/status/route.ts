@@ -42,7 +42,13 @@ function page(heading: string, body: string, status: number): Response {
 </head>
 <body><main><h1>${heading}</h1><p>${body}</p></main></body>
 </html>`,
-    { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } },
+    {
+      status,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    },
   )
 }
 
@@ -51,7 +57,11 @@ export async function GET(request: Request): Promise<Response> {
   // A confirmation code is 32 hex characters. Anything else cannot match a
   // row, and refusing it here keeps arbitrary input out of the query.
   if (!code || !/^[0-9a-f]{32}$/.test(code)) {
-    return page('Data deletion request', 'We have no record of that request.', 404)
+    return page(
+      'Data deletion request',
+      'We have no record of that request.',
+      404,
+    )
   }
 
   const { data, error } = await createAdminClient()
@@ -74,7 +84,10 @@ export async function GET(request: Request): Promise<Response> {
 
   // An unknown code and a pending one read the same, so this cannot be used
   // to discover which codes are real.
-  if (!data || (data as { completed_at: string | null }).completed_at === null) {
+  if (
+    !data ||
+    (data as { completed_at: string | null }).completed_at === null
+  ) {
     return page(
       'Data deletion request',
       'We have no completed record for that request. If you have just made it, it may still be in progress.',

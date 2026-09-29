@@ -49,7 +49,11 @@ export async function POST(
   if (!result.ok) {
     const status = result.errorCode === 'embed_failed' ? 502 : 500
     return NextResponse.json(
-      { error: 'knowledge add failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'knowledge add failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

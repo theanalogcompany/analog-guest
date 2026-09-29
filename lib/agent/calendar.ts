@@ -55,7 +55,10 @@ export function computeCalendar(
   }).format(now)
   const [year, month, day] = localIso.split('-').map(Number)
 
-  const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
+  const weekdayFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+  })
   const monthDayFmt = new Intl.DateTimeFormat('en-US', {
     timeZone: 'UTC',
     month: 'short',
@@ -65,7 +68,10 @@ export function computeCalendar(
   const out: Array<{ weekday: string; monthDay: string }> = []
   for (let i = 0; i < CALENDAR_DAYS; i += 1) {
     const d = new Date(Date.UTC(year, month - 1, day + i))
-    out.push({ weekday: weekdayFmt.format(d), monthDay: monthDayFmt.format(d) })
+    out.push({
+      weekday: weekdayFmt.format(d),
+      monthDay: monthDayFmt.format(d),
+    })
   }
   return out
 }

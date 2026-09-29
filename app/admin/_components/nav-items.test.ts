@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  isNavItemActive,
-  NAV_GROUPS,
-  NAV_ITEMS,
-} from './nav-items'
+import { isNavItemActive, NAV_GROUPS, NAV_ITEMS } from './nav-items'
 
 // Guards the shared nav source (TAC-306). The sidebar and the ⌘K command
 // palette both read NAV_GROUPS, so these invariants keep their targets valid
@@ -42,14 +38,20 @@ describe('isNavItemActive', () => {
 
   it('section roots match themselves and descendant routes', () => {
     expect(isNavItemActive('/admin/voices', '/admin/voices')).toBe(true)
-    expect(isNavItemActive('/admin/voices', '/admin/voices/mock-cafe')).toBe(true)
-    expect(isNavItemActive('/admin/conversations', '/admin/conversations')).toBe(true)
+    expect(isNavItemActive('/admin/voices', '/admin/voices/mock-cafe')).toBe(
+      true,
+    )
+    expect(
+      isNavItemActive('/admin/conversations', '/admin/conversations'),
+    ).toBe(true)
   })
 
   it('non-matching paths are inactive', () => {
     expect(isNavItemActive('/admin/voices', '/admin/tunables')).toBe(false)
     expect(isNavItemActive('/admin/tunables', '/admin/voices')).toBe(false)
     // a sibling whose path is a string-prefix but not a route boundary
-    expect(isNavItemActive('/admin/voices', '/admin/voices-archive')).toBe(false)
+    expect(isNavItemActive('/admin/voices', '/admin/voices-archive')).toBe(
+      false,
+    )
   })
 })

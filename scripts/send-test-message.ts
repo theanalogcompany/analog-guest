@@ -17,11 +17,15 @@ async function main(): Promise<void> {
   const result = await sendMessage({ venueId, to, body })
 
   if (!result.ok) {
-    console.error(`✗ send failed: ${result.error}${result.errorCode ? ` (${result.errorCode})` : ''}`)
+    console.error(
+      `✗ send failed: ${result.error}${result.errorCode ? ` (${result.errorCode})` : ''}`,
+    )
     process.exit(1)
   }
 
-  console.log(`✓ sent | providerMessageId=${result.data.providerMessageId} | status=${result.data.status}`)
+  console.log(
+    `✓ sent | providerMessageId=${result.data.providerMessageId} | status=${result.data.status}`,
+  )
 }
 
 main().catch((e: unknown) => {
