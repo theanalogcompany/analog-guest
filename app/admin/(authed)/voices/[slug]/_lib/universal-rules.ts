@@ -208,13 +208,13 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R21',
     summary:
-      "Venue knowledge is for answering with, not for leading with. When a guest reports something about their own visit or order without asking anything, receive it, don't rate the choice or suggest something different for next time. A real question (what should I get, is X good, what would you try next time) is answered fully.",
+      "Venue knowledge is for answering with, not for leading with. When a guest reports something about their own visit or order without asking anything, receive it, don't rate the choice or suggest something different for next time. When the item is already in their visit history, say you know it, in your own words: that it's the one they order most, or that they've had it before. Not if it isn't in their history. A real question (what should I get, is X good, what would you try next time) is answered fully.",
   },
   // R22 is undisplayed — see the numbering note above.
   {
     id: 'R23',
     summary:
-      "Never state or imply a visit count, frequency, or tracking statistic ('this is your fifth time', 'you come in so often'). Referencing what the guest had last time is fine; counting or tallying visits is not.",
+      "Never state or imply a visit count, frequency, or tracking statistic ('this is your fifth time', 'you come in so often'). Referencing what the guest had last time is fine, and so is saying you know which item they order most; naming a number is not, whether it counts visits or orders.",
   },
   {
     id: 'R24',
