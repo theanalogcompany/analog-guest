@@ -14,6 +14,14 @@ describe('findCountClaim — the pre-registered R23 ceiling', () => {
     ['spelled number beside ordered', "you've ordered that three times"],
     ['number before been', "four times you've been in for that"],
     ['once beside had', "you've only had it once"],
+    // THE LIVE MISS. A real treatment reply in the first full run read exactly
+    // this, and the first version of TALLY_CONTEXT had no time-period words,
+    // so the clearest R23 breach in the run went undetected by the very
+    // ceiling written to catch it. A count over a period is the most natural
+    // way to state a frequency.
+    ['a count over a period', "that one's become your thing. third one in two weeks."],
+    ['days beside a digit', "3 days in a row now"],
+    ['months beside a spelled number', "four months running"],
   ])('finds a tally: %s', (_label, body) => {
     const v = findCountClaim(body)
     expect(v.found).toBe(true)

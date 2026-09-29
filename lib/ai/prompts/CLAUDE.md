@@ -120,6 +120,19 @@ block-order test is the only thing that catches a move past it.
   at a venue whose prompt said "not in every text".
 - **`sparingly` is empirically identical to `never`** (0 of 188 measured). Recorded, not
   fixed.
+- **Recognising a regular's usual order lives in R21 and R23, not in a category block and
+  not behind a counter signal.** A guest with cortado on 4 of 5 recorded visits typed "just
+  got a cortado" and the reply was "nice". The classifier is a coin flip on one word there
+  ("just got a X" is `casual_chatter`, "got a X" is `acknowledgment`, 4 of 4 each), both
+  categories are silent on recognition, and a new category needs `messages_category_check`
+  widened. R21 already had the exact trigger clause. **R23's carve-out is the part that
+  looks redundant and is not:** R23 renders after R21, so on most-proximate-wins it beats
+  the recognition clause, and its own "you come in so often" example is close enough to
+  "the one they order most" to pull the model both ways. Delete it and the change is
+  silently vetoed. Not counter-scoped: `scanArrival` is set only on the five-minute
+  greeting cron, and TAC-536's carry-forward reaches `visitConfirmedAt`, which goes to
+  intention arming and never to the prompt. Full reasoning is the v1.71.0 header in
+  `system-template.ts`.
 
 ---
 

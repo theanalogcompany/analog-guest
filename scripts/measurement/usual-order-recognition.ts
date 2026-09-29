@@ -95,6 +95,24 @@ const FREQUENT_BAR = 18
 const NEW_FALSE_CLAIM_CEILING = 0
 const TEMPLATE_MAX_SHARE = 0.25
 
+/**
+ * The n-gram width for the templating ceiling, and it is SMALL on purpose.
+ *
+ * A REPLY SHORTER THAN n PRODUCES NO n-GRAMS, so a ceiling set wider than the
+ * replies cannot fire and prints PASS having evaluated nothing. The first run
+ * of this harness used TAC-548's default of 5 against treatment replies of two
+ * and three words ("your usual", "your go-to"), which is exactly that: the
+ * templating bar was vacuous and the recurring two-word wording it exists to
+ * catch was invisible to it. TAC-548's own replies are sentences, so 5 is
+ * right there and wrong here.
+ *
+ * Here the reply IS the wording, so the phrase to catch is two words long.
+ * `repeatedPhrases` counts REPLIES containing a phrase against a share of the
+ * arm, so a 2-gram is only reported when it appears in more than a quarter of
+ * them, which is itself the definition of a template forming.
+ */
+const TEMPLATE_NGRAM = 2
+
 // ---------------------------------------------------------------------------
 // Scenarios
 // ---------------------------------------------------------------------------
@@ -702,18 +720,42 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
   }
 
   // BAR 3: templating. TAC-548's detector, whose default share is already the
-  // quarter this ticket asks for.
+  // quarter this ticket asks for, at the narrow width TEMPLATE_NGRAM explains.
   {
     const bodies = pick('frequent', 'treatment')
       .filter((r) => !r.invalid && r.reply !== null)
       .map((r) => r.reply as string)
-    const repeats = repeatedPhrases(bodies, { n: 5, maxShare: TEMPLATE_MAX_SHARE })
-    const ok = repeats.length === 0
-    if (!ok) failures.push(`templating: ${repeats.length} phrase(s) in more than a quarter of arm A treatment replies`)
-    console.log(
-      `${ok ? 'PASS' : 'FAIL'}  bar: no phrase in more than ${Math.round(TEMPLATE_MAX_SHARE * 100)}% of ${bodies.length} arm A treatment replies`,
-    )
-    for (const p of repeats) console.log(`      "${p.phrase}" in ${p.replies}/${bodies.length}`)
+
+    // A CEILING THAT CANNOT FIRE MUST SAY SO RATHER THAN PRINT PASS. A reply
+    // shorter than n produces no n-grams, so if most replies are shorter than
+    // the width this bar is evaluating nothing. Reported as a VOID bar and
+    // pushed to the failures list: an unevaluated ceiling is not a passed one.
+    const lengths = bodies
+      .map((b) => b.toLowerCase().replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean).length)
+      .sort((a, b) => a - b)
+    const median = lengths.length === 0 ? 0 : (lengths[Math.floor(lengths.length / 2)] as number)
+    const scorable = lengths.filter((l) => l >= TEMPLATE_NGRAM).length
+
+    if (bodies.length === 0 || scorable < bodies.length / 2) {
+      failures.push(
+        `templating bar VOID: only ${scorable}/${bodies.length} replies are at least ${TEMPLATE_NGRAM} words (median ${median}), so the ceiling evaluated almost nothing`,
+      )
+      console.log(
+        `VOID  bar: templating could not be evaluated - ${scorable}/${bodies.length} replies reach ${TEMPLATE_NGRAM} words (median ${median})`,
+      )
+    } else {
+      const repeats = repeatedPhrases(bodies, { n: TEMPLATE_NGRAM, maxShare: TEMPLATE_MAX_SHARE })
+      const ok = repeats.length === 0
+      if (!ok) {
+        failures.push(
+          `templating: ${repeats.length} phrase(s) in more than a quarter of arm A treatment replies`,
+        )
+      }
+      console.log(
+        `${ok ? 'PASS' : 'FAIL'}  bar: no ${TEMPLATE_NGRAM}-word phrase in more than ${Math.round(TEMPLATE_MAX_SHARE * 100)}% of ${bodies.length} arm A treatment replies (median length ${median})`,
+      )
+      for (const p of repeats) console.log(`      "${p.phrase}" in ${p.replies}/${bodies.length}`)
+    }
   }
 
   // ADVISORY, NOT BARS. Reported prominently because a visit-frequency claim

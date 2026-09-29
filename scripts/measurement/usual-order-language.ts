@@ -124,6 +124,23 @@ const TALLY_CONTEXT = new Set([
   'rounds',
   'stopped',
   'stop',
+  // TIME-PERIOD WORDS, added after a live miss. The first version had none,
+  // and a real treatment reply read "third one in two weeks" with no word
+  // from the list above anywhere near either number, so the ceiling this
+  // detector exists to enforce did not fire on the clearest breach in the
+  // run. A count over a period is the most natural way to state a frequency,
+  // which is precisely what R23 forbids.
+  'week',
+  'weeks',
+  'month',
+  'months',
+  'day',
+  'days',
+  'year',
+  'years',
+  'morning',
+  'mornings',
+  'row',
 ])
 
 /** How many words either side of a number are searched for tally context. */
