@@ -75,7 +75,7 @@ jobs:
       # a bug report against the test, not something to ignore. Local runs
       # stay retry-free so flakes surface loudly at the desk.
       - run: npx vitest run --retry=1 --reporter=default --reporter=junit --outputFile=vitest-junit.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: vitest-junit
