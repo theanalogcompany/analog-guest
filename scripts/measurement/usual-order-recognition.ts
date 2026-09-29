@@ -62,11 +62,14 @@ import type {
   KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
-import type { Visit } from '@/lib/ai/types'
+import type { RecentMessage as RuntimeMessage, Visit } from '@/lib/ai/types'
 import {
+  countWords,
   findCountClaim,
   findOtherHistoryItems,
+  findSellingLanguage,
   findVisitFrequencyClaim,
+  isBareLabel,
 } from './usual-order-language'
 import { repeatedPhrases } from './take-and-specifics-language'
 import { createRunLog } from './run-log'
@@ -79,7 +82,7 @@ import { createRunLog } from './run-log'
  * mismatch is a startup failure.
  */
 const R21_CLAUSE =
-  " Receiving it is not the same as saying as little as possible. When the item they named is already in this guest's ## Visit history, say so: that it's the one they order more than any other when the history shows it that way, or simply that they've had it before when it appears once or twice. Put it in your own words, the way someone behind the counter speaks to an order they recognize, and vary how you say it so it doesn't read as a script. Recognizing an order is not rating it, and this doesn't license a verdict on the choice. If the item is not in their history, say nothing about their history. A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know."
+  " Receiving it is not the same as saying as little as possible. When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them coming back and about the choice itself. That warmth is the one place this rule's ban on rating the choice gives way, and only here, because a guest you recognize is not a stranger whose order you are grading. Say it in your own words. Two or three words naming the order and nothing else is a label, not a sentence, and it is not this. Never put a number on any of it: not a count of visits or orders, not how often or how recently they come, not even when the dates in their history would let you work it out. Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has. That the beans can go home with them to brew is a natural aside inside that story, never an offer. All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks. Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up. Do not recite their history back to them in any of this. If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story. A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know. Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only."
 
 const R23_CLAUSE =
   ' This rule is about how often they have been here, not about what they order: telling a guest you know which item they order most is the order-recognition guidance above, and is not a visit statistic. What this rule forbids is naming a number, and that holds whether the number counts visits or orders.'
@@ -92,7 +95,6 @@ const JUDGE_REPS = 3
 
 /** The ticket's bars. */
 const FREQUENT_BAR = 18
-const NEW_FALSE_CLAIM_CEILING = 0
 const TEMPLATE_MAX_SHARE = 0.25
 
 /**
@@ -112,6 +114,7 @@ const TEMPLATE_MAX_SHARE = 0.25
  * them, which is itself the definition of a template forming.
  */
 const TEMPLATE_NGRAM = 2
+
 
 // ---------------------------------------------------------------------------
 // Scenarios
@@ -141,6 +144,14 @@ const SHAPES: readonly { visits: number; dominant: number }[] = [
   { visits: 3, dominant: 3 },
 ]
 
+/**
+ * Follow-up turns for the 3-turn same-guest check. Ordinary continuations, so
+ * the second and third replies are not themselves recognition turns: what is
+ * under test is whether a DETAIL or BEAN STORY repeats across a conversation,
+ * which the rule forbids and which no marker enforces.
+ */
+const FOLLOWUP_TURNS = ['back for another one', 'same again today']
+
 interface Unit {
   id: string
   /** 'frequent' is arm A, 'new' is arm B. */
@@ -149,9 +160,12 @@ interface Unit {
   namedItem: string
   /** The item that dominates the history. Equal to namedItem in arm A. */
   dominantItem: string
-  body: string
+  /** Turn bodies in order. Length 1 for a single-turn unit. */
+  turns: string[]
   visits: Visit[]
   historyItems: string[]
+  /** True when the named item is a coffee drink, so ruling 1(d) is reachable. */
+  beanStoryAvailable: boolean
 }
 
 /**
@@ -159,13 +173,33 @@ interface Unit {
  * derail a run: TAC-513 watched the model correctly answer "we don't actually
  * have a matcha on the menu", which would have scored as a miss while
  * measuring item existence rather than recognition.
+ *
+ * ARM A IS COFFEE-FIRST, deliberately. Ruling 1(d) is for a regular's usual
+ * DRINK, so a pastry can carry (c) and never (d), and a (d) rate computed
+ * mostly over pastries would understate it against a bar that expects it to be
+ * low but non-zero. Coffee drinks are taken first and pastries fill the tail,
+ * so both are represented and every unit records which it is.
  */
-function buildUnits(menu: string[], frequentCount: number, newCount: number): Unit[] {
+function buildUnits(
+  menu: string[],
+  frequentCount: number,
+  newCount: number,
+  multiTurnCount: number,
+): Unit[] {
   const units: Unit[] = []
   const now = Date.now()
   const day = 24 * 60 * 60 * 1000
 
-  const makeVisits = (dominant: string, filler: string[], shape: { visits: number; dominant: number }) => {
+  const coffee = menu.filter(isCoffeeDrink)
+  const other = menu.filter((m) => !isCoffeeDrink(m))
+  // Coffee first so (d) is reachable on as many arm A units as the menu allows.
+  const ordered = [...coffee, ...other]
+
+  const makeVisits = (
+    dominant: string,
+    filler: string[],
+    shape: { visits: number; dominant: number },
+  ) => {
     const visits: Visit[] = []
     for (let i = 0; i < shape.visits; i += 1) {
       const item = i < shape.dominant ? dominant : (filler[i % filler.length] as string)
@@ -177,29 +211,33 @@ function buildUnits(menu: string[], frequentCount: number, newCount: number): Un
   }
 
   for (let i = 0; i < frequentCount; i += 1) {
-    const dominant = menu[i % menu.length] as string
-    const filler = menu.filter((m) => m !== dominant)
+    const dominant = ordered[i % ordered.length] as string
+    const filler = ordered.filter((m) => m !== dominant)
     const shape = SHAPES[i % SHAPES.length] as { visits: number; dominant: number }
     const phrasing = PHRASINGS[i % PHRASINGS.length] as (item: string) => string
     const visits = makeVisits(dominant, filler, shape)
+    // The first `multiTurnCount` units run three turns on one guest.
+    const turns = [phrasing(dominant.toLowerCase())]
+    if (i < multiTurnCount) turns.push(...FOLLOWUP_TURNS)
     units.push({
       id: `freq-${String(i + 1).padStart(2, '0')}`,
       population: 'frequent',
       namedItem: dominant,
       dominantItem: dominant,
-      body: phrasing(dominant.toLowerCase()),
+      turns,
       visits,
       historyItems: [...new Set(visits.flatMap((v) => v.items))],
+      beanStoryAvailable: isCoffeeDrink(dominant),
     })
   }
 
   for (let i = 0; i < newCount; i += 1) {
     // The dominant item and the named item are DIFFERENT, and the named item
     // appears nowhere in the history. That is the whole of arm B.
-    const dominant = menu[i % menu.length] as string
-    const named = menu[(i + Math.floor(menu.length / 2)) % menu.length] as string
+    const dominant = ordered[i % ordered.length] as string
+    const named = ordered[(i + Math.floor(ordered.length / 2)) % ordered.length] as string
     if (named === dominant) continue
-    const filler = menu.filter((m) => m !== dominant && m !== named)
+    const filler = ordered.filter((m) => m !== dominant && m !== named)
     const shape = SHAPES[i % SHAPES.length] as { visits: number; dominant: number }
     const phrasing = PHRASINGS[i % PHRASINGS.length] as (item: string) => string
     const visits = makeVisits(dominant, filler.length > 0 ? filler : [dominant], shape)
@@ -210,15 +248,15 @@ function buildUnits(menu: string[], frequentCount: number, newCount: number): Un
       population: 'new',
       namedItem: named,
       dominantItem: dominant,
-      body: phrasing(named.toLowerCase()),
+      turns: [phrasing(named.toLowerCase())],
       visits,
       historyItems,
+      beanStoryAvailable: isCoffeeDrink(named),
     })
   }
 
   return units
 }
-
 // ---------------------------------------------------------------------------
 // The judge
 // ---------------------------------------------------------------------------
@@ -233,18 +271,34 @@ const JudgeSchema = z.object({
   reasoning: z.string(),
   recognizesPriorOrder: z.boolean(),
   claimsMostFrequent: z.boolean(),
+  complimentsReturning: z.boolean(),
+  complimentsChoice: z.boolean(),
   recitesHistory: z.boolean(),
   statesCount: z.boolean(),
+  includesItemDetail: z.boolean(),
+  includesBeanStory: z.boolean(),
+  /** The bean the reply names, verbatim, or the empty string. */
+  beanNamed: z.string(),
+  /** Set only when a detail or story is present and the chunks do not support it. */
+  detailUngrounded: z.boolean(),
+  readsAsSelling: z.boolean(),
 })
 
-const JUDGE_SYSTEM = `You are grading one reply a cafe sent to a guest who just told the venue what they ordered. You are given the guest's message, the reply, and the items that appear in that guest's recorded visit history.
+const JUDGE_SYSTEM = `You are grading one reply a cafe sent to a guest who just told the venue what they ordered. You are given the guest's message, the reply, the items in that guest's recorded visit history, and the venue knowledge the writer had available.
 
-Answer four questions about the REPLY only.
+Answer each question about the REPLY only.
 
 - recognizesPriorOrder: does the reply indicate, in any wording, that the guest has had this item before, or that the venue knows this order? Saying nothing about their history is false. Merely naming the item back is false on its own.
 - claimsMostFrequent: does the reply indicate this is what the guest usually gets, their regular order, or the one they get more than anything else? A plain "you've had that before" is false here and true for recognizesPriorOrder.
+- complimentsReturning: is there warmth about the guest coming back, being here again, or being glad to see them? Warmth about the ITEM is not this.
+- complimentsChoice: is there warmth or approval about the choice itself, the item being a good one?
 - recitesHistory: does the reply read the history back, listing past visits, naming dates, or naming other past items? A single reference to the item the guest just named is not reciting.
-- statesCount: does the reply state a number of visits or a number of times they have ordered something? A quantity in the guest's own order is not a count.
+- statesCount: does the reply state a number of visits, a number of times they have ordered something, or how often or how recently they come? A quantity in the guest's own order is not a count.
+- includesItemDetail: does the reply add a specific factual detail about the item itself, beyond recognising it? A flavour note, an ingredient, how it is made.
+- includesBeanStory: does the reply tell something about the coffee bean behind the drink: where it comes from, its variety or roast, why it tastes as it does? This is narrower than includesItemDetail.
+- beanNamed: if the reply names a specific coffee bean or blend, return that name exactly as the reply spells it. Otherwise return an empty string.
+- detailUngrounded: only when includesItemDetail or includesBeanStory is true, is any part of that detail absent from the venue knowledge given below? If both are false, return false.
+- readsAsSelling: does the reply read as selling rather than sharing? Naming a price, a bag size, a website, telling the guest to buy, or offering to sell. Mentioning that people take beans home to brew is NOT selling on its own.
 
 Judge the wording as written. Do not reward or penalise tone.`
 
@@ -252,15 +306,20 @@ async function judge(
   guestMessage: string,
   reply: string,
   historyItems: readonly string[],
+  knowledgeTexts: readonly string[],
 ): Promise<z.infer<typeof JudgeSchema> | null> {
+  const knowledge =
+    knowledgeTexts.length === 0
+      ? '(none was retrieved for this turn)'
+      : knowledgeTexts.map((t, i) => `[${i + 1}] ${t}`).join('\n')
   try {
     const { object } = await generateObject({
       model: getClassificationModel(),
       system: JUDGE_SYSTEM,
-      prompt: `Guest message: "${guestMessage}"\n\nReply: "${reply}"\n\nItems in this guest's recorded visit history: ${historyItems.join(', ')}\n\nGrade the reply.`,
+      prompt: `Guest message: "${guestMessage}"\n\nReply: "${reply}"\n\nItems in this guest's recorded visit history: ${historyItems.join(', ')}\n\nVenue knowledge available to the writer:\n${knowledge}\n\nGrade the reply.`,
       schema: JudgeSchema,
       temperature: 0.2,
-      maxOutputTokens: 400,
+      maxOutputTokens: 700,
     })
     return object
   } catch {
@@ -269,40 +328,52 @@ async function judge(
 }
 
 /** Majority over JUDGE_REPS, with the split kept so instability is visible. */
-interface JudgeVerdict {
-  recognizesPriorOrder: number
-  claimsMostFrequent: number
-  recitesHistory: number
-  statesCount: number
+/** Every boolean the judge answers, counted over the repeats. */
+const JUDGE_FLAGS = [
+  'recognizesPriorOrder',
+  'claimsMostFrequent',
+  'complimentsReturning',
+  'complimentsChoice',
+  'recitesHistory',
+  'statesCount',
+  'includesItemDetail',
+  'includesBeanStory',
+  'detailUngrounded',
+  'readsAsSelling',
+] as const
+type JudgeFlag = (typeof JUDGE_FLAGS)[number]
+
+type JudgeVerdict = Record<JudgeFlag, number> & {
   reps: number
   failures: number
   reasonings: string[]
+  /** Every bean name the repeats returned, so a disagreement is visible. */
+  beansNamed: string[]
 }
 
 async function judgeRepeatedly(
   guestMessage: string,
   reply: string,
   historyItems: readonly string[],
+  knowledgeTexts: readonly string[],
 ): Promise<JudgeVerdict> {
+  const counts = Object.fromEntries(JUDGE_FLAGS.map((f) => [f, 0])) as Record<JudgeFlag, number>
   const v: JudgeVerdict = {
-    recognizesPriorOrder: 0,
-    claimsMostFrequent: 0,
-    recitesHistory: 0,
-    statesCount: 0,
+    ...counts,
     reps: JUDGE_REPS,
     failures: 0,
     reasonings: [],
+    beansNamed: [],
   }
   for (let i = 0; i < JUDGE_REPS; i += 1) {
-    const r = await judge(guestMessage, reply, historyItems)
+    const r = await judge(guestMessage, reply, historyItems, knowledgeTexts)
     if (r === null) {
       v.failures += 1
       continue
     }
-    if (r.recognizesPriorOrder) v.recognizesPriorOrder += 1
-    if (r.claimsMostFrequent) v.claimsMostFrequent += 1
-    if (r.recitesHistory) v.recitesHistory += 1
-    if (r.statesCount) v.statesCount += 1
+    for (const f of JUDGE_FLAGS) if (r[f]) v[f] += 1
+    const bean = r.beanNamed.trim()
+    if (bean !== '' && !v.beansNamed.includes(bean)) v.beansNamed.push(bean)
     if (i === 0) v.reasonings.push(r.reasoning)
   }
   return v
@@ -332,26 +403,243 @@ interface UnitRecord {
   error: string | null
   generationCalls: number
   judge: JudgeVerdict | null
-  recognizes: boolean
-  claimsUsual: boolean
-  recites: boolean
-  statesCountJudge: boolean
+  /** Majority verdicts, one per judge flag. */
+  flags: Record<JudgeFlag, boolean>
+  /** True when (d) is even available: the named item is a coffee drink. */
+  beanStoryAvailable: boolean
+  /** Which turn of a multi-turn conversation this is, 1 for a single turn. */
+  turn: number
+  wordCount: number
+  bareLabel: boolean
   countClaimMatches: string[]
+  sellingMatches: string[]
   visitFrequencyMatches: string[]
   otherHistoryItemMatches: string[]
+}
+
+/**
+ * Whether ruling 1(d) is even reachable for this item. The bean story is for a
+ * regular's usual DRINK, so a pastry can carry (c) and never (d), and a (d)
+ * rate computed over pastries would understate it. Reported per unit rather
+ * than assumed, and a bean story ON a pastry is a finding rather than a hit.
+ */
+const COFFEE_WORDS =
+  /\b(?:espresso|cortado|latte|cappuccino|americano|macchiato|mocha|coffee|cold brew|pour over|pourover|filter|drip|flat white)\b/i
+
+function isCoffeeDrink(item: string): boolean {
+  return COFFEE_WORDS.test(item)
 }
 
 function parseIntArg(name: string, fallback: number): number {
   const raw = process.env[name]
   if (raw === undefined) return fallback
   const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+  // ZERO IS A VALID ANSWER and must not fall back. The first version required
+  // `> 0`, so MEASURE_MULTITURN=0 silently ran three multi-turn units, which
+  // is the "a flag that cannot express what it looks like it expresses" shape.
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+}
+
+/**
+ * The message history each unit runs against, and why it is NOT the real
+ * guest's.
+ *
+ * The base context is built from Le Mil's busiest real guest so the venue,
+ * persona and corpus are genuine. Their MESSAGE history cannot be reused, for
+ * two independent reasons found by reading a smoke run:
+ *
+ *   1. IT CONTAINS THE INCIDENT. The tail holds, verbatim, "just got a
+ *      cortado" answered with "nice", which is the defect this ticket exists
+ *      to fix. Every unit in BOTH arms would inherit a worked demonstration of
+ *      the failure, and the model imitates its own tail (TAC-544 records the
+ *      same mechanism for names). The arm comparison would survive that, since
+ *      the confound is identical on both sides, but the absolute rate the bar
+ *      is read from would not.
+ *   2. IT IS INCOHERENT WITH THE UNIT. That history is about cortados and
+ *      filter coffee, while a unit may be a Pour Over or a pastry regular. A
+ *      fixture whose history contradicts its own premise is not realism.
+ *
+ * So each unit gets a short, neutral prior exchange instead: enough that the
+ * thread is not a first message, and carrying nothing that teaches either
+ * terseness or warmth on an order report. Unrelated to the item on purpose.
+ */
+function buildUnitHistory(now: Date): RuntimeMessage[] {
+  const day = 24 * 60 * 60 * 1000
+  return [
+    {
+      direction: 'inbound',
+      body: 'what time do you close today',
+      createdAt: new Date(now.getTime() - 4 * day),
+      delivery: 'delivered',
+    },
+    {
+      direction: 'outbound',
+      body: 'open until 3 today ☕',
+      createdAt: new Date(now.getTime() - 4 * day + 60_000),
+      delivery: 'delivered',
+    },
+  ] as RuntimeMessage[]
+}
+
+
+// ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
+
+/**
+ * A network fault is not a result, and the ticket asks for the DNS losses to
+ * be retried. The first full run lost 6 of 20 arm A units to sustained
+ * `getaddrinfo ENOTFOUND` at concurrency 1, which left the bar unmeasurable
+ * rather than failed. A unit that ends invalid on a transport fault is retried
+ * after a pause; one that stays invalid is reported as such.
+ */
+const UNIT_RETRIES = 3
+const RETRY_PAUSE_MS = 20_000
+
+function looksTransient(error: string | null): boolean {
+  if (error === null) return false
+  return /ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|Cannot connect|socket hang up|rate.?limit|overloaded|529|503/i.test(
+    error,
+  )
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+interface TurnOutcome {
+  category: string | null
+  reply: string | null
+  error: string | null
+  invalid: boolean
+  calls: number
+  knowledgeTexts: string[]
+}
+
+/** One generated turn. `history` is appended to in place across a multi-turn unit. */
+async function generateTurn(
+  baseCtx: Awaited<ReturnType<typeof buildRuntimeContext>>,
+  unit: Unit,
+  arm: Arm,
+  turnIndex: number,
+  history: RuntimeMessage[],
+  channel: 'text' | 'instagram',
+  now: Date,
+): Promise<TurnOutcome> {
+  const out: TurnOutcome = {
+    category: null,
+    reply: null,
+    error: null,
+    invalid: false,
+    calls: 0,
+    knowledgeTexts: [],
+  }
+  const ctx = {
+    ...baseCtx,
+    recentVisits: unit.visits,
+    recentMessages: [...history],
+  } as typeof baseCtx
+  ctx.currentMessage = {
+    id: randomUUID(),
+    providerMessageId: `tac555-${unit.id}-${arm}-t${turnIndex}`,
+    body: unit.turns[turnIndex] as string,
+    receivedAt: new Date(now.getTime() + turnIndex * 120_000),
+    channel,
+    referralSource: null,
+  }
+
+  try {
+    const classification = await classifyStage(ctx)
+    ctx.classification = classification
+    out.category = classification.category
+    ctx.corpus = await retrieveCorpusStage(ctx)
+    ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
+      ? await retrieveKnowledgeStage(ctx, classification.category, unit.turns[turnIndex] as string)
+      : []
+
+    const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
+      id: c.id,
+      text: c.text,
+      sourceType: c.sourceType as AiVoiceCorpusChunk['sourceType'],
+      relevanceScore: c.similarity,
+    }))
+    const knowledgeChunks: AiKnowledgeCorpusChunk[] | undefined =
+      ctx.knowledgeCorpus === null
+        ? undefined
+        : ctx.knowledgeCorpus.map((c) => ({
+            id: c.id,
+            text: c.text,
+            sourceType: c.sourceType,
+            primaryTags: c.primaryTags,
+            secondaryTags: c.secondaryTags,
+            relevanceScore: c.similarity,
+          }))
+    // Kept so the judge grounds (c) and (d) against what the writer actually
+    // saw, rather than against the whole corpus.
+    out.knowledgeTexts = (knowledgeChunks ?? []).map((c) => c.text)
+
+    const composed = composePrompt({
+      category: classification.category,
+      persona: ctx.venue.brandPersona,
+      venueInfo: ctx.venue.venueInfo,
+      ragChunks,
+      knowledgeChunks,
+      runtime: buildAiRuntime(ctx),
+      channel: ctx.conversationChannel,
+    })
+
+    // THE ONE DIFFERENCE BETWEEN THE ARMS. Both clauses come out, each
+    // checked to have actually changed the prompt.
+    let systemBody = composed.systemPrompt
+    if (arm === 'control') {
+      for (const [label, clause] of [
+        ['R21', R21_CLAUSE],
+        ['R23', R23_CLAUSE],
+      ] as const) {
+        const stripped = systemBody.replace(clause, '')
+        if (stripped === systemBody) {
+          out.error = `control slice did not change the prompt (${label})`
+          out.invalid = true
+          return out
+        }
+        systemBody = stripped
+      }
+    }
+
+    // VOICE_FIDELITY_INSTRUCTION is appended exactly as generateMessage
+    // appends it. composePrompt does not include it, and without it the model
+    // answers voiceFidelity on a 1-to-10 scale the schema's [0,1] refine
+    // rejects, which the TAC-513 harness hit on 11 of its first 14 units.
+    const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      out.calls += 1
+      try {
+        const { object } = await generateObject({
+          model: getGenerationModel(),
+          system,
+          prompt: composed.userPrompt,
+          schema: GeneratedMessageSchema,
+          temperature: 0.7,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        })
+        out.reply = object.body
+        out.error = null
+        break
+      } catch (e) {
+        out.error = e instanceof Error ? e.message : String(e)
+      }
+    }
+  } catch (e) {
+    out.error = e instanceof Error ? e.message : String(e)
+  }
+
+  if (out.reply === null) out.invalid = true
+  return out
 }
 
 async function main() {
   const venueSlug = process.env.MEASURE_VENUE ?? 'le-mils-coffee'
   const frequentCount = parseIntArg('MEASURE_FREQUENT', 20)
   const newCount = parseIntArg('MEASURE_NEW', 10)
+  const multiTurnCount = parseIntArg('MEASURE_MULTITURN', 3)
 
   const db = createAdminClient()
 
@@ -451,7 +739,7 @@ async function main() {
     }
   }
 
-  const units = buildUnits(menu, frequentCount, newCount)
+  const units = buildUnits(menu, frequentCount, newCount, multiTurnCount)
   const startedAt = new Date()
   const log = createRunLog({
     name: 'tac555-usual-order-recognition',
@@ -463,6 +751,9 @@ async function main() {
       guestMessageCount,
       frequentUnits: units.filter((u) => u.population === 'frequent').length,
       newUnits: units.filter((u) => u.population === 'new').length,
+      multiTurnUnits: units.filter((u) => u.turns.length > 1).length,
+      coffeeUnitsInArmA: units.filter((u) => u.population === 'frequent' && u.beanStoryAvailable)
+        .length,
       judgeReps: JUDGE_REPS,
       menuItemsAvailable: menu.length,
       statesBefore,
@@ -470,7 +761,12 @@ async function main() {
   })
 
   console.log(`[tac555] venue ${venueSlug} | prompt ${PROMPT_VERSION} | channel ${channel}`)
-  console.log(`[tac555] ${units.length} units x ${ARMS.length} arms | judge reps ${JUDGE_REPS}`)
+  console.log(
+    `[tac555] ${units.length} units x ${ARMS.length} arms | ${units.filter((u) => u.turns.length > 1).length} multi-turn | judge reps ${JUDGE_REPS}`,
+  )
+  console.log(
+    `[tac555] arm A coffee units (bean story reachable): ${units.filter((u) => u.population === 'frequent' && u.beanStoryAvailable).length}/${units.filter((u) => u.population === 'frequent').length}`,
+  )
   console.log(`[tac555] guest_states rows before: ${statesBefore}`)
   console.log(`[tac555] run log: ${log.path}\n`)
 
@@ -478,158 +774,108 @@ async function main() {
 
   for (const unit of units) {
     for (const arm of ARMS) {
-      const ctx = { ...baseCtx, recentVisits: unit.visits } as typeof baseCtx
-      ctx.currentMessage = {
-        id: randomUUID(),
-        providerMessageId: `tac555-${unit.id}-${arm}`,
-        body: unit.body,
-        receivedAt: now,
-        channel,
-        referralSource: null,
-      }
+      // A fresh history per (unit, arm) so a multi-turn conversation's own
+      // replies cannot leak between arms.
+      const history: RuntimeMessage[] = buildUnitHistory(now)
 
-      let category: string | null = null
-      let reply: string | null = null
-      let error: string | null = null
-      let invalid = false
-      let calls = 0
+      for (let t = 0; t < unit.turns.length; t += 1) {
+        let outcome = await generateTurn(baseCtx, unit, arm, t, history, channel, now)
 
-      try {
-        const classification = await classifyStage(ctx)
-        ctx.classification = classification
-        category = classification.category
-        ctx.corpus = await retrieveCorpusStage(ctx)
-        ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-          ? await retrieveKnowledgeStage(ctx, classification.category, unit.body)
-          : []
-
-        const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
-          id: c.id,
-          text: c.text,
-          sourceType: c.sourceType as AiVoiceCorpusChunk['sourceType'],
-          relevanceScore: c.similarity,
-        }))
-        const knowledgeChunks: AiKnowledgeCorpusChunk[] | undefined =
-          ctx.knowledgeCorpus === null
-            ? undefined
-            : ctx.knowledgeCorpus.map((c) => ({
-                id: c.id,
-                text: c.text,
-                sourceType: c.sourceType,
-                primaryTags: c.primaryTags,
-                secondaryTags: c.secondaryTags,
-                relevanceScore: c.similarity,
-              }))
-
-        const composed = composePrompt({
-          category: classification.category,
-          persona: ctx.venue.brandPersona,
-          venueInfo: ctx.venue.venueInfo,
-          ragChunks,
-          knowledgeChunks,
-          runtime: buildAiRuntime(ctx),
-          channel: ctx.conversationChannel,
-        })
-
-        // THE ONE DIFFERENCE BETWEEN THE ARMS. Both clauses come out, each
-        // checked to have actually changed the prompt.
-        let systemBody = composed.systemPrompt
-        if (arm === 'control') {
-          for (const [label, clause] of [
-            ['R21', R21_CLAUSE],
-            ['R23', R23_CLAUSE],
-          ] as const) {
-            const stripped = systemBody.replace(clause, '')
-            if (stripped === systemBody) {
-              error = `control slice did not change the prompt (${label})`
-              invalid = true
-              break
-            }
-            systemBody = stripped
-          }
+        // RETRY A TRANSPORT FAULT, not a schema or slice failure. A slice
+        // failure is a real defect and retrying it would hide it.
+        for (let r = 0; r < UNIT_RETRIES && outcome.invalid && looksTransient(outcome.error); r += 1) {
+          console.log(`    ${unit.id} ${arm} t${t}: transient fault, retrying in ${RETRY_PAUSE_MS / 1000}s`)
+          await sleep(RETRY_PAUSE_MS)
+          outcome = await generateTurn(baseCtx, unit, arm, t, history, channel, now)
         }
 
-        if (!invalid) {
-          // VOICE_FIDELITY_INSTRUCTION is appended exactly as generateMessage
-          // appends it. composePrompt does not include it, and without it the
-          // model answers voiceFidelity on a 1-to-10 scale the schema's [0,1]
-          // refine rejects, which the TAC-513 harness hit on 11 of its first
-          // 14 generations.
-          const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
-          for (let attempt = 0; attempt < 4; attempt += 1) {
-            calls += 1
-            try {
-              const { object } = await generateObject({
-                model: getGenerationModel(),
-                system,
-                prompt: composed.userPrompt,
-                schema: GeneratedMessageSchema,
-                temperature: 0.7,
-                maxOutputTokens: MAX_OUTPUT_TOKENS,
-              })
-              reply = object.body
-              error = null
-              break
-            } catch (e) {
-              error = e instanceof Error ? e.message : String(e)
-            }
-          }
+        let invalid = outcome.invalid
+        const judgeVerdict =
+          outcome.reply === null
+            ? null
+            : await judgeRepeatedly(
+                unit.turns[t] as string,
+                outcome.reply,
+                unit.historyItems,
+                outcome.knowledgeTexts,
+              )
+        if (judgeVerdict !== null && judgeVerdict.failures === JUDGE_REPS) invalid = true
+
+        const flags = Object.fromEntries(
+          JUDGE_FLAGS.map((f) => [
+            f,
+            judgeVerdict !== null &&
+              majority(judgeVerdict[f], judgeVerdict.reps, judgeVerdict.failures),
+          ]),
+        ) as Record<JudgeFlag, boolean>
+
+        const reply = outcome.reply
+        const count = reply === null ? { found: false, matches: [] } : findCountClaim(reply)
+        const selling = reply === null ? { found: false, matches: [] } : findSellingLanguage(reply)
+        const freq = reply === null ? { found: false, matches: [] } : findVisitFrequencyClaim(reply)
+        const others =
+          reply === null
+            ? { found: false, matches: [] }
+            : findOtherHistoryItems(reply, unit.historyItems, unit.namedItem)
+
+        const rec: UnitRecord = {
+          unitId: unit.id,
+          population: unit.population,
+          arm,
+          namedItem: unit.namedItem,
+          dominantItem: unit.dominantItem,
+          historyItems: unit.historyItems,
+          guestMessage: unit.turns[t] as string,
+          category: outcome.category,
+          reply,
+          invalid,
+          error: outcome.error,
+          generationCalls: outcome.calls,
+          judge: judgeVerdict,
+          flags,
+          beanStoryAvailable: unit.beanStoryAvailable,
+          turn: t + 1,
+          wordCount: reply === null ? 0 : countWords(reply),
+          bareLabel: reply !== null && isBareLabel(reply),
+          countClaimMatches: count.matches,
+          sellingMatches: selling.matches,
+          visitFrequencyMatches: freq.matches,
+          otherHistoryItemMatches: others.matches,
         }
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e)
+        records.push(rec)
+        log.appendUnit(rec as unknown as Record<string, unknown>)
+
+        // Append this turn to the conversation so turn 2 and 3 see it.
+        if (reply !== null) {
+          history.push({
+            direction: 'inbound',
+            body: unit.turns[t] as string,
+            createdAt: new Date(now.getTime() + t * 120_000),
+            delivery: 'delivered',
+          } as RuntimeMessage)
+          history.push({
+            direction: 'outbound',
+            body: reply,
+            createdAt: new Date(now.getTime() + t * 120_000 + 30_000),
+            delivery: 'delivered',
+          } as RuntimeMessage)
+        }
+
+        const marks = [
+          rec.invalid ? 'INVALID' : '',
+          rec.flags.claimsMostFrequent ? 'usual' : rec.flags.recognizesPriorOrder ? 'had-before' : '',
+          rec.flags.complimentsReturning || rec.flags.complimentsChoice ? 'warm' : '',
+          rec.bareLabel ? 'LABEL' : '',
+          rec.flags.statesCount || rec.countClaimMatches.length > 0 ? 'COUNT' : '',
+          rec.flags.includesBeanStory ? 'bean' : rec.flags.includesItemDetail ? 'detail' : '',
+          rec.flags.readsAsSelling || rec.sellingMatches.length > 0 ? 'SELL' : '',
+        ]
+          .filter((m) => m !== '')
+          .join(' ')
+        console.log(
+          `  ${unit.id} t${t + 1} ${arm.padEnd(9)} [${(outcome.category ?? '?').padEnd(18)}] ${marks.padEnd(34)} ${JSON.stringify(reply ?? outcome.error)}`,
+        )
       }
-
-      // A FAILED UNIT IS NOT A RESULT. It can meet no expectation whatever its
-      // flags read (TAC-502 scored a run in which every call failed as clean).
-      if (reply === null) invalid = true
-
-      const judgeVerdict = reply === null ? null : await judgeRepeatedly(unit.body, reply, unit.historyItems)
-      if (judgeVerdict !== null && judgeVerdict.failures === JUDGE_REPS) invalid = true
-
-      const count = reply === null ? { found: false, matches: [] } : findCountClaim(reply)
-      const freq = reply === null ? { found: false, matches: [] } : findVisitFrequencyClaim(reply)
-      const others =
-        reply === null
-          ? { found: false, matches: [] }
-          : findOtherHistoryItems(reply, unit.historyItems, unit.namedItem)
-
-      const rec: UnitRecord = {
-        unitId: unit.id,
-        population: unit.population,
-        arm,
-        namedItem: unit.namedItem,
-        dominantItem: unit.dominantItem,
-        historyItems: unit.historyItems,
-        guestMessage: unit.body,
-        category,
-        reply,
-        invalid,
-        error,
-        generationCalls: calls,
-        judge: judgeVerdict,
-        recognizes:
-          judgeVerdict !== null &&
-          majority(judgeVerdict.recognizesPriorOrder, judgeVerdict.reps, judgeVerdict.failures),
-        claimsUsual:
-          judgeVerdict !== null &&
-          majority(judgeVerdict.claimsMostFrequent, judgeVerdict.reps, judgeVerdict.failures),
-        recites:
-          judgeVerdict !== null &&
-          majority(judgeVerdict.recitesHistory, judgeVerdict.reps, judgeVerdict.failures),
-        statesCountJudge:
-          judgeVerdict !== null &&
-          majority(judgeVerdict.statesCount, judgeVerdict.reps, judgeVerdict.failures),
-        countClaimMatches: count.matches,
-        visitFrequencyMatches: freq.matches,
-        otherHistoryItemMatches: others.matches,
-      }
-      records.push(rec)
-      log.appendUnit(rec as unknown as Record<string, unknown>)
-
-      const mark = rec.invalid ? 'INVALID' : rec.recognizes || rec.claimsUsual ? 'recognised' : '-'
-      console.log(
-        `  ${unit.id} ${arm.padEnd(9)} [${(category ?? '?').padEnd(18)}] ${mark.padEnd(10)} ${JSON.stringify(reply ?? error)}`,
-      )
     }
   }
 
@@ -645,8 +891,10 @@ async function main() {
 // ---------------------------------------------------------------------------
 
 function report(records: UnitRecord[], statesBefore: number, statesAfter: number, startedAt: Date) {
+  // The RECOGNITION turn is turn 1. Turns 2 and 3 exist only for the repeat
+  // check, and scoring them as recognition turns would dilute every rate.
   const pick = (population: 'frequent' | 'new', arm: Arm) =>
-    records.filter((r) => r.population === population && r.arm === arm)
+    records.filter((r) => r.population === population && r.arm === arm && r.turn === 1)
 
   console.log(`\n${'='.repeat(78)}`)
   console.log('TAC-555 usual-order recognition')
@@ -654,23 +902,27 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
 
   const failures: string[] = []
 
+  // The ruled requirement is BOTH: a recognition and warmth, in a real
+  // sentence. A reply with one and not the other does not meet it.
+  const meetsBar = (r: UnitRecord) =>
+    (r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent) &&
+    (r.flags.complimentsReturning || r.flags.complimentsChoice) &&
+    !r.bareLabel
+
   for (const arm of ARMS) {
-    const freq = pick('frequent', arm)
-    const valid = freq.filter((r) => !r.invalid)
-    const recognised = valid.filter((r) => r.recognizes || r.claimsUsual)
-    const usual = valid.filter((r) => r.claimsUsual)
+    const valid = pick('frequent', arm).filter((r) => !r.invalid)
+    const rec = valid.filter((r) => r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent)
+    const warm = valid.filter((r) => r.flags.complimentsReturning || r.flags.complimentsChoice)
+    const both = valid.filter(meetsBar)
     console.log(
-      `arm A (frequent item), ${arm}: recognised ${recognised.length}/${valid.length} valid (${freq.length - valid.length} invalid), of which "usual" ${usual.length}`,
+      `arm A, ${arm}: recognition ${rec.length}/${valid.length}, warmth ${warm.length}/${valid.length}, BOTH in a real sentence ${both.length}/${valid.length}`,
     )
-    // Recognition BY CATEGORY. This is the sharpest read on R21's
-    // jurisdictional sentence: if it holds on the acknowledgment units, the
-    // category veto is genuinely closed.
     const byCategory = new Map<string, { n: number; hit: number }>()
     for (const r of valid) {
       const k = r.category ?? '?'
       const b = byCategory.get(k) ?? { n: 0, hit: 0 }
       b.n += 1
-      if (r.recognizes || r.claimsUsual) b.hit += 1
+      if (meetsBar(r)) b.hit += 1
       byCategory.set(k, b)
     }
     for (const [cat, b] of [...byCategory.entries()].sort()) {
@@ -678,108 +930,207 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     }
   }
 
-  // BAR 1: the treatment arm on the frequent population.
+  // BAR 1: recognition AND compliment, in a real sentence.
   {
     const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
-    const hit = valid.filter((r) => r.recognizes || r.claimsUsual).length
+    const hit = valid.filter(meetsBar).length
     const ok = hit >= FREQUENT_BAR && valid.length >= FREQUENT_BAR
-    if (!ok) failures.push(`arm A treatment recognised ${hit}/${valid.length}, bar is ${FREQUENT_BAR}`)
-    console.log(`\n${ok ? 'PASS' : 'FAIL'}  bar: arm A treatment >= ${FREQUENT_BAR} recognised (got ${hit}/${valid.length} valid)`)
-  }
-
-  // CEILING: nothing in arm A may recite history or state a count. A breach
-  // fails the arm whatever the recognition rate reads.
-  for (const arm of ARMS) {
-    const valid = pick('frequent', arm).filter((r) => !r.invalid)
-    const recites = valid.filter((r) => r.recites)
-    const counts = valid.filter((r) => r.statesCountJudge || r.countClaimMatches.length > 0)
-    const ok = recites.length === 0 && counts.length === 0
-    if (!ok && arm === 'treatment') {
+    if (!ok) {
       failures.push(
-        `arm A treatment ceiling breached: ${recites.length} recite history, ${counts.length} state a count`,
+        `arm A treatment met the recognition+compliment bar on ${hit}/${valid.length} valid, bar is ${FREQUENT_BAR} of ${FREQUENT_BAR} valid`,
       )
     }
     console.log(
-      `${ok ? 'PASS' : 'FAIL'}  ceiling (${arm}): recites history ${recites.length}, states a count ${counts.length}`,
+      `\n${ok ? 'PASS' : 'FAIL'}  bar: arm A treatment >= ${FREQUENT_BAR} recognition + compliment in a real sentence (got ${hit}/${valid.length} valid)`,
+    )
+  }
+
+  // CEILING: no bare labels, no counts. A breach fails the arm whatever the rate.
+  {
+    const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
+    const labels = valid.filter((r) => r.bareLabel)
+    const counts = valid.filter((r) => r.flags.statesCount || r.countClaimMatches.length > 0)
+    const recites = valid.filter((r) => r.flags.recitesHistory)
+    if (labels.length > 0) failures.push(`arm A treatment: ${labels.length} bare label(s), ceiling is 0`)
+    if (counts.length > 0) failures.push(`arm A treatment: ${counts.length} count claim(s), ceiling is 0`)
+    if (recites.length > 0) failures.push(`arm A treatment: ${recites.length} recited history, ceiling is 0`)
+    console.log(
+      `${labels.length === 0 ? 'PASS' : 'FAIL'}  ceiling: bare labels ${labels.length}/${valid.length}`,
+    )
+    for (const r of labels) console.log(`      ${r.unitId}: (${r.wordCount}w) ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${counts.length === 0 ? 'PASS' : 'FAIL'}  ceiling: count claims ${counts.length}/${valid.length}`,
     )
     for (const r of counts) {
-      console.log(`      ${r.unitId}: judge=${r.statesCountJudge} regex=${JSON.stringify(r.countClaimMatches)}`)
+      console.log(
+        `      ${r.unitId}: judge=${r.flags.statesCount} regex=${JSON.stringify(r.countClaimMatches)} | ${JSON.stringify(r.reply)}`,
+      )
+    }
+    console.log(
+      `${recites.length === 0 ? 'PASS' : 'FAIL'}  ceiling: recited history ${recites.length}/${valid.length}`,
+    )
+    for (const r of recites) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+  }
+
+  // (c) AND (d) RATES. Expected some, not most. Reported rather than barred,
+  // except that every (d) must be grounded and must not read as selling.
+  {
+    const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
+    const detail = valid.filter((r) => r.flags.includesItemDetail && !r.flags.includesBeanStory)
+    const bean = valid.filter((r) => r.flags.includesBeanStory)
+    const coffee = valid.filter((r) => r.beanStoryAvailable)
+    console.log(
+      `\nadded content: item detail (c) ${detail.length}/${valid.length}, bean story (d) ${bean.length}/${valid.length} (reachable on ${coffee.length} coffee units)`,
+    )
+    for (const r of bean) {
+      console.log(
+        `      (d) ${r.unitId} [${r.namedItem}] beans=${JSON.stringify(r.judge?.beansNamed ?? [])} grounded=${!r.flags.detailUngrounded} | ${JSON.stringify(r.reply)}`,
+      )
+    }
+    for (const r of detail) console.log(`      (c) ${r.unitId} | ${JSON.stringify(r.reply)}`)
+
+    // A bean story on a pastry is a finding: (d) is scoped to a drink.
+    const beanOnPastry = bean.filter((r) => !r.beanStoryAvailable)
+    if (beanOnPastry.length > 0) {
+      failures.push(`${beanOnPastry.length} bean story/stories on an item that is not a coffee drink`)
+      console.log(`FAIL  bean story on a non-coffee item: ${beanOnPastry.length}`)
+      for (const r of beanOnPastry) console.log(`      ${r.unitId} [${r.namedItem}]: ${JSON.stringify(r.reply)}`)
+    }
+
+    // Grounding and selling, both ceilings on the added content.
+    const ungrounded = valid.filter(
+      (r) => (r.flags.includesItemDetail || r.flags.includesBeanStory) && r.flags.detailUngrounded,
+    )
+    const selling = valid.filter((r) => r.flags.readsAsSelling || r.sellingMatches.length > 0)
+    if (ungrounded.length > 0) {
+      failures.push(`${ungrounded.length} added detail/story not grounded in the venue's knowledge`)
+    }
+    if (selling.length > 0) failures.push(`${selling.length} repl(y/ies) read as selling`)
+    console.log(
+      `${ungrounded.length === 0 ? 'PASS' : 'FAIL'}  ceiling: ungrounded added detail ${ungrounded.length}`,
+    )
+    for (const r of ungrounded) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(`${selling.length === 0 ? 'PASS' : 'FAIL'}  ceiling: reads as selling ${selling.length}`)
+    for (const r of selling) {
+      console.log(
+        `      ${r.unitId}: judge=${r.flags.readsAsSelling} regex=${JSON.stringify(r.sellingMatches)} | ${JSON.stringify(r.reply)}`,
+      )
     }
   }
 
-  // BAR 2: no false "usual" on the new population, in EITHER arm.
+  // BAR 2: arm B claims nothing, in either arm.
   for (const arm of ARMS) {
     const valid = pick('new', arm).filter((r) => !r.invalid)
-    const claims = valid.filter((r) => r.claimsUsual || r.recognizes)
-    const ok = claims.length <= NEW_FALSE_CLAIM_CEILING
-    if (!ok) failures.push(`arm B ${arm}: ${claims.length} false prior-order claims, ceiling is ${NEW_FALSE_CLAIM_CEILING}`)
+    const claims = valid.filter((r) => r.flags.claimsMostFrequent || r.flags.recognizesPriorOrder)
+    const returning = valid.filter((r) => r.flags.complimentsReturning)
+    const beans = valid.filter((r) => r.flags.includesBeanStory)
+    if (claims.length > 0) failures.push(`arm B ${arm}: ${claims.length} false prior-order claim(s)`)
+    if (returning.length > 0) {
+      failures.push(`arm B ${arm}: ${returning.length} compliment(s) on returning`)
+    }
+    if (beans.length > 0) failures.push(`arm B ${arm}: ${beans.length} bean story/stories on a new item`)
     console.log(
-      `${ok ? 'PASS' : 'FAIL'}  bar: arm B ${arm} false "usual"/"had it before" claims ${claims.length}/${valid.length} valid (ceiling ${NEW_FALSE_CLAIM_CEILING})`,
+      `\n${claims.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} false prior-order claims ${claims.length}/${valid.length}`,
     )
     for (const r of claims) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${returning.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} compliments on returning ${returning.length}/${valid.length}`,
+    )
+    for (const r of returning) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${beans.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} bean stories ${beans.length}/${valid.length}`,
+    )
+    for (const r of beans) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
   }
 
-  // BAR 3: templating. TAC-548's detector, whose default share is already the
-  // quarter this ticket asks for, at the narrow width TEMPLATE_NGRAM explains.
+  // BAR 3: templating, at BOTH widths the ruling names.
   {
     const bodies = pick('frequent', 'treatment')
       .filter((r) => !r.invalid && r.reply !== null)
       .map((r) => r.reply as string)
-
-    // A CEILING THAT CANNOT FIRE MUST SAY SO RATHER THAN PRINT PASS. A reply
-    // shorter than n produces no n-grams, so if most replies are shorter than
-    // the width this bar is evaluating nothing. Reported as a VOID bar and
-    // pushed to the failures list: an unevaluated ceiling is not a passed one.
-    const lengths = bodies
-      .map((b) => b.toLowerCase().replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean).length)
-      .sort((a, b) => a - b)
+    const lengths = bodies.map((b) => countWords(b)).sort((a, b) => a - b)
     const median = lengths.length === 0 ? 0 : (lengths[Math.floor(lengths.length / 2)] as number)
-    const scorable = lengths.filter((l) => l >= TEMPLATE_NGRAM).length
+    console.log(`\nmedian arm A treatment reply length: ${median} words`)
 
-    if (bodies.length === 0 || scorable < bodies.length / 2) {
-      failures.push(
-        `templating bar VOID: only ${scorable}/${bodies.length} replies are at least ${TEMPLATE_NGRAM} words (median ${median}), so the ceiling evaluated almost nothing`,
-      )
-      console.log(
-        `VOID  bar: templating could not be evaluated - ${scorable}/${bodies.length} replies reach ${TEMPLATE_NGRAM} words (median ${median})`,
-      )
-    } else {
-      const repeats = repeatedPhrases(bodies, { n: TEMPLATE_NGRAM, maxShare: TEMPLATE_MAX_SHARE })
-      const ok = repeats.length === 0
-      if (!ok) {
+    for (const n of [TEMPLATE_NGRAM, TEMPLATE_NGRAM + 1]) {
+      // A CEILING THAT CANNOT FIRE MUST SAY SO RATHER THAN PRINT PASS. A reply
+      // shorter than n produces no n-grams, so if most replies are shorter
+      // than the width this bar is evaluating nothing.
+      const scorable = lengths.filter((l) => l >= n).length
+      if (bodies.length === 0 || scorable < bodies.length / 2) {
         failures.push(
-          `templating: ${repeats.length} phrase(s) in more than a quarter of arm A treatment replies`,
+          `templating bar at n=${n} VOID: only ${scorable}/${bodies.length} replies reach ${n} words`,
         )
+        console.log(`VOID  bar: templating at n=${n} could not be evaluated (${scorable}/${bodies.length} scorable)`)
+        continue
       }
+      const repeats = repeatedPhrases(bodies, { n, maxShare: TEMPLATE_MAX_SHARE })
+      const ok = repeats.length === 0
+      if (!ok) failures.push(`templating at n=${n}: ${repeats.length} phrase(s) over the quarter share`)
       console.log(
-        `${ok ? 'PASS' : 'FAIL'}  bar: no ${TEMPLATE_NGRAM}-word phrase in more than ${Math.round(TEMPLATE_MAX_SHARE * 100)}% of ${bodies.length} arm A treatment replies (median length ${median})`,
+        `${ok ? 'PASS' : 'FAIL'}  bar: no ${n}-word phrase in more than ${Math.round(TEMPLATE_MAX_SHARE * 100)}% of ${bodies.length} arm A treatment replies`,
       )
-      for (const p of repeats) console.log(`      "${p.phrase}" in ${p.replies}/${bodies.length}`)
+      for (const p of repeats) {
+        console.log(`      "${p.phrase}" in ${p.replies}/${bodies.length} = ${Math.round((p.replies / bodies.length) * 100)}%`)
+      }
     }
   }
 
-  // ADVISORY, NOT BARS. Reported prominently because a visit-frequency claim
-  // with no number is the R23 breach a count check structurally cannot see,
-  // and it is the specific risk this change introduces. Not pre-registered, so
-  // it does not fail the run: Jaipal reads these and decides.
+  // BAR 4: the 3-turn same-guest check. No detail and no bean story repeated
+  // within one conversation. The rule says once per guest and NOTHING enforces
+  // it, by instruction, so this is the only thing that would show it failing.
+  {
+    const multi = records.filter((r) => r.arm === 'treatment' && r.population === 'frequent')
+    const byUnit = new Map<string, UnitRecord[]>()
+    for (const r of multi) {
+      const b = byUnit.get(r.unitId) ?? []
+      b.push(r)
+      byUnit.set(r.unitId, b)
+    }
+    const conversations = [...byUnit.entries()].filter(([, rs]) => rs.length > 1)
+    let repeated = 0
+    console.log(`\n3-turn same-guest check: ${conversations.length} conversation(s)`)
+    for (const [id, rs] of conversations) {
+      const ordered = [...rs].sort((a, b) => a.turn - b.turn)
+      const withContent = ordered.filter(
+        (r) => !r.invalid && (r.flags.includesItemDetail || r.flags.includesBeanStory),
+      )
+      const beanTurns = ordered.filter((r) => !r.invalid && r.flags.includesBeanStory)
+      if (beanTurns.length > 1) {
+        repeated += 1
+        failures.push(`${id}: a bean story appears on ${beanTurns.length} turns of one conversation`)
+      }
+      console.log(
+        `    ${id}: turns with added content ${withContent.map((r) => r.turn).join(',') || 'none'} | bean story on turns ${beanTurns.map((r) => r.turn).join(',') || 'none'}`,
+      )
+      for (const r of ordered) {
+        console.log(`        t${r.turn} "${r.guestMessage}" -> ${JSON.stringify(r.reply)}`)
+      }
+    }
+    console.log(
+      `${repeated === 0 ? 'PASS' : 'FAIL'}  bar: no bean story repeated inside a conversation (${repeated} breach(es))`,
+    )
+  }
+
+  // ADVISORY, NOT BARS.
   {
     const flagged = records.filter((r) => !r.invalid && r.visitFrequencyMatches.length > 0)
     console.log(`\nADVISORY (not a bar) visit-frequency claims with no number: ${flagged.length}`)
     for (const r of flagged) {
-      console.log(`      ${r.unitId} ${r.arm}: ${JSON.stringify(r.visitFrequencyMatches)} | ${JSON.stringify(r.reply)}`)
+      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.visitFrequencyMatches)} | ${JSON.stringify(r.reply)}`)
     }
   }
   {
     const flagged = records.filter((r) => !r.invalid && r.otherHistoryItemMatches.length > 0)
     console.log(`ADVISORY (not a bar) replies naming a DIFFERENT past item (R15 cap): ${flagged.length}`)
     for (const r of flagged) {
-      console.log(`      ${r.unitId} ${r.arm}: ${JSON.stringify(r.otherHistoryItemMatches)} | ${JSON.stringify(r.reply)}`)
+      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.otherHistoryItemMatches)} | ${JSON.stringify(r.reply)}`)
     }
   }
 
   const invalid = records.filter((r) => r.invalid)
-  console.log(`\ninvalid units: ${invalid.length}/${records.length}`)
-  for (const r of invalid) console.log(`      ${r.unitId} ${r.arm}: ${r.error ?? 'no reply'}`)
+  console.log(`\ninvalid units after retries: ${invalid.length}/${records.length}`)
+  for (const r of invalid) console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${r.error ?? 'no reply'}`)
 
   console.log(`\nguest_states rows: ${statesBefore} before, ${statesAfter} after`)
   console.log(`elapsed: ${Math.round((Date.now() - startedAt.getTime()) / 1000)}s`)
@@ -788,8 +1139,9 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
   console.log(failures.length === 0 ? 'ALL PRE-REGISTERED BARS AND CEILINGS PASS' : 'FAILED:')
   for (const f of failures) console.log(`  - ${f}`)
   console.log(`${'-'.repeat(78)}`)
-  console.log('\nRead the bodies, not only the table. A rate cannot tell a correct')
-  console.log('recognition from one that named the wrong item.\n')
+  console.log('\nThe recognition+compliment bar and every (d) are HAND-READ before')
+  console.log('anything ships. A rate cannot tell warmth from a formula, nor a')
+  console.log('grounded bean story from a pitch.\n')
 }
 
 void main()

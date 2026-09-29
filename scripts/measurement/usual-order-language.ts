@@ -230,6 +230,77 @@ export function findVisitFrequencyClaim(body: string): LanguageFinding {
  * another word. It takes the history as given rather than deriving it, so the
  * caller decides what counts as the named item.
  */
+/**
+ * A reply that names the order and nothing else.
+ *
+ * THE PRE-REGISTERED BARE-LABEL CEILING, and the reason it is a word count
+ * rather than a grammar check. The ruled requirement is that the reply carry
+ * BOTH a recognition and something warm, and no reply of three or four words
+ * can carry both. So a low word count is not a proxy for the judgement, it is
+ * a sufficient condition for failing it, which is what a ceiling wants.
+ * Jaipal named the two-word case directly.
+ *
+ * Emoji and punctuation do not count as words: the measured template was a
+ * two-word phrase plus an emoji, and counting the emoji would have let a
+ * four-word label read as five.
+ *
+ * DELIBERATELY NOT the number the recognition rate is read from. A reply can
+ * be long and still say nothing warm, which only the judge and a human can
+ * see. This catches the short end, where the failure is certain.
+ */
+export const BARE_LABEL_MAX_WORDS = 4
+
+export function isBareLabel(body: string): boolean {
+  return countWords(body) <= BARE_LABEL_MAX_WORDS
+}
+
+export function countWords(body: string): number {
+  return words(body).length
+}
+
+/**
+ * Language that reads as selling rather than sharing.
+ *
+ * WHY THIS IS DETERMINISTIC AND WHY IT MATTERS HERE. Le Mil's bean knowledge
+ * carries the origin story and the shop copy in ONE chunk: every bean entry
+ * ends with the bag sizes, the dollar amounts and the website. So the model is
+ * asked to draw a story out of a chunk whose second half is a price list, and
+ * the pitch risk is in the source material rather than in the model's manners.
+ * A price or a buy instruction is exactly the kind of thing a judge softens
+ * and a regex does not.
+ *
+ * Recall-biased like its siblings, and every match is reported. A reply
+ * answering a guest who ASKED the price would match here, which is correct to
+ * surface and wrong to treat as a violation: the caller knows whether the
+ * guest asked.
+ */
+const SELLING_PATTERNS: readonly RegExp[] = [
+  /\$\s?\d/,
+  /\b\d+\s?(?:oz|lb|lbs|pound|pounds)\b/,
+  /\b(?:we|you can|you could)\s+(?:sell|buy|order|grab|get)\s+(?:it|them|those|some|a bag|bags)\b/,
+  /\bfor sale\b/,
+  /\bin stock\b/,
+  /\bpurchase\b/,
+  /\bshop\b/,
+  /\bonline\b/,
+  /\blemils\.com\b/,
+  /\bwebsite\b/,
+  /\ba bag of\b/,
+  /\bwhole bean\b/,
+  /\bprice[sd]?\b/,
+  /\bcosts?\b/,
+]
+
+export function findSellingLanguage(body: string): LanguageFinding {
+  const folded = fold(body)
+  const matches: string[] = []
+  for (const re of SELLING_PATTERNS) {
+    const m = folded.match(re)
+    if (m && m[0]) matches.push(m[0])
+  }
+  return matches.length === 0 ? EMPTY : { found: true, matches: [...new Set(matches)] }
+}
+
 export function findOtherHistoryItems(
   body: string,
   historyItems: readonly string[],

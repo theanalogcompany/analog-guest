@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countWords,
   findCountClaim,
   findOtherHistoryItems,
+  findSellingLanguage,
   findVisitFrequencyClaim,
+  isBareLabel,
 } from './usual-order-language'
 
 describe('findCountClaim — the pre-registered R23 ceiling', () => {
@@ -80,6 +83,63 @@ describe('findVisitFrequencyClaim — advisory, not a bar', () => {
   it('deduplicates repeated matches of the same phrase', () => {
     const v = findVisitFrequencyClaim('every time, and I mean every time')
     expect(v.matches).toEqual(['every time'])
+  })
+})
+
+describe('isBareLabel — the pre-registered bare-label ceiling', () => {
+  it.each([
+    ['the measured template', 'your usual ☕'],
+    ['three words plus an emoji', "that's your go-to ☕"],
+    ['a label with no emoji', 'the usual'],
+    ['four words exactly', 'that one you know'],
+  ])('flags a label: %s', (_label, body) => {
+    expect(isBareLabel(body)).toBe(true)
+  })
+
+  it.each([
+    ['a real sentence with recognition and warmth', "your usual, and honestly a good one to keep coming back to"],
+    ['five words', 'good to see you back'],
+  ])('does NOT flag: %s', (_label, body) => {
+    expect(isBareLabel(body)).toBe(false)
+  })
+
+  // Emoji must not inflate the count, or a four-word label reads as five and
+  // slips the ceiling. The measured template was two words plus an emoji.
+  it('does not count an emoji as a word', () => {
+    expect(countWords('your usual ☕')).toBe(2)
+    expect(countWords('that one you know ☕ 😄')).toBe(4)
+  })
+
+  it('counts an empty body as zero words', () => {
+    expect(countWords('')).toBe(0)
+  })
+})
+
+describe('findSellingLanguage — the pitch cross-check', () => {
+  it.each([
+    ['a price', "that bean is $17 for a 10 oz bag"],
+    ['a bag size', 'we do 1 lb bags of it'],
+    ['the shop URL', "it's on lemils.com if you want some"],
+    ['a buy instruction', 'you can buy it whole bean'],
+    ['whole bean phrasing', 'we have it as whole bean'],
+    ['online', 'grab it online'],
+  ])('flags selling language: %s', (_label, body) => {
+    expect(findSellingLanguage(body).found).toBe(true)
+  })
+
+  it.each([
+    ['a pure origin story', "that one's the Bhadra, 100% Indian robusta, which is why it hits so hard"],
+    ['a taking-home aside with no commerce', "people take that one home to brew, it holds up in a moka pot"],
+    ['plain recognition and warmth', 'your usual, good to have you back in'],
+  ])('does NOT fire on: %s', (_label, body) => {
+    expect(findSellingLanguage(body).found).toBe(false)
+  })
+
+  // NON-GOAL, recorded deliberately: a reply answering a guest who ASKED the
+  // price matches here. That is correct to surface and wrong to call a
+  // violation; the caller knows whether the guest asked.
+  it('KNOWN FALSE POSITIVE: a price the guest asked for', () => {
+    expect(findSellingLanguage("it's $17 for the 10 oz").found).toBe(true)
   })
 })
 

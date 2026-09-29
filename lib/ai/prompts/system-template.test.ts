@@ -1387,12 +1387,52 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   })
 
   // THE ## Length OVERRIDE, and it is why the first version templated. R20
-  // makes ## Length the only authority on length and mirrors the guest, so a
-  // four-word inbound compressed the reply to a two-word label. Scoped to
+  // makes ## Length the only authority on length and R19 mirrors the guest, so
+  // a five-word inbound compressed the reply to a two-word label. Scoped to
   // this turn only, or it becomes a general licence to run long.
   it('overrides ## Length for one sentence, and for this turn only', () => {
     expect(SYSTEM_TEMPLATE).toContain(
       'Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only.',
+    )
+  })
+
+  // THE OVERRIDE IS NOT SELF-EXECUTING, and this is the finding a smoke run
+  // produced before the full one: asserting the override inside R21 is not
+  // enough, because the two length rules PRE-EMPT it from above.
+  //
+  // R20 said "Nothing later in this prompt overrides it", categorically, 767
+  // characters before R21's override, so the prompt contained a flat
+  // contradiction and the model resolved it against R21: a treatment reply
+  // still came back as the two-word "the usual". R19's only escape clause was
+  // "when the ## Length section names an exception", and R21 is not that
+  // section. Neither could see R21.
+  //
+  // ## Length itself is `persona.lengthGuide`, per-venue data rendered by
+  // personaToProse, so it is not this file's to amend and not the right place:
+  // the fix is the two rules that claim authority over it.
+  //
+  // Neither wording was pinned before this, which is how the first version
+  // shipped believing the override worked.
+  it('R20 names the recognition exception, so the override is reachable at all', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Nothing later in this prompt overrides it, with one exception, named in the rule below on receiving an order this guest has had before: there, one real sentence is worth the room.',
+    )
+  })
+
+  it('R19 lets a rule in the list, not only ## Length, name an exception to mirroring', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When the ## Length section or another rule in this list names an exception, the exception beats mirroring.',
+    )
+  })
+
+  // R20's original authority claim must survive: the exception is one named
+  // carve-out, not a general demotion of ## Length.
+  it('keeps ## Length as the authority and keeps its own exception mechanism', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Length section below is the only authority on how long a message should be.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Otherwise, when ## Length names an exception (for example, recommendations going deeper than the default), the exception holds.',
     )
   })
 
