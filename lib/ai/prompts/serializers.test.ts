@@ -704,7 +704,11 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     it('asserts an ask never changes what the reply is about', () => {
       const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
       expect(out).toContain('Asking never changes what the reply is about. Whatever they raised is')
-      expect(out).toContain('still the job, and the question goes at the end, in one short line, or\nnot at all.')
+      // TAC-554: pinned as ONE contiguous literal, not fragments. A sentence
+      // can be reversed while every asserted fragment survives, which is the
+      // TAC-409/TAC-502 lesson, and this clause is exactly the kind a future
+      // reader would "tidy" back into a positional claim.
+      expect(out).toContain('still the job, and the question is one short line on its own, or not at\nall.')
     })
 
     // Plan-review: "license" is spec vocabulary describing the mechanism,

@@ -220,6 +220,31 @@ never saw. A cross-module test iterates every category for exactly this.
 runs downstream of a transaction, and a transaction satisfies the intention. There is a
 source-level guard matching both the snake_case column and the camelCase field.
 
+### A raised question is always its own last message (TAC-554)
+
+The model emits it in `intentionQuestion`, separately from the reply.
+`composeReplyWithIntention` (`lib/ai/generate-message.ts`) then JOINS the two, so
+`generation.body` is still the complete reply and every backstop that reads the body still
+reads the question. The field rides along as the exact TAIL of the body - true by
+construction, because we did the joining - and `resolveDispatchBubbles(body, rng, tail)`
+peels it off as the final bubble.
+
+`intentionTailFor(question, renderedCount)` is the ONE gate, called by both dispatch arms.
+A question only bubbles when the intentions block actually rendered, which is
+`renderableIntentions` above. Two copies of that decision is the drift this directory
+already pays for.
+
+**`''` is byte-identical to the pre-TAC-554 path**, asserted as an equivalence rather than
+by restating expected bubbles. The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`
+so the total still honours the cap.
+
+**`fitBubblesToInstagramCap` takes the tail too, and must.** Its repack throws the bubble
+structure away and re-packs the whole reply greedily, which merges the question back into
+the message in front of it - and only when a bubble is over 1000 bytes, so it is the kind of
+conditional regression nothing notices.
+
+Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
+
 ## Other rules that bite
 
 - **A mock's recorded argument is a live reference.** These orchestrators mutate the `ctx`

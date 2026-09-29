@@ -220,6 +220,8 @@ function makeGeneration(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
@@ -1895,5 +1897,137 @@ describe('applyInlineCancellation (TAC-513)', () => {
     await scheduleAndSend(makeCtx({ activeCommitments: [TONIC] }), generationWithBody('sure thing'))
 
     expect(vi.mocked(cancelCommitmentForGuest)).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-554: the WIRING. The pure rule is pinned exhaustively in
+// sentence-split.test.ts; what these assert is that the text arm actually
+// passes the question and the gate through to it.
+//
+// This is the class of mutant this repo keeps finding alive: the author's
+// mutants ask what the code computes, and the survivors ask whether anything
+// calls it. Dropping the third argument at this call site, or dropping the
+// gate, leaves every test in sentence-split.test.ts green.
+// ---------------------------------------------------------------------------
+
+describe('scheduleAndSend — the intention question is its own message (TAC-554)', () => {
+  const ANCHOR_554 = new Date('2026-09-01T00:00:00.000Z')
+  const RENDERED_554 = [
+    { key: 'learn_name' as const, promptLine: 'unused on the wire', eligibleAt: ANCHOR_554 },
+  ]
+
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(createCommitmentFromPending)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function generationAsking(answer: string, question: string): GenerateMessageResult {
+    return {
+      ...makeGeneration(),
+      body: `${answer} ${question}`,
+      intentionQuestion: question,
+    }
+  }
+
+  it('sends the question as its own last message, and one row per message', async () => {
+    queueSends('provider-1', 'provider-2')
+    queueInserts('msg-1', 'msg-2')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking('Open until 3 on Sundays.', "by the way, what's your name?"),
+      { skipHumanFeelDelay: true, rng: () => 0.99, renderedIntentions: RENDERED_554 },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: 'Open until 3 on Sundays',
+    })
+    expect(vi.mocked(sendMessage).mock.calls[1]![0]).toMatchObject({
+      body: "by the way, what's your name?",
+    })
+    expect(scenario.inserts).toHaveLength(2)
+    expect(scenario.inserts[1]!.body).toBe("by the way, what's your name?")
+    expect(result.bubbleCount).toBe(2)
+  })
+
+  // THE GATE. renderableIntentions already excludes opt_out, comp_complaint
+  // and pending-question turns, so a question emitted on a turn where nothing
+  // rendered must be folded into the one message rather than bubbled.
+  it('folds the question into one message when no intention rendered', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking('Open until 3 on Sundays.', "by the way, what's your name?"),
+      { skipHumanFeelDelay: true, rng: () => 0.99 },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: "Open until 3 on Sundays. by the way, what's your name?",
+    })
+    expect(result.bubbleCount).toBe(1)
+  })
+
+  it('folds the question in when the rendered set is explicitly empty', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(
+      makeCtx(),
+      generationAsking('Open until 3 on Sundays.', "what's your name?"),
+      { skipHumanFeelDelay: true, rng: () => 0.99, renderedIntentions: [] },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+  })
+
+  // A turn that asks nothing must behave exactly as it did before TAC-554,
+  // even with a rendered intention present — the block rendering is not the
+  // same thing as the model choosing to ask.
+  it('is unchanged when the model asked nothing, rendered set or not', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      skipHumanFeelDelay: true,
+      rng: () => 0,
+      renderedIntentions: RENDERED_554,
+    })
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({ body: 'Open until 4' })
+  })
+
+  it('keeps the total within the bubble cap when the answer is long', async () => {
+    queueSends('provider-1', 'provider-2', 'provider-3')
+    queueInserts('msg-1', 'msg-2', 'msg-3')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking('One here. Two here. Three here.', "what's your name?"),
+      { skipHumanFeelDelay: true, rng: () => 0, renderedIntentions: RENDERED_554 },
+    )
+
+    // The answer keeps all three of its sentences in one message rather than
+    // taking a third slot the question needs.
+    expect(result.bubbleCount).toBe(2)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: 'One here. Two here. Three here',
+    })
+    expect(vi.mocked(sendMessage).mock.calls[1]![0]).toMatchObject({ body: "what's your name?" })
   })
 })

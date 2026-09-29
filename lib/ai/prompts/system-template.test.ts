@@ -28,8 +28,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.71.0 (the order summary line in ## Visit history)', () => {
-    expect(PROMPT_VERSION).toBe('v1.71.0')
+  it('is v1.72.0 (the getting-to-know-you question is its own emission field)', () => {
+    expect(PROMPT_VERSION).toBe('v1.72.0')
   })
 })
 
@@ -2457,5 +2457,86 @@ describe('SYSTEM_TEMPLATE — R39: honest take first, then the specifics (TAC-54
     const r39 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R39')
     expect(r39).toBeDefined()
     expect(r39?.summary).toContain('Give your honest take first')
+  })
+})
+
+describe('# Getting-to-know-you questions (TAC-554)', () => {
+  const blockOf = (template: string): string => {
+    const start = template.indexOf('# Getting-to-know-you questions')
+    const end = template.indexOf('# Universal voice rules', start)
+    return template.slice(start, end)
+  }
+
+  it('is its own emission block, beside the other emission blocks', () => {
+    expect(SYSTEM_TEMPLATE).toContain('# Getting-to-know-you questions')
+    expect(SYSTEM_TEMPLATE.indexOf('# Getting-to-know-you questions')).toBeGreaterThan(
+      SYSTEM_TEMPLATE.indexOf('# Guest context capture'),
+    )
+    expect(SYSTEM_TEMPLATE.indexOf('# Getting-to-know-you questions')).toBeLessThan(
+      SYSTEM_TEMPLATE.indexOf('# Universal voice rules'),
+    )
+  })
+
+  // PINNED AS CONTIGUOUS LITERALS, not fragments. The TAC-409/TAC-502 lesson is
+  // that a sentence can be reversed while every asserted fragment survives, and
+  // the operative instruction here — which field the question goes in — is
+  // exactly the kind a future edit would invert or "simplify".
+  it('says the question goes in the field and NOT in the body', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When you do ask, the question goes in `intentionQuestion`, and NOT in\n`body`.',
+    )
+  })
+
+  it('says the body must read as finished without the question', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '`body` is the reply without it, complete on its own: it has to read as a\nfinished message to someone who never sees the question.',
+    )
+  })
+
+  it('says the question is written as its own message and is sent separately', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '`intentionQuestion` is that one question, by itself, written as a message of\nits own rather than as a clause tacked onto another sentence. It is sent to the\nguest a moment after the reply, as a separate message.',
+    )
+  })
+
+  // learn_name's own promptLine prescribes a softener in front of the question
+  // ("by the way, what's your name?"). That shape has to survive inside the
+  // field, or this block and that line would contradict each other.
+  it('keeps a softener inside the field rather than in the body', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Anything the listed line\nasks you to put in front of it, such as a softener, belongs in here with it.',
+    )
+  })
+
+  it('names the empty string as the common case', () => {
+    expect(SYSTEM_TEMPLATE).toContain('Emit "" when you are not asking. Most turns emit "".')
+  })
+
+  // NO SECOND AUTHORITY ON WHETHER TO ASK. The intentions block owns that
+  // decision, and a block rendering in the SYSTEM prompt that also ruled on it
+  // would outrank the user-prompt block on proximity — the TAC-314/327/330/338
+  // failure class this repo keeps paying for.
+  it('defers the decision to ask to the intentions block', () => {
+    expect(SYSTEM_TEMPLATE).toContain("Whether to ask is that block's call, and it is usually\nno.")
+  })
+
+  it('renders on both channels', () => {
+    for (const channel of ['text', 'instagram'] as const) {
+      expect(systemTemplateFor(channel)).toContain('# Getting-to-know-you questions')
+      expect(systemTemplateFor(channel)).toContain(
+        'When you do ask, the question goes in `intentionQuestion`, and NOT in\n`body`.',
+      )
+    }
+  })
+
+  // The block is model-facing emission instruction, not a voice rule, so it
+  // must not leak into the universal-rules section the Voices rail mirrors.
+  it('is not a universal voice rule', () => {
+    const rules = SYSTEM_TEMPLATE.slice(SYSTEM_TEMPLATE.indexOf('# Universal voice rules'))
+    expect(rules).not.toContain('intentionQuestion')
+  })
+
+  it('carries no em or en dash', () => {
+    expect(blockOf(SYSTEM_TEMPLATE)).not.toMatch(/[—–]/)
   })
 })

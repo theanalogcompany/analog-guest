@@ -30,7 +30,7 @@ import {
   type SlotDropReason,
   type PendingRowsBySlot,
 } from './pending-slots'
-import { resolveDispatchBubbles } from './sentence-split'
+import { intentionTailFor, resolveDispatchBubbles } from './sentence-split'
 import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
 import type { RuntimeContext } from './types'
 
@@ -483,7 +483,14 @@ export async function scheduleAndSend(
   // (terminal periods stripped) or sent as one block. Each bubble is
   // persisted with its own text, so no delimiter ever reaches the database
   // on this path.
-  const bubbles = resolveDispatchBubbles(generation.body, options.rng ?? Math.random)
+  // TAC-554: the getting-to-know-you question rides as its own last message,
+  // gated on the intentions block having actually rendered this turn. '' means
+  // this is exactly the call it was before TAC-554.
+  const bubbles = resolveDispatchBubbles(
+    generation.body,
+    options.rng ?? Math.random,
+    intentionTailFor(generation.intentionQuestion, options.renderedIntentions?.length ?? 0),
+  )
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has
     // been sent, so this takes the ordinary send-failure path.

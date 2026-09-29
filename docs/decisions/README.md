@@ -37,3 +37,4 @@ decision.
 | [0004](0004-ticket-branch-owner-is-any-username.md) | a ticket branch is `<username>/<ticket>-...`, any username |
 | [0005](0005-inbound-coalescing-settle-window.md) | A guest's burst settles for 3 s before one run claims it |
 | [0006](0006-two-pending-slots-per-guest.md) | A guest holds two pending cards, one per slot |
+| [0007](0007-intention-question-is-its-own-bubble.md) | A getting-to-know-you question is its own last message, guaranteed in code |

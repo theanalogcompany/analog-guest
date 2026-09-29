@@ -412,6 +412,10 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the crash card. Generation failed, so there is no
+    // getting-to-know-you question, and the card is blank anyway.
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 2,
     attemptScores: [],
     attemptHistory: [],
@@ -2419,8 +2423,13 @@ async function runInboundTurn(
         reviewReason: approval.reason,
         // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
         // and this branch records against, so what a card carries and what
-        // an auto-send carries cannot drift. Audit only on this path — the
-        // recording below is what actually closes the intentions.
+        // an auto-send carries cannot drift. The recording below is what
+        // actually closes the intentions.
+        //
+        // TAC-554 gave this a SECOND job, so it is no longer audit-only on
+        // this path: dispatch reads its length through intentionTailFor to
+        // decide whether the getting-to-know-you question earns its own
+        // message. Passing it is now load-bearing rather than bookkeeping.
         renderedIntentions,
         // TAC-469: the Instagram reply check. If this message already has an
         // answer (usually one staff typed in the Instagram app), send nothing.

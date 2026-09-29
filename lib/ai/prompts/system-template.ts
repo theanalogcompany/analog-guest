@@ -1714,7 +1714,40 @@ import {
 // question" by asking nothing. Ruled out 2026-09-29. Do not re-add one without
 // measuring it: the prompt already tells this category to answer from the
 // block, and that sentence was in front of the model on every failure above.
-export const PROMPT_VERSION = 'v1.71.0'
+// v1.72.0 (TAC-554): a new # Getting-to-know-you questions emission block, and
+// one clause dropped from the intentions block's restraint paragraph in
+// serializers.ts. No new voice rule.
+//
+// Jaipal ruled that a question raised from `## What you're hoping to get to`
+// always goes out as its own message bubble, after the answer. A persona rule
+// saying exactly that was applied on 2026-09-29 and failed twice the same day.
+//
+// THE FAILURES WERE DISPATCH, NOT DISOBEDIENCE, which is why this is a schema
+// field rather than more wording. resolveDispatchBubbles splits on sentence
+// boundaries it can detect: "nice! what variation did you go with? and by the
+// way, what's your name?" is three sentences, so it rode a fair coin and lost;
+// "Foncii, nice to meet you 🙂 do you live or work around Polk Street?" has no
+// `.?!` before "do", so it is ONE sentence and could not have split at any
+// coin value. Bubble structure is not reachable from prompt text.
+//
+// MEASURED BEFORE THE CHANGE, 36 units at Le Mil's across both channels:
+// 0 of 21 raising turns put the question in its own bubble. Of those 21
+// failures, 18 had an answer outside the 2-3 sentence range and so could not
+// have split at ANY coin value; only 3 lost a coin. So the ceiling on any
+// wording-only fix was about 3 in 21, not the ~50% the plan estimated.
+//
+// The block tells the model to put the question in `intentionQuestion` and NOT
+// in `body`. composeReplyWithIntention then JOINS them, so `body` stays the
+// complete reply and every backstop still reads the question; the field rides
+// along as the exact tail, and dispatch peels it off. Whether to ask is still
+// entirely the intentions block's call — this block deliberately adds no second
+// authority on that (the TAC-314/327 lesson).
+//
+// The dropped clause is the positional one: "the question goes at the end, in
+// one short line, or not at all" became "the question is one short line on its
+// own, or not at all". The question has no position in the body any more, so
+// the old wording would be false.
+export const PROMPT_VERSION = 'v1.72.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1852,6 +1885,23 @@ When to emit each:
 Hard rule: never record an INFERENCE as if it were a share. If the guest's history shows they always order oat lattes, that's pattern recognition — already surfaced to you in ## Visit history. Do NOT translate it into a write like preferences.favorites = ["oat latte"]. Only record what the guest just said in plain text.
 
 If the ## Guest context block already shows the guest has something captured (e.g. first_name already set to "Sarah"), and the inbound doesn't update it, leave contextUpdate empty. Re-recording the same fact every turn is noise.
+
+# Getting-to-know-you questions
+
+\`## What you're hoping to get to\` in the user prompt lists things you'd like to
+learn about this guest. Whether to ask is that block's call, and it is usually
+no. When you do ask, the question goes in \`intentionQuestion\`, and NOT in
+\`body\`.
+
+\`body\` is the reply without it, complete on its own: it has to read as a
+finished message to someone who never sees the question.
+
+\`intentionQuestion\` is that one question, by itself, written as a message of
+its own rather than as a clause tacked onto another sentence. It is sent to the
+guest a moment after the reply, as a separate message. Anything the listed line
+asks you to put in front of it, such as a softener, belongs in here with it.
+
+Emit "" when you are not asking. Most turns emit "".
 
 # Universal voice rules
 These apply to every venue, on top of the venue-specific voice imperative below. When in doubt, follow these.
