@@ -771,8 +771,27 @@ function formatFollowupContext(
 // line tells Sonnet how to use the data — pattern recognition for
 // recommendations, NOT reciting it back at the guest (R11 reinforces).
 /**
- * TAC-543: one line naming every distinct item this guest has ordered, with a
+ * TAC-543: one line naming each distinct item in the visits above, with a
  * count, rendered AFTER the timestamped visits and never replacing them.
+ *
+ * "ACROSS THE VISITS ABOVE", NOT "EVERYTHING THEY'VE ORDERED HERE" (ruled
+ * 2026-09-29). The first wording shipped for one commit and was wrong in the
+ * direction that matters: `visits` is bounded by MAX_VISIT_HISTORY_DAYS (90),
+ * by MAX_VISIT_HISTORY_TRANSACTIONS (20, newest-first so the OLDEST drop), and
+ * by extractRecentVisits dropping any transaction with no parseable item name.
+ * An absolute claim over that subset made the model assert a falsehood about a
+ * guest with older orders - "cortado (once)" as EVERYTHING, for a guest who had
+ * a blossom tonic 100 days ago - which is this ticket's own device defect at a
+ * different boundary, and the line exists precisely to make the model assert
+ * from this list rather than hedge. It also contradicted the block's own intro,
+ * which says "Recent transactions".
+ *
+ * The shipped wording is true BY CONSTRUCTION: the line is derived from exactly
+ * the visits rendered above it, so it claims nothing about what is outside
+ * them. All-time counts beyond the window are a known follow-up, not this line.
+ * A wording naming the window ("in the last 90 days") was considered and
+ * rejected: it would still be false if the 20-cap bit, and it puts a number in
+ * prompt copy that actually lives in a constant.
  *
  * WHY IT EXISTS, measured rather than assumed. The timestamped bullets carry
  * the same facts, and two wordings of a category-instruction clause failed to
@@ -824,7 +843,7 @@ export function formatOrderSummary(visits: readonly Visit[]): string {
     .map((name, i) => ({ name, n: counts.get(name.toLowerCase()) ?? 0, i }))
     .sort((a, b) => b.n - a.n || a.i - b.i)
     .map(({ name, n }) => `${name} (${n === 1 ? 'once' : `${n}\u00d7`})`)
-  return `Everything they've ordered here: ${parts.join(', ')}.`
+  return `Across the visits above: ${parts.join(', ')}.`
 }
 
 function formatVisitHistory(

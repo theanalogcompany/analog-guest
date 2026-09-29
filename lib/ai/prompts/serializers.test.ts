@@ -1689,7 +1689,7 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
       { items: ['cortado', 'pink panther'], visitedAt: t(3) },
     ])
     // One entry per distinct item, never one per visit.
-    expect(line).toBe("Everything they've ordered here: cortado (3\u00d7), pink panther (2\u00d7).")
+    expect(line).toBe("Across the visits above: cortado (3\u00d7), pink panther (2\u00d7).")
     expect(line.match(/cortado/g)).toHaveLength(1)
   })
 
@@ -1711,7 +1711,7 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
       { items: ['B', 'C'], visitedAt: t(2) },
       { items: ['C'], visitedAt: t(3) },
     ])
-    expect(line).toBe("Everything they've ordered here: C (3\u00d7), B (2\u00d7), A (once).")
+    expect(line).toBe("Across the visits above: C (3\u00d7), B (2\u00d7), A (once).")
   })
 
   it('is DERIVED from the visits it is given, naming every item and nothing else', () => {
@@ -1737,7 +1737,7 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
     // given, and the count is asserted so a truncation cannot pass by naming a
     // subset that happens to satisfy every toContain above.
     const mentioned = line
-      .replace("Everything they've ordered here: ", '')
+      .replace("Across the visits above: ", '')
       .split(/,\s*/)
       .map((part) => part.replace(/\s*\((once|\d+\u00d7)\)\.?$/, ''))
     expect(mentioned).toHaveLength(distinct.length)
@@ -1760,7 +1760,7 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
       { items: ['sofi'], visitedAt: t(2) },
     ])
     // Two spellings, ONE entry, counted twice.
-    expect(line).toBe("Everything they've ordered here: SoFi (2\u00d7).")
+    expect(line).toBe("Across the visits above: SoFi (2\u00d7).")
     // And the first-seen spelling is echoed back untouched, neither
     // capitalised nor lowercased by this function.
     expect(formatOrderSummary([{ items: ['SoFi'], visitedAt: t(1) }])).toContain('SoFi')
@@ -1771,7 +1771,7 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
     expect(formatOrderSummary([])).toBe('')
     expect(formatOrderSummary([{ items: [], visitedAt: t(1) }])).toBe('')
     expect(formatOrderSummary([{ items: ['  ', 'cortado'], visitedAt: t(1) }])).toBe(
-      "Everything they've ordered here: cortado (once).",
+      "Across the visits above: cortado (once).",
     )
   })
 })
@@ -1793,17 +1793,17 @@ describe('runtimeToProse — the order summary renders ONLY with the block (TAC-
     // The bullets SURVIVE. The summary is an addition, not a replacement.
     expect(out).toContain('- [yesterday] cortado, sofi')
     expect(out).toContain('- [2 days ago] cortado')
-    expect(out).toContain("Everything they've ordered here: cortado (2\u00d7), sofi (once).")
+    expect(out).toContain("Across the visits above: cortado (2\u00d7), sofi (once).")
     // And it sits AFTER the bullets.
     expect(out.indexOf('- [2 days ago] cortado')).toBeLessThan(
-      out.indexOf("Everything they've ordered here:"),
+      out.indexOf("Across the visits above:"),
     )
   })
 
   it('never renders without the block: no visits means neither', () => {
     const out = runtimeToProse({ recentVisits: [] }, 'reply', NOW)
     expect(out).not.toContain('## Visit history')
-    expect(out).not.toContain("Everything they've ordered here")
+    expect(out).not.toContain("Across the visits above")
   })
 
   it('never renders on a category that suppresses the block', () => {
@@ -1816,7 +1816,7 @@ describe('runtimeToProse — the order summary renders ONLY with the block (TAC-
         NOW,
       )
       expect(out).not.toContain('## Visit history')
-      expect(out).not.toContain("Everything they've ordered here")
+      expect(out).not.toContain("Across the visits above")
     }
   })
 })

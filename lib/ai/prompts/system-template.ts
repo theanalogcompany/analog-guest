@@ -1629,8 +1629,13 @@ import {
 //
 // AS PRODUCTION RENDERS IT, lowercase, because extractRecentVisits lowercases
 // every line-item name:
-//   Everything they've ordered here: cortado (4x), pink panther (3x), gulab
-//   jamun cake (2x), sofi (once), blossom tonic (once).
+//   Across the visits above: cortado (4x), pink panther (3x), gulab jamun cake
+//   (2x), sofi (once), blossom tonic (once).
+// The preamble is "Across the visits above", NOT "Everything they've ordered
+// here" (ruled 2026-09-29). The absolute form asserted a falsehood about any
+// guest with orders outside the 90-day window or the 20-transaction cap, which
+// is this ticket's own defect one boundary out; this form is true by
+// construction. All-time counts are a known follow-up, not in scope here.
 // An earlier draft of this entry showed it capitalised, which is a string
 // production never produces; the measurement injected visits directly and so
 // measured that capitalised form too. The arm comparison is unaffected (both
@@ -1647,37 +1652,51 @@ import {
 //
 // MEASURED, 20 history questions per arm against Le Mil's live config, control
 // = this block without the line, removed from the composed prompt by exact-once
-// replacement so the arms differ in that one string.
+// replacement so the arms differ in that one string. The harness builds its
+// visits THROUGH extractRecentVisits and refuses to run unless they come back
+// lowercase, so this is the prompt production actually composes.
 //
-// Wrong has/hasn't claims 1/20 to 0/20. READ THAT AS "DID NOT REPRODUCE", NOT
-// AS A RATE: it is a one-unit delta, and the same caveat applies to it as to
-// the recommendation figure below. The control failure was the same defect on
-// the same item as the device case, in different words ("both ones you haven't
-// landed on yet" against the device's "the one you haven't touched yet") - an
-// earlier draft of this entry called it verbatim, which overstates it.
+//   contradicts the guest's history   control 3/20   change 1/20
+//   false "the only one" claim        control 1/20   change 0/20
+//   answers the question              control 20/20  change 20/20
+//   "what do i usually get" leads
+//     with the genuine 4x item        control 1/4    change 4/4
 //
-// The clearest thing the counts buy is not that bar. "What do i usually get"
-// leads with the genuine 4x item 3/4, where the control led with the 3x item
-// 4/4 and so named the top item correctly 0/4. That is a ranking the bullets
-// alone do not give up.
+// THE PRE-REGISTERED BAR WAS 0 CONTRADICTIONS AND THIS SHIPS AT 1/20. Ruled
+// 2026-09-29: the change beats main on every axis measured and the remaining
+// failure is one main produces too, so holding it would ship the worse
+// behaviour. The failing body, verbatim, judge 3 of 3:
+//
+//   "The Blossom Tonic and the Spiced Cold Brew, from what we can see. The
+//    Blossom Tonic is espresso with floral syrup and tonic under a thick foam
+//    you can eat like ice cream, finished with beet powder and crushed rose.
+//    Worth trying."
+//
+// The guest had the blossom tonic five days ago. The control produced a
+// near-identical sentence, so this is a shared failure the line reduces rather
+// than removes. It is always the same shape - the "what haven't I tried"
+// question, answered about the ONCE-ordered item - and it is the complement
+// problem: this line says what a guest HAS had, and that question is about what
+// they have not. TAC-559 owns it.
+//
+// THE RANKING IS THE MOST ROBUST GAIN and is what the counts actually buy:
+// 4/4 against 1/4, with replies naming the frequency outright ("cortado most
+// often, with the pink panther a close second"). The control leads with the 3x
+// item instead.
+//
+// AN EARLIER RUN REPORTED 1/20 AND 0/20 AND IS SUPERSEDED. It injected
+// ctx.recentVisits directly with menu casing, so it measured a capitalised
+// string production never renders; on the production-shaped prompt BOTH arms
+// are worse. Do not quote those numbers. A "says once" gain that run reported
+// (2/4) did not survive the re-run (0/4 in both arms) and was noise at n=4.
 //
 // Recommendation turns 3/10 to 2/10 on presenting a history item as new: no
-// regression, and no improvement worth claiming at that n.
+// regression, and no improvement worth claiming at that n. That figure is from
+// the earlier run and was not re-measured on the new wording.
 //
-// TWO COLLECTED METRICS MOVED AND BOTH ARE REPORTED, including the unflattering
-// one. "Answers the question" held 20/20 in both arms. "Names an ordered item"
-// went 17/20 to 14/20, entirely on the have-I-had-X-before scenario where the
-// change answers "not yet" and the control recited what they had instead; that
-// is a 3-unit swing against a 1-unit swing on the headline, and reading it as
-// desirable terseness (R11/R15 discourage the recitation) is a judgement, not a
-// measurement.
-//
-// A PRE-REGISTERED BAR BREACHED AND IT IS RECORDED AS A BREACH. Bar 2 was "0 of
-// 20 make a false 'the only one' claim"; by the judge built for it the line went
-// 0/20 to 1/20. Ruled out of scope 2026-09-29 on a hand read of the bodies
-// (control 3/20, change 4/20, one reply apart on n=4) plus the structural
-// argument below. Note the judge could not decide its own bar: it flagged one
-// of four byte-identical sentences.
+// TWO COLLECTED METRICS, both reported including the unflattering one.
+// "Answers the question" held 20/20 in both arms. "Names an ordered item" was
+// 19/20 against 18/20, inside noise.
 //
 // TWO THINGS THIS DOES NOT FIX, both recorded rather than left to be found.
 // The DEPTH HEDGE survives it ("you've had it once but it's worth a proper sit
