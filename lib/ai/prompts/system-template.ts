@@ -1624,10 +1624,19 @@ import {
 // not in the context.
 // v1.71.0 (TAC-543): NO RULE CHANGE. The ## Visit history block gains one line
 // after the timestamped bullets, naming every distinct item the guest has
-// ordered with a count: "Everything they've ordered here: Cortado (4x), Pink
-// Panther (3x), ... Blossom Tonic (once)." Derived from the same Visit[] the
-// bullets render, so the two can never disagree. formatOrderSummary in
-// serializers.ts.
+// ordered with a count. Derived from the same Visit[] the bullets render, so
+// the two can never disagree. formatOrderSummary in serializers.ts.
+//
+// AS PRODUCTION RENDERS IT, lowercase, because extractRecentVisits lowercases
+// every line-item name:
+//   Everything they've ordered here: cortado (4x), pink panther (3x), gulab
+//   jamun cake (2x), sofi (once), blossom tonic (once).
+// An earlier draft of this entry showed it capitalised, which is a string
+// production never produces; the measurement injected visits directly and so
+// measured that capitalised form too. The arm comparison is unaffected (both
+// arms were mis-cased identically and differ only in the line's presence), but
+// the exact bytes measured were not the shipped ones. Guest-facing casing, if
+// it matters, is extractItemNames's to fix.
 //
 // WHY, and it is a fact about how the model reads the bullets rather than about
 // the data being absent. The bullets already carried every one of those items.
@@ -1637,12 +1646,38 @@ import {
 // haven't touched yet". Naming the counts flatly is what closed it.
 //
 // MEASURED, 20 history questions per arm against Le Mil's live config, control
-// = this block without the line. Wrong has/hasn't claims 1/20 to 0/20, the one
-// control failure being the device case verbatim. "What do i usually get" leads
-// with the genuine 4x item 3/4 where the control led with the 3x item 4/4, so
-// the counts reach the answer and not just the prompt. Recommendation turns
-// 3/10 to 2/10 on presenting a history item as new: no regression, and no
-// improvement worth claiming at that n.
+// = this block without the line, removed from the composed prompt by exact-once
+// replacement so the arms differ in that one string.
+//
+// Wrong has/hasn't claims 1/20 to 0/20. READ THAT AS "DID NOT REPRODUCE", NOT
+// AS A RATE: it is a one-unit delta, and the same caveat applies to it as to
+// the recommendation figure below. The control failure was the same defect on
+// the same item as the device case, in different words ("both ones you haven't
+// landed on yet" against the device's "the one you haven't touched yet") - an
+// earlier draft of this entry called it verbatim, which overstates it.
+//
+// The clearest thing the counts buy is not that bar. "What do i usually get"
+// leads with the genuine 4x item 3/4, where the control led with the 3x item
+// 4/4 and so named the top item correctly 0/4. That is a ranking the bullets
+// alone do not give up.
+//
+// Recommendation turns 3/10 to 2/10 on presenting a history item as new: no
+// regression, and no improvement worth claiming at that n.
+//
+// TWO COLLECTED METRICS MOVED AND BOTH ARE REPORTED, including the unflattering
+// one. "Answers the question" held 20/20 in both arms. "Names an ordered item"
+// went 17/20 to 14/20, entirely on the have-I-had-X-before scenario where the
+// change answers "not yet" and the control recited what they had instead; that
+// is a 3-unit swing against a 1-unit swing on the headline, and reading it as
+// desirable terseness (R11/R15 discourage the recitation) is a judgement, not a
+// measurement.
+//
+// A PRE-REGISTERED BAR BREACHED AND IT IS RECORDED AS A BREACH. Bar 2 was "0 of
+// 20 make a false 'the only one' claim"; by the judge built for it the line went
+// 0/20 to 1/20. Ruled out of scope 2026-09-29 on a hand read of the bodies
+// (control 3/20, change 4/20, one reply apart on n=4) plus the structural
+// argument below. Note the judge could not decide its own bar: it flagged one
+// of four byte-identical sentences.
 //
 // TWO THINGS THIS DOES NOT FIX, both recorded rather than left to be found.
 // The DEPTH HEDGE survives it ("you've had it once but it's worth a proper sit

@@ -1661,31 +1661,47 @@ describe('runtimeToProse — guest relationship line (TAC-234)', () => {
 // bullets carry the same facts and two wordings of a category-instruction
 // clause could not make the model use them — it read the block as what a guest
 // HABITUALLY orders, so an item ordered once did not register as being in
-// their history. Measured: 16/20 replies presented a history item as new with
-// the bullets alone, 7/20 once the counts were named.
+// their history.
+//
+// MEASURED, and be careful which number this is. On 20 HISTORY questions per
+// arm the line took wrong has/hasn't claims 1/20 to 0/20 - a one-unit delta,
+// so read it as "did not reproduce" rather than as a rate. On 10 RECOMMENDATION
+// turns it went 3/10 to 2/10, which is no regression and no improvement worth
+// claiming at that n.
+//
+// An earlier version of this header read "16/20 ... 7/20 once the counts were
+// named". Those are the PARKED measurement's numbers and 7/20 is NOT a
+// summary-alone figure: that arm carried a category-instruction clause as well,
+// which the harness's own docstring warns about. The clause is dropped and
+// nothing here measures it.
+//
+// FIXTURES ARE LOWERCASE BECAUSE PRODUCTION IS. extractRecentVisits lowercases
+// every item name, so "Cortado" is a shape this function never sees from the
+// agent path - every pre-existing Visit fixture in this file is lowercase too.
+// The one mixed-case test below is about the exported contract, and says so.
 describe('formatOrderSummary — the order summary line (TAC-543)', () => {
   const t = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000)
 
   it('DEDUPES an item ordered on several visits into one entry with a count', () => {
     const line = formatOrderSummary([
-      { items: ['Cortado', 'Pink Panther'], visitedAt: t(1) },
-      { items: ['Cortado'], visitedAt: t(2) },
-      { items: ['Cortado', 'Pink Panther'], visitedAt: t(3) },
+      { items: ['cortado', 'pink panther'], visitedAt: t(1) },
+      { items: ['cortado'], visitedAt: t(2) },
+      { items: ['cortado', 'pink panther'], visitedAt: t(3) },
     ])
     // One entry per distinct item, never one per visit.
-    expect(line).toBe("Everything they've ordered here: Cortado (3\u00d7), Pink Panther (2\u00d7).")
-    expect(line.match(/Cortado/g)).toHaveLength(1)
+    expect(line).toBe("Everything they've ordered here: cortado (3\u00d7), pink panther (2\u00d7).")
+    expect(line.match(/cortado/g)).toHaveLength(1)
   })
 
   it('writes "once" for a single order and "Nx" above one', () => {
     // The distinction is the whole point: a once-ordered item is exactly what
     // the model was treating as never-ordered.
     const line = formatOrderSummary([
-      { items: ['Cortado', 'SoFi'], visitedAt: t(1) },
-      { items: ['Cortado'], visitedAt: t(2) },
+      { items: ['cortado', 'sofi'], visitedAt: t(1) },
+      { items: ['cortado'], visitedAt: t(2) },
     ])
-    expect(line).toContain('Cortado (2\u00d7)')
-    expect(line).toContain('SoFi (once)')
+    expect(line).toContain('cortado (2\u00d7)')
+    expect(line).toContain('sofi (once)')
     expect(line).not.toContain('(1\u00d7)')
   })
 
@@ -1701,31 +1717,61 @@ describe('formatOrderSummary — the order summary line (TAC-543)', () => {
   it('is DERIVED from the visits it is given, naming every item and nothing else', () => {
     // The guarantee that matters: the summary and the bullets cannot disagree
     // about what the guest has had, because they read the same array.
+    // SEVEN distinct items, deliberately. A three-item fixture cannot detect
+    // TRUNCATION: a .slice(0, 3) "prompt bloat" tidy survived all 293 tests
+    // when this fixture had three, and it would cut the once-ordered items
+    // first, because they sort LAST under the count-descending order. Those are
+    // the exact items this line exists to surface. Any cap below seven now
+    // fails, and the length assertion below is what does it.
     const visits = [
-      { items: ['Cortado', 'Gulab Jamun Cake'], visitedAt: t(1) },
-      { items: ['SoFi'], visitedAt: t(2) },
+      { items: ['cortado', 'gulab jamun cake', 'pour over'], visitedAt: t(1) },
+      { items: ['sofi', 'cortado', 'mango lassi'], visitedAt: t(2) },
+      { items: ['blossom tonic', 'pink panther'], visitedAt: t(3) },
     ]
     const line = formatOrderSummary(visits)
     const named = visits.flatMap((v) => v.items)
     for (const item of named) expect(line).toContain(item)
-    // Nothing invented: every capitalised token in the line comes from a visit.
+    const distinct = [...new Set(named)]
+    expect(distinct).toHaveLength(7)
+    // Nothing invented and nothing DROPPED: the set named is exactly the set
+    // given, and the count is asserted so a truncation cannot pass by naming a
+    // subset that happens to satisfy every toContain above.
     const mentioned = line
       .replace("Everything they've ordered here: ", '')
       .split(/,\s*/)
       .map((part) => part.replace(/\s*\((once|\d+\u00d7)\)\.?$/, ''))
-    expect(mentioned.sort()).toEqual([...new Set(named)].sort())
+    expect(mentioned).toHaveLength(distinct.length)
+    expect(mentioned.sort()).toEqual(distinct.sort())
   })
 
-  it('preserves the case the visits use, so a menu name is never handed back mis-cased', () => {
-    // "sofi" written to a guest is a voice regression; the visits spell it SoFi.
+  it('dedupes case-insensitively and changes no casing of its own', () => {
+    // THE EXPORTED CONTRACT, not a claim about production. The agent path
+    // always hands this function lowercase names (extractRecentVisits
+    // lowercases), so on that path this test's input is unreachable - it is
+    // here because the function is exported and the measurement harnesses pass
+    // menu-cased names straight in.
+    //
+    // MIXED CASE ON PURPOSE. With one casing the lowercase dedupe key is
+    // indistinguishable from a case-sensitive one, and a case-sensitive key
+    // survived the whole suite when every fixture agreed on casing. This is
+    // the only input that separates them.
+    const line = formatOrderSummary([
+      { items: ['SoFi'], visitedAt: t(1) },
+      { items: ['sofi'], visitedAt: t(2) },
+    ])
+    // Two spellings, ONE entry, counted twice.
+    expect(line).toBe("Everything they've ordered here: SoFi (2\u00d7).")
+    // And the first-seen spelling is echoed back untouched, neither
+    // capitalised nor lowercased by this function.
     expect(formatOrderSummary([{ items: ['SoFi'], visitedAt: t(1) }])).toContain('SoFi')
+    expect(formatOrderSummary([{ items: ['sofi'], visitedAt: t(1) }])).toContain('sofi')
   })
 
   it('returns an empty string for no visits, and skips blank item names', () => {
     expect(formatOrderSummary([])).toBe('')
     expect(formatOrderSummary([{ items: [], visitedAt: t(1) }])).toBe('')
-    expect(formatOrderSummary([{ items: ['  ', 'Cortado'], visitedAt: t(1) }])).toBe(
-      "Everything they've ordered here: Cortado (once).",
+    expect(formatOrderSummary([{ items: ['  ', 'cortado'], visitedAt: t(1) }])).toBe(
+      "Everything they've ordered here: cortado (once).",
     )
   })
 })
@@ -1737,19 +1783,19 @@ describe('runtimeToProse — the order summary renders ONLY with the block (TAC-
     const out = runtimeToProse(
       {
         recentVisits: [
-          { items: ['Cortado', 'SoFi'], visitedAt: t(1) },
-          { items: ['Cortado'], visitedAt: t(2) },
+          { items: ['cortado', 'sofi'], visitedAt: t(1) },
+          { items: ['cortado'], visitedAt: t(2) },
         ],
       },
       'reply',
       NOW,
     )
     // The bullets SURVIVE. The summary is an addition, not a replacement.
-    expect(out).toContain('- [yesterday] Cortado, SoFi')
-    expect(out).toContain('- [2 days ago] Cortado')
-    expect(out).toContain("Everything they've ordered here: Cortado (2\u00d7), SoFi (once).")
+    expect(out).toContain('- [yesterday] cortado, sofi')
+    expect(out).toContain('- [2 days ago] cortado')
+    expect(out).toContain("Everything they've ordered here: cortado (2\u00d7), sofi (once).")
     // And it sits AFTER the bullets.
-    expect(out.indexOf('- [2 days ago] Cortado')).toBeLessThan(
+    expect(out.indexOf('- [2 days ago] cortado')).toBeLessThan(
       out.indexOf("Everything they've ordered here:"),
     )
   })
@@ -1765,7 +1811,7 @@ describe('runtimeToProse — the order summary renders ONLY with the block (TAC-
     // rather than leaking out on its own.
     for (const category of ['welcome', 'opt_out'] as const) {
       const out = runtimeToProse(
-        { recentVisits: [{ items: ['Cortado'], visitedAt: t(1) }] },
+        { recentVisits: [{ items: ['cortado'], visitedAt: t(1) }] },
         category,
         NOW,
       )

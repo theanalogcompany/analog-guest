@@ -786,8 +786,23 @@ function formatFollowupContext(
  * bullets can never disagree about what the guest has had. It is deliberately
  * not a second query.
  *
- * Case is PRESERVED as the visits spell it: handing the model "sofi" for SoFi
- * invites a mis-cased menu name into a guest-facing reply.
+ * CASE IS WHATEVER extractRecentVisits GAVE US, WHICH IS LOWERCASE. That
+ * function lowercases every line-item name (`seen.set(lower, lower)`) and its
+ * own Visit doc comment says so, so production renders "cortado (4x), pink
+ * panther (3x), ... blossom tonic (once)". This function does not change case
+ * in either direction: normalising here would be a second opinion about a
+ * decision made upstream, and capitalising would mean inventing a spelling.
+ *
+ * An earlier version of this comment claimed case was PRESERVED so a menu name
+ * could never be handed back mis-cased. That was false in the direction that
+ * matters: the mis-casing happens at extraction, before this function sees the
+ * name, and seven tests pinned it only because their fixtures were capitalised
+ * in a way production cannot produce. If guest-facing casing is worth fixing it
+ * is `extractItemNames`'s to fix, not this line's.
+ *
+ * The lowercase dedupe KEY below is therefore inert on production input and is
+ * kept for the exported contract: this is a pure exported function and the
+ * measurement harnesses call it with menu-cased names directly.
  */
 export function formatOrderSummary(visits: readonly Visit[]): string {
   const counts = new Map<string, number>()
