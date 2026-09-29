@@ -149,7 +149,8 @@ export function scanCarryForwardAt(input: ScanCarryForwardInput): Date | null {
 
   if (lastGreetingAt === null) return null
   const sinceGreeting = inboundAt.getTime() - lastGreetingAt.getTime()
-  if (sinceGreeting < 0 || sinceGreeting > SCAN_GREETING_CARRY_FORWARD_MS) return null
+  if (sinceGreeting < 0 || sinceGreeting > SCAN_GREETING_CARRY_FORWARD_MS)
+    return null
   // The greeting has to belong to this scan, not to an older one: a greeting
   // sent BEFORE the scan is evidence about a different arrival.
   if (lastGreetingAt.getTime() < lastScanAt.getTime()) return null

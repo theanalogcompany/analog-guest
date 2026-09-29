@@ -55,7 +55,11 @@ function trimmedOrNull(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function graphGet(path: string, token: string, fetchImpl: FetchLike): Promise<GraphResult<unknown>> {
+function graphGet(
+  path: string,
+  token: string,
+  fetchImpl: FetchLike,
+): Promise<GraphResult<unknown>> {
   return graphRequest('GET', path, token, fetchImpl)
 }
 
@@ -69,14 +73,22 @@ export async function fetchInstagramProfile(
   token: string,
   fetchImpl: FetchLike,
 ): Promise<GraphResult<InstagramProfile>> {
-  const result = await graphGet(`/${encodeURIComponent(igsid)}?fields=username,name`, token, fetchImpl)
+  const result = await graphGet(
+    `/${encodeURIComponent(igsid)}?fields=username,name`,
+    token,
+    fetchImpl,
+  )
   if (!result.ok) return result
 
   const body = isRecord(result.value) ? result.value : {}
   const username = trimmedOrNull(body.username)
   // Meta always returns a username for someone who has messaged the account.
   // A 200 without one is not something to store over a good handle.
-  if (username === null) return { ok: false, failure: { reason: 'malformed_response', httpStatus: 200 } }
+  if (username === null)
+    return {
+      ok: false,
+      failure: { reason: 'malformed_response', httpStatus: 200 },
+    }
   return { ok: true, value: { username, name: trimmedOrNull(body.name) } }
 }
 
@@ -85,11 +97,20 @@ export async function fetchInstagramProfile(
  * are 17 digits, past what a JSON number holds exactly, so a numeric user_id
  * could compare unequal to the stored one while being "the same" account.
  */
-export async function fetchTokenAccountId(token: string, fetchImpl: FetchLike): Promise<GraphResult<string>> {
+export async function fetchTokenAccountId(
+  token: string,
+  fetchImpl: FetchLike,
+): Promise<GraphResult<string>> {
   const result = await graphGet('/me?fields=user_id', token, fetchImpl)
   if (!result.ok) return result
 
-  const accountId = isRecord(result.value) ? stringOrNull(result.value.user_id) : null
-  if (accountId === null) return { ok: false, failure: { reason: 'malformed_response', httpStatus: 200 } }
+  const accountId = isRecord(result.value)
+    ? stringOrNull(result.value.user_id)
+    : null
+  if (accountId === null)
+    return {
+      ok: false,
+      failure: { reason: 'malformed_response', httpStatus: 200 },
+    }
   return { ok: true, value: accountId }
 }

@@ -66,12 +66,17 @@ export async function loadExistingSheet(
   return { spreadsheetId, currentRows, metaEntries }
 }
 
-async function embedCached(text: string, cache: Map<string, number[]>): Promise<number[] | null> {
+async function embedCached(
+  text: string,
+  cache: Map<string, number[]>,
+): Promise<number[] | null> {
   const cached = cache.get(text)
   if (cached) return cached
   const result = await embedText(text, 'document')
   if (!result.ok) {
-    console.warn(`[merge-scenario-sheet] embedding failed for tombstone dedup: ${result.error}`)
+    console.warn(
+      `[merge-scenario-sheet] embedding failed for tombstone dedup: ${result.error}`,
+    )
     return null
   }
   cache.set(text, result.data.embedding)
@@ -80,7 +85,11 @@ async function embedCached(text: string, cache: Map<string, number[]>): Promise<
 
 export interface DedupReport {
   droppedCount: number
-  dropped: Array<{ message: string; topic: string; matchedTombstoneId: string }>
+  dropped: Array<{
+    message: string
+    topic: string
+    matchedTombstoneId: string
+  }>
 }
 
 /**
@@ -96,7 +105,10 @@ export async function dedupeAgainstTombstones(
 ): Promise<{ kept: Scenario[]; report: DedupReport }> {
   const tombstones = detectTombstones(metaEntries, currentRows)
   if (tombstones.length === 0) {
-    return { kept: [...freshScenarios], report: { droppedCount: 0, dropped: [] } }
+    return {
+      kept: [...freshScenarios],
+      report: { droppedCount: 0, dropped: [] },
+    }
   }
   const byTopic = groupTombstonesByTopic(tombstones)
   const cache = new Map<string, number[]>()
@@ -110,7 +122,10 @@ export async function dedupeAgainstTombstones(
     }
   }
 
-  const similarityLookup = (candidateMessage: string, tombstoneMessage: string): number => {
+  const similarityLookup = (
+    candidateMessage: string,
+    tombstoneMessage: string,
+  ): number => {
     const a = cache.get(candidateMessage)
     const b = cache.get(tombstoneMessage)
     if (!a || !b) return 0
@@ -167,7 +182,12 @@ export async function writeFullSheet(
   ]
 
   await writeTabValues(sheets, input.spreadsheetId, SCENARIOS_TAB, scenarioRows)
-  await writeTabValues(sheets, input.spreadsheetId, TOPICS_TAB, input.topicsTabRows)
+  await writeTabValues(
+    sheets,
+    input.spreadsheetId,
+    TOPICS_TAB,
+    input.topicsTabRows,
+  )
   await writeTabValues(sheets, input.spreadsheetId, META_TAB, metaRows)
 }
 
@@ -188,14 +208,14 @@ export async function runMerge(args: {
   const currentRows = args.existing?.currentRows ?? []
   const metaEntries = args.existing?.metaEntries ?? []
 
-  const { kept: dedupedFresh, report: dedupReport } = await dedupeAgainstTombstones(
-    args.freshScenarios,
-    metaEntries,
-    currentRows,
-  )
+  const { kept: dedupedFresh, report: dedupReport } =
+    await dedupeAgainstTombstones(args.freshScenarios, metaEntries, currentRows)
 
   const freshStampedRows = stampFreshRows(dedupedFresh)
-  const { finalRows, stats } = mergeScenarioRows({ currentRows, freshStampedRows })
+  const { finalRows, stats } = mergeScenarioRows({
+    currentRows,
+    freshStampedRows,
+  })
   const allMetaEntries = buildMergedMetaEntries(metaEntries, freshStampedRows)
 
   return { finalRows, allMetaEntries, mergeStats: stats, dedupReport }

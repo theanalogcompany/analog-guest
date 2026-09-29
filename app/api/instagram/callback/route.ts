@@ -63,12 +63,18 @@ const VENUE_ACCOUNT_UNIQUE_CONSTRAINT = 'venues_instagram_account_id_key'
 function html(body: string, status: number): Response {
   return new Response(body, {
     status,
-    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
   })
 }
 
 function fail(reason: InstagramCallbackFailure): Response {
-  return html(instagramCallbackFailurePage(reason), INSTAGRAM_CALLBACK_FAILURE_STATUS[reason])
+  return html(
+    instagramCallbackFailurePage(reason),
+    INSTAGRAM_CALLBACK_FAILURE_STATUS[reason],
+  )
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -99,14 +105,20 @@ export async function GET(request: Request): Promise<Response> {
 
   // 1. The signature. Cheap, no database read, and it refuses a tampered or
   //    malformed state before anything else happens.
-  const verified = verifyInstagramOAuthState(state, deriveInstagramStateSigningKey(encryptionKey), now)
+  const verified = verifyInstagramOAuthState(
+    state,
+    deriveInstagramStateSigningKey(encryptionKey),
+    now,
+  )
   if (!verified.ok) {
     console.warn('[instagram callback] state refused', {
       event: 'instagram_callback_state_refused',
       // The CATEGORY only. Never the state value itself.
       reason: verified.reason,
     })
-    return fail(verified.reason === 'expired' ? 'state_expired' : 'state_invalid')
+    return fail(
+      verified.reason === 'expired' ? 'state_expired' : 'state_invalid',
+    )
   }
 
   const supabase = createAdminClient()
@@ -114,7 +126,11 @@ export async function GET(request: Request): Promise<Response> {
   // 2. The claim. THIS is what refuses a replay: the signature above verifies
   //    a second presentation just as happily, because nothing about a signed
   //    value changes between presentations.
-  const claim = await claimInstagramOAuthState(supabase, verified.payload.nonce, now)
+  const claim = await claimInstagramOAuthState(
+    supabase,
+    verified.payload.nonce,
+    now,
+  )
   if (!claim.ok) {
     if (claim.reason === 'error') {
       console.error('[instagram callback] could not claim the state', {
@@ -129,17 +145,26 @@ export async function GET(request: Request): Promise<Response> {
   // 3. Belt and braces. The signed payload and the stored row are written in
   //    the same moment from the same values, so a disagreement means
   //    something is wrong in a way worth refusing over rather than resolving.
-  if (claim.venueId !== verified.payload.venueId || claim.operatorId !== verified.payload.operatorId) {
-    console.error('[instagram callback] signed state disagrees with the issued row', {
-      event: 'instagram_callback_state_mismatch',
-      venueId: claim.venueId,
-    })
+  if (
+    claim.venueId !== verified.payload.venueId ||
+    claim.operatorId !== verified.payload.operatorId
+  ) {
+    console.error(
+      '[instagram callback] signed state disagrees with the issued row',
+      {
+        event: 'instagram_callback_state_mismatch',
+        venueId: claim.venueId,
+      },
+    )
     return fail('state_invalid')
   }
   const venueId = claim.venueId
 
   // 4. Code -> short-lived -> long-lived.
-  const short = await exchangeInstagramCode({ code, redirectUri, appId, appSecret }, fetch)
+  const short = await exchangeInstagramCode(
+    { code, redirectUri, appId, appSecret },
+    fetch,
+  )
   if (!short.ok) {
     console.error('[instagram callback] code exchange failed', {
       event: 'instagram_callback_exchange_failed',
@@ -188,19 +213,25 @@ export async function GET(request: Request): Promise<Response> {
     .eq('instagram_account_id', accountId)
     .maybeSingle()
   if (existing.error) {
-    console.error('[instagram callback] could not check for an existing connection', {
-      event: 'instagram_callback_conflict_check_failed',
-      venueId,
-      error: existing.error.message,
-    })
+    console.error(
+      '[instagram callback] could not check for an existing connection',
+      {
+        event: 'instagram_callback_conflict_check_failed',
+        venueId,
+        error: existing.error.message,
+      },
+    )
     return fail('storage_failed')
   }
   if (existing.data && existing.data.id !== venueId) {
-    console.warn('[instagram callback] refused: account already connected to another venue', {
-      event: 'instagram_callback_account_taken',
-      venueId,
-      heldByVenueId: existing.data.id,
-    })
+    console.warn(
+      '[instagram callback] refused: account already connected to another venue',
+      {
+        event: 'instagram_callback_account_taken',
+        venueId,
+        heldByVenueId: existing.data.id,
+      },
+    )
     return fail('account_already_connected')
   }
 
@@ -233,7 +264,8 @@ export async function GET(request: Request): Promise<Response> {
     // outcome for the operator is the same and the constraint is the
     // authority. Other failures are storage failures.
     const isConflict =
-      pointed.error.code === '23505' || pointed.error.message.includes(VENUE_ACCOUNT_UNIQUE_CONSTRAINT)
+      pointed.error.code === '23505' ||
+      pointed.error.message.includes(VENUE_ACCOUNT_UNIQUE_CONSTRAINT)
 
     // COMPENSATE, so both failure pages tell the truth. Both say "Nothing was
     // changed", and until code review that was FALSE here: the credential at
@@ -247,15 +279,23 @@ export async function GET(request: Request): Promise<Response> {
     // Deleting rather than deactivating: this credential was never usable, so
     // there is nothing to keep a record of, and a reconnect writes a fresh
     // row anyway.
-    const undo = await supabase.from('instagram_credentials').delete().eq('venue_id', venueId)
-    console.error('[instagram callback] could not point the venue at the account', {
-      event: isConflict ? 'instagram_callback_account_taken' : 'instagram_callback_storage_failed',
-      venueId,
-      error: pointed.error.message,
-      // If the compensation ALSO failed the venue is in the state described
-      // above, and that is worth seeing rather than inferring.
-      credentialRolledBack: !undo.error,
-    })
+    const undo = await supabase
+      .from('instagram_credentials')
+      .delete()
+      .eq('venue_id', venueId)
+    console.error(
+      '[instagram callback] could not point the venue at the account',
+      {
+        event: isConflict
+          ? 'instagram_callback_account_taken'
+          : 'instagram_callback_storage_failed',
+        venueId,
+        error: pointed.error.message,
+        // If the compensation ALSO failed the venue is in the state described
+        // above, and that is worth seeing rather than inferring.
+        credentialRolledBack: !undo.error,
+      },
+    )
     return fail(isConflict ? 'account_already_connected' : 'storage_failed')
   }
 
@@ -273,7 +313,10 @@ export async function GET(request: Request): Promise<Response> {
     await captureInstagramConnectSubscribeFailed({
       venueId,
       failureReason: subscribed.failure.reason,
-      graphCode: subscribed.failure.reason === 'graph_error' ? subscribed.failure.code : null,
+      graphCode:
+        subscribed.failure.reason === 'graph_error'
+          ? subscribed.failure.code
+          : null,
     })
   }
 

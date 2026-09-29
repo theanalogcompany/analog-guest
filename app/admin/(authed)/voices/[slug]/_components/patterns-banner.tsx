@@ -68,7 +68,8 @@ export function PatternsBanner({ venueId }: PatternsBannerProps) {
           onClick={() => setExpanded((v) => !v)}
           className="h-auto p-0 text-[11.5px] uppercase font-semibold tracking-wider text-clay-deep hover:text-clay"
         >
-          {clusters.length} {clusters.length === 1 ? 'pattern' : 'patterns'} detected · {expanded ? 'hide' : 'review'}
+          {clusters.length} {clusters.length === 1 ? 'pattern' : 'patterns'}{' '}
+          detected · {expanded ? 'hide' : 'review'}
         </Button>
         <Button
           variant="ghost"

@@ -14,7 +14,10 @@
 // is not that path — it computes a deadline for display and routes nothing.
 
 import { INSTAGRAM_WINDOW_MS } from '@/lib/messaging/instagram/window'
-import { parseMessageChannel, type MessageChannel } from '@/lib/schemas/message-channel'
+import {
+  parseMessageChannel,
+  type MessageChannel,
+} from '@/lib/schemas/message-channel'
 import {
   resolveConversationChannel,
   type ConversationChannelInput,
@@ -47,15 +50,21 @@ const GUEST_CHANNEL_FALLBACK: MessageChannel = 'text'
  * migration 048, so an unparseable value means the database holds something
  * the CHECK forbids. Loud, then 'text'.
  */
-export function queueGuestChannel(rawChannel: string | null, draftId: string): MessageChannel {
+export function queueGuestChannel(
+  rawChannel: string | null,
+  draftId: string,
+): MessageChannel {
   const parsed = parseMessageChannel(rawChannel)
   if (parsed !== null) return parsed
-  console.error('[operator] queue draft has an unreadable channel; falling back to text', {
-    draftId,
-    // The raw value, not the guest or the body: this says what the column
-    // holds, and nothing about who the guest is.
-    rawChannel,
-  })
+  console.error(
+    '[operator] queue draft has an unreadable channel; falling back to text',
+    {
+      draftId,
+      // The raw value, not the guest or the body: this says what the column
+      // holds, and nothing about who the guest is.
+      rawChannel,
+    },
+  )
   return GUEST_CHANNEL_FALLBACK
 }
 
@@ -85,12 +94,15 @@ export function conversationGuestChannel(
     inboundChannel: undefined,
   })
   if (channel !== null) return channel
-  console.error('[operator] conversation channel unresolved; falling back to text', {
-    guestId,
-    unresolvedReason,
-    hasPhone: input.hasPhone,
-    hasInstagramId: input.hasInstagramId,
-  })
+  console.error(
+    '[operator] conversation channel unresolved; falling back to text',
+    {
+      guestId,
+      unresolvedReason,
+      hasPhone: input.hasPhone,
+      hasInstagramId: input.hasInstagramId,
+    },
+  )
   return GUEST_CHANNEL_FALLBACK
 }
 
@@ -113,7 +125,9 @@ export function conversationGuestChannel(
  * conversation with a null here has an UNKNOWN window, not an expired one.
  * A value in the past means expired; it is not clamped.
  */
-export function replyWindowExpiresAt(lastGuestActionAt: string | null): string | null {
+export function replyWindowExpiresAt(
+  lastGuestActionAt: string | null,
+): string | null {
   if (lastGuestActionAt === null) return null
   const at = new Date(lastGuestActionAt)
   if (Number.isNaN(at.getTime())) return null

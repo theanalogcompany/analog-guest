@@ -4,6 +4,7 @@
 // have a connected venue to attribute the event to (logged, returns null).
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 
 import type { PosProviderName } from './types'
 
@@ -23,7 +24,7 @@ export async function resolveVenueByLocation(
     .eq('is_active', true)
     .maybeSingle()
   if (error) {
-    console.error('pos resolve: by-location lookup failed', {
+    logger.error('pos resolve: by-location lookup failed', {
       provider,
       locationExternalId,
       error: error.message,
@@ -47,7 +48,7 @@ export async function resolveVenueByMerchant(
     .eq('is_active', true)
     .maybeSingle()
   if (error) {
-    console.error('pos resolve: by-merchant lookup failed', {
+    logger.error('pos resolve: by-merchant lookup failed', {
       provider,
       merchantExternalId,
       error: error.message,

@@ -35,7 +35,11 @@ import {
   STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
-import { MAX_ATTEMPTS, MAX_OUTPUT_TOKENS, MIN_VOICE_FIDELITY } from '@/lib/ai/generate-message'
+import {
+  MAX_ATTEMPTS,
+  MAX_OUTPUT_TOKENS,
+  MIN_VOICE_FIDELITY,
+} from '@/lib/ai/generate-message'
 import { VERIFY_GROUNDING_MAX_OUTPUT_TOKENS } from '@/lib/ai/verify-grounding'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
@@ -64,7 +68,10 @@ import {
   DEFAULT_STATE_THRESHOLDS,
   ENGAGEMENT_EVENT_WEIGHTS,
 } from '@/lib/recognition/types'
-import { MATCH_LIMIT, SIMILARITY_THRESHOLD } from '@/lib/voices/find-pattern-cluster'
+import {
+  MATCH_LIMIT,
+  SIMILARITY_THRESHOLD,
+} from '@/lib/voices/find-pattern-cluster'
 import { MIN_PRIOR_MATCHES_FOR_CLUSTER } from '@/lib/voices/find-pattern-cluster-pure'
 
 export type TunableCategory =
@@ -75,7 +82,8 @@ export type TunableCategory =
   | 'retrieval'
   | 'mechanics'
 
-export type TunableType = 'number' | 'boolean' | 'string-enum' | 'range' | 'object'
+export type TunableType =
+  'number' | 'boolean' | 'string-enum' | 'range' | 'object'
 
 export interface Tunable {
   readonly name: string
@@ -117,7 +125,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/analytics/posthog.ts',
-    description: 'Top-match cosine score below which a thin-retrieval alert fires.',
+    description:
+      'Top-match cosine score below which a thin-retrieval alert fires.',
   },
   {
     name: 'max_visit_history_days',
@@ -125,7 +134,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/build-runtime-context.ts',
-    description: 'Lookback window for the ## Visit history block — transactions older than this are not surfaced to the agent.',
+    description:
+      'Lookback window for the ## Visit history block — transactions older than this are not surfaced to the agent.',
     relatedTickets: ['TAC-234'],
   },
   {
@@ -134,7 +144,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/build-runtime-context.ts',
-    description: 'Cap on transactions loaded into RuntimeContext.recentVisits; guards against prompt bloat for chatty regulars.',
+    description:
+      'Cap on transactions loaded into RuntimeContext.recentVisits; guards against prompt bloat for chatty regulars.',
     relatedTickets: ['TAC-234'],
   },
   {
@@ -143,7 +154,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/ai/generate-message.ts',
-    description: 'Maximum regeneration attempts before settling on the highest-fidelity result.',
+    description:
+      'Maximum regeneration attempts before settling on the highest-fidelity result.',
   },
   {
     name: 'max_history_days',
@@ -151,7 +163,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/build-runtime-context.ts',
-    description: 'Lookback window for recent message history loaded into runtime context.',
+    description:
+      'Lookback window for recent message history loaded into runtime context.',
   },
   {
     name: 'max_history_messages',
@@ -168,7 +181,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/ai/generate-message.ts',
-    description: 'Voice fidelity target for the regeneration loop; below, regenerate; above, ship.',
+    description:
+      'Voice fidelity target for the regeneration loop; below, regenerate; above, ship.',
   },
   {
     name: 'send_fidelity_floor',
@@ -176,7 +190,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/stages.ts',
-    description: 'Voice fidelity below this refuses to send and fires a red alert.',
+    description:
+      'Voice fidelity below this refuses to send and fires a red alert.',
   },
   {
     name: 'auto_send_fidelity_floor',
@@ -184,7 +199,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/stages.ts',
-    description: 'Voice fidelity below this (but at or above send_fidelity_floor) queues the draft for operator review instead of auto-sending. Above auto-sends if no other approval trigger fires.',
+    description:
+      'Voice fidelity below this (but at or above send_fidelity_floor) queues the draft for operator review instead of auto-sending. Above auto-sends if no other approval trigger fires.',
     relatedTickets: ['TAC-212'],
   },
   {
@@ -193,7 +209,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/agent/comp-backstop.ts',
-    description: 'Number of regex patterns in the deterministic comp backstop. Operator-action-anchored phrasings; iterated as a routine PR when false-positive / false-negative counts move.',
+    description:
+      'Number of regex patterns in the deterministic comp backstop. Operator-action-anchored phrasings; iterated as a routine PR when false-positive / false-negative counts move.',
     relatedTickets: ['TAC-212'],
   },
   {
@@ -202,7 +219,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/analytics/posthog.ts',
-    description: 'Voice fidelity below this fires a low-fidelity alert (sits between send floor and regen target).',
+    description:
+      'Voice fidelity below this fires a low-fidelity alert (sits between send floor and regen target).',
   },
   {
     name: 'webhook_silence_threshold_hours',
@@ -210,7 +228,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/analytics/posthog.ts',
-    description: 'Inbound-webhook silence above this duration fires a webhook-silence alert.',
+    description:
+      'Inbound-webhook silence above this duration fires a webhook-silence alert.',
   },
 
   // ---------------------------------------------------------------------------
@@ -222,7 +241,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'classification',
     source: 'lib/analytics/posthog.ts',
-    description: 'Classifier confidence below this fires a low-confidence alert.',
+    description:
+      'Classifier confidence below this fires a low-confidence alert.',
   },
   {
     name: 'classification_confidence_reroute_threshold',
@@ -230,7 +250,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'classification',
     source: 'lib/analytics/posthog.ts',
-    description: 'Classifier confidence below this auto-routes the returned category to `unknown`; the agent ships a holding response instead of proceeding with the low-confidence pick. Original category preserved on the PostHog event.',
+    description:
+      'Classifier confidence below this auto-routes the returned category to `unknown`; the agent ships a holding response instead of proceeding with the low-confidence pick. Original category preserved on the PostHog event.',
     relatedTickets: ['TAC-240'],
   },
   {
@@ -239,7 +260,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'classification',
     source: 'lib/ai/classify-message.ts',
-    description: 'Inbound length cap sent to the classifier; longer messages are truncated with a `[...truncated]` suffix. Generation still receives the full body.',
+    description:
+      'Inbound length cap sent to the classifier; longer messages are truncated with a `[...truncated]` suffix. Generation still receives the full body.',
     relatedTickets: ['TAC-240'],
   },
 
@@ -252,7 +274,8 @@ export const TUNABLES = [
     type: 'object',
     category: 'recognition',
     source: 'lib/recognition/types.ts',
-    description: 'Default relationship-strength formula: signal weights, multiplier bands, stacking cap. Per-venue overridable in venue_configs.',
+    description:
+      'Default relationship-strength formula: signal weights, multiplier bands, stacking cap. Per-venue overridable in venue_configs.',
   },
   {
     name: 'default_state_thresholds',
@@ -260,7 +283,8 @@ export const TUNABLES = [
     type: 'object',
     category: 'recognition',
     source: 'lib/recognition/types.ts',
-    description: 'Default score bands for the four guest states (new, returning, regular, raving_fan). Per-venue overridable in venue_configs.',
+    description:
+      'Default score bands for the four guest states (new, returning, regular, raving_fan). Per-venue overridable in venue_configs.',
   },
   {
     name: 'engagement_event_weights',
@@ -276,7 +300,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'recognition',
     source: 'lib/recognition/normalize-signals.ts',
-    description: 'Spend in the lookback window that scores 100 on the money signal.',
+    description:
+      'Spend in the lookback window that scores 100 on the money signal.',
   },
   {
     name: 'recency_bands',
@@ -284,7 +309,8 @@ export const TUNABLES = [
     type: 'object',
     category: 'recognition',
     source: 'lib/recognition/normalize-signals.ts',
-    description: 'Days-since-last-visit bands mapped to a recency score (0–100).',
+    description:
+      'Days-since-last-visit bands mapped to a recency score (0–100).',
   },
   {
     name: 'response_min_sample',
@@ -292,7 +318,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'recognition',
     source: 'lib/recognition/normalize-signals.ts',
-    description: 'Minimum outbound message count before the response-rate signal contributes (below, scores 0).',
+    description:
+      'Minimum outbound message count before the response-rate signal contributes (below, scores 0).',
   },
   {
     name: 'visit_freq_max_visits',
@@ -300,7 +327,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'recognition',
     source: 'lib/recognition/normalize-signals.ts',
-    description: 'Visit count in the lookback window that scores 100 on the visit-frequency signal.',
+    description:
+      'Visit count in the lookback window that scores 100 on the visit-frequency signal.',
   },
   {
     name: 'visit_lookback_days',
@@ -328,7 +356,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
-    description: 'Fallback voice corpus retrieval limit when the caller passes none.',
+    description:
+      'Fallback voice corpus retrieval limit when the caller passes none.',
   },
   {
     name: 'knowledge_confidence_floor_default',
@@ -336,7 +365,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
-    description: 'Default min_confidence applied to match_knowledge_corpus when the caller does not override. Excludes low-confidence chunks from the prompt; matches the classifier low-confidence threshold for symmetry.',
+    description:
+      'Default min_confidence applied to match_knowledge_corpus when the caller does not override. Excludes low-confidence chunks from the prompt; matches the classifier low-confidence threshold for symmetry.',
     relatedTickets: ['TAC-242'],
   },
   {
@@ -345,7 +375,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
-    description: 'Minimum per-query cosine similarity for a knowledge_corpus chunk to reach the prompt. A sanity bound, NOT a relevance filter — TAC-358 measured that cosine tracks query length rather than answerability on this corpus (an unanswerable question outscored every answerable terse one), so the floor stopped judging relevance and the semantic call moved to verify-grounding. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query similarity).',
+    description:
+      'Minimum per-query cosine similarity for a knowledge_corpus chunk to reach the prompt. A sanity bound, NOT a relevance filter — TAC-358 measured that cosine tracks query length rather than answerability on this corpus (an unanswerable question outscored every answerable terse one), so the floor stopped judging relevance and the semantic call moved to verify-grounding. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query similarity).',
     relatedTickets: ['TAC-350', 'TAC-358'],
   },
   {
@@ -362,7 +393,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/voices/find-pattern-cluster.ts',
-    description: 'Maximum prior critiques returned per cosine search in the voices clustering pipeline.',
+    description:
+      'Maximum prior critiques returned per cosine search in the voices clustering pipeline.',
     relatedTickets: ['THE-238'],
   },
   {
@@ -371,7 +403,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/voices/find-pattern-cluster-pure.ts',
-    description: 'Minimum prior critique matches required before a cluster verification call fires.',
+    description:
+      'Minimum prior critique matches required before a cluster verification call fires.',
     relatedTickets: ['THE-238'],
   },
   {
@@ -380,7 +413,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
-    description: 'Minimum chunks at or above STRONG_MATCH_SIMILARITY required on the inbound path; below, the agent bails to a fallback acknowledgment. Followup path skips this gate.',
+    description:
+      'Minimum chunks at or above STRONG_MATCH_SIMILARITY required on the inbound path; below, the agent bails to a fallback acknowledgment. Followup path skips this gate.',
   },
   {
     name: 'similarity_floor',
@@ -388,7 +422,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
-    description: 'Cosine score below which retrieval results are dropped at the rag layer (filters before chunks reach the agent).',
+    description:
+      'Cosine score below which retrieval results are dropped at the rag layer (filters before chunks reach the agent).',
   },
   {
     name: 'similarity_threshold',
@@ -396,7 +431,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/voices/find-pattern-cluster.ts',
-    description: 'Cosine threshold for two voice critiques to count as cluster members.',
+    description:
+      'Cosine threshold for two voice critiques to count as cluster members.',
     relatedTickets: ['THE-238'],
   },
   {
@@ -405,7 +441,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
-    description: 'Cosine threshold a voice corpus chunk must meet to count as a strong match for the inbound retrieval gate.',
+    description:
+      'Cosine threshold a voice corpus chunk must meet to count as a strong match for the inbound retrieval gate.',
   },
 
   // ---------------------------------------------------------------------------
@@ -423,7 +460,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'cold_lapsed: a guest\'s last visit must be older than this many days before the cold-nudge reason fires.',
+    description:
+      "cold_lapsed: a guest's last visit must be older than this many days before the cold-nudge reason fires.",
     relatedTickets: ['TAC-123'],
   },
   {
@@ -432,7 +470,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'cold_lapsed: minimum days between successive cold-nudge dispatches to the same guest (time-bound dedup orthogonal to last_visit_at re-arm).',
+    description:
+      'cold_lapsed: minimum days between successive cold-nudge dispatches to the same guest (time-bound dedup orthogonal to last_visit_at re-arm).',
     relatedTickets: ['TAC-123'],
   },
   {
@@ -441,7 +480,8 @@ export const TUNABLES = [
     type: 'object',
     category: 'agent_runtime',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'cold_lapsed: only fires when the guest\'s current recognition state is in this set. Excludes new/returning by default — we don\'t try to re-engage guests who never engaged.',
+    description:
+      "cold_lapsed: only fires when the guest's current recognition state is in this set. Excludes new/returning by default — we don't try to re-engage guests who never engaged.",
     relatedTickets: ['TAC-123'],
   },
   {
@@ -450,7 +490,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'Hard cap on engine-initiated follow-up sends per (venue, guest) in any rolling 7-day window. Operator-initiated manual sends do NOT count.',
+    description:
+      'Hard cap on engine-initiated follow-up sends per (venue, guest) in any rolling 7-day window. Operator-initiated manual sends do NOT count.',
     relatedTickets: ['TAC-123'],
   },
   {
@@ -459,7 +500,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'If the guest texted in within this many hours, the engine suppresses for this guest this tick — they\'re in active conversation.',
+    description:
+      "If the guest texted in within this many hours, the engine suppresses for this guest this tick — they're in active conversation.",
     relatedTickets: ['TAC-123'],
   },
   {
@@ -468,7 +510,8 @@ export const TUNABLES = [
     type: 'string-enum',
     category: 'timing',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'Venue-local time-of-day after which the engine suppresses sends. Pairs with followup_quiet_hours_end_local for a midnight-crossing window.',
+    description:
+      'Venue-local time-of-day after which the engine suppresses sends. Pairs with followup_quiet_hours_end_local for a midnight-crossing window.',
     relatedTickets: ['TAC-123'],
   },
   {
@@ -477,7 +520,8 @@ export const TUNABLES = [
     type: 'string-enum',
     category: 'timing',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'Venue-local time-of-day at which quiet hours end (engine resumes dispatching).',
+    description:
+      'Venue-local time-of-day at which quiet hours end (engine resumes dispatching).',
     relatedTickets: ['TAC-123'],
   },
   {
@@ -486,7 +530,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'timing',
     source: 'lib/schemas/followup-rules.ts',
-    description: 'Venue-local hour (0-23) at which the daily processor fires. The cron itself fires hourly UTC; the processor filters per-venue against this value.',
+    description:
+      'Venue-local hour (0-23) at which the daily processor fires. The cron itself fires hourly UTC; the processor filters per-venue against this value.',
     relatedTickets: ['TAC-123'],
   },
   // ---------------------------------------------------------------------------
@@ -519,7 +564,9 @@ export const TUNABLES = [
     name: 'intention_default_min_replies',
     value: Object.fromEntries(
       INTENTION_DEFINITIONS.flatMap((d): [string, number][] =>
-        d.gate.kind === 'conversational' ? [[d.key, d.gate.defaultMinReplies]] : [],
+        d.gate.kind === 'conversational'
+          ? [[d.key, d.gate.defaultMinReplies]]
+          : [],
       ),
     ),
     type: 'object',
@@ -535,7 +582,8 @@ export const TUNABLES = [
     type: 'number',
     category: 'timing',
     source: 'lib/agent/intentions/definitions.ts',
-    description: 'understand_order stays open this many days after the guest first texted in by scanning the sign.',
+    description:
+      'understand_order stays open this many days after the guest first texted in by scanning the sign.',
     relatedTickets: ['TAC-324', 'TAC-380'],
   },
   {

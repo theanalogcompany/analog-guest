@@ -50,7 +50,10 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { DELIVERED_OUTBOUND_STATUSES, deriveDelivery } from '@/lib/agent/group-responses'
+import {
+  DELIVERED_OUTBOUND_STATUSES,
+  deriveDelivery,
+} from '@/lib/agent/group-responses'
 
 const REPO_ROOT = join(__dirname, '../..')
 
@@ -58,8 +61,15 @@ const REPO_ROOT = join(__dirname, '../..')
 // DELIVERED_OUTBOUND_STATUSES would agree with whatever the constant says.
 const CONTRACT_STATUSES = ['sending', 'sent', 'delivered']
 
-function contractCounts(direction: string, status: string, reviewState: string | null): boolean {
-  return direction === 'inbound' || (reviewState !== 'pending' && CONTRACT_STATUSES.includes(status))
+function contractCounts(
+  direction: string,
+  status: string,
+  reviewState: string | null,
+): boolean {
+  return (
+    direction === 'inbound' ||
+    (reviewState !== 'pending' && CONTRACT_STATUSES.includes(status))
+  )
 }
 
 /**
@@ -100,25 +110,36 @@ const STATUS_IN = `status in (${[...DELIVERED_OUTBOUND_STATUSES].map((s) => `'${
 // (as group-responses.test.ts does for statuses), so the truth table below has
 // to decide every combination.
 const MESSAGE_STATUSES: string[] = (() => {
-  const sql = readFileSync(join(REPO_ROOT, 'db/migrations/001_initial_schema.sql'), 'utf-8')
+  const sql = readFileSync(
+    join(REPO_ROOT, 'db/migrations/001_initial_schema.sql'),
+    'utf-8',
+  )
   const table = sql.slice(sql.indexOf('create table messages'))
   const check = table.slice(table.indexOf('check (status in ('))
-  return [...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!)
+  return [...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g)].map(
+    (m) => m[1]!,
+  )
 })()
 
 const REVIEW_STATES: Array<string | null> = (() => {
-  const sql = readFileSync(join(REPO_ROOT, 'db/migrations/018_operator_review_state.sql'), 'utf-8')
+  const sql = readFileSync(
+    join(REPO_ROOT, 'db/migrations/018_operator_review_state.sql'),
+    'utf-8',
+  )
   const check = sql.slice(sql.indexOf('messages_review_state_check'))
-  const values = [...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!)
+  const values = [
+    ...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g),
+  ].map((m) => m[1]!)
   return [null, ...values]
 })()
 
 const MIGRATIONS_DIR = join(REPO_ROOT, 'db/migrations')
 
 function createsFunction(sql: string, fnName: string): boolean {
-  return new RegExp(`create\\s+(or\\s+replace\\s+)?function\\s+public\\.${fnName}\\b`, 'i').test(
-    stripComments(sql),
-  )
+  return new RegExp(
+    `create\\s+(or\\s+replace\\s+)?function\\s+public\\.${fnName}\\b`,
+    'i',
+  ).test(stripComments(sql))
 }
 
 /**
@@ -130,11 +151,15 @@ function createsFunction(sql: string, fnName: string): boolean {
 function currentDefiner(fnName: string): string {
   const definers = readdirSync(MIGRATIONS_DIR)
     .filter((file) => /^\d+_.*\.sql$/.test(file))
-    .filter((file) => createsFunction(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'), fnName))
+    .filter((file) =>
+      createsFunction(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'), fnName),
+    )
     .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
   const latest = definers.at(-1)
   if (latest === undefined) {
-    throw new Error(`no migration creates public.${fnName} — renamed, or the scan is broken`)
+    throw new Error(
+      `no migration creates public.${fnName} — renamed, or the scan is broken`,
+    )
   }
   return latest
 }
@@ -146,10 +171,16 @@ function currentDefiner(fnName: string): string {
  */
 function functionText(file: string, fnName: string): string {
   const sql = stripComments(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'))
-  const start = sql.search(new RegExp(`create\\s+(or\\s+replace\\s+)?function\\s+public\\.${fnName}\\b`, 'i'))
+  const start = sql.search(
+    new RegExp(
+      `create\\s+(or\\s+replace\\s+)?function\\s+public\\.${fnName}\\b`,
+      'i',
+    ),
+  )
   if (start === -1) throw new Error(`${file} does not create public.${fnName}`)
   const end = sql.indexOf('$function$;', start)
-  if (end === -1) throw new Error(`${file}: public.${fnName} never closes with $function$;`)
+  if (end === -1)
+    throw new Error(`${file}: public.${fnName} never closes with $function$;`)
   return normalizeSql(sql.slice(start, end + '$function$;'.length))
 }
 
@@ -170,15 +201,24 @@ function functionText(file: string, fnName: string): string {
 function laterMigrationsMentioning(file: string, fnName: string): string[] {
   return readdirSync(MIGRATIONS_DIR)
     .filter((candidate) => /^\d+_.*\.sql$/.test(candidate))
-    .filter((candidate) => Number.parseInt(candidate, 10) > Number.parseInt(file, 10))
-    .filter((candidate) => stripComments(readFileSync(join(MIGRATIONS_DIR, candidate), 'utf8')).includes(fnName))
+    .filter(
+      (candidate) => Number.parseInt(candidate, 10) > Number.parseInt(file, 10),
+    )
+    .filter((candidate) =>
+      stripComments(
+        readFileSync(join(MIGRATIONS_DIR, candidate), 'utf8'),
+      ).includes(fnName),
+    )
     .sort()
 }
 
 const CONVERSATIONS_MIGRATION = currentDefiner('list_operator_conversations')
 const QUEUE_MIGRATION = currentDefiner('list_operator_queue')
 
-const CONVERSATIONS_SQL = functionText(CONVERSATIONS_MIGRATION, 'list_operator_conversations')
+const CONVERSATIONS_SQL = functionText(
+  CONVERSATIONS_MIGRATION,
+  'list_operator_conversations',
+)
 const QUEUE_SQL = functionText(QUEUE_MIGRATION, 'list_operator_queue')
 
 // Each fragment names the CTE or clause it belongs to. Written with the same
@@ -189,7 +229,10 @@ const CONVERSATIONS_FRAGMENTS: Array<[string, string]> = [
     `(m.direction = 'inbound'
       or (m.review_state is distinct from 'pending' and m.${STATUS_IN})) as reached_guest`,
   ],
-  ['scoped_messages keeps the non-empty-body filter', `where m.venue_id = any(venue_ids) and m.body <> ''`],
+  [
+    'scoped_messages keeps the non-empty-body filter',
+    `where m.venue_id = any(venue_ids) and m.body <> ''`,
+  ],
   [
     'guest_reach asks whether the guest has any row that reached them',
     'bool_or(sm.reached_guest) as any_reached from scoped_messages sm group by sm.guest_id, sm.venue_id',
@@ -218,7 +261,9 @@ const CONVERSATIONS_FRAGMENTS: Array<[string, string]> = [
 
 describe('the reached-guest condition (TAC-395)', () => {
   it('DELIVERED_OUTBOUND_STATUSES is the Contract list', () => {
-    expect([...DELIVERED_OUTBOUND_STATUSES].sort()).toEqual([...CONTRACT_STATUSES].sort())
+    expect([...DELIVERED_OUTBOUND_STATUSES].sort()).toEqual(
+      [...CONTRACT_STATUSES].sort(),
+    )
   })
 
   it('agrees with deriveDelivery on every direction, status and review_state', () => {
@@ -228,9 +273,13 @@ describe('the reached-guest condition (TAC-395)', () => {
     for (const direction of ['inbound', 'outbound']) {
       for (const status of MESSAGE_STATUSES) {
         for (const reviewState of REVIEW_STATES) {
-          const delivered = deriveDelivery({ direction, status, review_state: reviewState }) === 'delivered'
+          const delivered =
+            deriveDelivery({ direction, status, review_state: reviewState }) ===
+            'delivered'
           if (delivered !== contractCounts(direction, status, reviewState)) {
-            disagreements.push(`${direction}/${status}/${reviewState ?? 'null'}`)
+            disagreements.push(
+              `${direction}/${status}/${reviewState ?? 'null'}`,
+            )
           }
         }
       }
@@ -338,7 +387,12 @@ describe('the reached-guest condition (TAC-395)', () => {
       const definers = (fn: string) =>
         readdirSync(MIGRATIONS_DIR)
           .filter((file) => /^\d+_.*\.sql$/.test(file))
-          .filter((file) => createsFunction(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'), fn))
+          .filter((file) =>
+            createsFunction(
+              readFileSync(join(MIGRATIONS_DIR, file), 'utf8'),
+              fn,
+            ),
+          )
           // readdirSync order is not guaranteed by Node or POSIX, and
           // currentDefiner sorts numerically. Without this the comparison below
           // passes or fails on the filesystem's mood.
@@ -361,17 +415,30 @@ describe('the reached-guest condition (TAC-395)', () => {
     // does not match, such as an unqualified or quoted function name. That is
     // migration 056's failure exactly, and the shape a re-pin would reintroduce.
     it('has no LATER migration that so much as mentions the function', () => {
-      expect(laterMigrationsMentioning(QUEUE_MIGRATION, 'list_operator_queue')).toEqual([])
-      expect(laterMigrationsMentioning(CONVERSATIONS_MIGRATION, 'list_operator_conversations')).toEqual([])
+      expect(
+        laterMigrationsMentioning(QUEUE_MIGRATION, 'list_operator_queue'),
+      ).toEqual([])
+      expect(
+        laterMigrationsMentioning(
+          CONVERSATIONS_MIGRATION,
+          'list_operator_conversations',
+        ),
+      ).toEqual([])
     })
 
     it('extracts ONE function, not the whole migration file', () => {
       expect(QUEUE_SQL).toContain('create function public.list_operator_queue')
-      expect(CONVERSATIONS_SQL).toContain('create function public.list_operator_conversations')
+      expect(CONVERSATIONS_SQL).toContain(
+        'create function public.list_operator_conversations',
+      )
       // 056 defines both. An extraction that returned the file would carry the
       // other function's create statement, so this bites on the real data.
-      expect(QUEUE_SQL).not.toContain('create function public.list_operator_conversations')
-      expect(CONVERSATIONS_SQL).not.toContain('create function public.list_operator_queue')
+      expect(QUEUE_SQL).not.toContain(
+        'create function public.list_operator_conversations',
+      )
+      expect(CONVERSATIONS_SQL).not.toContain(
+        'create function public.list_operator_queue',
+      )
     })
 
     // The case that forced the scoping, asserted against the live files rather
@@ -387,7 +454,9 @@ describe('the reached-guest condition (TAC-395)', () => {
 
   it('thread.ts builds its status list from DELIVERED_OUTBOUND_STATUSES, not a literal', () => {
     const source = readTsSource('lib/operator/thread.ts')
-    expect(source).toContain("import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'")
+    expect(source).toContain(
+      "import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'",
+    )
     expect(source).toContain('...DELIVERED_OUTBOUND_STATUSES')
     for (const status of CONTRACT_STATUSES) {
       expect(source).not.toMatch(new RegExp(`\\b${status}\\b`))

@@ -49,7 +49,11 @@ describe('recordInstagramTurnNotRun', () => {
       // No agent ran, so there is no run to correlate with. Null rather than a
       // fabricated id, which would look like a run that never happened.
       agentRunId: null,
-      entry: { outcome: 'not_run', reason: 'gate_shut', outboundMessageId: null },
+      entry: {
+        outcome: 'not_run',
+        reason: 'gate_shut',
+        outboundMessageId: null,
+      },
     })
   })
 
@@ -67,7 +71,12 @@ describe('recordInstagramTurnNotRun', () => {
     // A row that required a venue could not describe it — which is why all
     // three columns are nullable in migration 055.
     await recordInstagramTurnNotRun(
-      { status: 'skipped', kind: 'message', reason: 'venue_not_found', venueId: null },
+      {
+        status: 'skipped',
+        kind: 'message',
+        reason: 'venue_not_found',
+        venueId: null,
+      },
       'event_not_persisted',
     )
     expect(written()).toMatchObject({
@@ -85,7 +94,12 @@ describe('recordInstagramTurnNotRun', () => {
     // therefore invisible to `where venue_id = ...`, the headline read on this
     // table, which is the most important population it holds.
     await recordInstagramTurnNotRun(
-      { status: 'skipped', kind: 'message', reason: 'unknown_guest', venueId: 'venue-1' },
+      {
+        status: 'skipped',
+        kind: 'message',
+        reason: 'unknown_guest',
+        venueId: 'venue-1',
+      },
       'event_not_persisted',
     )
     expect(written()).toMatchObject({ venueId: 'venue-1' })
@@ -93,7 +107,14 @@ describe('recordInstagramTurnNotRun', () => {
 
   it('carries the venue for a failed save, which is the population that matters most', async () => {
     await recordInstagramTurnNotRun(
-      { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: '08006', venueId: 'venue-1' },
+      {
+        status: 'failed',
+        kind: 'message',
+        stage: 'message_insert',
+        error: 'x',
+        code: '08006',
+        venueId: 'venue-1',
+      },
       'event_not_persisted',
     )
     expect(written()).toMatchObject({ venueId: 'venue-1' })
@@ -109,17 +130,30 @@ describe('recordInstagramTurnNotRun', () => {
     )
     expect(written()).toMatchObject({
       venueId: null,
-      entry: { outcome: 'not_run', reason: 'message_unrenderable', detail: { reason: 'message_unsupported' } },
+      entry: {
+        outcome: 'not_run',
+        reason: 'message_unrenderable',
+        detail: { reason: 'message_unsupported' },
+      },
     })
   })
 
   it('records the failure stage and PostgREST code for a failed save', async () => {
     await recordInstagramTurnNotRun(
-      { status: 'failed', kind: 'postback', stage: 'message_insert', error: 'boom', code: '23505', venueId: 'venue-1' },
+      {
+        status: 'failed',
+        kind: 'postback',
+        stage: 'message_insert',
+        error: 'boom',
+        code: '23505',
+        venueId: 'venue-1',
+      },
       'event_not_persisted',
     )
     expect(written()).toMatchObject({
-      entry: { detail: { kind: 'postback', stage: 'message_insert', code: '23505' } },
+      entry: {
+        detail: { kind: 'postback', stage: 'message_insert', code: '23505' },
+      },
     })
   })
 
@@ -146,10 +180,9 @@ describe('recordInstagramTurnNotRun', () => {
     // The scoped id never appears in an outcome, but the referral ref and the
     // handle are the fields most likely to be added later by someone widening
     // `detail`; this pins the current, deliberate set.
-    expect(Object.keys((written().entry as { detail: object }).detail).sort()).toEqual([
-      'guestCreated',
-      'kind',
-    ])
+    expect(
+      Object.keys((written().entry as { detail: object }).detail).sort(),
+    ).toEqual(['guestCreated', 'kind'])
     expect(serialized).not.toContain('SHORTLINK')
   })
 })

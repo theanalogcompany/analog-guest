@@ -44,7 +44,11 @@ describe('parseDayRange', () => {
     ['24-hour', '07:00-15:00'],
     ['the word to', '7:00 AM to 3:00 PM'],
   ])('parses the %s variant an operator might hand-type', (_label, value) => {
-    expect(parseDayRange(value)).toEqual({ openMin: 420, closeMin: 900, overnight: false })
+    expect(parseDayRange(value)).toEqual({
+      openMin: 420,
+      closeMin: 900,
+      overnight: false,
+    })
   })
 
   it('strips the trailing per-row note the venue-spec parser appends', () => {
@@ -119,7 +123,11 @@ describe('parseDayRange', () => {
     it('still accepts an ASCENDING bare-hour range, which is unambiguous', () => {
       // 7 to 3pm means the same thing under either reading, so no evidence
       // is required. Only descending pairs are ambiguous.
-      expect(parseDayRange('7-3pm')).toEqual({ openMin: 420, closeMin: 900, overnight: false })
+      expect(parseDayRange('7-3pm')).toEqual({
+        openMin: 420,
+        closeMin: 900,
+        overnight: false,
+      })
     })
   })
 })
@@ -194,7 +202,10 @@ describe('resolveOpenState', () => {
   it('reports closed with today as the next opening before the venue opens', () => {
     // Friday 2026-09-11, 05:30 local — closed, but opens later the same day.
     const state = resolveOpenState(LE_MILS, TZ, at('2026-09-11T12:30:00Z'))
-    expect(state).toEqual({ state: 'closed', opensAt: { day: 'today', time: '7:00 AM' } })
+    expect(state).toEqual({
+      state: 'closed',
+      opensAt: { day: 'today', time: '7:00 AM' },
+    })
   })
 
   it('treats the exact closing minute as closed', () => {
@@ -213,8 +224,12 @@ describe('resolveOpenState', () => {
     // 2026-09-11T17:30:00Z is 10:30 in LA (open) and 03:30 in Berlin (closed).
     // Same instant, opposite answers — this is the TAC-293 timezone guarantee.
     const instant = at('2026-09-11T17:30:00Z')
-    expect(resolveOpenState(LE_MILS, 'America/Los_Angeles', instant).state).toBe('open')
-    expect(resolveOpenState(LE_MILS, 'Europe/Berlin', instant).state).toBe('closed')
+    expect(
+      resolveOpenState(LE_MILS, 'America/Los_Angeles', instant).state,
+    ).toBe('open')
+    expect(resolveOpenState(LE_MILS, 'Europe/Berlin', instant).state).toBe(
+      'closed',
+    )
   })
 
   describe('overnight ranges', () => {
@@ -246,7 +261,9 @@ describe('resolveOpenState', () => {
 
     it('is closed in the dead hours between close and open', () => {
       // Saturday 10:00 local.
-      expect(resolveOpenState(BAR, TZ, at('2026-09-12T17:00:00Z')).state).toBe('closed')
+      expect(resolveOpenState(BAR, TZ, at('2026-09-12T17:00:00Z')).state).toBe(
+        'closed',
+      )
     })
 
     // REGRESSION GUARD. resolveOpenState inherits yesterday's overnight range
@@ -259,7 +276,9 @@ describe('resolveOpenState', () => {
       const closedSaturday: VenueInfo['hours'] = { ...BAR, saturday: 'Closed' }
       // Saturday 20:00 local: inside Friday's 5pm-2am window by the evening
       // half, but Saturday itself is closed.
-      expect(resolveOpenState(closedSaturday, TZ, at('2026-09-13T03:00:00Z'))).toEqual({
+      expect(
+        resolveOpenState(closedSaturday, TZ, at('2026-09-13T03:00:00Z')),
+      ).toEqual({
         state: 'closed',
         opensAt: { day: 'tomorrow', time: '5:00 PM' },
       })
@@ -283,11 +302,15 @@ describe('resolveOpenState', () => {
     })
 
     it('returns unknown for an empty hours object', () => {
-      expect(resolveOpenState({}, TZ, at('2026-09-11T17:30:00Z'))).toEqual({ state: 'unknown' })
+      expect(resolveOpenState({}, TZ, at('2026-09-11T17:30:00Z'))).toEqual({
+        state: 'unknown',
+      })
     })
 
     it('returns unknown rather than throwing on an invalid timezone', () => {
-      expect(resolveOpenState(LE_MILS, 'Not/AZone', at('2026-09-11T17:30:00Z'))).toEqual({
+      expect(
+        resolveOpenState(LE_MILS, 'Not/AZone', at('2026-09-11T17:30:00Z')),
+      ).toEqual({
         state: 'unknown',
       })
     })
@@ -302,7 +325,9 @@ describe('resolveOpenState', () => {
       // not inferred: see the explicit-Closed test below.
       const missingFriday: VenueInfo['hours'] = { ...LE_MILS }
       delete missingFriday.friday
-      expect(resolveOpenState(missingFriday, TZ, at('2026-09-11T17:30:00Z'))).toEqual({
+      expect(
+        resolveOpenState(missingFriday, TZ, at('2026-09-11T17:30:00Z')),
+      ).toEqual({
         state: 'unknown',
       })
     })
@@ -310,14 +335,20 @@ describe('resolveOpenState', () => {
     it('treats an explicit "Closed" day as closed, not as a parse failure', () => {
       const hours: VenueInfo['hours'] = { ...LE_MILS, friday: 'Closed' }
       const state = resolveOpenState(hours, TZ, at('2026-09-11T17:30:00Z'))
-      expect(state).toEqual({ state: 'closed', opensAt: { day: 'tomorrow', time: '7:00 AM' } })
+      expect(state).toEqual({
+        state: 'closed',
+        opensAt: { day: 'tomorrow', time: '7:00 AM' },
+      })
     })
 
     it('treats the venue-spec parser\'s own "Closed – Closed" shape as closed', () => {
       // The shape that actually reaches production for a closed day. Matching
       // only the hand-typed bare "Closed" left this unreadable, which was the
       // original excuse for treating absence as a closure.
-      const hours: VenueInfo['hours'] = { ...LE_MILS, friday: 'Closed – Closed' }
+      const hours: VenueInfo['hours'] = {
+        ...LE_MILS,
+        friday: 'Closed – Closed',
+      }
       expect(resolveOpenState(hours, TZ, at('2026-09-11T17:30:00Z'))).toEqual({
         state: 'closed',
         opensAt: { day: 'tomorrow', time: '7:00 AM' },
@@ -335,10 +366,17 @@ describe('resolveOpenState', () => {
       // End-to-end version of the BLOCKER: "7-3" must not render OPEN at
       // 19:57. Silence is correct here; a confident wrong OPEN is not.
       const shorthand: VenueInfo['hours'] = {
-        monday: '7-3', tuesday: '7-3', wednesday: '7-3', thursday: '7-3',
-        friday: '7-3', saturday: '7-3', sunday: '7-3',
+        monday: '7-3',
+        tuesday: '7-3',
+        wednesday: '7-3',
+        thursday: '7-3',
+        friday: '7-3',
+        saturday: '7-3',
+        sunday: '7-3',
       }
-      expect(resolveOpenState(shorthand, TZ, at('2026-09-12T02:57:00Z'))).toEqual({
+      expect(
+        resolveOpenState(shorthand, TZ, at('2026-09-12T02:57:00Z')),
+      ).toEqual({
         state: 'unknown',
       })
     })
@@ -382,7 +420,9 @@ describe('resolveOpenState', () => {
 describe('resolveOpeningToday (TAC-428)', () => {
   it("returns today's opening minutes and the venue-local clock", () => {
     // 2026-09-22T17:30:00Z = 10:30 PDT, Tuesday.
-    expect(resolveOpeningToday(LE_MILS, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+    expect(
+      resolveOpeningToday(LE_MILS, TZ, at('2026-09-22T17:30:00Z')),
+    ).toEqual({
       state: 'open',
       openMin: 7 * 60,
       nowMin: 10 * 60 + 30,
@@ -426,14 +466,20 @@ describe('resolveOpeningToday (TAC-428)', () => {
   })
 
   it('carries a half-hour opening through rather than rounding it', () => {
-    const half: VenueInfo['hours'] = { ...LE_MILS, tuesday: '7:30 AM – 3:00 PM' }
+    const half: VenueInfo['hours'] = {
+      ...LE_MILS,
+      tuesday: '7:30 AM – 3:00 PM',
+    }
     expect(resolveOpeningToday(half, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
       expect.objectContaining({ state: 'open', openMin: 7 * 60 + 30 }),
     )
   })
 
   it('reports an overnight range by when it OPENS, not its post-midnight tail', () => {
-    const bar: VenueInfo['hours'] = { ...LE_MILS, tuesday: '5:00 PM – 2:00 AM' }
+    const bar: VenueInfo['hours'] = {
+      ...LE_MILS,
+      tuesday: '5:00 PM – 2:00 AM',
+    }
     expect(resolveOpeningToday(bar, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
       expect.objectContaining({ state: 'open', openMin: 17 * 60 }),
     )
@@ -446,38 +492,52 @@ describe('resolveOpeningToday (TAC-428)', () => {
   // venue says it is shut.
   it('reports a stated closure as CLOSED, never as unknown', () => {
     const closed: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'Closed' }
-    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
-      state: 'closed',
-    })
+    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
+      {
+        state: 'closed',
+      },
+    )
   })
 
   it('reports the venue-spec parser\'s own "Closed – Closed" row as CLOSED', () => {
     // parse-venue-spec.ts writes this shape, so it is the form a real venue
     // arrives in rather than a hand-typed bare "Closed".
-    const closed: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'Closed – Closed' }
-    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
-      state: 'closed',
-    })
+    const closed: VenueInfo['hours'] = {
+      ...LE_MILS,
+      tuesday: 'Closed – Closed',
+    }
+    expect(resolveOpeningToday(closed, TZ, at('2026-09-22T17:30:00Z'))).toEqual(
+      {
+        state: 'closed',
+      },
+    )
   })
 
   // The unknown causes. These the caller MAY guess past, because nobody told
   // us anything — absence is not a closure (see classifyDay).
   it('reports an absent day as unknown, not closed', () => {
     const missing: VenueInfo['hours'] = { ...LE_MILS, tuesday: undefined }
-    expect(resolveOpeningToday(missing, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
+    expect(
+      resolveOpeningToday(missing, TZ, at('2026-09-22T17:30:00Z')),
+    ).toEqual({
       state: 'unknown',
     })
   })
 
   it('reports an unparseable day as unknown, not closed', () => {
-    const junk: VenueInfo['hours'] = { ...LE_MILS, tuesday: 'ask at the counter' }
+    const junk: VenueInfo['hours'] = {
+      ...LE_MILS,
+      tuesday: 'ask at the counter',
+    }
     expect(resolveOpeningToday(junk, TZ, at('2026-09-22T17:30:00Z'))).toEqual({
       state: 'unknown',
     })
   })
 
   it('reports a timezone this runtime cannot use as unknown, not closed', () => {
-    expect(resolveOpeningToday(LE_MILS, 'Not/AZone', at('2026-09-22T17:30:00Z'))).toEqual({
+    expect(
+      resolveOpeningToday(LE_MILS, 'Not/AZone', at('2026-09-22T17:30:00Z')),
+    ).toEqual({
       state: 'unknown',
     })
   })
@@ -506,6 +566,8 @@ describe('venueLocalMinutes (TAC-428)', () => {
   })
 
   it('returns null on a timezone this runtime cannot use', () => {
-    expect(venueLocalMinutes('Not/AZone', at('2026-09-22T17:30:00Z'))).toBeNull()
+    expect(
+      venueLocalMinutes('Not/AZone', at('2026-09-22T17:30:00Z')),
+    ).toBeNull()
   })
 })

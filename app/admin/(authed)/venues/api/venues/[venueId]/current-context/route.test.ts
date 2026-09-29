@@ -52,7 +52,10 @@ describe('POST /admin/venues/api/venues/[venueId]/current-context', () => {
       },
     })
     const res = await POST(
-      buildRequest({ content: 'Oat milk is out', expiresAt: '2026-06-01T00:00:00.000Z' }),
+      buildRequest({
+        content: 'Oat milk is out',
+        expiresAt: '2026-06-01T00:00:00.000Z',
+      }),
       buildParams(VENUE_ID),
     )
     expect(res.status).toBe(200)
@@ -72,9 +75,15 @@ describe('POST /admin/venues/api/venues/[venueId]/current-context', () => {
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
-    const res = await POST(buildRequest({ content: 'x' }), buildParams(VENUE_ID))
+    const res = await POST(
+      buildRequest({ content: 'x' }),
+      buildParams(VENUE_ID),
+    )
     expect(res.status).toBe(403)
     expect(addCurrentContextEntry).not.toHaveBeenCalled()
   })

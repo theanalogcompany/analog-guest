@@ -65,7 +65,11 @@ import { classifySendFailure, type InstagramSendFailureKind } from './send'
  * different request shape with a different reason to exist. Adding one means
  * widening `SenderActionBody` too, which is the point of leaving them out.
  */
-export const INSTAGRAM_SENDER_ACTIONS = ['mark_seen', 'typing_on', 'typing_off'] as const
+export const INSTAGRAM_SENDER_ACTIONS = [
+  'mark_seen',
+  'typing_on',
+  'typing_off',
+] as const
 
 export type InstagramSenderAction = (typeof INSTAGRAM_SENDER_ACTIONS)[number]
 
@@ -110,12 +114,19 @@ export async function sendInstagramSenderAction(input: {
     input.fetchImpl,
     {
       // Exactly these two keys. See the Limitations quote in the header.
-      body: { recipient: { id: input.recipientId }, sender_action: input.action },
+      body: {
+        recipient: { id: input.recipientId },
+        sender_action: input.action,
+      },
       timeoutMs: INSTAGRAM_SENDER_ACTION_TIMEOUT_MS,
     },
   )
   if (!result.ok) {
-    return { ok: false, kind: classifySendFailure(result.failure), failure: result.failure }
+    return {
+      ok: false,
+      kind: classifySendFailure(result.failure),
+      failure: result.failure,
+    }
   }
   // Deliberately no body check, where sendInstagramText treats a 200 without a
   // `message_id` as a failure. A send needs the mid to save a row and to

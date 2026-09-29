@@ -15,7 +15,10 @@ const validPersonaBase = {
 describe('VoiceAntiPatternSchema', () => {
   it('normalizes a legacy string entry to {text, source: manual}', () => {
     const out = VoiceAntiPatternSchema.parse('do not open with Hi [name]!')
-    expect(out).toEqual({ text: 'do not open with Hi [name]!', source: 'manual' })
+    expect(out).toEqual({
+      text: 'do not open with Hi [name]!',
+      source: 'manual',
+    })
   })
 
   it('preserves a struct entry with all fields', () => {
@@ -41,13 +44,17 @@ describe('VoiceAntiPatternSchema', () => {
 
   it('rejects an unknown source value', () => {
     expect(
-      VoiceAntiPatternSchema.safeParse({ text: 'x', source: 'imported' }).success,
+      VoiceAntiPatternSchema.safeParse({ text: 'x', source: 'imported' })
+        .success,
     ).toBe(false)
   })
 
   it('rejects a non-uuid authorOperatorId', () => {
     expect(
-      VoiceAntiPatternSchema.safeParse({ text: 'x', authorOperatorId: 'jaipal' }).success,
+      VoiceAntiPatternSchema.safeParse({
+        text: 'x',
+        authorOperatorId: 'jaipal',
+      }).success,
     ).toBe(false)
   })
 })
@@ -56,7 +63,10 @@ describe('BrandPersonaSchema voiceAntiPatterns', () => {
   it('accepts a legacy string-array shape and normalizes each entry', () => {
     const parsed = BrandPersonaSchema.parse({
       ...validPersonaBase,
-      voiceAntiPatterns: ['no marketing flourishes', 'no closing acknowledgments'],
+      voiceAntiPatterns: [
+        'no marketing flourishes',
+        'no closing acknowledgments',
+      ],
     })
     expect(parsed.voiceAntiPatterns).toEqual([
       { text: 'no marketing flourishes', source: 'manual' },

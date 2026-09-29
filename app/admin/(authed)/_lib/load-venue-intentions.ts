@@ -11,7 +11,10 @@ import {
   deriveIntentionState,
   type IntentionStateEntry,
 } from '@/lib/agent/intentions/derive'
-import { GuestContextSchema, toParsedGuestContext } from '@/lib/schemas/guest-context'
+import {
+  GuestContextSchema,
+  toParsedGuestContext,
+} from '@/lib/schemas/guest-context'
 import { guestNameWithPhone } from './guest-name'
 
 // TAC-381, reworked by TAC-380: which intentions are OPEN right now for the
@@ -89,7 +92,9 @@ async function _loadVenueOpenIntentions(
   now: Date,
 ): Promise<VenueOpenIntentions> {
   const supabase = createAdminClient()
-  const cutoffIso = new Date(now.getTime() - maxIntentionWindowMs()).toISOString()
+  const cutoffIso = new Date(
+    now.getTime() - maxIntentionWindowMs(),
+  ).toISOString()
 
   // TAC-380 trap 1, admin edition. Two reads, because an open intention is two
   // shapes of row. Unprompted rows are eligibility rows. A re-armed event-armed
@@ -99,9 +104,9 @@ async function _loadVenueOpenIntentions(
   // (deriveIntentionState), on prompted rows of the re-armable keys only.
   // Reading every prompted row as open would list every intention already asked
   // as still being pursued.
-  const rearmableKeys = INTENTION_DEFINITIONS.filter((d) => rearmsOnNewerEvent(d.armsOn)).map(
-    (d) => d.key,
-  )
+  const rearmableKeys = INTENTION_DEFINITIONS.filter((d) =>
+    rearmsOnNewerEvent(d.armsOn),
+  ).map((d) => d.key)
   const [eligibilityResult, rearmedResult] = await Promise.all([
     supabase
       .from('guest_intention_prompts')
@@ -142,15 +147,25 @@ async function _loadVenueOpenIntentions(
   const eligibilityRows = eligibilityResult.data ?? []
   const rearmedRows = rearmedResult.error ? [] : (rearmedResult.data ?? [])
   const cohortTruncated =
-    eligibilityRows.length > INTENTION_COHORT_LIMIT || rearmedRows.length > INTENTION_COHORT_LIMIT
+    eligibilityRows.length > INTENTION_COHORT_LIMIT ||
+    rearmedRows.length > INTENTION_COHORT_LIMIT
 
   // Grouped by guest, in first-seen order.
-  const entriesByGuest = new Map<string, Map<IntentionKey, IntentionStateEntry>>()
-  const addEntry = (guestId: string, key: string, entry: IntentionStateEntry) => {
+  const entriesByGuest = new Map<
+    string,
+    Map<IntentionKey, IntentionStateEntry>
+  >()
+  const addEntry = (
+    guestId: string,
+    key: string,
+    entry: IntentionStateEntry,
+  ) => {
     // A retired definition's key (the orphaned invite_contact_save row) is a
     // real value in this bare-text column. It just isn't an intention any more.
     if (!isIntentionKey(key)) return
-    const entries = entriesByGuest.get(guestId) ?? new Map<IntentionKey, IntentionStateEntry>()
+    const entries =
+      entriesByGuest.get(guestId) ??
+      new Map<IntentionKey, IntentionStateEntry>()
     entries.set(key, entry)
     entriesByGuest.set(guestId, entries)
   }
@@ -177,7 +192,9 @@ async function _loadVenueOpenIntentions(
   const [guestsResult, txResult] = await Promise.all([
     supabase
       .from('guests')
-      .select('id, first_name, last_name, phone_number, instagram_username, created_at, context')
+      .select(
+        'id, first_name, last_name, phone_number, instagram_username, created_at, context',
+      )
       .eq('venue_id', venueId)
       .in('id', guestIds),
     supabase
@@ -190,7 +207,9 @@ async function _loadVenueOpenIntentions(
   // No labels and no name / home-base facts without this read, so fail closed
   // to an empty, labelled-degraded list rather than guess at either.
   if (guestsResult.error) {
-    console.warn(`[loadVenueOpenIntentions] guests query failed: ${guestsResult.error.message}`)
+    console.warn(
+      `[loadVenueOpenIntentions] guests query failed: ${guestsResult.error.message}`,
+    )
     return { rows: [], cohortTruncated, degraded: true }
   }
 
@@ -220,7 +239,9 @@ async function _loadVenueOpenIntentions(
     }
   }
 
-  const guestsById = new Map((guestsResult.data ?? []).map((g) => [g.id, g] as const))
+  const guestsById = new Map(
+    (guestsResult.data ?? []).map((g) => [g.id, g] as const),
+  )
   const rows: VenueOpenIntentionRow[] = []
   for (const guestId of guestIds) {
     const guest = guestsById.get(guestId)
@@ -228,9 +249,14 @@ async function _loadVenueOpenIntentions(
     // this venue's guest to show.
     if (!guest) continue
     const parsedContext = GuestContextSchema.safeParse(guest.context)
-    const context = toParsedGuestContext(parsedContext.success ? parsedContext.data : {}, now)
+    const context = toParsedGuestContext(
+      parsedContext.success ? parsedContext.data : {},
+      now,
+    )
     const open = deriveIntentionState({
-      entries: entriesByGuest.get(guestId) ?? new Map<IntentionKey, IntentionStateEntry>(),
+      entries:
+        entriesByGuest.get(guestId) ??
+        new Map<IntentionKey, IntentionStateEntry>(),
       facts: buildSatisfactionFacts({
         hasQualifyingTransaction: hasTransaction.has(guestId),
         firstName: guest.first_name,

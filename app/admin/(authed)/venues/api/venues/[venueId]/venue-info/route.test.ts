@@ -20,7 +20,12 @@ const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222'
 
 const validVenueInfo = {
-  address: { line1: '1 Main St', city: 'Someville', region: 'CA', postalCode: '00000' },
+  address: {
+    line1: '1 Main St',
+    city: 'Someville',
+    region: 'CA',
+    postalCode: '00000',
+  },
   contact: { publicPhone: '+15551234567' },
   hours: { monday: '7am-3pm' },
   menu: { highlights: ['Try the cortado'], items: [], notes: 'Seasonal menu' },
@@ -35,7 +40,9 @@ interface AdminMockState {
   updateError: { message: string } | null
 }
 
-function newAdminState(overrides: Partial<AdminMockState> = {}): AdminMockState {
+function newAdminState(
+  overrides: Partial<AdminMockState> = {},
+): AdminMockState {
   return {
     venueInfo: { ...validVenueInfo },
     readError: null,
@@ -136,11 +143,23 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — body validatio
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
     const res = await PATCH(
-      buildRequest({ currentContext: [{ id: 'x', content: 'y', source: 'text', addedAt: new Date().toISOString() }] }),
+      buildRequest({
+        currentContext: [
+          {
+            id: 'x',
+            content: 'y',
+            source: 'text',
+            addedAt: new Date().toISOString(),
+          },
+        ],
+      }),
       buildParams(VENUE_ID),
     )
     expect(res.status).toBe(200)
-    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    const written = state.updateCalls[0].payload.venue_info as Record<
+      string,
+      unknown
+    >
     // currentContext in the write is whatever was already on the row — [] —
     // never replaced by the stripped, ignored request field.
     expect(written.currentContext).toEqual([])
@@ -167,7 +186,10 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — happy path', (
     )
     expect(res.status).toBe(200)
     expect(state.updateCalls).toHaveLength(1)
-    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    const written = state.updateCalls[0].payload.venue_info as Record<
+      string,
+      unknown
+    >
     expect(written.qrEnrollmentMessage).toBe('Hi Sana!')
     // Untouched top-level keys preserved — this is the load-bearing property.
     expect(written.staff).toEqual(['Rayan', 'Kinani'])
@@ -183,7 +205,14 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — happy path', (
       buildRequest({
         menu: {
           highlights: ['New highlight'],
-          items: [{ name: 'Cortado', category: 'drinks', price: 4.5, isOffMenu: false }],
+          items: [
+            {
+              name: 'Cortado',
+              category: 'drinks',
+              price: 4.5,
+              isOffMenu: false,
+            },
+          ],
         },
       }),
       buildParams(VENUE_ID),
@@ -201,7 +230,10 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — happy path', (
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    const res = await PATCH(buildRequest({ staff: ['Rayan'] }), buildParams(VENUE_ID))
+    const res = await PATCH(
+      buildRequest({ staff: ['Rayan'] }),
+      buildParams(VENUE_ID),
+    )
     expect(res.status).toBe(500)
     expect(state.updateCalls).toEqual([])
   })
@@ -224,7 +256,10 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — links round-tr
   it('leaves links untouched when the body does not mention them', async () => {
     const storedLinks = [
       { label: 'Budan beans', url: 'https://lemils.com/products/budan' },
-      { label: 'Shipping policy', url: 'https://lemils.com/policies/shipping-policy' },
+      {
+        label: 'Shipping policy',
+        url: 'https://lemils.com/policies/shipping-policy',
+      },
     ]
     const state = newAdminState({
       venueInfo: { ...validVenueInfo, links: storedLinks },
@@ -240,7 +275,10 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — links round-tr
 
     expect(res.status).toBe(200)
     expect(state.updateCalls).toHaveLength(1)
-    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    const written = state.updateCalls[0].payload.venue_info as Record<
+      string,
+      unknown
+    >
     expect(written.links).toEqual(storedLinks)
     expect((written.hours as Record<string, unknown>).monday).toBe('8am-4pm')
   })
@@ -260,7 +298,10 @@ describe('PATCH /admin/venues/api/venues/[venueId]/venue-info — links round-tr
     )
 
     expect(res.status).toBe(200)
-    const written = state.updateCalls[0].payload.venue_info as Record<string, unknown>
+    const written = state.updateCalls[0].payload.venue_info as Record<
+      string,
+      unknown
+    >
     expect(written.links).toEqual(storedLinks)
   })
 })

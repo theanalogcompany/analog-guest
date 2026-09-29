@@ -38,7 +38,8 @@ type AdminSupabaseClient = SupabaseClient<Database>
 /** The Contract's literal threshold. Not the refresh window. */
 export const INSTAGRAM_EXPIRING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
-export type InstagramConnectionStatus = 'connected' | 'disconnected' | 'expiring'
+export type InstagramConnectionStatus =
+  'connected' | 'disconnected' | 'expiring'
 
 /**
  * Always present, never undefined, per the Contract. `username` and
@@ -55,8 +56,7 @@ export type VenueConnectionState = {
 }
 
 export type LoadVenueConnectionResult =
-  | { ok: true; state: VenueConnectionState }
-  | { ok: false; error: string }
+  { ok: true; state: VenueConnectionState } | { ok: false; error: string }
 
 const DISCONNECTED: VenueInstagramConnection = {
   status: 'disconnected',
@@ -79,7 +79,11 @@ export async function loadVenueConnectionState(
 ): Promise<LoadVenueConnectionResult> {
   const [loaded, venue] = await Promise.all([
     loadInstagramCredential(supabase, venueId),
-    supabase.from('venues').select('instagram_account_id').eq('id', venueId).maybeSingle(),
+    supabase
+      .from('venues')
+      .select('instagram_account_id')
+      .eq('id', venueId)
+      .maybeSingle(),
   ])
   // A failed read is a failure, never "disconnected". Reporting a venue as
   // disconnected because a query timed out would tell an operator their
@@ -91,7 +95,12 @@ export async function loadVenueConnectionState(
   const hasAccount = typeof accountId === 'string' && accountId.trim() !== ''
 
   const credential = loaded.credential
-  if (credential === null || !credential.isActive || credential.deauthorizedAt !== null || !hasAccount) {
+  if (
+    credential === null ||
+    !credential.isActive ||
+    credential.deauthorizedAt !== null ||
+    !hasAccount
+  ) {
     return { ok: true, state: { instagram: DISCONNECTED } }
   }
 

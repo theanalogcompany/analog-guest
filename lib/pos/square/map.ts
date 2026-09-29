@@ -2,7 +2,8 @@
 // (lib/pos/types.ts). Permissive Zod at the boundary — a payload that doesn't
 // parse yields null/[] rather than throwing, so a single malformed delivery
 // degrades to "skip" instead of crashing the webhook handler (the runtime-side
-// of the permissive-schema rule in CLAUDE.md §"Common gotchas").
+// of the permissive-schema rule in
+// .claude/rules/errors-as-values.md, "Every failure path picks a direction").
 
 import { z } from 'zod'
 
@@ -124,7 +125,9 @@ function parseQuantity(raw: string | undefined): number {
  * Line items are NOT on the payment — they live on the Order and are hydrated
  * separately via fetchOrder. Returns null if the object doesn't parse.
  */
-export function mapSquarePaymentToTransaction(payment: unknown): TransactionEvent | null {
+export function mapSquarePaymentToTransaction(
+  payment: unknown,
+): TransactionEvent | null {
   const parsed = SquarePaymentSchema.safeParse(payment)
   if (!parsed.success) return null
   const p = parsed.data

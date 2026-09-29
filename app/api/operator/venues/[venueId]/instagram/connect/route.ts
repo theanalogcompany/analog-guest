@@ -39,7 +39,8 @@ import {
 } from '@/lib/messaging/instagram/oauth-state'
 
 /** Canonical UUID regex, as the sibling operator routes. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Meta's approval screen. The Contract names this host literally. */
 const INSTAGRAM_AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize'
@@ -79,7 +80,7 @@ export async function POST(
 
   // ---- configuration ----
   // Read at call time, never at module load: CI defines none of the Meta vars
-  // (CLAUDE.md, "Module-load vs first-call").
+  // (CLAUDE.md, "Environment variables").
   const appId = process.env.INSTAGRAM_APP_ID
   const redirectUri = process.env.INSTAGRAM_OAUTH_REDIRECT_URL
   const encryptionKey = process.env.INSTAGRAM_TOKEN_ENC_KEY
@@ -116,7 +117,12 @@ export async function POST(
   }
 
   const state = signInstagramOAuthState(
-    { venueId, operatorId: operator.operatorId, nonce, expiresAtMs: expiresAt.getTime() },
+    {
+      venueId,
+      operatorId: operator.operatorId,
+      nonce,
+      expiresAtMs: expiresAt.getTime(),
+    },
     deriveInstagramStateSigningKey(encryptionKey),
   )
 

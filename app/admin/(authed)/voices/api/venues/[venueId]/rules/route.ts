@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireVenueAdmin } from '@/lib/auth'
-import { dedupeAndAppendAntiPatterns, removeAntiPattern } from '@/lib/voice-training'
+import {
+  dedupeAndAppendAntiPatterns,
+  removeAntiPattern,
+} from '@/lib/voice-training'
 
 // POST/DELETE /admin/voices/api/venues/[venueId]/rules — venue anti-pattern
 // adds and exact-text removes from the rail's Rules pane.
@@ -12,7 +15,10 @@ import { dedupeAndAppendAntiPatterns, removeAntiPattern } from '@/lib/voice-trai
 
 const PostBodySchema = z.object({
   // Trim outer whitespace per agreed convention; inner text stays as typed.
-  ruleText: z.string().min(1).transform((s) => s.trim()),
+  ruleText: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
 })
 
 const DeleteBodySchema = z.object({
@@ -93,7 +99,11 @@ export async function DELETE(
   if (!result.ok) {
     const status = result.errorCode === 'not_found' ? 404 : 500
     return NextResponse.json(
-      { error: 'rule delete failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'rule delete failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

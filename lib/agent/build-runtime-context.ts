@@ -30,7 +30,10 @@ import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 import { scanCarryForwardAt } from './scan-arrival'
 import { loadScanCarryForward } from './scan-arrival-store'
-import { resolveConversationChannel, venueMessagingNumberRequired } from './conversation-channel'
+import {
+  resolveConversationChannel,
+  venueMessagingNumberRequired,
+} from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
 import { groupIntoResponses } from './group-responses'
@@ -110,7 +113,9 @@ export async function buildRuntimeContext(input: {
 }): Promise<RuntimeContext> {
   const supabase = createAdminClient()
   const computedAt = new Date()
-  const historyCutoffIso = new Date(Date.now() - MAX_HISTORY_DAYS * MS_PER_DAY).toISOString()
+  const historyCutoffIso = new Date(
+    Date.now() - MAX_HISTORY_DAYS * MS_PER_DAY,
+  ).toISOString()
 
   // Exclude the current inbound row (it's already in the table by the time the
   // agent runs, and gets rendered separately as `inboundMessage` in the prompt).
@@ -131,7 +136,9 @@ export async function buildRuntimeContext(input: {
   // reaches the prompt through ## Unanswered question.
   let messagesQuery = supabase
     .from('messages')
-    .select('id, direction, body, created_at, generation_id, status, review_state')
+    .select(
+      'id, direction, body, created_at, generation_id, status, review_state',
+    )
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
     .neq('body', '')
@@ -223,7 +230,9 @@ export async function buildRuntimeContext(input: {
     // intentions never render on a followup (see below). loadIntentionRows
     // never throws and returns null on any failure; the derivation fails CLOSED
     // on null.
-    input.currentMessage ? loadIntentionRows(input.venueId, input.guestId) : Promise.resolve(null),
+    input.currentMessage
+      ? loadIntentionRows(input.venueId, input.guestId)
+      : Promise.resolve(null),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -279,7 +288,9 @@ export async function buildRuntimeContext(input: {
   // `?? null`: a message whose channel is missing (an InboundMessage built
   // through a cast) resolves as unparseable, never as "no inbound message",
   // which would hand a guest with both identifiers the SMS copy.
-  const inboundChannel = input.currentMessage ? (input.currentMessage.channel ?? null) : undefined
+  const inboundChannel = input.currentMessage
+    ? (input.currentMessage.channel ?? null)
+    : undefined
   // TAC-469: a guest with both identifiers and no inbound message is on the
   // channel they last messaged us on. Read only then, so every other run pays
   // nothing for it.
@@ -294,16 +305,19 @@ export async function buildRuntimeContext(input: {
     lastInboundChannel,
   })
   if (channelResolution.channel === null) {
-    console.warn('[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number', {
-      agentRunId: input.agentRunId,
-      venueId: input.venueId,
-      guestId: input.guestId,
-      inboundMessageId: input.currentMessage?.id ?? null,
-      inboundChannel,
-      hasPhone,
-      hasInstagramId,
-      reason: channelResolution.unresolvedReason,
-    })
+    console.warn(
+      '[agent] buildRuntimeContext: conversation channel unresolved, using the copy that asserts no phone number',
+      {
+        agentRunId: input.agentRunId,
+        venueId: input.venueId,
+        guestId: input.guestId,
+        inboundMessageId: input.currentMessage?.id ?? null,
+        inboundChannel,
+        hasPhone,
+        hasInstagramId,
+        reason: channelResolution.unresolvedReason,
+      },
+    )
     // TAC-469 pre-flight: a real signal, not only a log line nobody watches.
     // Once Instagram replies are on, an unresolved channel is a guest whose
     // reply cannot be routed at all (dispatch never routes on null). The same
@@ -330,7 +344,10 @@ export async function buildRuntimeContext(input: {
   // changes no send path. An unknown channel (null) still requires it, as
   // before: that is a data problem, and failing loudly is the better outcome.
   const venueRow = venueResult.data
-  if (!venueRow.messaging_phone_number && venueMessagingNumberRequired(channelResolution.channel)) {
+  if (
+    !venueRow.messaging_phone_number &&
+    venueMessagingNumberRequired(channelResolution.channel)
+  ) {
     throw new Error(
       `buildRuntimeContext: venue ${input.venueId} has no messaging_phone_number` +
         (channelResolution.channel === null
@@ -343,7 +360,7 @@ export async function buildRuntimeContext(input: {
   // a nested object (1:1 by PK), an array, or null when no row exists.
   // Normalize all three to a single record-or-null shape.
   const configRaw = venueRow.venue_configs
-  const config = Array.isArray(configRaw) ? configRaw[0] ?? null : configRaw
+  const config = Array.isArray(configRaw) ? (configRaw[0] ?? null) : configRaw
 
   if (!config) {
     throw new Error(
@@ -367,7 +384,10 @@ export async function buildRuntimeContext(input: {
 
   const venueInfo = {
     ...venueInfoParsed.data,
-    currentContext: filterActiveContext(venueInfoParsed.data.currentContext, computedAt),
+    currentContext: filterActiveContext(
+      venueInfoParsed.data.currentContext,
+      computedAt,
+    ),
   }
 
   const venue: VenueContext = {
@@ -419,7 +439,9 @@ export async function buildRuntimeContext(input: {
     // guests who have never visited; deriveFollowupContext (stages.ts)
     // ignores this field for post_visit_* reasons (those anchor on
     // recentVisits[0]).
-    lastVisitAt: guestRow.last_visit_at ? new Date(guestRow.last_visit_at) : null,
+    lastVisitAt: guestRow.last_visit_at
+      ? new Date(guestRow.last_visit_at)
+      : null,
   }
 
   const recognition: RecognitionSnapshot = {
@@ -444,9 +466,14 @@ export async function buildRuntimeContext(input: {
   // Computed once here rather than inside the intentions branch, so the
   // retrieval layer reads the same number rather than re-deriving it.
   const conversationWindowMs =
-    parseFollowupRules(config.followup_rules).recent_conversation_hours * 60 * 60 * 1000
+    parseFollowupRules(config.followup_rules).recent_conversation_hours *
+    60 *
+    60 *
+    1000
 
-  const mechanicCandidates: EligibilityCandidate[] = (mechanicsResult.data ?? []).map((m) => ({
+  const mechanicCandidates: EligibilityCandidate[] = (
+    mechanicsResult.data ?? []
+  ).map((m) => ({
     id: m.id,
     type: m.type as MechanicType,
     name: m.name,
@@ -460,7 +487,10 @@ export async function buildRuntimeContext(input: {
   }))
 
   const redemptions: RedemptionRecord[] = (redemptionsResult.data ?? [])
-    .filter((r): r is { mechanic_id: string; created_at: string } => r.mechanic_id !== null)
+    .filter(
+      (r): r is { mechanic_id: string; created_at: string } =>
+        r.mechanic_id !== null,
+    )
     .map((r) => ({
       mechanicId: r.mechanic_id,
       createdAt: new Date(r.created_at),
@@ -503,7 +533,11 @@ export async function buildRuntimeContext(input: {
   // of recordIntentionPrompts), so rendering there would raise an intention
   // nothing ever closes. So on any followup run: nothing open, nothing newly
   // eligible, unconditionally.
-  let intentions: DeriveOpenIntentionsResult = { open: [], newlyEligible: [], brakeEngaged: false }
+  let intentions: DeriveOpenIntentionsResult = {
+    open: [],
+    newlyEligible: [],
+    brakeEngaged: false,
+  }
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
@@ -598,7 +632,11 @@ export async function buildRuntimeContext(input: {
       !isScanReferral(input.currentMessage?.referralSource) &&
       input.currentMessage?.channel === 'instagram'
     ) {
-      const carry = await loadScanCarryForward(supabase, input.venueId, input.guestId)
+      const carry = await loadScanCarryForward(
+        supabase,
+        input.venueId,
+        input.guestId,
+      )
       carriedScanAt = scanCarryForwardAt({
         lastScanAt: carry.lastScanAt,
         lastGreetingAt: carry.lastGreetingAt,
@@ -648,7 +686,9 @@ export async function buildRuntimeContext(input: {
     // that fails toward not asking. Raw rows, because ActiveCommitment doesn't
     // carry updated_at. A failed read doesn't lift the hold:
     // openRecommendationsUnreadable holds got_the_recommendation outright.
-    const openRecommendationTouchedTimes = (activeCommitmentsResult.ok ? activeCommitmentsResult.data : [])
+    const openRecommendationTouchedTimes = (
+      activeCommitmentsResult.ok ? activeCommitmentsResult.data : []
+    )
       .filter((row) => row.type === 'recommendation')
       .map((row) => new Date(row.updated_at))
       .filter((d) => Number.isFinite(d.getTime()))
@@ -667,7 +707,9 @@ export async function buildRuntimeContext(input: {
     // one. recentMessages is already response-grouped; inbound rows are each
     // their own group.
     const inboundTimes = [
-      ...recentMessages.filter((m) => m.direction === 'inbound').map((m) => m.createdAt),
+      ...recentMessages
+        .filter((m) => m.direction === 'inbound')
+        .map((m) => m.createdAt),
       input.currentMessage.receivedAt,
     ]
 
@@ -739,9 +781,12 @@ export async function buildRuntimeContext(input: {
       guestId: input.guestId,
     })
     scanArrival = {
-      hadPriorConversation: input.followupTrigger.instagramScanArrival?.hadPriorConversation === true,
+      hadPriorConversation:
+        input.followupTrigger.instagramScanArrival?.hadPriorConversation ===
+        true,
       hasRecordedVisit:
-        (visitHistoryResult.data?.length ?? 0) > 0 || (arrival.ok && arrival.data !== null),
+        (visitHistoryResult.data?.length ?? 0) > 0 ||
+        (arrival.ok && arrival.data !== null),
     }
   }
 

@@ -27,7 +27,10 @@ describe('getCurrentOperator', () => {
       venueScope: grantedVenues(['venue-a']),
     })
     const out = await getCurrentOperator(emptyRequest())
-    expect(out).toEqual({ operatorId: 'operator-1', venueScope: grantedVenues(['venue-a']) })
+    expect(out).toEqual({
+      operatorId: 'operator-1',
+      venueScope: grantedVenues(['venue-a']),
+    })
   })
 
   it('returns a 401 Response when verifyOperatorRequest throws AuthError(401)', async () => {
@@ -39,7 +42,9 @@ describe('getCurrentOperator', () => {
     const res = out as Response
     expect(res.status).toBe(401)
     expect(res.headers.get('content-type')).toBe('application/json')
-    await expect(res.json()).resolves.toEqual({ error: 'invalid or expired token' })
+    await expect(res.json()).resolves.toEqual({
+      error: 'invalid or expired token',
+    })
   })
 
   it('returns a 403 Response when AuthError(403) is thrown (forwards forwarded statuses)', async () => {

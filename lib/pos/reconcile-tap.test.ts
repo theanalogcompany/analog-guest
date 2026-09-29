@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { createAdminClient } from '@/lib/db/admin'
 
-import { expireStalePendingTaps, extractTapToken, reconcileTapFromInbound } from './reconcile-tap'
+import {
+  expireStalePendingTaps,
+  extractTapToken,
+  reconcileTapFromInbound,
+} from './reconcile-tap'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -16,7 +20,10 @@ function makeClient(cfg: Cfg): {
   client: AdminClient
   captured: { updates: Record<string, any>; upserts: Record<string, any> }
 } {
-  const captured = { updates: {} as Record<string, any>, upserts: {} as Record<string, any> }
+  const captured = {
+    updates: {} as Record<string, any>,
+    upserts: {} as Record<string, any>,
+  }
   function chain(table: string): any {
     const self: any = {}
     const ret = () => self
@@ -33,12 +40,16 @@ function makeClient(cfg: Cfg): {
       captured.upserts[table] = p
       return self
     }
-    self.maybeSingle = async () => cfg.maybeSingle?.[table] ?? { data: null, error: null }
+    self.maybeSingle = async () =>
+      cfg.maybeSingle?.[table] ?? { data: null, error: null }
     self.then = (resolve: (r: { data?: unknown; error: unknown }) => unknown) =>
       resolve(cfg.then?.[table] ?? { data: null, error: null })
     return self
   }
-  return { client: { from: (t: string) => chain(t) } as unknown as AdminClient, captured }
+  return {
+    client: { from: (t: string) => chain(t) } as unknown as AdminClient,
+    captured,
+  }
 }
 
 const VENUE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -74,7 +85,9 @@ describe('reconcileTapFromInbound', () => {
   })
 
   it('returns tap_not_found when no pending tap matches the token', async () => {
-    const { client } = makeClient({ maybeSingle: { pos_tap_events: { data: null, error: null } } })
+    const { client } = makeClient({
+      maybeSingle: { pos_tap_events: { data: null, error: null } },
+    })
     const res = await reconcileTapFromInbound({
       venueId: VENUE,
       guestId: GUEST,
@@ -88,8 +101,17 @@ describe('reconcileTapFromInbound', () => {
   it('attaches the guest to the linked transaction and maps the fingerprint', async () => {
     const { client, captured } = makeClient({
       maybeSingle: {
-        pos_tap_events: { data: { reconciled_transaction_id: 'tx_1' }, error: null },
-        transactions: { data: { card_fingerprint: 'fp_1', occurred_at: '2026-06-15T10:00:00Z' }, error: null },
+        pos_tap_events: {
+          data: { reconciled_transaction_id: 'tx_1' },
+          error: null,
+        },
+        transactions: {
+          data: {
+            card_fingerprint: 'fp_1',
+            occurred_at: '2026-06-15T10:00:00Z',
+          },
+          error: null,
+        },
       },
     })
     const res = await reconcileTapFromInbound({
@@ -99,7 +121,10 @@ describe('reconcileTapFromInbound', () => {
       body,
       supabase: client,
     })
-    expect(res.ok && res.data).toEqual({ status: 'matched', transactionId: 'tx_1' })
+    expect(res.ok && res.data).toEqual({
+      status: 'matched',
+      transactionId: 'tx_1',
+    })
     expect(captured.updates.transactions).toMatchObject({
       guest_id: GUEST,
       match_method: 'tap_token',
@@ -121,7 +146,12 @@ describe('reconcileTapFromInbound', () => {
 
   it('still matches (transactionId null) when the tap had no linked transaction', async () => {
     const { client } = makeClient({
-      maybeSingle: { pos_tap_events: { data: { reconciled_transaction_id: null }, error: null } },
+      maybeSingle: {
+        pos_tap_events: {
+          data: { reconciled_transaction_id: null },
+          error: null,
+        },
+      },
     })
     const res = await reconcileTapFromInbound({
       venueId: VENUE,
@@ -130,12 +160,17 @@ describe('reconcileTapFromInbound', () => {
       body,
       supabase: client,
     })
-    expect(res.ok && res.data).toEqual({ status: 'matched', transactionId: null })
+    expect(res.ok && res.data).toEqual({
+      status: 'matched',
+      transactionId: null,
+    })
   })
 
   it('surfaces a claim error', async () => {
     const { client } = makeClient({
-      maybeSingle: { pos_tap_events: { data: null, error: { message: 'boom' } } },
+      maybeSingle: {
+        pos_tap_events: { data: null, error: { message: 'boom' } },
+      },
     })
     const res = await reconcileTapFromInbound({
       venueId: VENUE,
@@ -144,14 +179,20 @@ describe('reconcileTapFromInbound', () => {
       body,
       supabase: client,
     })
-    expect(res).toEqual({ ok: false, error: 'boom', errorCode: 'tap_claim_failed' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'boom',
+      errorCode: 'tap_claim_failed',
+    })
   })
 })
 
 describe('expireStalePendingTaps', () => {
   it('counts the rows it expired', async () => {
     const { client } = makeClient({
-      then: { pos_tap_events: { data: [{ id: 'a' }, { id: 'b' }], error: null } },
+      then: {
+        pos_tap_events: { data: [{ id: 'a' }, { id: 'b' }], error: null },
+      },
     })
     const res = await expireStalePendingTaps({
       now: new Date('2026-06-15T12:00:00Z'),
@@ -170,6 +211,10 @@ describe('expireStalePendingTaps', () => {
       ttlMinutes: 30,
       supabase: client,
     })
-    expect(res).toEqual({ ok: false, error: 'nope', errorCode: 'tap_expiry_failed' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'nope',
+      errorCode: 'tap_expiry_failed',
+    })
   })
 })

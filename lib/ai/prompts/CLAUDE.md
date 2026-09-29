@@ -106,8 +106,22 @@ block-order test is the only thing that catches a move past it.
 - **Splitting is decided in code, not by the prompt.** `[[BREAK]]` is retired and the
   template must carry no trace of it; a test asserts the absence. Two prompt-side rounds
   failed identically before `lib/agent/sentence-split.ts` took over.
+- **A getting-to-know-you question is separated in code, not by the prompt** (TAC-554).
+  Same lesson as splitting, paid for a second time. A persona rule saying the question goes
+  in its own bubble failed twice on device the day it was applied, and dispatch is why:
+  `resolveDispatchBubbles` splits on sentence boundaries it can detect, so one reply rode a
+  fair coin and lost and the other had no detectable boundary at all. Measured before the
+  change, 0 of 21 raising turns separated it, and 18 of those 21 could not have split at any
+  coin value. The `# Getting-to-know-you questions` block tells the model which FIELD the
+  question goes in; it deliberately does not rule on whether to ask, which stays entirely
+  the intentions block's call.
 - **Emoji cadence is a per-message coin flip in code**, not a frequency word in prose. A
   frequency word has no referent inside a single generation: the measured rate was 10 of 11
   at a venue whose prompt said "not in every text".
 - **`sparingly` is empirically identical to `never`** (0 of 188 measured). Recorded, not
   fixed.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

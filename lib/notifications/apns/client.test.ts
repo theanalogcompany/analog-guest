@@ -104,7 +104,9 @@ describe('sendApnsRequest', () => {
     stream.emit('response', { ':status': 200 })
     stream.emit('end')
     await promise
-    expect(connectMock).toHaveBeenCalledWith('https://api.sandbox.push.apple.com')
+    expect(connectMock).toHaveBeenCalledWith(
+      'https://api.sandbox.push.apple.com',
+    )
   })
 
   it('returns env_missing when APNS_ENV is neither production nor sandbox', async () => {
@@ -146,7 +148,9 @@ describe('sendApnsRequest', () => {
     expect(session.requestHeaders[':method']).toBe('POST')
     expect(session.requestHeaders[':path']).toBe('/3/device/devicetoken123')
     expect(session.requestHeaders.authorization).toBe('bearer test.jwt.token')
-    expect(session.requestHeaders['apns-topic']).toBe('company.theanalog.operator')
+    expect(session.requestHeaders['apns-topic']).toBe(
+      'company.theanalog.operator',
+    )
     expect(session.requestHeaders['apns-push-type']).toBe('alert')
     expect(session.requestHeaders['apns-priority']).toBe('10')
     expect(session.requestHeaders['content-type']).toBe('application/json')
@@ -158,7 +162,10 @@ describe('sendApnsRequest', () => {
   })
 
   it('writes the JSON-serialized body to the stream', async () => {
-    const body = { aps: { alert: { title: 'T', body: 'B' }, badge: 3 }, draftId: 'd' }
+    const body = {
+      aps: { alert: { title: 'T', body: 'B' }, badge: 3 },
+      draftId: 'd',
+    }
     const promise = sendApnsRequest({ deviceToken: 'tok', body })
     await Promise.resolve()
     const session = lastSession.value!
@@ -171,7 +178,10 @@ describe('sendApnsRequest', () => {
   })
 
   it('parses APNs error responses and surfaces reason on 410 Gone', async () => {
-    const promise = sendApnsRequest({ deviceToken: 'expired-tok', body: { aps: {} } })
+    const promise = sendApnsRequest({
+      deviceToken: 'expired-tok',
+      body: { aps: {} },
+    })
     await Promise.resolve()
     const session = lastSession.value!
     const stream = session.lastStream!

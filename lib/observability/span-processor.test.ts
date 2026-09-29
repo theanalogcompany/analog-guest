@@ -39,8 +39,12 @@ describe('shouldExportSpan', () => {
     // REST URL carries table and filter values, so a guest id or phone number
     // rides in a span name that LANGFUSE_CAPTURE_CONTENT does not gate.
     expect(shouldExportSpan(span('@vercel/otel'))).toBe(false)
-    expect(shouldExportSpan(span('@opentelemetry/instrumentation-fetch'))).toBe(false)
-    expect(shouldExportSpan(span('@opentelemetry/instrumentation-undici'))).toBe(false)
+    expect(shouldExportSpan(span('@opentelemetry/instrumentation-fetch'))).toBe(
+      false,
+    )
+    expect(
+      shouldExportSpan(span('@opentelemetry/instrumentation-undici')),
+    ).toBe(false)
     expect(shouldExportSpan(span('next.js'))).toBe(false)
   })
 

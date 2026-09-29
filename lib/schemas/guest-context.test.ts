@@ -33,9 +33,15 @@ describe('GuestContextSchema', () => {
         dislikes: ['cilantro'],
       },
       life_context: [
-        { note: 'Going to Tokyo', captured_at: '2026-04-15T10:00:00Z', expires_at: '2026-05-15T10:00:00Z' },
+        {
+          note: 'Going to Tokyo',
+          captured_at: '2026-04-15T10:00:00Z',
+          expires_at: '2026-05-15T10:00:00Z',
+        },
       ],
-      observations: [{ note: 'Runs marathons', captured_at: '2026-04-20T08:00:00Z' }],
+      observations: [
+        { note: 'Runs marathons', captured_at: '2026-04-20T08:00:00Z' },
+      ],
     })
     expect(r.success).toBe(true)
   })
@@ -116,13 +122,17 @@ describe('GuestContextPatchSchema', () => {
     expect(r.success).toBe(true)
     if (r.success) {
       expect(r.data.guest_details?.home_base).toBe('Bernal Heights')
-      expect(r.data.guest_details?.workplace).toBe('marketing agency near Union Square')
+      expect(r.data.guest_details?.workplace).toBe(
+        'marketing agency near Union Square',
+      )
     }
   })
 
   it('accepts life_context patch entries without captured_at (runtime stamps)', () => {
     const r = GuestContextPatchSchema.safeParse({
-      life_context: [{ note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z' }],
+      life_context: [
+        { note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z' },
+      ],
     })
     expect(r.success).toBe(true)
   })
@@ -171,17 +181,33 @@ describe('filterActiveLifeContext', () => {
   })
 
   it('drops entries whose expires_at is strictly in the past', () => {
-    const entries = [{ note: 'past', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-29T11:59:59Z' }]
+    const entries = [
+      {
+        note: 'past',
+        captured_at: '2026-04-01T00:00:00Z',
+        expires_at: '2026-04-29T11:59:59Z',
+      },
+    ]
     expect(filterActiveLifeContext(entries, NOW)).toEqual([])
   })
 
   it('keeps entries whose expires_at is strictly in the future', () => {
-    const entry = { note: 'future', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-29T12:00:01Z' }
+    const entry = {
+      note: 'future',
+      captured_at: '2026-04-01T00:00:00Z',
+      expires_at: '2026-04-29T12:00:01Z',
+    }
     expect(filterActiveLifeContext([entry], NOW)).toEqual([entry])
   })
 
   it('drops entries whose expires_at equals now (strictly-future semantics)', () => {
-    const entries = [{ note: 'now', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-29T12:00:00Z' }]
+    const entries = [
+      {
+        note: 'now',
+        captured_at: '2026-04-01T00:00:00Z',
+        expires_at: '2026-04-29T12:00:00Z',
+      },
+    ]
     expect(filterActiveLifeContext(entries, NOW)).toEqual([])
   })
 
@@ -192,7 +218,13 @@ describe('filterActiveLifeContext', () => {
 
   it('drops malformed expires_at and logs a warning, without crashing', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const entries = [{ note: 'bad', captured_at: '2026-04-01T00:00:00Z', expires_at: 'not-a-date' }]
+    const entries = [
+      {
+        note: 'bad',
+        captured_at: '2026-04-01T00:00:00Z',
+        expires_at: 'not-a-date',
+      },
+    ]
     expect(filterActiveLifeContext(entries, NOW)).toEqual([])
     expect(warnSpy).toHaveBeenCalledOnce()
     expect(warnSpy.mock.calls[0][0]).toContain('bad')
@@ -201,12 +233,30 @@ describe('filterActiveLifeContext', () => {
 
   it('preserves only active + permanent entries from a mixed array, in original order', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const expired = { note: 'expired', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-28T00:00:00Z' }
-    const active = { note: 'active', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-05-15T00:00:00Z' }
-    const permanent = { note: 'permanent', captured_at: '2026-04-01T00:00:00Z' }
-    const malformed = { note: 'malformed', captured_at: '2026-04-01T00:00:00Z', expires_at: 'garbage' }
+    const expired = {
+      note: 'expired',
+      captured_at: '2026-04-01T00:00:00Z',
+      expires_at: '2026-04-28T00:00:00Z',
+    }
+    const active = {
+      note: 'active',
+      captured_at: '2026-04-01T00:00:00Z',
+      expires_at: '2026-05-15T00:00:00Z',
+    }
+    const permanent = {
+      note: 'permanent',
+      captured_at: '2026-04-01T00:00:00Z',
+    }
+    const malformed = {
+      note: 'malformed',
+      captured_at: '2026-04-01T00:00:00Z',
+      expires_at: 'garbage',
+    }
 
-    const out = filterActiveLifeContext([expired, active, permanent, malformed], NOW)
+    const out = filterActiveLifeContext(
+      [expired, active, permanent, malformed],
+      NOW,
+    )
     expect(out.map((e) => e.note)).toEqual(['active', 'permanent'])
   })
 
@@ -236,8 +286,16 @@ describe('toParsedGuestContext', () => {
       {
         guest_details: { first_name: 'Sarah' },
         life_context: [
-          { note: 'expired', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-28T00:00:00Z' },
-          { note: 'active', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-05-15T00:00:00Z' },
+          {
+            note: 'expired',
+            captured_at: '2026-04-01T00:00:00Z',
+            expires_at: '2026-04-28T00:00:00Z',
+          },
+          {
+            note: 'active',
+            captured_at: '2026-04-01T00:00:00Z',
+            expires_at: '2026-05-15T00:00:00Z',
+          },
         ],
       },
       NOW,
@@ -262,7 +320,11 @@ describe('toParsedGuestContext', () => {
       {
         guest_details: {
           first_name: 'Sarah',
-          home_base: { neighborhood: 'Bernal Heights', city: 'SF', zip: '94110' },
+          home_base: {
+            neighborhood: 'Bernal Heights',
+            city: 'SF',
+            zip: '94110',
+          },
           workplace: { employer: 'Acme', neighborhood: 'SoMa' },
         },
       },
@@ -289,7 +351,9 @@ describe('toParsedGuestContext', () => {
       NOW,
     )
     expect(out.guest_details?.home_base).toBe('Bernal Heights')
-    expect(out.guest_details?.workplace).toBe('marketing agency near Union Square')
+    expect(out.guest_details?.workplace).toBe(
+      'marketing agency near Union Square',
+    )
   })
 
   it('drops guest_details entirely when every renderable field is empty after normalize', () => {
@@ -309,7 +373,11 @@ describe('toParsedGuestContext', () => {
     const out = toParsedGuestContext(
       {
         life_context: [
-          { note: 'expired', captured_at: '2026-04-01T00:00:00Z', expires_at: '2026-04-28T00:00:00Z' },
+          {
+            note: 'expired',
+            captured_at: '2026-04-01T00:00:00Z',
+            expires_at: '2026-04-28T00:00:00Z',
+          },
         ],
         observations: [],
       },
@@ -327,11 +395,15 @@ describe('isEmptyGuestContext', () => {
   })
 
   it('returns false when guest_details is present', () => {
-    expect(isEmptyGuestContext({ guest_details: { first_name: 'Sarah' } })).toBe(false)
+    expect(
+      isEmptyGuestContext({ guest_details: { first_name: 'Sarah' } }),
+    ).toBe(false)
   })
 
   it('returns false when preferences is present', () => {
-    expect(isEmptyGuestContext({ preferences: { dietary: ['vegan'] } })).toBe(false)
+    expect(isEmptyGuestContext({ preferences: { dietary: ['vegan'] } })).toBe(
+      false,
+    )
   })
 
   it('returns false when life_context is non-empty', () => {

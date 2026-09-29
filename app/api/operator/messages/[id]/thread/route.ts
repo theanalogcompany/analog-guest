@@ -17,8 +17,8 @@
 // the operator's allowlist" return 404 with `{"error":"not_found"}` —
 // uniform, indistinguishable to the client. The helper distinguishes the
 // two internally for logging/observability; the route flattens. Matches
-// CLAUDE.md → Auth boundary ("don't leak existence") and the rest of
-// `app/api/operator/*`.
+// lib/operator/CLAUDE.md, "Out of scope and non-existent are the same 404",
+// and the rest of `app/api/operator/*`.
 //
 // Invalid UUID returns 404 (not 400). The Contract doesn't enumerate 400,
 // and a non-UUID `messageId` "doesn't exist" by definition — collapsing
@@ -27,12 +27,14 @@
 import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
+import { logger } from '@/lib/observability/logger'
 import { loadGuestThread } from '@/lib/operator'
 
 // Canonical UUID regex: app/api/operator/messages/[id]/approve/route.ts:19.
 // Inlined rather than imported to avoid coupling route handlers; extract
 // to lib/operator/uuid.ts if a third caller appears.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +75,7 @@ export async function GET(
         // 500 body is the literal 'internal_error' per Contract; surface the
         // underlying message to Vercel logs so a transient DB error leaves a
         // breadcrumb instead of going silent.
-        console.warn(
+        logger.warn(
           `[/api/operator/messages/:id/thread] loadGuestThread failed errorCode=${result.errorCode} error=${result.error ?? '<no detail>'}`,
         )
         return NextResponse.json({ error: 'internal_error' }, { status: 500 })

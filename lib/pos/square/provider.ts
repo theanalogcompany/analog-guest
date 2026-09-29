@@ -23,7 +23,11 @@ import { verifySquareWebhook } from './verify-webhook'
 export class SquareProvider implements PosProvider {
   readonly name = 'square' as const
 
-  verifyWebhook(rawBody: string, headers: Headers, notificationUrl: string): boolean {
+  verifyWebhook(
+    rawBody: string,
+    headers: Headers,
+    notificationUrl: string,
+  ): boolean {
     const key = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY
     if (!key) throw new Error('Missing env var: SQUARE_WEBHOOK_SIGNATURE_KEY')
     return verifySquareWebhook(rawBody, headers, notificationUrl, key)
@@ -38,7 +42,10 @@ export class SquareProvider implements PosProvider {
     orderExternalId: string,
   ): Promise<PosResult<TransactionLineItem[]>> {
     try {
-      const client = createSquareClient(cred.accessToken, resolveSquareEnv(process.env.SQUARE_ENV))
+      const client = createSquareClient(
+        cred.accessToken,
+        resolveSquareEnv(process.env.SQUARE_ENV),
+      )
       const res = await client.orders.get({ orderId: orderExternalId })
       return { ok: true, data: mapSquareOrderLineItems(res.order) }
     } catch (e) {
@@ -52,7 +59,10 @@ export class SquareProvider implements PosProvider {
 
   async fetchCatalog(cred: PosCredential): Promise<PosResult<MenuItem[]>> {
     try {
-      const client = createSquareClient(cred.accessToken, resolveSquareEnv(process.env.SQUARE_ENV))
+      const client = createSquareClient(
+        cred.accessToken,
+        resolveSquareEnv(process.env.SQUARE_ENV),
+      )
       const objects: unknown[] = []
       // list() returns an auto-paginating Page; iterate all ITEM objects.
       const page = await client.catalog.list({ types: 'ITEM' })
@@ -74,11 +84,16 @@ export class SquareProvider implements PosProvider {
     catalogIds?: string[],
   ): Promise<PosResult<InventoryCount[]>> {
     try {
-      const client = createSquareClient(cred.accessToken, resolveSquareEnv(process.env.SQUARE_ENV))
+      const client = createSquareClient(
+        cred.accessToken,
+        resolveSquareEnv(process.env.SQUARE_ENV),
+      )
       const counts: unknown[] = []
       const page = await client.inventory.batchGetCounts({
         catalogObjectIds: catalogIds,
-        locationIds: cred.locationExternalId ? [cred.locationExternalId] : undefined,
+        locationIds: cred.locationExternalId
+          ? [cred.locationExternalId]
+          : undefined,
       })
       for await (const c of page) {
         counts.push(c)

@@ -43,11 +43,16 @@ export async function PATCH(
     const status =
       result.errorCode === 'not_found'
         ? 404
-        : result.errorCode === 'invalid_after_merge' || result.errorCode === 'no_op'
+        : result.errorCode === 'invalid_after_merge' ||
+            result.errorCode === 'no_op'
           ? 400
           : 500
     return NextResponse.json(
-      { error: 'mechanic edit failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'mechanic edit failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }
@@ -67,7 +72,11 @@ export async function DELETE(
   if (!result.ok) {
     const status = result.errorCode === 'not_found' ? 404 : 500
     return NextResponse.json(
-      { error: 'mechanic deactivate failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'mechanic deactivate failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

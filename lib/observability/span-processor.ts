@@ -36,7 +36,10 @@ export interface LangfuseConfig {
  * tracer, this follows and `span-processor.test.ts` proves the value still
  * matches what `startObservation` actually stamps.
  */
-const EXPORTED_INSTRUMENTATION_SCOPES: readonly string[] = [LANGFUSE_TRACER_NAME, 'ai']
+const EXPORTED_INSTRUMENTATION_SCOPES: readonly string[] = [
+  LANGFUSE_TRACER_NAME,
+  'ai',
+]
 
 /**
  * Whether a finished span should be shipped to Langfuse.
@@ -48,7 +51,9 @@ export function shouldExportSpan({
 }: {
   otelSpan: { instrumentationScope: { name: string } }
 }): boolean {
-  return EXPORTED_INSTRUMENTATION_SCOPES.includes(otelSpan.instrumentationScope.name)
+  return EXPORTED_INSTRUMENTATION_SCOPES.includes(
+    otelSpan.instrumentationScope.name,
+  )
 }
 
 /**

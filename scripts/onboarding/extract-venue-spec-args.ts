@@ -35,7 +35,9 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
         return null
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        console.error(`[extract] --interview-date must be YYYY-MM-DD, got "${value}"`)
+        console.error(
+          `[extract] --interview-date must be YYYY-MM-DD, got "${value}"`,
+        )
         return null
       }
       interviewDate = value
@@ -61,6 +63,10 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
  * against a venue that already has a live 06-file without touching it), and
  * --force bypasses it deliberately.
  */
-export function shouldRefuseOverwrite(existing06Found: boolean, dryRun: boolean, force: boolean): boolean {
+export function shouldRefuseOverwrite(
+  existing06Found: boolean,
+  dryRun: boolean,
+  force: boolean,
+): boolean {
   return existing06Found && !dryRun && !force
 }

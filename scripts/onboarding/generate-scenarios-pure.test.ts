@@ -10,7 +10,12 @@ import {
 import type { KnowledgeCorpusRow, MechanicRow } from './load-venue-context'
 
 const baseVenueInfo = (overrides: Partial<VenueInfo> = {}): VenueInfo => ({
-  address: { line1: '123 Main St', city: 'Anytown', region: 'CA', postalCode: '90000' },
+  address: {
+    line1: '123 Main St',
+    city: 'Anytown',
+    region: 'CA',
+    postalCode: '90000',
+  },
   contact: {},
   hours: {},
   menu: { highlights: [], items: [] },
@@ -24,8 +29,18 @@ describe('buildCoverableRows', () => {
     const rows = buildCoverableRows({
       venueInfo: baseVenueInfo(),
       knowledgeRows: [
-        { id: 'kc-1', content: 'sourcing story', primaryTags: ['sourcing'], isProcessed: true },
-        { id: 'kc-2', content: 'not yet embedded', primaryTags: ['other'], isProcessed: false },
+        {
+          id: 'kc-1',
+          content: 'sourcing story',
+          primaryTags: ['sourcing'],
+          isProcessed: true,
+        },
+        {
+          id: 'kc-2',
+          content: 'not yet embedded',
+          primaryTags: ['other'],
+          isProcessed: false,
+        },
       ] satisfies KnowledgeCorpusRow[],
       mechanics: [],
     })
@@ -34,7 +49,11 @@ describe('buildCoverableRows', () => {
   })
 
   it('always includes address, omits hours/contact/amenities/staff when unset', () => {
-    const rows = buildCoverableRows({ venueInfo: baseVenueInfo(), knowledgeRows: [], mechanics: [] })
+    const rows = buildCoverableRows({
+      venueInfo: baseVenueInfo(),
+      knowledgeRows: [],
+      mechanics: [],
+    })
     const ids = rows.map((r) => r.id)
     expect(ids).toContain('fact:address')
     expect(ids).not.toContain('fact:hours')
@@ -47,7 +66,12 @@ describe('buildCoverableRows', () => {
     const rows = buildCoverableRows({
       venueInfo: baseVenueInfo({
         currentContext: [
-          { id: 'ctx-a', content: 'active note', source: 'text', addedAt: new Date() },
+          {
+            id: 'ctx-a',
+            content: 'active note',
+            source: 'text',
+            addedAt: new Date(),
+          },
           {
             id: 'ctx-b',
             content: 'expired note',
@@ -70,15 +94,31 @@ describe('buildCoverableRows', () => {
         menu: {
           highlights: [],
           items: [
-            { name: 'Olipop', category: 'drinks', price: 4, modifiers: [], dietary: [], isOffMenu: false },
-            { name: 'Olipop', category: 'drinks', price: 5, modifiers: [], dietary: [], isOffMenu: false },
+            {
+              name: 'Olipop',
+              category: 'drinks',
+              price: 4,
+              modifiers: [],
+              dietary: [],
+              isOffMenu: false,
+            },
+            {
+              name: 'Olipop',
+              category: 'drinks',
+              price: 5,
+              modifiers: [],
+              dietary: [],
+              isOffMenu: false,
+            },
           ],
         },
       }),
       knowledgeRows: [],
       mechanics: [],
     })
-    const menuIds = rows.filter((r) => r.id.startsWith('menu:')).map((r) => r.id)
+    const menuIds = rows
+      .filter((r) => r.id.startsWith('menu:'))
+      .map((r) => r.id)
     expect(new Set(menuIds).size).toBe(2)
   })
 
@@ -123,7 +163,9 @@ describe('buildVenueContentDigest', () => {
       { id: 'a', label: 'x', content: 'open 9-5 weekdays' },
       { id: 'b', label: 'y', content: 'no delivery apps' },
     ]
-    expect(buildVenueContentDigest(rows)).toBe('- open 9-5 weekdays\n- no delivery apps')
+    expect(buildVenueContentDigest(rows)).toBe(
+      '- open 9-5 weekdays\n- no delivery apps',
+    )
   })
 
   it('returns an empty string for no rows', () => {
@@ -141,7 +183,9 @@ describe('validateTopicMapping', () => {
       validRowIds,
       validTopics,
     )
-    expect(valid).toEqual([{ rowId: 'knowledge:kc-1', topics: ['story_and_sourcing', 'location'] }])
+    expect(valid).toEqual([
+      { rowId: 'knowledge:kc-1', topics: ['story_and_sourcing', 'location'] },
+    ])
   })
 
   it('throws on an unknown row id (hallucination)', () => {
@@ -161,17 +205,28 @@ describe('validateTopicMapping', () => {
       validTopics,
     )
     expect(valid).toEqual([])
-    expect(droppedTopicRefs).toEqual([{ rowId: 'knowledge:kc-1', unknownTopic: 'made_up_topic' }])
+    expect(droppedTopicRefs).toEqual([
+      { rowId: 'knowledge:kc-1', unknownTopic: 'made_up_topic' },
+    ])
   })
 
   it('keeps the known topics on a row whose mapping mixes known and unknown topics', () => {
     const { valid, droppedTopicRefs } = validateTopicMapping(
-      [{ rowId: 'knowledge:kc-1', topics: ['story_and_sourcing', 'made_up_topic'] }],
+      [
+        {
+          rowId: 'knowledge:kc-1',
+          topics: ['story_and_sourcing', 'made_up_topic'],
+        },
+      ],
       validRowIds,
       validTopics,
     )
-    expect(valid).toEqual([{ rowId: 'knowledge:kc-1', topics: ['story_and_sourcing'] }])
-    expect(droppedTopicRefs).toEqual([{ rowId: 'knowledge:kc-1', unknownTopic: 'made_up_topic' }])
+    expect(valid).toEqual([
+      { rowId: 'knowledge:kc-1', topics: ['story_and_sourcing'] },
+    ])
+    expect(droppedTopicRefs).toEqual([
+      { rowId: 'knowledge:kc-1', unknownTopic: 'made_up_topic' },
+    ])
   })
 
   it('sends a row to unmappedRowIds when every one of its topic references is unknown', () => {
@@ -184,7 +239,11 @@ describe('validateTopicMapping', () => {
   })
 
   it('sends a row with no mapping entry to unmappedRowIds', () => {
-    const { unmappedRowIds } = validateTopicMapping([], validRowIds, validTopics)
+    const { unmappedRowIds } = validateTopicMapping(
+      [],
+      validRowIds,
+      validTopics,
+    )
     expect(unmappedRowIds.sort()).toEqual(['fact:address', 'knowledge:kc-1'])
   })
 
@@ -213,7 +272,9 @@ describe('parseMissingInformationItems', () => {
   })
 
   it('returns [] when there is no Needs confirmation section at all', () => {
-    expect(parseMissingInformationItems('# Just a venue spec\n\nsome content')).toEqual([])
+    expect(
+      parseMissingInformationItems('# Just a venue spec\n\nsome content'),
+    ).toEqual([])
   })
 
   it('returns [] when Needs confirmation exists but Missing information does not', () => {

@@ -27,10 +27,10 @@
  * applies.
  */
 
-import { redact } from './linear-cli.mjs';
-import { TICKET_BRANCH_OWNER } from './ticket-branch.mjs';
+import { redact } from './linear-cli.mjs'
+import { TICKET_BRANCH_OWNER } from './ticket-branch.mjs'
 
-export const EXIT = { OK: 0, USAGE: 2 };
+export const EXIT = { OK: 0, USAGE: 2 }
 
 export const ENDING = {
   FINISHED: 'finished',
@@ -38,16 +38,16 @@ export const ENDING = {
   STOPPED_AT_LIMIT: 'stopped-at-limit',
   ERRORED: 'errored',
   NO_RECORD: 'no-record',
-};
+}
 
 export const USAGE = [
   'usage:',
   '  node scripts/run-report.mjs ending <execution-file> <max-turns>',
   '  node scripts/run-report.mjs notice <ticket> <execution-file> <max-turns>',
   'env for notice: RUN_URL, GITHUB_RUN_ID, DENIALS, DENIED, LINEAR_API_KEY (redacted, never printed)',
-].join('\n');
+].join('\n')
 
-const TICKET = /^[A-Z][A-Z0-9]*-\d+$/;
+const TICKET = /^[A-Z][A-Z0-9]*-\d+$/
 
 /**
  * The session's result message from the action's execution file, or null.
@@ -55,15 +55,15 @@ const TICKET = /^[A-Z][A-Z0-9]*-\d+$/;
  * session's outcome, as the workflow's own jq reads it.
  */
 export function lastResult(text) {
-  let records;
+  let records
   try {
-    records = JSON.parse(text);
+    records = JSON.parse(text)
   } catch {
-    return null;
+    return null
   }
-  if (!Array.isArray(records)) return null;
-  const results = records.filter((r) => r && r.type === 'result');
-  return results.length > 0 ? results[results.length - 1] : null;
+  if (!Array.isArray(records)) return null
+  const results = records.filter((r) => r && r.type === 'result')
+  return results.length > 0 ? results[results.length - 1] : null
 }
 
 /**
@@ -72,25 +72,25 @@ export function lastResult(text) {
  * this agrees with the step that fails the run.
  */
 export function classifyEnding(result, maxTurns) {
-  if (!result) return ENDING.NO_RECORD;
-  if (result.subtype === 'error_max_turns') return ENDING.STOPPED_AT_LIMIT;
-  const succeeded = result.subtype === 'success' && !result.is_error;
-  if (!succeeded) return ENDING.ERRORED;
+  if (!result) return ENDING.NO_RECORD
+  if (result.subtype === 'error_max_turns') return ENDING.STOPPED_AT_LIMIT
+  const succeeded = result.subtype === 'success' && !result.is_error
+  if (!succeeded) return ENDING.ERRORED
   if (typeof result.num_turns === 'number' && result.num_turns > maxTurns) {
-    return ENDING.FINISHED_OVER_LIMIT;
+    return ENDING.FINISHED_OVER_LIMIT
   }
-  return ENDING.FINISHED;
+  return ENDING.FINISHED
 }
 
 function lines(text) {
   return (text ?? '')
     .split('\n')
     .map((l) => l.trimEnd())
-    .filter((l) => l.trim() !== '');
+    .filter((l) => l.trim() !== '')
 }
 
 function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
@@ -102,20 +102,29 @@ function escapeRegExp(s) {
  * changes, means git could not answer: unknown, which is not the same as none.
  */
 function readSideFolders(git) {
-  const out = git(['worktree', 'list', '--porcelain']);
-  if (out === null) return null;
-  const blocks = out.split(/\n[ \t]*\n/).map(lines).filter((block) => block.length > 0);
+  const out = git(['worktree', 'list', '--porcelain'])
+  if (out === null) return null
+  const blocks = out
+    .split(/\n[ \t]*\n/)
+    .map(lines)
+    .filter((block) => block.length > 0)
   return blocks
     .slice(1)
     .map((block) => ({
-      path: block.find((l) => l.startsWith('worktree '))?.slice('worktree '.length) ?? null,
-      branch: block.find((l) => l.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) ?? null,
+      path:
+        block
+          .find((l) => l.startsWith('worktree '))
+          ?.slice('worktree '.length) ?? null,
+      branch:
+        block
+          .find((l) => l.startsWith('branch refs/heads/'))
+          ?.slice('branch refs/heads/'.length) ?? null,
     }))
     .filter((folder) => folder.path !== null)
     .map((folder) => {
-      const status = git(['-C', folder.path, 'status', '--porcelain']);
-      return { ...folder, uncommitted: status === null ? null : lines(status) };
-    });
+      const status = git(['-C', folder.path, 'status', '--porcelain'])
+      return { ...folder, uncommitted: status === null ? null : lines(status) }
+    })
 }
 
 /**
@@ -128,121 +137,165 @@ function readSideFolders(git) {
  * detection cannot disagree about what a ticket branch is.
  */
 export function readGitState(git, ticket) {
-  const refsOut = git(['for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/origin/']);
-  if (refsOut === null) return { readable: false };
+  const refsOut = git([
+    'for-each-ref',
+    '--format=%(refname)',
+    'refs/heads/',
+    'refs/remotes/origin/',
+  ])
+  if (refsOut === null) return { readable: false }
 
-  const own = new RegExp(`^refs/(heads|remotes/origin)/(${TICKET_BRANCH_OWNER}/${escapeRegExp(ticket)}-.+)$`, 'i');
-  const byName = new Map();
+  const own = new RegExp(
+    `^refs/(heads|remotes/origin)/(${TICKET_BRANCH_OWNER}/${escapeRegExp(ticket)}-.+)$`,
+    'i',
+  )
+  const byName = new Map()
   for (const ref of lines(refsOut)) {
-    const m = ref.match(own);
-    if (!m) continue;
-    const entry = byName.get(m[2]) ?? { name: m[2], local: false, remote: false };
-    if (m[1] === 'heads') entry.local = true;
-    else entry.remote = true;
-    byName.set(m[2], entry);
+    const m = ref.match(own)
+    if (!m) continue
+    const entry = byName.get(m[2]) ?? {
+      name: m[2],
+      local: false,
+      remote: false,
+    }
+    if (m[1] === 'heads') entry.local = true
+    else entry.remote = true
+    byName.set(m[2], entry)
   }
 
   // null when git could not answer: unknown, which is not the same as none.
   const log = (range) => {
-    const out = git(['log', '--format=%h %s', range]);
-    return out === null ? null : lines(out);
-  };
+    const out = git(['log', '--format=%h %s', range])
+    return out === null ? null : lines(out)
+  }
   const branches = [...byName.values()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((b) => ({
       ...b,
-      onGitHub: b.remote ? log(`refs/remotes/origin/main..refs/remotes/origin/${b.name}`) : [],
-      notPushed: b.local
-        ? log(b.remote
-          ? `refs/remotes/origin/${b.name}..refs/heads/${b.name}`
-          : `refs/remotes/origin/main..refs/heads/${b.name}`)
+      onGitHub: b.remote
+        ? log(`refs/remotes/origin/main..refs/remotes/origin/${b.name}`)
         : [],
-    }));
+      notPushed: b.local
+        ? log(
+            b.remote
+              ? `refs/remotes/origin/${b.name}..refs/heads/${b.name}`
+              : `refs/remotes/origin/main..refs/heads/${b.name}`,
+          )
+        : [],
+    }))
 
   return {
     readable: true,
     head: (git(['rev-parse', '--abbrev-ref', 'HEAD']) ?? '').trim() || null,
     branches,
     uncommitted: (() => {
-      const out = git(['status', '--porcelain']);
-      return out === null ? null : lines(out);
+      const out = git(['status', '--porcelain'])
+      return out === null ? null : lines(out)
     })(),
     sideFolders: readSideFolders(git),
     // A session must never commit to main. If one did, say so rather than
     // letting it vanish with the runner. Unreadable here means no local main.
     onLocalMain: log('refs/remotes/origin/main..refs/heads/main') ?? [],
-  };
+  }
 }
 
 // Long lists are cut, so a session that touched many files still gets a
 // comment Linear accepts.
-export const MAX_LIST = 50;
+export const MAX_LIST = 50
 
 function capped(items) {
-  if (items.length <= MAX_LIST) return items;
-  return [...items.slice(0, MAX_LIST), `...and ${items.length - MAX_LIST} more`];
+  if (items.length <= MAX_LIST) return items
+  return [...items.slice(0, MAX_LIST), `...and ${items.length - MAX_LIST} more`]
 }
 
 // The report goes inside ```text fences. A backtick run in a commit subject
 // or a file name would close the fence, so backticks are swapped for a
 // look-alike, as the workflow's [DENIALS] list does.
 function fenced(items) {
-  const body = items.length > 0 ? capped(items).join('\n') : '(none)';
-  return ['```text', body.replaceAll('`', '\u02cb'), '```'].join('\n');
+  const body = items.length > 0 ? capped(items).join('\n') : '(none)'
+  return ['```text', body.replaceAll('`', '\u02cb'), '```'].join('\n')
 }
 
-const UNKNOWN = '(unknown: git could not read it)';
+const UNKNOWN = '(unknown: git could not read it)'
 
 /** The pushed / not pushed / not committed report, as markdown. */
 export function renderGitReport(state) {
   if (!state.readable) {
-    return 'The runner\'s git could not be read, so what was pushed is unknown. Check the ticket\'s branch on GitHub.';
+    return "The runner's git could not be read, so what was pushed is unknown. Check the ticket's branch on GitHub."
   }
 
-  const out = [];
-  const remote = state.branches.filter((b) => b.remote);
+  const out = []
+  const remote = state.branches.filter((b) => b.remote)
   if (remote.length === 0) {
-    out.push('On GitHub, and kept: no branch for this ticket, so nothing.');
+    out.push('On GitHub, and kept: no branch for this ticket, so nothing.')
   } else {
-    out.push('On GitHub, and kept:');
-    out.push(fenced(remote.flatMap((b) => b.onGitHub === null
-      ? [`${b.name} ${UNKNOWN}`]
-      : [
-          `${b.name} (${b.onGitHub.length} commit${b.onGitHub.length === 1 ? '' : 's'} ahead of main)`,
-          ...b.onGitHub.map((c) => `  ${c}`),
-        ])));
+    out.push('On GitHub, and kept:')
+    out.push(
+      fenced(
+        remote.flatMap((b) =>
+          b.onGitHub === null
+            ? [`${b.name} ${UNKNOWN}`]
+            : [
+                `${b.name} (${b.onGitHub.length} commit${b.onGitHub.length === 1 ? '' : 's'} ahead of main)`,
+                ...b.onGitHub.map((c) => `  ${c}`),
+              ],
+        ),
+      ),
+    )
   }
 
-  const notPushed = state.branches.filter((b) => b.notPushed === null || b.notPushed.length > 0);
-  out.push('Committed on the runner but never pushed, and lost:');
-  out.push(fenced(notPushed.flatMap((b) => b.notPushed === null
-    ? [`${b.name} ${UNKNOWN}`]
-    : [b.name, ...b.notPushed.map((c) => `  ${c}`)])));
+  const notPushed = state.branches.filter(
+    (b) => b.notPushed === null || b.notPushed.length > 0,
+  )
+  out.push('Committed on the runner but never pushed, and lost:')
+  out.push(
+    fenced(
+      notPushed.flatMap((b) =>
+        b.notPushed === null
+          ? [`${b.name} ${UNKNOWN}`]
+          : [b.name, ...b.notPushed.map((c) => `  ${c}`)],
+      ),
+    ),
+  )
 
-  out.push(`Changed on the runner but never committed, and lost${state.head ? ` (on ${state.head})` : ''}:`);
-  out.push(fenced(state.uncommitted ?? [UNKNOWN]));
+  out.push(
+    `Changed on the runner but never committed, and lost${state.head ? ` (on ${state.head})` : ''}:`,
+  )
+  out.push(fenced(state.uncommitted ?? [UNKNOWN]))
 
   if (state.sideFolders === null) {
-    out.push('Changed in a side folder but never committed, and lost:');
-    out.push(fenced([UNKNOWN]));
+    out.push('Changed in a side folder but never committed, and lost:')
+    out.push(fenced([UNKNOWN]))
   } else {
     for (const folder of state.sideFolders ?? []) {
-      out.push(`Changed in the side folder ${folder.path} but never committed, and lost${folder.branch ? ` (on ${folder.branch})` : ''}:`);
-      out.push(fenced(folder.uncommitted ?? [UNKNOWN]));
+      out.push(
+        `Changed in the side folder ${folder.path} but never committed, and lost${folder.branch ? ` (on ${folder.branch})` : ''}:`,
+      )
+      out.push(fenced(folder.uncommitted ?? [UNKNOWN]))
     }
   }
 
   if (state.onLocalMain.length > 0) {
-    out.push('Committed to main on the runner, which a session must never do. Never pushed, and lost:');
-    out.push(fenced(state.onLocalMain));
+    out.push(
+      'Committed to main on the runner, which a session must never do. Never pushed, and lost:',
+    )
+    out.push(fenced(state.onLocalMain))
   }
-  return out.join('\n\n');
+  return out.join('\n\n')
 }
 
-const PREFIX = '**[FROM CLAUDE CODE]**';
+const PREFIX = '**[FROM CLAUDE CODE]**'
 
 /** [TURN-LIMIT]: the CLI stopped the session. Blocking, like [SILENT-RUN]. */
-export function renderTurnLimit({ ticket, turns, maxTurns, gitReport, runUrl, denials, denied }) {
+export function renderTurnLimit({
+  ticket,
+  turns,
+  maxTurns,
+  gitReport,
+  runUrl,
+  denials,
+  denied,
+}) {
   return [
     PREFIX,
     '',
@@ -260,7 +313,7 @@ export function renderTurnLimit({ ticket, turns, maxTurns, gitReport, runUrl, de
     fenced(denied),
     '',
     'Reply here to continue. The next scheduled run resumes the build from the branch on GitHub; anything listed as lost has to be redone. If the ticket is too large for one session, split it instead of replying.',
-  ].join('\n');
+  ].join('\n')
 }
 
 /**
@@ -268,7 +321,14 @@ export function renderTurnLimit({ ticket, turns, maxTurns, gitReport, runUrl, de
  * going over the limit. Bookkeeping: the automation skips it (TAC-447,
  * question 3: the run stays failed, and this says what was pushed).
  */
-export function renderOverLimit({ ticket, turns, maxTurns, gitReport, runUrl, runId }) {
+export function renderOverLimit({
+  ticket,
+  turns,
+  maxTurns,
+  gitReport,
+  runUrl,
+  runId,
+}) {
   return [
     PREFIX,
     '',
@@ -279,21 +339,21 @@ export function renderOverLimit({ ticket, turns, maxTurns, gitReport, runUrl, ru
     gitReport,
     '',
     `Run: ${runUrl}`,
-  ].join('\n');
+  ].join('\n')
 }
 
 function parseMaxTurns(text) {
-  return /^\d+$/.test(text ?? '') && Number(text) > 0 ? Number(text) : null;
+  return /^\d+$/.test(text ?? '') && Number(text) > 0 ? Number(text) : null
 }
 
 function readResult(readFile, path) {
-  let text;
+  let text
   try {
-    text = readFile(path);
+    text = readFile(path)
   } catch {
-    return null;
+    return null
   }
-  return lastResult(text);
+  return lastResult(text)
 }
 
 /**
@@ -302,34 +362,45 @@ function readResult(readFile, path) {
  * workflow posts only what it is given.
  */
 export function run({ argv, env, readFile, git, stdout, stderr }) {
-  const key = env.LINEAR_API_KEY ?? '';
+  const key = env.LINEAR_API_KEY ?? ''
   const usage = (why) => {
-    stderr(`${redact(why, key)}\n${USAGE}\n`);
-    return EXIT.USAGE;
-  };
+    stderr(`${redact(why, key)}\n${USAGE}\n`)
+    return EXIT.USAGE
+  }
 
-  const [verb, ...rest] = argv;
+  const [verb, ...rest] = argv
 
   if (verb === 'ending') {
-    if (rest.length !== 2) return usage('ending takes exactly two arguments: <execution-file> <max-turns>');
-    const maxTurns = parseMaxTurns(rest[1]);
-    if (maxTurns === null) return usage(`"${rest[1]}" is not a turn limit`);
-    stdout(`${classifyEnding(readResult(readFile, rest[0]), maxTurns)}\n`);
-    return EXIT.OK;
+    if (rest.length !== 2)
+      return usage(
+        'ending takes exactly two arguments: <execution-file> <max-turns>',
+      )
+    const maxTurns = parseMaxTurns(rest[1])
+    if (maxTurns === null) return usage(`"${rest[1]}" is not a turn limit`)
+    stdout(`${classifyEnding(readResult(readFile, rest[0]), maxTurns)}\n`)
+    return EXIT.OK
   }
 
   if (verb === 'notice') {
-    if (rest.length !== 3) return usage('notice takes exactly three arguments: <ticket> <execution-file> <max-turns>');
+    if (rest.length !== 3)
+      return usage(
+        'notice takes exactly three arguments: <ticket> <execution-file> <max-turns>',
+      )
     // A manual dispatch can pass the id in lowercase; Linear accepts either.
-    const ticket = rest[0].toUpperCase();
-    const [, file, limit] = rest;
-    if (!TICKET.test(ticket)) return usage(`"${rest[0]}" is not a ticket identifier`);
-    const maxTurns = parseMaxTurns(limit);
-    if (maxTurns === null) return usage(`"${limit}" is not a turn limit`);
+    const ticket = rest[0].toUpperCase()
+    const [, file, limit] = rest
+    if (!TICKET.test(ticket))
+      return usage(`"${rest[0]}" is not a ticket identifier`)
+    const maxTurns = parseMaxTurns(limit)
+    if (maxTurns === null) return usage(`"${limit}" is not a turn limit`)
 
-    const result = readResult(readFile, file);
-    const ending = classifyEnding(result, maxTurns);
-    if (ending !== ENDING.STOPPED_AT_LIMIT && ending !== ENDING.FINISHED_OVER_LIMIT) return EXIT.OK;
+    const result = readResult(readFile, file)
+    const ending = classifyEnding(result, maxTurns)
+    if (
+      ending !== ENDING.STOPPED_AT_LIMIT &&
+      ending !== ENDING.FINISHED_OVER_LIMIT
+    )
+      return EXIT.OK
 
     const common = {
       ticket,
@@ -337,17 +408,22 @@ export function run({ argv, env, readFile, git, stdout, stderr }) {
       maxTurns,
       gitReport: renderGitReport(readGitState(git, ticket)),
       runUrl: env.RUN_URL ?? '(no run url)',
-    };
-    const body = ending === ENDING.STOPPED_AT_LIMIT
-      ? renderTurnLimit({
-          ...common,
-          denials: env.DENIALS ?? '0',
-          denied: lines(env.DENIED).map((l) => l.replace(/^- /, '')).filter((l) => l !== '(none)'),
-        })
-      : renderOverLimit({ ...common, runId: env.GITHUB_RUN_ID ?? 'unknown' });
-    stdout(`${redact(body, key)}\n`);
-    return EXIT.OK;
+    }
+    const body =
+      ending === ENDING.STOPPED_AT_LIMIT
+        ? renderTurnLimit({
+            ...common,
+            denials: env.DENIALS ?? '0',
+            denied: lines(env.DENIED)
+              .map((l) => l.replace(/^- /, ''))
+              .filter((l) => l !== '(none)'),
+          })
+        : renderOverLimit({ ...common, runId: env.GITHUB_RUN_ID ?? 'unknown' })
+    stdout(`${redact(body, key)}\n`)
+    return EXIT.OK
   }
 
-  return usage(verb === undefined ? 'no command given' : `unknown command "${verb}"`);
+  return usage(
+    verb === undefined ? 'no command given' : `unknown command "${verb}"`,
+  )
 }

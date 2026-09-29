@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { createAdminClient } from '@/lib/db/admin'
 
-import { linkFingerprintToGuest, reconcileTransactionByFingerprint } from './reconcile'
+import {
+  linkFingerprintToGuest,
+  reconcileTransactionByFingerprint,
+} from './reconcile'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -26,7 +29,10 @@ interface Captured {
   upsert?: Record<string, unknown>
 }
 
-function makeClient(opts: MockOpts): { client: AdminClient; captured: Captured } {
+function makeClient(opts: MockOpts): {
+  client: AdminClient
+  captured: Captured
+} {
   const captured: Captured = {}
 
   function chain(table: string): any {
@@ -48,7 +54,9 @@ function makeClient(opts: MockOpts): { client: AdminClient; captured: Captured }
       error: opts.lookupError ?? null,
     })
     // Make awaited update/upsert chains resolve to { error }.
-    self.then = (resolve: (r: { error: { message: string } | null }) => unknown) => {
+    self.then = (
+      resolve: (r: { error: { message: string } | null }) => unknown,
+    ) => {
       const error =
         table === 'transactions'
           ? (opts.txnError ?? null)
@@ -60,7 +68,10 @@ function makeClient(opts: MockOpts): { client: AdminClient; captured: Captured }
     return self
   }
 
-  return { client: { from: (t: string) => chain(t) } as unknown as AdminClient, captured }
+  return {
+    client: { from: (t: string) => chain(t) } as unknown as AdminClient,
+    captured,
+  }
 }
 
 describe('reconcileTransactionByFingerprint', () => {
@@ -73,7 +84,10 @@ describe('reconcileTransactionByFingerprint', () => {
       occurredAt: OCCURRED,
       supabase: client,
     })
-    expect(res).toEqual({ ok: true, data: { status: 'unmatched', reason: 'no_fingerprint' } })
+    expect(res).toEqual({
+      ok: true,
+      data: { status: 'unmatched', reason: 'no_fingerprint' },
+    })
     expect(captured.txnUpdate).toBeUndefined()
   })
 
@@ -86,7 +100,10 @@ describe('reconcileTransactionByFingerprint', () => {
       occurredAt: OCCURRED,
       supabase: client,
     })
-    expect(res.ok && res.data).toEqual({ status: 'unmatched', reason: 'no_mapping' })
+    expect(res.ok && res.data).toEqual({
+      status: 'unmatched',
+      reason: 'no_mapping',
+    })
   })
 
   it('matches a returning guest and stamps the transaction + last_visit_at', async () => {
@@ -100,7 +117,11 @@ describe('reconcileTransactionByFingerprint', () => {
     })
     expect(res.ok).toBe(true)
     if (!res.ok) return
-    expect(res.data).toEqual({ status: 'matched', guestId: GUEST, method: 'card_fingerprint' })
+    expect(res.data).toEqual({
+      status: 'matched',
+      guestId: GUEST,
+      method: 'card_fingerprint',
+    })
     expect(captured.txnUpdate).toMatchObject({
       guest_id: GUEST,
       match_method: 'card_fingerprint',
@@ -125,11 +146,18 @@ describe('reconcileTransactionByFingerprint', () => {
       occurredAt: OCCURRED,
       supabase: client,
     })
-    expect(res).toEqual({ ok: false, error: 'boom', errorCode: 'fingerprint_lookup_failed' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'boom',
+      errorCode: 'fingerprint_lookup_failed',
+    })
   })
 
   it('surfaces a transaction-update error as ok:false', async () => {
-    const { client } = makeClient({ mapping: { guest_id: GUEST }, txnError: { message: 'nope' } })
+    const { client } = makeClient({
+      mapping: { guest_id: GUEST },
+      txnError: { message: 'nope' },
+    })
     const res = await reconcileTransactionByFingerprint({
       transactionId: TXN,
       venueId: VENUE,
@@ -137,11 +165,18 @@ describe('reconcileTransactionByFingerprint', () => {
       occurredAt: OCCURRED,
       supabase: client,
     })
-    expect(res).toEqual({ ok: false, error: 'nope', errorCode: 'transaction_update_failed' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'nope',
+      errorCode: 'transaction_update_failed',
+    })
   })
 
   it('still matches when the non-fatal last_visit_at bump errors', async () => {
-    const { client } = makeClient({ mapping: { guest_id: GUEST }, guestError: { message: 'lv fail' } })
+    const { client } = makeClient({
+      mapping: { guest_id: GUEST },
+      guestError: { message: 'lv fail' },
+    })
     const res = await reconcileTransactionByFingerprint({
       transactionId: TXN,
       venueId: VENUE,
@@ -178,6 +213,10 @@ describe('linkFingerprintToGuest', () => {
       cardFingerprint: 'fp_new',
       supabase: client,
     })
-    expect(res).toEqual({ ok: false, error: 'dup', errorCode: 'fingerprint_link_failed' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'dup',
+      errorCode: 'fingerprint_link_failed',
+    })
   })
 })

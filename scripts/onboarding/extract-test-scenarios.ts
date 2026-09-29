@@ -10,7 +10,8 @@ import type { Scenario } from './scenario-schema'
 const EXTRACTION_MODEL = 'claude-sonnet-4-6'
 const TEMPERATURE = 0.7
 
-const SYSTEM_PROMPT = 'You generate test scenarios for a hospitality messaging agent.'
+const SYSTEM_PROMPT =
+  'You generate test scenarios for a hospitality messaging agent.'
 
 export { GUEST_STATES, type GuestState }
 
@@ -92,7 +93,9 @@ export interface ExtractInput {
  * Per THE-157: avoid `.min`/`.max` on number fields in the LLM-output schema
  * (Anthropic structured-output rejects them). This schema has none.
  */
-export async function extractTestScenarios(input: ExtractInput): Promise<RawScenario[]> {
+export async function extractTestScenarios(
+  input: ExtractInput,
+): Promise<RawScenario[]> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Missing env var: ANTHROPIC_API_KEY')
   }
@@ -208,7 +211,9 @@ export function assignSampleIds(
   const fixtureIdx = new Map<string, number>()
   fixtureCategoryOrder.forEach((c, i) => fixtureIdx.set(c, i))
 
-  const stateOrder = new Map<GuestState, number>(GUEST_STATES.map((s, i) => [s, i]))
+  const stateOrder = new Map<GuestState, number>(
+    GUEST_STATES.map((s, i) => [s, i]),
+  )
 
   const cmp = (a: RawScenario, b: RawScenario): number => {
     const ai = fixtureIdx.get(a.category) ?? Number.MAX_SAFE_INTEGER

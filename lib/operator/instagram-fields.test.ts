@@ -24,7 +24,9 @@ describe('replyWindowExpiresAt', () => {
   it('is the guest action plus exactly 24 hours, as ISO 8601 UTC', () => {
     // Transcribed from the Contract's JSON example: an action at 09:12:03 on
     // the 23rd expires at 09:12:03 on the 24th.
-    expect(replyWindowExpiresAt('2026-09-23T09:12:03.000Z')).toBe('2026-09-24T09:12:03.000Z')
+    expect(replyWindowExpiresAt('2026-09-23T09:12:03.000Z')).toBe(
+      '2026-09-24T09:12:03.000Z',
+    )
   })
 
   it('adds the window constant rather than a hardcoded 24 hours', () => {
@@ -49,7 +51,9 @@ describe('replyWindowExpiresAt', () => {
     // clamp it." Clamping to null would make an expired window
     // indistinguishable from an unknown one, which is the distinction the
     // client renders differently.
-    expect(replyWindowExpiresAt('2020-01-01T00:00:00.000Z')).toBe('2020-01-02T00:00:00.000Z')
+    expect(replyWindowExpiresAt('2020-01-01T00:00:00.000Z')).toBe(
+      '2020-01-02T00:00:00.000Z',
+    )
   })
 
   it('subtracts no display margin', () => {
@@ -93,14 +97,20 @@ describe('conversationGuestChannel', () => {
   })
 
   it('is text for a guest with only a phone number', () => {
-    expect(conversationGuestChannel({ hasPhone: true, hasInstagramId: false }, 'g1')).toBe('text')
+    expect(
+      conversationGuestChannel({ hasPhone: true, hasInstagramId: false }, 'g1'),
+    ).toBe('text')
   })
 
   it('takes the last inbound channel for a guest with BOTH identifiers', () => {
     // TAC-469's rule: the conversation they are actually in.
     expect(
       conversationGuestChannel(
-        { hasPhone: true, hasInstagramId: true, lastInboundChannel: 'instagram' },
+        {
+          hasPhone: true,
+          hasInstagramId: true,
+          lastInboundChannel: 'instagram',
+        },
         'g1',
       ),
     ).toBe('instagram')
@@ -120,7 +130,12 @@ describe('conversationGuestChannel', () => {
     // Reaching it means that constraint is gone, which is worth an error line
     // rather than a null the client cannot parse.
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(conversationGuestChannel({ hasPhone: false, hasInstagramId: false }, 'g1')).toBe('text')
+    expect(
+      conversationGuestChannel(
+        { hasPhone: false, hasInstagramId: false },
+        'g1',
+      ),
+    ).toBe('text')
     expect(error).toHaveBeenCalledTimes(1)
   })
 

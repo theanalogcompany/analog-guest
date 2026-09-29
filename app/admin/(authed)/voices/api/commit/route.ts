@@ -7,10 +7,7 @@ import {
   SOURCE_REF_PREFIXES,
   upsertCorpusEdit,
 } from '@/lib/voice-training'
-import {
-  findPatternClusterForCritique,
-  persistCritique,
-} from '@/lib/voices'
+import { findPatternClusterForCritique, persistCritique } from '@/lib/voices'
 
 // POST /admin/voices/api/commit — the live half of the regen → commit
 // loop. Orchestrates four artifacts in serial:

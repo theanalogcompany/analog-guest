@@ -5,8 +5,21 @@ paths:
   - "lib/ai/classify-message.ts"
   - "lib/agent/**"
   - "lib/voices/**"
-  - "**/*.test.ts"
 ---
+
+<!--
+Scoped to the directories that own the composed prompt, NOT to `**/*.test.ts`.
+That glob matched all 304 test files in the repo to reach the 52 in these
+directories, so this file loaded on five reads out of six that had nothing to do
+with the prompt. The cost is not tokens: a rule that shows up on every unrelated
+read is a rule that gets skimmed, and injected mid-session text competes for
+authority with the actual task (root CLAUDE.md, "later beats earlier").
+
+The sweep this file describes is still repo-wide - the tests it warns about are
+fixtures scattered anywhere. That is what the grep is for. The rule does not have
+to be resident in every session to be followed once you are bumping the constant,
+and every path that gets you there is covered above.
+-->
 
 # Bumping PROMPT_VERSION is a repo-wide sweep
 
@@ -16,8 +29,15 @@ means bumping it, and the bump touches files in several directories.
 ## Grep. Never read a list, including this one.
 
 ```
-grep -rn "v1\.<old>\.<new>" --include='*.ts' .
+grep -rn "v1\.<old>\.<new>" --include='*.ts' --include='*.md' .
 ```
+
+**`--include='*.md'` is not optional, and it was missing here until TAC-554.** Two sites live
+in prose rather than code - the constants table in the root `CLAUDE.md` and the
+`PROMPT_VERSION` sentence in `lib/ai/CLAUDE.md` - so a `*.ts`-only sweep cannot see either,
+and this file was telling people to run exactly that. What caught them was
+`scripts/lib/claude-md-claims.test.ts`, which compares both against the live constant. That
+guard works; the instruction above did not.
 
 **A carried count is worse than no count - no count makes you grep, a stale one tells you
 that you already did.** The site list has grown on essentially every bump, because every new

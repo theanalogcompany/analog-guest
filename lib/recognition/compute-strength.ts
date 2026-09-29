@@ -21,7 +21,11 @@ async function loadFormula(
     .maybeSingle()
 
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'load_formula_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'load_formula_failed',
+    }
   }
 
   const raw = data?.relationship_strength_formula
@@ -30,14 +34,20 @@ async function loadFormula(
   if (
     raw === null ||
     raw === undefined ||
-    (typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 0)
+    (typeof raw === 'object' &&
+      !Array.isArray(raw) &&
+      Object.keys(raw).length === 0)
   ) {
     return { ok: true, data: DEFAULT_FORMULA }
   }
 
   const parsed = RelationshipStrengthFormulaSchema.safeParse(raw)
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.message, errorCode: 'invalid_formula' }
+    return {
+      ok: false,
+      error: parsed.error.message,
+      errorCode: 'invalid_formula',
+    }
   }
   return { ok: true, data: parsed.data }
 }
@@ -89,7 +99,8 @@ export async function computeRelationshipStrength({
     engagementEvents: signals.engagementEvents * weights.engagementEvents,
     moneySpent: signals.moneySpent * weights.moneySpent,
     responseRate: signals.responseRate * weights.responseRate,
-    percentMenuExplored: signals.percentMenuExplored * weights.percentMenuExplored,
+    percentMenuExplored:
+      signals.percentMenuExplored * weights.percentMenuExplored,
     referrals: signals.referrals * weights.referrals,
   }
   const weightedSum =

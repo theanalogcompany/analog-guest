@@ -12,7 +12,9 @@ export interface AirtableVenueRecord {
  * record's other fields. Returns the raw `fields` object as-is for the
  * extraction prompt to consume.
  */
-export async function getAirtableRecord(slug: string): Promise<AirtableVenueRecord> {
+export async function getAirtableRecord(
+  slug: string,
+): Promise<AirtableVenueRecord> {
   const apiKey = process.env.AIRTABLE_API_KEY
   if (!apiKey) throw new Error('Missing env var: AIRTABLE_API_KEY')
   const baseId = process.env.AIRTABLE_BASE_ID
@@ -35,7 +37,9 @@ export async function getAirtableRecord(slug: string): Promise<AirtableVenueReco
     )
   }
   if (records.length > 1) {
-    throw new Error(`airtable: multiple records match slug="${slug}" — ambiguous`)
+    throw new Error(
+      `airtable: multiple records match slug="${slug}" — ambiguous`,
+    )
   }
 
   return {

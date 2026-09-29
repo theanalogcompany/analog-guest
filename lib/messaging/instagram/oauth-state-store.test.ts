@@ -22,20 +22,29 @@ const OPERATOR_ID = 'operator-1'
 describe('INSTAGRAM_OAUTH_STATE_TTL_MS', () => {
   // Pinned so shortening it past usefulness, or widening it to hours, is a
   // deliberate act that has to delete a test saying why not.
-  it('gives an operator ten minutes to get through Meta\'s screen', () => {
+  it("gives an operator ten minutes to get through Meta's screen", () => {
     expect(INSTAGRAM_OAUTH_STATE_TTL_MS).toBe(10 * 60 * 1000)
   })
 })
 
 describe('issueInstagramOAuthState', () => {
   it('records the nonce against the venue and operator that started the flow', async () => {
-    const { client, queries } = queryRecorder({ instagram_oauth_states: [{ data: null, error: null }] })
+    const { client, queries } = queryRecorder({
+      instagram_oauth_states: [{ data: null, error: null }],
+    })
     const expiresAt = new Date(NOW.getTime() + INSTAGRAM_OAUTH_STATE_TTL_MS)
     expect(
-      await issueInstagramOAuthState(client, { nonce: NONCE, venueId: VENUE_ID, operatorId: OPERATOR_ID, expiresAt }),
+      await issueInstagramOAuthState(client, {
+        nonce: NONCE,
+        venueId: VENUE_ID,
+        operatorId: OPERATOR_ID,
+        expiresAt,
+      }),
     ).toEqual({ ok: true })
 
-    const [[row]] = callsNamed(queries[0], 'insert') as [[Record<string, unknown>]]
+    const [[row]] = callsNamed(queries[0], 'insert') as [
+      [Record<string, unknown>],
+    ]
     expect(row).toEqual({
       state_nonce: NONCE,
       venue_id: VENUE_ID,
@@ -46,7 +55,9 @@ describe('issueInstagramOAuthState', () => {
 
   it('reports a write failure rather than pretending the state was issued', async () => {
     const { client } = queryRecorder({
-      instagram_oauth_states: [{ data: null, error: { message: 'duplicate key' } }],
+      instagram_oauth_states: [
+        { data: null, error: { message: 'duplicate key' } },
+      ],
     })
     expect(
       await issueInstagramOAuthState(client, {
@@ -67,11 +78,18 @@ describe('claimInstagramOAuthState', () => {
   it('claims by nonce, only while unconsumed and unexpired, in one UPDATE', async () => {
     const { client, queries } = queryRecorder({
       instagram_oauth_states: [
-        { data: [{ venue_id: VENUE_ID, operator_id: OPERATOR_ID }], error: null },
+        {
+          data: [{ venue_id: VENUE_ID, operator_id: OPERATOR_ID }],
+          error: null,
+        },
       ],
     })
     const result = await claimInstagramOAuthState(client, NONCE, NOW)
-    expect(result).toEqual({ ok: true, venueId: VENUE_ID, operatorId: OPERATOR_ID })
+    expect(result).toEqual({
+      ok: true,
+      venueId: VENUE_ID,
+      operatorId: OPERATOR_ID,
+    })
 
     const query = queries[0]
     const [[patch]] = callsNamed(query, 'update') as [[Record<string, unknown>]]
@@ -86,7 +104,10 @@ describe('claimInstagramOAuthState', () => {
   it('refuses a second claim of the same nonce', async () => {
     const { client } = queryRecorder({
       instagram_oauth_states: [
-        { data: [{ venue_id: VENUE_ID, operator_id: OPERATOR_ID }], error: null },
+        {
+          data: [{ venue_id: VENUE_ID, operator_id: OPERATOR_ID }],
+          error: null,
+        },
         { data: [], error: null },
       ],
     })
@@ -102,16 +123,21 @@ describe('claimInstagramOAuthState', () => {
   // branch would behave differently.
   it('reports an unknown, consumed or expired nonce identically', async () => {
     const { client } = queryRecorder({
-      instagram_oauth_states: [{ data: [], error: null }, { data: null, error: null }],
+      instagram_oauth_states: [
+        { data: [], error: null },
+        { data: null, error: null },
+      ],
     })
     expect(await claimInstagramOAuthState(client, 'unknown', NOW)).toEqual({
       ok: false,
       reason: 'unclaimable',
     })
-    expect(await claimInstagramOAuthState(client, 'also-unknown', NOW)).toEqual({
-      ok: false,
-      reason: 'unclaimable',
-    })
+    expect(await claimInstagramOAuthState(client, 'also-unknown', NOW)).toEqual(
+      {
+        ok: false,
+        reason: 'unclaimable',
+      },
+    )
   })
 
   // Two rows can never come back (state_nonce is UNIQUE), but if they did,
@@ -138,7 +164,9 @@ describe('claimInstagramOAuthState', () => {
   // as "this state was already used", which is a false and confusing answer.
   it('separates a database failure from an unclaimable state', async () => {
     const { client } = queryRecorder({
-      instagram_oauth_states: [{ data: null, error: { message: 'connection reset' } }],
+      instagram_oauth_states: [
+        { data: null, error: { message: 'connection reset' } },
+      ],
     })
     expect(await claimInstagramOAuthState(client, NONCE, NOW)).toEqual({
       ok: false,
@@ -150,7 +178,10 @@ describe('claimInstagramOAuthState', () => {
   it('returns the venue and operator the state was ISSUED for, not what a caller claims', async () => {
     const { client } = queryRecorder({
       instagram_oauth_states: [
-        { data: [{ venue_id: 'venue-issued', operator_id: 'operator-issued' }], error: null },
+        {
+          data: [{ venue_id: 'venue-issued', operator_id: 'operator-issued' }],
+          error: null,
+        },
       ],
     })
     expect(await claimInstagramOAuthState(client, NONCE, NOW)).toEqual({

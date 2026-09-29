@@ -63,7 +63,9 @@ export function filterActiveContext(
   entries: readonly VenueContextNote[],
   now: Date,
 ): VenueContextNote[] {
-  return entries.filter((entry) => classifyContextEntry(entry, now) === 'active')
+  return entries.filter(
+    (entry) => classifyContextEntry(entry, now) === 'active',
+  )
 }
 
 // A single row from the venue's menu CSV (04-{slug}-menu in Drive). Items are
@@ -84,10 +86,10 @@ export const MenuItemSchema = z
     availability: z.string().optional(),
     isOffMenu: z.boolean(),
   })
-  .refine(
-    (item) => item.price !== undefined || item.priceNote !== undefined,
-    { message: 'item must have either a price or a priceNote', path: ['price'] },
-  )
+  .refine((item) => item.price !== undefined || item.priceNote !== undefined, {
+    message: 'item must have either a price or a priceNote',
+    path: ['price'],
+  })
 
 export type MenuItem = z.infer<typeof MenuItemSchema>
 
@@ -195,7 +197,9 @@ export const VenueInfoSchema = z.object({
   // renders no services section at all.
   //
   // `.catch(undefined)` is the repo's permissive-at-the-LIVE-boundary rule
-  // (see CLAUDE.md → Common gotchas). This field has no write path yet, so it
+  // (see
+  // .claude/rules/errors-as-values.md, "Every failure path picks a direction").
+  // This field has no write path yet, so it
   // is hand-edited in Studio, and `buildRuntimeContext` THROWS on a venue_info
   // parse failure — meaning `"holds": "false"` (a string, the natural Studio
   // typo) would take down every agent run for that venue rather than just
@@ -288,14 +292,20 @@ export function parseVenueLinks(raw: unknown): VenueLink[] {
       entry !== null && typeof entry === 'object' && !Array.isArray(entry)
         ? { ...(entry as Record<string, unknown>) }
         : entry
-    if (candidate !== null && typeof candidate === 'object' && 'url' in candidate) {
+    if (
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      'url' in candidate
+    ) {
       const u = (candidate as { url: unknown }).url
       if (typeof u === 'string') (candidate as { url: unknown }).url = u.trim()
     }
     const parsed = VenueLinkEntrySchema.safeParse(candidate)
     if (!parsed.success) {
       console.warn('[venue-info] dropping unusable venue_info.links entry', {
-        reason: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.code}`),
+        reason: parsed.error.issues.map(
+          (i) => `${i.path.join('.') || '(root)'}: ${i.code}`,
+        ),
       })
       continue
     }

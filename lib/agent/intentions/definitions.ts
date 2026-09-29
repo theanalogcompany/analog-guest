@@ -271,8 +271,10 @@ const DEFINITIONS = {
     priority: 20,
     armsOn: { kind: 'open_recommendation' },
     gate: { kind: 'conversational', defaultMinReplies: 3 },
-    promptLine: "You suggested something to this guest and haven't heard whether they tried it.",
-    classifierDescription: 'asks whether the guest tried something the venue suggested to them',
+    promptLine:
+      "You suggested something to this guest and haven't heard whether they tried it.",
+    classifierDescription:
+      'asks whether the guest tried something the venue suggested to them',
     satisfactionLabel:
       'Closes once raised. Whether the guest actually tried the suggestion is not observed until TAC-385.',
     expiresAfterMs: EVENT_ARMED_WINDOW_DAYS * MS_PER_DAY,
@@ -286,7 +288,8 @@ const DEFINITIONS = {
     priority: 30,
     armsOn: { kind: 'recorded_order' },
     gate: { kind: 'conversational', defaultMinReplies: 3 },
-    promptLine: 'You know what this guest ordered, but not whether they liked it.',
+    promptLine:
+      'You know what this guest ordered, but not whether they liked it.',
     classifierDescription:
       "asks how the guest's drink or food was, or whether they enjoyed what they ordered",
     satisfactionLabel:
@@ -298,7 +301,11 @@ const DEFINITIONS = {
     key: 'learn_name',
     priority: 40,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'replies_only', defaultMinReplies: 3, firstMessageMinReplies: 0 },
+    gate: {
+      kind: 'replies_only',
+      defaultMinReplies: 3,
+      firstMessageMinReplies: 0,
+    },
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on
     // the end is fine" is true of every intention here, and on a name it
@@ -317,9 +324,10 @@ const DEFINITIONS = {
     // which remains entirely the restraint paragraph's call. Inverting it to
     // "Ask their name" is a mutant definitions.test.ts kills.
     promptLine:
-      "You don't know this guest's name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way \"by the way, what's your name?\" reads. A bare \"what's your name?\" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.",
+      'You don\'t know this guest\'s name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way "by the way, what\'s your name?" reads. A bare "what\'s your name?" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.',
     classifierDescription: "asks the guest's name or what to call them",
-    satisfactionLabel: 'Closes once raised, or once a first name is on record for this guest.',
+    satisfactionLabel:
+      'Closes once raised, or once a first name is on record for this guest.',
     expiresAfterMs: FIRST_CONTACT_WINDOW_DAYS * MS_PER_DAY,
     // See IntentionSatisfactionFacts.hasFirstName for the Probe 1 consequence.
     isSatisfied: (facts) => facts.hasFirstName,
@@ -328,11 +336,16 @@ const DEFINITIONS = {
     key: 'are_they_local',
     priority: 50,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'replies_only', defaultMinReplies: 5, firstMessageMinReplies: 5 },
+    gate: {
+      kind: 'replies_only',
+      defaultMinReplies: 5,
+      firstMessageMinReplies: 5,
+    },
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
-    satisfactionLabel: 'Closes once raised, or once a home base is on record for this guest.',
+    satisfactionLabel:
+      'Closes once raised, or once a home base is on record for this guest.',
     expiresAfterMs: FIRST_CONTACT_WINDOW_DAYS * MS_PER_DAY,
     isSatisfied: (facts) => facts.hasHomeBase,
   },
@@ -340,7 +353,11 @@ const DEFINITIONS = {
     key: 'their_rhythm',
     priority: 60,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'replies_only', defaultMinReplies: 8, firstMessageMinReplies: 8 },
+    gate: {
+      kind: 'replies_only',
+      defaultMinReplies: 8,
+      firstMessageMinReplies: 8,
+    },
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -359,10 +376,16 @@ const DEFINITIONS = {
     key: 'why_theyre_here',
     priority: 70,
     armsOn: { kind: 'first_contact' },
-    gate: { kind: 'replies_only', defaultMinReplies: 11, firstMessageMinReplies: 11 },
+    gate: {
+      kind: 'replies_only',
+      defaultMinReplies: 11,
+      firstMessageMinReplies: 11,
+    },
     promptLine: "You don't know what brings this guest in.",
-    classifierDescription: 'asks what brings the guest in, or what they come in for',
-    satisfactionLabel: 'Closes once raised. The reason itself is not observed until TAC-385.',
+    classifierDescription:
+      'asks what brings the guest in, or what they come in for',
+    satisfactionLabel:
+      'Closes once raised. The reason itself is not observed until TAC-385.',
     expiresAfterMs: FIRST_CONTACT_WINDOW_DAYS * MS_PER_DAY,
     isSatisfied: () => false,
   },
@@ -376,8 +399,9 @@ const DEFINITIONS = {
  * `readonly IntentionDefinition[]`, which is not exhaustiveness-checked — the
  * same trap TAC-381 found in TERMINAL_STATUSES.
  */
-export const INTENTION_DEFINITION_BY_KEY: Readonly<Record<IntentionKey, IntentionDefinition>> =
-  DEFINITIONS
+export const INTENTION_DEFINITION_BY_KEY: Readonly<
+  Record<IntentionKey, IntentionDefinition>
+> = DEFINITIONS
 
 /** Every definition, in priority order. The derivation iterates this. */
 export const INTENTION_DEFINITIONS: readonly IntentionDefinition[] = (
@@ -385,7 +409,8 @@ export const INTENTION_DEFINITIONS: readonly IntentionDefinition[] = (
 ).sort((a, b) => a.priority - b.priority)
 
 /** Every intention key, in priority order. */
-export const INTENTION_KEYS: readonly IntentionKey[] = INTENTION_DEFINITIONS.map((d) => d.key)
+export const INTENTION_KEYS: readonly IntentionKey[] =
+  INTENTION_DEFINITIONS.map((d) => d.key)
 
 /**
  * Narrow a raw `guest_intention_prompts.intention_key` to a live key. The

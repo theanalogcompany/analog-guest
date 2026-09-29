@@ -18,8 +18,16 @@
 // Time-bound dedup (cold_lapsed within cold_dedup_days) lives in
 // canSendFollowup (the rules gate). Detectors stay calendar-only.
 
-import { isStateAtLeast, type EligibleMechanic, type GuestState } from '@/lib/recognition'
-import type { EngineFollowupReason, FollowupRules, VisitTimePrecision } from '@/lib/schemas'
+import {
+  isStateAtLeast,
+  type EligibleMechanic,
+  type GuestState,
+} from '@/lib/recognition'
+import type {
+  EngineFollowupReason,
+  FollowupRules,
+  VisitTimePrecision,
+} from '@/lib/schemas'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -37,7 +45,11 @@ export type MessagingCadence = {
   day_14?: boolean
 }
 
-const POST_VISIT_TIERS: ReadonlyArray<{ days: number; reason: EngineFollowupReason; cadenceKey: keyof MessagingCadence }> = [
+const POST_VISIT_TIERS: ReadonlyArray<{
+  days: number
+  reason: EngineFollowupReason
+  cadenceKey: keyof MessagingCadence
+}> = [
   { days: 14, reason: 'post_visit_day_14', cadenceKey: 'day_14' },
   { days: 7, reason: 'post_visit_day_7', cadenceKey: 'day_7' },
   { days: 3, reason: 'post_visit_day_3', cadenceKey: 'day_3' },
@@ -87,7 +99,9 @@ export function detectPostVisitReason(
 ): EngineFollowupReason | null {
   if (lastVisitAt === null) return null
   if (precision === 'approximate') return null
-  const elapsedDays = Math.floor((now.getTime() - lastVisitAt.getTime()) / MS_PER_DAY)
+  const elapsedDays = Math.floor(
+    (now.getTime() - lastVisitAt.getTime()) / MS_PER_DAY,
+  )
   if (elapsedDays < 1) return null
   for (const tier of POST_VISIT_TIERS) {
     if (elapsedDays >= tier.days && cadence[tier.cadenceKey] === true) {
@@ -116,7 +130,9 @@ export function detectColdLapsedReason(
   now: Date,
 ): EngineFollowupReason | null {
   if (lastVisitAt === null) return null
-  const elapsedDays = Math.floor((now.getTime() - lastVisitAt.getTime()) / MS_PER_DAY)
+  const elapsedDays = Math.floor(
+    (now.getTime() - lastVisitAt.getTime()) / MS_PER_DAY,
+  )
   if (elapsedDays < rules.absence_window_days) return null
   if (!rules.lapsed_eligible_states.includes(currentState)) return null
   return 'cold_lapsed'
@@ -168,7 +184,10 @@ export function detectPerkUnlockReason(
     // filterEligibleMechanics + isStateAtLeast. Defensive recheck —
     // mostly a paranoid no-op, but if the upstream mechanic list ever
     // includes a mechanic with a state we don't meet, this catches it.
-    if (mechanic.minState !== null && !isStateAtLeast(input.currentState, mechanic.minState)) {
+    if (
+      mechanic.minState !== null &&
+      !isStateAtLeast(input.currentState, mechanic.minState)
+    ) {
       continue
     }
     return { reason: 'perk_unlock', mechanic }
@@ -201,9 +220,7 @@ export function dedupKeyForReason(
     case 'post_visit_day_7':
     case 'post_visit_day_14': {
       if (!details.lastVisitAt) {
-        throw new Error(
-          `dedupKeyForReason: ${reason} requires lastVisitAt`,
-        )
+        throw new Error(`dedupKeyForReason: ${reason} requires lastVisitAt`)
       }
       // Match the FollowupReason tag suffix (day_1 / day_3 / ...).
       const dayTag = reason.replace('post_visit_', '')

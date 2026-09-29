@@ -75,8 +75,13 @@ describe('loadInstagramCredential', () => {
   })
 
   it('returns null for a venue that has never connected', async () => {
-    const { client } = queryRecorder({ instagram_credentials: [{ data: null, error: null }] })
-    expect(await loadInstagramCredential(client, VENUE_ID)).toEqual({ ok: true, credential: null })
+    const { client } = queryRecorder({
+      instagram_credentials: [{ data: null, error: null }],
+    })
+    expect(await loadInstagramCredential(client, VENUE_ID)).toEqual({
+      ok: true,
+      credential: null,
+    })
   })
 
   // Deauthorized is NOT absent: the operator endpoint has to tell
@@ -85,7 +90,10 @@ describe('loadInstagramCredential', () => {
     const { client } = queryRecorder({
       instagram_credentials: [
         {
-          data: credentialRow({ is_active: false, deauthorized_at: '2026-10-01T00:00:00.000Z' }),
+          data: credentialRow({
+            is_active: false,
+            deauthorized_at: '2026-10-01T00:00:00.000Z',
+          }),
           error: null,
         },
       ],
@@ -94,19 +102,30 @@ describe('loadInstagramCredential', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.credential?.isActive).toBe(false)
-    expect(result.credential?.deauthorizedAt).toEqual(new Date('2026-10-01T00:00:00.000Z'))
+    expect(result.credential?.deauthorizedAt).toEqual(
+      new Date('2026-10-01T00:00:00.000Z'),
+    )
   })
 
   it('refuses a row whose NOT NULL timestamps are unreadable rather than guessing', async () => {
     const { client } = queryRecorder({
-      instagram_credentials: [{ data: credentialRow({ token_expires_at: 'not-a-date' }), error: null }],
+      instagram_credentials: [
+        {
+          data: credentialRow({ token_expires_at: 'not-a-date' }),
+          error: null,
+        },
+      ],
     })
-    expect(await loadInstagramCredential(client, VENUE_ID)).toMatchObject({ ok: false })
+    expect(await loadInstagramCredential(client, VENUE_ID)).toMatchObject({
+      ok: false,
+    })
   })
 
   it('reports a read failure as a failure, never as "no credential"', async () => {
     const { client } = queryRecorder({
-      instagram_credentials: [{ data: null, error: { message: 'connection reset' } }],
+      instagram_credentials: [
+        { data: null, error: { message: 'connection reset' } },
+      ],
     })
     expect(await loadInstagramCredential(client, VENUE_ID)).toEqual({
       ok: false,
@@ -120,7 +139,11 @@ describe('resolveInstagramAccessToken', () => {
     const { client } = queryRecorder({
       instagram_credentials: [{ data: credentialRow(), error: null }],
     })
-    const result = await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))
+    const result = await resolveInstagramAccessToken(
+      client,
+      VENUE_ID,
+      envReader(ENV_TOKEN),
+    )
     expect(result).toEqual({
       ok: true,
       resolved: {
@@ -135,8 +158,12 @@ describe('resolveInstagramAccessToken', () => {
   // before TAC-516. If this test fails, deploying this ticket changes
   // behaviour for every venue on the day it lands.
   it('falls back to the env token for a venue that has never connected', async () => {
-    const { client } = queryRecorder({ instagram_credentials: [{ data: null, error: null }] })
-    expect(await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))).toEqual({
+    const { client } = queryRecorder({
+      instagram_credentials: [{ data: null, error: null }],
+    })
+    expect(
+      await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN)),
+    ).toEqual({
       ok: true,
       resolved: { token: ENV_TOKEN, source: 'env', expiresAt: null },
     })
@@ -144,9 +171,15 @@ describe('resolveInstagramAccessToken', () => {
 
   it('falls back to the env token for a deauthorized venue', async () => {
     const { client } = queryRecorder({
-      instagram_credentials: [{ data: credentialRow({ is_active: false }), error: null }],
+      instagram_credentials: [
+        { data: credentialRow({ is_active: false }), error: null },
+      ],
     })
-    const result = await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))
+    const result = await resolveInstagramAccessToken(
+      client,
+      VENUE_ID,
+      envReader(ENV_TOKEN),
+    )
     expect(result).toMatchObject({ ok: true, resolved: { source: 'env' } })
   })
 
@@ -156,11 +189,21 @@ describe('resolveInstagramAccessToken', () => {
   it('returns an expired venue token rather than reporting none', async () => {
     const { client } = queryRecorder({
       instagram_credentials: [
-        { data: credentialRow({ token_expires_at: '2020-01-01T00:00:00.000Z' }), error: null },
+        {
+          data: credentialRow({ token_expires_at: '2020-01-01T00:00:00.000Z' }),
+          error: null,
+        },
       ],
     })
-    const result = await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))
-    expect(result).toMatchObject({ ok: true, resolved: { token: VENUE_TOKEN, source: 'venue' } })
+    const result = await resolveInstagramAccessToken(
+      client,
+      VENUE_ID,
+      envReader(ENV_TOKEN),
+    )
+    expect(result).toMatchObject({
+      ok: true,
+      resolved: { token: VENUE_TOKEN, source: 'venue' },
+    })
   })
 
   // The sharp one. A connected venue whose token cannot be decrypted must
@@ -170,10 +213,17 @@ describe('resolveInstagramAccessToken', () => {
   it('fails hard when a connected venue token cannot be decrypted, never falling back', async () => {
     const { client } = queryRecorder({
       instagram_credentials: [
-        { data: credentialRow({ access_token_enc: 'garbage.not.valid' }), error: null },
+        {
+          data: credentialRow({ access_token_enc: 'garbage.not.valid' }),
+          error: null,
+        },
       ],
     })
-    const result = await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))
+    const result = await resolveInstagramAccessToken(
+      client,
+      VENUE_ID,
+      envReader(ENV_TOKEN),
+    )
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error).toMatch(/could not decrypt/)
@@ -182,8 +232,12 @@ describe('resolveInstagramAccessToken', () => {
   })
 
   it('resolves nothing when there is neither a credential nor an env token', async () => {
-    const { client } = queryRecorder({ instagram_credentials: [{ data: null, error: null }] })
-    expect(await resolveInstagramAccessToken(client, VENUE_ID, envReader(null))).toEqual({
+    const { client } = queryRecorder({
+      instagram_credentials: [{ data: null, error: null }],
+    })
+    expect(
+      await resolveInstagramAccessToken(client, VENUE_ID, envReader(null)),
+    ).toEqual({
       ok: true,
       resolved: null,
     })
@@ -193,7 +247,9 @@ describe('resolveInstagramAccessToken', () => {
     const { client } = queryRecorder({
       instagram_credentials: [{ data: null, error: { message: 'timeout' } }],
     })
-    expect(await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN))).toEqual({
+    expect(
+      await resolveInstagramAccessToken(client, VENUE_ID, envReader(ENV_TOKEN)),
+    ).toEqual({
       ok: false,
       error: 'timeout',
     })
@@ -224,7 +280,9 @@ describe('upsertInstagramCredential', () => {
     // The whole point of the column: what is written is ciphertext, and it
     // round-trips back to the token we were handed.
     expect(JSON.stringify(row)).not.toContain(VENUE_TOKEN)
-    expect(decryptInstagramToken(String(row.access_token_enc))).toBe(VENUE_TOKEN)
+    expect(decryptInstagramToken(String(row.access_token_enc))).toBe(
+      VENUE_TOKEN,
+    )
   })
 
   // A reconnect is a brand new token. Carrying the previous token's failure
@@ -242,7 +300,9 @@ describe('upsertInstagramCredential', () => {
       connectedByOperatorId: null,
       now: new Date('2026-09-22T00:00:00.000Z'),
     })
-    const [[row]] = callsNamed(queries[0], 'upsert') as [[Record<string, unknown>]]
+    const [[row]] = callsNamed(queries[0], 'upsert') as [
+      [Record<string, unknown>],
+    ]
     expect(row).toMatchObject({
       is_active: true,
       deauthorized_at: null,
@@ -254,7 +314,9 @@ describe('upsertInstagramCredential', () => {
 
   it('reports a write failure without leaking the token', async () => {
     const { client } = queryRecorder({
-      instagram_credentials: [{ data: null, error: { message: 'unique violation', code: '23505' } }],
+      instagram_credentials: [
+        { data: null, error: { message: 'unique violation', code: '23505' } },
+      ],
     })
     const result = await upsertInstagramCredential(client, {
       venueId: VENUE_ID,
@@ -292,27 +354,49 @@ describe('upsertInstagramCredential', () => {
 
 describe('readInstagramAccessToken', () => {
   it('trims, and treats blank as absent', () => {
-    expect(readInstagramAccessToken({ INSTAGRAM_ACCESS_TOKEN: ' abc ' } as unknown as NodeJS.ProcessEnv)).toBe('abc')
-    expect(readInstagramAccessToken({ INSTAGRAM_ACCESS_TOKEN: '  ' } as unknown as NodeJS.ProcessEnv)).toBeNull()
-    expect(readInstagramAccessToken({} as unknown as NodeJS.ProcessEnv)).toBeNull()
+    expect(
+      readInstagramAccessToken({
+        INSTAGRAM_ACCESS_TOKEN: ' abc ',
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBe('abc')
+    expect(
+      readInstagramAccessToken({
+        INSTAGRAM_ACCESS_TOKEN: '  ',
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBeNull()
+    expect(
+      readInstagramAccessToken({} as unknown as NodeJS.ProcessEnv),
+    ).toBeNull()
   })
 })
 
 describe('deauthorizeInstagramCredential', () => {
   it('marks the credential inactive and frees the account id', async () => {
     const { client, queries } = queryRecorder({
-      venues: [{ data: { id: VENUE_ID }, error: null }, { data: null, error: null }],
+      venues: [
+        { data: { id: VENUE_ID }, error: null },
+        { data: null, error: null },
+      ],
       instagram_credentials: [{ data: null, error: null }],
     })
     const now = new Date('2026-10-01T12:00:00.000Z')
-    expect(await deauthorizeInstagramCredential(client, 'acct-1', now)).toEqual({
-      ok: true,
-      venueId: VENUE_ID,
-    })
+    expect(await deauthorizeInstagramCredential(client, 'acct-1', now)).toEqual(
+      {
+        ok: true,
+        venueId: VENUE_ID,
+      },
+    )
 
-    const credentialUpdate = queries.find((q) => q.table === 'instagram_credentials')!
-    const [[patch]] = callsNamed(credentialUpdate, 'update') as [[Record<string, unknown>]]
-    expect(patch).toEqual({ is_active: false, deauthorized_at: now.toISOString() })
+    const credentialUpdate = queries.find(
+      (q) => q.table === 'instagram_credentials',
+    )!
+    const [[patch]] = callsNamed(credentialUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
+    expect(patch).toEqual({
+      is_active: false,
+      deauthorized_at: now.toISOString(),
+    })
     // THE FILTER, not just the patch. Both were unasserted until code review,
     // and the nastier mutant leaves the credential active while clearing the
     // venue's account id: loadVenueConnectionState then reports `connected`
@@ -321,7 +405,9 @@ describe('deauthorizeInstagramCredential', () => {
 
     // Clearing the account id is what frees it to be connected again.
     const venueUpdate = queries.filter((q) => q.table === 'venues')[1]
-    const [[venuePatch]] = callsNamed(venueUpdate, 'update') as [[Record<string, unknown>]]
+    const [[venuePatch]] = callsNamed(venueUpdate, 'update') as [
+      [Record<string, unknown>],
+    ]
     expect(venuePatch).toEqual({ instagram_account_id: null })
     expect(callsNamed(venueUpdate, 'eq')).toEqual([['id', VENUE_ID]])
   })
@@ -330,18 +416,27 @@ describe('deauthorizeInstagramCredential', () => {
   // deletion callback's question, with its own ruling.
   it('touches no table but venues and instagram_credentials', async () => {
     const { client, queries } = queryRecorder({
-      venues: [{ data: { id: VENUE_ID }, error: null }, { data: null, error: null }],
+      venues: [
+        { data: { id: VENUE_ID }, error: null },
+        { data: null, error: null },
+      ],
       instagram_credentials: [{ data: null, error: null }],
     })
     await deauthorizeInstagramCredential(client, 'acct-1', new Date())
-    expect(new Set(queries.map((q) => q.table))).toEqual(new Set(['venues', 'instagram_credentials']))
+    expect(new Set(queries.map((q) => q.table))).toEqual(
+      new Set(['venues', 'instagram_credentials']),
+    )
   })
 
   // Meta can send this for an account we never finished connecting, or one
   // already disconnected. Not an error.
   it('is a no-op for an account no venue owns', async () => {
-    const { client, queries } = queryRecorder({ venues: [{ data: null, error: null }] })
-    expect(await deauthorizeInstagramCredential(client, 'unknown', new Date())).toEqual({
+    const { client, queries } = queryRecorder({
+      venues: [{ data: null, error: null }],
+    })
+    expect(
+      await deauthorizeInstagramCredential(client, 'unknown', new Date()),
+    ).toEqual({
       ok: true,
       venueId: null,
     })
@@ -349,17 +444,33 @@ describe('deauthorizeInstagramCredential', () => {
   })
 
   it('reports a lookup or write failure rather than claiming success', async () => {
-    const lookupFailed = queryRecorder({ venues: [{ data: null, error: { message: 'timeout' } }] })
-    expect(await deauthorizeInstagramCredential(lookupFailed.client, 'acct-1', new Date())).toEqual({
+    const lookupFailed = queryRecorder({
+      venues: [{ data: null, error: { message: 'timeout' } }],
+    })
+    expect(
+      await deauthorizeInstagramCredential(
+        lookupFailed.client,
+        'acct-1',
+        new Date(),
+      ),
+    ).toEqual({
       ok: false,
       error: 'timeout',
     })
 
     const writeFailed = queryRecorder({
       venues: [{ data: { id: VENUE_ID }, error: null }],
-      instagram_credentials: [{ data: null, error: { message: 'write conflict' } }],
+      instagram_credentials: [
+        { data: null, error: { message: 'write conflict' } },
+      ],
     })
-    expect(await deauthorizeInstagramCredential(writeFailed.client, 'acct-1', new Date())).toEqual({
+    expect(
+      await deauthorizeInstagramCredential(
+        writeFailed.client,
+        'acct-1',
+        new Date(),
+      ),
+    ).toEqual({
       ok: false,
       error: 'write conflict',
     })

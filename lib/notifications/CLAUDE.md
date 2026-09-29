@@ -97,3 +97,8 @@ under-reports what is waiting.
   from anywhere other than a CAS-win path double-pushes.
 - Minutes round **down** in the window warning, so the number never promises more time than
   there is.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

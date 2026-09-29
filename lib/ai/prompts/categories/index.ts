@@ -8,7 +8,11 @@
 // "Category instruction layer carries NO pursuit authority (TAC-327)".
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { MessageCategory } from '../../types'
-import { applyChannelSubstitutions, type ChannelSubstitution, copyVariantFor } from '../channel-variants'
+import {
+  applyChannelSubstitutions,
+  type ChannelSubstitution,
+  copyVariantFor,
+} from '../channel-variants'
 import { ACKNOWLEDGMENT_INSTRUCTIONS } from './acknowledgment'
 import { CASUAL_CHATTER_INSTRUCTIONS } from './casual-chatter'
 import { COMP_COMPLAINT_INSTRUCTIONS } from './comp-complaint'
@@ -91,21 +95,34 @@ export function getCategoryInstructions(category: MessageCategory): string {
 const CATEGORY_CHANNEL_SUBSTITUTIONS = {
   text: {},
   instagram: {
-    unknown: [{ from: 'a real busy person texting back', to: 'a real busy person messaging back' }],
+    unknown: [
+      {
+        from: 'a real busy person texting back',
+        to: 'a real busy person messaging back',
+      },
+    ],
   },
-} as const satisfies Record<MessageChannel, Partial<Record<MessageCategory, readonly ChannelSubstitution[]>>>
+} as const satisfies Record<
+  MessageChannel,
+  Partial<Record<MessageCategory, readonly ChannelSubstitution[]>>
+>
 
-const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<MessageChannel, Partial<Record<MessageCategory, string>>> = {
+const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<
+  MessageChannel,
+  Partial<Record<MessageCategory, string>>
+> = {
   text: {},
   instagram: Object.fromEntries(
-    Object.entries(CATEGORY_CHANNEL_SUBSTITUTIONS.instagram).map(([category, substitutions]) => [
-      category,
-      applyChannelSubstitutions(
-        getCategoryInstructions(category as MessageCategory),
-        substitutions,
-        `CATEGORY/${category}/instagram`,
-      ),
-    ]),
+    Object.entries(CATEGORY_CHANNEL_SUBSTITUTIONS.instagram).map(
+      ([category, substitutions]) => [
+        category,
+        applyChannelSubstitutions(
+          getCategoryInstructions(category as MessageCategory),
+          substitutions,
+          `CATEGORY/${category}/instagram`,
+        ),
+      ],
+    ),
   ),
 }
 
@@ -132,6 +149,10 @@ export function categoryInstructionsFor(
   channel: MessageChannel | null,
   scanArrival: { hadPriorConversation: boolean } | null = null,
 ): string {
-  if (category === 'guest_arrived') return guestArrivedInstructionsFor(scanArrival)
-  return CATEGORY_INSTRUCTIONS_BY_CHANNEL[copyVariantFor(channel)][category] ?? getCategoryInstructions(category)
+  if (category === 'guest_arrived')
+    return guestArrivedInstructionsFor(scanArrival)
+  return (
+    CATEGORY_INSTRUCTIONS_BY_CHANNEL[copyVariantFor(channel)][category] ??
+    getCategoryInstructions(category)
+  )
 }

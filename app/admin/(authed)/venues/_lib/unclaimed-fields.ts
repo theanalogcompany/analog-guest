@@ -49,11 +49,14 @@ export interface UnclaimedField {
  * above; this returns [] today and exists so a FUTURE schema addition
  * surfaces automatically instead of silently never rendering.
  */
-export function computeUnclaimedVenueInfoFields(venueInfo: VenueInfo): UnclaimedField[] {
+export function computeUnclaimedVenueInfoFields(
+  venueInfo: VenueInfo,
+): UnclaimedField[] {
   const unclaimed: UnclaimedField[] = []
 
   for (const [key, value] of Object.entries(venueInfo)) {
-    if ((CLAIMED_TOP_LEVEL_VENUE_INFO_KEYS as readonly string[]).includes(key)) continue
+    if ((CLAIMED_TOP_LEVEL_VENUE_INFO_KEYS as readonly string[]).includes(key))
+      continue
     if (value === undefined) continue
     unclaimed.push({ key, value })
   }
@@ -124,12 +127,15 @@ function isEmptyUnclaimedValue(value: unknown): boolean {
  * loader without updating this list fails `tsc`, not just this function's
  * own tests.
  */
-export function computeUnclaimedMechanicColumns(row: VenueDetailMechanicRow): string[] {
+export function computeUnclaimedMechanicColumns(
+  row: VenueDetailMechanicRow,
+): string[] {
   return Object.entries(row)
     .filter(
       ([key, value]) =>
-        !(MECHANIC_CLAIMED_OR_CHROME_COLUMNS as readonly string[]).includes(key) &&
-        !isEmptyUnclaimedValue(value),
+        !(MECHANIC_CLAIMED_OR_CHROME_COLUMNS as readonly string[]).includes(
+          key,
+        ) && !isEmptyUnclaimedValue(value),
     )
     .map(([key]) => key)
 }

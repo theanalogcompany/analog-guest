@@ -13,7 +13,7 @@ function getHeader(
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() !== lower) continue
     if (value === undefined) return null
-    return Array.isArray(value) ? value[0] ?? null : value
+    return Array.isArray(value) ? (value[0] ?? null) : value
   }
   return null
 }

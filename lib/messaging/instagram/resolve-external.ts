@@ -76,7 +76,6 @@ import { INSTAGRAM_WINDOW_MS, loadLastGuestActionAt } from './window'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
-
 export interface ExternalResolutionTarget {
   venueId: string
   guestId: string
@@ -146,13 +145,18 @@ export async function resolveCardAnsweredExternally(
   now: Date,
 ): Promise<ExternalResolutionOutcome> {
   try {
-    const lastAction = await loadLastGuestActionAt(supabase, target.venueId, target.guestId)
+    const lastAction = await loadLastGuestActionAt(
+      supabase,
+      target.venueId,
+      target.guestId,
+    )
     if (!lastAction.ok) return { status: 'failed', error: lastAction.error }
     // Null means no saved guest action carries Meta's clock. Expiry cannot be
     // established, so nothing is resolved: a guess here would be a guess about
     // whether this echo is our own.
     if (lastAction.value === null) return { status: 'window_unknown' }
-    if (!windowHasExpired(lastAction.value, now)) return { status: 'window_open' }
+    if (!windowHasExpired(lastAction.value, now))
+      return { status: 'window_open' }
 
     const { data: card, error: cardError } = await supabase
       .from('messages')
@@ -180,7 +184,8 @@ export async function resolveCardAnsweredExternally(
       .eq('review_state', 'pending')
       .select('id')
     if (updateError) return { status: 'failed', error: updateError.message }
-    if (!updated || updated.length !== 1) return { status: 'lost_race', cardId: card.id }
+    if (!updated || updated.length !== 1)
+      return { status: 'lost_race', cardId: card.id }
     return {
       status: 'resolved',
       cardId: card.id,
@@ -195,6 +200,9 @@ export async function resolveCardAnsweredExternally(
       hadPendingCommitment: card.pending_commitment != null,
     }
   } catch (err) {
-    return { status: 'failed', error: err instanceof Error ? err.message : String(err) }
+    return {
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 }

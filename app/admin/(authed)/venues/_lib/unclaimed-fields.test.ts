@@ -8,7 +8,12 @@ import {
 
 function baseVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   return {
-    address: { line1: '1 Main St', city: 'Someville', region: 'CA', postalCode: '00000' },
+    address: {
+      line1: '1 Main St',
+      city: 'Someville',
+      region: 'CA',
+      postalCode: '00000',
+    },
     contact: {},
     hours: {},
     menu: { highlights: [], items: [] },
@@ -135,17 +140,26 @@ describe('computeUnclaimedMechanicColumns', () => {
   })
 
   it('flags metadata once it actually carries something', () => {
-    const withMetadata = { ...fullRow(), metadata: { note: 'left by an operator' } }
+    const withMetadata = {
+      ...fullRow(),
+      metadata: { note: 'left by an operator' },
+    }
     expect(computeUnclaimedMechanicColumns(withMetadata)).toEqual(['metadata'])
   })
 
   it('flags a field the loader adds later, structurally, not by a hardcoded name, when non-empty', () => {
-    const withExtra = { ...fullRow(), someNewField: 'x' } as unknown as VenueDetailMechanicRow
+    const withExtra = {
+      ...fullRow(),
+      someNewField: 'x',
+    } as unknown as VenueDetailMechanicRow
     expect(computeUnclaimedMechanicColumns(withExtra)).toEqual(['someNewField'])
   })
 
   it('does not flag a future field whose value is empty', () => {
-    const withEmptyExtra = { ...fullRow(), someNewField: [] } as unknown as VenueDetailMechanicRow
+    const withEmptyExtra = {
+      ...fullRow(),
+      someNewField: [],
+    } as unknown as VenueDetailMechanicRow
     expect(computeUnclaimedMechanicColumns(withEmptyExtra)).toEqual([])
   })
 })

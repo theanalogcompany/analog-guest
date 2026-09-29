@@ -45,12 +45,14 @@ describe('verifyMechanicOffer', () => {
       object: {
         offersGatedMechanic: true,
         mechanicId: 'mech-1',
-        reasoning: 'reply promises a complimentary item matching Referral Surprise',
+        reasoning:
+          'reply promises a complimentary item matching Referral Surprise',
       },
     })
 
     const result = await verifyMechanicOffer({
-      replyBody: 'since your friend came in with you, something special is on us',
+      replyBody:
+        'since your friend came in with you, something special is on us',
       eligibleGatedMechanics: makeMechanics(),
     })
 
@@ -96,13 +98,17 @@ describe('verifyMechanicOffer', () => {
       object: {
         offersGatedMechanic: true,
         mechanicId: 'none',
-        reasoning: 'reply promises something but multiple gated mechanics are eligible',
+        reasoning:
+          'reply promises something but multiple gated mechanics are eligible',
       },
     })
 
     const result = await verifyMechanicOffer({
       replyBody: 'something special is coming your way',
-      eligibleGatedMechanics: makeMechanics([{ id: 'mech-1' }, { id: 'mech-2' }]),
+      eligibleGatedMechanics: makeMechanics([
+        { id: 'mech-1' },
+        { id: 'mech-2' },
+      ]),
     })
 
     expect(result.ok).toBe(true)
@@ -155,13 +161,19 @@ describe('verifyMechanicOffer', () => {
       eligibleGatedMechanics: makeMechanics([{ id: 'abc-1' }, { id: 'abc-2' }]),
     })
 
-    const args = generateObjectMock.mock.calls[0][0] as { schema: z.ZodTypeAny }
+    const args = generateObjectMock.mock.calls[0][0] as {
+      schema: z.ZodTypeAny
+    }
     // The schema is a Zod object; assert indirectly via its JSON Schema
     // projection so this test doesn't depend on Zod's internal shape.
     const jsonSchema = z.toJSONSchema(args.schema) as {
       properties?: { mechanicId?: { enum?: string[] } }
     }
-    expect(jsonSchema.properties?.mechanicId?.enum).toEqual(['abc-1', 'abc-2', 'none'])
+    expect(jsonSchema.properties?.mechanicId?.enum).toEqual([
+      'abc-1',
+      'abc-2',
+      'none',
+    ])
   })
 
   it('includes the reply body and every eligible mechanic in the prompt', async () => {
@@ -172,7 +184,11 @@ describe('verifyMechanicOffer', () => {
     await verifyMechanicOffer({
       replyBody: 'the exact reply text',
       eligibleGatedMechanics: makeMechanics([
-        { id: 'mech-1', name: 'Referral Surprise', rewardDescription: 'a treat' },
+        {
+          id: 'mech-1',
+          name: 'Referral Surprise',
+          rewardDescription: 'a treat',
+        },
       ]),
     })
 

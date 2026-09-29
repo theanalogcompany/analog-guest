@@ -2,17 +2,22 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { verifyInstagramSignature, verifyMetaChallengeToken } from './verify-webhook'
+import {
+  verifyInstagramSignature,
+  verifyMetaChallengeToken,
+} from './verify-webhook'
 
 // The real timingSafeEqual, wrapped so a test can see that it is what decides
 // the comparison. Nothing else about node:crypto changes.
 vi.mock('node:crypto', async () => {
-  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto')
+  const actual =
+    await vi.importActual<typeof import('node:crypto')>('node:crypto')
   return { ...actual, timingSafeEqual: vi.fn(actual.timingSafeEqual) }
 })
 
 const SECRET = 'test-app-secret'
-const BODY = '{"object":"instagram","entry":[{"id":"17841400000000000","time":1,"messaging":[]}]}'
+const BODY =
+  '{"object":"instagram","entry":[{"id":"17841400000000000","time":1,"messaging":[]}]}'
 
 function sign(body: string, secret: string): string {
   return createHmac('sha256', secret).update(body).digest('hex')
@@ -28,17 +33,29 @@ afterEach(() => {
 
 describe('verifyInstagramSignature', () => {
   it('accepts a correctly signed delivery', () => {
-    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}`), SECRET)
+    const result = verifyInstagramSignature(
+      BODY,
+      headersWith(`sha256=${sign(BODY, SECRET)}`),
+      SECRET,
+    )
     expect(result).toEqual({ ok: true })
   })
 
   it('rejects a tampered body as a mismatch', () => {
-    const result = verifyInstagramSignature(`${BODY} `, headersWith(`sha256=${sign(BODY, SECRET)}`), SECRET)
+    const result = verifyInstagramSignature(
+      `${BODY} `,
+      headersWith(`sha256=${sign(BODY, SECRET)}`),
+      SECRET,
+    )
     expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
   it('rejects the wrong app secret as a mismatch', () => {
-    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}`), 'other-secret')
+    const result = verifyInstagramSignature(
+      BODY,
+      headersWith(`sha256=${sign(BODY, SECRET)}`),
+      'other-secret',
+    )
     expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
@@ -52,12 +69,18 @@ describe('verifyInstagramSignature', () => {
   // The natural mistake is sending the bare hex digest. Meta does not, but an
   // endpoint anyone can reach sees whatever anyone sends it.
   it('rejects a header with no sha256= prefix as malformed', () => {
-    const result = verifyInstagramSignature(BODY, headersWith(sign(BODY, SECRET)), SECRET)
+    const result = verifyInstagramSignature(
+      BODY,
+      headersWith(sign(BODY, SECRET)),
+      SECRET,
+    )
     expect(result).toEqual({ ok: false, reason: 'malformed_header' })
   })
 
   it('rejects a sha256= prefix with an empty digest as malformed', () => {
-    expect(verifyInstagramSignature(BODY, headersWith('sha256='), SECRET)).toEqual({
+    expect(
+      verifyInstagramSignature(BODY, headersWith('sha256='), SECRET),
+    ).toEqual({
       ok: false,
       reason: 'malformed_header',
     })
@@ -66,14 +89,20 @@ describe('verifyInstagramSignature', () => {
   // timingSafeEqual throws on a length mismatch, so the length guard is what
   // keeps these a refusal rather than an exception.
   it('rejects a short digest without throwing', () => {
-    expect(verifyInstagramSignature(BODY, headersWith('sha256=abc'), SECRET)).toEqual({
+    expect(
+      verifyInstagramSignature(BODY, headersWith('sha256=abc'), SECRET),
+    ).toEqual({
       ok: false,
       reason: 'mismatch',
     })
   })
 
   it('rejects an absurdly long digest without throwing', () => {
-    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${'a'.repeat(8000)}`), SECRET)
+    const result = verifyInstagramSignature(
+      BODY,
+      headersWith(`sha256=${'a'.repeat(8000)}`),
+      SECRET,
+    )
     expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
@@ -82,7 +111,11 @@ describe('verifyInstagramSignature', () => {
   // cut the received value to digest length would turn this into a forgery
   // that passes.
   it('never matches a correct digest with bytes appended', () => {
-    const result = verifyInstagramSignature(BODY, headersWith(`sha256=${sign(BODY, SECRET)}extra`), SECRET)
+    const result = verifyInstagramSignature(
+      BODY,
+      headersWith(`sha256=${sign(BODY, SECRET)}extra`),
+      SECRET,
+    )
     expect(result).toEqual({ ok: false, reason: 'mismatch' })
   })
 
@@ -94,7 +127,10 @@ describe('verifyInstagramSignature', () => {
   // removed.
   it('never verifies against an empty or unset secret, even a body signed with an empty key', () => {
     const forged = headersWith(`sha256=${sign(BODY, '')}`)
-    expect(verifyInstagramSignature(BODY, forged, '')).toEqual({ ok: false, reason: 'secret_unset' })
+    expect(verifyInstagramSignature(BODY, forged, '')).toEqual({
+      ok: false,
+      reason: 'secret_unset',
+    })
     expect(verifyInstagramSignature(BODY, forged, undefined)).toEqual({
       ok: false,
       reason: 'secret_unset',
@@ -115,7 +151,9 @@ describe('verifyInstagramSignature', () => {
 
     vi.mocked(timingSafeEqual).mockClear()
     const forgery = 'f'.repeat(digest.length)
-    expect(verifyInstagramSignature(BODY, headersWith(`sha256=${forgery}`), SECRET)).toEqual({
+    expect(
+      verifyInstagramSignature(BODY, headersWith(`sha256=${forgery}`), SECRET),
+    ).toEqual({
       ok: false,
       reason: 'mismatch',
     })
@@ -133,13 +171,19 @@ describe('verifyInstagramSignature', () => {
 
     const outcomes = [
       verifyInstagramSignature(BODY, headersWith(`sha256=${digest}`), SECRET),
-      verifyInstagramSignature(forgedBody, headersWith(`sha256=${digest}`), SECRET),
+      verifyInstagramSignature(
+        forgedBody,
+        headersWith(`sha256=${digest}`),
+        SECRET,
+      ),
       verifyInstagramSignature(forgedBody, new Headers(), SECRET),
       verifyInstagramSignature(forgedBody, headersWith('sha256=abc'), SECRET),
     ]
 
     for (const outcome of outcomes) {
-      expect(Object.keys(outcome).sort()).toEqual('reason' in outcome ? ['ok', 'reason'] : ['ok'])
+      expect(Object.keys(outcome).sort()).toEqual(
+        'reason' in outcome ? ['ok', 'reason'] : ['ok'],
+      )
       const serialized = JSON.stringify(outcome)
       expect(serialized).not.toContain(digest)
       expect(serialized).not.toContain(digestOfForgedBody)

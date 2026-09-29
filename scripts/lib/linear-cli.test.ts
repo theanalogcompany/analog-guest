@@ -25,16 +25,31 @@ const PLAN_BODY =
   '**[FROM CLAUDE CODE]**\n\n[PLAN] TAC-1\n\nA "quoted" word, a back\\slash, and\na second line.'
 
 type Reply = { status?: number; body?: unknown; raw?: string; throws?: Error }
-type Call = { url: string; headers: Record<string, string>; query: string; variables: Record<string, unknown>; rawBody: string }
+type Call = {
+  url: string
+  headers: Record<string, string>
+  query: string
+  variables: Record<string, unknown>
+  rawBody: string
+}
 
 // A stand-in for Linear. Each GraphQL operation is answered by the first
 // handler whose key appears in the query text; an operation nobody answers
 // fails the test loudly rather than returning something plausible.
 function fakeLinear(handlers: Record<string, Reply>) {
   const calls: Call[] = []
-  const fetch = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+  const fetch = async (
+    url: string,
+    init: { headers: Record<string, string>; body: string },
+  ) => {
     const parsed = JSON.parse(init.body)
-    calls.push({ url, headers: init.headers, query: parsed.query, variables: parsed.variables, rawBody: init.body })
+    calls.push({
+      url,
+      headers: init.headers,
+      query: parsed.query,
+      variables: parsed.variables,
+      rawBody: init.body,
+    })
     const match = Object.keys(handlers).find((k) => parsed.query.includes(k))
     if (!match) throw new Error(`unexpected query: ${parsed.query}`)
     const reply = handlers[match]
@@ -46,18 +61,33 @@ function fakeLinear(handlers: Record<string, Reply>) {
   return { fetch, calls }
 }
 
-const ISSUE_OK: Reply = { body: { data: { issue: { id: ISSUE_UUID, identifier: 'TAC-1', team: { id: TEAM_ID } } } } }
+const ISSUE_OK: Reply = {
+  body: {
+    data: {
+      issue: { id: ISSUE_UUID, identifier: 'TAC-1', team: { id: TEAM_ID } },
+    },
+  },
+}
 
 function files(map: Record<string, string>) {
   return async (path: string) => {
-    if (!(path in map)) throw new Error(`ENOENT: no such file or directory, open '${path}'`)
+    if (!(path in map))
+      throw new Error(`ENOENT: no such file or directory, open '${path}'`)
     return map[path]
   }
 }
 
 async function runWith(
   argv: string[],
-  { handlers = {}, fileMap = {}, key = FAKE_KEY }: { handlers?: Record<string, Reply>; fileMap?: Record<string, string>; key?: string } = {},
+  {
+    handlers = {},
+    fileMap = {},
+    key = FAKE_KEY,
+  }: {
+    handlers?: Record<string, Reply>
+    fileMap?: Record<string, string>
+    key?: string
+  } = {},
 ) {
   const linear = fakeLinear(handlers)
   let stdout = ''
@@ -67,19 +97,50 @@ async function runWith(
     env: key ? { LINEAR_API_KEY: key } : {},
     fetch: linear.fetch,
     readFile: files(fileMap),
-    stdout: (t: string) => { stdout += t },
-    stderr: (t: string) => { stderr += t },
+    stdout: (t: string) => {
+      stdout += t
+    },
+    stderr: (t: string) => {
+      stderr += t
+    },
   })
   return { code, stdout, stderr, calls: linear.calls }
 }
 
 describe('parseArgs', () => {
   it('accepts every command the prompts teach', () => {
-    expect(parseArgs(['comment', 'TAC-395', '/tmp/a.md'])).toEqual({ ok: true, command: { kind: 'comment', issue: 'TAC-395', file: '/tmp/a.md' } })
-    expect(parseArgs(['describe', 'TAC-395', '/tmp/d.md'])).toEqual({ ok: true, command: { kind: 'describe', issue: 'TAC-395', file: '/tmp/d.md' } })
-    expect(parseArgs(['label', 'add', 'TAC-395', 'Needs Decision'])).toEqual({ ok: true, command: { kind: 'label', op: 'add', issue: 'TAC-395', name: 'Needs Decision' } })
-    expect(parseArgs(['label', 'remove', 'TAC-395', 'Needs Decision'])).toEqual({ ok: true, command: { kind: 'label', op: 'remove', issue: 'TAC-395', name: 'Needs Decision' } })
-    expect(parseArgs(['state', 'TAC-395', 'Ready'])).toEqual({ ok: true, command: { kind: 'state', issue: 'TAC-395', name: 'Ready' } })
+    expect(parseArgs(['comment', 'TAC-395', '/tmp/a.md'])).toEqual({
+      ok: true,
+      command: { kind: 'comment', issue: 'TAC-395', file: '/tmp/a.md' },
+    })
+    expect(parseArgs(['describe', 'TAC-395', '/tmp/d.md'])).toEqual({
+      ok: true,
+      command: { kind: 'describe', issue: 'TAC-395', file: '/tmp/d.md' },
+    })
+    expect(parseArgs(['label', 'add', 'TAC-395', 'Needs Decision'])).toEqual({
+      ok: true,
+      command: {
+        kind: 'label',
+        op: 'add',
+        issue: 'TAC-395',
+        name: 'Needs Decision',
+      },
+    })
+    expect(parseArgs(['label', 'remove', 'TAC-395', 'Needs Decision'])).toEqual(
+      {
+        ok: true,
+        command: {
+          kind: 'label',
+          op: 'remove',
+          issue: 'TAC-395',
+          name: 'Needs Decision',
+        },
+      },
+    )
+    expect(parseArgs(['state', 'TAC-395', 'Ready'])).toEqual({
+      ok: true,
+      command: { kind: 'state', issue: 'TAC-395', name: 'Ready' },
+    })
   })
 
   it('accepts an issue uuid as well as an identifier', () => {
@@ -115,7 +176,11 @@ describe('checkCommentBody', () => {
   // written for the plain prefix would refuse this, so this pins that the
   // check is the shared one (TAC-396), not a second copy of it.
   it('accepts a prefix that arrives with escaped brackets', () => {
-    expect(checkCommentBody('**\\[FROM CLAUDE CODE\\]**\n\n\\[AUDIT\\] TAC-1\n\nBody.').ok).toBe(true)
+    expect(
+      checkCommentBody(
+        '**\\[FROM CLAUDE CODE\\]**\n\n\\[AUDIT\\] TAC-1\n\nBody.',
+      ).ok,
+    ).toBe(true)
   })
 
   it.each([
@@ -123,7 +188,10 @@ describe('checkCommentBody', () => {
     ['no prefix', '[PLAN] TAC-1\n\nA plan.'],
     ['a Claude Chat ruling', '**[FROM CLAUDE CHAT — RULING]**\n\nBuild it.'],
     ['prefix without a marker', '**[FROM CLAUDE CODE]**\n\nJust some text.'],
-    ['a marker only quoted later in the body', '**[FROM CLAUDE CODE]**\n\nThis is not a [PLAN] marker.'],
+    [
+      'a marker only quoted later in the body',
+      '**[FROM CLAUDE CODE]**\n\nThis is not a [PLAN] marker.',
+    ],
   ])('refuses %s', (_label, body) => {
     expect(checkCommentBody(body).ok).toBe(false)
   })
@@ -135,7 +203,9 @@ describe('checkDescriptionBody', () => {
   })
 
   it('accepts any non-empty description', () => {
-    expect(checkDescriptionBody('## Open questions\n\n1. A question.').ok).toBe(true)
+    expect(checkDescriptionBody('## Open questions\n\n1. A question.').ok).toBe(
+      true,
+    )
   })
 })
 
@@ -155,7 +225,11 @@ describe('comment', () => {
       fileMap: { '/tmp/plan.md': PLAN_BODY },
       handlers: {
         'issue(id:': ISSUE_OK,
-        commentCreate: { body: { data: { commentCreate: { success: true, comment: { id: 'c-1' } } } } },
+        commentCreate: {
+          body: {
+            data: { commentCreate: { success: true, comment: { id: 'c-1' } } },
+          },
+        },
       },
     })
     expect(r.code).toBe(EXIT.OK)
@@ -171,7 +245,7 @@ describe('comment', () => {
     expect(post.query).not.toContain('parentId')
   })
 
-  it('sends nothing for a comment that is not one of Claude Code\'s own', async () => {
+  it("sends nothing for a comment that is not one of Claude Code's own", async () => {
     const r = await runWith(['comment', 'TAC-1', '/tmp/plan.md'], {
       fileMap: { '/tmp/plan.md': 'Plan approved. Build it.' },
     })
@@ -190,7 +264,12 @@ describe('comment', () => {
   it('fails when Linear does not return success: true', async () => {
     const r = await runWith(['comment', 'TAC-1', '/tmp/plan.md'], {
       fileMap: { '/tmp/plan.md': PLAN_BODY },
-      handlers: { 'issue(id:': ISSUE_OK, commentCreate: { body: { data: { commentCreate: { success: false } } } } },
+      handlers: {
+        'issue(id:': ISSUE_OK,
+        commentCreate: {
+          body: { data: { commentCreate: { success: false } } },
+        },
+      },
     })
     expect(r.code).toBe(EXIT.FAILED)
     expect(r.stdout).toBe('')
@@ -208,10 +287,14 @@ describe('comment', () => {
 
 describe('describe', () => {
   it('replaces the description with the file, as written', async () => {
-    const description = '**Repo:** `analog-guest`\n\n## Open questions\n\n1. "A" question?'
+    const description =
+      '**Repo:** `analog-guest`\n\n## Open questions\n\n1. "A" question?'
     const r = await runWith(['describe', 'TAC-1', '/tmp/d.md'], {
       fileMap: { '/tmp/d.md': description },
-      handlers: { 'issue(id:': ISSUE_OK, issueUpdate: { body: { data: { issueUpdate: { success: true } } } } },
+      handlers: {
+        'issue(id:': ISSUE_OK,
+        issueUpdate: { body: { data: { issueUpdate: { success: true } } } },
+      },
     })
     expect(r.code).toBe(EXIT.OK)
     expect(r.stdout).toBe('ok: description updated on TAC-1\n')
@@ -220,7 +303,9 @@ describe('describe', () => {
   })
 
   it('sends nothing for an empty file', async () => {
-    const r = await runWith(['describe', 'TAC-1', '/tmp/d.md'], { fileMap: { '/tmp/d.md': '\n' } })
+    const r = await runWith(['describe', 'TAC-1', '/tmp/d.md'], {
+      fileMap: { '/tmp/d.md': '\n' },
+    })
     expect(r.code).toBe(EXIT.FAILED)
     expect(r.calls).toHaveLength(0)
   })
@@ -228,21 +313,30 @@ describe('describe', () => {
   it('fails when Linear does not return success: true', async () => {
     const r = await runWith(['describe', 'TAC-1', '/tmp/d.md'], {
       fileMap: { '/tmp/d.md': 'text' },
-      handlers: { 'issue(id:': ISSUE_OK, issueUpdate: { body: { data: { issueUpdate: { success: false } } } } },
+      handlers: {
+        'issue(id:': ISSUE_OK,
+        issueUpdate: { body: { data: { issueUpdate: { success: false } } } },
+      },
     })
     expect(r.code).toBe(EXIT.FAILED)
   })
 })
 
 describe('label', () => {
-  const labels = (nodes: unknown[]): Reply => ({ body: { data: { issueLabels: { nodes } } } })
+  const labels = (nodes: unknown[]): Reply => ({
+    body: { data: { issueLabels: { nodes } } },
+  })
 
-  it('adds the label this ticket can carry, skipping another team\'s', async () => {
+  it("adds the label this ticket can carry, skipping another team's", async () => {
     const r = await runWith(['label', 'add', 'TAC-1', 'Needs Decision'], {
       handlers: {
         'issue(id:': ISSUE_OK,
         issueLabels: labels([
-          { id: 'l-other', name: 'Needs Decision', team: { id: OTHER_TEAM_ID } },
+          {
+            id: 'l-other',
+            name: 'Needs Decision',
+            team: { id: OTHER_TEAM_ID },
+          },
           { id: 'l-workspace', name: 'Needs Decision', team: null },
         ]),
         issueAddLabel: { body: { data: { issueAddLabel: { success: true } } } },
@@ -251,15 +345,22 @@ describe('label', () => {
     expect(r.code).toBe(EXIT.OK)
     expect(r.stdout).toBe('ok: label "Needs Decision" added to TAC-1\n')
     expect(r.calls[1].variables).toEqual({ name: 'Needs Decision' })
-    expect(r.calls[2].variables).toEqual({ id: ISSUE_UUID, labelId: 'l-workspace' })
+    expect(r.calls[2].variables).toEqual({
+      id: ISSUE_UUID,
+      labelId: 'l-workspace',
+    })
   })
 
   it('removes a label through issueRemoveLabel', async () => {
     const r = await runWith(['label', 'remove', 'TAC-1', 'Needs Decision'], {
       handlers: {
         'issue(id:': ISSUE_OK,
-        issueLabels: labels([{ id: 'l-team', name: 'Needs Decision', team: { id: TEAM_ID } }]),
-        issueRemoveLabel: { body: { data: { issueRemoveLabel: { success: true } } } },
+        issueLabels: labels([
+          { id: 'l-team', name: 'Needs Decision', team: { id: TEAM_ID } },
+        ]),
+        issueRemoveLabel: {
+          body: { data: { issueRemoveLabel: { success: true } } },
+        },
       },
     })
     expect(r.code).toBe(EXIT.OK)
@@ -289,21 +390,28 @@ describe('label', () => {
     expect(r.code).toBe(EXIT.FAILED)
   })
 
-  it.each(['add', 'remove'])('fails when Linear does not return success: true on %s', async (op) => {
-    const field = op === 'add' ? 'issueAddLabel' : 'issueRemoveLabel'
-    const r = await runWith(['label', op, 'TAC-1', 'Needs Decision'], {
-      handlers: {
-        'issue(id:': ISSUE_OK,
-        issueLabels: labels([{ id: 'l-team', name: 'Needs Decision', team: { id: TEAM_ID } }]),
-        [field]: { body: { data: { [field]: { success: false } } } },
-      },
-    })
-    expect(r.code).toBe(EXIT.FAILED)
-  })
+  it.each(['add', 'remove'])(
+    'fails when Linear does not return success: true on %s',
+    async (op) => {
+      const field = op === 'add' ? 'issueAddLabel' : 'issueRemoveLabel'
+      const r = await runWith(['label', op, 'TAC-1', 'Needs Decision'], {
+        handlers: {
+          'issue(id:': ISSUE_OK,
+          issueLabels: labels([
+            { id: 'l-team', name: 'Needs Decision', team: { id: TEAM_ID } },
+          ]),
+          [field]: { body: { data: { [field]: { success: false } } } },
+        },
+      })
+      expect(r.code).toBe(EXIT.FAILED)
+    },
+  )
 })
 
 describe('state', () => {
-  const states = (nodes: unknown[]): Reply => ({ body: { data: { workflowStates: { nodes } } } })
+  const states = (nodes: unknown[]): Reply => ({
+    body: { data: { workflowStates: { nodes } } },
+  })
 
   it('moves the ticket to the named state in its own team', async () => {
     const r = await runWith(['state', 'TAC-1', 'Ready'], {
@@ -317,7 +425,10 @@ describe('state', () => {
     expect(r.stdout).toBe('ok: TAC-1 moved to Ready\n')
     expect(r.calls[1].variables).toEqual({ name: 'Ready', team: TEAM_ID })
     expect(r.calls[2].query).toContain('stateId: $stateId')
-    expect(r.calls[2].variables).toEqual({ id: ISSUE_UUID, stateId: 's-ready' })
+    expect(r.calls[2].variables).toEqual({
+      id: ISSUE_UUID,
+      stateId: 's-ready',
+    })
   })
 
   it('fails when the team has no such state', async () => {
@@ -341,10 +452,14 @@ describe('state', () => {
 
 describe('transport failures', () => {
   const stateCall = (issueReply: Reply) =>
-    runWith(['state', 'TAC-1', 'Ready'], { handlers: { 'issue(id:': issueReply } })
+    runWith(['state', 'TAC-1', 'Ready'], {
+      handlers: { 'issue(id:': issueReply },
+    })
 
   it('fails on GraphQL errors, even with HTTP 200', async () => {
-    const r = await stateCall({ body: { errors: [{ message: 'Entity not found' }], data: null } })
+    const r = await stateCall({
+      body: { errors: [{ message: 'Entity not found' }], data: null },
+    })
     expect(r.code).toBe(EXIT.FAILED)
     expect(r.stderr).toContain('Entity not found')
   })
@@ -387,7 +502,14 @@ describe('the key never appears in output or errors', () => {
   it('is sent only as the Authorization header, never in a request body', async () => {
     const r = await runWith(['comment', 'TAC-1', '/tmp/plan.md'], {
       fileMap: { '/tmp/plan.md': PLAN_BODY },
-      handlers: { 'issue(id:': ISSUE_OK, commentCreate: { body: { data: { commentCreate: { success: true, comment: { id: 'c-1' } } } } } },
+      handlers: {
+        'issue(id:': ISSUE_OK,
+        commentCreate: {
+          body: {
+            data: { commentCreate: { success: true, comment: { id: 'c-1' } } },
+          },
+        },
+      },
     })
     expect(r.code).toBe(EXIT.OK)
     for (const call of r.calls) {
@@ -398,11 +520,69 @@ describe('the key never appears in output or errors', () => {
 
   // Every place a message can come from, made to echo the key.
   it.each<[string, string[], Record<string, Reply>, Record<string, string>]>([
-    ['a GraphQL error that quotes the key', ['state', 'TAC-1', 'Ready'], { 'issue(id:': { status: 401, body: { errors: [{ message: `Authentication failed for ${FAKE_KEY}` }] } } }, {}],
-    ['a non-JSON body that quotes the key', ['state', 'TAC-1', 'Ready'], { 'issue(id:': { status: 400, raw: `bad header: Authorization: ${FAKE_KEY}` } }, {}],
-    ['a network error that quotes the key', ['state', 'TAC-1', 'Ready'], { 'issue(id:': { throws: new Error(`socket closed sending ${FAKE_KEY}`) } }, {}],
-    ['a success line that echoes the key', ['comment', 'TAC-1', '/tmp/plan.md'], { 'issue(id:': { body: { data: { issue: { id: ISSUE_UUID, identifier: FAKE_KEY, team: { id: TEAM_ID } } } } }, commentCreate: { body: { data: { commentCreate: { success: true, comment: { id: FAKE_KEY } } } } } }, { '/tmp/plan.md': PLAN_BODY }],
-    ['a file error that names the key', ['comment', 'TAC-1', `/tmp/${FAKE_KEY}.md`], {}, {}],
+    [
+      'a GraphQL error that quotes the key',
+      ['state', 'TAC-1', 'Ready'],
+      {
+        'issue(id:': {
+          status: 401,
+          body: {
+            errors: [{ message: `Authentication failed for ${FAKE_KEY}` }],
+          },
+        },
+      },
+      {},
+    ],
+    [
+      'a non-JSON body that quotes the key',
+      ['state', 'TAC-1', 'Ready'],
+      {
+        'issue(id:': {
+          status: 400,
+          raw: `bad header: Authorization: ${FAKE_KEY}`,
+        },
+      },
+      {},
+    ],
+    [
+      'a network error that quotes the key',
+      ['state', 'TAC-1', 'Ready'],
+      {
+        'issue(id:': { throws: new Error(`socket closed sending ${FAKE_KEY}`) },
+      },
+      {},
+    ],
+    [
+      'a success line that echoes the key',
+      ['comment', 'TAC-1', '/tmp/plan.md'],
+      {
+        'issue(id:': {
+          body: {
+            data: {
+              issue: {
+                id: ISSUE_UUID,
+                identifier: FAKE_KEY,
+                team: { id: TEAM_ID },
+              },
+            },
+          },
+        },
+        commentCreate: {
+          body: {
+            data: {
+              commentCreate: { success: true, comment: { id: FAKE_KEY } },
+            },
+          },
+        },
+      },
+      { '/tmp/plan.md': PLAN_BODY },
+    ],
+    [
+      'a file error that names the key',
+      ['comment', 'TAC-1', `/tmp/${FAKE_KEY}.md`],
+      {},
+      {},
+    ],
   ])('%s', async (_label, argv, handlers, fileMap) => {
     const r = await runWith(argv, { handlers, fileMap })
     const printed = r.stdout + r.stderr
@@ -434,7 +614,10 @@ describe('scripts/linear.mjs as a process', () => {
   })
 
   it('redacts the key from a file error in the real process', () => {
-    const r = node(['comment', 'TAC-1', join(tmpdir(), `${FAKE_KEY}-missing.md`)], { LINEAR_API_KEY: FAKE_KEY })
+    const r = node(
+      ['comment', 'TAC-1', join(tmpdir(), `${FAKE_KEY}-missing.md`)],
+      { LINEAR_API_KEY: FAKE_KEY },
+    )
     expect(r.code).toBe(EXIT.FAILED)
     expect(r.printed).toContain('***')
     expect(r.printed).not.toContain(FAKE_KEY)
@@ -463,7 +646,9 @@ describe('source', () => {
   // human input.
   it('takes its comment check from comment-provenance.mjs', () => {
     const source = readFileSync(resolve(__dirname, 'linear-cli.mjs'), 'utf8')
-    expect(source).toMatch(/import\s*\{[^}]*\bcommentMarker\b[^}]*\bisBotComment\b[^}]*\}\s*from\s*'\.\/comment-provenance\.mjs'/)
+    expect(source).toMatch(
+      /import\s*\{[^}]*\bcommentMarker\b[^}]*\bisBotComment\b[^}]*\}\s*from\s*'\.\/comment-provenance\.mjs'/,
+    )
     expect(source).not.toMatch(/\/[^/\n]*FROM CLAUDE CODE[^/\n]*\/[gimsuy]*/)
   })
 })

@@ -138,7 +138,12 @@ function ctxFor(inboundBody: string): RuntimeContext {
       holdAllOutbound: false,
       approvalPolicy: { default: 'auto_send', perCategory: {} },
     },
-    guest: { id: GUEST, firstName: 'Sam', phoneNumber: '+15555550853', isDemo: false },
+    guest: {
+      id: GUEST,
+      firstName: 'Sam',
+      phoneNumber: '+15555550853',
+      isDemo: false,
+    },
     currentMessage: {
       id: 'in-reported-order',
       body: inboundBody,
@@ -164,7 +169,9 @@ function ctxFor(inboundBody: string): RuntimeContext {
   } as unknown as RuntimeContext
 }
 
-function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageResult {
+function generation(
+  over: Partial<GenerateMessageResult> = {},
+): GenerateMessageResult {
   return {
     body: 'the drafted reply that the backstop caught',
     voiceFidelity: 0.85,
@@ -178,12 +185,14 @@ function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageR
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.70.0',
+    promptVersion: 'v1.72.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,
@@ -202,12 +211,21 @@ const BACKSTOP_FLAGGED = {
 async function runTurn(
   ctx: RuntimeContext,
   gen: GenerateMessageResult,
-  grounding: Parameters<typeof applyApprovalPolicyStage>[2] = { status: 'clean' },
+  grounding: Parameters<typeof applyApprovalPolicyStage>[2] = {
+    status: 'clean',
+  },
 ) {
-  return applyApprovalPolicyStage(ctx, gen, grounding, { status: 'skipped' }, { status: 'skipped' }, {
-    resolution: { status: 'none' },
-    claim: 'skipped',
-  })
+  return applyApprovalPolicyStage(
+    ctx,
+    gen,
+    grounding,
+    { status: 'skipped' },
+    { status: 'skipped' },
+    {
+      resolution: { status: 'none' },
+      claim: 'skipped',
+    },
+  )
 }
 
 beforeEach(() => {
@@ -223,7 +241,11 @@ afterEach(() => {
 describe('TAC-484 leg A: the card that started it arms no clock', () => {
   it('queues the backstop-caught draft and arms NO clock, so the timer has nothing to pick up', async () => {
     useFake()
-    const decision = await runTurn(ctxFor(REPORTED_ORDER), generation(), BACKSTOP_FLAGGED)
+    const decision = await runTurn(
+      ctxFor(REPORTED_ORDER),
+      generation(),
+      BACKSTOP_FLAGGED,
+    )
 
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return

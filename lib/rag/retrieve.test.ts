@@ -15,7 +15,10 @@ vi.mock('@/lib/db/admin', () => ({
   }),
 }))
 
-import { retrieveKnowledgeContext, KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT } from './retrieve'
+import {
+  retrieveKnowledgeContext,
+  KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT,
+} from './retrieve'
 
 beforeEach(() => {
   embedTextMock.mockReset()
@@ -43,7 +46,11 @@ describe('retrieveKnowledgeContext — RPC arg shape (TAC-242)', () => {
   })
 
   it('forwards an explicit min_confidence override', async () => {
-    await retrieveKnowledgeContext({ venueId: 'v-1', query: 'hi', minConfidence: 0.4 })
+    await retrieveKnowledgeContext({
+      venueId: 'v-1',
+      query: 'hi',
+      minConfidence: 0.4,
+    })
     const args = rpcMock.mock.calls[0][1] as { min_confidence: number }
     expect(args.min_confidence).toBe(0.4)
   })
@@ -52,7 +59,11 @@ describe('retrieveKnowledgeContext — RPC arg shape (TAC-242)', () => {
     // Defensive lock: `?? KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT` only triggers
     // on undefined/null. A future refactor that switches to `||` would
     // silently coerce 0 to 0.7 and break the operator-override path.
-    await retrieveKnowledgeContext({ venueId: 'v-1', query: 'hi', minConfidence: 0 })
+    await retrieveKnowledgeContext({
+      venueId: 'v-1',
+      query: 'hi',
+      minConfidence: 0,
+    })
     const args = rpcMock.mock.calls[0][1] as { min_confidence: number }
     expect(args.min_confidence).toBe(0)
   })
@@ -93,7 +104,10 @@ describe('retrieveKnowledgeContext — chunk mapping (TAC-242)', () => {
       error: null,
     })
 
-    const r = await retrieveKnowledgeContext({ venueId: 'v-1', query: 'beans' })
+    const r = await retrieveKnowledgeContext({
+      venueId: 'v-1',
+      query: 'beans',
+    })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data).toHaveLength(1)
@@ -186,7 +200,10 @@ describe('retrieveKnowledgeContext — error paths', () => {
   })
 
   it('surfaces db_query_failed when the RPC errors', async () => {
-    rpcMock.mockResolvedValueOnce({ data: null, error: { message: 'rpc fail' } })
+    rpcMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'rpc fail' },
+    })
     const r = await retrieveKnowledgeContext({ venueId: 'v-1', query: 'q' })
     expect(r.ok).toBe(false)
     if (r.ok) return

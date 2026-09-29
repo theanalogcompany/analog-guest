@@ -1,7 +1,11 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
-import type { AIResult, VerifyMechanicOfferInput, VerifyMechanicOfferResult } from './types'
+import type {
+  AIResult,
+  VerifyMechanicOfferInput,
+  VerifyMechanicOfferResult,
+} from './types'
 
 // TAC-355. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this verifier never touches the classify/generate contract, same
@@ -20,11 +24,15 @@ Do not flag:
 
 Set offersGatedMechanic=true only when the reply promises a listed perk with enough confidence that an owner reviewing it would recognize it as that specific perk. Set mechanicId to that perk's id. Otherwise set offersGatedMechanic=false and mechanicId="none".`
 
-function buildMechanicsBlock(mechanics: VerifyMechanicOfferInput['eligibleGatedMechanics']): string {
+function buildMechanicsBlock(
+  mechanics: VerifyMechanicOfferInput['eligibleGatedMechanics'],
+): string {
   return mechanics
     .map((m) => {
       const reward = m.rewardDescription ? ` — ${m.rewardDescription}` : ''
-      const qual = m.qualification ? ` (qualifies when: ${m.qualification})` : ''
+      const qual = m.qualification
+        ? ` (qualifies when: ${m.qualification})`
+        : ''
       return `- id="${m.id}": ${m.name}${reward}${qual}`
     })
     .join('\n')
@@ -61,7 +69,10 @@ export async function verifyMechanicOffer(
   if (typeof input.replyBody !== 'string' || input.replyBody.length === 0) {
     return { ok: false, error: 'invalid_input' }
   }
-  if (!Array.isArray(input.eligibleGatedMechanics) || input.eligibleGatedMechanics.length === 0) {
+  if (
+    !Array.isArray(input.eligibleGatedMechanics) ||
+    input.eligibleGatedMechanics.length === 0
+  ) {
     return { ok: false, error: 'no_eligible_gated_mechanics' }
   }
 
@@ -70,7 +81,10 @@ export async function verifyMechanicOffer(
   // cast to the tuple shape z.enum requires ("neither type sufficiently
   // overlaps") — bridge through `unknown` per the compiler's own suggested
   // fix for this exact situation.
-  const mechanicIdEnum = z.enum([...ids, 'none'] as unknown as [string, ...string[]])
+  const mechanicIdEnum = z.enum([...ids, 'none'] as unknown as [
+    string,
+    ...string[],
+  ])
 
   const schema = z.object({
     offersGatedMechanic: z.boolean(),
@@ -113,6 +127,10 @@ export async function verifyMechanicOffer(
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: message, errorCode: 'ai_verify_mechanic_offer_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_verify_mechanic_offer_failed',
+    }
   }
 }

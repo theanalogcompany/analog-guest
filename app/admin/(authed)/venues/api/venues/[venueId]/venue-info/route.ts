@@ -69,14 +69,20 @@ export async function PATCH(
   const supabase = createAdminClient()
   const loaded = await loadVenueInfo(supabase, venueId)
   if (!loaded.ok) {
-    return NextResponse.json({ error: 'venue_info lookup failed', detail: loaded.error }, { status: 500 })
+    return NextResponse.json(
+      { error: 'venue_info lookup failed', detail: loaded.error },
+      { status: 500 },
+    )
   }
 
   const merged = { ...loaded.venueInfo, ...body }
   const validated = VenueInfoSchema.safeParse(merged)
   if (!validated.success) {
     return NextResponse.json(
-      { error: 'venue_info invalid after merge', detail: validated.error.message },
+      {
+        error: 'venue_info invalid after merge',
+        detail: validated.error.message,
+      },
       { status: 400 },
     )
   }

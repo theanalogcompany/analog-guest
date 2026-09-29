@@ -4,6 +4,7 @@
 // Vercel Hobby (daily-only cron), same posture as commitments-due /
 // followups-due. Auth + dev-skip mirror the other cron routes.
 
+import { logger } from '@/lib/observability/logger'
 import { expireStalePendingTaps } from '@/lib/pos/reconcile-tap'
 
 // Pending taps older than this with no send are abandoned. Generous enough to
@@ -27,10 +28,12 @@ export async function GET(request: Request): Promise<Response> {
     ttlMinutes: TAP_TTL_MINUTES,
   })
   if (!result.ok) {
-    console.error('[cron pos-tap-reconcile] failed', { error: result.error })
+    logger.error('[cron pos-tap-reconcile] failed', { error: result.error })
     return Response.json({ ok: false, error: result.error }, { status: 500 })
   }
 
-  console.log('[cron pos-tap-reconcile] tick complete', result.data)
+  logger.info('[cron pos-tap-reconcile] tick complete', {
+    summary: result.data,
+  })
   return Response.json({ ok: true, ...result.data })
 }

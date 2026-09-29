@@ -21,7 +21,9 @@ import { findOpenObligations, markEscalated, markExpired } from './commitments'
 
 const NOW = new Date('2026-09-20T18:00:00Z')
 
-function makeRow(overrides: Partial<GuestCommitmentRow> = {}): GuestCommitmentRow {
+function makeRow(
+  overrides: Partial<GuestCommitmentRow> = {},
+): GuestCommitmentRow {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     guest_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -51,14 +53,21 @@ function scanReturns(rows: GuestCommitmentRow[]) {
   vi.mocked(findOpenObligations).mockResolvedValue({ ok: true, data: rows })
 }
 
-function transitionOk(transitioned: boolean, row: GuestCommitmentRow | null = null) {
+function transitionOk(
+  transitioned: boolean,
+  row: GuestCommitmentRow | null = null,
+) {
   return { ok: true as const, data: { transitioned, row } }
 }
 
 beforeEach(() => {
   vi.mocked(findOpenObligations).mockReset()
-  vi.mocked(markEscalated).mockReset().mockResolvedValue(transitionOk(true, makeRow()))
-  vi.mocked(markExpired).mockReset().mockResolvedValue(transitionOk(true, makeRow()))
+  vi.mocked(markEscalated)
+    .mockReset()
+    .mockResolvedValue(transitionOk(true, makeRow()))
+  vi.mocked(markExpired)
+    .mockReset()
+    .mockResolvedValue(transitionOk(true, makeRow()))
   vi.mocked(captureCommitmentEscalated).mockReset()
   vi.mocked(captureCommitmentExpired).mockReset()
 })
@@ -72,7 +81,12 @@ describe('processCommitmentLifecycle — escalation', () => {
     scanReturns([makeRow()])
     const r = await processCommitmentLifecycle(NOW)
     expect(r).toEqual(
-      expect.objectContaining({ scanned: 1, escalated: 1, expired: 0, casLost: 0 }),
+      expect.objectContaining({
+        scanned: 1,
+        escalated: 1,
+        expired: 0,
+        casLost: 0,
+      }),
     )
     expect(markExpired).not.toHaveBeenCalled()
     expect(captureCommitmentEscalated).toHaveBeenCalledWith(
@@ -158,7 +172,9 @@ describe('processCommitmentLifecycle — expiry', () => {
       order.push('expire')
       return transitionOk(true, makeRow())
     })
-    scanReturns([makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null })])
+    scanReturns([
+      makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null }),
+    ])
 
     const r = await processCommitmentLifecycle(NOW)
 
@@ -239,7 +255,9 @@ describe('processCommitmentLifecycle — the escalation guarantee under failure'
   // was computed from INTENT rather than outcome. The guarantee's only
   // telemetry actively asserted it had held.
   it('does not expire a row whose escalation write failed', async () => {
-    scanReturns([makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null })])
+    scanReturns([
+      makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null }),
+    ])
     vi.mocked(markEscalated).mockResolvedValue({
       ok: false,
       error: 'db down',
@@ -258,7 +276,9 @@ describe('processCommitmentLifecycle — the escalation guarantee under failure'
 
   // hadEscalated must describe what happened, not what was attempted.
   it('reports hadEscalated from the outcome, not from the intent', async () => {
-    scanReturns([makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null })])
+    scanReturns([
+      makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null }),
+    ])
     vi.mocked(markEscalated).mockResolvedValue(transitionOk(true, makeRow()))
 
     await processCommitmentLifecycle(NOW)
@@ -271,7 +291,9 @@ describe('processCommitmentLifecycle — the escalation guarantee under failure'
   // One row, one race. Counting the same row's single CAS loss in both the
   // escalation and expiry branches let casLost exceed scanned.
   it('counts one lost race once, not twice', async () => {
-    scanReturns([makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null })])
+    scanReturns([
+      makeRow({ expires_at: '2026-09-19T18:00:00Z', escalated_at: null }),
+    ])
     vi.mocked(markEscalated).mockResolvedValue(transitionOk(false))
 
     const r = await processCommitmentLifecycle(NOW)
@@ -299,7 +321,12 @@ describe('processCommitmentLifecycle — failure handling', () => {
     })
     const r = await processCommitmentLifecycle(NOW)
     expect(r).toEqual(
-      expect.objectContaining({ scanned: 0, errored: 1, escalated: 0, expired: 0 }),
+      expect.objectContaining({
+        scanned: 0,
+        errored: 1,
+        escalated: 0,
+        expired: 0,
+      }),
     )
   })
 

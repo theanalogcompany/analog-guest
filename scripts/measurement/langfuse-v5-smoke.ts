@@ -82,7 +82,9 @@ async function main(): Promise<void> {
   // NODE_ENV is readonly to `tsc`, and a silent no-op is the exact failure this
   // script exists to catch.
   if (process.env.NODE_ENV === 'test') {
-    console.error('FAIL: NODE_ENV=test forces the wrapper into no-op mode. Unset it and re-run.')
+    console.error(
+      'FAIL: NODE_ENV=test forces the wrapper into no-op mode. Unset it and re-run.',
+    )
     process.exit(1)
   }
 
@@ -93,9 +95,8 @@ async function main(): Promise<void> {
   const { register } = await import('../../instrumentation')
   await register()
 
-  const { startAgentTrace, fetchTrace, langfuseInitFailed, toAgentUsage } = await import(
-    '../../lib/observability/langfuse'
-  )
+  const { startAgentTrace, fetchTrace, langfuseInitFailed, toAgentUsage } =
+    await import('../../lib/observability/langfuse')
 
   if (langfuseInitFailed()) {
     console.error('FAIL: span processor init threw. Check LANGFUSE_* vars.')
@@ -154,7 +155,9 @@ async function main(): Promise<void> {
   const REQUIRED_SPANS = ['smoke.parent', 'smoke.child', 'smoke.generation']
   const deadline = Date.now() + DEADLINE_MS
   let attempt = 0
-  let lastProblems: string[] = ['trace never appeared; the write path is not ingesting']
+  let lastProblems: string[] = [
+    'trace never appeared; the write path is not ingesting',
+  ]
 
   while (Date.now() < deadline) {
     attempt += 1
@@ -165,7 +168,9 @@ async function main(): Promise<void> {
       const problems: string[] = []
 
       if (fetched.name !== 'smoke.langfuse_v5') {
-        problems.push(`trace name is ${fetched.name}, expected smoke.langfuse_v5`)
+        problems.push(
+          `trace name is ${fetched.name}, expected smoke.langfuse_v5`,
+        )
       }
       if (fetched.sessionId !== runId) {
         problems.push(`sessionId is ${fetched.sessionId}, expected ${runId}`)
@@ -175,12 +180,15 @@ async function main(): Promise<void> {
       // scope is ever renamed, these vanish - which the unit test CANNOT catch,
       // because it imports the scope constant from the same place the source does.
       for (const required of REQUIRED_SPANS) {
-        if (!names.includes(required)) problems.push(`missing observation ${required}`)
+        if (!names.includes(required))
+          problems.push(`missing observation ${required}`)
       }
       // The root must have a duration, or `agent.inbound` end-to-end latency -
       // the number the whole baseline rests on - would read as null.
       if (typeof fetched.latency !== 'number' || fetched.latency <= 0) {
-        problems.push(`root latency is ${fetched.latency}; the root span did not close`)
+        problems.push(
+          `root latency is ${fetched.latency}; the root span did not close`,
+        )
       }
 
       // PRICING. Measured 2026-09-29: every `generate` span was type SPAN with no
@@ -194,16 +202,23 @@ async function main(): Promise<void> {
       // survived; `model` and `usageDetails` prove the native mapping; `costDetails`
       // proves Langfuse actually priced it, which is the only one of the four that
       // depends on anything outside this repo.
-      const genObs = (fetched.observations ?? []).find((o) => o.name === 'smoke.generation')
+      const genObs = (fetched.observations ?? []).find(
+        (o) => o.name === 'smoke.generation',
+      )
       if (genObs) {
         if (genObs.type !== 'GENERATION') {
-          problems.push(`smoke.generation has type ${genObs.type}, expected GENERATION`)
+          problems.push(
+            `smoke.generation has type ${genObs.type}, expected GENERATION`,
+          )
         }
         if (genObs.model !== SMOKE_MODEL) {
-          problems.push(`smoke.generation model is ${genObs.model}, expected ${SMOKE_MODEL}`)
+          problems.push(
+            `smoke.generation model is ${genObs.model}, expected ${SMOKE_MODEL}`,
+          )
         }
         const usageDiff = diffUsageDetails(genObs.usageDetails)
-        if (usageDiff) problems.push(`smoke.generation usageDetails wrong: ${usageDiff}`)
+        if (usageDiff)
+          problems.push(`smoke.generation usageDetails wrong: ${usageDiff}`)
         if (!hasEntries(genObs.costDetails)) {
           problems.push(
             `smoke.generation costDetails is empty; Langfuse did not price ${SMOKE_MODEL}` +
@@ -249,7 +264,9 @@ async function main(): Promise<void> {
       }
 
       lastProblems = problems
-      console.log(`  attempt ${attempt}: ${problems.length} not yet satisfied, waiting…`)
+      console.log(
+        `  attempt ${attempt}: ${problems.length} not yet satisfied, waiting…`,
+      )
     }
 
     await new Promise((r) => setTimeout(r, 3000))
@@ -267,7 +284,9 @@ async function main(): Promise<void> {
  * on the object itself would pass on exactly the failure being looked for.
  */
 function hasEntries(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && Object.keys(value).length > 0
+  return (
+    typeof value === 'object' && value !== null && Object.keys(value).length > 0
+  )
 }
 
 /**
@@ -286,9 +305,13 @@ function diffUsageDetails(actual: unknown): string | null {
 
   const wrong = Object.entries(EXPECTED_USAGE_DETAILS)
     .filter(([key, want]) => got[key] !== want)
-    .map(([key, want]) => `${key}=${JSON.stringify(got[key])} (expected ${want})`)
+    .map(
+      ([key, want]) => `${key}=${JSON.stringify(got[key])} (expected ${want})`,
+    )
 
-  const extra = Object.keys(got).filter((key) => !(key in EXPECTED_USAGE_DETAILS))
+  const extra = Object.keys(got).filter(
+    (key) => !(key in EXPECTED_USAGE_DETAILS),
+  )
 
   if (wrong.length === 0 && extra.length === 0) return null
   return [
@@ -310,8 +333,10 @@ function diffUsageDetails(actual: unknown): string | null {
 async function findLeakedHttpSpans(startedAt: string): Promise<string[]> {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY ?? ''
   const secretKey = process.env.LANGFUSE_SECRET_KEY ?? ''
-  const baseUrl = process.env.LANGFUSE_BASE_URL ?? process.env.LANGFUSE_HOST ?? ''
-  if (!publicKey || !secretKey || !baseUrl) return ['cannot check HTTP-span leakage: no creds']
+  const baseUrl =
+    process.env.LANGFUSE_BASE_URL ?? process.env.LANGFUSE_HOST ?? ''
+  if (!publicKey || !secretKey || !baseUrl)
+    return ['cannot check HTTP-span leakage: no creds']
 
   // Scoped to THIS RUN, not a rolling window. A time window couples the check to
   // history: one leaked span from an earlier run would fail every clean run
@@ -323,17 +348,26 @@ async function findLeakedHttpSpans(startedAt: string): Promise<string[]> {
 
   let names: string[]
   try {
-    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } })
-    if (!res.ok) return [`cannot check HTTP-span leakage: read API returned ${res.status}`]
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${auth}` },
+    })
+    if (!res.ok)
+      return [`cannot check HTTP-span leakage: read API returned ${res.status}`]
     const body = (await res.json()) as { data?: { name?: string | null }[] }
     names = (body.data ?? []).map((o) => o.name ?? '')
   } catch (e) {
-    return [`cannot check HTTP-span leakage: ${e instanceof Error ? e.message : String(e)}`]
+    return [
+      `cannot check HTTP-span leakage: ${e instanceof Error ? e.message : String(e)}`,
+    ]
   }
 
   // `fetch GET https://...` is the @vercel/otel naming; bare URLs cover other
   // HTTP instrumentors.
-  const leaked = [...new Set(names.filter((n) => /^fetch\s|^https?:\/\/|^(GET|POST) https?:/.test(n)))]
+  const leaked = [
+    ...new Set(
+      names.filter((n) => /^fetch\s|^https?:\/\/|^(GET|POST) https?:/.test(n)),
+    ),
+  ]
   if (leaked.length === 0) return []
   return [
     `auto-instrumented HTTP spans are being exported: ${JSON.stringify(leaked.slice(0, 5))}` +

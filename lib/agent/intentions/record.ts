@@ -1,6 +1,10 @@
 import { classifyIntentionPrompts } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
-import { INTENTION_DEFINITION_BY_KEY, type IntentionKey, rearmsOnNewerEvent } from './definitions'
+import {
+  INTENTION_DEFINITION_BY_KEY,
+  type IntentionKey,
+  rearmsOnNewerEvent,
+} from './definitions'
 import type { NewlyEligibleIntention, OpenIntention } from './derive'
 
 // TAC-324 / TAC-380: the two writes behind intentions. Both are fire-and-forget
@@ -60,7 +64,10 @@ export function buildEligibilityRow(input: {
   }
 }
 
-const ENSURE_OPTIONS = { onConflict: 'guest_id,intention_key', ignoreDuplicates: true } as const
+const ENSURE_OPTIONS = {
+  onConflict: 'guest_id,intention_key',
+  ignoreDuplicates: true,
+} as const
 
 export type RecordIntentionEligibilityOutcome =
   | { kind: 'nothing_to_record' }
@@ -123,7 +130,10 @@ export async function recordIntentionEligibility(input: {
     }
     return { kind: 'recorded', keys: input.entries.map((e) => e.key) }
   } catch (e) {
-    return { kind: 'failed', error: e instanceof Error ? e.message : String(e) }
+    return {
+      kind: 'failed',
+      error: e instanceof Error ? e.message : String(e),
+    }
   }
 }
 
@@ -144,12 +154,21 @@ export type RecordIntentionPromptsOutcome =
    * closed rather than risk asking it again. Not a real prompt — the brake
    * excludes these rows, and handle-inbound alerts on this outcome.
    */
-  | { kind: 'closed_pessimistically'; closedKeys: IntentionKey[]; classifierError: string }
+  | {
+      kind: 'closed_pessimistically'
+      closedKeys: IntentionKey[]
+      classifierError: string
+    }
   /**
    * The write itself failed. The only path left to a genuine re-ask, so
    * handle-inbound alerts on it.
    */
-  | { kind: 'write_failed'; keys: IntentionKey[]; source: PromptSource; error: string }
+  | {
+      kind: 'write_failed'
+      keys: IntentionKey[]
+      source: PromptSource
+      error: string
+    }
 
 type ClassifierResult =
   | { ok: true; raisedKeys: string[]; attempts: number }
@@ -162,8 +181,16 @@ async function classifyWithRetry(
   let lastError = 'classifier did not run'
   for (let attempt = 1; attempt <= CLASSIFIER_ATTEMPTS; attempt++) {
     try {
-      const result = await classifyIntentionPrompts({ sentBody, openIntentions })
-      if (result.ok) return { ok: true, raisedKeys: result.data.raisedKeys, attempts: attempt }
+      const result = await classifyIntentionPrompts({
+        sentBody,
+        openIntentions,
+      })
+      if (result.ok)
+        return {
+          ok: true,
+          raisedKeys: result.data.raisedKeys,
+          attempts: attempt,
+        }
       lastError = result.error
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e)
@@ -216,17 +243,19 @@ async function closeIntentions(input: {
   )
   try {
     const supabase = createAdminClient()
-    const { error: ensureError } = await supabase.from('guest_intention_prompts').upsert(
-      input.intentions.map((o) =>
-        buildEligibilityRow({
-          venueId: input.venueId,
-          guestId: input.guestId,
-          key: o.key,
-          eligibleAt: o.eligibleAt,
-        }),
-      ),
-      ENSURE_OPTIONS,
-    )
+    const { error: ensureError } = await supabase
+      .from('guest_intention_prompts')
+      .upsert(
+        input.intentions.map((o) =>
+          buildEligibilityRow({
+            venueId: input.venueId,
+            guestId: input.guestId,
+            key: o.key,
+            eligibleAt: o.eligibleAt,
+          }),
+        ),
+        ENSURE_OPTIONS,
+      )
     if (ensureError) return { ok: false, error: ensureError.message }
 
     if (plain.length > 0) {
@@ -304,9 +333,18 @@ export async function recordIntentionPrompts(input: {
       source: 'pessimistic',
     })
     if (!closed.ok) {
-      return { kind: 'write_failed', keys: openKeys, source: 'pessimistic', error: closed.error }
+      return {
+        kind: 'write_failed',
+        keys: openKeys,
+        source: 'pessimistic',
+        error: closed.error,
+      }
     }
-    return { kind: 'closed_pessimistically', closedKeys: openKeys, classifierError: classification.error }
+    return {
+      kind: 'closed_pessimistically',
+      closedKeys: openKeys,
+      classifierError: classification.error,
+    }
   }
 
   const raisedSet = new Set(classification.raisedKeys)
@@ -323,7 +361,16 @@ export async function recordIntentionPrompts(input: {
     source: 'classified',
   })
   if (!closed.ok) {
-    return { kind: 'write_failed', keys: raisedKeys, source: 'classified', error: closed.error }
+    return {
+      kind: 'write_failed',
+      keys: raisedKeys,
+      source: 'classified',
+      error: closed.error,
+    }
   }
-  return { kind: 'recorded', raisedKeys, classifierAttempts: classification.attempts }
+  return {
+    kind: 'recorded',
+    raisedKeys,
+    classifierAttempts: classification.attempts,
+  }
 }

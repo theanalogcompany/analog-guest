@@ -37,7 +37,10 @@ describe('handle-operator-decline structural invariants (TAC-299)', () => {
     let m: RegExpExecArray | null
     while ((m = re.exec(src)) !== null) {
       for (const name of m[1].split(',')) {
-        const trimmed = name.trim().split(/\s+as\s+/)[0].trim()
+        const trimmed = name
+          .trim()
+          .split(/\s+as\s+/)[0]
+          .trim()
         if (trimmed.length > 0) out.add(trimmed)
       }
     }
@@ -103,11 +106,11 @@ vi.mock('voyageai', () => ({
 // Three sibling orchestrator tests carry the same pattern — handle-inbound,
 // handle-followup and coalesce-inbound all importActual './stages'. Worth
 // hoisting there too if any of them ever starts flaking.
-const { buildAiRuntime } = await vi.importActual<typeof import('./stages')>('./stages')
-const { runtimeToProse } =
-  await vi.importActual<typeof import('@/lib/ai/prompts/serializers')>(
-    '@/lib/ai/prompts/serializers',
-  )
+const { buildAiRuntime } =
+  await vi.importActual<typeof import('./stages')>('./stages')
+const { runtimeToProse } = await vi.importActual<
+  typeof import('@/lib/ai/prompts/serializers')
+>('@/lib/ai/prompts/serializers')
 
 const buildRuntimeContextMock = vi.fn()
 const retrieveCorpusStageMock = vi.fn()
@@ -133,10 +136,12 @@ vi.mock('./stages', () => ({
 // helpers run REAL, so which card a decline regenerates is decided by the code
 // under test, not by a fixture.
 vi.mock('./pending-slots', async () => {
-  const actual = await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
+  const actual =
+    await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
   return {
     ...actual,
-    loadPendingRowsBySlot: (...args: unknown[]) => loadPendingRowsBySlotMock(...args),
+    loadPendingRowsBySlot: (...args: unknown[]) =>
+      loadPendingRowsBySlotMock(...args),
   }
 })
 vi.mock('./schedule-and-send', () => ({
@@ -206,7 +211,15 @@ const SIBLING_COMMITMENT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 function makeCtx() {
   return {
     agentRunId: 'agent-run-1',
-    venue: { id: VENUE_ID, slug: 'v', brandPersona: {}, venueInfo: { hours: {} }, timezone: 'UTC', sendblueNumber: '+1', holdAllOutbound: false },
+    venue: {
+      id: VENUE_ID,
+      slug: 'v',
+      brandPersona: {},
+      venueInfo: { hours: {} },
+      timezone: 'UTC',
+      sendblueNumber: '+1',
+      holdAllOutbound: false,
+    },
     guest: {
       id: GUEST_ID,
       phoneNumber: '+1',
@@ -316,7 +329,11 @@ function generateSucceedsCapturingCtx() {
 }
 
 // TAC-394: a pending row as loadPendingRowsBySlot returns it.
-function pendingRow(id: string, body: string, pendingCommitment: unknown = null) {
+function pendingRow(
+  id: string,
+  body: string,
+  pendingCommitment: unknown = null,
+) {
   return {
     id,
     body,
@@ -347,7 +364,10 @@ beforeEach(() => {
   commitmentIdsSeenByGenerate = null
   ctxSeenByGenerate = null
   loadPendingRowsBySlotMock.mockReset()
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
+  loadPendingRowsBySlotMock.mockResolvedValue({
+    obligation: null,
+    conversation: [],
+  })
   captureDraftDroppedMock.mockReset()
   captureDraftDroppedMock.mockResolvedValue(undefined)
   persistOrRegenQueuedDraftMock.mockReset()
@@ -417,7 +437,9 @@ describe('handleOperatorDecline', () => {
       followupTrigger?: { reason: string; metadata?: { hint?: string } }
     }
     expect(ctxArg.followupTrigger?.reason).toBe('manual')
-    expect(ctxArg.followupTrigger?.metadata?.hint).toContain('orange polenta cake')
+    expect(ctxArg.followupTrigger?.metadata?.hint).toContain(
+      'orange polenta cake',
+    )
     expect(ctxArg.followupTrigger?.metadata?.hint).toContain("can't fulfill")
   })
 
@@ -548,7 +570,9 @@ describe('handleOperatorDecline', () => {
     // The SNAPSHOT, not the live ctx: this test is sensitive to the filter
     // running late as well as to it filtering wrongly.
     const prose = runtimeToProse(
-      buildAiRuntime(ctxSeenByGenerate as unknown as Parameters<typeof buildAiRuntime>[0]),
+      buildAiRuntime(
+        ctxSeenByGenerate as unknown as Parameters<typeof buildAiRuntime>[0],
+      ),
       'manual',
       new Date(),
     )
@@ -596,7 +620,10 @@ describe('handleOperatorDecline', () => {
   })
 
   it('passes null existingPendingDraftId when neither slot holds a card', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: null,
+      conversation: [],
+    })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -618,7 +645,10 @@ describe('handleOperatorDecline', () => {
   })
 
   it('fires captureDraftQueued on INSERT path', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValueOnce({ obligation: null, conversation: [] })
+    loadPendingRowsBySlotMock.mockResolvedValueOnce({
+      obligation: null,
+      conversation: [],
+    })
     generateStageMock.mockResolvedValueOnce({
       status: 'success',
       result: makeGenerationResult(),
@@ -719,7 +749,9 @@ describe('handleOperatorDecline', () => {
       status: 'success',
       result: makeGenerationResult(),
     })
-    persistOrRegenQueuedDraftMock.mockRejectedValueOnce(new Error('connection lost'))
+    persistOrRegenQueuedDraftMock.mockRejectedValueOnce(
+      new Error('connection lost'),
+    )
 
     const result = await handleOperatorDecline({
       venueId: VENUE_ID,
@@ -798,7 +830,10 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
       obligation: pendingRow('card-a', "the next one's on us", COMP_A),
       conversation: [pendingRow('card-conv', 'we open at 7')],
     })
-    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
     persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
       outboundMessageId: 'card-conv',
       action: 'updated',
@@ -818,7 +853,10 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
       obligation: pendingRow('card-a', "the next one's on us", COMP_A),
       conversation: [],
     })
-    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
     persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
       outboundMessageId: MESSAGE_ID,
       action: 'inserted',
@@ -877,7 +915,11 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
         description: 'a free cortado on your next visit',
         code: '7K2P',
       },
-      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+      droppedCommitment: {
+        type: 'comp',
+        description: 'a free croissant',
+        code: null,
+      },
       triggers: ['operator_decline_initiated'],
       kind: 'followup',
       category: 'manual',
@@ -906,7 +948,11 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
         description: 'a free cortado on your next visit',
         code: '7K2P',
       },
-      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+      droppedCommitment: {
+        type: 'comp',
+        description: 'a free croissant',
+        code: null,
+      },
     })
 
     const result = await handleOperatorDecline(INPUT)
@@ -918,7 +964,10 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
       triggers: ['operator_decline_initiated'],
     })
     expect(captureDraftDroppedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'obligation_slot_taken', protectedDraftId: 'card-a' }),
+      expect.objectContaining({
+        reason: 'obligation_slot_taken',
+        protectedDraftId: 'card-a',
+      }),
     )
     expect(captureDraftQueuedMock).not.toHaveBeenCalled()
     warn.mockRestore()
@@ -928,7 +977,10 @@ describe('handleOperatorDecline: two pending slots (TAC-394)', () => {
   // the slot's unique index and race recovery decide again with the same policy.
   it('inserts when the slot read fails', async () => {
     loadPendingRowsBySlotMock.mockResolvedValueOnce(null)
-    generateStageMock.mockResolvedValueOnce({ status: 'success', result: makeGenerationResult() })
+    generateStageMock.mockResolvedValueOnce({
+      status: 'success',
+      result: makeGenerationResult(),
+    })
     persistOrRegenQueuedDraftMock.mockResolvedValueOnce({
       outboundMessageId: MESSAGE_ID,
       action: 'inserted',

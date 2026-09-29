@@ -106,7 +106,8 @@ const JudgeSchema = z.object({
 type Judgement = z.infer<typeof JudgeSchema>
 
 const TYPE_ASK: Record<Question['type'], string> = {
-  taste: 'The guest asked HOW IT TASTES. Answering the question type means the reply describes the actual flavour. Saying only that it is strong, popular, good, or who likes it is NOT describing the flavour. Telling them where to buy it, or what it is made of without saying how it tastes, is answering a different question.',
+  taste:
+    'The guest asked HOW IT TASTES. Answering the question type means the reply describes the actual flavour. Saying only that it is strong, popular, good, or who likes it is NOT describing the flavour. Telling them where to buy it, or what it is made of without saying how it tastes, is answering a different question.',
   how_to:
     'The guest asked HOW TO USE, BREW OR ORDER it. Answering the question type means the reply tells them a method: a brew style, a recipe, a grind, a thing to say at the counter, a technique. Telling them where to BUY it, or describing what it tastes like, or what it is, is answering a different question.',
   what_is:
@@ -175,10 +176,16 @@ async function main() {
   // reads. A per-question metric that is not unanimous across reps is printed
   // as a fraction so an unstable cell is visible rather than rounded away.
   const reps = Number(process.env.MEASURE_REPS ?? '3')
-  if (!Number.isInteger(reps) || reps < 1) throw new Error('MEASURE_REPS must be a positive integer')
-  const only = (process.env.MEASURE_ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-  const questions = only.length > 0 ? QUESTIONS.filter((q) => only.includes(q.id)) : QUESTIONS
-  if (questions.length === 0) throw new Error('MEASURE_ONLY matched no question id')
+  if (!Number.isInteger(reps) || reps < 1)
+    throw new Error('MEASURE_REPS must be a positive integer')
+  const only = (process.env.MEASURE_ONLY ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const questions =
+    only.length > 0 ? QUESTIONS.filter((q) => only.includes(q.id)) : QUESTIONS
+  if (questions.length === 0)
+    throw new Error('MEASURE_ONLY matched no question id')
 
   const db = createAdminClient()
   const { data: venue, error: venueError } = await db
@@ -195,7 +202,9 @@ async function main() {
     .single()
   const info = (cfg?.venue_info ?? {}) as { staff?: string[] }
   const personNames = [
-    ...(info.staff ?? []).map((line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? ''),
+    ...(info.staff ?? []).map(
+      (line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? '',
+    ),
     'Himanshu',
     'Milana',
   ].filter((n) => n.length > 2)
@@ -210,7 +219,10 @@ async function main() {
     .eq('venue_id', venue.id)
     .not('first_name', 'is', null)
   const named = (candidates ?? []).filter(
-    (g) => !String(g.first_name ?? '').toLowerCase().startsWith('synthetic'),
+    (g) =>
+      !String(g.first_name ?? '')
+        .toLowerCase()
+        .startsWith('synthetic'),
   )
   let guest: (typeof named)[number] | null = null
   let guestMessageCount = 0
@@ -224,8 +236,11 @@ async function main() {
       guest = g
     }
   }
-  if (!guest) throw new Error('no non-synthetic guest with a first_name at this venue')
-  const channel: 'text' | 'instagram' = guest.phone_number ? 'text' : 'instagram'
+  if (!guest)
+    throw new Error('no non-synthetic guest with a first_name at this venue')
+  const channel: 'text' | 'instagram' = guest.phone_number
+    ? 'text'
+    : 'instagram'
 
   const { count: statesBefore } = await db
     .from('guest_states')
@@ -245,16 +260,25 @@ async function main() {
       questions: questions.length,
       reps,
       statesBefore,
-      runLocal: startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' }),
+      runLocal: startedAt.toLocaleString('en-US', {
+        timeZone: venue.timezone ?? 'UTC',
+      }),
     },
   })
 
-  console.log(`[tac548] venue ${VENUE_SLUG} | guest "${guest.first_name}" (${channel}, ${guestMessageCount} messages)`)
-  console.log(`[tac548] prompt ${PROMPT_VERSION} | venue-local ${startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' })}`)
+  console.log(
+    `[tac548] venue ${VENUE_SLUG} | guest "${guest.first_name}" (${channel}, ${guestMessageCount} messages)`,
+  )
+  console.log(
+    `[tac548] prompt ${PROMPT_VERSION} | venue-local ${startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' })}`,
+  )
   console.log(`[tac548] guest_states rows before: ${statesBefore}`)
   console.log(`[tac548] run log: ${log.path}\n`)
 
-  const trace = startAgentTrace({ name: 'tac548-measure', agentRunId: randomUUID() })
+  const trace = startAgentTrace({
+    name: 'tac548-measure',
+    agentRunId: randomUUID(),
+  })
   const now = new Date()
 
   // ONE context build for the whole run, cloned per question below.
@@ -302,7 +326,10 @@ async function main() {
   for (const q of questions) {
     // Per question: classify and retrieve ONCE, compose ONCE. Both arms share
     // all of it, so the only thing that can differ is the sliced line.
-    const ctx = { ...baseCtx, recentMessages: [...baseCtx.recentMessages] } as typeof baseCtx
+    const ctx = {
+      ...baseCtx,
+      recentMessages: [...baseCtx.recentMessages],
+    } as typeof baseCtx
     ctx.currentMessage = {
       id: randomUUID(),
       providerMessageId: `tac548-${q.id}`,
@@ -370,102 +397,111 @@ async function main() {
     }
 
     for (let rep = 0; rep < reps; rep += 1) {
-    for (const arm of ARMS) {
-      let reply: string | null = null
-      let error: string | null = setupError
-      let calls = 0
+      for (const arm of ARMS) {
+        let reply: string | null = null
+        let error: string | null = setupError
+        let calls = 0
 
-      if (composed !== null && error === null) {
-        // THE ONE DIFFERENCE BETWEEN THE ARMS.
-        let systemBody = composed.systemPrompt
-        if (arm === 'control') {
-          const stripped = systemBody.replace(`${R39}\n`, '')
-          if (stripped === systemBody) {
-            error = 'control slice did not change the prompt'
-          } else {
-            systemBody = stripped
+        if (composed !== null && error === null) {
+          // THE ONE DIFFERENCE BETWEEN THE ARMS.
+          let systemBody = composed.systemPrompt
+          if (arm === 'control') {
+            const stripped = systemBody.replace(`${R39}\n`, '')
+            if (stripped === systemBody) {
+              error = 'control slice did not change the prompt'
+            } else {
+              systemBody = stripped
+            }
           }
-        }
 
-        if (error === null) {
-          const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
-          // A BOUNDED RE-ASK on a schema failure, byte-identical prompt every
-          // attempt. Not the regen loop: no feedback, no sticky constraints. It
-          // absorbs the voiceFidelity-scale failure that hit 11 of the TAC-513
-          // harness's first 14 generations, which has nothing to do with arm.
-          for (let attempt = 0; attempt < 4; attempt += 1) {
-            calls += 1
-            try {
-              const { object } = await generateObject({
-                model: getGenerationModel(),
-                system,
-                prompt: composed.userPrompt,
-                schema: GeneratedMessageSchema,
-                temperature: 0.7,
-                maxOutputTokens: MAX_OUTPUT_TOKENS,
-              })
-              reply = object.body
-              error = null
-              break
-            } catch (e) {
-              error = e instanceof Error ? e.message : String(e)
+          if (error === null) {
+            const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+            // A BOUNDED RE-ASK on a schema failure, byte-identical prompt every
+            // attempt. Not the regen loop: no feedback, no sticky constraints. It
+            // absorbs the voiceFidelity-scale failure that hit 11 of the TAC-513
+            // harness's first 14 generations, which has nothing to do with arm.
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+              calls += 1
+              try {
+                const { object } = await generateObject({
+                  model: getGenerationModel(),
+                  system,
+                  prompt: composed.userPrompt,
+                  schema: GeneratedMessageSchema,
+                  temperature: 0.7,
+                  maxOutputTokens: MAX_OUTPUT_TOKENS,
+                })
+                reply = object.body
+                error = null
+                break
+              } catch (e) {
+                error = e instanceof Error ? e.message : String(e)
+              }
             }
           }
         }
-      }
 
-      // A FAILED UNIT IS NOT A RESULT. It is recorded with its error and
-      // excluded from every rate below, never counted as a negative.
-      let judgement: Judgement | null = null
-      if (reply !== null) {
-        try {
-          judgement = await judge(q, reply)
-        } catch (e) {
-          error = `judge failed: ${e instanceof Error ? e.message : String(e)}`
+        // A FAILED UNIT IS NOT A RESULT. It is recorded with its error and
+        // excluded from every rate below, never counted as a negative.
+        let judgement: Judgement | null = null
+        if (reply !== null) {
+          try {
+            judgement = await judge(q, reply)
+          } catch (e) {
+            error = `judge failed: ${e instanceof Error ? e.message : String(e)}`
+          }
         }
+
+        const spec = reply ? countSpecificHits(reply, q.specifics) : null
+        const take = reply ? findPersonalTake(reply) : null
+        const identity = reply
+          ? classifySpeakerIdentity(reply, {
+              personNames,
+              venueNames: [...venueNames],
+            })
+          : null
+        const thirdPerson = reply
+          ? findThirdPersonVenue(reply, [...venueNames])
+          : null
+
+        const unit: Unit = {
+          questionId: q.id,
+          rep,
+          type: q.type,
+          question: q.body,
+          arm,
+          reply,
+          error,
+          calls,
+          category,
+          knowledgeChunkIds,
+          entryRetrieved,
+          judge: judgement,
+          specificHits: spec?.hits ?? 0,
+          specificsAvailable: q.specifics.length,
+          specificLabels: spec?.hitLabels ?? [],
+          detectorTake: take?.hasTake ?? false,
+          detectorTakeMatches: take?.matches ?? [],
+          namedSelfIntro: identity?.namedSelfIntro ?? false,
+          namedSelfIntroMatch: identity?.namedSelfIntroMatch ?? null,
+          thirdPersonVenue: thirdPerson,
+        }
+        units.push(unit)
+        log.appendUnit(unit as unknown as Record<string, unknown>)
+
+        const mark = error
+          ? '!'
+          : judgement?.answersQuestionType
+            ? '\u2713'
+            : '\u2717'
+        console.log(
+          `  ${mark} ${q.id.padEnd(22)} r${rep + 1} ${arm.padEnd(9)} ` +
+            `type=${judgement?.answersQuestionType ? 'Y' : 'n'} ` +
+            `spec=${judgement?.usesSpecifics ? 'Y' : 'n'}(${unit.specificHits}/${unit.specificsAvailable}) ` +
+            `take=${judgement?.keepsPersonalTake ? 'Y' : 'n'}` +
+            (error ? ` ERROR ${error.slice(0, 60)}` : ''),
+        )
       }
-
-      const spec = reply ? countSpecificHits(reply, q.specifics) : null
-      const take = reply ? findPersonalTake(reply) : null
-      const identity = reply
-        ? classifySpeakerIdentity(reply, { personNames, venueNames: [...venueNames] })
-        : null
-      const thirdPerson = reply ? findThirdPersonVenue(reply, [...venueNames]) : null
-
-      const unit: Unit = {
-        questionId: q.id,
-        rep,
-        type: q.type,
-        question: q.body,
-        arm,
-        reply,
-        error,
-        calls,
-        category,
-        knowledgeChunkIds,
-        entryRetrieved,
-        judge: judgement,
-        specificHits: spec?.hits ?? 0,
-        specificsAvailable: q.specifics.length,
-        specificLabels: spec?.hitLabels ?? [],
-        detectorTake: take?.hasTake ?? false,
-        detectorTakeMatches: take?.matches ?? [],
-        namedSelfIntro: identity?.namedSelfIntro ?? false,
-        namedSelfIntroMatch: identity?.namedSelfIntroMatch ?? null,
-        thirdPersonVenue: thirdPerson,
-      }
-      units.push(unit)
-      log.appendUnit(unit as unknown as Record<string, unknown>)
-
-      const mark = error ? '!' : judgement?.answersQuestionType ? '\u2713' : '\u2717'
-      console.log(
-        `  ${mark} ${q.id.padEnd(22)} r${rep + 1} ${arm.padEnd(9)} ` +
-          `type=${judgement?.answersQuestionType ? 'Y' : 'n'} ` +
-          `spec=${judgement?.usesSpecifics ? 'Y' : 'n'}(${unit.specificHits}/${unit.specificsAvailable}) ` +
-          `take=${judgement?.keepsPersonalTake ? 'Y' : 'n'}` +
-          (error ? ` ERROR ${error.slice(0, 60)}` : ''),
-      )
-    }
     }
   }
 
@@ -473,7 +509,11 @@ async function main() {
     .from('guest_states')
     .select('*', { count: 'exact', head: true })
 
-  report(units, { statesBefore: statesBefore ?? 0, statesAfter: statesAfter ?? 0, logPath: log.path })
+  report(units, {
+    statesBefore: statesBefore ?? 0,
+    statesAfter: statesAfter ?? 0,
+    logPath: log.path,
+  })
 }
 
 function pct(n: number, d: number): string {
@@ -497,23 +537,37 @@ function report(
 
   const failed = units.filter((u) => u.error !== null)
   say('')
-  say(`units: ${units.length} | failed: ${failed.length} (excluded from every rate)`)
+  say(
+    `units: ${units.length} | failed: ${failed.length} (excluded from every rate)`,
+  )
   for (const f of failed) say(`  ! ${f.questionId} ${f.arm}: ${f.error}`)
-  say(`guest_states rows: ${meta.statesBefore} before, ${meta.statesAfter} after`)
+  say(
+    `guest_states rows: ${meta.statesBefore} before, ${meta.statesAfter} after`,
+  )
   say(`run log: ${meta.logPath}`)
 
-  const notRetrieved = units.filter((u) => u.arm === 'treatment' && !u.entryRetrieved)
+  const notRetrieved = units.filter(
+    (u) => u.arm === 'treatment' && !u.entryRetrieved,
+  )
   if (notRetrieved.length > 0) {
     say('')
-    say(`RETRIEVAL NOTE: the entry's own terms did not appear in any retrieved chunk for ${notRetrieved.length} question(s).`)
-    say("That is a retrieval result (TAC-547's subject), not a verdict on R39. Those questions are")
-    say('reported in the table like any other, and are the ones to read rather than count.')
+    say(
+      `RETRIEVAL NOTE: the entry's own terms did not appear in any retrieved chunk for ${notRetrieved.length} question(s).`,
+    )
+    say(
+      "That is a retrieval result (TAC-547's subject), not a verdict on R39. Those questions are",
+    )
+    say(
+      'reported in the table like any other, and are the ones to read rather than count.',
+    )
     for (const u of notRetrieved) say(`  - ${u.questionId}`)
   }
 
   say('')
   say('-'.repeat(78))
-  say('HEADLINE METRICS (LLM judge, given the venue’s own entry as ground truth)')
+  say(
+    'HEADLINE METRICS (LLM judge, given the venue’s own entry as ground truth)',
+  )
   say('-'.repeat(78))
   say('')
   say('metric                          control            change')
@@ -524,7 +578,9 @@ function report(
     ['keeps a personal take', 'keepsPersonalTake'],
   ] as const) {
     const cells = ARMS.map((arm) => {
-      const scored = units.filter((u) => u.arm === arm && u.error === null && u.judge !== null)
+      const scored = units.filter(
+        (u) => u.arm === arm && u.error === null && u.judge !== null,
+      )
       const hits = scored.filter((u) => (u.judge as Judgement)[key]).length
       return pct(hits, scored.length)
     })
@@ -542,15 +598,22 @@ function report(
   const scoredOf = (arm: Arm) =>
     units.filter((u) => u.arm === arm && u.error === null && u.judge !== null)
 
-  const treatMisses = scoredOf('treatment').filter((u) => !(u.judge as Judgement).answersQuestionType)
+  const treatMisses = scoredOf('treatment').filter(
+    (u) => !(u.judge as Judgement).answersQuestionType,
+  )
   say(
     `${treatMisses.length === 0 ? 'PASS' : 'FAIL'}  bar: the change answers the question type asked, 0 misses` +
-      (treatMisses.length > 0 ? ` — missed: ${treatMisses.map((u) => u.questionId).join(', ')}` : ''),
+      (treatMisses.length > 0
+        ? ` — missed: ${treatMisses.map((u) => u.questionId).join(', ')}`
+        : ''),
   )
 
   const takeRate = (arm: Arm) => {
     const s = scoredOf(arm)
-    return s.length === 0 ? 0 : s.filter((u) => (u.judge as Judgement).keepsPersonalTake).length / s.length
+    return s.length === 0
+      ? 0
+      : s.filter((u) => (u.judge as Judgement).keepsPersonalTake).length /
+          s.length
   }
   const ctlTake = takeRate('control')
   const trtTake = takeRate('treatment')
@@ -563,18 +626,27 @@ function report(
     const scored = units.filter((u) => u.arm === arm && u.error === null)
     const intros = scored.filter((u) => u.namedSelfIntro)
     const thirds = scored.filter((u) => u.thirdPersonVenue !== null)
-    const reps = repeatedPhrases(scored.map((u) => u.reply ?? ''), { n: 5, maxShare: 0.25 })
+    const reps = repeatedPhrases(
+      scored.map((u) => u.reply ?? ''),
+      { n: 5, maxShare: 0.25 },
+    )
     say(
       `${intros.length === 0 ? 'PASS' : 'FAIL'}  ${arm}: 0 named self-introductions` +
-        (intros.length > 0 ? ` — ${intros.map((u) => `${u.questionId}:"${u.namedSelfIntroMatch}"`).join(', ')}` : ''),
+        (intros.length > 0
+          ? ` — ${intros.map((u) => `${u.questionId}:"${u.namedSelfIntroMatch}"`).join(', ')}`
+          : ''),
     )
     say(
       `${thirds.length === 0 ? 'PASS' : 'FAIL'}  ${arm}: 0 third-person venue references` +
-        (thirds.length > 0 ? ` — ${thirds.map((u) => `${u.questionId}:"${u.thirdPersonVenue}"`).join(', ')}` : ''),
+        (thirds.length > 0
+          ? ` — ${thirds.map((u) => `${u.questionId}:"${u.thirdPersonVenue}"`).join(', ')}`
+          : ''),
     )
     say(
       `${reps.length === 0 ? 'PASS' : 'FAIL'}  ${arm}: no phrasing in more than a quarter of replies` +
-        (reps.length > 0 ? ` — ${reps.map((r) => `"${r.phrase}" x${r.replies}`).join('; ')}` : ''),
+        (reps.length > 0
+          ? ` — ${reps.map((r) => `"${r.phrase}" x${r.replies}`).join('; ')}`
+          : ''),
     )
   }
 
@@ -582,7 +654,9 @@ function report(
   // of it. A wide gap between the two is a reason to read the bodies.
   say('')
   say('-'.repeat(78))
-  say('DETERMINISTIC CROSS-CHECK (a floor, not the verdict — see the module header)')
+  say(
+    'DETERMINISTIC CROSS-CHECK (a floor, not the verdict — see the module header)',
+  )
   say('-'.repeat(78))
   for (const arm of ARMS) {
     const scored = units.filter((u) => u.arm === arm && u.error === null)
@@ -595,14 +669,23 @@ function report(
   }
 
   const disagree = units.filter(
-    (u) => u.error === null && u.judge !== null && u.judge.keepsPersonalTake !== u.detectorTake,
+    (u) =>
+      u.error === null &&
+      u.judge !== null &&
+      u.judge.keepsPersonalTake !== u.detectorTake,
   )
   if (disagree.length > 0) {
     say('')
-    say(`judge and detector disagree on a take in ${disagree.length} reply/replies (read these):`)
+    say(
+      `judge and detector disagree on a take in ${disagree.length} reply/replies (read these):`,
+    )
     for (const u of disagree) {
-      say(`  ${u.questionId} ${u.arm}: judge=${u.judge!.keepsPersonalTake} detector=${u.detectorTake}` +
-        (u.judge!.personalTakeQuote ? ` judge quote: "${u.judge!.personalTakeQuote}"` : ''))
+      say(
+        `  ${u.questionId} ${u.arm}: judge=${u.judge!.keepsPersonalTake} detector=${u.detectorTake}` +
+          (u.judge!.personalTakeQuote
+            ? ` judge quote: "${u.judge!.personalTakeQuote}"`
+            : ''),
+      )
     }
   }
 
@@ -625,10 +708,14 @@ function report(
         const hits = ok.filter((u) => (u.judge as Judgement)[key]).length
         return hits === n ? 'YYY' : hits === 0 ? '···' : `${hits}/${n}`
       }
-      return `type ${f('answersQuestionType')} spec ${f('usesSpecifics')} take ${f('keepsPersonalTake')}`.padEnd(20)
+      return `type ${f('answersQuestionType')} spec ${f('usesSpecifics')} take ${f('keepsPersonalTake')}`.padEnd(
+        20,
+      )
     }
     if (units.some((u) => u.questionId === q.id)) {
-      say(`${q.id.padEnd(24)}${q.type.padEnd(8)}| ${cell('control')}| ${cell('treatment')}`)
+      say(
+        `${q.id.padEnd(24)}${q.type.padEnd(8)}| ${cell('control')}| ${cell('treatment')}`,
+      )
     }
   }
 
@@ -644,16 +731,28 @@ function sideBySide(units: readonly Unit[]): string {
   const out: string[] = []
   out.push('# TAC-548 side-by-side')
   out.push('')
-  out.push('Control is the shipped prompt with R39 sliced out. Change is the shipped prompt untouched.')
-  out.push('Per question both arms share one classification, one voice corpus, one knowledge corpus and')
-  out.push('one user prompt, so the only difference between them is that single line.')
+  out.push(
+    'Control is the shipped prompt with R39 sliced out. Change is the shipped prompt untouched.',
+  )
+  out.push(
+    'Per question both arms share one classification, one voice corpus, one knowledge corpus and',
+  )
+  out.push(
+    'one user prompt, so the only difference between them is that single line.',
+  )
   out.push('')
   for (const q of QUESTIONS) {
-    const c = units.find((u) => u.questionId === q.id && u.arm === 'control' && u.rep === 0)
-    const t = units.find((u) => u.questionId === q.id && u.arm === 'treatment' && u.rep === 0)
+    const c = units.find(
+      (u) => u.questionId === q.id && u.arm === 'control' && u.rep === 0,
+    )
+    const t = units.find(
+      (u) => u.questionId === q.id && u.arm === 'treatment' && u.rep === 0,
+    )
     if (!c && !t) continue
     out.push(`### ${q.body}`)
-    out.push(`*${q.type}* · ${q.id}${c && !c.entryRetrieved ? ' · **entry terms not in retrieved chunks**' : ''}`)
+    out.push(
+      `*${q.type}* · ${q.id}${c && !c.entryRetrieved ? ' · **entry terms not in retrieved chunks**' : ''}`,
+    )
     out.push('')
     out.push('**Control**')
     out.push('')

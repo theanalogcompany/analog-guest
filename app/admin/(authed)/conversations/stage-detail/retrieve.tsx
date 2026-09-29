@@ -46,14 +46,19 @@ export function RetrieveDetail({ stage }: { stage: TraceStage }) {
   return (
     <div className="flex flex-col gap-2.5">
       <KvList>
-        {matchCount !== null ? <KvRow label="matchCount" value={matchCount} /> : null}
+        {matchCount !== null ? (
+          <KvRow label="matchCount" value={matchCount} />
+        ) : null}
         {topSimilarity !== null ? (
           <KvRow label="topSimilarity" value={topSimilarity.toFixed(3)} />
         ) : null}
       </KvList>
 
       {hasCaptured ? (
-        <SubSection title={`Captured content · ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}`} defaultOpen>
+        <SubSection
+          title={`Captured content · ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}`}
+          defaultOpen
+        >
           <div className="flex flex-col gap-2">
             {chunks.map((chunk) => (
               <ChunkRow key={chunk.id} chunk={chunk} />
@@ -65,8 +70,12 @@ export function RetrieveDetail({ stage }: { stage: TraceStage }) {
       {hasInput ? (
         <SubSection title="Input" defaultOpen={false}>
           <KvList>
-            {queryLength !== null ? <KvRow label="queryLength" value={queryLength} /> : null}
-            {query !== null ? <KvRow label="query" value={<LongText text={query} />} /> : null}
+            {queryLength !== null ? (
+              <KvRow label="queryLength" value={queryLength} />
+            ) : null}
+            {query !== null ? (
+              <KvRow label="query" value={<LongText text={query} />} />
+            ) : null}
           </KvList>
         </SubSection>
       ) : null}
@@ -79,11 +88,16 @@ function ChunkRow({ chunk }: { chunk: CorpusChunk }) {
     <div className="border border-stone-light/60 rounded p-2 bg-paper/40 flex flex-col gap-1.5 text-sm">
       <div className="flex items-baseline justify-between gap-2 text-xs text-ink-faint">
         <span className="tabular-nums">sim {chunk.similarity.toFixed(3)}</span>
-        <span className="truncate" title={`${chunk.sourceType} · ${chunk.voiceCorpusId}`}>
+        <span
+          className="truncate"
+          title={`${chunk.sourceType} · ${chunk.voiceCorpusId}`}
+        >
           {chunk.sourceType}
         </span>
       </div>
-      <span className="text-ink whitespace-pre-wrap break-words">{chunk.text}</span>
+      <span className="text-ink whitespace-pre-wrap break-words">
+        {chunk.text}
+      </span>
     </div>
   )
 }

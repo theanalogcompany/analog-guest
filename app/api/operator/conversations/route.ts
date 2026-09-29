@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
+import { logger } from '@/lib/observability/logger'
 import { listOperatorConversations } from '@/lib/operator'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +25,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await listOperatorConversations(operator.venueScope)
   if (!result.ok) {
-    console.warn(
+    logger.warn(
       `[/api/operator/conversations] listOperatorConversations failed error=${result.error}`,
     )
     return NextResponse.json({ error: 'internal_error' }, { status: 500 })

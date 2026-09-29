@@ -16,7 +16,9 @@ export function verifyOAuthState(state: string, secret: string): string | null {
   const parts = state.split('.')
   if (parts.length !== 2) return null
   const [payload, sig] = parts
-  const expected = createHmac('sha256', secret).update(payload).digest('base64url')
+  const expected = createHmac('sha256', secret)
+    .update(payload)
+    .digest('base64url')
   const a = Buffer.from(sig)
   const b = Buffer.from(expected)
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null

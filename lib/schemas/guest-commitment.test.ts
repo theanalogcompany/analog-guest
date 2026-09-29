@@ -27,9 +27,9 @@ describe('isEmptyCommitmentEmission', () => {
   })
 
   it('treats whitespace-only description as empty', () => {
-    expect(isEmptyCommitmentEmission({ type: 'comp', description: '   ' })).toBe(
-      true,
-    )
+    expect(
+      isEmptyCommitmentEmission({ type: 'comp', description: '   ' }),
+    ).toBe(true)
   })
 
   it('treats a fully-formed emission as non-empty', () => {
@@ -49,14 +49,17 @@ describe('isEmptyArrivalCapture', () => {
   })
 
   it('treats reference-without-signal as empty', () => {
-    expect(
-      isEmptyArrivalCapture({ referencesCommitmentId: 'abc-123' }),
-    ).toBe(true)
+    expect(isEmptyArrivalCapture({ referencesCommitmentId: 'abc-123' })).toBe(
+      true,
+    )
   })
 
   it('treats whitespace-only commitment id as empty', () => {
     expect(
-      isEmptyArrivalCapture({ signal: 'imminent', referencesCommitmentId: '  ' }),
+      isEmptyArrivalCapture({
+        signal: 'imminent',
+        referencesCommitmentId: '  ',
+      }),
     ).toBe(true)
   })
 
@@ -137,7 +140,10 @@ describe('pendingFromEmission', () => {
   })
 
   it('generates a code for discount when emission omits one', () => {
-    const out = pendingFromEmission({ type: 'discount', description: '15% off' })
+    const out = pendingFromEmission({
+      type: 'discount',
+      description: '15% off',
+    })
     expect(out?.code).toMatch(/^[A-Z2-9]{4}$/)
   })
 
@@ -245,7 +251,9 @@ describe('toActiveCommitment', () => {
   })
 
   it('returns null for acknowledged status', () => {
-    expect(toActiveCommitment({ ...baseRow, status: 'acknowledged' })).toBeNull()
+    expect(
+      toActiveCommitment({ ...baseRow, status: 'acknowledged' }),
+    ).toBeNull()
   })
 
   it('returns null for cancelled / expired / redeemed', () => {
@@ -311,7 +319,7 @@ describe('resolveCancellation (TAC-513)', () => {
     code: 'GWPZ',
   }
 
-  it('resolves an id that is on this guest\'s list', () => {
+  it("resolves an id that is on this guest's list", () => {
     const r = resolveCancellation(tonic.id, [cortado, tonic])
     expect(r).toEqual({
       status: 'resolved',
@@ -333,14 +341,16 @@ describe('resolveCancellation (TAC-513)', () => {
     // The load-bearing distinction: the reply still says a promise is
     // cancelled, so this has to reach the unbacked-claim backstop rather than
     // pass as a turn that carried nothing.
-    const r = resolveCancellation('deadbeef-0000-4000-8000-000000000000', [cortado])
+    const r = resolveCancellation('deadbeef-0000-4000-8000-000000000000', [
+      cortado,
+    ])
     expect(r).toEqual({
       status: 'unresolved',
       claimedId: 'deadbeef-0000-4000-8000-000000000000',
     })
   })
 
-  it('reports another guest\'s commitment id as unresolved', () => {
+  it("reports another guest's commitment id as unresolved", () => {
     // activeCommitments is always one guest's own set, so an id from another
     // guest is simply absent from it. This is the whole cross-guest guard.
     expect(resolveCancellation(tonic.id, [cortado]).status).toBe('unresolved')
@@ -364,12 +374,18 @@ describe('resolveCancellation (TAC-513)', () => {
   })
 
   it('trims surrounding whitespace before matching', () => {
-    expect(resolveCancellation(`  ${tonic.id}  `, [tonic]).status).toBe('resolved')
+    expect(resolveCancellation(`  ${tonic.id}  `, [tonic]).status).toBe(
+      'resolved',
+    )
   })
 
   it('matches the id exactly, never by prefix or case', () => {
-    expect(resolveCancellation(tonic.id.slice(0, 8), [tonic]).status).toBe('unresolved')
-    expect(resolveCancellation(tonic.id.toUpperCase(), [tonic]).status).toBe('unresolved')
+    expect(resolveCancellation(tonic.id.slice(0, 8), [tonic]).status).toBe(
+      'unresolved',
+    )
+    expect(resolveCancellation(tonic.id.toUpperCase(), [tonic]).status).toBe(
+      'unresolved',
+    )
   })
 
   it('never matches on the verification code', () => {
@@ -387,7 +403,9 @@ describe('PendingCancellationSchema (TAC-513)', () => {
   })
 
   it('rejects an empty commitmentId', () => {
-    expect(PendingCancellationSchema.safeParse({ commitmentId: '' }).success).toBe(false)
+    expect(
+      PendingCancellationSchema.safeParse({ commitmentId: '' }).success,
+    ).toBe(false)
   })
 
   it('rejects a missing commitmentId', () => {

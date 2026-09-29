@@ -2,10 +2,9 @@
 
 Loads only when you work in this directory.
 
-Rehomed here 2026-09-29, after the root `CLAUDE.md` restructure (PR #282) dropped the whole
-"Observability and alerting" section instead of routing it. For four days the repo had a
-measured latency baseline no document mentioned, and a planning session re-derived it from
-scratch and got the priorities wrong. **If you move this again, move it - do not delete it.**
+Rehomed here 2026-09-29: PR #282 deleted the root "Observability and alerting" section instead
+of routing it, and for four days a measured latency baseline existed that no document mentioned.
+**If you move this again, move it - do not delete it.**
 
 ## Three layers, each filling a different gap
 
@@ -104,21 +103,18 @@ and is removed **2026-11-16**.
 ### The 2026-11-16 deadline, and the v5 migration that answered it
 
 **The same date removes the legacy batch ingestion API, and `langfuse@3.x` stops ingesting
-traces entirely** - every span, every latency query, the cache accounting and the trace panel.
+traces entirely.** **Migrated to SDK v5 on 2026-09-29, so this repo is handled** - a package
+replacement, not a version bump: `langfuse` → `@langfuse/tracing` + `@langfuse/otel` +
+`@langfuse/client` + `@langfuse/core`. Recorded because the traps below stay live, and a sibling
+repo or old branch still on v3 needs to know the date is real. Three traps:
 
-**Migrated to SDK v5 on 2026-09-29, so this is handled.** Recorded because the traps below stay
-live, and a sibling repo or old branch on `langfuse@3.x` needs to know the date is real. It was
-a package replacement, not a version bump: `langfuse` → `@langfuse/tracing` + `@langfuse/otel`
-+ `@langfuse/client` + `@langfuse/core`. Three traps:
-
-- **v5 filters spans by default** instead of exporting everything, and filtering drops spans
-  **silently**. `span-processor.ts` passes an explicit predicate keyed on instrumentation scope:
-  keep `langfuse-sdk` (everything `startObservation` creates) and `ai` (the AI SDK, so
-  `experimental_telemetry` is not dropped the day someone enables it). **Do not widen it to
-  `() => true`** - `@vercel/otel` instruments `fetch`, so that exports a span per outbound HTTP
-  call with the full URL as the span name, which is both ingestion volume nobody chose and a PII
-  surface `LANGFUSE_CAPTURE_CONTENT` does not gate. `npm run langfuse-smoke` checks both
-  directions.
+- **v5 filters spans by default** and filtering drops them **silently**. `span-processor.ts`
+  passes an explicit predicate keyed on instrumentation scope: keep `langfuse-sdk` (everything
+  `startObservation` creates) and `ai` (so `experimental_telemetry` is not dropped the day someone
+  enables it). **Do not widen it to `() => true`** - `@vercel/otel` instruments `fetch`, so that
+  exports a span per outbound HTTP call with the full URL as the span NAME: ingestion volume
+  nobody chose, and a PII surface `LANGFUSE_CAPTURE_CONTENT` does not gate. `npm run
+  langfuse-smoke` checks both directions.
 - **Use SDK ≥ 5.4.0**, or set `x-langfuse-ingestion-version: 4` on a direct OTLP exporter.
   Without it, ingested data can lag up to 15 minutes - the real source of the "data delays".
 - **`@langfuse/core` is a declared direct dependency though it looks transitive.**
@@ -132,6 +128,7 @@ a package replacement, not a version bump: `langfuse` → `@langfuse/tracing` + 
 | `instrumentation.ts` (repo root) | Next's `register()` hook. Registers the OTel provider once per runtime, before the first request |
 | `lib/observability/span-processor.ts` | the `LangfuseSpanProcessor` singleton and `readLangfuseConfig()` - the single source of truth for "is observability on" |
 | `lib/observability/langfuse.ts` | the `AgentTrace` / `AgentSpan` wrapper every consumer imports |
+| `lib/observability/logger.ts` | structured one-JSON-line-per-event logging. **Convention for new code:** `logger.warn('[area] what', { fields })` rather than `console.warn`. Pure, no `@/*` imports. Existing `console.*` call sites migrate as they are touched, keeping the message text so log searches survive the migration - `langfuse.ts` is still on `console.warn` for that reason |
 
 Four structural choices, reasoning in each file's header. Read those before changing any of
 them; all four fail quietly.
@@ -245,62 +242,43 @@ curl -s -u "$PK:$SK" -G "$LANGFUSE_BASE_URL/api/public/observations" \
 ```
 
 Spans older than the accounting carry no such fields - exclude them, do not count them as misses.
-Measured once at a ~75% hit rate, close to the ~82% the traffic-gap analysis predicted, so the
-cache is not silently broken; re-run the query rather than trusting that sentence.
+Measured once at a ~75% hit rate; re-run the query rather than trusting that sentence.
 
-This span is the **only** surface the cache is visible on: a hit and a fast uncached call have
-identical latency, and a breakpoint that quietly stops reading raises no error. The failure mode
-is named in `lib/ai/types.ts` - something per-message leaking into `composePrompt`'s first three
+**This span is the only surface the cache is visible on.** A hit and a fast uncached call have
+identical latency, and a breakpoint that quietly stops reading raises no error. The failure mode is
+named in `lib/ai/types.ts`: something per-message leaking into `composePrompt`'s first three
 sections, silently killing a ~10k-token cached prefix for every venue.
 
-The breakpoint is on the first of two adjacent system blocks - template + persona + venue info,
-stable per (venue, channel); the second carries the retrieved slates and is deliberately
-uncached. `ttl: '1h'` rather than the 5m default was chosen from measured inter-message gaps,
-**already asked and answered** - the derivation and the numbers are in
-`lib/ai/generate-message.ts` at the `generateObject` call. Re-derive only if traffic shape
-changes.
+The breakpoint sits on the first of two adjacent system blocks - template + persona + venue info,
+stable per (venue, channel); the second carries the retrieved slates and is deliberately uncached.
+`ttl: '1h'` over the 5m default was chosen from measured inter-message gaps, **already asked and
+answered** at the `generateObject` call in `lib/ai/generate-message.ts`. Re-derive only if traffic
+shape changes.
 
-### AI SDK `experimental_telemetry`: measured, and not a config flip
+### Native cost and usage: how it works, and why not `experimental_telemetry`
 
-The plumbing is ready - `span-processor.ts` allowlists the `ai` instrumentation scope - but
-**turning it on as-is splits every model call into its own separate trace**, measured with a
-live probe on 2026-09-29.
+Before 2026-09-29 every model call was recorded as `type: SPAN` with **no model, no
+`usageDetails`, no `costDetails`** - 0 of 100 `generate` observations - so Langfuse's cost and
+token dashboards were **empty for this project** (1,448 traces over 30 days, total cost $0.0003,
+and that figure was one probe call). Langfuse prices only GENERATION observations.
 
-What the probe found. Enabling it on one `generateObject` nested inside one of our spans
-produced **two traces**, not one: ours (`probe.ai_sdk_telemetry`) and a detached
-`probe.classify:ai.generateObject` carrying the `doGenerate` generation. The cause is structural:
-`startObservation` returns an object and never makes its span *active* in the OTel context, so
-the AI SDK's tracer starts a new root instead of attaching as a child.
+The fix: `AgentSpanUpdate` carries `model` and `usage`, built with `toAgentUsage()`, and model call
+sites use `trace.generation()`. **`classify` and `generate` are converted; the five verifiers are
+not yet.** `generate` sums usage across regen attempts rather than reporting the last, so the
+~12.6% of turns that run a second Sonnet call are priced for both.
 
-The prize is real, which is why this is worth revisiting. The AI SDK's generation span records
-**native Langfuse `usageDetails`** - `input`, `output`, `input_cached_tokens`,
-`input_cache_creation_5m`, `input_cache_creation_1h`, with the model attributed. That is exactly
-the prompt-cache accounting the metrics API currently cannot aggregate because we hand-roll it
-into span output JSON.
+**The AI SDK's own `experimental_telemetry` was the obvious alternative and is NOT a config flip.**
+`span-processor.ts` allowlists the `ai` scope, so the plumbing is there, but a live probe on
+2026-09-29 found that enabling it on one `generateObject` nested in one of our spans produced **two
+traces**: ours, and a detached `probe.classify:ai.generateObject` carrying the generation. The
+cause is structural - `startObservation` returns an object and never makes its span *active* in the
+OTel context, so the AI SDK's tracer starts a new root. Making ours active means
+`startActiveObservation(name, fn, opts)`, which is **callback-scoped**, and the whole `AgentTrace`
+shape exists to hand objects to straight-line code across ~20 sites.
 
-But the fix is an interface change, not a flag. Making our spans context-active means
-`startActiveObservation(name, fn, opts)`, which is **callback-scoped** - and the whole
-`AgentTrace` / `AgentSpan` shape exists to hand objects to straight-line code across ~20 call
-sites. Inverting that is the interface change the v5 migration was designed to avoid.
-
-**Do not enable `experimental_telemetry` without deciding that first.** Split traces would break
-the per-stage latency queries and the Command Center trace panel, both of which assume one trace
-per turn. The files involved are also THE-215's.
-
-**A much cheaper path reaches the same prize, and it is the one being taken.** Measured
-2026-09-29 before the change: every `generate` span was `type: SPAN` with **no model, no
-`usageDetails`, no `costDetails`** - 0 of 100 - so Langfuse's cost and token dashboards were
-**empty for this project** (1,448 traces over 30 days, total cost $0.0003, and that figure was one
-probe call). `generation()` was called by nothing outside the smoke test, and `AgentSpanUpdate` had
-no `usage` or `model` field to pass anyway.
-
-So `AgentSpanUpdate` gained `model` and `usage` (build the latter with `toAgentUsage`, never by
-hand), and model call sites call `trace.generation()` instead of `trace.span()`. No context
-propagation, no interface inversion, and the AI SDK already returns the cache-token breakdown.
-
-**`classify` and `generate` are converted. The five verifiers are not yet.** `generate` sums usage
-across regen attempts rather than reporting the last, so the ~12.6% of turns that run a second
-Sonnet call are priced for both.
+**Do not enable it without deciding that inversion first.** Split traces break the per-stage
+latency queries and the Command Center trace panel, both of which assume one trace per turn. The
+route above already delivers the usage and cost attribution that was the point.
 
 ### Three traps in the native usage fields
 

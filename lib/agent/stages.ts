@@ -63,7 +63,10 @@ import {
   pendingFromEmission,
   resolveCancellation,
 } from '@/lib/schemas/guest-commitment'
-import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
+import {
+  resolveCategoryPolicy,
+  resolvePolicyDecision,
+} from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
@@ -527,7 +530,8 @@ export const APPROVAL_TRIGGERS = {
  * keep the human-readable label map exhaustive at compile time — adding
  * a new trigger above without a corresponding label there is a TS error.
  */
-export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
+export type ApprovalTrigger =
+  (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
 
 /**
  * TAC-364: `messages.review_reason` for a card written by
@@ -745,7 +749,11 @@ export function knowledgeGapWillQueue(
   ctx: Pick<RuntimeContext, 'currentMessage' | 'guest'>,
   knowledgeGap: boolean,
 ): boolean {
-  return knowledgeGap === true && ctx.currentMessage !== null && ctx.guest.isDemo !== true
+  return (
+    knowledgeGap === true &&
+    ctx.currentMessage !== null &&
+    ctx.guest.isDemo !== true
+  )
 }
 
 // TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
@@ -753,7 +761,10 @@ export function knowledgeGapWillQueue(
 // file. Re-exported here so every existing import keeps working. The moved
 // review_reason values are literals there; stages.test.ts pins them against
 // APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON.
-export { isKnowledgeGapCard, KNOWLEDGE_GAP_CARD_REVIEW_REASONS } from './pending-slots'
+export {
+  isKnowledgeGapCard,
+  KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
+} from './pending-slots'
 
 function pickPrimaryTrigger(triggers: readonly string[]): string {
   // Caller guarantees triggers.length > 0; the fallback to triggers[0]
@@ -770,7 +781,9 @@ function pickPrimaryTrigger(triggers: readonly string[]): string {
  * with a prefixed error message; caller catches and fires the appropriate
  * red alert.
  */
-export async function classifyStage(ctx: RuntimeContext): Promise<Classification> {
+export async function classifyStage(
+  ctx: RuntimeContext,
+): Promise<Classification> {
   if (!ctx.currentMessage) {
     throw new Error('classifyStage: no inbound message on context')
   }
@@ -833,14 +846,18 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
  * shouldn't need the same corpus depth as topic-specific ones. Calibrate
  * against real corpus data after first 100 inbound messages.
  */
-export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMatch[]> {
+export async function retrieveCorpusStage(
+  ctx: RuntimeContext,
+): Promise<CorpusMatch[]> {
   const query =
     ctx.currentMessage?.body ??
     (ctx.followupTrigger
       ? `Followup ${ctx.followupTrigger.reason} for ${ctx.guest.firstName ?? 'guest'}`
       : '')
   if (!query) {
-    throw new Error('retrieveCorpusStage: no query available (no inbound, no followup)')
+    throw new Error(
+      'retrieveCorpusStage: no query available (no inbound, no followup)',
+    )
   }
   const r = await retrieveContext({
     venueId: ctx.venue.id,
@@ -850,7 +867,9 @@ export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMa
   if (!r.ok) {
     throw new Error(`retrieveCorpusStage: ${r.error}`)
   }
-  const strongCount = r.data.filter((m) => m.similarity >= STRONG_MATCH_SIMILARITY).length
+  const strongCount = r.data.filter(
+    (m) => m.similarity >= STRONG_MATCH_SIMILARITY,
+  ).length
   // THE-231: only fail closed on the inbound path. Followups are operator-
   // initiated (cron trigger or Command Center button); the synthetic followup
   // query — "Followup manual for {firstName}" — rarely embeds anywhere near
@@ -868,11 +887,13 @@ export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMa
   // Observability event: thin retrieval. Looser bar than the gate above —
   // retrieval succeeded structurally but the best match is weak, suggesting
   // the prompt may lack venue-voice grounding.
-  const topSimilarity = r.data.length > 0 ? Math.max(...r.data.map((m) => m.similarity)) : 0
+  const topSimilarity =
+    r.data.length > 0 ? Math.max(...r.data.map((m) => m.similarity)) : 0
   if (topSimilarity < CORPUS_TOP_SIMILARITY_LOW_THRESHOLD) {
-    const topMatch = r.data.length > 0
-      ? r.data.reduce((a, b) => (a.similarity >= b.similarity ? a : b))
-      : null
+    const topMatch =
+      r.data.length > 0
+        ? r.data.reduce((a, b) => (a.similarity >= b.similarity ? a : b))
+        : null
     await captureCorpusRetrievalBelowThreshold({
       agentRunId: ctx.agentRunId,
       venueId: ctx.venue.id,
@@ -1080,7 +1101,8 @@ export async function generateStage(
   ctx: RuntimeContext,
   category: Classification['category'],
 ): Promise<GenerateOutcome> {
-  if (!ctx.corpus) return { status: 'failed', error: 'corpus missing on context' }
+  if (!ctx.corpus)
+    return { status: 'failed', error: 'corpus missing on context' }
   // lib/rag types sourceType as plain string; lib/ai narrows it to a closed
   // union. The DB check constraint on voice_corpus.source_type guarantees
   // runtime values are inside that union, so the per-field cast is sound.
@@ -1231,7 +1253,8 @@ export async function generateStage(
  * return `clean`, which the gate then recorded on messages.ungrounded_claims
  * as `[]` — byte-identical to what a genuine pass writes. After the fact "the
  * check passed this draft" and "the check never completed" were the same row.
- * That is this repo's signature defect class (see CLAUDE.md's Common gotchas:
+ * That is this repo's signature defect class (see CLAUDE.md, "Gotchas worth
+ * carrying everywhere":
  * comp_regex_backstop, the push `future-add safety` test, is_test_synthetic),
  * and a distinct state is what makes the gate's mapping a total switch instead
  * of a ternary chain with a silent default.
@@ -1257,7 +1280,7 @@ export type GroundingBackstopResult =
  * passing. That was caught in code review, by someone adding the state and
  * running the tree rather than reading the sentence, and it is this repo's
  * signature defect class committed inside the ticket that exists to close an
- * instance of it (CLAUDE.md, Common gotchas).
+ * instance of it (CLAUDE.md, "Gotchas worth carrying everywhere").
  *
  * `satisfies Record<GroundingBackstopResult['status'], …>` is what makes the
  * claim true. A sixth state now fails to compile here until someone says what
@@ -1355,9 +1378,17 @@ const UNGROUNDED_CLAIMS_BY_STATUS = {
 export async function verifyGroundingStage(
   ctx: Pick<
     RuntimeContext,
-    'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus' | 'conversationChannel'
+    | 'agentRunId'
+    | 'currentMessage'
+    | 'guest'
+    | 'venue'
+    | 'knowledgeCorpus'
+    | 'conversationChannel'
   >,
-  generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body' | 'userPrompt'>,
+  generation: Pick<
+    GenerateMessageResult,
+    'knowledgeGap' | 'body' | 'userPrompt'
+  >,
 ): Promise<GroundingBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (generation.knowledgeGap === true) return { status: 'skipped' }
@@ -1496,7 +1527,9 @@ export function isCommitmentTypeGated(
   const commitmentDescription = generation.commitment.description?.trim()
   return Boolean(
     commitmentDescription &&
-      (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount'),
+    (commitmentType === 'comp' ||
+      commitmentType === 'hold' ||
+      commitmentType === 'discount'),
   )
 }
 
@@ -1575,7 +1608,10 @@ export type MechanicOfferBackstopResult =
  */
 export async function verifyMechanicOfferStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'mechanics'>,
-  generation: Pick<GenerateMessageResult, 'body' | 'requiresOperatorApproval' | 'commitment'>,
+  generation: Pick<
+    GenerateMessageResult,
+    'body' | 'requiresOperatorApproval' | 'commitment'
+  >,
 ): Promise<MechanicOfferBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (isModelFlagged(generation) || isCommitmentTypeGated(generation)) {
@@ -1834,7 +1870,8 @@ export async function verifyClosedVenueArrivalStage(
   // The same `now` the recognition snapshot and the arrival dispatch use, so
   // the gate cannot reach a different verdict from the one capture reached a
   // few lines earlier on the same turn.
-  if (!isVenueClosed(ctx.venue, ctx.recognition.computedAt)) return { status: 'skipped' }
+  if (!isVenueClosed(ctx.venue, ctx.recognition.computedAt))
+    return { status: 'skipped' }
   if (isClosedVenueArrivalEmitted(generation)) return { status: 'skipped' }
 
   let r = await verifyClosedVenueArrival({ replyBody: generation.body })
@@ -1842,13 +1879,17 @@ export async function verifyClosedVenueArrivalStage(
   // One immediate retry, transient faults only. Truncation is excluded by
   // errorCode rather than by message text, which is provider-formatted and
   // not a contract.
-  if (!r.ok && r.errorCode !== VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE) {
+  if (
+    !r.ok &&
+    r.errorCode !== VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
+  ) {
     retried = true
     r = await verifyClosedVenueArrival({ replyBody: generation.body })
   }
 
   if (!r.ok) {
-    const truncated = r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
+    const truncated =
+      r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
     console.warn(
       `[agent] closed-venue arrival check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}${retried ? ' (after one retry)' : ''}`,
     )
@@ -1931,7 +1972,8 @@ export async function verifyCancellationClaimStage(
 
   if (ctx.guest.isDemo === true) return { resolution, claim: 'skipped' }
   if (resolution.status === 'resolved') return { resolution, claim: 'skipped' }
-  if (generation.body.trim().length === 0) return { resolution, claim: 'skipped' }
+  if (generation.body.trim().length === 0)
+    return { resolution, claim: 'skipped' }
 
   let r = await verifyCancellationClaim({ replyBody: generation.body })
   let retried = false
@@ -1944,7 +1986,8 @@ export async function verifyCancellationClaimStage(
   }
 
   if (!r.ok) {
-    const truncated = r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
+    const truncated =
+      r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
     console.warn(
       `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
@@ -2238,10 +2281,18 @@ export type ApprovalDecision =
  * out.
  */
 export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
-  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+  if (
+    ctx.venue.holdAllOutbound === true &&
+    ctx.classification?.category !== 'opt_out'
+  ) {
     return false
   }
-  if (resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) !== 'auto_send') {
+  if (
+    resolveCategoryPolicy(
+      ctx.venue.approvalPolicy,
+      ctx.classification?.category,
+    ) !== 'auto_send'
+  ) {
     return false
   }
   return !isVenueClosed(ctx.venue, ctx.recognition.computedAt)
@@ -2293,7 +2344,9 @@ export async function applyApprovalPolicyStage(
   //
   // The STRUCTURAL half of this pair needs no parameter: it reads the
   // generation's own emission and the venue's hours, both already here.
-  closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult = { status: 'skipped' },
+  closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult = {
+    status: 'skipped',
+  },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -2347,7 +2400,8 @@ export async function applyApprovalPolicyStage(
   // review_state='auto_sent', outside both indexes.
   const isManualFollowup = ctx.followupTrigger?.reason === 'manual'
   const pendingRows =
-    (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+    (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ??
+    EMPTY_PENDING_ROWS
 
   // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
   // discount}. Fires regardless of requiresOperatorApproval self-flag.
@@ -2368,7 +2422,10 @@ export async function applyApprovalPolicyStage(
   // ONLY this trigger — an opt_out reply still passes through triggers 1–5
   // above unchanged. Composes with (does not short-circuit) the other
   // triggers, so existingPendingDraftId still routes regen-in-place correctly.
-  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+  if (
+    ctx.venue.holdAllOutbound === true &&
+    ctx.classification?.category !== 'opt_out'
+  ) {
     triggers.push(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
   }
 
@@ -2455,7 +2512,9 @@ export async function applyApprovalPolicyStage(
   // than handled separately — the gate has never distinguished "not run" from
   // "ran and found nothing", and the harness + followup callers both rely on
   // being able to omit the argument entirely.
-  const grounding: GroundingBackstopResult = groundingBackstop ?? { status: 'skipped' }
+  const grounding: GroundingBackstopResult = groundingBackstop ?? {
+    status: 'skipped',
+  }
   const backstopFired = grounding.status === 'flagged'
   if (backstopFired) {
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
@@ -2689,7 +2748,9 @@ export async function applyApprovalPolicyStage(
   // name — both mean "no carrier from here", and resolveDraftCarrierIdentity
   // treats them identically.
   const promisedCommitment: PendingCommitment | null =
-    prosePromiseBackstop.status === 'flagged' ? prosePromiseBackstop.commitment : null
+    prosePromiseBackstop.status === 'flagged'
+      ? prosePromiseBackstop.commitment
+      : null
   // TAC-513: the cancellation carrier, from the model's own resolved emission
   // and nothing else.
   //
@@ -2713,8 +2774,10 @@ export async function applyApprovalPolicyStage(
   )
   const slot: PendingSlot = pendingSlotOf(draftCommitment)
   const slotOccupant = occupantOfSlot(pendingRows, slot)
-  const existingIsKnowledgeGapCard = slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
-  const protectedCardCarveOutBase = existingIsKnowledgeGapCard && triggers.length === 0
+  const existingIsKnowledgeGapCard =
+    slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
+  const protectedCardCarveOutBase =
+    existingIsKnowledgeGapCard && triggers.length === 0
 
   // TAC-397: which of the three cases this turn is, for the conversation slot.
   // Computed here because `pendingRows` is already read and `ctx.classification`
@@ -2734,7 +2797,8 @@ export async function applyApprovalPolicyStage(
       : resolveConversationDisposition({
           hasConversationOccupant: pendingRows.conversation.length > 0,
           category: ctx.classification?.category ?? null,
-          correctsPendingReply: ctx.classification?.correctsPendingReply ?? false,
+          correctsPendingReply:
+            ctx.classification?.correctsPendingReply ?? false,
           inboundBody: ctx.currentMessage.body,
         })
   // TAC-513 × TAC-397: a draft that WITHDRAWS a promise is never silenced.
@@ -2924,7 +2988,8 @@ export async function applyApprovalPolicyStage(
       triggers,
       protectedDraftId: slotDecision.protectedDraftId,
       protectedCommitment: commitmentIdentityOf(
-        occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ?? null,
+        occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ??
+          null,
       ),
       droppedCommitment: draftCommitment,
     }
@@ -3010,8 +3075,10 @@ export async function applyApprovalPolicyStage(
     // resolved against this guest's list.
     pendingCancellation,
     compMatchedPattern: comp.matched ? comp.pattern : null,
-    existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
-    captureReplacedDraft: slotDecision.action === 'regen' && slotDecision.captureReplacedDraft,
+    existingPendingDraftId:
+      slotDecision.action === 'regen' ? slotDecision.draftId : null,
+    captureReplacedDraft:
+      slotDecision.action === 'regen' && slotDecision.captureReplacedDraft,
     conversationDisposition,
     slot,
     otherSlotOccupied: otherSlotOccupied(pendingRows, draftCommitment),
@@ -3075,7 +3142,10 @@ function isValidTimezone(tz: string): boolean {
   }
 }
 
-function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiRuntimeContext['today']> {
+function computeToday(
+  timezone: string,
+  now: Date = new Date(),
+): NonNullable<AiRuntimeContext['today']> {
   // Caller (buildAiRuntime) is responsible for passing a validated timezone —
   // otherwise Intl.DateTimeFormat throws a RangeError mid-format.
   // en-CA renders dates as YYYY-MM-DD; en-GB renders 24h HH:MM. Both are
@@ -3105,7 +3175,6 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
     calendar: computeCalendar(timezone, now),
   }
 }
-
 
 // TAC-244 / TAC-123: map the agent's FollowupTrigger.reason to the
 // AI-runtime's FollowupReason. day_* → post_visit_day_*; cold_lapsed and
@@ -3245,12 +3314,16 @@ export function deriveFollowupContext(
 // it) structurally unable to disagree about what "the opener turn" means.
 // `buildAiRuntime` below calls this with `new Date()`, identical to its
 // prior inline `Date.now()` call — zero behavior change there.
-export function computeFirstTouchAfterQrScan(ctx: RuntimeContext, now: Date): boolean {
+export function computeFirstTouchAfterQrScan(
+  ctx: RuntimeContext,
+  now: Date,
+): boolean {
   return (
     ctx.currentMessage !== null &&
     ctx.guest.createdVia === 'qr_scan' &&
     ctx.recentMessages.length === 0 &&
-    now.getTime() - ctx.guest.createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+    now.getTime() - ctx.guest.createdAt.getTime() <=
+      REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
   )
 }
 
@@ -3399,7 +3472,8 @@ export function buildAiRuntime(
     ? {
         name: ctx.followupTrigger.perkMechanic.name,
         qualification: ctx.followupTrigger.perkMechanic.qualification ?? '',
-        rewardDescription: ctx.followupTrigger.perkMechanic.rewardDescription ?? '',
+        rewardDescription:
+          ctx.followupTrigger.perkMechanic.rewardDescription ?? '',
       }
     : undefined
 
@@ -3524,7 +3598,9 @@ export function buildAiRuntime(
     willBeReviewed:
       ctx.guest.isDemo !== true &&
       isFloorCategory(ctx.classification?.category) &&
-      resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
-        'operator_approval',
+      resolveCategoryPolicy(
+        ctx.venue.approvalPolicy,
+        ctx.classification?.category,
+      ) === 'operator_approval',
   }
 }

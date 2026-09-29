@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { firstOrNull } from '@/lib/db/postgrest'
+import { logger } from '@/lib/observability/logger'
 import { type BrandPersona, BrandPersonaSchema } from '@/lib/schemas'
 
 // Per-voice page server-side data fetch. The venue lookup runs first
@@ -143,12 +144,16 @@ export async function loadVoicePage(input: {
   ] = await Promise.all([
     supabase
       .from('voice_corpus')
-      .select('id, content, source_type, tags, created_at, source_ref, added_by_operator_id')
+      .select(
+        'id, content, source_type, tags, created_at, source_ref, added_by_operator_id',
+      )
       .eq('venue_id', venue.id)
       .order('created_at', { ascending: false }),
     supabase
       .from('messages')
-      .select('id, guest_id, body, direction, created_at, reply_to_message_id, guests(first_name, last_name, phone_number, instagram_username)')
+      .select(
+        'id, guest_id, body, direction, created_at, reply_to_message_id, guests(first_name, last_name, phone_number, instagram_username)',
+      )
       .eq('venue_id', venue.id)
       .neq('body', '')
       .order('created_at', { ascending: false })
@@ -184,22 +189,24 @@ export async function loadVoicePage(input: {
   ])
 
   if (corpusResult.error) {
-    console.warn('[loadVoicePage] corpus load failed', corpusResult.error.message)
+    logger.warn('[loadVoicePage] corpus load failed', {
+      error: corpusResult.error.message,
+    })
   }
   if (recentMessagesResult.error) {
-    console.warn('[loadVoicePage] messages load failed', recentMessagesResult.error.message)
+    logger.warn('[loadVoicePage] messages load failed', {
+      error: recentMessagesResult.error.message,
+    })
   }
   if (transactionsResult.error) {
-    console.warn(
-      '[loadVoicePage] transactions load failed',
-      transactionsResult.error.message,
-    )
+    logger.warn('[loadVoicePage] transactions load failed', {
+      error: transactionsResult.error.message,
+    })
   }
   if (guestStatesResult.error) {
-    console.warn(
-      '[loadVoicePage] guest_states load failed',
-      guestStatesResult.error.message,
-    )
+    logger.warn('[loadVoicePage] guest_states load failed', {
+      error: guestStatesResult.error.message,
+    })
   }
 
   const corpus: VoicePageCorpusRow[] = (corpusResult.data ?? []).map((r) => ({
@@ -266,7 +273,8 @@ export async function loadVoicePage(input: {
   ).map((m) => ({
     id: m.id,
     body: m.body,
-    direction: (m.direction === 'outbound' ? 'outbound' : 'inbound') as 'inbound' | 'outbound',
+    direction: (m.direction === 'outbound' ? 'outbound' : 'inbound') as
+      'inbound' | 'outbound',
     createdAt: new Date(m.created_at),
     replyToMessageId: m.reply_to_message_id,
   }))

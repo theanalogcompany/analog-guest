@@ -39,7 +39,11 @@ export async function getAvailability(opts: {
     .ilike('name', `%${term}%`)
     .limit(20)
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'availability_lookup_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'availability_lookup_failed',
+    }
   }
   if (!items || items.length === 0) {
     return { ok: true, data: { found: false, items: [] } }
@@ -52,7 +56,11 @@ export async function getAvailability(opts: {
     .eq('venue_id', opts.venueId)
     .in('catalog_external_id', variationIds)
   if (invError) {
-    return { ok: false, error: invError.message, errorCode: 'availability_inventory_failed' }
+    return {
+      ok: false,
+      error: invError.message,
+      errorCode: 'availability_inventory_failed',
+    }
   }
 
   const quantityByVariation = new Map<string, number | null>()

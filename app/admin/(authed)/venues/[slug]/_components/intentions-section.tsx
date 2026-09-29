@@ -1,11 +1,17 @@
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 import { HairlineRow, StatusDot } from '@/lib/ui'
 import {
   RECORDED_PROMPTS_LIMIT,
   type IntentionPromptRow,
 } from '../../../_lib/load-intention-prompts'
 import type { VenueOpenIntentions } from '../../../_lib/load-venue-intentions'
-import { formatPromptedAt, resolveDefinition } from '../../../intentions/_lib/definition-display'
+import {
+  formatPromptedAt,
+  resolveDefinition,
+} from '../../../intentions/_lib/definition-display'
 import { formatAge } from '../../_lib/commitment-display'
 
 // TAC-381: what the agent is pursuing with this venue's guests.
@@ -49,8 +55,8 @@ function OpenIntentionsBlock({
         // idiom for status colour on internal surfaces, and inventing a hex
         // here would be a second, unbridged source of the same signal.
         <p className="mb-2 flex items-center gap-2 text-xs text-ink-soft">
-          <StatusDot tone="neutral" label="degraded" />
-          A supporting read failed. This list under-reports — treat it as a floor, not a total.
+          <StatusDot tone="neutral" label="degraded" />A supporting read failed.
+          This list under-reports — treat it as a floor, not a total.
         </p>
       )}
       {cohortTruncated && (
@@ -70,12 +76,17 @@ function OpenIntentionsBlock({
               {row.openKeys.map((key) => {
                 const resolved = resolveDefinition(key)
                 return (
-                  <span key={key} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                  <span
+                    key={key}
+                    className="flex flex-wrap items-baseline gap-x-2 text-xs"
+                  >
                     <code className="text-ink-soft">{key}</code>
                     {/* Read from the constant, never copied — a drifted copy
                         would misreport what the model actually sees. */}
                     {resolved.known && (
-                      <span className="text-ink-faint">{resolved.definition.promptLine}</span>
+                      <span className="text-ink-faint">
+                        {resolved.definition.promptLine}
+                      </span>
                     )}
                   </span>
                 )
@@ -91,12 +102,16 @@ function OpenIntentionsBlock({
   )
 }
 
-function RaisedIntentionsBlock({ rows }: { rows: readonly IntentionPromptRow[] }) {
+function RaisedIntentionsBlock({
+  rows,
+}: {
+  rows: readonly IntentionPromptRow[]
+}) {
   if (rows.length === 0) {
     return (
       <EmptySectionNote>
-        Nothing raised at this venue yet. A row appears only after a sent message actually raises
-        an open intention.
+        Nothing raised at this venue yet. A row appears only after a sent
+        message actually raises an open intention.
       </EmptySectionNote>
     )
   }
@@ -114,10 +129,14 @@ function RaisedIntentionsBlock({ rows }: { rows: readonly IntentionPromptRow[] }
               <span className="text-sm text-ink">{row.guestLabel}</span>
               <code className="text-xs text-ink-soft">{row.intentionKey}</code>
               {!resolved.known && (
-                <span className="text-[11px] text-ink-faint italic">no matching definition</span>
+                <span className="text-[11px] text-ink-faint italic">
+                  no matching definition
+                </span>
               )}
               {row.promptSource === 'pessimistic' && (
-                <span className="text-[11px] text-ink-faint italic">closed without a verdict</span>
+                <span className="text-[11px] text-ink-faint italic">
+                  closed without a verdict
+                </span>
               )}
             </span>
             <span className="shrink-0 text-xs text-ink-faint tabular-nums">
@@ -153,23 +172,26 @@ export function IntentionsSection({
       subtitle="Goals the agent carries into conversations at this venue. Read-only."
     >
       <p className="mb-3 text-xs text-ink-faint max-w-2xl">
-        Open means recorded eligible, not yet raised, inside its window, and not answered by a fact
-        on record. It is not a promise the block will appear — the brake and several other
-        conditions decide that at the moment of a live turn, and none of them are knowable here. An
-        intention whose gate opened since the guest last texted appears only after their next
+        Open means recorded eligible, not yet raised, inside its window, and not
+        answered by a fact on record. It is not a promise the block will appear
+        — the brake and several other conditions decide that at the moment of a
+        live turn, and none of them are knowable here. An intention whose gate
+        opened since the guest last texted appears only after their next
         message. The full list is on the Intentions page.
       </p>
       <OpenIntentionsBlock openIntentions={openIntentions} now={now} />
 
       <div className="mt-6 border-t border-stone-light/60 pt-4">
         <p className="mb-2 text-xs text-ink-faint max-w-2xl">
-          Already raised here · one row per guest per intention, showing its latest prompt. A
-          recommendation or order intention that a newer event re-armed is listed as open too.{' '}
+          Already raised here · one row per guest per intention, showing its
+          latest prompt. A recommendation or order intention that a newer event
+          re-armed is listed as open too.{' '}
           {raisedHasMore
             ? `Showing the ${RECORDED_PROMPTS_LIMIT} most recent; older ones exist and are not listed. `
             : ''}
-          Worth reading against the message that produced it: a row recorded off a send that was
-          not really making that move is how a mis-classification becomes visible.
+          Worth reading against the message that produced it: a row recorded off
+          a send that was not really making that move is how a
+          mis-classification becomes visible.
         </p>
         <div className="opacity-80">
           <RaisedIntentionsBlock rows={raised} />

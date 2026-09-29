@@ -32,10 +32,16 @@ function makeClient(cfg: Cfg): {
       return self
     }
     self.then = (resolve: (r: { data: unknown; error: unknown }) => unknown) =>
-      resolve({ data: cfg.data?.[table] ?? null, error: cfg.error?.[table] ?? null })
+      resolve({
+        data: cfg.data?.[table] ?? null,
+        error: cfg.error?.[table] ?? null,
+      })
     return self
   }
-  return { client: { from: (t: string) => chain(t) } as unknown as AdminClient, captured }
+  return {
+    client: { from: (t: string) => chain(t) } as unknown as AdminClient,
+    captured,
+  }
 }
 
 const VENUE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -43,17 +49,30 @@ const VENUE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 describe('applyInventoryCounts', () => {
   it('no-ops on empty counts without touching the DB', async () => {
     const { client, captured } = makeClient({})
-    const res = await applyInventoryCounts({ venueId: VENUE, counts: [], supabase: client })
+    const res = await applyInventoryCounts({
+      venueId: VENUE,
+      counts: [],
+      supabase: client,
+    })
     expect(res).toEqual({ ok: true, data: { upserted: 0 } })
     expect(captured.upserts.pos_inventory_counts).toBeUndefined()
   })
 
   it('upserts mapped rows', async () => {
     const counts: InventoryCount[] = [
-      { catalogExternalId: 'v1', locationExternalId: 'L1', quantity: 5, state: 'IN_STOCK' },
+      {
+        catalogExternalId: 'v1',
+        locationExternalId: 'L1',
+        quantity: 5,
+        state: 'IN_STOCK',
+      },
     ]
     const { client, captured } = makeClient({})
-    const res = await applyInventoryCounts({ venueId: VENUE, counts, supabase: client })
+    const res = await applyInventoryCounts({
+      venueId: VENUE,
+      counts,
+      supabase: client,
+    })
     expect(res).toEqual({ ok: true, data: { upserted: 1 } })
     expect(captured.upserts.pos_inventory_counts).toEqual([
       {
@@ -69,18 +88,37 @@ describe('applyInventoryCounts', () => {
 
   it('surfaces an upsert error', async () => {
     const counts: InventoryCount[] = [
-      { catalogExternalId: 'v1', locationExternalId: 'L1', quantity: 5, state: null },
+      {
+        catalogExternalId: 'v1',
+        locationExternalId: 'L1',
+        quantity: 5,
+        state: null,
+      },
     ]
-    const { client } = makeClient({ error: { pos_inventory_counts: { message: 'dup' } } })
-    const res = await applyInventoryCounts({ venueId: VENUE, counts, supabase: client })
-    expect(res).toEqual({ ok: false, error: 'dup', errorCode: 'inventory_upsert_failed' })
+    const { client } = makeClient({
+      error: { pos_inventory_counts: { message: 'dup' } },
+    })
+    const res = await applyInventoryCounts({
+      venueId: VENUE,
+      counts,
+      supabase: client,
+    })
+    expect(res).toEqual({
+      ok: false,
+      error: 'dup',
+      errorCode: 'inventory_upsert_failed',
+    })
   })
 })
 
 describe('getAvailability', () => {
   it('returns found:false when no catalog item matches', async () => {
     const { client } = makeClient({ data: { pos_catalog_items: [] } })
-    const res = await getAvailability({ venueId: VENUE, itemName: 'croissant', supabase: client })
+    const res = await getAvailability({
+      venueId: VENUE,
+      itemName: 'croissant',
+      supabase: client,
+    })
     expect(res).toEqual({ ok: true, data: { found: false, items: [] } })
   })
 
@@ -94,7 +132,11 @@ describe('getAvailability', () => {
         pos_inventory_counts: [{ catalog_external_id: 'v1', quantity: 2 }],
       },
     })
-    const res = await getAvailability({ venueId: VENUE, itemName: 'croissant', supabase: client })
+    const res = await getAvailability({
+      venueId: VENUE,
+      itemName: 'croissant',
+      supabase: client,
+    })
     expect(res.ok).toBe(true)
     if (!res.ok) return
     expect(res.data.found).toBe(true)
@@ -106,13 +148,27 @@ describe('getAvailability', () => {
 
   it('returns found:false on empty search term', async () => {
     const { client } = makeClient({})
-    const res = await getAvailability({ venueId: VENUE, itemName: '  ', supabase: client })
+    const res = await getAvailability({
+      venueId: VENUE,
+      itemName: '  ',
+      supabase: client,
+    })
     expect(res).toEqual({ ok: true, data: { found: false, items: [] } })
   })
 
   it('surfaces a catalog lookup error', async () => {
-    const { client } = makeClient({ error: { pos_catalog_items: { message: 'boom' } } })
-    const res = await getAvailability({ venueId: VENUE, itemName: 'x', supabase: client })
-    expect(res).toEqual({ ok: false, error: 'boom', errorCode: 'availability_lookup_failed' })
+    const { client } = makeClient({
+      error: { pos_catalog_items: { message: 'boom' } },
+    })
+    const res = await getAvailability({
+      venueId: VENUE,
+      itemName: 'x',
+      supabase: client,
+    })
+    expect(res).toEqual({
+      ok: false,
+      error: 'boom',
+      errorCode: 'availability_lookup_failed',
+    })
   })
 })

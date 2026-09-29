@@ -120,7 +120,9 @@ describe('venueLocalInstant', () => {
       const instant = venueLocalInstant(LA, y, m, d, 23 * 60 + 59)
       expect(instant).not.toBeNull()
       const back = venueLocalDate(LA, instant as Date)
-      expect(back).toEqual(expect.objectContaining({ year: y, month: m, day: d }))
+      expect(back).toEqual(
+        expect.objectContaining({ year: y, month: m, day: d }),
+      )
     }
   })
 
@@ -129,7 +131,9 @@ describe('venueLocalInstant', () => {
     // land on February 1st rather than producing an invalid date.
     const r = venueLocalInstant(LA, 2026, 1, 32, 2 * 60)
     const back = venueLocalDate(LA, r as Date)
-    expect(back).toEqual(expect.objectContaining({ year: 2026, month: 2, day: 1 }))
+    expect(back).toEqual(
+      expect.objectContaining({ year: 2026, month: 2, day: 1 }),
+    )
   })
 
   it('returns null on an unusable timezone', () => {
@@ -200,14 +204,21 @@ describe('deriveExpiresAt — comp and discount', () => {
 
   it('treats a discount exactly as a comp', () => {
     const createdAt = new Date('2026-09-08T18:00:00Z')
-    const comp = deriveExpiresAt({ type: 'comp', createdAt, timezone: null, hours: null })
+    const comp = deriveExpiresAt({
+      type: 'comp',
+      createdAt,
+      timezone: null,
+      hours: null,
+    })
     const discount = deriveExpiresAt({
       type: 'discount',
       createdAt,
       timezone: null,
       hours: null,
     })
-    expect(discount.expiresAt?.toISOString()).toBe(comp.expiresAt?.toISOString())
+    expect(discount.expiresAt?.toISOString()).toBe(
+      comp.expiresAt?.toISOString(),
+    )
   })
 
   it('needs no venue clock at all for a comp', () => {
@@ -381,7 +392,13 @@ describe('escalationDueAt', () => {
   it('escalates a discount on the same schedule as a comp', () => {
     const createdAt = new Date('2026-09-08T18:00:00Z')
     const expiresAt = new Date('2026-11-07T18:00:00Z')
-    expect(escalationDueAt({ type: 'discount', createdAt, expiresAt })?.toISOString()).toBe(
+    expect(
+      escalationDueAt({
+        type: 'discount',
+        createdAt,
+        expiresAt,
+      })?.toISOString(),
+    ).toBe(
       escalationDueAt({ type: 'comp', createdAt, expiresAt })?.toISOString(),
     )
   })

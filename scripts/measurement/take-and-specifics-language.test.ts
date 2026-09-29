@@ -22,7 +22,9 @@ describe('countSpecificHits', () => {
   })
 
   it('reports zero without inventing a hit', () => {
-    expect(countSpecificHits("it's strong, you'll like it", BHADRA).hits).toBe(0)
+    expect(countSpecificHits("it's strong, you'll like it", BHADRA).hits).toBe(
+      0,
+    )
   })
 
   // TAC-326: unanchored containment matched "san" inside "Hi Sana!" and "ice"
@@ -39,7 +41,9 @@ describe('countSpecificHits', () => {
   })
 
   it('folds case and curly apostrophes so phrasing cannot hide a hit', () => {
-    const specs: Specific[] = [{ label: 'himanshus pick', variants: ["himanshu's pick"] }]
+    const specs: Specific[] = [
+      { label: 'himanshus pick', variants: ["himanshu's pick"] },
+    ]
     expect(countSpecificHits('Himanshu’s Pick, honestly', specs).hits).toBe(1)
   })
 
@@ -52,13 +56,17 @@ describe('countSpecificHits', () => {
   // unanticipated paraphrase scores as a miss. This test documents that the
   // number is a FLOOR.
   it('misses a paraphrase that is not a listed variant (the stated floor)', () => {
-    expect(countSpecificHits('tastes chocolatey and smoky', BHADRA).hits).toBe(0)
+    expect(countSpecificHits('tastes chocolatey and smoky', BHADRA).hits).toBe(
+      0,
+    )
   })
 })
 
 describe('findPersonalTake', () => {
   it('fires on the reply Jaipal named as the voice working', () => {
-    const v = findPersonalTake("Bhadra is intense, honestly. 100% Robusta so it hits hard")
+    const v = findPersonalTake(
+      'Bhadra is intense, honestly. 100% Robusta so it hits hard',
+    )
     expect(v.hasTake).toBe(true)
     expect(v.matches).toContain('honestly')
   })
@@ -78,18 +86,23 @@ describe('findPersonalTake', () => {
 
   it('catches a preference and a guest-taste address', () => {
     expect(findPersonalTake('I love it with milk').hasTake).toBe(true)
-    expect(findPersonalTake('if you like it strong, this is the one').hasTake).toBe(true)
+    expect(
+      findPersonalTake('if you like it strong, this is the one').hasTake,
+    ).toBe(true)
   })
 
   // The stated limit. A take carried entirely by phrasing no marker lists is
   // invisible here, which is why the judge is primary.
   it('misses a take carried by phrasing alone (the stated recall limit)', () => {
-    expect(findPersonalTake('that one always surprises people.').hasTake).toBe(false)
+    expect(findPersonalTake('that one always surprises people.').hasTake).toBe(
+      false,
+    )
   })
 })
 
 describe('repeatedPhrases', () => {
-  const template = (tail: string) => `it has notes of dark chocolate and ${tail}`
+  const template = (tail: string) =>
+    `it has notes of dark chocolate and ${tail}`
 
   it('flags a phrase in more than a quarter of replies', () => {
     const replies = [
@@ -146,7 +159,9 @@ describe('repeatedPhrases', () => {
       "IT'S MADE FOR ESPRESSO, honestly!",
       'nothing like the others at all',
     ]
-    expect(repeatedPhrases(replies, { n: 4, maxShare: 0.25 }).length).toBeGreaterThan(0)
+    expect(
+      repeatedPhrases(replies, { n: 4, maxShare: 0.25 }).length,
+    ).toBeGreaterThan(0)
   })
 })
 
@@ -155,13 +170,23 @@ describe('repeatedPhrases — small-run floor', () => {
   // single reply cleared the threshold and the ceiling reported a template
   // that did not exist. A phrase in one reply is never a repeated phrasing.
   it('never flags a phrase that appears in only one reply', () => {
-    expect(repeatedPhrases(['a totally unique sentence here', 'something else'], { n: 5 })).toEqual([])
-    expect(repeatedPhrases(['a totally unique sentence here'], { n: 5 })).toEqual([])
+    expect(
+      repeatedPhrases(['a totally unique sentence here', 'something else'], {
+        n: 5,
+      }),
+    ).toEqual([])
+    expect(
+      repeatedPhrases(['a totally unique sentence here'], { n: 5 }),
+    ).toEqual([])
   })
 
   it('still flags a genuine repeat at small N', () => {
     const found = repeatedPhrases(
-      ['it is made for espresso honestly', 'it is made for espresso honestly', 'nothing alike'],
+      [
+        'it is made for espresso honestly',
+        'it is made for espresso honestly',
+        'nothing alike',
+      ],
       { n: 5 },
     )
     expect(found.length).toBeGreaterThan(0)

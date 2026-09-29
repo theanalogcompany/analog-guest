@@ -6,6 +6,7 @@
 // venue and the callback validates it, but production should gate /connect
 // behind admin/operator auth so only staff can start a link (follow-up).
 
+import { logger } from '@/lib/observability/logger'
 import { resolveSquareEnv } from '@/lib/pos/square/client'
 import { buildSquareAuthorizeUrl } from '@/lib/pos/square/oauth'
 import { signOAuthState } from '@/lib/pos/square/oauth-state'
@@ -19,7 +20,9 @@ export async function GET(request: Request): Promise<Response> {
   const applicationId = process.env.SQUARE_APPLICATION_ID
   const stateSecret = process.env.POS_TOKEN_ENC_KEY
   if (!applicationId || !stateSecret) {
-    console.error('square connect: SQUARE_APPLICATION_ID / POS_TOKEN_ENC_KEY not set')
+    logger.error(
+      'square connect: SQUARE_APPLICATION_ID / POS_TOKEN_ENC_KEY not set',
+    )
     return new Response('Server misconfigured', { status: 500 })
   }
 

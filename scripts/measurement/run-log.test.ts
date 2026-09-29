@@ -35,7 +35,11 @@ describe('createRunLog default path', () => {
   // several did before anyone noticed. A run log is evidence for a ticket, not
   // source, and it belongs somewhere findable and out of the way.
   it('writes into the run-log directory, never the working directory', () => {
-    const log = createRunLog({ name: 'probe', meta: { arm: 'a' }, gitSha: null })
+    const log = createRunLog({
+      name: 'probe',
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     expect(log.path.startsWith(`${RUN_LOG_DIR}/`)).toBe(true)
     expect(existsSync(log.path)).toBe(true)
     // The thing that regressed: nothing named `probe-*.jsonl` at the top level.
@@ -44,7 +48,11 @@ describe('createRunLog default path', () => {
 
   it('creates the run-log directory when it does not exist', () => {
     expect(existsSync(RUN_LOG_DIR)).toBe(false)
-    const log = createRunLog({ name: 'probe', meta: { arm: 'a' }, gitSha: null })
+    const log = createRunLog({
+      name: 'probe',
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     expect(existsSync(RUN_LOG_DIR)).toBe(true)
     expect(existsSync(log.path)).toBe(true)
   })
@@ -56,10 +64,12 @@ describe('createRunLog default path', () => {
   it.each(['/tmp/harness', 'nested/harness', '../harness'])(
     'refuses a name that is a path (%j) and names outputPath instead',
     (name) => {
-      expect(() => createRunLog({ name, meta: { arm: 'a' }, gitSha: null })).toThrow(
-        /name must be a run name, not a path/,
-      )
-      expect(() => createRunLog({ name, meta: { arm: 'a' }, gitSha: null })).toThrow(/outputPath/)
+      expect(() =>
+        createRunLog({ name, meta: { arm: 'a' }, gitSha: null }),
+      ).toThrow(/name must be a run name, not a path/)
+      expect(() =>
+        createRunLog({ name, meta: { arm: 'a' }, gitSha: null }),
+      ).toThrow(/outputPath/)
       // And nothing was created on the way to the throw.
       expect(existsSync(RUN_LOG_DIR)).toBe(false)
     },
@@ -113,12 +123,25 @@ describe('createRunLog default path', () => {
   })
 
   it('advances the timestamp between calls to produce distinct default names', () => {
-    const times = [new Date('2026-09-18T10:00:00.000Z'), new Date('2026-09-18T10:05:00.000Z')]
+    const times = [
+      new Date('2026-09-18T10:00:00.000Z'),
+      new Date('2026-09-18T10:05:00.000Z'),
+    ]
     let i = 0
     const now = () => times[i++]
 
-    const first = createRunLog({ name: 'harness', meta: { arm: 'a' }, now, gitSha: null })
-    const second = createRunLog({ name: 'harness', meta: { arm: 'b' }, now, gitSha: null })
+    const first = createRunLog({
+      name: 'harness',
+      meta: { arm: 'a' },
+      now,
+      gitSha: null,
+    })
+    const second = createRunLog({
+      name: 'harness',
+      meta: { arm: 'b' },
+      now,
+      gitSha: null,
+    })
 
     expect(first.path).toContain('2026-09-18T10-00-00')
     expect(second.path).toContain('2026-09-18T10-05-00')
@@ -176,11 +199,21 @@ describe('explicit path collision', () => {
   it('refuses to overwrite an explicit existing path without force', () => {
     const path = join(process.cwd(), 'explicit-results.jsonl')
 
-    const log = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
+    const log = createRunLog({
+      name: 'unused',
+      outputPath: path,
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     log.appendUnit({ i: 1 })
 
     expect(() =>
-      createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'b' }, gitSha: null }),
+      createRunLog({
+        name: 'unused',
+        outputPath: path,
+        meta: { arm: 'b' },
+        gitSha: null,
+      }),
     ).toThrow(/already exists/)
 
     // The refused attempt must not have touched the existing file.
@@ -192,7 +225,12 @@ describe('explicit path collision', () => {
   it('overwrites an explicit existing path when force is true', () => {
     const path = join(process.cwd(), 'explicit-results.jsonl')
 
-    const first = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
+    const first = createRunLog({
+      name: 'unused',
+      outputPath: path,
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     first.appendUnit({ i: 1 })
 
     const second = createRunLog({
@@ -235,7 +273,12 @@ describe('directory auto-creation', () => {
   it('creates a not-yet-existing subdirectory named by outputPath', () => {
     const path = join(process.cwd(), 'results', 'nested', 'run.jsonl')
 
-    const log = createRunLog({ name: 'unused', outputPath: path, meta: { arm: 'a' }, gitSha: null })
+    const log = createRunLog({
+      name: 'unused',
+      outputPath: path,
+      meta: { arm: 'a' },
+      gitSha: null,
+    })
     log.appendUnit({ i: 1 })
 
     expect(existsSync(path)).toBe(true)
@@ -246,6 +289,9 @@ describe('real git sha default', () => {
   it('resolves a string or null when gitSha is not injected', () => {
     const log = createRunLog({ name: 'harness', meta: { arm: 'a' } })
     const contents = readRunLog(log.path)
-    expect(typeof contents.header.gitSha === 'string' || contents.header.gitSha === null).toBe(true)
+    expect(
+      typeof contents.header.gitSha === 'string' ||
+        contents.header.gitSha === null,
+    ).toBe(true)
   })
 })

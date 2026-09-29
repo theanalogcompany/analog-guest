@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { activityIndex, orderGuestsByActivity } from './order-guests-by-activity'
+import {
+  activityIndex,
+  orderGuestsByActivity,
+} from './order-guests-by-activity'
 
 const AT = (iso: string) => new Date(iso).getTime()
 
@@ -17,7 +20,9 @@ describe('activityIndex', () => {
   // is NaN, which Array.sort reads as "equal", so one bad row would scramble
   // the whole list rather than misplacing itself.
   it('degrades an unparseable timestamp to no-activity rather than NaN', () => {
-    const index = activityIndex([{ guest_id: 'a', last_interaction_at: 'not a date' }])
+    const index = activityIndex([
+      { guest_id: 'a', last_interaction_at: 'not a date' },
+    ])
     expect(Number.isFinite(index.get('a'))).toBe(true)
     expect(index.get('a')).toBe(-1)
   })
@@ -47,11 +52,16 @@ describe('orderGuestsByActivity', () => {
   })
 
   it('keeps a guest with no activity row, sorted last', () => {
-    const index = activityIndex([{ guest_id: 'active', last_interaction_at: '2026-09-20T10:00:00Z' }])
-    expect(orderGuestsByActivity([{ id: 'silent' }, { id: 'active' }], index, 10).map((g) => g.id)).toEqual([
-      'active',
-      'silent',
+    const index = activityIndex([
+      { guest_id: 'active', last_interaction_at: '2026-09-20T10:00:00Z' },
     ])
+    expect(
+      orderGuestsByActivity(
+        [{ id: 'silent' }, { id: 'active' }],
+        index,
+        10,
+      ).map((g) => g.id),
+    ).toEqual(['active', 'silent'])
   })
 
   // The truncation half, and the reason ordering is load-bearing rather than
@@ -66,12 +76,17 @@ describe('orderGuestsByActivity', () => {
         last_interaction_at: new Date(Date.UTC(2026, 8, 1 + i)).toISOString(),
       })),
     )
-    expect(orderGuestsByActivity(many, index, 2).map((g) => g.id)).toEqual(['g4', 'g3'])
+    expect(orderGuestsByActivity(many, index, 2).map((g) => g.id)).toEqual([
+      'g4',
+      'g3',
+    ])
   })
 
   it('does not mutate its input', () => {
     const input = [{ id: 'b' }, { id: 'a' }]
-    const index = activityIndex([{ guest_id: 'a', last_interaction_at: '2026-09-20T10:00:00Z' }])
+    const index = activityIndex([
+      { guest_id: 'a', last_interaction_at: '2026-09-20T10:00:00Z' },
+    ])
     orderGuestsByActivity(input, index, 10)
     expect(input.map((g) => g.id)).toEqual(['b', 'a'])
   })
@@ -84,14 +99,16 @@ describe('orderGuestsByActivity', () => {
       { guest_id: 'b', last_interaction_at: same },
       { guest_id: 'a', last_interaction_at: same },
     ])
-    expect(orderGuestsByActivity([{ id: 'b' }, { id: 'a' }], index, 10).map((g) => g.id)).toEqual([
-      'a',
-      'b',
-    ])
-    expect(orderGuestsByActivity([{ id: 'a' }, { id: 'b' }], index, 10).map((g) => g.id)).toEqual([
-      'a',
-      'b',
-    ])
+    expect(
+      orderGuestsByActivity([{ id: 'b' }, { id: 'a' }], index, 10).map(
+        (g) => g.id,
+      ),
+    ).toEqual(['a', 'b'])
+    expect(
+      orderGuestsByActivity([{ id: 'a' }, { id: 'b' }], index, 10).map(
+        (g) => g.id,
+      ),
+    ).toEqual(['a', 'b'])
   })
 
   // The no-activity tail. Without the enrollment tiebreak this falls to UUID
@@ -107,17 +124,19 @@ describe('orderGuestsByActivity', () => {
       { id: 'aaa-oldest', first_contacted_at: '2026-01-01T00:00:00Z' },
       { id: 'zzz-newest', first_contacted_at: '2026-09-01T00:00:00Z' },
     ]
-    expect(orderGuestsByActivity(guestsByEnrollment, new Map(), 10).map((g) => g.id)).toEqual([
-      'zzz-newest',
-      'aaa-oldest',
-    ])
+    expect(
+      orderGuestsByActivity(guestsByEnrollment, new Map(), 10).map((g) => g.id),
+    ).toEqual(['zzz-newest', 'aaa-oldest'])
   })
 
   // Enrollment is the SECOND key, never the first: a long-enrolled guest who
   // messaged today still outranks a guest who enrolled today and never wrote.
   it('ranks activity above enrollment', () => {
     const index = activityIndex([
-      { guest_id: 'old-but-active', last_interaction_at: '2026-09-20T10:00:00Z' },
+      {
+        guest_id: 'old-but-active',
+        last_interaction_at: '2026-09-20T10:00:00Z',
+      },
     ])
     const ordered = orderGuestsByActivity(
       [
@@ -127,14 +146,18 @@ describe('orderGuestsByActivity', () => {
       index,
       10,
     )
-    expect(ordered.map((g) => g.id)).toEqual(['old-but-active', 'new-and-silent'])
+    expect(ordered.map((g) => g.id)).toEqual([
+      'old-but-active',
+      'new-and-silent',
+    ])
   })
 
   it('falls back to id when enrollment is absent on both', () => {
-    expect(orderGuestsByActivity([{ id: 'b' }, { id: 'a' }], new Map(), 10).map((g) => g.id)).toEqual([
-      'a',
-      'b',
-    ])
+    expect(
+      orderGuestsByActivity([{ id: 'b' }, { id: 'a' }], new Map(), 10).map(
+        (g) => g.id,
+      ),
+    ).toEqual(['a', 'b'])
   })
 
   it('returns everything when the list is under the cap', () => {
@@ -142,8 +165,14 @@ describe('orderGuestsByActivity', () => {
   })
 
   it('preserves the full guest shape, not just the id', () => {
-    const index = activityIndex([{ guest_id: 'a', last_interaction_at: '2026-09-20T10:00:00Z' }])
-    const [first] = orderGuestsByActivity([{ id: 'a', firstName: 'Ada' }], index, 10)
+    const index = activityIndex([
+      { guest_id: 'a', last_interaction_at: '2026-09-20T10:00:00Z' },
+    ])
+    const [first] = orderGuestsByActivity(
+      [{ id: 'a', firstName: 'Ada' }],
+      index,
+      10,
+    )
     expect(first).toEqual({ id: 'a', firstName: 'Ada' })
   })
 })

@@ -48,6 +48,7 @@ import {
 } from './stages'
 import { resolveCategoryPolicy } from '@/lib/schemas/approval-policy'
 import { startAgentTrace } from '@/lib/observability'
+import { logger } from '@/lib/observability/logger'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult, PendingQuestion } from '@/lib/ai'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
@@ -61,7 +62,7 @@ import type { RuntimeContext } from './types'
  * closer to how the venues actually text than a capitalized system string
  * would.
  */
-export const FALLBACK_HOLDING_BODY = "still checking on that for you"
+export const FALLBACK_HOLDING_BODY = 'still checking on that for you'
 
 /** How many times generation may be attempted before the fallback. */
 export const HOLDING_MESSAGE_MAX_ATTEMPTS = 2
@@ -85,7 +86,11 @@ export type HoldingMessageResult =
   // 'answered_by_hand': on Instagram the question already has a reply (usually
   // staff typing in the Instagram app), so "still checking" would arrive after
   // the answer. The knowledge-gap card stays for the operator either way.
-  | { status: 'suppressed'; reason: 'opted_out' | 'hold_all_outbound' | 'policy_hold' | 'answered_by_hand' }
+  | {
+      status: 'suppressed'
+      reason:
+        'opted_out' | 'hold_all_outbound' | 'policy_hold' | 'answered_by_hand'
+    }
   | { status: 'failed'; stage: 'context_build' | 'send'; error: string }
 
 /**
@@ -192,7 +197,7 @@ export async function handleHoldingMessage(input: {
     // the TAC-308 carve-out and leaves the card and its clock intact, so
     // without this check the holding message goes to someone who just left.
     if (await isOptedOut(input.guestId)) {
-      console.log('[agent] holding message suppressed — guest opted out', {
+      logger.info('[agent] holding message suppressed — guest opted out', {
         agentRunId,
         guestId: input.guestId,
       })
@@ -207,10 +212,13 @@ export async function handleHoldingMessage(input: {
     // without anyone deciding to. Skip instead: the card is already in their
     // queue, and a venue that reviews everything has accepted slower replies.
     if (ctx.venue.holdAllOutbound === true) {
-      console.log('[agent] holding message suppressed — venue holds all outbound', {
-        agentRunId,
-        venueId: input.venueId,
-      })
+      logger.info(
+        '[agent] holding message suppressed — venue holds all outbound',
+        {
+          agentRunId,
+          venueId: input.venueId,
+        },
+      )
       return { status: 'suppressed', reason: 'hold_all_outbound' }
     }
 
@@ -229,13 +237,18 @@ export async function handleHoldingMessage(input: {
     // not set until further down, so it is passed explicitly rather than read
     // off the context. Resolves through perCategory.manual, then `default`.
     if (
-      resolveCategoryPolicy(ctx.venue.approvalPolicy, HOLDING_MESSAGE_CATEGORY) ===
-      'operator_approval'
+      resolveCategoryPolicy(
+        ctx.venue.approvalPolicy,
+        HOLDING_MESSAGE_CATEGORY,
+      ) === 'operator_approval'
     ) {
-      console.log('[agent] holding message suppressed — approval policy holds this category', {
-        agentRunId,
-        venueId: input.venueId,
-      })
+      logger.info(
+        '[agent] holding message suppressed — approval policy holds this category',
+        {
+          agentRunId,
+          venueId: input.venueId,
+        },
+      )
       return { status: 'suppressed', reason: 'policy_hold' }
     }
 
@@ -260,7 +273,7 @@ export async function handleHoldingMessage(input: {
       reasoning: 'TAC-308 holding message (system-initiated, not classified)',
       // TAC-348: system-initiated, not a guest message — never applicable.
       crisisSafety: false,
-    // TAC-397: no guest inbound on this path — see handle-followup.ts.
+      // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
     }
 
@@ -313,10 +326,15 @@ export async function handleHoldingMessage(input: {
       // is down, not thin retrieval. No corpus means no voice, and a
       // voiceless holding message is exactly what the fallback is for.
       const errMsg = e instanceof Error ? e.message : String(e)
-      console.warn(
+      logger.warn(
         `[agent] holding message corpus retrieval failed for guest=${input.guestId}, using fallback: ${errMsg}`,
       )
-      return await sendFallback(ctx, agentRunId, 'corpus_failed', input.questionMessageId)
+      return await sendFallback(
+        ctx,
+        agentRunId,
+        'corpus_failed',
+        input.questionMessageId,
+      )
       // NOTE: no 'corpus' failure stage exists on HoldingMessageResult — this
       // path always resolves to the fallback's sent-or-failed, never to a
       // corpus-specific failure.
@@ -326,15 +344,25 @@ export async function handleHoldingMessage(input: {
       const generated = await tryGenerateHolding(ctx, agentRunId, attempt)
       if (generated === null) continue
 
-      const sendSpan = trace.span('send', { attempt, bodyLength: generated.body.length })
+      const sendSpan = trace.span('send', {
+        attempt,
+        bodyLength: generated.body.length,
+      })
       try {
-        const dispatched = await dispatchHolding(ctx, generated, input.questionMessageId)
+        const dispatched = await dispatchHolding(
+          ctx,
+          generated,
+          input.questionMessageId,
+        )
         if (dispatched.kind === 'answered_by_hand') {
           sendSpan.end({ output: { suppressed: 'answered_by_hand', attempt } })
-          console.log('[agent] holding message suppressed — the question already has a reply', {
-            agentRunId,
-            guestId: input.guestId,
-          })
+          logger.info(
+            '[agent] holding message suppressed — the question already has a reply',
+            {
+              agentRunId,
+              guestId: input.guestId,
+            },
+          )
           return { status: 'suppressed', reason: 'answered_by_hand' }
         }
         if (dispatched.kind === 'failed') {
@@ -364,7 +392,12 @@ export async function handleHoldingMessage(input: {
       }
     }
 
-    return await sendFallback(ctx, agentRunId, 'gates_failed', input.questionMessageId)
+    return await sendFallback(
+      ctx,
+      agentRunId,
+      'gates_failed',
+      input.questionMessageId,
+    )
   } finally {
     await trace.flushAsync()
   }
@@ -386,7 +419,7 @@ async function tryGenerateHolding(
 ): Promise<GenerateMessageResult | null> {
   const gen = await generateStage(ctx, HOLDING_MESSAGE_CATEGORY)
   if (gen.status !== 'success') {
-    console.warn(
+    logger.warn(
       `[agent] holding message generation attempt ${attempt} did not succeed (${gen.status}) for guest=${ctx.guest.id}`,
     )
     return null
@@ -418,18 +451,19 @@ async function tryGenerateHolding(
   // allSettled, not Promise.all, for the reason both orchestrators give: a
   // hypothetical future throw in one stage must not discard the other's
   // finding on a check required to fail closed.
-  const [groundingSettled, prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
-    verifyGroundingStage(ctx, gen.result),
-    verifyProsePromiseStage(ctx, gen.result),
-    // TAC-513: a holding message is content-free by construction and cancels
-    // nothing, so this is expected to return clean every time. It runs anyway,
-    // for the reason the prose-promise check runs here: "content-free by
-    // construction" is a claim about the prompt, not a property the code
-    // enforces, and this path generates through the ordinary generator.
-    verifyCancellationClaimStage(ctx, gen.result),
-  ])
+  const [groundingSettled, prosePromiseSettled, cancellationSettled] =
+    await Promise.allSettled([
+      verifyGroundingStage(ctx, gen.result),
+      verifyProsePromiseStage(ctx, gen.result),
+      // TAC-513: a holding message is content-free by construction and cancels
+      // nothing, so this is expected to return clean every time. It runs anyway,
+      // for the reason the prose-promise check runs here: "content-free by
+      // construction" is a claim about the prompt, not a property the code
+      // enforces, and this path generates through the ordinary generator.
+      verifyCancellationClaimStage(ctx, gen.result),
+    ])
   if (groundingSettled.status === 'rejected') {
-    console.warn(
+    logger.warn(
       '[agent] holding message verifyGroundingStage threw unexpectedly (degrading to skipped)',
       {
         agentRunId,
@@ -442,7 +476,7 @@ async function tryGenerateHolding(
     )
   }
   if (prosePromiseSettled.status === 'rejected') {
-    console.warn(
+    logger.warn(
       '[agent] holding message verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
       {
         agentRunId,
@@ -455,24 +489,32 @@ async function tryGenerateHolding(
     )
   }
   const groundingBackstop: GroundingBackstopResult =
-    groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
+    groundingSettled.status === 'fulfilled'
+      ? groundingSettled.value
+      : { status: 'skipped' }
   const prosePromiseBackstop: ProsePromiseBackstopResult =
     prosePromiseSettled.status === 'fulfilled'
       ? prosePromiseSettled.value
       : { status: 'check_failed' }
   if (groundingBackstop.status === 'flagged') {
-    console.warn('[agent] holding message grounding backstop caught an unverified claim', {
-      agentRunId,
-      attempt,
-      claimCount: groundingBackstop.claims.length,
-    })
+    logger.warn(
+      '[agent] holding message grounding backstop caught an unverified claim',
+      {
+        agentRunId,
+        attempt,
+        claimCount: groundingBackstop.claims.length,
+      },
+    )
   }
   // TAC-424: a degraded check now lands here too. On this path the ladder
   // already treats any non-send gate verdict as "this attempt failed", so the
   // consequence is a retry and then FALLBACK_HOLDING_BODY — a fixed string
   // that asserts nothing. The guest is never left silent by it.
-  if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
-    console.warn(
+  if (
+    groundingBackstop.status === 'truncated' ||
+    groundingBackstop.status === 'degraded'
+  ) {
+    logger.warn(
       '[agent] holding message grounding backstop did not complete — treating as unclean (fail closed)',
       { agentRunId, attempt, outcome: groundingBackstop.status },
     )
@@ -482,7 +524,7 @@ async function tryGenerateHolding(
     prosePromiseBackstop.status === 'flagged' ||
     prosePromiseBackstop.status === 'check_failed'
   ) {
-    console.warn('[agent] holding message prose-promise backstop fired', {
+    logger.warn('[agent] holding message prose-promise backstop fired', {
       agentRunId,
       attempt,
       status: prosePromiseBackstop.status,
@@ -509,7 +551,7 @@ async function tryGenerateHolding(
         },
   )
   if (approval.action !== 'send') {
-    console.warn(
+    logger.warn(
       `[agent] holding message attempt ${attempt} blocked by approval gate (${approval.action}) for guest=${ctx.guest.id}`,
       {
         agentRunId,
@@ -541,11 +583,17 @@ async function sendFallback(
 ): Promise<HoldingMessageResult> {
   const fallbackGeneration = buildFallbackGeneration()
   try {
-    const dispatched = await dispatchHolding(ctx, fallbackGeneration, questionMessageId)
-    if (dispatched.kind === 'answered_by_hand') return { status: 'suppressed', reason: 'answered_by_hand' }
-    if (dispatched.kind === 'failed') return { status: 'failed', stage: 'send', error: dispatched.error }
+    const dispatched = await dispatchHolding(
+      ctx,
+      fallbackGeneration,
+      questionMessageId,
+    )
+    if (dispatched.kind === 'answered_by_hand')
+      return { status: 'suppressed', reason: 'answered_by_hand' }
+    if (dispatched.kind === 'failed')
+      return { status: 'failed', stage: 'send', error: dispatched.error }
     const { outboundMessageId } = dispatched
-    console.warn('[agent] holding message used plain fallback', {
+    logger.warn('[agent] holding message used plain fallback', {
       agentRunId,
       guestId: ctx.guest.id,
       cause,
@@ -597,14 +645,14 @@ async function isOptedOut(guestId: string): Promise<boolean> {
       .eq('id', guestId)
       .maybeSingle()
     if (error) {
-      console.warn(
+      logger.warn(
         `[agent] holding message opt-out check failed for guest=${guestId}, suppressing: ${error.message}`,
       )
       return true
     }
     return data?.opted_out_at !== null && data?.opted_out_at !== undefined
   } catch (e) {
-    console.warn(
+    logger.warn(
       `[agent] holding message opt-out check threw for guest=${guestId}, suppressing: ${
         e instanceof Error ? e.message : String(e)
       }`,
@@ -626,7 +674,8 @@ function buildFallbackGeneration(): GenerateMessageResult {
   return {
     body: FALLBACK_HOLDING_BODY,
     voiceFidelity: 0,
-    reasoning: 'TAC-308 plain fallback: generation attempts did not clear the gates',
+    reasoning:
+      'TAC-308 plain fallback: generation attempts did not clear the gates',
     // TAC-509: FALLBACK_HOLDING_BODY is a fixed constant that asserts nothing
     // and carries no link.
     unverifiedUrls: [],
@@ -638,6 +687,10 @@ function buildFallbackGeneration(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the fixed fallback holding line, with no generation behind
+    // it, so there is no getting-to-know-you question to bubble.
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

@@ -75,10 +75,12 @@ const DASH_RE = /[—–]/ // em dash, en dash
 // Phone: loose US-style pattern (with or without separators/country code).
 const PHONE_RE = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g
 // URL/domain: scheme-optional, requires a recognizable TLD.
-const URL_RE = /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(?:\/\S*)?\b/gi
+const URL_RE =
+  /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(?:\/\S*)?\b/gi
 
 // Sign-off patterns: a trailing "- Name" / "Best, Name" / "Thanks, Name" line.
-const SIGNOFF_RE = /(?:^|\n)\s*(?:[-—–]\s*[A-Z][a-z]+|(?:best|thanks|cheers|regards)[,!]?\s+[A-Z][a-z]+)\s*$/i
+const SIGNOFF_RE =
+  /(?:^|\n)\s*(?:[-—–]\s*[A-Z][a-z]+|(?:best|thanks|cheers|regards)[,!]?\s+[A-Z][a-z]+)\s*$/i
 
 // Third-person indicators immediately preceding the persona's own name —
 // "ask Himanshu", "check with Himanshu" — as opposed to first-person
@@ -97,14 +99,22 @@ const THIRD_PERSON_INDICATORS = [
 
 /** Sentence count for the length check — short (under MIN_WORDS_TO_COUNT-word) sentences don't count. */
 function extractCountedSentences(body: string): number {
-  return splitIntoSentences(body).filter((s) => s.trim().split(/\s+/).filter(Boolean).length >= MIN_WORDS_TO_COUNT).length
+  return splitIntoSentences(body).filter(
+    (s) => s.trim().split(/\s+/).filter(Boolean).length >= MIN_WORDS_TO_COUNT,
+  ).length
 }
 
 function normalizeDomain(url: string): string {
-  return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLowerCase()
+  return url
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .split('/')[0]
+    .toLowerCase()
 }
 
-export function gradeVoiceDeterministic(input: DeterministicVoiceInput): DeterministicVoiceResult {
+export function gradeVoiceDeterministic(
+  input: DeterministicVoiceInput,
+): DeterministicVoiceResult {
   const { replyBody } = input
 
   // 2026-09-11 owner decision: safety-critical scenarios skip the voice
@@ -173,22 +183,36 @@ export function gradeVoiceDeterministic(input: DeterministicVoiceInput): Determi
   }
 
   if (SIGNOFF_RE.test(replyBody)) {
-    findings.push({ check: 'signed_name', detail: 'reply ends with an email-style signature line' })
+    findings.push({
+      check: 'signed_name',
+      detail: 'reply ends with an email-style signature line',
+    })
   }
 
   const phoneMatches = replyBody.match(PHONE_RE) ?? []
   const unknownPhones = phoneMatches.filter(
-    (p) => !input.knownPhones.some((known) => known.replace(/\D/g, '').endsWith(p.replace(/\D/g, ''))),
+    (p) =>
+      !input.knownPhones.some((known) =>
+        known.replace(/\D/g, '').endsWith(p.replace(/\D/g, '')),
+      ),
   )
   if (unknownPhones.length > 0) {
-    findings.push({ check: 'phone_or_link', detail: `phone number(s) not in venue data: ${unknownPhones.join(', ')}` })
+    findings.push({
+      check: 'phone_or_link',
+      detail: `phone number(s) not in venue data: ${unknownPhones.join(', ')}`,
+    })
   }
-  const urlMatches = [...replyBody.matchAll(URL_RE)].map((m) => normalizeDomain(m[0]))
+  const urlMatches = [...replyBody.matchAll(URL_RE)].map((m) =>
+    normalizeDomain(m[0]),
+  )
   const unknownDomains = [...new Set(urlMatches)].filter(
     (d) => !input.knownDomains.some((known) => normalizeDomain(known) === d),
   )
   if (unknownDomains.length > 0) {
-    findings.push({ check: 'phone_or_link', detail: `link(s)/domain(s) not in venue data: ${unknownDomains.join(', ')}` })
+    findings.push({
+      check: 'phone_or_link',
+      detail: `link(s)/domain(s) not in venue data: ${unknownDomains.join(', ')}`,
+    })
   }
 
   if (input.speakerFraming === 'named_person' && input.speakerName) {
@@ -209,7 +233,10 @@ export function gradeVoiceDeterministic(input: DeterministicVoiceInput): Determi
 }
 
 /** Known-good phone/domain data pulled from venue_info, for the phone_or_link check. */
-export function extractKnownContactData(venueInfo: VenueInfo): { phones: string[]; domains: string[] } {
+export function extractKnownContactData(venueInfo: VenueInfo): {
+  phones: string[]
+  domains: string[]
+} {
   const phones: string[] = []
   const domains: string[] = []
   if (venueInfo.contact.publicPhone) phones.push(venueInfo.contact.publicPhone)

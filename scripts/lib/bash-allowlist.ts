@@ -17,7 +17,8 @@ import yaml from 'js-yaml'
 export function allows(rule: string, command: string): boolean {
   const m = /^Bash\((.*)\)$/.exec(rule)
   if (!m) return false
-  if (m[1].replace(/:\*$/, '').includes('*')) throw new Error(`unmodelled wildcard rule: ${rule}`)
+  if (m[1].replace(/:\*$/, '').includes('*'))
+    throw new Error(`unmodelled wildcard rule: ${rule}`)
   if (!m[1].endsWith(':*')) return command === m[1]
   const prefix = m[1].slice(0, -2)
   return command === prefix || command.startsWith(`${prefix} `)
@@ -25,8 +26,15 @@ export function allows(rule: string, command: string): boolean {
 
 // A command a session can run: an allow rule admits it and no deny rule
 // does. A deny rule wins over an allow rule.
-export function permits(allowed: readonly string[], disallowed: readonly string[], command: string): boolean {
-  return allowed.some((rule) => allows(rule, command)) && !disallowed.some((rule) => allows(rule, command))
+export function permits(
+  allowed: readonly string[],
+  disallowed: readonly string[],
+  command: string,
+): boolean {
+  return (
+    allowed.some((rule) => allows(rule, command)) &&
+    !disallowed.some((rule) => allows(rule, command))
+  )
 }
 
 // A whole command line as a CI session would type it. Claude Code checks
@@ -88,12 +96,18 @@ export function permitsCommandLine(
   if (commands.some((c) => c === '')) return false
   const cds = commands.filter((c) => c === 'cd' || c.startsWith('cd '))
   if (cds.length > 1) return false
-  if (cds.length === 1 && commands.some((c) => c === 'git' || c.startsWith('git '))) return false
+  if (
+    cds.length === 1 &&
+    commands.some((c) => c === 'git' || c.startsWith('git '))
+  )
+    return false
   return commands.every((c) => {
     if (!c.startsWith('cd ')) return permits(allowed, disallowed, c)
     const path = c.slice(3).trim()
     if (/\s/.test(path) || path.split('/').includes('..')) return false
-    return path.startsWith('/') ? path === root || path.startsWith(`${root}/`) : !path.startsWith('~')
+    return path.startsWith('/')
+      ? path === root || path.startsWith(`${root}/`)
+      : !path.startsWith('~')
   })
 }
 
@@ -105,12 +119,16 @@ export function claudeStep(src: string): { args: string; prompt: string } {
   const step = Object.values(doc.jobs)
     .flatMap((job) => job.steps)
     .find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
-  if (!step?.with?.claude_args || !step.with.prompt) throw new Error('no claude-code-action step')
+  if (!step?.with?.claude_args || !step.with.prompt)
+    throw new Error('no claude-code-action step')
   return { args: step.with.claude_args, prompt: step.with.prompt }
 }
 
 // The rules one flag of claude_args lists.
-export function toolList(args: string, flag: '--allowedTools' | '--disallowedTools'): string[] {
+export function toolList(
+  args: string,
+  flag: '--allowedTools' | '--disallowedTools',
+): string[] {
   const m = new RegExp(`${flag} "([^"]*)"`).exec(args)
   if (!m) throw new Error(`no ${flag}`)
   return m[1].split(',')

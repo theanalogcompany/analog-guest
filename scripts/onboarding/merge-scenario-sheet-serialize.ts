@@ -1,4 +1,7 @@
-import { ScenarioSheetRowSchema, type ScenarioSheetRow } from './scenario-schema'
+import {
+  ScenarioSheetRowSchema,
+  type ScenarioSheetRow,
+} from './scenario-schema'
 import type { MetaEntry } from './merge-scenario-sheet-pure'
 
 /**
@@ -72,9 +75,13 @@ export function scenarioRowToValues(row: ScenarioSheetRow): string[] {
  * sheet, and fails loudly (skips + logs) on a row that no longer validates
  * rather than silently corrupting the merge.
  */
-export function valuesToScenarioRow(headerRow: string[], dataRow: string[]): ScenarioSheetRow | null {
+export function valuesToScenarioRow(
+  headerRow: string[],
+  dataRow: string[],
+): ScenarioSheetRow | null {
   const byHeader = new Map(headerRow.map((h, i) => [h, dataRow[i] ?? '']))
-  const get = (col: (typeof SCENARIO_COLUMNS)[number]): string => byHeader.get(col) ?? ''
+  const get = (col: (typeof SCENARIO_COLUMNS)[number]): string =>
+    byHeader.get(col) ?? ''
 
   const candidate = {
     sample_id: get('id'),
@@ -93,7 +100,8 @@ export function valuesToScenarioRow(headerRow: string[], dataRow: string[]): Sce
     scenario_source: get('scenario_source'),
     forbidden_claims: split(get('forbidden_claims')),
     source_row_ids: split(get('source_row_ids')),
-    expected_failure: get('expected_failure').length > 0 ? get('expected_failure') : null,
+    expected_failure:
+      get('expected_failure').length > 0 ? get('expected_failure') : null,
     scenario: get('scenario_description'),
   }
 
@@ -113,7 +121,11 @@ export function buildMergedMetaEntries(
 ): MetaEntry[] {
   const byId = new Map(existing.map((m) => [m.id, m]))
   for (const row of freshRows) {
-    byId.set(row.sample_id, { id: row.sample_id, topic: row.topic, message: row.inbound_message })
+    byId.set(row.sample_id, {
+      id: row.sample_id,
+      topic: row.topic,
+      message: row.inbound_message,
+    })
   }
   return Array.from(byId.values())
 }

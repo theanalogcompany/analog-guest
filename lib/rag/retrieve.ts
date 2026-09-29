@@ -38,7 +38,11 @@ export async function retrieveContext(
 
   const queryEmbed = await embedText(input.query, 'query')
   if (!queryEmbed.ok) {
-    return { ok: false, error: queryEmbed.error, errorCode: 'embedding_failed' }
+    return {
+      ok: false,
+      error: queryEmbed.error,
+      errorCode: 'embedding_failed',
+    }
   }
 
   const supabase = createAdminClient()
@@ -48,8 +52,12 @@ export async function retrieveContext(
     query_venue_id: input.venueId,
     query_embedding: toVectorLiteral(queryEmbed.data.embedding),
     match_count: limit,
-    ...(input.sourceTypeFilter !== undefined && { source_type_filter: input.sourceTypeFilter }),
-    ...(input.minConfidence !== undefined && { min_confidence: input.minConfidence }),
+    ...(input.sourceTypeFilter !== undefined && {
+      source_type_filter: input.sourceTypeFilter,
+    }),
+    ...(input.minConfidence !== undefined && {
+      min_confidence: input.minConfidence,
+    }),
   })
 
   if (error) {
@@ -97,19 +105,26 @@ export async function retrieveKnowledgeContext(
 
   const queryEmbed = await embedText(input.query, 'query')
   if (!queryEmbed.ok) {
-    return { ok: false, error: queryEmbed.error, errorCode: 'embedding_failed' }
+    return {
+      ok: false,
+      error: queryEmbed.error,
+      errorCode: 'embedding_failed',
+    }
   }
 
   const supabase = createAdminClient()
   const limit = input.limit ?? DEFAULT_LIMIT
-  const minConfidence = input.minConfidence ?? KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT
+  const minConfidence =
+    input.minConfidence ?? KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT
 
   const { data, error } = await supabase.rpc('match_knowledge_corpus', {
     query_venue_id: input.venueId,
     query_embedding: toVectorLiteral(queryEmbed.data.embedding),
     match_count: limit,
     min_confidence: minConfidence,
-    ...(input.sourceTypeFilter !== undefined && { source_type_filter: input.sourceTypeFilter }),
+    ...(input.sourceTypeFilter !== undefined && {
+      source_type_filter: input.sourceTypeFilter,
+    }),
     ...(input.primaryTagPreference !== undefined && {
       primary_tag_filter: input.primaryTagPreference,
     }),

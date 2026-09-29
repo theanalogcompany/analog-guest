@@ -19,7 +19,7 @@ This file holds what **every** task needs. Everything else is routed:
 | a rule that follows a file pattern | `.claude/rules/` |
 | why a decision was made | that source file's header comment |
 | an incident, a measurement run, mutation results | the PR body |
-| a cross-cutting decision people re-litigate | `docs/decisions/` |
+| a cross-cutting decision people re-litigate | `docs/decisions/README.md` indexes them |
 | per-ticket narrative, test-count deltas | nowhere. Git has it. |
 
 **Do not append subsystem detail here.** This file was 1.34 MB and 376k tokens, which
@@ -278,7 +278,10 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 7045 tests across 304 files (2026-09-28).** Measure it, never estimate:
+Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
+never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
+with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
+precise is read as authoritative:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -302,7 +305,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
 | `STRONG_MATCH_SIMILARITY` 0.3 / `MIN_STRONG_MATCHES` 1 | voice retrieval, fails **closed** on inbound |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.70.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.72.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **23 approval triggers compose; any one queues the draft.** All five post-generation checks
 fail **closed** after one retry - treat a proposal to loosen one as a change to all five
@@ -315,6 +318,10 @@ turn (`docs/decisions/0005-inbound-coalescing-settle-window.md`).
 
 `venues.status` gates processing as a **deny-list**, never an allow-list on `active` - the live
 pilot venue is `pending` (`docs/decisions/0002-deny-list-not-allow-list.md`).
+
+A getting-to-know-you question always goes out as its **own last message**, guaranteed at
+generation rather than asked for in prose
+(`docs/decisions/0007-intention-question-is-its-own-bubble.md`).
 
 ## Environment variables
 

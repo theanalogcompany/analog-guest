@@ -18,7 +18,10 @@ export interface GradedScenario {
   routing: RoutingGrade
 }
 
-const KNOWLEDGE_PASS: ReadonlySet<string> = new Set(['correct', 'correctly_declined'])
+const KNOWLEDGE_PASS: ReadonlySet<string> = new Set([
+  'correct',
+  'correctly_declined',
+])
 const KNOWLEDGE_NA: ReadonlySet<string> = new Set(['not_applicable'])
 
 export function knowledgePassed(g: GradedScenario): boolean | null {
@@ -43,7 +46,9 @@ export interface TopicPassRate {
   routingPassRate: number | null
 }
 
-export function computeTopicPassRates(graded: readonly GradedScenario[]): TopicPassRate[] {
+export function computeTopicPassRates(
+  graded: readonly GradedScenario[],
+): TopicPassRate[] {
   const byTopic = new Map<string, GradedScenario[]>()
   for (const g of graded) {
     const list = byTopic.get(g.scenario.topic) ?? []
@@ -53,16 +58,22 @@ export function computeTopicPassRates(graded: readonly GradedScenario[]): TopicP
 
   const rates: TopicPassRate[] = []
   for (const [topic, items] of byTopic) {
-    const knowledgeApplicable = items.map(knowledgePassed).filter((v): v is boolean => v !== null)
-    const routingApplicable = items.map(routingPassed).filter((v): v is boolean => v !== null)
+    const knowledgeApplicable = items
+      .map(knowledgePassed)
+      .filter((v): v is boolean => v !== null)
+    const routingApplicable = items
+      .map(routingPassed)
+      .filter((v): v is boolean => v !== null)
     const voiceResults = items.map(voicePassed)
 
     rates.push({
       topic,
       total: items.length,
-      knowledgePassRate: knowledgeApplicable.length > 0 ? rate(knowledgeApplicable) : null,
+      knowledgePassRate:
+        knowledgeApplicable.length > 0 ? rate(knowledgeApplicable) : null,
       voicePassRate: rate(voiceResults),
-      routingPassRate: routingApplicable.length > 0 ? rate(routingApplicable) : null,
+      routingPassRate:
+        routingApplicable.length > 0 ? rate(routingApplicable) : null,
     })
   }
   return rates.sort((a, b) => a.topic.localeCompare(b.topic))
@@ -119,11 +130,18 @@ const SEVERITY_ORDER: readonly ReviewSeverity[] = [
  * repo deliberately doesn't have), so a miss on that axis needs to surface
  * above everything else besides an actual unapproved commitment.
  */
-export function buildReviewList(graded: readonly GradedScenario[], maxItems = 60): ReviewItem[] {
+export function buildReviewList(
+  graded: readonly GradedScenario[],
+  maxItems = 60,
+): ReviewItem[] {
   const items: ReviewItem[] = []
 
   for (const g of graded) {
-    if (g.scenario.scenario_source === 'mechanic' && g.routing.expectedRoute === 'queue' && g.routing.actualRoute === 'send') {
+    if (
+      g.scenario.scenario_source === 'mechanic' &&
+      g.routing.expectedRoute === 'queue' &&
+      g.routing.actualRoute === 'send'
+    ) {
       items.push({
         sampleId: g.scenario.sample_id,
         severity: 'unapproved_commitment',
@@ -139,7 +157,10 @@ export function buildReviewList(graded: readonly GradedScenario[], maxItems = 60
       })
       continue
     }
-    if (g.llmGrade.knowledgeVerdict === 'invented' || g.llmGrade.knowledgeVerdict === 'should_have_declined') {
+    if (
+      g.llmGrade.knowledgeVerdict === 'invented' ||
+      g.llmGrade.knowledgeVerdict === 'should_have_declined'
+    ) {
       items.push({
         sampleId: g.scenario.sample_id,
         severity: 'invented',
@@ -165,10 +186,17 @@ export function buildReviewList(graded: readonly GradedScenario[], maxItems = 60
     }
     if (!voicePassed(g)) {
       const detParts = g.deterministicVoice.findings.map((f) => f.detail)
-      const reason = [...detParts, g.llmGrade.voiceVerdict === 'fail' ? g.llmGrade.voiceReason : null]
+      const reason = [
+        ...detParts,
+        g.llmGrade.voiceVerdict === 'fail' ? g.llmGrade.voiceReason : null,
+      ]
         .filter((x): x is string => Boolean(x))
         .join('; ')
-      items.push({ sampleId: g.scenario.sample_id, severity: 'voice_fail', reason })
+      items.push({
+        sampleId: g.scenario.sample_id,
+        severity: 'voice_fail',
+        reason,
+      })
       continue
     }
     if (g.llmGrade.knowledgeVerdict === 'incomplete') {
@@ -180,7 +208,10 @@ export function buildReviewList(graded: readonly GradedScenario[], maxItems = 60
     }
   }
 
-  items.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
+  items.sort(
+    (a, b) =>
+      SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
+  )
   return items.slice(0, maxItems)
 }
 
@@ -206,7 +237,11 @@ function seededShuffle<T>(items: readonly T[], seed: number): T[] {
 }
 
 /** Spread sample for an owner voice read — prefers one per topic before repeating. */
-export function sampleForVoiceRead(graded: readonly GradedScenario[], count = 20, seed = 1): GradedScenario[] {
+export function sampleForVoiceRead(
+  graded: readonly GradedScenario[],
+  count = 20,
+  seed = 1,
+): GradedScenario[] {
   const withReply = graded.filter((g) => g.result.replyBody !== null)
   const byTopic = new Map<string, GradedScenario[]>()
   for (const g of withReply) {
@@ -233,7 +268,11 @@ export function sampleForVoiceRead(graded: readonly GradedScenario[], count = 20
   return picked
 }
 
-export function sampleForGraderSpotCheck(graded: readonly GradedScenario[], count = 10, seed = 2): GradedScenario[] {
+export function sampleForGraderSpotCheck(
+  graded: readonly GradedScenario[],
+  count = 10,
+  seed = 2,
+): GradedScenario[] {
   const graded_ = graded.filter((g) => g.result.replyBody !== null)
   return seededShuffle(graded_, seed).slice(0, count)
 }

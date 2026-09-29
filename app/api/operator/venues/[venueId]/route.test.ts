@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const verifyOperatorRequestMock = vi.fn()
 vi.mock('@/lib/auth', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
-  return { ...actual, verifyOperatorRequest: (req: Request) => verifyOperatorRequestMock(req) }
+  const actual =
+    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
+  return {
+    ...actual,
+    verifyOperatorRequest: (req: Request) => verifyOperatorRequestMock(req),
+  }
 })
 
 const loadMock = vi.fn()
@@ -25,7 +29,11 @@ const OTHER_VENUE_ID = '22222222-2222-4222-8222-222222222222'
 const OPERATOR_ID = '33333333-3333-4333-8333-333333333333'
 
 const CONNECTED = {
-  instagram: { status: 'connected', username: 'lemilscoffee', expiresAt: '2026-11-21T00:00:00.000Z' },
+  instagram: {
+    status: 'connected',
+    username: 'lemilscoffee',
+    expiresAt: '2026-11-21T00:00:00.000Z',
+  },
 }
 
 function call(venueId = VENUE_ID) {
@@ -70,7 +78,9 @@ describe('GET /api/operator/venues/[venueId]', () => {
   })
 
   it('returns 401 with the Contract body, never AuthError.message', async () => {
-    verifyOperatorRequestMock.mockRejectedValue(new AuthError(401, 'JWT expired'))
+    verifyOperatorRequestMock.mockRejectedValue(
+      new AuthError(401, 'JWT expired'),
+    )
     const res = await call()
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ error: 'unauthorized' })
@@ -97,7 +107,10 @@ describe('GET /api/operator/venues/[venueId]', () => {
   })
 
   it('returns 404 for a fleet-wide scope, which this bearer path must never honour', async () => {
-    verifyOperatorRequestMock.mockResolvedValue({ operatorId: OPERATOR_ID, venueScope: ALL_VENUES })
+    verifyOperatorRequestMock.mockResolvedValue({
+      operatorId: OPERATOR_ID,
+      venueScope: ALL_VENUES,
+    })
     expect((await call()).status).toBe(404)
     expect(loadMock).not.toHaveBeenCalled()
   })

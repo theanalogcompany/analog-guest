@@ -9,7 +9,8 @@ const loadPendingRowsBySlotMock = vi.fn()
 const findActiveCommitmentsForGuestMock = vi.fn()
 
 vi.mock('@/lib/agent/pending-slots', () => ({
-  loadPendingRowsBySlot: (...args: unknown[]) => loadPendingRowsBySlotMock(...args),
+  loadPendingRowsBySlot: (...args: unknown[]) =>
+    loadPendingRowsBySlotMock(...args),
 }))
 vi.mock('@/lib/guests/commitments', () => ({
   findActiveCommitmentsForGuest: (...args: unknown[]) =>
@@ -48,14 +49,16 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
         phone: '+15550001000',
         guestId: 'guest-new',
         kind: 'pending_draft',
-        detail: 'message id=card-a, slot=obligation, review_reason=commitment_type_gated',
+        detail:
+          'message id=card-a, slot=obligation, review_reason=commitment_type_gated',
       },
       {
         state: 'new',
         phone: '+15550001000',
         guestId: 'guest-new',
         kind: 'pending_draft',
-        detail: 'message id=card-conv, slot=conversation, review_reason=category_requires_approval',
+        detail:
+          'message id=card-conv, slot=conversation, review_reason=category_requires_approval',
       },
       // TAC-397: the second conversation card. With only one seeded,
       // `pending.conversation.slice(0, 1)` would pass and the new loop would
@@ -66,13 +69,17 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
         phone: '+15550001000',
         guestId: 'guest-new',
         kind: 'pending_draft',
-        detail: 'message id=card-conv-2, slot=conversation, review_reason=knowledge_gap',
+        detail:
+          'message id=card-conv-2, slot=conversation, review_reason=knowledge_gap',
       },
     ])
   })
 
   it('reports nothing for a guest with no pending cards', async () => {
-    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: null,
+      conversation: [],
+    })
     expect(await checkCleanState(VENUE, GUESTS, PHONES)).toEqual([])
   })
 
@@ -86,7 +93,8 @@ describe('checkCleanState — pending drafts (TAC-394)', () => {
         phone: '+15550001000',
         guestId: 'guest-new',
         kind: 'pending_draft',
-        detail: 'could not read pending drafts; check this guest by hand before running',
+        detail:
+          'could not read pending drafts; check this guest by hand before running',
       },
     ])
   })

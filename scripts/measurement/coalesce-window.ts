@@ -53,7 +53,9 @@ import { COALESCE_SETTLE_MS } from '@/lib/agent/coalesce-turn'
 import { createRunLog } from './run-log'
 
 /** The windows the table reports, in milliseconds. */
-const CANDIDATE_WINDOWS_MS = [0, 2_000, 4_000, 6_000, 8_000, 12_000, 20_000, 30_000] as const
+const CANDIDATE_WINDOWS_MS = [
+  0, 2_000, 4_000, 6_000, 8_000, 12_000, 20_000, 30_000,
+] as const
 
 interface Args {
   days: number
@@ -63,7 +65,12 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { days: 30, venueSlug: null, outputPath: null, force: false }
+  const args: Args = {
+    days: 30,
+    venueSlug: null,
+    outputPath: null,
+    force: false,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]
     if (flag === '--days') args.days = Number(argv[++i])
@@ -72,7 +79,9 @@ function parseArgs(argv: string[]): Args {
     else if (flag === '--force') args.force = true
   }
   if (!Number.isFinite(args.days) || args.days <= 0) {
-    throw new Error(`--days must be a positive number, got ${String(args.days)}`)
+    throw new Error(
+      `--days must be a positive number, got ${String(args.days)}`,
+    )
   }
   return args
 }
@@ -109,7 +118,10 @@ function buildPairs(inbound: InboundRow[], outbound: OutboundRow[]): Pair[] {
     if (row.guest_id === null) continue
     const key = `${row.venue_id}::${row.guest_id}`
     const at = new Date(row.created_at).getTime()
-    if (!Number.isNaN(at)) (outboundByGuest.get(key) ?? outboundByGuest.set(key, []).get(key)!).push(at)
+    if (!Number.isNaN(at))
+      (outboundByGuest.get(key) ?? outboundByGuest.set(key, []).get(key)!).push(
+        at,
+      )
   }
 
   const byGuest = new Map<string, InboundRow[]>()
@@ -125,7 +137,8 @@ function buildPairs(inbound: InboundRow[], outbound: OutboundRow[]): Pair[] {
     // `pickNewer` uses, because one Instagram delivery can insert several rows
     // in the same millisecond and a timestamp-only sort is not deterministic.
     rows.sort((a, b) => {
-      const d = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      const d =
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       return d !== 0 ? d : a.id < b.id ? -1 : 1
     })
     const replies = outboundByGuest.get(key) ?? []
@@ -148,7 +161,9 @@ function buildPairs(inbound: InboundRow[], outbound: OutboundRow[]): Pair[] {
 }
 
 /** How many pairs each candidate window would fold, excluding real exchanges. */
-function windowTable(pairs: Pair[]): { windowMs: number; folded: number; ofBursts: number }[] {
+function windowTable(
+  pairs: Pair[],
+): { windowMs: number; folded: number; ofBursts: number }[] {
   const bursts = pairs.filter((p) => !p.repliedBetween)
   return CANDIDATE_WINDOWS_MS.map((windowMs) => ({
     windowMs,
@@ -160,7 +175,9 @@ function windowTable(pairs: Pair[]): { windowMs: number; folded: number; ofBurst
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   const supabase = createAdminClient()
-  const since = new Date(Date.now() - args.days * 24 * 60 * 60 * 1000).toISOString()
+  const since = new Date(
+    Date.now() - args.days * 24 * 60 * 60 * 1000,
+  ).toISOString()
 
   let venueId: string | null = null
   if (args.venueSlug !== null) {
@@ -178,16 +195,22 @@ async function main(): Promise<void> {
     .select('id, venue_id, guest_id, created_at, channel')
     .eq('direction', 'inbound')
     .gte('created_at', since)
-  const inbound = await (venueId ? inboundQuery.eq('venue_id', venueId) : inboundQuery)
-  if (inbound.error) throw new Error(`inbound read failed: ${inbound.error.message}`)
+  const inbound = await (venueId
+    ? inboundQuery.eq('venue_id', venueId)
+    : inboundQuery)
+  if (inbound.error)
+    throw new Error(`inbound read failed: ${inbound.error.message}`)
 
   const outboundQuery = supabase
     .from('messages')
     .select('venue_id, guest_id, created_at')
     .eq('direction', 'outbound')
     .gte('created_at', since)
-  const outbound = await (venueId ? outboundQuery.eq('venue_id', venueId) : outboundQuery)
-  if (outbound.error) throw new Error(`outbound read failed: ${outbound.error.message}`)
+  const outbound = await (venueId
+    ? outboundQuery.eq('venue_id', venueId)
+    : outboundQuery)
+  if (outbound.error)
+    throw new Error(`outbound read failed: ${outbound.error.message}`)
 
   const pairs = buildPairs(inbound.data ?? [], outbound.data ?? [])
   const table = windowTable(pairs)
@@ -211,11 +234,16 @@ async function main(): Promise<void> {
   for (const pair of pairs) await log.appendUnit(pair)
 
   const bursts = pairs.filter((p) => !p.repliedBetween)
-  console.log(`\ninbound rows: ${inbound.data?.length ?? 0}   pairs: ${pairs.length}`)
-  console.log(`pairs with no reply in between (candidate bursts): ${bursts.length}`)
+  console.log(
+    `\ninbound rows: ${inbound.data?.length ?? 0}   pairs: ${pairs.length}`,
+  )
+  console.log(
+    `pairs with no reply in between (candidate bursts): ${bursts.length}`,
+  )
   console.log(`\n  window     folded   of bursts`)
   for (const row of table) {
-    const pct = row.ofBursts === 0 ? 0 : Math.round((row.folded / row.ofBursts) * 100)
+    const pct =
+      row.ofBursts === 0 ? 0 : Math.round((row.folded / row.ofBursts) * 100)
     const mark = row.windowMs === COALESCE_SETTLE_MS ? '  <- shipped' : ''
     console.log(
       `  ${String(row.windowMs).padStart(6)}ms ${String(row.folded).padStart(8)} ${String(pct).padStart(9)}%${mark}`,

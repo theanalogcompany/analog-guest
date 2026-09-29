@@ -43,7 +43,8 @@ const GATES: readonly Gate[] = [
     title: 'Unanswered-prompt brake',
     detail:
       "When the guest's most recent prompts each went unanswered, meaning no reply arrived within the follow-up conversation window, no intention renders at all. Intentions closed after a classifier failure don't count as prompts.",
-    source: 'lib/agent/intentions/derive.ts · followup_rules.recent_conversation_hours',
+    source:
+      'lib/agent/intentions/derive.ts · followup_rules.recent_conversation_hours',
   },
   {
     title: 'Menu-mention suppression',
@@ -63,12 +64,18 @@ export function GatingConditions() {
   return (
     <div className="flex flex-col">
       {GATES.map((gate, i) => (
-        <HairlineRow key={gate.title} last={i === GATES.length - 1} className="flex flex-col gap-1">
+        <HairlineRow
+          key={gate.title}
+          last={i === GATES.length - 1}
+          className="flex flex-col gap-1"
+        >
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
             <span className="text-sm text-ink font-medium">{gate.title}</span>
             <code className="text-xs text-ink-faint">{gate.source}</code>
           </div>
-          <p className="text-sm text-ink-soft leading-snug max-w-3xl">{gate.detail}</p>
+          <p className="text-sm text-ink-soft leading-snug max-w-3xl">
+            {gate.detail}
+          </p>
         </HairlineRow>
       ))}
     </div>

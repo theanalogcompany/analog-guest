@@ -6,7 +6,9 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 }))
 
 const updateThenMock = vi.fn()
-const eqMock = vi.fn().mockReturnValue({ then: (r: (v: unknown) => unknown) => updateThenMock().then(r) })
+const eqMock = vi.fn().mockReturnValue({
+  then: (r: (v: unknown) => unknown) => updateThenMock().then(r),
+})
 const updateMock = vi.fn().mockReturnValue({ eq: eqMock })
 const fromMock = vi.fn().mockReturnValue({ update: updateMock })
 vi.mock('@/lib/db/admin', () => ({
@@ -29,7 +31,10 @@ function makeRequest(body: unknown): Request {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues(['v1']) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues(['v1']),
+  })
   fromMock.mockClear()
   updateMock.mockClear()
   eqMock.mockClear()
@@ -44,7 +49,9 @@ afterEach(() => {
 describe('POST /api/operator/devices', () => {
   it('returns 401 when bearer auth fails', async () => {
     const { AuthError } = await import('@/lib/auth/types')
-    verifyMock.mockRejectedValueOnce(new AuthError(401, 'missing Authorization header'))
+    verifyMock.mockRejectedValueOnce(
+      new AuthError(401, 'missing Authorization header'),
+    )
     const res = await POST(makeRequest({ token: VALID_TOKEN }), {
       params: Promise.resolve({}),
     })
@@ -68,31 +75,30 @@ describe('POST /api/operator/devices', () => {
   })
 
   it('returns 400 on too-short token', async () => {
-    const res = await POST(
-      makeRequest({ token: 'abcd' }),
-      { params: Promise.resolve({}) },
-    )
+    const res = await POST(makeRequest({ token: 'abcd' }), {
+      params: Promise.resolve({}),
+    })
     expect(res.status).toBe(400)
   })
 
   it('returns 400 on too-long token (>256 chars)', async () => {
-    const res = await POST(
-      makeRequest({ token: 'a'.repeat(257) }),
-      { params: Promise.resolve({}) },
-    )
+    const res = await POST(makeRequest({ token: 'a'.repeat(257) }), {
+      params: Promise.resolve({}),
+    })
     expect(res.status).toBe(400)
   })
 
   it('returns 400 on non-JSON body', async () => {
-    const res = await POST(makeRequest('not json'), { params: Promise.resolve({}) })
+    const res = await POST(makeRequest('not json'), {
+      params: Promise.resolve({}),
+    })
     expect(res.status).toBe(400)
   })
 
   it('upserts the token + timestamp on the authenticated operator and returns 200', async () => {
-    const res = await POST(
-      makeRequest({ token: VALID_TOKEN }),
-      { params: Promise.resolve({}) },
-    )
+    const res = await POST(makeRequest({ token: VALID_TOKEN }), {
+      params: Promise.resolve({}),
+    })
     expect(res.status).toBe(200)
     expect(fromMock).toHaveBeenCalledWith('operators')
     expect(updateMock).toHaveBeenCalledTimes(1)
@@ -103,24 +109,23 @@ describe('POST /api/operator/devices', () => {
   })
 
   it('returns 500 when the DB update fails', async () => {
-    updateThenMock.mockResolvedValueOnce({ error: { message: 'db connection broke' } })
-    const res = await POST(
-      makeRequest({ token: VALID_TOKEN }),
-      { params: Promise.resolve({}) },
-    )
+    updateThenMock.mockResolvedValueOnce({
+      error: { message: 'db connection broke' },
+    })
+    const res = await POST(makeRequest({ token: VALID_TOKEN }), {
+      params: Promise.resolve({}),
+    })
     expect(res.status).toBe(500)
   })
 
   it('accepts re-registration of the same token (idempotent)', async () => {
-    const res1 = await POST(
-      makeRequest({ token: VALID_TOKEN }),
-      { params: Promise.resolve({}) },
-    )
+    const res1 = await POST(makeRequest({ token: VALID_TOKEN }), {
+      params: Promise.resolve({}),
+    })
     expect(res1.status).toBe(200)
-    const res2 = await POST(
-      makeRequest({ token: VALID_TOKEN }),
-      { params: Promise.resolve({}) },
-    )
+    const res2 = await POST(makeRequest({ token: VALID_TOKEN }), {
+      params: Promise.resolve({}),
+    })
     expect(res2.status).toBe(200)
     expect(updateMock).toHaveBeenCalledTimes(2)
   })

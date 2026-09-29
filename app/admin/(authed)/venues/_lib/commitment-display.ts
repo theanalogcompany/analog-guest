@@ -19,12 +19,16 @@ export type CommitmentKind = 'obligation' | 'recommendation'
  * negation nobody revisited — a local copy here would silently opt this page
  * out of that decision.
  */
-export function classifyKind(row: Pick<VenueCommitmentRow, 'type'>): CommitmentKind {
+export function classifyKind(
+  row: Pick<VenueCommitmentRow, 'type'>,
+): CommitmentKind {
   return isObligationType(row.type) ? 'obligation' : 'recommendation'
 }
 
 /** A human has been told about this obligation (TAC-341). */
-export function isEscalated(row: Pick<VenueCommitmentRow, 'escalatedAt'>): boolean {
+export function isEscalated(
+  row: Pick<VenueCommitmentRow, 'escalatedAt'>,
+): boolean {
   return row.escalatedAt !== null
 }
 
@@ -63,7 +67,9 @@ export function displayRank(row: VenueCommitmentRow): number {
  * Returns a new array — the input is a loader result that other callers may
  * read, and an in-place sort would reorder it under them.
  */
-export function sortForDisplay(rows: readonly VenueCommitmentRow[]): VenueCommitmentRow[] {
+export function sortForDisplay(
+  rows: readonly VenueCommitmentRow[],
+): VenueCommitmentRow[] {
   return [...rows].sort((a, b) => {
     const rank = displayRank(a) - displayRank(b)
     if (rank !== 0) return rank

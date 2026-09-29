@@ -25,7 +25,8 @@ export const SHEET_HEADERS = [
 type ColName = (typeof SHEET_HEADERS)[number]
 export type ReviewRow = Record<ColName, string>
 
-export type RowKind = 'approve' | 'expected_failure' | 'edit' | 'rule' | 'edit_and_rule'
+export type RowKind =
+  'approve' | 'expected_failure' | 'edit' | 'rule' | 'edit_and_rule'
 
 export interface CorpusEntrySummary {
   sample_id: string
@@ -121,7 +122,9 @@ export function normalizeForCompare(s: string): string {
 }
 
 export function tagsForRow(row: ReviewRow): string[] {
-  return ['phase_5_review', row.category, row.guest_state].filter((t) => t.length > 0)
+  return ['phase_5_review', row.category, row.guest_state].filter(
+    (t) => t.length > 0,
+  )
 }
 
 /**
@@ -191,13 +194,16 @@ export function appendPhase5Section(
   const nextH2Re = /\n## /
   const nextH2 = nextH2Re.exec(after)
 
-  const insertionAbsolute = nextH2 ? sectionContentStart + nextH2.index : existing.length
+  const insertionAbsolute = nextH2
+    ? sectionContentStart + nextH2.index
+    : existing.length
 
   const before = existing.slice(0, insertionAbsolute).replace(/\s+$/, '')
   const tail = existing.slice(insertionAbsolute)
 
   const separator = '\n\n---\n\n'
-  const tailPrefix = tail.length === 0 ? '\n' : tail.startsWith('\n\n') ? '' : '\n\n'
+  const tailPrefix =
+    tail.length === 0 ? '\n' : tail.startsWith('\n\n') ? '' : '\n\n'
   const newMarkdown = `${before}${separator}${subsection}${tailPrefix}${tail}`
   return { newMarkdown, alreadyHadSection: true }
 }

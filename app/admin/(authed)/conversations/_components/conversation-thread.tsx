@@ -24,7 +24,7 @@ import { type BubblePosition, MessageBubble } from './message-bubble'
 // scrolled up to read history.
 
 const SEQUENCE_GAP_MS = 60 * 1000
-const TIMESTAMP_GAP_MS = 5 * 60 * 1000  // Show centered timestamp row when gap exceeds 5 min
+const TIMESTAMP_GAP_MS = 5 * 60 * 1000 // Show centered timestamp row when gap exceeds 5 min
 const NEAR_BOTTOM_PX = 120
 
 interface ConversationThreadProps {
@@ -101,9 +101,15 @@ export function ConversationThread({
             venueTimezone={venueTimezone}
             position={item.position}
             selected={item.response.id === selectedMessageId}
-            reviewed={item.isLastBubble && item.response.responseReview !== null}
+            reviewed={
+              item.isLastBubble && item.response.responseReview !== null
+            }
             muted={item.state.kind === 'annotated'}
-            stateLabel={item.isLastBubble && item.state.kind === 'annotated' ? item.state.label : null}
+            stateLabel={
+              item.isLastBubble && item.state.kind === 'annotated'
+                ? item.state.label
+                : null
+            }
             onSelect={() => onSelectMessage(item.response.id)}
           />
         )

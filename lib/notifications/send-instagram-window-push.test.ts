@@ -18,14 +18,16 @@ const clearOperatorPushTokenMock = vi.fn()
 vi.mock('./recipients', () => ({
   loadPushRecipients: (...args: unknown[]) => loadPushRecipientsMock(...args),
   countOperatorBadge: (...args: unknown[]) => countOperatorBadgeMock(...args),
-  clearOperatorPushToken: (...args: unknown[]) => clearOperatorPushTokenMock(...args),
+  clearOperatorPushToken: (...args: unknown[]) =>
+    clearOperatorPushTokenMock(...args),
 }))
 
 const capturePushSentMock = vi.fn()
 const capturePushTokenInvalidMock = vi.fn()
 vi.mock('@/lib/analytics/posthog', () => ({
   capturePushSent: (...args: unknown[]) => capturePushSentMock(...args),
-  capturePushTokenInvalid: (...args: unknown[]) => capturePushTokenInvalidMock(...args),
+  capturePushTokenInvalid: (...args: unknown[]) =>
+    capturePushTokenInvalidMock(...args),
 }))
 
 import {
@@ -43,9 +45,14 @@ const INPUT = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  loadPushRecipientsMock.mockResolvedValue([{ id: 'op-1', apnsDeviceToken: 'tok-1' }])
+  loadPushRecipientsMock.mockResolvedValue([
+    { id: 'op-1', apnsDeviceToken: 'tok-1' },
+  ])
   countOperatorBadgeMock.mockResolvedValue(3)
-  sendApnsRequestMock.mockResolvedValue({ ok: true, response: { status: 200, reason: null, apnsId: 'a-1' } })
+  sendApnsRequestMock.mockResolvedValue({
+    ok: true,
+    response: { status: 200, reason: null, apnsId: 'a-1' },
+  })
 })
 
 describe('buildInstagramWindowPushBody', () => {
@@ -57,7 +64,9 @@ describe('buildInstagramWindowPushBody', () => {
 
   it('rounds DOWN, so it never promises more time than there is', () => {
     // 42m59s is 42 minutes left, not 43.
-    expect(buildInstagramWindowPushBody('Ana', 42 * 60_000 + 59_000)).toContain('42m')
+    expect(buildInstagramWindowPushBody('Ana', 42 * 60_000 + 59_000)).toContain(
+      '42m',
+    )
   })
 
   it('switches to whole hours at an hour or more', () => {
@@ -107,7 +116,10 @@ describe('sendInstagramWindowWarningPush', () => {
       deviceToken: 'tok-1',
       body: {
         aps: {
-          alert: { title: 'Instagram window closing', body: 'Ana has 42m left to reply on Instagram' },
+          alert: {
+            title: 'Instagram window closing',
+            body: 'Ana has 42m left to reply on Instagram',
+          },
           badge: 3,
           sound: 'default',
         },
@@ -123,8 +135,16 @@ describe('sendInstagramWindowWarningPush', () => {
   // only way this can go wrong.
   it('carries no message body, no handle and no scoped id', async () => {
     await sendInstagramWindowWarningPush(INPUT)
-    const payload = sendApnsRequestMock.mock.calls[0]![0].body as Record<string, unknown>
-    expect(Object.keys(payload).sort()).toEqual(['aps', 'draftId', 'guestId', 'operatorId'])
+    const payload = sendApnsRequestMock.mock.calls[0]![0].body as Record<
+      string,
+      unknown
+    >
+    expect(Object.keys(payload).sort()).toEqual([
+      'aps',
+      'draftId',
+      'guestId',
+      'operatorId',
+    ])
     const serialised = JSON.stringify(payload)
     expect(serialised).not.toMatch(/instagram_scoped_id|igsid/i)
     // The first name is permitted; nothing else about the guest is.
@@ -146,7 +166,11 @@ describe('sendInstagramWindowWarningPush', () => {
   it('tags both captures with its own surface, so the three push surfaces stay separable', async () => {
     await sendInstagramWindowWarningPush(INPUT)
     expect(capturePushSentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ surface: 'instagram_window_warning', ok: true, badge: 3 }),
+      expect.objectContaining({
+        surface: 'instagram_window_warning',
+        ok: true,
+        badge: 3,
+      }),
     )
   })
 
@@ -157,7 +181,10 @@ describe('sendInstagramWindowWarningPush', () => {
     })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     await sendInstagramWindowWarningPush(INPUT)
-    expect(clearOperatorPushTokenMock).toHaveBeenCalledWith('op-1', expect.any(Object))
+    expect(clearOperatorPushTokenMock).toHaveBeenCalledWith(
+      'op-1',
+      expect.any(Object),
+    )
     expect(capturePushTokenInvalidMock).toHaveBeenCalledWith(
       expect.objectContaining({ surface: 'instagram_window_warning' }),
     )
@@ -188,8 +215,15 @@ describe('sendInstagramWindowWarningPush', () => {
       { id: 'op-2', apnsDeviceToken: 'tok-2' },
     ])
     sendApnsRequestMock
-      .mockResolvedValueOnce({ ok: false, error: 'timeout', detail: 'no response' })
-      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null, apnsId: 'a-2' } })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'timeout',
+        detail: 'no response',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        response: { status: 200, reason: null, apnsId: 'a-2' },
+      })
     await sendInstagramWindowWarningPush(INPUT)
     expect(sendApnsRequestMock).toHaveBeenCalledTimes(2)
     expect(capturePushSentMock).toHaveBeenCalledWith(

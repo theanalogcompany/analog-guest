@@ -30,15 +30,15 @@
 
 import { NextResponse } from 'next/server'
 
-import {
-  captureOperatorCommitmentAcknowledged,
-} from '@/lib/analytics/posthog'
+import { captureOperatorCommitmentAcknowledged } from '@/lib/analytics/posthog'
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { markAcknowledged } from '@/lib/guests/commitments'
+import { logger } from '@/lib/observability/logger'
 import { venueFilterIds } from '@/lib/auth/venue-scope'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +73,7 @@ export async function POST(
   })
 
   if (!result.ok) {
-    console.warn(
+    logger.warn(
       `[/api/operator/commitments/:id/acknowledge] markAcknowledged failed errorCode=${result.errorCode ?? '<none>'} error=${result.error}`,
     )
     return NextResponse.json({ error: 'internal_error' }, { status: 500 })
@@ -86,7 +86,10 @@ export async function POST(
       guestId: row.guest_id,
       commitmentId: row.id,
       operatorId: operator.operatorId,
-      timeToActionMs: Math.max(0, now.getTime() - new Date(row.created_at).getTime()),
+      timeToActionMs: Math.max(
+        0,
+        now.getTime() - new Date(row.created_at).getTime(),
+      ),
       type: row.type,
     })
     return NextResponse.json({ ok: true })

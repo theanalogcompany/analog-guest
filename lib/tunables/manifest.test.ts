@@ -10,7 +10,10 @@ vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
 
-import { SEND_FIDELITY_FLOOR, STRONG_MATCH_SIMILARITY } from '@/lib/agent/stages'
+import {
+  SEND_FIDELITY_FLOOR,
+  STRONG_MATCH_SIMILARITY,
+} from '@/lib/agent/stages'
 import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
 import { TUNABLES, type TunableCategory, type TunableType } from './manifest'
 
@@ -50,9 +53,9 @@ describe('TUNABLES manifest', () => {
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
-  // one bucket and removing from another keeps the total satisfied. The
-  // CLAUDE.md "Adding a tunable" rubric tells writers to bump the count
-  // assertion; this makes the assertion meaningful.
+  // one bucket and removing from another keeps the total satisfied. Adding a
+  // tunable means bumping both the total above and the category below; this
+  // second assertion is what makes the first one mean anything.
   it('matches the documented per-category breakdown', () => {
     const counts: Record<TunableCategory, number> = {
       agent_runtime: 0,

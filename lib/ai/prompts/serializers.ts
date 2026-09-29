@@ -32,9 +32,11 @@ import type {
 const MAX_HISTORY_BODY_CHARS = 200
 
 const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
-  casual: 'Use contractions; lowercase starts are fine; write the way you would text a friend.',
+  casual:
+    'Use contractions; lowercase starts are fine; write the way you would text a friend.',
   warm: 'Conversational and friendly. Contractions are fine. Avoid stiffness, but stay clear and complete.',
-  formal: 'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
+  formal:
+    'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
 }
 
 // TAC-495: the casual line's Instagram variant says "message a friend", not
@@ -48,7 +50,12 @@ const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
 // channel and are identical on both.
 const CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS = {
   text: [],
-  instagram: [{ from: 'write the way you would text a friend.', to: 'write the way you would message a friend.' }],
+  instagram: [
+    {
+      from: 'write the way you would text a friend.',
+      to: 'write the way you would message a friend.',
+    },
+  ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
 const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
@@ -64,13 +71,19 @@ const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
   ),
 }
 
-function formalityGuidanceFor(formality: BrandPersona['formality'], channel: MessageChannel | null): string {
-  return formality === 'casual' ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)] : FORMALITY_GUIDANCE[formality]
+function formalityGuidanceFor(
+  formality: BrandPersona['formality'],
+  channel: MessageChannel | null,
+): string {
+  return formality === 'casual'
+    ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)]
+    : FORMALITY_GUIDANCE[formality]
 }
 
 const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
   never: 'Do not use emoji.',
-  sparingly: 'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
+  sparingly:
+    'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
   // TAC-362: `never` and `sparingly` are UNCHANGED and deliberately so —
   // both measure 0 emoji across 240 responses, and rewording a proven path
   // is how you find out it was load-bearing. Only `frequent` moves, because
@@ -110,7 +123,12 @@ const NAMED_PERSON_LINE =
 
 const NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS = {
   text: [],
-  instagram: [{ from: 'staff at the venue, texting as yourself.', to: 'staff at the venue, messaging as yourself.' }],
+  instagram: [
+    {
+      from: 'staff at the venue, texting as yourself.',
+      to: 'staff at the venue, messaging as yourself.',
+    },
+  ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
 const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
@@ -126,7 +144,10 @@ const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
   ),
 }
 
-function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | null): string {
+function speakerFramingProse(
+  persona: BrandPersona,
+  channel: MessageChannel | null,
+): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
@@ -172,7 +193,10 @@ function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | nu
  */
 function personaBullet(text: string): string {
   const [first = '', ...rest] = text.split('\n')
-  return [`- ${first}`, ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`))].join('\n')
+  return [
+    `- ${first}`,
+    ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`)),
+  ].join('\n')
 }
 
 /**
@@ -182,14 +206,23 @@ function personaBullet(text: string): string {
  * passes 'text', because its prompt is not guest-facing and TAC-495 leaves it
  * exactly as it was.
  */
-export function personaToProse(persona: BrandPersona, channel: MessageChannel | null): string {
+export function personaToProse(
+  persona: BrandPersona,
+  channel: MessageChannel | null,
+): string {
   const sections: string[] = []
 
   sections.push(`## Voice and Tone\n${persona.tone}`)
-  sections.push(`## How to address the guest\n${speakerFramingProse(persona, channel)}`)
-  sections.push(`## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`)
+  sections.push(
+    `## How to address the guest\n${speakerFramingProse(persona, channel)}`,
+  )
+  sections.push(
+    `## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`,
+  )
   sections.push(`## Length\n${persona.lengthGuide}`)
-  sections.push(`## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`)
+  sections.push(
+    `## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`,
+  )
 
   if (persona.signaturePhrases.length > 0) {
     sections.push(
@@ -216,18 +249,29 @@ export function personaToProse(persona: BrandPersona, channel: MessageChannel | 
 }
 
 function formatAddress(addr: VenueInfo['address']): string {
-  const parts = [addr.line1, addr.line2, `${addr.city}, ${addr.region} ${addr.postalCode}`].filter(
-    (p): p is string => Boolean(p),
-  )
+  const parts = [
+    addr.line1,
+    addr.line2,
+    `${addr.city}, ${addr.region} ${addr.postalCode}`,
+  ].filter((p): p is string => Boolean(p))
   return parts.join(', ')
 }
 
 function formatHours(hours: VenueInfo['hours']): string | null {
-  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
+  const days = [
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
+  ] as const
   const lines: string[] = []
   for (const day of days) {
     const value = hours[day]
-    if (value) lines.push(`  - ${day[0].toUpperCase() + day.slice(1)}: ${value}`)
+    if (value)
+      lines.push(`  - ${day[0].toUpperCase() + day.slice(1)}: ${value}`)
   }
   if (hours.notes) {
     // Notes can be multi-line (operator may write several `- **<key>:** <val>`
@@ -273,24 +317,36 @@ function compareItems(a: MenuItem, b: MenuItem): number {
 function formatMenuItems(items: readonly MenuItem[]): string | null {
   if (items.length === 0) return null
 
-  const onMenu = items.filter((i) => !i.isOffMenu).slice().sort(compareItems)
-  const offMenu = items.filter((i) => i.isOffMenu).slice().sort(compareItems)
+  const onMenu = items
+    .filter((i) => !i.isOffMenu)
+    .slice()
+    .sort(compareItems)
+  const offMenu = items
+    .filter((i) => i.isOffMenu)
+    .slice()
+    .sort(compareItems)
 
   const sections: string[] = []
   if (onMenu.length > 0) {
     sections.push(`On-menu:\n${onMenu.map(formatMenuItemLine).join('\n')}`)
   }
   if (offMenu.length > 0) {
-    sections.push(`Off-menu (by request):\n${offMenu.map(formatMenuItemLine).join('\n')}`)
+    sections.push(
+      `Off-menu (by request):\n${offMenu.map(formatMenuItemLine).join('\n')}`,
+    )
   }
 
   return `## Menu (structured)\n${sections.join('\n\n')}`
 }
 
-function formatAmenities(amenities: NonNullable<VenueInfo['amenities']>): string | null {
+function formatAmenities(
+  amenities: NonNullable<VenueInfo['amenities']>,
+): string | null {
   const lines: string[] = []
-  if (amenities.wifi !== undefined) lines.push(`  - WiFi: ${amenities.wifi ? 'yes' : 'no'}`)
-  if (amenities.petFriendly !== undefined) lines.push(`  - Pet-friendly: ${amenities.petFriendly ? 'yes' : 'no'}`)
+  if (amenities.wifi !== undefined)
+    lines.push(`  - WiFi: ${amenities.wifi ? 'yes' : 'no'}`)
+  if (amenities.petFriendly !== undefined)
+    lines.push(`  - Pet-friendly: ${amenities.petFriendly ? 'yes' : 'no'}`)
   if (amenities.parking) lines.push(`  - Parking: ${amenities.parking}`)
   if (amenities.seating) lines.push(`  - Seating: ${amenities.seating}`)
   if (amenities.notes) lines.push(`  - Notes: ${amenities.notes}`)
@@ -343,7 +399,9 @@ function formatVenueServices(services: VenueServices): string | null {
   const offered: string[] = []
   const notOffered: string[] = []
 
-  for (const key of Object.keys(SERVICE_LABELS) as Array<keyof typeof SERVICE_LABELS>) {
+  for (const key of Object.keys(SERVICE_LABELS) as Array<
+    keyof typeof SERVICE_LABELS
+  >) {
     const value = services[key]
     // Strict boolean checks: `undefined` means nobody said, and must fall
     // through to NEITHER list.
@@ -481,7 +539,10 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
   if (chunks.length === 0) return ''
 
   const blocks = chunks.map((c) => {
-    const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
+    const quoted = c.text
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n')
     return `[${c.sourceType}]\n${quoted}`
   })
 
@@ -529,10 +590,17 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
 
   const blocks = chunks.map((c) => {
     const primaryLine =
-      c.primaryTags.length > 0 ? `[primary: ${c.primaryTags.join(', ')}]` : `[primary: ${c.sourceType}]`
+      c.primaryTags.length > 0
+        ? `[primary: ${c.primaryTags.join(', ')}]`
+        : `[primary: ${c.sourceType}]`
     const secondaryLine =
-      c.secondaryTags.length > 0 ? `\n[secondary: ${c.secondaryTags.join(', ')}]` : ''
-    const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
+      c.secondaryTags.length > 0
+        ? `\n[secondary: ${c.secondaryTags.join(', ')}]`
+        : ''
+    const quoted = c.text
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n')
     return `${primaryLine}${secondaryLine}\n${quoted}`
   })
 
@@ -553,7 +621,9 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
  * block byte-identical to its pre-TAC-301 shape. That silence is deliberate:
  * see the governing rule in lib/schemas/venue-hours.ts.
  */
-function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openState']): string | null {
+function formatOpenStatus(
+  openState: NonNullable<RuntimeContext['today']>['openState'],
+): string | null {
   if (!openState) return null
 
   if (openState.state === 'open') {
@@ -600,7 +670,9 @@ function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openS
  * Every line is Jaipal's wording. No em dash: R3 bans them in output and the
  * prompt should not model one.
  */
-function formatScanArrival(scanArrival: NonNullable<RuntimeContext['scanArrival']>): string {
+function formatScanArrival(
+  scanArrival: NonNullable<RuntimeContext['scanArrival']>,
+): string {
   return [
     '## Guest just arrived',
     scanArrival.hadPriorConversation
@@ -663,7 +735,9 @@ function normalizeHistoryBody(body: string): string {
 // draft the venue decided against and a send that failed both went unread, but
 // only the first was a decision, and "never sent" with no reason can nudge the
 // model to raise what an operator rejected (2026-09-14 ruling).
-export function historyDeliveryMarker(delivery: MessageDelivery): string | null {
+export function historyDeliveryMarker(
+  delivery: MessageDelivery,
+): string | null {
   switch (delivery) {
     case 'delivered':
       return null
@@ -683,14 +757,19 @@ export function historyDeliveryMarker(delivery: MessageDelivery): string | null 
 export const UNSENT_HISTORY_NOTE =
   'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
 
-function formatRecentConversation(messages: readonly RecentMessage[], now: Date): string | null {
+function formatRecentConversation(
+  messages: readonly RecentMessage[],
+  now: Date,
+): string | null {
   if (messages.length === 0) return null
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const body = normalizeHistoryBody(m.body)
     const marker = historyDeliveryMarker(m.delivery)
-    return marker === null ? `[${speaker}, ${delta}] ${body}` : `[${speaker}, ${delta}, ${marker}] ${body}`
+    return marker === null
+      ? `[${speaker}, ${delta}] ${body}`
+      : `[${speaker}, ${delta}, ${marker}] ${body}`
   })
   const block = `## Recent conversation\n${lines.join('\n')}`
   // A history with nothing unsent renders exactly as it did before TAC-394:
@@ -770,6 +849,82 @@ function formatFollowupContext(
 // time-delta matches the ## Recent conversation block style. The intro
 // line tells Sonnet how to use the data — pattern recognition for
 // recommendations, NOT reciting it back at the guest (R11 reinforces).
+/**
+ * TAC-543: one line naming each distinct item in the visits above, with a
+ * count, rendered AFTER the timestamped visits and never replacing them.
+ *
+ * "ACROSS THE VISITS ABOVE", NOT "EVERYTHING THEY'VE ORDERED HERE" (ruled
+ * 2026-09-29). The first wording shipped for one commit and was wrong in the
+ * direction that matters: `visits` is bounded by MAX_VISIT_HISTORY_DAYS (90),
+ * by MAX_VISIT_HISTORY_TRANSACTIONS (20, newest-first so the OLDEST drop), and
+ * by extractRecentVisits dropping any transaction with no parseable item name.
+ * An absolute claim over that subset made the model assert a falsehood about a
+ * guest with older orders - "cortado (once)" as EVERYTHING, for a guest who had
+ * a blossom tonic 100 days ago - which is this ticket's own device defect at a
+ * different boundary, and the line exists precisely to make the model assert
+ * from this list rather than hedge. It also contradicted the block's own intro,
+ * which says "Recent transactions".
+ *
+ * The shipped wording is true BY CONSTRUCTION: the line is derived from exactly
+ * the visits rendered above it, so it claims nothing about what is outside
+ * them. All-time counts beyond the window are a known follow-up, not this line.
+ * A wording naming the window ("in the last 90 days") was considered and
+ * rejected: it would still be false if the 20-cap bit, and it puts a number in
+ * prompt copy that actually lives in a constant.
+ *
+ * WHY IT EXISTS, measured rather than assumed. The timestamped bullets carry
+ * the same facts, and two wordings of a category-instruction clause failed to
+ * make the model use them: it reads the block as what a guest HABITUALLY
+ * orders, so an item ordered once did not register as being in their history
+ * at all. Every defect in both measured runs landed on one of the two items
+ * ordered exactly once, and none ever landed on the items ordered four and
+ * three times. Naming the counts flatly is what closed it.
+ *
+ * DERIVED FROM THE SAME `visits` THE BULLETS RENDER, so the summary and the
+ * bullets can never disagree about what the guest has had. It is deliberately
+ * not a second query.
+ *
+ * CASE IS WHATEVER extractRecentVisits GAVE US, WHICH IS LOWERCASE. That
+ * function lowercases every line-item name (`seen.set(lower, lower)`) and its
+ * own Visit doc comment says so, so production renders "cortado (4x), pink
+ * panther (3x), ... blossom tonic (once)". This function does not change case
+ * in either direction: normalising here would be a second opinion about a
+ * decision made upstream, and capitalising would mean inventing a spelling.
+ *
+ * An earlier version of this comment claimed case was PRESERVED so a menu name
+ * could never be handed back mis-cased. That was false in the direction that
+ * matters: the mis-casing happens at extraction, before this function sees the
+ * name, and seven tests pinned it only because their fixtures were capitalised
+ * in a way production cannot produce. If guest-facing casing is worth fixing it
+ * is `extractItemNames`'s to fix, not this line's.
+ *
+ * The lowercase dedupe KEY below is therefore inert on production input and is
+ * kept for the exported contract: this is a pure exported function and the
+ * measurement harnesses call it with menu-cased names directly.
+ */
+export function formatOrderSummary(visits: readonly Visit[]): string {
+  const counts = new Map<string, number>()
+  const order: string[] = []
+  for (const v of visits) {
+    for (const raw of v.items) {
+      const name = raw.trim()
+      if (name === '') continue
+      const key = name.toLowerCase()
+      if (!counts.has(key)) {
+        counts.set(key, 0)
+        order.push(name)
+      }
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  if (order.length === 0) return ''
+  const parts = order
+    .map((name, i) => ({ name, n: counts.get(name.toLowerCase()) ?? 0, i }))
+    .sort((a, b) => b.n - a.n || a.i - b.i)
+    .map(({ name, n }) => `${name} (${n === 1 ? 'once' : `${n}\u00d7`})`)
+  return `Across the visits above: ${parts.join(', ')}.`
+}
+
 function formatVisitHistory(
   visits: readonly Visit[],
   now: Date,
@@ -780,11 +935,17 @@ function formatVisitHistory(
     const items = v.items.join(', ')
     return `- [${delta}] ${items}`
   })
+  // The summary line sits INSIDE this function, after the bullets, so it can
+  // never render without them: the empty-visits guard above is the only exit.
+  const summary = formatOrderSummary(visits)
   return [
     '## Visit history',
     "Recent transactions, most recent first. Use this to recognize patterns and offer relevant suggestions — don't recite history back at the guest.",
     lines.join('\n'),
-  ].join('\n')
+    summary,
+  ]
+    .filter((part) => part !== '')
+    .join('\n')
 }
 
 // Category gate for the Visit History block. Welcome is the first-contact
@@ -836,7 +997,7 @@ function formatCritiqueToIncorporate(critique: string): string {
     '## Critique to incorporate',
     'A previous attempt at this message was flagged. The operator wrote:',
     critique,
-    'Take this critique seriously. Generate a new message that addresses it directly while still speaking in the venue\'s voice.',
+    "Take this critique seriously. Generate a new message that addresses it directly while still speaking in the venue's voice.",
   ].join('\n')
 }
 
@@ -851,7 +1012,7 @@ function formatOperatorInstruction(instruction: string): string {
   return [
     '## Operator instruction',
     `The operator wants you to follow up with this guest about: ${instruction}`,
-    'Draft a message that addresses this directly, in the venue\'s voice.',
+    "Draft a message that addresses this directly, in the venue's voice.",
   ].join('\n')
 }
 
@@ -872,7 +1033,8 @@ function formatGuestDetailsLines(
   if (details.first_name) lines.push(`- First name: ${details.first_name}`)
   if (details.last_name) lines.push(`- Last name: ${details.last_name}`)
   if (details.pronouns) lines.push(`- Pronouns: ${details.pronouns}`)
-  if (details.date_of_birth) lines.push(`- Date of birth: ${details.date_of_birth}`)
+  if (details.date_of_birth)
+    lines.push(`- Date of birth: ${details.date_of_birth}`)
   // TAC-300: home_base / workplace are bare strings post-normalize. Legacy
   // nested-object reads are flattened in toParsedGuestContext, so the
   // serializer only ever sees a string here.
@@ -930,10 +1092,15 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
   if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
 
   // First fallback: trim observations to the floor.
-  if (context.observations && context.observations.length > GUEST_CONTEXT_OBSERVATIONS_FLOOR) {
+  if (
+    context.observations &&
+    context.observations.length > GUEST_CONTEXT_OBSERVATIONS_FLOOR
+  ) {
     const trimmed: ParsedGuestContext = {
       ...context,
-      observations: context.observations.slice(-GUEST_CONTEXT_OBSERVATIONS_FLOOR),
+      observations: context.observations.slice(
+        -GUEST_CONTEXT_OBSERVATIONS_FLOOR,
+      ),
     }
     rendered = renderGuestContextBody(trimmed)
     if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
@@ -947,7 +1114,8 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
     while (keepCount >= 0) {
       const trimmed: ParsedGuestContext = {
         ...context,
-        life_context: keepCount === 0 ? undefined : context.life_context.slice(-keepCount),
+        life_context:
+          keepCount === 0 ? undefined : context.life_context.slice(-keepCount),
       }
       rendered = renderGuestContextBody(trimmed)
       if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
@@ -1151,7 +1319,7 @@ function formatMechanicEligibility(
     return `- ${m.name}${reward}${qual}${approval}`
   })
   const reviewedRider = willBeReviewed
-    ? "\nSomeone at the venue approves this message before the guest sees it, so if putting things right calls for something beyond the list, propose it and let them decide."
+    ? '\nSomeone at the venue approves this message before the guest sees it, so if putting things right calls for something beyond the list, propose it and let them decide.'
     : ''
   return `${header}\n${intro}\n${bullets.join('\n')}${reviewedRider}`
 }
@@ -1312,8 +1480,8 @@ function formatMechanicEligibility(
 // The two CLAUSES that used to sit after the question are still gone, and they
 // are a separate thing from the question itself. The paragraph rendered
 // directly beneath says both: "take the one listed first, and only that one",
-// and "Asking never changes what the reply is about ... the question goes at
-// the end, in one short line, or not at all." The second of them was also the
+// and "Asking never changes what the reply is about ... the question is one
+// short line on its own, or not at all." The second of them was also the
 // deadlock sentence TAC-436 deleted from that paragraph, surviving here in
 // different words and so invisible to the canary guarding it. Consequence,
 // ruled rather than inherited: a guest who scans AND asks something gets their
@@ -1344,7 +1512,10 @@ const FIRST_TOUCH_OPENER =
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [
-    { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
+    {
+      from: "This is the guest's first message on this number,",
+      to: "This is the guest's first message,",
+    },
   ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
@@ -1416,14 +1587,22 @@ function formatOpenIntentions(
     'Not an opening: a message carrying an apology, bad news, or something',
     "they're unhappy about. Leave those alone entirely.",
     '',
+    // TAC-554 dropped "goes at the end" from the next line. The question no
+    // longer has a POSITION in this text at all: it is emitted in its own
+    // field and dispatch sends it as its own message after the reply, so a
+    // claim about where it sits in the body would be false. "One short line
+    // on its own" is what survives, and it is still true — it is now true
+    // structurally rather than by the model's cooperation.
     'Asking never changes what the reply is about. Whatever they raised is',
-    'still the job, and the question goes at the end, in one short line, or',
-    'not at all. Never steer the conversation toward one of these, and never',
+    'still the job, and the question is one short line on its own, or not at',
+    'all. Never steer the conversation toward one of these, and never',
     'raise one twice.',
     '',
     'If nothing fits, let it wait. There will be other conversations.',
   ].join('\n')
-  const opener = firstTouchAfterQrScan ? `${firstTouchOpenerFor(channel)}\n\n` : ''
+  const opener = firstTouchAfterQrScan
+    ? `${firstTouchOpenerFor(channel)}\n\n`
+    : ''
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
@@ -1559,7 +1738,12 @@ export function runtimeToProse(
     blocks.push(formatOperatorInstruction(runtime.operatorInstruction))
   }
   if (runtime.mechanics !== undefined) {
-    blocks.push(formatMechanicEligibility(runtime.mechanics, runtime.willBeReviewed === true))
+    blocks.push(
+      formatMechanicEligibility(
+        runtime.mechanics,
+        runtime.willBeReviewed === true,
+      ),
+    )
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
   // Intent-then-evidence — this block states *why* we're reaching out;
@@ -1644,7 +1828,11 @@ export function runtimeToProse(
   // NOT after the emoji directive, which keeps its own last-block position:
   // that one is measured (TAC-362) and demoting a measured mechanism to promote
   // this one is not a trade this ticket makes.
-  if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
+  if (
+    shouldRenderOpenIntentions(category) &&
+    runtime.openIntentions &&
+    runtime.openIntentions.length > 0
+  ) {
     const block = formatOpenIntentions(
       runtime.openIntentions,
       runtime.firstTouchAfterQrScan === true,
@@ -1691,7 +1879,9 @@ export function runtimeToProse(
   if (runtime.perkBeingUnlocked) {
     lines.push(`Perk: ${runtime.perkBeingUnlocked.name}`)
     lines.push(`Why they qualified: ${runtime.perkBeingUnlocked.qualification}`)
-    lines.push(`What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`)
+    lines.push(
+      `What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`,
+    )
   }
   if (runtime.eventBeingInvited) {
     lines.push(`Event: ${runtime.eventBeingInvited.name}`)
@@ -1703,7 +1893,10 @@ export function runtimeToProse(
     lines.push(`Additional context: ${runtime.additionalContext}`)
   }
 
-  const tail = lines.length === 0 ? `Generate a ${category} message now.` : `${lines.join('\n')}\n\nGenerate the message now.`
+  const tail =
+    lines.length === 0
+      ? `Generate a ${category} message now.`
+      : `${lines.join('\n')}\n\nGenerate the message now.`
 
   if (blocks.length === 0) return tail
   return `${blocks.join('\n\n')}\n\n${tail}`

@@ -106,7 +106,9 @@ export type CanSendFollowupResult =
  * (let cold_lapsed re-fire inside its window). The filtered subset is
  * the right semantic.
  */
-export function canSendFollowup(input: CanSendFollowupInput): CanSendFollowupResult {
+export function canSendFollowup(
+  input: CanSendFollowupInput,
+): CanSendFollowupResult {
   const { reasons, guest, log, rules, venueTimezone, now } = input
 
   // 1. Opt-out — total suppression, irrespective of any reason.
@@ -118,7 +120,14 @@ export function canSendFollowup(input: CanSendFollowupInput): CanSendFollowupRes
   // at `cron_hour_local` (default 10am) and the default quiet window is
   // 21:00..08:00 (so the gate never trips in practice today), the run hour
   // is a tunable; this gate has to be correct.
-  if (isQuietHour(now, venueTimezone, rules.quiet_hours_start_local, rules.quiet_hours_end_local)) {
+  if (
+    isQuietHour(
+      now,
+      venueTimezone,
+      rules.quiet_hours_start_local,
+      rules.quiet_hours_end_local,
+    )
+  ) {
     return { ok: false, reason: 'quiet_hours' }
   }
 
@@ -148,7 +157,8 @@ export function canSendFollowup(input: CanSendFollowupInput): CanSendFollowupRes
   // the filter empties the array entirely, the only reasons we were going
   // to dispatch are all in dedup → suppress with per_reason_dedup.
   const allowedReasons = reasons.filter(
-    (reason) => !isReasonTimeBoundOnDedup(reason, log.lastByReason[reason], rules, now),
+    (reason) =>
+      !isReasonTimeBoundOnDedup(reason, log.lastByReason[reason], rules, now),
   )
   if (reasons.length > 0 && allowedReasons.length === 0) {
     return { ok: false, reason: 'per_reason_dedup' }
@@ -191,7 +201,10 @@ export function isQuietHour(
  * Venue-local hour-and-minute as minutes-since-midnight, or null on
  * invalid timezone.
  */
-function venueLocalMinutes(instant: Date, venueTimezone: string): number | null {
+function venueLocalMinutes(
+  instant: Date,
+  venueTimezone: string,
+): number | null {
   try {
     const formatted = new Intl.DateTimeFormat('en-GB', {
       timeZone: venueTimezone,

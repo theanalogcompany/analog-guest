@@ -76,7 +76,9 @@ describe('removeAntiPattern — exact text match', () => {
       ]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'no marketing flourishes')
@@ -94,7 +96,9 @@ describe('removeAntiPattern — exact text match', () => {
       persona: makePersonaWithAntiPatterns(['legacy entry']),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'legacy entry')
@@ -112,7 +116,9 @@ describe('removeAntiPattern — non-matches return not_found', () => {
       ]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'something else')
@@ -129,7 +135,9 @@ describe('removeAntiPattern — non-matches return not_found', () => {
       ]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'No Marketing Flourishes')
@@ -143,7 +151,9 @@ describe('removeAntiPattern — db error paths', () => {
   it('returns db_error on lookup failure', async () => {
     const state = newState({ selectError: { message: 'lookup failed' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'x')
@@ -160,7 +170,9 @@ describe('removeAntiPattern — db error paths', () => {
       updateError: { message: 'write failed' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeAntiPattern(VENUE_ID, 'remove me')

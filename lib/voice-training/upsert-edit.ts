@@ -11,6 +11,7 @@
 // errorCode='embed_failed' and surface a retry affordance to the operator.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { ingestCorpusEntry } from '@/lib/rag'
 
 export const DEFAULT_OPERATOR_EDIT_CONFIDENCE = 0.95
@@ -129,7 +130,7 @@ export async function upsertCorpusEdit(
       .delete()
       .eq('id', inserted.id)
     if (cleanupErr) {
-      console.error(
+      logger.error(
         '[voice-training] cleanup-after-embed-failure failed; voice_corpus row stranded',
         {
           corpusId: inserted.id,

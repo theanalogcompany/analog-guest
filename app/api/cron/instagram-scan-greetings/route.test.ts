@@ -30,7 +30,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  if (originalExternalCronSecret === undefined) delete process.env.EXTERNAL_CRON_SECRET
+  if (originalExternalCronSecret === undefined)
+    delete process.env.EXTERNAL_CRON_SECRET
   else process.env.EXTERNAL_CRON_SECRET = originalExternalCronSecret
   if (originalCronSecret === undefined) delete process.env.CRON_SECRET
   else process.env.CRON_SECRET = originalCronSecret
@@ -40,7 +41,9 @@ afterEach(() => {
 describe('GET /api/cron/instagram-scan-greetings', () => {
   it('skips auth in development', async () => {
     vi.stubEnv('NODE_ENV', 'development')
-    const res = await GET(new Request('http://localhost/api/cron/instagram-scan-greetings'))
+    const res = await GET(
+      new Request('http://localhost/api/cron/instagram-scan-greetings'),
+    )
     expect(res.status).toBe(200)
     expect(processDueScanGreetingsMock).toHaveBeenCalledOnce()
   })
@@ -60,7 +63,9 @@ describe('GET /api/cron/instagram-scan-greetings', () => {
   it('refuses a request with no Authorization header', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     process.env.EXTERNAL_CRON_SECRET = 'the-secret'
-    const res = await GET(new Request('http://localhost/api/cron/instagram-scan-greetings'))
+    const res = await GET(
+      new Request('http://localhost/api/cron/instagram-scan-greetings'),
+    )
     expect(res.status).toBe(401)
     expect(processDueScanGreetingsMock).not.toHaveBeenCalled()
   })

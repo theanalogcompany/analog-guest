@@ -4,7 +4,10 @@ import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { INTENTION_DEFINITIONS } from '@/lib/agent/intentions/definitions'
-import { loadIntentionPrompts, RECORDED_PROMPTS_LIMIT } from '../_lib/load-intention-prompts'
+import {
+  loadIntentionPrompts,
+  RECORDED_PROMPTS_LIMIT,
+} from '../_lib/load-intention-prompts'
 import { DefinitionsList } from './_components/definitions-list'
 import { GatingConditions } from './_components/gating-conditions'
 import { RecordedPromptsList } from './_components/recorded-prompts-list'
@@ -53,14 +56,15 @@ export default async function IntentionsPage() {
       />
 
       <p className="text-sm text-ink-soft leading-relaxed max-w-3xl">
-        An intention is a conversational goal the agent carries into a conversation it does not
-        control. Open ones render into the{' '}
-        <code className="text-ink">## What you&rsquo;re hoping to get to</code> block of the user
-        prompt, phrased as a state rather than an instruction. Each becomes eligible on its own
-        event, and closes when it is raised, when the fact it asks about is recorded, or when its
-        window runs out. First-contact intentions are raised at most once per guest, ever; the two
-        that ask about a recommendation or an order re-arm when a newer one arrives in a later
-        conversation.
+        An intention is a conversational goal the agent carries into a
+        conversation it does not control. Open ones render into the{' '}
+        <code className="text-ink">## What you&rsquo;re hoping to get to</code>{' '}
+        block of the user prompt, phrased as a state rather than an instruction.
+        Each becomes eligible on its own event, and closes when it is raised,
+        when the fact it asks about is recorded, or when its window runs out.
+        First-contact intentions are raised at most once per guest, ever; the
+        two that ask about a recommendation or an order re-arm when a newer one
+        arrives in a later conversation.
       </p>
 
       <SectionShell

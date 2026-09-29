@@ -114,7 +114,9 @@ export async function dedupeAndAppendAntiPatterns(
     text,
     source: opts.source,
     addedAt,
-    ...(opts.authorOperatorId ? { authorOperatorId: opts.authorOperatorId } : {}),
+    ...(opts.authorOperatorId
+      ? { authorOperatorId: opts.authorOperatorId }
+      : {}),
   }))
 
   const updatedPersona = {

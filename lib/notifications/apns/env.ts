@@ -1,11 +1,13 @@
 // APNs environment validation (TAC-207 follow-up).
 //
-// CLAUDE.md → "Environment variables → Boot-time validation" prescribes a
-// startup validator that crashes loudly for every required env var, written
-// after the 2026-05-27 incident where APNS_AUTH_KEY was pasted without its
-// `-----END PRIVATE KEY-----` footer, signed nothing, and failed silently at
-// the first push attempt nine hours after deploy. That validator was never
-// implemented — getApnsJwt still parsed the key lazily on first send.
+// CLAUDE.md, "Environment variables", requires a validator to ship with every
+// new credential var. The rule was originally written as a boot-time validator
+// that crashes loudly, after the 2026-05-27 incident where APNS_AUTH_KEY was
+// pasted without its `-----END PRIVATE KEY-----` footer, signed nothing, and
+// failed silently at the first push attempt nine hours after deploy. That
+// boot-time validator was never implemented — getApnsJwt still parsed the key
+// lazily on first send — and the rule has since been rewritten to require
+// first-call enforcement instead, for the reason below.
 //
 // WHY THIS IS FIRST-CALL, NOT MODULE-LOAD:
 //
@@ -31,9 +33,7 @@ export const REQUIRED_APNS_VARS = [
   'APNS_ENV',
 ] as const
 
-export type ApnsEnvCheck =
-  | { ok: true }
-  | { ok: false; problems: string[] }
+export type ApnsEnvCheck = { ok: true } | { ok: false; problems: string[] }
 
 /** Apple key/team identifiers are always exactly 10 characters. */
 const APPLE_ID_LENGTH = 10
@@ -94,7 +94,11 @@ function checkAuthKey(raw: string): string[] {
 export type ApnsVar = (typeof REQUIRED_APNS_VARS)[number]
 
 /** Vars getApnsJwt needs to sign a bearer token. */
-export const JWT_APNS_VARS = ['APNS_AUTH_KEY', 'APNS_KEY_ID', 'APNS_TEAM_ID'] as const
+export const JWT_APNS_VARS = [
+  'APNS_AUTH_KEY',
+  'APNS_KEY_ID',
+  'APNS_TEAM_ID',
+] as const
 
 /** Vars sendApnsRequest needs to address a request (topic + host). */
 export const TRANSPORT_APNS_VARS = ['APNS_BUNDLE_ID', 'APNS_ENV'] as const
@@ -126,14 +130,22 @@ export function checkApnsEnv(
   }
 
   const authKey = env.APNS_AUTH_KEY
-  if (wanted.has('APNS_AUTH_KEY') && authKey !== undefined && authKey.trim() !== '') {
+  if (
+    wanted.has('APNS_AUTH_KEY') &&
+    authKey !== undefined &&
+    authKey.trim() !== ''
+  ) {
     problems.push(...checkAuthKey(authKey))
   }
 
   for (const name of ['APNS_KEY_ID', 'APNS_TEAM_ID'] as const) {
     if (!wanted.has(name)) continue
     const value = env[name]?.trim()
-    if (value !== undefined && value !== '' && value.length !== APPLE_ID_LENGTH) {
+    if (
+      value !== undefined &&
+      value !== '' &&
+      value.length !== APPLE_ID_LENGTH
+    ) {
       problems.push(
         `${name}: expected exactly ${APPLE_ID_LENGTH} characters, got ${value.length}`,
       )

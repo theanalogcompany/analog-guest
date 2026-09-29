@@ -47,7 +47,12 @@ export interface ReportInput {
   control: Distribution
   band: number
   results: ProposalResult[]
-  replacementTargets: Array<{ rowId: string; id: string; oldContent: string; newContent: string }>
+  replacementTargets: Array<{
+    rowId: string
+    id: string
+    oldContent: string
+    newContent: string
+  }>
   rulingEightRows: Array<{ id: string; label: string; content: string }>
   bareDomainExistingRows: Array<{ id: string; content: string }>
   splitFindings: SplitSafetyFinding[]
@@ -61,10 +66,12 @@ function fmt(n: number): string {
 function specificsLine(diff: SpecificsDiff): string {
   const parts: string[] = []
   for (const [k, v] of Object.entries(diff.onlyLeft)) {
-    if (v && v.length > 0) parts.push(`only in proposal — ${k}: ${v.join(', ')}`)
+    if (v && v.length > 0)
+      parts.push(`only in proposal — ${k}: ${v.join(', ')}`)
   }
   for (const [k, v] of Object.entries(diff.onlyRight)) {
-    if (v && v.length > 0) parts.push(`only in neighbour — ${k}: ${v.join(', ')}`)
+    if (v && v.length > 0)
+      parts.push(`only in neighbour — ${k}: ${v.join(', ')}`)
   }
   if (parts.length === 0) parts.push('no differing specifics')
   const flag = diff.numericDivergence
@@ -95,7 +102,9 @@ export function renderReport(input: ReportInput): string {
   L.push(`| input | \`${input.inputPath}\` |`)
   L.push(`| embedding model | ${input.embeddingModel} |`)
   L.push(`| existing entries | ${input.existingCount} |`)
-  L.push(`| proposals | ${input.proposalCount} (${input.newCount} new, ${input.replaceCount} replace) |`)
+  L.push(
+    `| proposals | ${input.proposalCount} (${input.newCount} new, ${input.replaceCount} replace) |`,
+  )
   L.push('')
 
   // ── threshold ────────────────────────────────────────────────────────────
@@ -129,7 +138,9 @@ export function renderReport(input: ReportInput): string {
   const peak = Math.max(...input.control.histogram.map((h) => h.count))
   for (const h of input.control.histogram) {
     const bar = '#'.repeat(Math.max(1, Math.round((h.count / peak) * 50)))
-    L.push(`${h.lo.toFixed(2)}-${h.hi.toFixed(2)} ${String(h.count).padStart(5)} ${bar}`)
+    L.push(
+      `${h.lo.toFixed(2)}-${h.hi.toFixed(2)} ${String(h.count).padStart(5)} ${bar}`,
+    )
   }
   L.push('```')
   L.push('')
@@ -143,22 +154,34 @@ export function renderReport(input: ReportInput): string {
 
   // ── summary ──────────────────────────────────────────────────────────────
   const counts = new Map<SuggestedVerdict, number>()
-  for (const r of input.results) counts.set(r.suggested, (counts.get(r.suggested) ?? 0) + 1)
+  for (const r of input.results)
+    counts.set(r.suggested, (counts.get(r.suggested) ?? 0) + 1)
   L.push('## 2. Suggested verdicts')
   L.push('')
-  L.push('`DUPLICATE` is never auto-suggested — dropping an entry costs the venue a fact, so it needs a reading.')
+  L.push(
+    '`DUPLICATE` is never auto-suggested — dropping an entry costs the venue a fact, so it needs a reading.',
+  )
   L.push('')
   L.push('| suggested | count |')
   L.push('|---|---|')
-  for (const v of ['REPLACES', 'CONFLICT_CANDIDATE', 'BORDERLINE', 'NEW'] as SuggestedVerdict[]) {
+  for (const v of [
+    'REPLACES',
+    'CONFLICT_CANDIDATE',
+    'BORDERLINE',
+    'NEW',
+  ] as SuggestedVerdict[]) {
     L.push(`| ${v} | ${counts.get(v) ?? 0} |`)
   }
   L.push('')
-  const flagged = input.results.filter((r) => r.suggested === 'CONFLICT_CANDIDATE' || r.suggested === 'BORDERLINE')
+  const flagged = input.results.filter(
+    (r) => r.suggested === 'CONFLICT_CANDIDATE' || r.suggested === 'BORDERLINE',
+  )
   if (flagged.length > 0) {
     L.push('Flagged for reading, by descending top score:')
     L.push('')
-    for (const r of [...flagged].sort((a, b) => (b.neighbours[0]?.score ?? 0) - (a.neighbours[0]?.score ?? 0))) {
+    for (const r of [...flagged].sort(
+      (a, b) => (b.neighbours[0]?.score ?? 0) - (a.neighbours[0]?.score ?? 0),
+    )) {
       L.push(
         `- **${r.proposal.row_id}** ${fmt(r.neighbours[0]?.score ?? 0)} vs \`${r.neighbours[0]?.label ?? '-'}\` — ${r.suggested}`,
       )
@@ -199,7 +222,9 @@ export function renderReport(input: ReportInput): string {
   } else {
     L.push('Result: **domains broken across bubbles:**')
     for (const f of input.splitFindings) {
-      L.push(`- ${f.rowId}: \`${f.brokenToken}\` split across ${JSON.stringify(f.bubbles)}`)
+      L.push(
+        `- ${f.rowId}: \`${f.brokenToken}\` split across ${JSON.stringify(f.bubbles)}`,
+      )
     }
   }
   L.push('')
@@ -225,7 +250,9 @@ export function renderReport(input: ReportInput): string {
     if (r && r.existingNeighbours.length > 0) {
       L.push('Nearest untouched existing entries:')
       L.push('')
-      L.push(r.existingNeighbours.map((n, i) => neighbourBlock(n, i)).join('\n'))
+      L.push(
+        r.existingNeighbours.map((n, i) => neighbourBlock(n, i)).join('\n'),
+      )
       L.push('')
     }
   }
@@ -236,7 +263,9 @@ export function renderReport(input: ReportInput): string {
   for (const r of input.results) {
     const p = r.proposal
     const top = r.neighbours[0]
-    L.push(`### ${p.row_id} — ${r.suggested}${top ? ` (top ${fmt(top.score)})` : ''}`)
+    L.push(
+      `### ${p.row_id} — ${r.suggested}${top ? ` (top ${fmt(top.score)})` : ''}`,
+    )
     L.push('')
     L.push(
       `\`action: ${p.action}\` · \`primary: ${p.primary_tags.join(', ')}\` · ` +
@@ -266,7 +295,9 @@ export function renderReport(input: ReportInput): string {
   L.push('## 7. Text defects')
   L.push('')
   if (input.textDefects.length === 0) {
-    L.push('None found by the automated checks (URL present, double punctuation, em/en dash, empty fields, non-canonical tag).')
+    L.push(
+      'None found by the automated checks (URL present, double punctuation, em/en dash, empty fields, non-canonical tag).',
+    )
   } else {
     for (const d of input.textDefects) L.push(`- ${d}`)
   }

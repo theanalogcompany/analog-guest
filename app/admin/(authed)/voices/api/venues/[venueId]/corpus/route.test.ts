@@ -6,7 +6,11 @@ vi.mock('@/lib/auth', () => ({
 }))
 vi.mock('@/lib/voice-training', () => ({
   addCorpusEntry: vi.fn(),
-  ADD_CORPUS_SOURCE_TYPES: ['manual_entry', 'sample_text', 'past_message'] as const,
+  ADD_CORPUS_SOURCE_TYPES: [
+    'manual_entry',
+    'sample_text',
+    'past_message',
+  ] as const,
 }))
 
 import { requireVenueAdmin } from '@/lib/auth'
@@ -115,7 +119,10 @@ describe('POST /admin/voices/api/venues/[venueId]/corpus — auth pass-through',
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await POST(
       buildRequest({ content: 'x', sourceType: 'manual_entry', tags: [] }),

@@ -17,9 +17,12 @@ const OPERATOR_ID = '22222222-2222-4222-8222-222222222222'
 const ENTRY_ID = '33333333-3333-4333-8333-333333333333'
 
 function buildRequest(): Request {
-  return new Request('http://test/admin/venues/api/venues/x/current-context/y', {
-    method: 'DELETE',
-  })
+  return new Request(
+    'http://test/admin/venues/api/venues/x/current-context/y',
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 function buildParams() {
@@ -44,7 +47,10 @@ describe('DELETE /admin/venues/api/venues/[venueId]/current-context/[entryId]', 
     vi.mocked(dropCurrentContextEntry).mockResolvedValue({ ok: true })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(200)
-    expect(dropCurrentContextEntry).toHaveBeenCalledWith({ venueId: VENUE_ID, entryId: ENTRY_ID })
+    expect(dropCurrentContextEntry).toHaveBeenCalledWith({
+      venueId: VENUE_ID,
+      entryId: ENTRY_ID,
+    })
   })
 
   it('404 when the entry is already gone', async () => {
@@ -60,7 +66,10 @@ describe('DELETE /admin/venues/api/venues/[venueId]/current-context/[entryId]', 
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(403)

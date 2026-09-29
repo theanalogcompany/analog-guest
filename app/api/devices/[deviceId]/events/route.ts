@@ -8,7 +8,12 @@
 // SSE/MQTT is a later upgrade.
 
 import { createAdminClient } from '@/lib/db/admin'
-import { buildDeviceEvents, deriveTapToken, verifyDeviceToken } from '@/lib/pos/devices'
+import { logger } from '@/lib/observability/logger'
+import {
+  buildDeviceEvents,
+  deriveTapToken,
+  verifyDeviceToken,
+} from '@/lib/pos/devices'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -44,7 +49,10 @@ async function ensureTapEvents(
     .from('pos_tap_events')
     .upsert(rows, { onConflict: 'tap_token', ignoreDuplicates: true })
   if (error) {
-    console.error('eink feed: tap_event upsert failed', { deviceId, error: error.message })
+    logger.error('eink feed: tap_event upsert failed', {
+      deviceId,
+      error: error.message,
+    })
   }
 }
 
@@ -61,7 +69,7 @@ export async function GET(
 
     const tapSecret = process.env.POS_TOKEN_ENC_KEY
     if (!tapSecret) {
-      console.error('eink feed: POS_TOKEN_ENC_KEY not set')
+      logger.error('eink feed: POS_TOKEN_ENC_KEY not set')
       return Response.json({ error: 'internal_error' }, { status: 500 })
     }
 
@@ -72,7 +80,10 @@ export async function GET(
       .eq('device_id', deviceId)
       .maybeSingle()
     if (deviceError) {
-      console.error('eink feed: device lookup failed', { deviceId, error: deviceError.message })
+      logger.error('eink feed: device lookup failed', {
+        deviceId,
+        error: deviceError.message,
+      })
       return Response.json({ error: 'internal_error' }, { status: 500 })
     }
     // Uniform 401 for unknown device or bad token — don't leak which devices exist.
@@ -92,11 +103,16 @@ export async function GET(
 
     const { data: rows, error: txError } = await query
     if (txError) {
-      console.error('eink feed: transaction query failed', { deviceId, error: txError.message })
+      logger.error('eink feed: transaction query failed', {
+        deviceId,
+        error: txError.message,
+      })
       return Response.json({ error: 'internal_error' }, { status: 500 })
     }
 
-    const events = buildDeviceEvents(rows ?? [], (txId) => deriveTapToken(txId, tapSecret))
+    const events = buildDeviceEvents(rows ?? [], (txId) =>
+      deriveTapToken(txId, tapSecret),
+    )
     await ensureTapEvents(
       supabase,
       device.venue_id,
@@ -115,7 +131,7 @@ export async function GET(
     const cursor = events.length > 0 ? events[events.length - 1].at : since
     return Response.json({ cursor, events })
   } catch (e) {
-    console.error('eink feed: unexpected error', {
+    logger.error('eink feed: unexpected error', {
       error: e instanceof Error ? e.message : String(e),
     })
     return Response.json({ error: 'internal_error' }, { status: 500 })

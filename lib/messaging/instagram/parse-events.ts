@@ -148,10 +148,20 @@ export type InstagramUnhandledEvent = {
 export type InstagramEvent = InstagramHandledEvent | InstagramUnhandledEvent
 
 /** Entry keys this parser reads. Any other key is reported, not ignored. */
-const KNOWN_ENTRY_KEYS: ReadonlySet<string> = new Set(['id', 'time', 'messaging', 'changes', 'standby'])
+const KNOWN_ENTRY_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'time',
+  'messaging',
+  'changes',
+  'standby',
+])
 
 /** Per-item keys that route an event rather than name it. */
-const ROUTING_KEYS: ReadonlySet<string> = new Set(['sender', 'recipient', 'timestamp'])
+const ROUTING_KEYS: ReadonlySet<string> = new Set([
+  'sender',
+  'recipient',
+  'timestamp',
+])
 
 // The same bounds summarize-payload.ts puts on what it logs: the names come
 // from a signed body, but they still end up in a log line.
@@ -180,7 +190,10 @@ function itemFieldNames(item: Record<string, unknown>): string[] {
   return fieldNames(Object.keys(item).filter((key) => !ROUTING_KEYS.has(key)))
 }
 
-function unhandled(reason: InstagramUnhandledReason, fields: string[] = []): InstagramUnhandledEvent {
+function unhandled(
+  reason: InstagramUnhandledReason,
+  fields: string[] = [],
+): InstagramUnhandledEvent {
   return { kind: 'unhandled', reason, fields }
 }
 
@@ -245,8 +258,10 @@ function parseMessage(
   if (!fits) return unhandled('account_mismatch', itemFieldNames(item))
 
   const mid = nonEmptyString(message.mid)
-  if (mid === null) return unhandled('malformed', fieldNames(Object.keys(message)))
-  if (message.is_deleted === true) return unhandled('message_deleted', fieldNames(Object.keys(message)))
+  if (mid === null)
+    return unhandled('malformed', fieldNames(Object.keys(message)))
+  if (message.is_deleted === true)
+    return unhandled('message_deleted', fieldNames(Object.keys(message)))
   if (message.is_unsupported === true) {
     return unhandled('message_unsupported', fieldNames(Object.keys(message)))
   }
@@ -282,7 +297,10 @@ function parseMessage(
   }
 }
 
-function parseMessagingItem(item: unknown, accountId: string | null): InstagramEvent {
+function parseMessagingItem(
+  item: unknown,
+  accountId: string | null,
+): InstagramEvent {
   if (!isRecord(item)) return unhandled('malformed')
 
   const senderId = idOf(item.sender)
@@ -301,7 +319,8 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
   if (isRecord(item.postback)) {
     if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
     const mid = nonEmptyString(item.postback.mid)
-    if (mid === null) return unhandled('malformed', fieldNames(Object.keys(item.postback)))
+    if (mid === null)
+      return unhandled('malformed', fieldNames(Object.keys(item.postback)))
     return {
       kind: 'postback',
       accountId,
@@ -309,15 +328,23 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
       mid,
       providerSentAt: providerSentAtOf(item),
       title: nonEmptyString(item.postback.title),
-      referral: parseReferral(item.postback.referral) ?? parseReferral(item.referral),
+      referral:
+        parseReferral(item.postback.referral) ?? parseReferral(item.referral),
     }
   }
 
   if (isRecord(item.read)) {
     if (!fromGuest) return unhandled('account_mismatch', itemFieldNames(item))
     const mid = nonEmptyString(item.read.mid)
-    if (mid === null) return unhandled('malformed', fieldNames(Object.keys(item.read)))
-    return { kind: 'read', accountId, guestIgsid: senderId, mid, providerSentAt: providerSentAtOf(item) }
+    if (mid === null)
+      return unhandled('malformed', fieldNames(Object.keys(item.read)))
+    return {
+      kind: 'read',
+      accountId,
+      guestIgsid: senderId,
+      mid,
+      providerSentAt: providerSentAtOf(item),
+    }
   }
 
   // TAC-536: a referral with nothing else beside it. Handled rather than
@@ -332,7 +359,8 @@ function parseMessagingItem(item: unknown, accountId: string | null): InstagramE
     const referral = parseReferral(item.referral)
     // No ref and no source. There is nothing to record and nothing to act on,
     // so it keeps the reason the whole shape used to carry.
-    if (referral === null) return unhandled('standalone_referral', itemFieldNames(item))
+    if (referral === null)
+      return unhandled('standalone_referral', itemFieldNames(item))
     return {
       kind: 'referral',
       accountId,
@@ -354,26 +382,34 @@ function parseEntry(entry: unknown): InstagramEvent[] {
 
   if (Array.isArray(entry.messaging)) {
     sawItems = true
-    for (const item of entry.messaging) events.push(parseMessagingItem(item, accountId))
+    for (const item of entry.messaging)
+      events.push(parseMessagingItem(item, accountId))
   }
   if (Array.isArray(entry.changes)) {
     sawItems = true
     for (const change of entry.changes) {
       const field = isRecord(change) ? nonEmptyString(change.field) : null
-      events.push(unhandled('changes_field', field === null ? [] : fieldNames([field])))
+      events.push(
+        unhandled('changes_field', field === null ? [] : fieldNames([field])),
+      )
     }
   }
   if (Array.isArray(entry.standby)) {
     sawItems = true
     for (const item of entry.standby) {
-      events.push(unhandled('standby', isRecord(item) ? itemFieldNames(item) : []))
+      events.push(
+        unhandled('standby', isRecord(item) ? itemFieldNames(item) : []),
+      )
     }
   }
 
   // A new array Meta adds beside `messaging` would otherwise reach no log at
   // all: summarize-payload.ts only reads keys inside `messaging` items.
-  const unknownKeys = Object.keys(entry).filter((key) => !KNOWN_ENTRY_KEYS.has(key))
-  if (unknownKeys.length > 0) events.push(unhandled('unrecognized_entry_field', fieldNames(unknownKeys)))
+  const unknownKeys = Object.keys(entry).filter(
+    (key) => !KNOWN_ENTRY_KEYS.has(key),
+  )
+  if (unknownKeys.length > 0)
+    events.push(unhandled('unrecognized_entry_field', fieldNames(unknownKeys)))
   else if (!sawItems) events.push(unhandled('malformed'))
   return events
 }
@@ -389,9 +425,12 @@ export function parseInstagramDelivery(parsed: unknown): InstagramEvent[] {
 
   if (parsed.object !== 'instagram') {
     const object = nonEmptyString(parsed.object)
-    return [unhandled('not_instagram', object === null ? [] : fieldNames([object]))]
+    return [
+      unhandled('not_instagram', object === null ? [] : fieldNames([object])),
+    ]
   }
 
-  if (!Array.isArray(parsed.entry)) return [unhandled('malformed', fieldNames(Object.keys(parsed)))]
+  if (!Array.isArray(parsed.entry))
+    return [unhandled('malformed', fieldNames(Object.keys(parsed)))]
   return parsed.entry.flatMap(parseEntry)
 }

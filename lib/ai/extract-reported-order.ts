@@ -96,7 +96,10 @@ export async function extractReportedOrder(
     }
   }
 
-  const menuItemNames = [...new Set(input.menuItemNames)] as [string, ...string[]]
+  const menuItemNames = [...new Set(input.menuItemNames)] as [
+    string,
+    ...string[],
+  ]
   const schema = z.object({
     items: z.array(
       z.object({
@@ -153,6 +156,10 @@ export async function extractReportedOrder(
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: message, errorCode: 'ai_extract_reported_order_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_extract_reported_order_failed',
+    }
   }
 }

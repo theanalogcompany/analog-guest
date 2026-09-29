@@ -51,12 +51,21 @@ function identityOf(outcome: InstagramEventOutcome): {
         venueId: outcome.venueId,
         guestId: null,
         messageId: null,
-        detail: { kind: outcome.kind, stage: outcome.stage, code: outcome.code },
+        detail: {
+          kind: outcome.kind,
+          stage: outcome.stage,
+          code: outcome.code,
+        },
       }
     case 'unhandled':
       // A guest message saved nowhere (message_unsupported / no_content). The
       // delivery carries no venue or guest — parse-events could not file it.
-      return { venueId: null, guestId: null, messageId: null, detail: { reason: outcome.reason } }
+      return {
+        venueId: null,
+        guestId: null,
+        messageId: null,
+        detail: { reason: outcome.reason },
+      }
     default:
       // resolveAgentHandoff returns 'not_a_turn' for every other status, so
       // nothing routes them here. Recorded with no identity rather than

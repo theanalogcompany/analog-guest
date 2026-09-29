@@ -1,0 +1,49 @@
+# Build output, vendored and generated trees
+node_modules
+.next
+out
+build
+coverage
+.worktrees
+.claude
+.agent-readiness
+.vercel
+scripts/sandbox
+package-lock.json
+
+# Generated from the DB schema by `npm run db:types`; formatting it would
+# churn on every regeneration.
+db/types.ts
+
+# Reference material, do not modify (CLAUDE.md); brand HTML ships as-is.
+docs/brand/
+
+# Markdown and YAML are excluded deliberately: CLAUDE.md files carry
+# byte/line budgets and exact phrases that tests locate
+# (scripts/lib/claude-md-budget.test.ts, bash-allowlist.test.ts), and
+# workflow YAML holds allowlist strings the same tests model. Formatting
+# those is churn with real blast radius and no readability win.
+*.md
+*.yml
+*.yaml
+
+# Recorded webhook payloads: the paired X-Hub-Signature-256 is an HMAC over
+# these exact bytes, so any reformat breaks signature verification in tests.
+lib/messaging/instagram/fixtures/
+# Measurement fixtures are recorded artifacts, same byte-exactness posture.
+scripts/measurement/fixtures/
+
+# Parsed by lib/ui/token-bridge.test.ts; formatting is not worth risking the
+# token-bridge guard's anchors.
+app/globals.css
+*.css
+
+# Harness-owned config
+.mcp.json
+
+# Not prettier's domain in this repo
+*.sql
+*.html
+*.jsonl
+measurement-runs/
+supabase/

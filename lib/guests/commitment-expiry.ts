@@ -165,7 +165,11 @@ export function venueLocalDate(
     if (weekday === undefined) return null
     const dayIndex = DAY_KEYS.indexOf(weekday as (typeof DAY_KEYS)[number])
     if (dayIndex === -1) return null
-    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    if (
+      !Number.isInteger(year) ||
+      !Number.isInteger(month) ||
+      !Number.isInteger(day)
+    ) {
       return null
     }
     return { year, month, day, dayIndex }
@@ -200,7 +204,9 @@ function offsetMsAt(timezone: string, instant: Date): number | null {
     const hour = get('hour') % 24
     const minute = get('minute')
     const second = get('second')
-    if ([year, month, day, hour, minute, second].some((n) => !Number.isInteger(n))) {
+    if (
+      [year, month, day, hour, minute, second].some((n) => !Number.isInteger(n))
+    ) {
       return null
     }
     const asIfUtc = Date.UTC(year, month - 1, day, hour, minute, second)
@@ -325,7 +331,8 @@ function deriveHoldExpiry(
   // plausible Studio typo) resolved a confident close time against UTC and
   // did NOT escalate, landing up to 14 hours early in the direction that
   // refuses a guest an item physically on the shelf. Present is not usable.
-  const zoneUsable = timezone !== null && venueLocalDate(timezone, createdAt) !== null
+  const zoneUsable =
+    timezone !== null && venueLocalDate(timezone, createdAt) !== null
   const usableZone = zoneUsable ? (timezone as string) : 'UTC'
   const local = venueLocalDate(usableZone, createdAt)
   if (local === null) {
@@ -398,7 +405,9 @@ export function escalationDueAt(input: EscalationDueInput): Date | null {
 
   if (type === 'hold') {
     if (expiresAt === null) return null
-    return new Date(expiresAt.getTime() - HOLD_ESCALATION_LEAD_MINUTES * 60 * 1000)
+    return new Date(
+      expiresAt.getTime() - HOLD_ESCALATION_LEAD_MINUTES * 60 * 1000,
+    )
   }
 
   const due = new Date(createdAt)

@@ -75,7 +75,8 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
   const [hint, setHint] = useState('')
   const [errorText, setErrorText] = useState<string | null>(null)
 
-  const isOpenLike = status === 'open' || status === 'sending' || status === 'error'
+  const isOpenLike =
+    status === 'open' || status === 'sending' || status === 'error'
   const sending = status === 'sending'
   const overLimit = hint.length > MAX_HINT_LENGTH
 
@@ -197,7 +198,12 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
               value={hint}
               onChange={(e) => setHint(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !sending && !overLimit) {
+                if (
+                  e.key === 'Enter' &&
+                  (e.metaKey || e.ctrlKey) &&
+                  !sending &&
+                  !overLimit
+                ) {
                   e.preventDefault()
                   void send()
                 }
@@ -251,7 +257,8 @@ export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {
 function formatError(httpStatus: number, body: ApiErrorBody): string {
   const label = body.error ?? `HTTP ${httpStatus}`
   if (body.detail) return `${label}: ${body.detail}`
-  if (httpStatus === 422) return 'Voice fidelity below send floor — try a different hint or retry.'
+  if (httpStatus === 422)
+    return 'Voice fidelity below send floor — try a different hint or retry.'
   if (httpStatus === 429) return 'Rate limited — try again in a few minutes.'
   if (httpStatus === 403 && body.error === 'guest opted out') {
     return 'Guest has opted out — cannot send.'

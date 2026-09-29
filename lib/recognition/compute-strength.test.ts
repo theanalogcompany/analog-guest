@@ -52,7 +52,11 @@ function rawAt(state: 'low' | 'mid' | 'high'): RawSignals {
       totalSpentLast90Days: 150,
       outboundMessageCount: 10,
       repliedMessageCount: 6,
-      engagementEventsByType: { first_visit: 1, perk_unlocked: 2, mechanic_redeemed: 1 },
+      engagementEventsByType: {
+        first_visit: 1,
+        perk_unlocked: 2,
+        mechanic_redeemed: 1,
+      },
       uniqueMenuItemsOrdered: 6,
       totalMenuItems: 20,
       referralsMade: 1,
@@ -99,7 +103,10 @@ function rawAt(state: 'low' | 'mid' | 'high'): RawSignals {
 describe('computeRelationshipStrength — weights + contributions surfacing', () => {
   it('returns weights matching the venue formula (defaults here)', async () => {
     loadSignalsMock.mockResolvedValueOnce({ ok: true, data: rawAt('mid') })
-    const result = await computeRelationshipStrength({ guestId: 'g', venueId: 'v' })
+    const result = await computeRelationshipStrength({
+      guestId: 'g',
+      venueId: 'v',
+    })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.weights).toEqual(DEFAULT_FORMULA.weights)
@@ -107,7 +114,10 @@ describe('computeRelationshipStrength — weights + contributions surfacing', ()
 
   it('contributions[k] equals signals[k] * weights[k] for every signal', async () => {
     loadSignalsMock.mockResolvedValueOnce({ ok: true, data: rawAt('mid') })
-    const result = await computeRelationshipStrength({ guestId: 'g', venueId: 'v' })
+    const result = await computeRelationshipStrength({
+      guestId: 'g',
+      venueId: 'v',
+    })
     if (!result.ok) throw new Error('expected ok')
     const { signals, weights, contributions } = result.data
     for (const key of [
@@ -126,9 +136,15 @@ describe('computeRelationshipStrength — weights + contributions surfacing', ()
   it('sum of contributions rounds to the returned score', async () => {
     for (const profile of ['low', 'mid', 'high'] as const) {
       loadSignalsMock.mockResolvedValueOnce({ ok: true, data: rawAt(profile) })
-      const result = await computeRelationshipStrength({ guestId: 'g', venueId: 'v' })
+      const result = await computeRelationshipStrength({
+        guestId: 'g',
+        venueId: 'v',
+      })
       if (!result.ok) throw new Error('expected ok')
-      const sum = Object.values(result.data.contributions).reduce((a, b) => a + b, 0)
+      const sum = Object.values(result.data.contributions).reduce(
+        (a, b) => a + b,
+        0,
+      )
       expect(result.data.score).toBe(Math.round(sum))
     }
   })

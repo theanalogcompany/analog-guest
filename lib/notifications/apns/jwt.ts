@@ -72,7 +72,9 @@ export async function getApnsJwt(
     return {
       ok: false,
       error: 'env_missing',
-      detail: check.ok ? 'APNS_AUTH_KEY / APNS_KEY_ID / APNS_TEAM_ID' : check.problems.join('; '),
+      detail: check.ok
+        ? 'APNS_AUTH_KEY / APNS_KEY_ID / APNS_TEAM_ID'
+        : check.problems.join('; '),
     }
   }
 
@@ -101,7 +103,10 @@ export async function getApnsJwt(
     return {
       ok: false,
       error: 'key_parse_failed',
-      detail: authKeyProblems.length > 0 ? `${raw} — ${authKeyProblems.join('; ')}` : raw,
+      detail:
+        authKeyProblems.length > 0
+          ? `${raw} — ${authKeyProblems.join('; ')}`
+          : raw,
     }
   }
 

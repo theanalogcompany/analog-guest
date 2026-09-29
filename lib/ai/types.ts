@@ -512,6 +512,9 @@ export type GenerateMessageAttempt = {
   // GenerateMessageResult.cancelsCommitmentId. '' means this reply cancels
   // nothing.
   cancelsCommitmentId: string
+  // TAC-554: this attempt's getting-to-know-you question, already composed
+  // onto `body`. Kept per attempt so a trace shows what each one asked.
+  intentionQuestion: string
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -583,6 +586,24 @@ export type GenerateMessageResult = {
   // own active commitments; nothing downstream may treat this string as a
   // commitment that exists.
   cancelsCommitmentId: string
+  // TAC-554: the getting-to-know-you question this reply asks, and the exact
+  // TAIL of `body` — composeReplyWithIntention joined them, so the identity is
+  // by construction rather than by the model reproducing a substring. '' on
+  // every turn that asks nothing, which is most turns.
+  //
+  // Dispatch peels this off and sends it as its own last message. Nothing else
+  // should read it to decide WHAT to say: `body` is still the complete reply
+  // and remains the single input to every backstop.
+  //
+  // REQUIRED, so a construction site with no generation behind it (crisis
+  // safety, the holding-message fallback, the crash card) has to SAY '' rather
+  // than omit it — the same reason cancelsCommitmentId above is required.
+  intentionQuestion: string
+  // TAC-554: whether the duplicate guard stripped a repeat of the question off
+  // the end of the answer. Reported rather than silent because that guard edits
+  // guest-facing text; a guard whose firing rate nobody can produce is how
+  // comp_regex_backstop became an illusion for two months.
+  intentionQuestionDuplicateStripped: boolean
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
@@ -727,8 +748,7 @@ export type ClassifyMessageResult = {
 }
 
 export type AIResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }
 
 // TAC-323: standalone order-extraction call, deliberately decoupled from the
 // classify/generate contract (see lib/agent/extract-reported-order.ts for

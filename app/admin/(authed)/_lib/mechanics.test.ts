@@ -74,7 +74,8 @@ function makeSupabaseMock(state: MockState) {
         select: (_cols: string) => ({
           single: async () => {
             state.insertCalls.push(row)
-            if (state.insertError) return { data: null, error: state.insertError }
+            if (state.insertError)
+              return { data: null, error: state.insertError }
             return { data: state.insertedRow, error: null }
           },
         }),
@@ -96,7 +97,8 @@ function makeSupabaseMock(state: MockState) {
           return Object.assign(bareResult, {
             select: (_c: string) => ({
               maybeSingle: async () => {
-                if (state.updateError) return { data: null, error: state.updateError }
+                if (state.updateError)
+                  return { data: null, error: state.updateError }
                 return { data: state.updatedRow, error: null }
               },
             }),
@@ -115,10 +117,15 @@ describe('addMechanic', () => {
   it('inserts every editable field, mapped to snake_case, trigger as {type}', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await addMechanic({ venueId: VENUE_ID, mechanic: fullCreate() })
+    const result = await addMechanic({
+      venueId: VENUE_ID,
+      mechanic: fullCreate(),
+    })
 
     expect(result).toEqual({ ok: true, mechanicId: MECHANIC_ID })
     expect(state.insertCalls[0]).toMatchObject({
@@ -136,12 +143,20 @@ describe('addMechanic', () => {
   })
 
   it('returns db_error on insert failure', async () => {
-    const state = newState({ insertError: { message: 'connection lost' }, insertedRow: null })
+    const state = newState({
+      insertError: { message: 'connection lost' },
+      insertedRow: null,
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await addMechanic({ venueId: VENUE_ID, mechanic: fullCreate() })
+    const result = await addMechanic({
+      venueId: VENUE_ID,
+      mechanic: fullCreate(),
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errorCode).toBe('db_error')
   })
@@ -161,7 +176,9 @@ describe('editMechanic', () => {
   it('merges a partial patch onto the fetched row and writes the whole merged shape', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const patch: MechanicPatch = { minState: 'raving_fan' }
@@ -178,13 +195,20 @@ describe('editMechanic', () => {
 
   it('merges the new trigger type onto the raw trigger jsonb rather than replacing it wholesale', async () => {
     const state = newState({
-      fetchedRow: dbRow({ trigger: { type: 'guest_initiated_request', note: 'legacy field' } }),
+      fetchedRow: dbRow({
+        trigger: { type: 'guest_initiated_request', note: 'legacy field' },
+      }),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    await editMechanic({ mechanicId: MECHANIC_ID, patch: { triggerType: 'manual_invite' } })
+    await editMechanic({
+      mechanicId: MECHANIC_ID,
+      patch: { triggerType: 'manual_invite' },
+    })
 
     expect(state.updateCalls[0].trigger).toEqual({
       type: 'manual_invite',
@@ -200,10 +224,15 @@ describe('editMechanic', () => {
     for (const corrupted of [['not', 'an', 'object'], 'a string', 42, null]) {
       const state = newState({ fetchedRow: dbRow({ trigger: corrupted }) })
       vi.mocked(createAdminClient).mockReturnValue(
-        makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+        makeSupabaseMock(state) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
       )
 
-      await editMechanic({ mechanicId: MECHANIC_ID, patch: { triggerType: 'manual_invite' } })
+      await editMechanic({
+        mechanicId: MECHANIC_ID,
+        patch: { triggerType: 'manual_invite' },
+      })
 
       expect(state.updateCalls[0].trigger).toEqual({ type: 'manual_invite' })
     }
@@ -212,7 +241,9 @@ describe('editMechanic', () => {
   it('rejects a merge that violates the redemption pairing constraint', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await editMechanic({
@@ -226,12 +257,20 @@ describe('editMechanic', () => {
   })
 
   it('returns not_found when the mechanic does not exist', async () => {
-    const state = newState({ fetchedRow: null, fetchError: { message: 'no rows' } })
+    const state = newState({
+      fetchedRow: null,
+      fetchError: { message: 'no rows' },
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await editMechanic({ mechanicId: MECHANIC_ID, patch: { name: 'New name' } })
+    const result = await editMechanic({
+      mechanicId: MECHANIC_ID,
+      patch: { name: 'New name' },
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errorCode).toBe('not_found')
   })
@@ -241,7 +280,9 @@ describe('deactivateMechanic', () => {
   it('sets is_active=false and deactivated_at, returns ok on an existing row', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await deactivateMechanic(MECHANIC_ID)
@@ -253,7 +294,9 @@ describe('deactivateMechanic', () => {
   it('returns not_found when the mechanic does not exist', async () => {
     const state = newState({ updatedRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await deactivateMechanic(MECHANIC_ID)

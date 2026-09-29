@@ -50,15 +50,14 @@
 import { NextResponse } from 'next/server'
 
 import { handleOperatorDecline } from '@/lib/agent'
-import {
-  captureOperatorDraftDeclineInitiated,
-} from '@/lib/analytics/posthog'
+import { captureOperatorDraftDeclineInitiated } from '@/lib/analytics/posthog'
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { markCancelled } from '@/lib/guests/commitments'
 import { venueFilterIds } from '@/lib/auth/venue-scope'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -112,7 +111,10 @@ export async function POST(
   if (row.status !== 'pending_ack') {
     return NextResponse.json({ error: 'invalid_state' }, { status: 409 })
   }
-  if (typeof row.description !== 'string' || row.description.trim().length === 0) {
+  if (
+    typeof row.description !== 'string' ||
+    row.description.trim().length === 0
+  ) {
     // Defensive: a commitment row with an empty description shouldn't exist
     // (the DB column is NOT NULL and the agent's pendingFromEmission guards
     // empty description before materialization), but if one slipped in we
@@ -234,7 +236,10 @@ export async function POST(
     messageId,
     operatorId: operator.operatorId,
     type: row.type,
-    timeToActionMs: Math.max(0, now.getTime() - new Date(row.created_at).getTime()),
+    timeToActionMs: Math.max(
+      0,
+      now.getTime() - new Date(row.created_at).getTime(),
+    ),
     commitmentCancellationRaceLost: cancellationRaceLost,
   })
 

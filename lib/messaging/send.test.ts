@@ -15,7 +15,8 @@ vi.mock('./sendblue-client', () => ({
   sendblueSendMessage: (...a: unknown[]) => sendblueSendMessageMock(...a),
 }))
 vi.mock('./venue-lookup', () => ({
-  getVenueMessagingNumber: (...a: unknown[]) => getVenueMessagingNumberMock(...a),
+  getVenueMessagingNumber: (...a: unknown[]) =>
+    getVenueMessagingNumberMock(...a),
 }))
 
 import { sendMessage } from './send'
@@ -25,7 +26,10 @@ const TO = '+15555550123'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  getVenueMessagingNumberMock.mockResolvedValue({ ok: true, data: '+15555559999' })
+  getVenueMessagingNumberMock.mockResolvedValue({
+    ok: true,
+    data: '+15555559999',
+  })
   sendblueSendMessageMock.mockResolvedValue({
     ok: true,
     data: { providerMessageId: 'p-1', status: 'QUEUED' },
@@ -45,7 +49,11 @@ describe('sendMessage — recipient without a phone number (TAC-467)', () => {
   })
 
   it('still calls a malformed number malformed', async () => {
-    const r = await sendMessage({ venueId: VENUE, to: '5555550123', body: 'hi' })
+    const r = await sendMessage({
+      venueId: VENUE,
+      to: '5555550123',
+      body: 'hi',
+    })
     expect(r).toEqual({ ok: false, error: 'invalid_recipient_phone_number' })
     expect(sendblueSendMessageMock).not.toHaveBeenCalled()
   })
@@ -53,7 +61,11 @@ describe('sendMessage — recipient without a phone number (TAC-467)', () => {
 
 describe('sendMessage — content guard (TAC-309)', () => {
   it('sends a normal body', async () => {
-    const r = await sendMessage({ venueId: VENUE, to: TO, body: 'yeah, oat and almond' })
+    const r = await sendMessage({
+      venueId: VENUE,
+      to: TO,
+      body: 'yeah, oat and almond',
+    })
     expect(r.ok).toBe(true)
     expect(sendblueSendMessageMock).toHaveBeenCalledTimes(1)
   })
@@ -70,7 +82,10 @@ describe('sendMessage — content guard (TAC-309)', () => {
     'refuses whitespace-only body %j',
     async (body) => {
       const r = await sendMessage({ venueId: VENUE, to: TO, body })
-      expect(r).toMatchObject({ ok: false, error: 'message_must_have_content' })
+      expect(r).toMatchObject({
+        ok: false,
+        error: 'message_must_have_content',
+      })
       expect(sendblueSendMessageMock).not.toHaveBeenCalled()
     },
   )

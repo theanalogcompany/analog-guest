@@ -34,14 +34,19 @@ function ctxWith(
   windowMs = WINDOW_MS,
 ): RuntimeContext {
   return {
-    currentMessage: current === null ? null : { body: current, receivedAt: NOW },
+    currentMessage:
+      current === null ? null : { body: current, receivedAt: NOW },
     recentMessages,
     conversationWindowMs: windowMs,
     recognition: { computedAt: NOW },
   } as unknown as RuntimeContext
 }
 
-function match(id: string, similarity: number, corpusId = `corpus-${id}`): KnowledgeMatch {
+function match(
+  id: string,
+  similarity: number,
+  corpusId = `corpus-${id}`,
+): KnowledgeMatch {
   return {
     id,
     knowledgeCorpusId: corpusId,
@@ -58,7 +63,9 @@ const MERGE = { rule: 'interleave' as const, limit: 4, floor: 0.3 }
 
 describe('reachedGuest — only what the guest actually read steers the search', () => {
   it('counts an inbound whatever its delivery value', () => {
-    expect(reachedGuest(msg('inbound', 'hi', { delivery: 'never_sent' }))).toBe(true)
+    expect(reachedGuest(msg('inbound', 'hi', { delivery: 'never_sent' }))).toBe(
+      true,
+    )
   })
 
   it.each([
@@ -75,9 +82,14 @@ describe('reachedGuest — only what the guest actually read steers the search',
 describe('buildContextQuery', () => {
   it('puts the prior turns first and the current message LAST', () => {
     const q = buildContextQuery(
-      ctxWith([msg('inbound', 'does the bhadra taste good'), msg('outbound', 'strongest we make')]),
+      ctxWith([
+        msg('inbound', 'does the bhadra taste good'),
+        msg('outbound', 'strongest we make'),
+      ]),
     )
-    expect(q).toBe('does the bhadra taste good\nstrongest we make\nhow should i brew it')
+    expect(q).toBe(
+      'does the bhadra taste good\nstrongest we make\nhow should i brew it',
+    )
   })
 
   it('takes the LAST turns, not the first', () => {
@@ -104,11 +116,17 @@ describe('buildContextQuery', () => {
   })
 
   it('returns empty when the only prior turn never reached the guest', () => {
-    expect(buildContextQuery(ctxWith([msg('outbound', 'held', { delivery: 'awaiting_review' })]))).toBe('')
+    expect(
+      buildContextQuery(
+        ctxWith([msg('outbound', 'held', { delivery: 'awaiting_review' })]),
+      ),
+    ).toBe('')
   })
 
   it('returns empty when there is no current message', () => {
-    expect(buildContextQuery(ctxWith([msg('inbound', 'something')], null))).toBe('')
+    expect(
+      buildContextQuery(ctxWith([msg('inbound', 'something')], null)),
+    ).toBe('')
   })
 
   it('drops an unsent draft but keeps a delivered turn behind it', () => {
@@ -116,7 +134,9 @@ describe('buildContextQuery', () => {
       ctxWith([
         msg('inbound', 'does the bhadra taste good', { minutesAgo: 20 }),
         msg('outbound', 'strongest we make', { minutesAgo: 15 }),
-        msg('outbound', 'HELD DRAFT ABOUT SOMETHING ELSE', { delivery: 'awaiting_review' }),
+        msg('outbound', 'HELD DRAFT ABOUT SOMETHING ELSE', {
+          delivery: 'awaiting_review',
+        }),
       ]),
     )
     expect(q).toContain('strongest we make')
@@ -126,8 +146,12 @@ describe('buildContextQuery', () => {
   it('keeps a turn exactly at the window edge and drops one past it', () => {
     const edge = new Date(NOW.getTime() - WINDOW_MS)
     const past = new Date(NOW.getTime() - WINDOW_MS - 1000)
-    expect(contextTurns(ctxWith([{ ...msg('inbound', 'edge'), createdAt: edge }]))).toHaveLength(1)
-    expect(contextTurns(ctxWith([{ ...msg('inbound', 'past'), createdAt: past }]))).toHaveLength(0)
+    expect(
+      contextTurns(ctxWith([{ ...msg('inbound', 'edge'), createdAt: edge }])),
+    ).toHaveLength(1)
+    expect(
+      contextTurns(ctxWith([{ ...msg('inbound', 'past'), createdAt: past }])),
+    ).toHaveLength(0)
   })
 
   // Kills a window hardcoded to 48h, and a window zeroed at the construction
@@ -137,13 +161,21 @@ describe('buildContextQuery', () => {
   // worth nothing if no test can tell the field from a constant.
   it('READS the venue window rather than assuming 48h', () => {
     const twoHours = 2 * 60 * 60 * 1000
-    const threeHoursAgo = msg('inbound', 'older than a 2h window', { minutesAgo: 180 })
+    const threeHoursAgo = msg('inbound', 'older than a 2h window', {
+      minutesAgo: 180,
+    })
     expect(buildContextQuery(ctxWith([threeHoursAgo]))).not.toBe('')
-    expect(buildContextQuery(ctxWith([threeHoursAgo], 'how should i brew it', twoHours))).toBe('')
+    expect(
+      buildContextQuery(
+        ctxWith([threeHoursAgo], 'how should i brew it', twoHours),
+      ),
+    ).toBe('')
   })
 
   it('treats a zero window as admitting nothing, not everything', () => {
-    expect(buildContextQuery(ctxWith([msg('inbound', 'a minute ago')], 'q', 0))).toBe('')
+    expect(
+      buildContextQuery(ctxWith([msg('inbound', 'a minute ago')], 'q', 0)),
+    ).toBe('')
   })
 
   // Kills measuring staleness from wall-clock now rather than from the message
@@ -153,12 +185,19 @@ describe('buildContextQuery', () => {
     const tenDaysAgo = new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000)
     const replay = {
       currentMessage: { body: 'how should i brew it', receivedAt: tenDaysAgo },
-      recentMessages: [{ ...msg('inbound', 'the turn before it'), createdAt: new Date(tenDaysAgo.getTime() - 60_000) }],
+      recentMessages: [
+        {
+          ...msg('inbound', 'the turn before it'),
+          createdAt: new Date(tenDaysAgo.getTime() - 60_000),
+        },
+      ],
       conversationWindowMs: WINDOW_MS,
       // Stamped today, as buildRuntimeContext does on every replay.
       recognition: { computedAt: NOW },
     } as unknown as RuntimeContext
-    expect(buildContextQuery(replay)).toBe('the turn before it\nhow should i brew it')
+    expect(buildContextQuery(replay)).toBe(
+      'the turn before it\nhow should i brew it',
+    )
   })
 
   it('truncates a long body to the history bound', () => {
@@ -168,13 +207,18 @@ describe('buildContextQuery', () => {
   })
 
   it('collapses newlines so one turn stays one line', () => {
-    const q = buildContextQuery(ctxWith([msg('inbound', 'line one\n  line two')]))
+    const q = buildContextQuery(
+      ctxWith([msg('inbound', 'line one\n  line two')]),
+    )
     expect(q.split('\n')).toEqual(['line one line two', 'how should i brew it'])
   })
 
   it('skips a blank-bodied history row rather than emitting an empty line', () => {
     const q = buildContextQuery(
-      ctxWith([msg('inbound', 'real question', { minutesAgo: 20 }), msg('outbound', '   ')]),
+      ctxWith([
+        msg('inbound', 'real question', { minutesAgo: 20 }),
+        msg('outbound', '   '),
+      ]),
     )
     expect(q).toBe('real question\nhow should i brew it')
   })
@@ -185,7 +229,9 @@ describe('buildContextQuery', () => {
       msg('outbound', 'agent reply', { minutesAgo: 10 }),
     ])
     expect(buildContextQuery(ctx, 1)).toBe('agent reply\nhow should i brew it')
-    expect(buildContextQuery(ctx, 2)).toBe('prev guest\nagent reply\nhow should i brew it')
+    expect(buildContextQuery(ctx, 2)).toBe(
+      'prev guest\nagent reply\nhow should i brew it',
+    )
   })
 
   // Pinned by VALUE, like KNOWLEDGE_MERGE_RULE two lines from it in the
@@ -211,38 +257,67 @@ describe('mergeKnowledgeMatches', () => {
     // The TAC-500 trap: `id` is the knowledge_embeddings row, and one corpus
     // entry can legitimately return several. Collapsing by corpus id drops a
     // chunk's TEXT, which is a regression against the control.
-    const a = [match('chunk-1', 0.9, 'same-entry'), match('chunk-2', 0.8, 'same-entry')]
+    const a = [
+      match('chunk-1', 0.9, 'same-entry'),
+      match('chunk-2', 0.8, 'same-entry'),
+    ]
     const out = mergeKnowledgeMatches([a, []], MERGE)
     expect(out.map((r) => r.id)).toEqual(['chunk-1', 'chunk-2'])
     // Both chunks, one entry. Collapsing by corpus id would return one row
     // and silently lose the other chunk's text.
     expect(out).toHaveLength(2)
-    expect(new Set(out.map((r) => r.knowledgeCorpusId))).toEqual(new Set(['same-entry']))
+    expect(new Set(out.map((r) => r.knowledgeCorpusId))).toEqual(
+      new Set(['same-entry']),
+    )
   })
 
   it('keeps the BEST score for an entry seen in both arms', () => {
-    const out = mergeKnowledgeMatches([[match('x', 0.4)], [match('x', 0.85)]], MERGE)
+    const out = mergeKnowledgeMatches(
+      [[match('x', 0.4)], [match('x', 0.85)]],
+      MERGE,
+    )
     expect(out).toHaveLength(1)
     expect(out[0].similarity).toBe(0.85)
   })
 
   it('keeps the best score whichever arm carried it', () => {
-    const out = mergeKnowledgeMatches([[match('x', 0.85)], [match('x', 0.4)]], MERGE)
+    const out = mergeKnowledgeMatches(
+      [[match('x', 0.85)], [match('x', 0.4)]],
+      MERGE,
+    )
     expect(out[0].similarity).toBe(0.85)
   })
 
   // The structural half of the no-lost-result claim.
   it('interleave ALWAYS keeps the control arm top two, however high the other arm scores', () => {
-    const control = [match('a0', 0.40), match('a1', 0.39), match('a2', 0.38), match('a3', 0.37)]
-    const contextual = [match('b0', 0.99), match('b1', 0.98), match('b2', 0.97), match('b3', 0.96)]
+    const control = [
+      match('a0', 0.4),
+      match('a1', 0.39),
+      match('a2', 0.38),
+      match('a3', 0.37),
+    ]
+    const contextual = [
+      match('b0', 0.99),
+      match('b1', 0.98),
+      match('b2', 0.97),
+      match('b3', 0.96),
+    ]
     const out = mergeKnowledgeMatches([control, contextual], MERGE)
     expect(out.map((r) => r.id)).toEqual(['a0', 'b0', 'a1', 'b1'])
   })
 
   it('best-score does NOT keep them — the rule TAC-547 measured and rejected', () => {
-    const control = [match('a0', 0.40), match('a1', 0.39)]
-    const contextual = [match('b0', 0.99), match('b1', 0.98), match('b2', 0.97), match('b3', 0.96)]
-    const out = mergeKnowledgeMatches([control, contextual], { ...MERGE, rule: 'best-score' })
+    const control = [match('a0', 0.4), match('a1', 0.39)]
+    const contextual = [
+      match('b0', 0.99),
+      match('b1', 0.98),
+      match('b2', 0.97),
+      match('b3', 0.96),
+    ]
+    const out = mergeKnowledgeMatches([control, contextual], {
+      ...MERGE,
+      rule: 'best-score',
+    })
     expect(out.map((r) => r.id)).toEqual(['b0', 'b1', 'b2', 'b3'])
   })
 
@@ -250,25 +325,36 @@ describe('mergeKnowledgeMatches', () => {
     const a = [match('a0', 0.9), match('a1', 0.8)]
     const b = [match('b0', 0.7), match('b1', 0.6)]
     expect(mergeKnowledgeMatches([a, b], MERGE)).toHaveLength(4)
-    expect(mergeKnowledgeMatches([a, b], { ...MERGE, limit: 2 }).map((r) => r.id)).toEqual(['a0', 'b0'])
+    expect(
+      mergeKnowledgeMatches([a, b], { ...MERGE, limit: 2 }).map((r) => r.id),
+    ).toEqual(['a0', 'b0'])
   })
 
   it('applies the floor AFTER the merge', () => {
     // Deliberately fed RAW rows. Through retrieveKnowledgeStage both arms
     // arrive pre-filtered and this can change nothing — see the note on
     // mergeKnowledgeMatches. It guards a caller passing unfiltered rows.
-    const out = mergeKnowledgeMatches([[match('keep', 0.5), match('drop', 0.1)], []], MERGE)
+    const out = mergeKnowledgeMatches(
+      [[match('keep', 0.5), match('drop', 0.1)], []],
+      MERGE,
+    )
     expect(out.map((r) => r.id)).toEqual(['keep'])
   })
 
   it('does not let a sub-floor row in one arm suppress its above-floor score in the other', () => {
-    const out = mergeKnowledgeMatches([[match('x', 0.1)], [match('x', 0.55)]], MERGE)
+    const out = mergeKnowledgeMatches(
+      [[match('x', 0.1)], [match('x', 0.55)]],
+      MERGE,
+    )
     expect(out.map((r) => r.id)).toEqual(['x'])
   })
 
   it('is a no-op on a single arm, which is what the no-prior-turn path relies on', () => {
     const only = [match('a', 0.9), match('b', 0.8)]
-    expect(mergeKnowledgeMatches([only, []], MERGE).map((r) => r.id)).toEqual(['a', 'b'])
+    expect(mergeKnowledgeMatches([only, []], MERGE).map((r) => r.id)).toEqual([
+      'a',
+      'b',
+    ])
   })
 
   // Four in one arm, none in the other: the only shape that separates a
@@ -276,14 +362,21 @@ describe('mergeKnowledgeMatches', () => {
   // guarantee in its own right — an empty contextual arm must leave the
   // control's FULL slate standing, not half of it.
   it('keeps the whole control slate when the contextual arm is empty', () => {
-    const control = [match('a0', 0.9), match('a1', 0.8), match('a2', 0.7), match('a3', 0.6)]
+    const control = [
+      match('a0', 0.9),
+      match('a1', 0.8),
+      match('a2', 0.7),
+      match('a3', 0.6),
+    ]
     const out = mergeKnowledgeMatches([control, []], MERGE)
     expect(out.map((r) => r.id)).toEqual(['a0', 'a1', 'a2', 'a3'])
   })
 
-
   it('handles arms of different lengths without emitting holes', () => {
-    const out = mergeKnowledgeMatches([[match('a0', 0.9)], [match('b0', 0.8), match('b1', 0.7)]], MERGE)
+    const out = mergeKnowledgeMatches(
+      [[match('a0', 0.9)], [match('b0', 0.8), match('b1', 0.7)]],
+      MERGE,
+    )
     expect(out.map((r) => r.id)).toEqual(['a0', 'b0', 'b1'])
   })
 
@@ -298,10 +391,14 @@ describe('mergeKnowledgeMatches', () => {
     const control = [match('a0', 0.4), match('a1', 0.39)]
     const contextual = [match('b0', 0.99)]
     expect(
-      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 2 }).map((r) => r.id),
+      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 2 }).map(
+        (r) => r.id,
+      ),
     ).toEqual(['a0', 'b0'])
     expect(
-      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 3 }).map((r) => r.id),
+      mergeKnowledgeMatches([control, contextual], { ...MERGE, limit: 3 }).map(
+        (r) => r.id,
+      ),
     ).toEqual(['a0', 'b0', 'a1'])
   })
 })

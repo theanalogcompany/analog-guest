@@ -1,5 +1,6 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { firstOrNull } from '@/lib/db/postgrest'
 import { BrandPersonaSchema } from '@/lib/schemas'
 import { venueFilterIds, type VenueScope } from '@/lib/auth/venue-scope'
@@ -55,7 +56,7 @@ async function _loadVoices(venueScope: VenueScope): Promise<VoiceListRow[]> {
   }
   const { data, error } = await query
   if (error) {
-    console.warn('[loadVoices] venues query failed', error.message)
+    logger.warn('[loadVoices] venues query failed', { error: error.message })
     return []
   }
 
@@ -68,7 +69,9 @@ async function _loadVoices(venueScope: VenueScope): Promise<VoiceListRow[]> {
       if (parsed.success && parsed.data.voiceName) {
         voiceName = parsed.data.voiceName
       } else if (!parsed.success) {
-        console.warn(`[loadVoices] persona parse failed for ${v.slug}: ${parsed.error.message}`)
+        logger.warn(
+          `[loadVoices] persona parse failed for ${v.slug}: ${parsed.error.message}`,
+        )
       }
     }
     rows.push({

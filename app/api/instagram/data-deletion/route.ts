@@ -48,9 +48,12 @@ function statusUrl(request: Request, code: string): string {
 export async function POST(request: Request): Promise<Response> {
   const secret = process.env.INSTAGRAM_APP_SECRET ?? ''
   if (secret === '') {
-    console.error('[instagram data-deletion] INSTAGRAM_APP_SECRET is not set; refusing every delivery', {
-      event: 'instagram_data_deletion_misconfigured',
-    })
+    console.error(
+      '[instagram data-deletion] INSTAGRAM_APP_SECRET is not set; refusing every delivery',
+      {
+        event: 'instagram_data_deletion_misconfigured',
+      },
+    )
     return new Response(null, { status: 403 })
   }
 
@@ -105,7 +108,9 @@ export async function POST(request: Request): Promise<Response> {
   } else if (result.venueId === null) {
     // See the header: legitimate, and also what a wrong id assumption looks
     // like. Loud rather than quiet.
-    await captureInstagramDeletionUnmatchedAccount({ confirmationCode: result.confirmationCode })
+    await captureInstagramDeletionUnmatchedAccount({
+      confirmationCode: result.confirmationCode,
+    })
   } else {
     console.log('[instagram data-deletion] completed', {
       event: 'instagram_data_deletion_completed',

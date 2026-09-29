@@ -119,7 +119,10 @@ export interface ParsedVenueSpec {
   knowledgeCorpus: KnowledgeCorpusSpec[]
 }
 
-function splitByHeading(markdown: string, level: 2 | 3): Array<{ title: string; content: string }> {
+function splitByHeading(
+  markdown: string,
+  level: 2 | 3,
+): Array<{ title: string; content: string }> {
   const re = level === 2 ? /^##\s+(.+?)\s*$/ : /^###\s+(.+?)\s*$/
   const lines = markdown.split('\n')
   const sections: Array<{ title: string; content: string }> = []
@@ -282,8 +285,13 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   }
 
   // ── Section 1: Venue identification ──────────────────────────────────────
-  const sectionIdent = h2s.find((s) => /^1\.\s*venue identification/i.test(s.title))
-  if (!sectionIdent) throw new Error('parse-venue-spec: missing section "1. Venue identification"')
+  const sectionIdent = h2s.find((s) =>
+    /^1\.\s*venue identification/i.test(s.title),
+  )
+  if (!sectionIdent)
+    throw new Error(
+      'parse-venue-spec: missing section "1. Venue identification"',
+    )
   const identKv = extractKvBullets(sectionIdent.content)
   const slug = identKv['slug']
   const name = identKv['name']
@@ -292,25 +300,33 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   if (!name) throw new Error('parse-venue-spec: section 1 missing **Name:**')
 
   // ── Section 2: Airtable intake (informational; we mine address/contact) ──
-  const sectionAirtable = h2s.find((s) => /^2\.\s*airtable intake/i.test(s.title))
-  const airtableKv = sectionAirtable ? extractKvBullets(sectionAirtable.content) : {}
+  const sectionAirtable = h2s.find((s) =>
+    /^2\.\s*airtable intake/i.test(s.title),
+  )
+  const airtableKv = sectionAirtable
+    ? extractKvBullets(sectionAirtable.content)
+    : {}
 
   // ── Section 3: brand_persona ─────────────────────────────────────────────
   const sectionPersona = h2s.find((s) => /^3\.\s*brand_persona/i.test(s.title))
-  if (!sectionPersona) throw new Error('parse-venue-spec: missing section "3. brand_persona"')
+  if (!sectionPersona)
+    throw new Error('parse-venue-spec: missing section "3. brand_persona"')
   const personaBlocks = extractJsonBlocks(sectionPersona.content)
   if (personaBlocks.length === 0) {
     throw new Error('parse-venue-spec: section 3 has no ```json block')
   }
   const personaParsed = BrandPersonaSchema.safeParse(personaBlocks[0])
   if (!personaParsed.success) {
-    throw new Error(`parse-venue-spec: brand_persona invalid: ${personaParsed.error.message}`)
+    throw new Error(
+      `parse-venue-spec: brand_persona invalid: ${personaParsed.error.message}`,
+    )
   }
   const brandPersona = personaParsed.data
 
   // ── Section 4: venue_info (composite) ────────────────────────────────────
   const sectionInfo = h2s.find((s) => /^4\.\s*venue_info/i.test(s.title))
-  if (!sectionInfo) throw new Error('parse-venue-spec: missing section "4. venue_info"')
+  if (!sectionInfo)
+    throw new Error('parse-venue-spec: missing section "4. venue_info"')
   const infoH3s = splitByHeading(sectionInfo.content, 3)
 
   // staff: JSON array of {name, role, notes} → flatten to "name — role" strings.
@@ -353,23 +369,35 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   let amenitiesRaw: Record<string, unknown> | undefined
   if (amenitiesSection) {
     const blocks = extractJsonBlocks(amenitiesSection.content)
-    if (blocks.length > 0 && typeof blocks[0] === 'object' && blocks[0] !== null) {
+    if (
+      blocks.length > 0 &&
+      typeof blocks[0] === 'object' &&
+      blocks[0] !== null
+    ) {
       amenitiesRaw = blocks[0] as Record<string, unknown>
     }
   }
 
   // menu.highlights: bullet list
-  const menuHighlightsSection = infoH3s.find((s) => /^menu\.highlights/i.test(s.title))
-  const menuHighlights = menuHighlightsSection ? extractBullets(menuHighlightsSection.content) : []
+  const menuHighlightsSection = infoH3s.find((s) =>
+    /^menu\.highlights/i.test(s.title),
+  )
+  const menuHighlights = menuHighlightsSection
+    ? extractBullets(menuHighlightsSection.content)
+    : []
 
   // menu.notes: free prose
   const menuNotesSection = infoH3s.find((s) => /^menu\.notes/i.test(s.title))
-  const menuNotes = menuNotesSection ? menuNotesSection.content.trim() : undefined
+  const menuNotes = menuNotesSection
+    ? menuNotesSection.content.trim()
+    : undefined
 
   // currentContext: JSON array → adapt to VenueContextNoteSchema. Pass through
   // source and expiresAt verbatim; schema accepts free-form source strings and
   // optional ISO expiresAt (THE-150).
-  const currentContextSection = infoH3s.find((s) => /^currentcontext/i.test(s.title))
+  const currentContextSection = infoH3s.find((s) =>
+    /^currentcontext/i.test(s.title),
+  )
   let currentContextRaw: Array<Record<string, unknown>> = []
   if (currentContextSection) {
     const blocks = extractJsonBlocks(currentContextSection.content)
@@ -381,32 +409,55 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
     .map((entry) => ({
       id: String(entry.id ?? ''),
       content: String(entry.content ?? ''),
-      source: typeof entry.source === 'string' && entry.source.length > 0 ? entry.source : 'text',
+      source:
+        typeof entry.source === 'string' && entry.source.length > 0
+          ? entry.source
+          : 'text',
       addedAt: entry.addedAt ?? new Date().toISOString(),
-      ...(typeof entry.expiresAt === 'string' ? { expiresAt: entry.expiresAt } : {}),
+      ...(typeof entry.expiresAt === 'string'
+        ? { expiresAt: entry.expiresAt }
+        : {}),
     }))
     .filter((e) => e.id.length > 0 && e.content.length > 0)
 
   // Address + contact from section 2 (Airtable intake)
   const addressLine1 = airtableKv['address line 1'] ?? ''
   const addressLine2Raw = airtableKv['address line 2'] ?? ''
-  const addressLine2 = isPlaceholder(addressLine2Raw) || !addressLine2Raw ? undefined : addressLine2Raw
+  const addressLine2 =
+    isPlaceholder(addressLine2Raw) || !addressLine2Raw
+      ? undefined
+      : addressLine2Raw
   const city = airtableKv['city'] ?? ''
   const region = airtableKv['state'] ?? airtableKv['region'] ?? ''
   const postalCode = airtableKv['postal code'] ?? ''
 
   const publicPhoneRaw = airtableKv['public phone'] ?? ''
-  const publicPhone = isPlaceholder(publicPhoneRaw) || !publicPhoneRaw ? undefined : stripParenAnnotation(publicPhoneRaw)
+  const publicPhone =
+    isPlaceholder(publicPhoneRaw) || !publicPhoneRaw
+      ? undefined
+      : stripParenAnnotation(publicPhoneRaw)
   const publicEmailRaw = airtableKv['public email'] ?? ''
-  const publicEmail = isPlaceholder(publicEmailRaw) || !publicEmailRaw ? undefined : stripParenAnnotation(publicEmailRaw)
+  const publicEmail =
+    isPlaceholder(publicEmailRaw) || !publicEmailRaw
+      ? undefined
+      : stripParenAnnotation(publicEmailRaw)
   const websiteRaw = airtableKv['website'] ?? ''
-  const website = isPlaceholder(websiteRaw) || !websiteRaw ? undefined : stripParenAnnotation(websiteRaw)
+  const website =
+    isPlaceholder(websiteRaw) || !websiteRaw
+      ? undefined
+      : stripParenAnnotation(websiteRaw)
 
   // Hours table from section 2 → VenueInfoSchema.hours shape.
   const hours = parseHoursFromSection2(sectionAirtable?.content ?? '')
 
   const venueInfoCandidate = {
-    address: { line1: addressLine1, line2: addressLine2, city, region, postalCode },
+    address: {
+      line1: addressLine1,
+      line2: addressLine2,
+      city,
+      region,
+      postalCode,
+    },
     contact: { publicPhone, publicEmail, website },
     hours,
     menu: { highlights: menuHighlights, notes: menuNotes },
@@ -416,13 +467,16 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   }
   const venueInfoParsed = VenueInfoSchema.safeParse(venueInfoCandidate)
   if (!venueInfoParsed.success) {
-    throw new Error(`parse-venue-spec: venue_info invalid: ${venueInfoParsed.error.message}`)
+    throw new Error(
+      `parse-venue-spec: venue_info invalid: ${venueInfoParsed.error.message}`,
+    )
   }
   const venueInfo = venueInfoParsed.data
 
   // ── Section 5: mechanics ─────────────────────────────────────────────────
   const sectionMechanics = h2s.find((s) => /^5\.\s*mechanics/i.test(s.title))
-  if (!sectionMechanics) throw new Error('parse-venue-spec: missing section "5. mechanics"')
+  if (!sectionMechanics)
+    throw new Error('parse-venue-spec: missing section "5. mechanics"')
   const mechanicsRaw = extractJsonBlocks(sectionMechanics.content)
   const mechanics: MechanicSpec[] = []
   for (const raw of mechanicsRaw) {
@@ -441,7 +495,8 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
 
   // ── Section 6: voice_corpus ──────────────────────────────────────────────
   const sectionCorpus = h2s.find((s) => /^6\.\s*voice_corpus/i.test(s.title))
-  if (!sectionCorpus) throw new Error('parse-venue-spec: missing section "6. voice_corpus"')
+  if (!sectionCorpus)
+    throw new Error('parse-venue-spec: missing section "6. voice_corpus"')
   const corpusRaw = extractJsonBlocks(sectionCorpus.content)
   const voiceCorpus: VoiceCorpusSpec[] = []
   for (const raw of corpusRaw) {
@@ -465,7 +520,9 @@ export function parseVenueSpec(markdown: string): ParsedVenueSpec {
   // (knowledge fires for inbound + event/manual followups; tag-aware routing
   // for the four mapped categories). New specs use the primary/secondary tag
   // shape — fail-loud at the schema below on legacy single-tag entries.
-  const sectionKnowledge = h2s.find((s) => /^7\.\s*knowledge_corpus/i.test(s.title))
+  const sectionKnowledge = h2s.find((s) =>
+    /^7\.\s*knowledge_corpus/i.test(s.title),
+  )
   const knowledgeCorpus: KnowledgeCorpusSpec[] = []
   if (sectionKnowledge) {
     const knowledgeRaw = extractJsonBlocks(sectionKnowledge.content)

@@ -3,8 +3,8 @@
  *
  * Dependency direction: this module is a leaf — other modules (lib/agent,
  * cron routes, etc.) import from here. This module imports only from
- * posthog-node. Never reverse the direction; analytics should never depend
- * on agent code.
+ * posthog-node, the Slack alert primitive, and the pure logger. Never
+ * reverse the direction; analytics should never depend on agent code.
  *
  * The underlying primitive is `capturePostHogEvent`, which lazily initializes
  * the PostHog client and swallows internal failures so an analytics outage
@@ -117,6 +117,8 @@
  */
 
 import { PostHog } from 'posthog-node'
+import { logger } from '@/lib/observability/logger'
+
 import { postToSlack, truncate } from './slack'
 
 const SLACK_FIELD_TRUNCATE_CHARS = 300
@@ -135,7 +137,7 @@ function getPostHog(): PostHog {
 
 /**
  * Primitive for capturing any PostHog event. Never throws; on internal
- * failure logs via console.error and swallows so analytics outages can't
+ * failure logs via logger.error and swallows so analytics outages can't
  * cascade into the orchestrator.
  */
 export async function capturePostHogEvent(
@@ -150,7 +152,7 @@ export async function capturePostHogEvent(
       properties: { ...properties, ts: new Date().toISOString() },
     })
   } catch (e) {
-    console.error(`alert: posthog capture failed for ${event}`, {
+    logger.error(`alert: posthog capture failed for ${event}`, {
       distinctId,
       error: e instanceof Error ? e.message : String(e),
     })
@@ -211,7 +213,10 @@ export const AGENT_LATENCY_HIGH_THRESHOLD_MS = {
  * compare against this, and an indexing expression at each is three chances to
  * index with the wrong kind.
  */
-export function isAgentLatencyHigh(kind: AgentLatencyKind, totalElapsedMs: number): boolean {
+export function isAgentLatencyHigh(
+  kind: AgentLatencyKind,
+  totalElapsedMs: number,
+): boolean {
   return totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS[kind]
 }
 
@@ -231,7 +236,9 @@ export interface VoiceFidelityLowProps {
   generatedBody: string
 }
 
-export async function captureVoiceFidelityLow(props: VoiceFidelityLowProps): Promise<void> {
+export async function captureVoiceFidelityLow(
+  props: VoiceFidelityLowProps,
+): Promise<void> {
   await capturePostHogEvent('voice_fidelity_low', props.guestId, { ...props })
   await postToSlack(formatVoiceFidelityLow(props))
 }
@@ -246,9 +253,13 @@ function formatVoiceFidelityLow(props: VoiceFidelityLowProps): string {
     `category: \`${props.category}\``,
   ]
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
-  lines.push(`generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  lines.push(
+    `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
   return lines.join('\n')
 }
 
@@ -266,11 +277,15 @@ export interface RegenerationTriggeredProps {
 export async function captureRegenerationTriggered(
   props: RegenerationTriggeredProps,
 ): Promise<void> {
-  await capturePostHogEvent('regeneration_triggered', props.guestId, { ...props })
+  await capturePostHogEvent('regeneration_triggered', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatRegenerationTriggered(props))
 }
 
-function formatRegenerationTriggered(props: RegenerationTriggeredProps): string {
+function formatRegenerationTriggered(
+  props: RegenerationTriggeredProps,
+): string {
   const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
   const lines = [
     `*Regeneration triggered* — ${props.attempts} attempts, final fidelity \`${props.finalFidelity.toFixed(2)}\` (scores: ${scores})`,
@@ -279,9 +294,13 @@ function formatRegenerationTriggered(props: RegenerationTriggeredProps): string 
     `run: \`${props.agentRunId}\``,
   ]
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
-  lines.push(`final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  lines.push(
+    `final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
   return lines.join('\n')
 }
 
@@ -309,7 +328,9 @@ export interface EmojiDirectiveViolatedProps {
 export async function captureEmojiDirectiveViolated(
   props: EmojiDirectiveViolatedProps,
 ): Promise<void> {
-  await capturePostHogEvent('emoji_directive_violated', props.guestId, { ...props })
+  await capturePostHogEvent('emoji_directive_violated', props.guestId, {
+    ...props,
+  })
 }
 
 // THE-225: dash regex check inside generateMessage's regen loop forces a
@@ -333,11 +354,15 @@ export interface DashViolationPersistedProps {
 export async function captureDashViolationPersisted(
   props: DashViolationPersistedProps,
 ): Promise<void> {
-  await capturePostHogEvent('dash_violation_persisted', props.guestId, { ...props })
+  await capturePostHogEvent('dash_violation_persisted', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatDashViolationPersisted(props))
 }
 
-function formatDashViolationPersisted(props: DashViolationPersistedProps): string {
+function formatDashViolationPersisted(
+  props: DashViolationPersistedProps,
+): string {
   const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
   const lines = [
     `*Dash violation persisted* — shipped after ${props.attempts} attempts (scores: ${scores}), final fidelity \`${props.finalFidelity.toFixed(2)}\``,
@@ -347,9 +372,13 @@ function formatDashViolationPersisted(props: DashViolationPersistedProps): strin
     `category: \`${props.category}\``,
   ]
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
-  lines.push(`final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  lines.push(
+    `final generated: "${truncate(props.finalGeneratedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
   return lines.join('\n')
 }
 
@@ -371,11 +400,15 @@ export interface ClassificationLowConfidenceProps {
 export async function captureClassificationLowConfidence(
   props: ClassificationLowConfidenceProps,
 ): Promise<void> {
-  await capturePostHogEvent('classification_low_confidence', props.guestId, { ...props })
+  await capturePostHogEvent('classification_low_confidence', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatClassificationLowConfidence(props))
 }
 
-function formatClassificationLowConfidence(props: ClassificationLowConfidenceProps): string {
+function formatClassificationLowConfidence(
+  props: ClassificationLowConfidenceProps,
+): string {
   const lines = [
     `*Classification low confidence* — \`${props.classifierConfidence.toFixed(2)}\` for category \`${props.category}\``,
     `venue: \`${props.venueId}\``,
@@ -387,7 +420,9 @@ function formatClassificationLowConfidence(props: ClassificationLowConfidencePro
   // operator should check; < 0.3 = agent shipped a holding ack, operator
   // decides if a real reply is needed. Spell out the action in the Slack copy.
   if (props.autoRoutedToUnknown) {
-    lines.push('auto-routed to: `unknown` — agent shipped holding ack; decide if a real reply is needed')
+    lines.push(
+      'auto-routed to: `unknown` — agent shipped holding ack; decide if a real reply is needed',
+    )
   }
   return lines.join('\n')
 }
@@ -406,11 +441,15 @@ export interface CorpusRetrievalBelowThresholdProps {
 export async function captureCorpusRetrievalBelowThreshold(
   props: CorpusRetrievalBelowThresholdProps,
 ): Promise<void> {
-  await capturePostHogEvent('corpus_retrieval_below_threshold', props.guestId, { ...props })
+  await capturePostHogEvent('corpus_retrieval_below_threshold', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatCorpusRetrievalBelowThreshold(props))
 }
 
-function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThresholdProps): string {
+function formatCorpusRetrievalBelowThreshold(
+  props: CorpusRetrievalBelowThresholdProps,
+): string {
   const lines = [
     `*Corpus retrieval thin* — top similarity \`${props.topSimilarity.toFixed(2)}\` (${props.strongMatchCount} strong matches above 0.3, ${props.totalMatches} total)`,
     `venue: \`${props.venueId}\``,
@@ -418,10 +457,14 @@ function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThreshol
     `run: \`${props.agentRunId}\``,
   ]
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
   if (props.topMatchPreview) {
-    lines.push(`top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
   return lines.join('\n')
 }
@@ -461,7 +504,9 @@ export interface UnverifiedUrlHeldProps {
   generatedBody: string
 }
 
-export async function captureUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): Promise<void> {
+export async function captureUnverifiedUrlHeld(
+  props: UnverifiedUrlHeldProps,
+): Promise<void> {
   await capturePostHogEvent('unverified_url_held', props.guestId, { ...props })
   await postToSlack(formatUnverifiedUrlHeld(props))
 }
@@ -480,7 +525,9 @@ export interface UngroundedClaimCaughtProps {
 export async function captureUngroundedClaimCaught(
   props: UngroundedClaimCaughtProps,
 ): Promise<void> {
-  await capturePostHogEvent('ungrounded_claim_caught', props.guestId, { ...props })
+  await capturePostHogEvent('ungrounded_claim_caught', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatUngroundedClaimCaught(props))
 }
 
@@ -546,11 +593,15 @@ export interface GroundingVerifierUnavailableProps {
 export async function captureGroundingVerifierUnavailable(
   props: GroundingVerifierUnavailableProps,
 ): Promise<void> {
-  await capturePostHogEvent('grounding_verifier_unavailable', props.guestId, { ...props })
+  await capturePostHogEvent('grounding_verifier_unavailable', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatGroundingVerifierUnavailable(props))
 }
 
-function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableProps): string {
+function formatGroundingVerifierUnavailable(
+  props: GroundingVerifierUnavailableProps,
+): string {
   // TAC-424, under SR-2. The degraded branch used to read "reply proceeded
   // ungated", which stopped being true the moment that outcome started
   // queueing — a Slack line that misstates what the system just did is worse
@@ -622,14 +673,20 @@ export interface IntentionPromptRaisedProps {
 export async function captureIntentionPromptRaised(
   props: IntentionPromptRaisedProps,
 ): Promise<void> {
-  await capturePostHogEvent('intention_prompt_raised', props.guestId, { ...props })
+  await capturePostHogEvent('intention_prompt_raised', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatIntentionPromptRaised(props))
 }
 
-function formatIntentionPromptRaised(props: IntentionPromptRaisedProps): string {
+function formatIntentionPromptRaised(
+  props: IntentionPromptRaisedProps,
+): string {
   // The offered set minus what was raised, so the line reads as "she took this
   // one, these were also open" rather than repeating the raised key.
-  const alsoOffered = props.offeredKeys.filter((k) => !props.raisedKeys.includes(k))
+  const alsoOffered = props.offeredKeys.filter(
+    (k) => !props.raisedKeys.includes(k),
+  )
   return [
     '*Intention raised* — the agent asked, and it is recorded',
     `venue: \`${props.venueId}\``,
@@ -681,11 +738,17 @@ export interface IntentionPromptRecordingFailedProps {
 export async function captureIntentionPromptRecordingFailed(
   props: IntentionPromptRecordingFailedProps,
 ): Promise<void> {
-  await capturePostHogEvent('intention_prompt_recording_failed', props.guestId, { ...props })
+  await capturePostHogEvent(
+    'intention_prompt_recording_failed',
+    props.guestId,
+    { ...props },
+  )
   await postToSlack(formatIntentionPromptRecordingFailed(props))
 }
 
-function formatIntentionPromptRecordingFailed(props: IntentionPromptRecordingFailedProps): string {
+function formatIntentionPromptRecordingFailed(
+  props: IntentionPromptRecordingFailedProps,
+): string {
   const headline =
     props.outcome === 'closed_pessimistically'
       ? '*Intention classifier failed twice* — rendered intentions closed without a verdict'
@@ -719,8 +782,12 @@ function formatUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): string {
   return lines.join('\n')
 }
 
-function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {
-  const claimList = props.ungroundedClaims.map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`).join(', ')
+function formatUngroundedClaimCaught(
+  props: UngroundedClaimCaughtProps,
+): string {
+  const claimList = props.ungroundedClaims
+    .map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    .join(', ')
   const lines = [
     `*Ungrounded claim caught* — reply never sent, queued for review`,
     `venue: \`${props.venueId}\``,
@@ -789,7 +856,9 @@ export interface ProsePromiseCaughtProps {
   replyBody: string
 }
 
-export async function captureProsePromiseCaught(props: ProsePromiseCaughtProps): Promise<void> {
+export async function captureProsePromiseCaught(
+  props: ProsePromiseCaughtProps,
+): Promise<void> {
   await capturePostHogEvent('prose_promise_caught', props.guestId, { ...props })
   await postToSlack(formatProsePromiseCaught(props))
 }
@@ -856,11 +925,15 @@ export interface ProsePromiseCheckUnavailableProps {
 export async function captureProsePromiseCheckUnavailable(
   props: ProsePromiseCheckUnavailableProps,
 ): Promise<void> {
-  await capturePostHogEvent('prose_promise_check_unavailable', props.guestId, { ...props })
+  await capturePostHogEvent('prose_promise_check_unavailable', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatProsePromiseCheckUnavailable(props))
 }
 
-function formatProsePromiseCheckUnavailable(props: ProsePromiseCheckUnavailableProps): string {
+function formatProsePromiseCheckUnavailable(
+  props: ProsePromiseCheckUnavailableProps,
+): string {
   const lines = [
     `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
@@ -923,11 +996,15 @@ export interface CancellationClaimUnbackedProps {
 export async function captureCancellationClaimUnbacked(
   props: CancellationClaimUnbackedProps,
 ): Promise<void> {
-  await capturePostHogEvent('cancellation_claim_unbacked', props.guestId, { ...props })
+  await capturePostHogEvent('cancellation_claim_unbacked', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatCancellationClaimUnbacked(props))
 }
 
-function formatCancellationClaimUnbacked(props: CancellationClaimUnbackedProps): string {
+function formatCancellationClaimUnbacked(
+  props: CancellationClaimUnbackedProps,
+): string {
   const lines = [
     props.bodyClaimedIt
       ? `*Reply claimed a cancellation nothing carries* — held, not sent`
@@ -1001,11 +1078,15 @@ export interface CancellationCheckUnavailableProps {
 export async function captureCancellationCheckUnavailable(
   props: CancellationCheckUnavailableProps,
 ): Promise<void> {
-  await capturePostHogEvent('cancellation_check_unavailable', props.guestId, { ...props })
+  await capturePostHogEvent('cancellation_check_unavailable', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatCancellationCheckUnavailable(props))
 }
 
-function formatCancellationCheckUnavailable(props: CancellationCheckUnavailableProps): string {
+function formatCancellationCheckUnavailable(
+  props: CancellationCheckUnavailableProps,
+): string {
   const lines = [
     `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
@@ -1046,11 +1127,15 @@ export interface ClosedVenueArrivalCaughtProps {
 export async function captureClosedVenueArrivalCaught(
   props: ClosedVenueArrivalCaughtProps,
 ): Promise<void> {
-  await capturePostHogEvent('closed_venue_arrival_caught', props.guestId, { ...props })
+  await capturePostHogEvent('closed_venue_arrival_caught', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatClosedVenueArrivalCaught(props))
 }
 
-function formatClosedVenueArrivalCaught(props: ClosedVenueArrivalCaughtProps): string {
+function formatClosedVenueArrivalCaught(
+  props: ClosedVenueArrivalCaughtProps,
+): string {
   const lines = [
     `*Arrival confirmed at a closed venue* — queued for review`,
     `venue: \`${props.venueId}\``,
@@ -1075,11 +1160,15 @@ export interface MechanicOfferBackstopCaughtProps {
 export async function captureMechanicOfferBackstopCaught(
   props: MechanicOfferBackstopCaughtProps,
 ): Promise<void> {
-  await capturePostHogEvent('mechanic_offer_backstop_caught', props.guestId, { ...props })
+  await capturePostHogEvent('mechanic_offer_backstop_caught', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatMechanicOfferBackstopCaught(props))
 }
 
-function formatMechanicOfferBackstopCaught(props: MechanicOfferBackstopCaughtProps): string {
+function formatMechanicOfferBackstopCaught(
+  props: MechanicOfferBackstopCaughtProps,
+): string {
   const lines = [
     `*Mechanic offer caught without approval* — queued for review`,
     `venue: \`${props.venueId}\``,
@@ -1129,7 +1218,9 @@ export interface AgentLatencyHighProps {
  * Do not re-add `postToSlack` here without also changing the threshold model.
  * `lib/analytics/posthog.test.ts` pins the absence.
  */
-export async function captureAgentLatencyHigh(props: AgentLatencyHighProps): Promise<void> {
+export async function captureAgentLatencyHigh(
+  props: AgentLatencyHighProps,
+): Promise<void> {
   await capturePostHogEvent('agent_latency_high', props.guestId, { ...props })
 }
 
@@ -1173,7 +1264,9 @@ export interface DraftQueuedProps {
   generatedBody: string
 }
 
-export async function captureDraftQueued(props: DraftQueuedProps): Promise<void> {
+export async function captureDraftQueued(
+  props: DraftQueuedProps,
+): Promise<void> {
   await capturePostHogEvent('draft_queued', props.guestId, { ...props })
   await postToSlack(formatDraftQueued(props))
 }
@@ -1189,15 +1282,21 @@ function formatDraftQueued(props: DraftQueuedProps): string {
     `slot: \`${props.slot}\`${props.otherSlotOccupied ? ' · second card for this guest' : ''}`,
   ]
   if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
-    lines.push(`model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
   if (props.compRegexMatchedPattern) {
     lines.push(`comp regex matched: \`${props.compRegexMatchedPattern}\``)
   }
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
-  lines.push(`draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  lines.push(
+    `draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
   return lines.join('\n')
 }
 
@@ -1233,7 +1332,9 @@ export interface DraftRegeneratedProps {
   generatedBody: string
 }
 
-export async function captureDraftRegenerated(props: DraftRegeneratedProps): Promise<void> {
+export async function captureDraftRegenerated(
+  props: DraftRegeneratedProps,
+): Promise<void> {
   await capturePostHogEvent('draft_regenerated', props.guestId, { ...props })
   await postToSlack(formatDraftRegenerated(props))
 }
@@ -1253,15 +1354,21 @@ function formatDraftRegenerated(props: DraftRegeneratedProps): string {
     `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
   ]
   if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
-    lines.push(`model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `model approval reason: "${truncate(props.modelApprovalReason, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
   if (props.compRegexMatchedPattern) {
     lines.push(`comp regex matched: \`${props.compRegexMatchedPattern}\``)
   }
   if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+    lines.push(
+      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
   }
-  lines.push(`draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
+  lines.push(
+    `draft: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
   return lines.join('\n')
 }
 
@@ -1316,13 +1423,19 @@ const CATEGORY_REQUIRES_APPROVAL_TRIGGER = 'category_requires_approval'
 export async function captureDemoBypassedApprovalGate(
   props: DemoBypassedApprovalGateProps,
 ): Promise<void> {
-  await capturePostHogEvent('demo_bypassed_approval_gate', props.guestId, { ...props })
-  const compBackstopBypassed = props.wouldHaveQueuedTriggers.includes(COMP_REGEX_BACKSTOP_TRIGGER)
+  await capturePostHogEvent('demo_bypassed_approval_gate', props.guestId, {
+    ...props,
+  })
+  const compBackstopBypassed = props.wouldHaveQueuedTriggers.includes(
+    COMP_REGEX_BACKSTOP_TRIGGER,
+  )
   const explicitPolicyBypassed =
     props.policyHoldWasExplicit === true &&
     props.wouldHaveQueuedTriggers.includes(CATEGORY_REQUIRES_APPROVAL_TRIGGER)
   if (compBackstopBypassed || explicitPolicyBypassed) {
-    await postToSlack(formatDemoBypassedApprovalGate(props, { compBackstopBypassed }))
+    await postToSlack(
+      formatDemoBypassedApprovalGate(props, { compBackstopBypassed }),
+    )
   }
 }
 
@@ -1330,7 +1443,9 @@ function formatDemoBypassedApprovalGate(
   props: DemoBypassedApprovalGateProps,
   opts: { compBackstopBypassed: boolean },
 ): string {
-  const triggerList = props.wouldHaveQueuedTriggers.map((t) => `\`${t}\``).join(', ')
+  const triggerList = props.wouldHaveQueuedTriggers
+    .map((t) => `\`${t}\``)
+    .join(', ')
   const cause = opts.compBackstopBypassed
     ? 'comp regex backstop would have queued this draft'
     : "this venue's explicit approval policy would have queued this draft"
@@ -1350,10 +1465,14 @@ export interface WebhookSilenceProps {
   lastWebhookAt: string
 }
 
-export async function captureWebhookSilence(props: WebhookSilenceProps): Promise<void> {
+export async function captureWebhookSilence(
+  props: WebhookSilenceProps,
+): Promise<void> {
   // No guestId/venueId — system-level event. Use a stable distinctId so
   // aggregation in PostHog works.
-  await capturePostHogEvent('webhook_silence', 'system:webhook-silence-cron', { ...props })
+  await capturePostHogEvent('webhook_silence', 'system:webhook-silence-cron', {
+    ...props,
+  })
   await postToSlack(formatWebhookSilence(props))
 }
 
@@ -1402,7 +1521,9 @@ export async function captureFollowupSuppressed(
 }
 
 function formatFollowupSuppressed(props: FollowupSuppressedProps): string {
-  const reasonList = props.wouldHaveDispatchedReasons.map((r) => `\`${r}\``).join(', ')
+  const reasonList = props.wouldHaveDispatchedReasons
+    .map((r) => `\`${r}\``)
+    .join(', ')
   return [
     `*Follow-up suppressed* — \`${props.suppressionReason}\` blocked: ${reasonList || '(no reasons)'}`,
     `venue: \`${props.venueId}\``,
@@ -1439,11 +1560,15 @@ export interface FollowupManualTaskRecordedProps {
 export async function captureFollowupManualTaskRecorded(
   props: FollowupManualTaskRecordedProps,
 ): Promise<void> {
-  await capturePostHogEvent('followup_manual_task_recorded', props.guestId, { ...props })
+  await capturePostHogEvent('followup_manual_task_recorded', props.guestId, {
+    ...props,
+  })
   await postToSlack(formatFollowupManualTaskRecorded(props))
 }
 
-function formatFollowupManualTaskRecorded(props: FollowupManualTaskRecordedProps): string {
+function formatFollowupManualTaskRecorded(
+  props: FollowupManualTaskRecordedProps,
+): string {
   const reasonList = props.reasons.map((r) => `\`${r}\``).join(', ')
   return [
     `*Follow-up recorded as a task* — ${props.channel} cannot be sent to on a schedule, so a human has to send this one.`,
@@ -1502,7 +1627,11 @@ export async function captureFollowupScanComplete(
 ): Promise<void> {
   // No guestId — system-level event. Stable distinctId so dashboards can
   // chart the daily processor run as a single series.
-  await capturePostHogEvent('followup_scan_complete', 'system:followup-engine', { ...props })
+  await capturePostHogEvent(
+    'followup_scan_complete',
+    'system:followup-engine',
+    { ...props },
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1536,7 +1665,9 @@ export interface OperatorMessageApprovedProps {
 export async function captureOperatorMessageApproved(
   props: OperatorMessageApprovedProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_message_approved', props.guestId, { ...props })
+  await capturePostHogEvent('operator_message_approved', props.guestId, {
+    ...props,
+  })
 }
 
 export interface OperatorMessageEditedProps {
@@ -1561,7 +1692,9 @@ export interface OperatorMessageEditedProps {
 export async function captureOperatorMessageEdited(
   props: OperatorMessageEditedProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_message_edited', props.guestId, { ...props })
+  await capturePostHogEvent('operator_message_edited', props.guestId, {
+    ...props,
+  })
 }
 
 export interface OperatorMessageSkippedProps {
@@ -1578,7 +1711,9 @@ export interface OperatorMessageSkippedProps {
 export async function captureOperatorMessageSkipped(
   props: OperatorMessageSkippedProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_message_skipped', props.guestId, { ...props })
+  await capturePostHogEvent('operator_message_skipped', props.guestId, {
+    ...props,
+  })
 }
 
 export interface OperatorMessageActionUndoneProps {
@@ -1602,7 +1737,9 @@ export interface OperatorMessageActionUndoneProps {
 export async function captureOperatorMessageActionUndone(
   props: OperatorMessageActionUndoneProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_message_action_undone', props.guestId, { ...props })
+  await capturePostHogEvent('operator_message_action_undone', props.guestId, {
+    ...props,
+  })
 }
 
 // TAC-297: operator acknowledged a pending_ack commitment via the operator
@@ -1624,7 +1761,9 @@ export interface OperatorCommitmentAcknowledgedProps {
 export async function captureOperatorCommitmentAcknowledged(
   props: OperatorCommitmentAcknowledgedProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_commitment_acknowledged', props.guestId, { ...props })
+  await capturePostHogEvent('operator_commitment_acknowledged', props.guestId, {
+    ...props,
+  })
 }
 
 /**
@@ -1652,7 +1791,9 @@ export interface OperatorDraftDeclineInitiatedProps {
 export async function captureOperatorDraftDeclineInitiated(
   props: OperatorDraftDeclineInitiatedProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_draft_decline_initiated', props.guestId, { ...props })
+  await capturePostHogEvent('operator_draft_decline_initiated', props.guestId, {
+    ...props,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1729,7 +1870,9 @@ export interface PushTokenInvalidProps {
   surface?: 'draft_flagged' | 'commitment_arrival' | 'instagram_window_warning'
 }
 
-export async function capturePushTokenInvalid(props: PushTokenInvalidProps): Promise<void> {
+export async function capturePushTokenInvalid(
+  props: PushTokenInvalidProps,
+): Promise<void> {
   await capturePostHogEvent('push.token_invalid', props.operatorId, {
     ...props,
     surface: props.surface ?? 'draft_flagged',
@@ -1762,9 +1905,7 @@ export interface DroppedDraftCommitment {
 }
 
 export type DraftDropReason =
-  | 'knowledge_gap_card_protected'
-  | 'obligation_slot_taken'
-  | 'slot_occupied'
+  'knowledge_gap_card_protected' | 'obligation_slot_taken' | 'slot_occupied'
 
 export interface DraftDroppedProps {
   agentRunId: string
@@ -1814,7 +1955,9 @@ export interface DraftDroppedProps {
  * refused manual followup with captureManualFollowupSlotOccupied instead: the
  * operator who clicked is told directly, so Slack would tell them twice.
  */
-export async function captureDraftDropped(props: DraftDroppedProps): Promise<void> {
+export async function captureDraftDropped(
+  props: DraftDroppedProps,
+): Promise<void> {
   const { guestPhone, ...rest } = props
   await capturePostHogEvent('draft_dropped', props.guestId, {
     ...rest,
@@ -1902,7 +2045,9 @@ export interface ManualFollowupSlotOccupiedProps {
 export async function captureManualFollowupSlotOccupied(
   props: ManualFollowupSlotOccupiedProps,
 ): Promise<void> {
-  await capturePostHogEvent('manual_followup_slot_occupied', props.guestId, { ...props })
+  await capturePostHogEvent('manual_followup_slot_occupied', props.guestId, {
+    ...props,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1926,7 +2071,9 @@ export interface PendingSlotInvariantBrokenProps {
 export async function capturePendingSlotInvariantBroken(
   props: PendingSlotInvariantBrokenProps,
 ): Promise<void> {
-  await capturePostHogEvent('pending_slot_invariant_broken', props.guestId, { ...props })
+  await capturePostHogEvent('pending_slot_invariant_broken', props.guestId, {
+    ...props,
+  })
   await postToSlack(
     [
       '*Pending-slot invariant broken: a guest has two pending cards in one slot*',
@@ -2008,7 +2155,9 @@ export interface CrisisSafetyReplySentProps {
 export async function captureCrisisSafetyReplySent(
   props: CrisisSafetyReplySentProps,
 ): Promise<void> {
-  await capturePostHogEvent('crisis_safety_reply_sent', props.guestId, { ...props })
+  await capturePostHogEvent('crisis_safety_reply_sent', props.guestId, {
+    ...props,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -2086,7 +2235,9 @@ export async function captureCommitmentDedupCheckFailed(props: {
   sourceMessageId: string
   error: string
 }): Promise<void> {
-  await capturePostHogEvent('commitment_dedup_check_failed', props.guestId, { ...props })
+  await capturePostHogEvent('commitment_dedup_check_failed', props.guestId, {
+    ...props,
+  })
   await postToSlack(
     [
       '*Commitment dedup check failed — proceeding to insert*',
@@ -2232,8 +2383,14 @@ export interface ConversationChannelUnresolvedProps {
 export async function captureConversationChannelUnresolved(
   props: ConversationChannelUnresolvedProps,
 ): Promise<void> {
-  const inboundChannel = props.inboundChannel === undefined ? 'none' : (props.inboundChannel ?? 'unparseable')
-  await capturePostHogEvent('conversation_channel_unresolved', props.guestId, { ...props, inboundChannel })
+  const inboundChannel =
+    props.inboundChannel === undefined
+      ? 'none'
+      : (props.inboundChannel ?? 'unparseable')
+  await capturePostHogEvent('conversation_channel_unresolved', props.guestId, {
+    ...props,
+    inboundChannel,
+  })
   await postToSlack(
     [
       "*Conversation channel unresolved*: this guest's reply can't be routed",
@@ -2242,7 +2399,9 @@ export async function captureConversationChannelUnresolved(
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,
       `run: \`${props.agentRunId}\``,
-      props.inboundMessageId ? `inbound message: \`${props.inboundMessageId}\`` : '',
+      props.inboundMessageId
+        ? `inbound message: \`${props.inboundMessageId}\``
+        : '',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -2287,8 +2446,12 @@ export interface InstagramSendFailedProps {
  * out, or another card holds the slot). TAC-469 rule 4: a failed send is never
  * a log line alone.
  */
-export async function captureInstagramSendFailed(props: InstagramSendFailedProps): Promise<void> {
-  await capturePostHogEvent('instagram_send_failed', props.guestId, { ...props })
+export async function captureInstagramSendFailed(
+  props: InstagramSendFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_send_failed', props.guestId, {
+    ...props,
+  })
   const meta =
     props.metaCode !== null
       ? ` · Meta code \`${props.metaCode}\`${props.metaSubcode !== null ? `/\`${props.metaSubcode}\`` : ''}${props.fbtraceId ? ` · fbtrace \`${props.fbtraceId}\`` : ''}`
@@ -2296,12 +2459,16 @@ export async function captureInstagramSendFailed(props: InstagramSendFailedProps
   await postToSlack(
     [
       `*Instagram reply didn't send*: \`${props.reason}\` (${props.scope === 'remainder' ? 'the rest of a split reply' : 'the whole reply'})${meta}`,
-      props.outcomeUnknown ? 'Meta may have delivered it anyway: check the thread before sending again.' : '',
+      props.outcomeUnknown
+        ? 'Meta may have delivered it anyway: check the thread before sending again.'
+        : '',
       props.windowRemainingMs !== null
         ? `window: \`${Math.round(props.windowRemainingMs / 1000)}s\` until Meta closes it`
         : '',
       `delivered \`${props.deliveredBubbles}\` of \`${props.bubbleCount}\` messages`,
-      props.cardId !== null ? `card: \`${props.cardId}\`` : `no card written: \`${props.cardSkipped ?? 'unknown'}\``,
+      props.cardId !== null
+        ? `card: \`${props.cardId}\``
+        : `no card written: \`${props.cardSkipped ?? 'unknown'}\``,
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,
       `run: \`${props.agentRunId}\``,
@@ -2333,7 +2500,11 @@ export interface OperatorMessageResolvedExternallyProps {
 export async function captureOperatorMessageResolvedExternally(
   props: OperatorMessageResolvedExternallyProps,
 ): Promise<void> {
-  await capturePostHogEvent('operator_message_resolved_externally', props.guestId, { ...props })
+  await capturePostHogEvent(
+    'operator_message_resolved_externally',
+    props.guestId,
+    { ...props },
+  )
 }
 
 export interface InstagramCardResolvedExternallyProps {
@@ -2343,7 +2514,13 @@ export interface InstagramCardResolvedExternallyProps {
   echoMessageId: string
   /** The card resolved, or null when none was. */
   cardId: string | null
-  outcome: 'resolved' | 'window_open' | 'window_unknown' | 'no_card' | 'lost_race' | 'failed'
+  outcome:
+    | 'resolved'
+    | 'window_open'
+    | 'window_unknown'
+    | 'no_card'
+    | 'lost_race'
+    | 'failed'
   /**
    * TAC-473: whether the resolved card carried a comp, hold or discount.
    *
@@ -2371,7 +2548,11 @@ export interface InstagramCardResolvedExternallyProps {
 export async function captureInstagramCardResolvedExternally(
   props: InstagramCardResolvedExternallyProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_card_resolved_externally', props.guestId, { ...props })
+  await capturePostHogEvent(
+    'instagram_card_resolved_externally',
+    props.guestId,
+    { ...props },
+  )
 }
 
 export interface InstagramReplySupersededProps {
@@ -2387,8 +2568,12 @@ export interface InstagramReplySupersededProps {
  * usually a reply staff typed in the Instagram app. PostHog only: it is the
  * intended behaviour (TAC-469 rule 3), not an alert.
  */
-export async function captureInstagramReplySuperseded(props: InstagramReplySupersededProps): Promise<void> {
-  await capturePostHogEvent('instagram_reply_superseded', props.guestId, { ...props })
+export async function captureInstagramReplySuperseded(
+  props: InstagramReplySupersededProps,
+): Promise<void> {
+  await capturePostHogEvent('instagram_reply_superseded', props.guestId, {
+    ...props,
+  })
 }
 
 export interface InstagramSenderActionFailedProps {
@@ -2418,7 +2603,9 @@ export interface InstagramSenderActionFailedProps {
 export async function captureInstagramSenderActionFailed(
   props: InstagramSenderActionFailedProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_sender_action_failed', props.guestId, { ...props })
+  await capturePostHogEvent('instagram_sender_action_failed', props.guestId, {
+    ...props,
+  })
 }
 
 export type InstagramScanUnattributedReason =
@@ -2515,7 +2702,9 @@ export interface InstagramScanConfirmedVisitProps {
 export async function captureInstagramScanConfirmedVisit(
   props: InstagramScanConfirmedVisitProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_scan_confirmed_visit', props.guestId, { ...props })
+  await capturePostHogEvent('instagram_scan_confirmed_visit', props.guestId, {
+    ...props,
+  })
   if (!props.returningGuest) return
   await postToSlack(
     [
@@ -2567,7 +2756,9 @@ export interface InstagramScanGreetingProps {
 export async function captureInstagramScanGreeting(
   props: InstagramScanGreetingProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_scan_greeting', props.guestId, { ...props })
+  await capturePostHogEvent('instagram_scan_greeting', props.guestId, {
+    ...props,
+  })
   if (props.outcome !== 'greeted') return
   await postToSlack(
     [
@@ -2585,12 +2776,18 @@ export async function captureInstagramScanGreeting(
 export async function captureInstagramScanUnattributed(
   props: InstagramScanUnattributedProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_scan_unattributed', props.guestId, { ...props })
+  await capturePostHogEvent('instagram_scan_unattributed', props.guestId, {
+    ...props,
+  })
   await postToSlack(
     [
       `*Instagram inbound could not be attributed to the venue's link*: \`${props.reason}\``,
-      props.referralSource !== null ? `source Meta sent: \`${props.referralSource}\`` : 'no referral on the event',
-      props.guestCreated ? 'this was the guest\'s first message' : 'the guest has messaged before',
+      props.referralSource !== null
+        ? `source Meta sent: \`${props.referralSource}\``
+        : 'no referral on the event',
+      props.guestCreated
+        ? "this was the guest's first message"
+        : 'the guest has messaged before',
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,
       `message: \`${props.messageId}\``,
@@ -2621,13 +2818,17 @@ export interface InstagramTokenRefreshFailedProps {
 export async function captureInstagramTokenRefreshFailed(
   props: InstagramTokenRefreshFailedProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_token_refresh_failed', props.venueId, { ...props })
+  await capturePostHogEvent('instagram_token_refresh_failed', props.venueId, {
+    ...props,
+  })
   await postToSlack(
     [
       `*Instagram token refresh failed*`,
       `venue: \`${props.venueId}\``,
       `why: ${props.reason}`,
-      props.expiresAt !== undefined ? `token expires: ${props.expiresAt}` : null,
+      props.expiresAt !== undefined
+        ? `token expires: ${props.expiresAt}`
+        : null,
       `_The existing token is untouched and still works. This retries daily._`,
     ]
       .filter((line): line is string => line !== null)
@@ -2652,7 +2853,11 @@ export interface InstagramTokenExpiredUnrecoverableProps {
 export async function captureInstagramTokenExpiredUnrecoverable(
   props: InstagramTokenExpiredUnrecoverableProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_token_expired_unrecoverable', props.venueId, { ...props })
+  await capturePostHogEvent(
+    'instagram_token_expired_unrecoverable',
+    props.venueId,
+    { ...props },
+  )
   await postToSlack(
     [
       `*Instagram token EXPIRED and cannot be refreshed*`,
@@ -2684,7 +2889,11 @@ export interface InstagramConnectSubscribeFailedProps {
 export async function captureInstagramConnectSubscribeFailed(
   props: InstagramConnectSubscribeFailedProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_connect_subscribe_failed', props.venueId, { ...props })
+  await capturePostHogEvent(
+    'instagram_connect_subscribe_failed',
+    props.venueId,
+    { ...props },
+  )
   await postToSlack(
     [
       `*Instagram connected but NOT subscribed to webhooks*`,
@@ -2720,7 +2929,11 @@ export interface InstagramDeletionUnmatchedAccountProps {
 export async function captureInstagramDeletionUnmatchedAccount(
   props: InstagramDeletionUnmatchedAccountProps,
 ): Promise<void> {
-  await capturePostHogEvent('instagram_deletion_unmatched_account', props.confirmationCode, { ...props })
+  await capturePostHogEvent(
+    'instagram_deletion_unmatched_account',
+    props.confirmationCode,
+    { ...props },
+  )
   await postToSlack(
     [
       `*Instagram data-deletion request matched no venue*`,

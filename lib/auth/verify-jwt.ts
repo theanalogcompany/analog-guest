@@ -31,7 +31,10 @@ export async function verifyOperatorRequest(
     throw new AuthError(401, 'missing Authorization header')
   }
   if (!/^Bearer\s+\S+/i.test(header)) {
-    throw new AuthError(401, 'malformed Authorization header — expected "Bearer <jwt>"')
+    throw new AuthError(
+      401,
+      'malformed Authorization header — expected "Bearer <jwt>"',
+    )
   }
   const jwt = header.replace(/^Bearer\s+/i, '').trim()
   if (jwt.length === 0) {
@@ -84,7 +87,10 @@ export async function verifyOperatorRequest(
     .select('venue_id')
     .eq('operator_id', operatorId)
   if (venuesError) {
-    throw new AuthError(401, `venue allowlist lookup failed: ${venuesError.message}`)
+    throw new AuthError(
+      401,
+      `venue allowlist lookup failed: ${venuesError.message}`,
+    )
   }
   // TAC-530: ALWAYS a `venues` scope, never fleet-wide — this path performs
   // no is_analog_admin lookup, so zero rows means "allowlisted for nothing".

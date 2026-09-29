@@ -46,7 +46,8 @@ export function composePrompt(input: GenerateMessageInput): {
   volatileSystemSuffix: string
   userPrompt: string
 } {
-  const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } = input
+  const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } =
+    input
 
   // TAC-495: the channel picks the channel copy in both prompts. The system
   // template's variant for 'text' is SYSTEM_TEMPLATE itself, unedited.
@@ -82,7 +83,9 @@ export function composePrompt(input: GenerateMessageInput): {
 
   return {
     systemPrompt: sections.join('\n\n'),
-    cacheableSystemPrefix: sections.slice(0, CACHEABLE_SECTION_COUNT).join('\n\n'),
+    cacheableSystemPrefix: sections
+      .slice(0, CACHEABLE_SECTION_COUNT)
+      .join('\n\n'),
     volatileSystemSuffix: sections.slice(CACHEABLE_SECTION_COUNT).join('\n\n'),
     userPrompt: runtimeToProse(runtime, category, undefined, input.channel),
   }

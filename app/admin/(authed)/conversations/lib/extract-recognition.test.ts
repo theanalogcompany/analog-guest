@@ -39,11 +39,26 @@ const FULL_OUTPUT = {
   content: {
     signals: [
       { signal: 'recency', normalized: 84, weight: 0.25, contribution: 21 },
-      { signal: 'visitFrequency', normalized: 65, weight: 0.2, contribution: 13 },
-      { signal: 'engagementEvents', normalized: 13, weight: 0.15, contribution: 2 },
+      {
+        signal: 'visitFrequency',
+        normalized: 65,
+        weight: 0.2,
+        contribution: 13,
+      },
+      {
+        signal: 'engagementEvents',
+        normalized: 13,
+        weight: 0.15,
+        contribution: 2,
+      },
       { signal: 'moneySpent', normalized: 50, weight: 0.1, contribution: 5 },
       { signal: 'responseRate', normalized: 95, weight: 0.3, contribution: 29 },
-      { signal: 'percentMenuExplored', normalized: 0, weight: 0, contribution: 0 },
+      {
+        signal: 'percentMenuExplored',
+        normalized: 0,
+        weight: 0,
+        contribution: 0,
+      },
       { signal: 'referrals', normalized: 0, weight: 0, contribution: 0 },
     ],
     multipliers: { distance: 1, consistency: 1, total: 1 },
@@ -96,7 +111,11 @@ describe('extractRecognition — null cases', () => {
 
   it('returns null when output.content.signals is missing', () => {
     const trace = makeTrace([
-      makeContextBuildObs({ recognitionState: 'regular', recognitionScore: 70, content: {} }),
+      makeContextBuildObs({
+        recognitionState: 'regular',
+        recognitionScore: 70,
+        content: {},
+      }),
     ])
     expect(extractRecognition(trace)).toBeNull()
   })
@@ -106,7 +125,7 @@ describe('extractRecognition — null cases', () => {
       makeContextBuildObs({
         recognitionState: 'regular',
         recognitionScore: 70,
-        content: { signals: [{ /* no signal field */ }] },
+        content: { signals: [{/* no signal field */}] },
       }),
     ])
     expect(extractRecognition(trace)).toBeNull()
@@ -120,7 +139,14 @@ describe('extractRecognition — defensive parsing', () => {
         recognitionState: 'new',
         recognitionScore: 0,
         content: {
-          signals: [{ signal: 'recency', normalized: NaN, weight: null, contribution: 'oops' }],
+          signals: [
+            {
+              signal: 'recency',
+              normalized: NaN,
+              weight: null,
+              contribution: 'oops',
+            },
+          ],
         },
       }),
     ])
@@ -137,7 +163,11 @@ describe('extractRecognition — defensive parsing', () => {
     const trace = makeTrace([
       makeContextBuildObs({
         recognitionScore: 0,
-        content: { signals: [{ signal: 'recency', normalized: 0, weight: 0, contribution: 0 }] },
+        content: {
+          signals: [
+            { signal: 'recency', normalized: 0, weight: 0, contribution: 0 },
+          ],
+        },
       }),
     ])
     const result = extractRecognition(trace)

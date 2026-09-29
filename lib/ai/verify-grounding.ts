@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { getClassificationModel } from './client'
 import { knowledgeChunksToProse, venueInfoToProse } from './prompts/serializers'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
-import type { AIResult, VerifyGroundingInput, VerifyGroundingResult } from './types'
+import type {
+  AIResult,
+  VerifyGroundingInput,
+  VerifyGroundingResult,
+} from './types'
 
 // TAC-350. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this verifier never touches the classify/generate contract, same
@@ -103,7 +107,8 @@ export const VERIFY_GROUNDING_MAX_OUTPUT_TOKENS = 2000
  * transient fault. The caller keys its fail-CLOSED branch on this exact
  * string; see verifyGroundingStage in lib/agent/stages.ts.
  */
-export const VERIFY_GROUNDING_TRUNCATED_ERROR_CODE = 'ai_verify_grounding_truncated'
+export const VERIFY_GROUNDING_TRUNCATED_ERROR_CODE =
+  'ai_verify_grounding_truncated'
 
 const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest, plus the source material the assistant had access to — the venue's facts, menu, and any retrieved venue knowledge. Your job is to catch specific factual claims in the reply that are NOT supported by that source material, even when the reply states them confidently.
 
@@ -188,7 +193,9 @@ const CONVERSATION_CHANNEL_FACT = {
 } as const satisfies Record<MessageChannel, string>
 
 function buildSystemPrompt(isProactive: boolean): string {
-  return isProactive ? `${SYSTEM_PROMPT}\n\n${PROACTIVE_ADDENDUM}` : SYSTEM_PROMPT
+  return isProactive
+    ? `${SYSTEM_PROMPT}\n\n${PROACTIVE_ADDENDUM}`
+    : SYSTEM_PROMPT
 }
 
 function buildSourceMaterial(input: VerifyGroundingInput): string {
@@ -246,7 +253,10 @@ function buildSourceMaterial(input: VerifyGroundingInput): string {
   // and would fall behind the next runtime block, which is precisely how the
   // six known divergences arrived (TAC-296, TAC-297, TAC-308, TAC-324 each
   // appended one).
-  if (input.runtimeContext !== undefined && input.runtimeContext.trim().length > 0) {
+  if (
+    input.runtimeContext !== undefined &&
+    input.runtimeContext.trim().length > 0
+  ) {
     sections.push(`## Runtime context for this turn\n${input.runtimeContext}`)
   }
   return sections.join('\n\n')
@@ -257,7 +267,7 @@ function buildUserPrompt(input: VerifyGroundingInput): string {
   // call has always sent. A proactive turn has no guest message to quote, so
   // it gets explicit framing instead of an empty pair of quotes.
   const guestLine = input.isProactive
-    ? "This message is proactive — the venue is sending it on its own initiative, not in reply to anything the guest said this turn."
+    ? 'This message is proactive — the venue is sending it on its own initiative, not in reply to anything the guest said this turn.'
     : `Guest's message: "${input.inboundBody}"`
   return `${guestLine}\n\nAssistant's reply, about to be sent: "${input.replyBody}"\n\nSource material the assistant had access to:\n\n${buildSourceMaterial(input)}\n\nDoes the reply state any specific factual claim not supported by the source material above?`
 }
@@ -366,6 +376,10 @@ export async function verifyGrounding(
         errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
       }
     }
-    return { ok: false, error: message, errorCode: 'ai_verify_grounding_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_verify_grounding_failed',
+    }
   }
 }

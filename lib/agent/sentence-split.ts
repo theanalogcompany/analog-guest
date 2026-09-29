@@ -20,8 +20,27 @@
 //      violates all-or-nothing, and four bubbles in a row stops reading as
 //      texting anyway.
 //   6. No categories, no carve-outs. Every scheduleAndSend body rides this.
+//
+// TAC-554 adds ONE carve-out to rule 6, and it is structural rather than a
+// category: a getting-to-know-you question always goes out as its own message,
+// last. Jaipal ruled it; a persona rule saying so failed twice on device on
+// 2026-09-29, and the two failures show why wording could never have carried
+// it. "nice! what variation did you go with? and by the way, what's your
+// name?" is three sentences, so it rode the coin below and lost. "Foncii, nice
+// to meet you 🙂 do you live or work around Polk Street?" has no `.?!` before
+// "do", so splitIntoSentences returns ONE sentence and rule 3 sends it whole —
+// that reply could not have split at any probability.
+//
+// So the question arrives here as its OWN STRING, `intentionTail`, already
+// separated at generation (see composeReplyWithIntention in
+// lib/ai/generate-message.ts). The boundary is never found in text: it is the
+// join between two separately generated strings, which is why this cannot cut
+// a sentence in half.
 
-import { MAX_BUBBLES_PER_RESPONSE, collapseToSingleMessage } from './split-message'
+import {
+  MAX_BUBBLES_PER_RESPONSE,
+  collapseToSingleMessage,
+} from './split-message'
 
 /**
  * Probability that a 2–3 sentence body splits into per-sentence bubbles.
@@ -124,6 +143,65 @@ export function stripTerminalPeriod(piece: string): string {
 }
 
 /**
+ * Does this piece carry anything a guest would read as a message?
+ *
+ * A bubble needs a letter or a digit. Punctuation or an emoji alone is not a
+ * message, and the one way to get there is real: replaceDashes REFUSES a
+ * substitution that would empty a non-empty string, so an intentionQuestion
+ * containing only an em dash survives as "—" and would otherwise become its
+ * own bubble containing a dash.
+ */
+export function hasRenderableContent(piece: string): boolean {
+  return /[\p{L}\p{N}]/u.test(piece)
+}
+
+/**
+ * Today's rule, with the bubble cap as a parameter.
+ *
+ * Extracted by TAC-554 so the tail path and the no-tail path run the SAME
+ * logic and differ only in the cap. That is what makes "a turn with no
+ * intention question is byte-identical to before" a property of the code
+ * rather than a claim: the no-tail path calls this with the same text, the
+ * same rng and the original cap.
+ */
+function splitToBubbles(
+  text: string,
+  rng: () => number,
+  maxBubbles: number,
+): string[] {
+  const sentences = splitIntoSentences(text)
+  if (sentences.length < 2 || sentences.length > maxBubbles) return [text]
+  if (rng() < SPLIT_PROBABILITY) return sentences.map(stripTerminalPeriod)
+  return [text]
+}
+
+/**
+ * The gate: a question only earns its own bubble on a turn where the
+ * intentions block actually rendered.
+ *
+ * ONE implementation, called by both dispatch arms, because two copies of
+ * "did the block render" is exactly the drift this repo keeps paying for — the
+ * shouldRenderOpenIntentions / renderableIntentions pair had to be bound by a
+ * cross-module test after diverging once (TAC-436).
+ *
+ * `renderedCount` is options.renderedIntentions.length, which handle-inbound
+ * computes ONCE from renderableIntentions above the queue/send fork and threads
+ * into both arms. So the gate here is the same predicate that decides whether
+ * the block was in the prompt at all, and it already excludes opt_out,
+ * comp_complaint and pending-question turns.
+ *
+ * Belt to the model's braces: if the model emits a question on a turn where
+ * nothing rendered, it is folded into the body and sent as one message rather
+ * than bubbled. Takes primitives so this module stays import-free.
+ */
+export function intentionTailFor(
+  intentionQuestion: string,
+  renderedCount: number,
+): string {
+  return renderedCount > 0 ? intentionQuestion : ''
+}
+
+/**
  * The one entry point dispatch calls: body in, bubbles out.
  *
  * `rng` must return a number in [0, 1). It is a required parameter here so no
@@ -134,22 +212,71 @@ export function stripTerminalPeriod(piece: string): string {
  *
  * Returns [] for a body that is empty, whitespace-only, or nothing but stray
  * delimiter markers — same contract the TAC-313 splitter had, so the caller's
- * existing "no sendable bubbles" failure path is unchanged.
+ * existing "no sendable bubbles" failure path is unchanged. A tail alone
+ * cannot rescue such a body: `cleaned` is checked first, and an empty one
+ * returns [] whatever the tail says, because a reply that is only a
+ * getting-to-know-you question with no answer in front of it is not a reply.
  */
-export function resolveDispatchBubbles(body: string, rng: () => number): string[] {
+export function resolveDispatchBubbles(
+  body: string,
+  rng: () => number,
+  // TAC-554: the getting-to-know-you question, already separated from the
+  // answer at generation, and '' on every turn that is not asking one.
+  //
+  // REQUIRED rather than optional-with-a-default, the TAC-367 / TAC-509
+  // discipline: a caller on a path with no intention question has to SAY so
+  // rather than inherit an answer by staying silent. A fourth dispatch arm
+  // added later fails `tsc` until it decides.
+  intentionTail: string,
+): string[] {
   // Stray model-emitted [[BREAK]] markers (and near-misses) are noise now;
   // collapseToSingleMessage strips them and normalizes whitespace, keeping
   // the invariant that no delimiter ever reaches Sendblue or the database.
   const cleaned = collapseToSingleMessage(body)
   if (cleaned.length === 0) return []
 
-  const sentences = splitIntoSentences(cleaned)
-  if (sentences.length < 2 || sentences.length > MAX_BUBBLES_PER_RESPONSE) {
-    return [cleaned]
+  const tail = collapseToSingleMessage(intentionTail)
+
+  // Three conditions before a tail earns its own bubble, and each closes a
+  // way this could ship an empty or broken message:
+  //
+  //   tail.length > 0        — the ordinary no-question turn, and the
+  //                            whitespace-only field.
+  //   hasRenderableContent   — punctuation or an emoji alone is not a message
+  //                            (see the predicate for the dash case).
+  //   cleaned.endsWith(tail) — the composition guarantees this, so it is a
+  //                            BELT, not the mechanism. If the two ever
+  //                            disagree we fall back to the old path and send
+  //                            one correct message, rather than slicing at an
+  //                            offset that means nothing. The measurement's
+  //                            `tail_not_last_bubble` ceiling is what would
+  //                            surface it.
+  const tailIsOwnMessage =
+    tail.length > 0 && hasRenderableContent(tail) && cleaned.endsWith(tail)
+
+  if (!tailIsOwnMessage) {
+    return splitToBubbles(cleaned, rng, MAX_BUBBLES_PER_RESPONSE)
   }
 
-  if (rng() < SPLIT_PROBABILITY) {
-    return sentences.map(stripTerminalPeriod)
-  }
-  return [cleaned]
+  const answer = cleaned.slice(0, cleaned.length - tail.length).trim()
+
+  // The model put everything in the field and nothing in the body. One
+  // message, which is the question, and never an empty bubble in front of it.
+  if (answer === '') return [stripTerminalPeriod(tail)]
+
+  // The answer's own cap drops by one so the total still honours
+  // MAX_BUBBLES_PER_RESPONSE: four bubbles in a row stops reading as texting,
+  // which is the whole reason that constant exists. Ruled 2026-09-29 — the
+  // answer keeps its texting cadence, it just cannot use the third slot.
+  //
+  // stripTerminalPeriod maps over the answer bubbles because with a tail
+  // behind it the answer IS a separate message, and TAC-319's rule is that a
+  // piece dispatching as its own bubble does not end in a period. Idempotent:
+  // splitToBubbles already stripped them if it split.
+  const answerBubbles = splitToBubbles(
+    answer,
+    rng,
+    MAX_BUBBLES_PER_RESPONSE - 1,
+  ).map(stripTerminalPeriod)
+  return [...answerBubbles, stripTerminalPeriod(tail)]
 }

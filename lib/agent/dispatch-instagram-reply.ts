@@ -52,30 +52,53 @@ import { randomUUID } from 'node:crypto'
 
 import type { Database } from '@/db/types'
 import type { GenerateMessageResult } from '@/lib/ai'
-import { captureInstagramReplySuperseded, captureInstagramSendFailed } from '@/lib/analytics/posthog'
+import {
+  captureInstagramReplySuperseded,
+  captureInstagramSendFailed,
+} from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { findReplyToInbound } from '@/lib/messaging/instagram/reply-check'
+import { logger } from '@/lib/observability/logger'
 import {
   fitsInstagramTextCap,
   sendInstagramText,
   sendResultOutcomeUnknown,
   type InstagramSendResult,
 } from '@/lib/messaging/instagram/send'
-import { loadInstagramSendTarget, type InstagramSendTargetResult } from '@/lib/messaging/instagram/send-target'
-import { instagramWindowState, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
+import {
+  loadInstagramSendTarget,
+  type InstagramSendTargetResult,
+} from '@/lib/messaging/instagram/send-target'
+import {
+  instagramWindowState,
+  loadLastGuestActionAt,
+} from '@/lib/messaging/instagram/window'
 import type { GraphFailure } from '@/lib/messaging/instagram/graph'
 import { fireRedAlert } from './alerts'
 import type { OpenIntention } from './intentions/derive'
 import { buildRenderedIntentionsPayload } from './intentions/rendered'
-import { decideSlotAction, draftCommitmentIdentity, EMPTY_PENDING_ROWS, loadPendingRowsBySlot } from './pending-slots'
+import {
+  decideSlotAction,
+  draftCommitmentIdentity,
+  EMPTY_PENDING_ROWS,
+  loadPendingRowsBySlot,
+} from './pending-slots'
 import {
   applyInlineCancellation,
   buildOutboundInsert,
   materializeInlineCommitment,
   persistOrRegenQueuedDraft,
 } from './schedule-and-send'
-import { resolveDispatchBubbles, splitIntoSentences } from './sentence-split'
-import { collapseToSingleMessage, INTER_BUBBLE_GAP_MS, MAX_BUBBLES_PER_RESPONSE } from './split-message'
+import {
+  intentionTailFor,
+  resolveDispatchBubbles,
+  splitIntoSentences,
+} from './sentence-split'
+import {
+  collapseToSingleMessage,
+  INTER_BUBBLE_GAP_MS,
+  MAX_BUBBLES_PER_RESPONSE,
+} from './split-message'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import type { RuntimeContext } from './types'
 
@@ -88,10 +111,12 @@ type MessageUpdate = Database['public']['Tables']['messages']['Update']
  * not go out. Outside APPROVAL_TRIGGERS: the gate had already said send.
  * lib/operator/queue.ts carries its copy.
  */
-export const INSTAGRAM_SEND_FAILED_REVIEW_REASON = 'instagram_send_failed' as const
+export const INSTAGRAM_SEND_FAILED_REVIEW_REASON =
+  'instagram_send_failed' as const
 
 /** Migration 006's unique constraint on messages.provider_message_id. */
-export const PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT = 'messages_provider_message_id_unique'
+export const PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT =
+  'messages_provider_message_id_unique'
 
 const PG_UNIQUE_VIOLATION = '23505'
 
@@ -111,10 +136,37 @@ export type FitResult =
  * cap, or a reply that would need more than MAX_BUBBLES_PER_RESPONSE messages,
  * can't be sent this way at all: the caller cards it rather than cut it.
  */
-export function fitBubblesToInstagramCap(bubbles: readonly string[], reply: string): FitResult {
-  if (bubbles.every(fitsInstagramTextCap)) return { ok: true, bubbles: [...bubbles] }
+export function fitBubblesToInstagramCap(
+  bubbles: readonly string[],
+  reply: string,
+  // TAC-554: the getting-to-know-you question, '' when this turn asks none.
+  //
+  // REQUIRED, because without it this function is the one place that can
+  // silently undo the whole ticket. The repack below throws the bubble
+  // structure away and re-packs the WHOLE reply greedily, so a question that
+  // dispatch had just separated gets merged straight back into the message in
+  // front of it — and only when a bubble happens to be over 1000 bytes, which
+  // is exactly the kind of conditional regression nothing would notice.
+  intentionTail: string,
+): FitResult {
+  if (bubbles.every(fitsInstagramTextCap))
+    return { ok: true, bubbles: [...bubbles] }
 
-  const sentences = splitIntoSentences(reply)
+  // Hold the question out of the packing entirely. The endsWith check is the
+  // same belt resolveDispatchBubbles applies: if the two ever disagree, pack
+  // the whole reply as before rather than slice at a meaningless offset.
+  const tail =
+    intentionTail !== '' && reply.endsWith(intentionTail) ? intentionTail : ''
+  // A question alone over the cap cannot be sent this way. In practice a
+  // getting-to-know-you question is a dozen words, so this is unreachable
+  // today; it is checked rather than assumed because the caller cards an
+  // over-cap reply rather than cutting it, and that must stay true.
+  if (tail !== '' && !fitsInstagramTextCap(tail))
+    return { ok: false, reason: 'sentence_over_cap' }
+  const answer =
+    tail === '' ? reply : reply.slice(0, reply.length - tail.length).trim()
+
+  const sentences = splitIntoSentences(answer)
   if (sentences.some((sentence) => !fitsInstagramTextCap(sentence))) {
     return { ok: false, reason: 'sentence_over_cap' }
   }
@@ -130,8 +182,12 @@ export function fitBubblesToInstagramCap(bubbles: readonly string[], reply: stri
     }
   }
   if (current !== '') packed.push(current)
-  if (packed.length > MAX_BUBBLES_PER_RESPONSE) return { ok: false, reason: 'too_many_messages' }
-  return { ok: true, bubbles: packed }
+  // The question counts toward the cap, so an answer that needs all three
+  // slots still cards rather than sending four messages.
+  const withTail = tail === '' ? packed : [...packed, tail]
+  if (withTail.length > MAX_BUBBLES_PER_RESPONSE)
+    return { ok: false, reason: 'too_many_messages' }
+  return { ok: true, bubbles: withTail }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,16 +226,26 @@ function agentColumns(payload: MessageInsert): MessageUpdate {
 export async function insertOrReconcileEcho(
   supabase: AdminSupabaseClient,
   payload: MessageInsert,
-): Promise<{ ok: true; id: string; reconciled: boolean } | { ok: false; error: string }> {
-  const { data, error } = await supabase.from('messages').insert(payload).select('id').single()
+): Promise<
+  { ok: true; id: string; reconciled: boolean } | { ok: false; error: string }
+> {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert(payload)
+    .select('id')
+    .single()
   if (!error && data) return { ok: true, id: data.id, reconciled: false }
   if (!error) return { ok: false, error: 'insert returned no row' }
-  if (error.code !== PG_UNIQUE_VIOLATION || !error.message.includes(PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT)) {
+  if (
+    error.code !== PG_UNIQUE_VIOLATION ||
+    !error.message.includes(PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT)
+  ) {
     return { ok: false, error: error.message }
   }
 
   const mid = payload.provider_message_id
-  if (typeof mid !== 'string') return { ok: false, error: 'duplicate key without a provider_message_id' }
+  if (typeof mid !== 'string')
+    return { ok: false, error: 'duplicate key without a provider_message_id' }
   const { data: rows, error: updateError } = await supabase
     .from('messages')
     .update(agentColumns(payload))
@@ -191,7 +257,10 @@ export async function insertOrReconcileEcho(
     .select('id')
   if (updateError) return { ok: false, error: updateError.message }
   if (!rows || rows.length !== 1) {
-    return { ok: false, error: `provider_message_id collided with no echo row to fill in (${rows?.length ?? 0} matched)` }
+    return {
+      ok: false,
+      error: `provider_message_id collided with no echo row to fill in (${rows?.length ?? 0} matched)`,
+    }
   }
   return { ok: true, id: rows[0]!.id, reconciled: true }
 }
@@ -202,7 +271,11 @@ export async function insertOrReconcileEcho(
 
 export type SendFailureCardResult =
   | { ok: true; cardId: string }
-  | { ok: false; skipped: 'opted_out' | 'slot_occupied' | 'write_failed'; error?: string }
+  | {
+      ok: false
+      skipped: 'opted_out' | 'slot_occupied' | 'write_failed'
+      error?: string
+    }
 
 /**
  * Write the reply that didn't go out as a card (rule 4). Never throws.
@@ -249,9 +322,14 @@ export async function writeInstagramSendFailureCard(input: {
     // on it, so the remainder card, which does not carry the commitment, must
     // not carry this either.
     const cancellation = input.carrier
-      ? resolveCancellation(input.generation.cancelsCommitmentId, ctx.activeCommitments)
+      ? resolveCancellation(
+          input.generation.cancelsCommitmentId,
+          ctx.activeCommitments,
+        )
       : { status: 'none' as const }
-    const rows = (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+    const rows =
+      (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ??
+      EMPTY_PENDING_ROWS
     const decision = decideSlotAction({
       rows,
       draftCommitment: draftCommitmentIdentity(generation.commitment, false),
@@ -262,21 +340,37 @@ export async function writeInstagramSendFailureCard(input: {
       // a pending reply. The `regen` policy is the only one that reads this.
       conversationDisposition: null,
     })
-    if (decision.action === 'drop') return { ok: false, skipped: 'slot_occupied' }
+    if (decision.action === 'drop')
+      return { ok: false, skipped: 'slot_occupied' }
 
-    const persisted = await persistOrRegenQueuedDraft(ctx, generation, INSTAGRAM_SEND_FAILED_REVIEW_REASON, null, {
-      callerPolicy: 'never_regen',
-      renderedIntentions: input.carrier ? input.renderedIntentions : undefined,
-      pendingCancellation: cancellation.status === 'resolved' ? cancellation.cancellation : null,
-    })
-    if (persisted.action === 'dropped') return { ok: false, skipped: 'slot_occupied' }
+    const persisted = await persistOrRegenQueuedDraft(
+      ctx,
+      generation,
+      INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+      null,
+      {
+        callerPolicy: 'never_regen',
+        renderedIntentions: input.carrier
+          ? input.renderedIntentions
+          : undefined,
+        pendingCancellation:
+          cancellation.status === 'resolved' ? cancellation.cancellation : null,
+      },
+    )
+    if (persisted.action === 'dropped')
+      return { ok: false, skipped: 'slot_occupied' }
     // TAC-397: unreachable — this path is never_regen, which never silences.
     // Reported as the same skip rather than cast away: either way no card was
     // written, which is what the caller needs to know.
-    if (persisted.action === 'silenced') return { ok: false, skipped: 'slot_occupied' }
+    if (persisted.action === 'silenced')
+      return { ok: false, skipped: 'slot_occupied' }
     return { ok: true, cardId: persisted.outboundMessageId }
   } catch (e) {
-    return { ok: false, skipped: 'write_failed', error: e instanceof Error ? e.message : String(e) }
+    return {
+      ok: false,
+      skipped: 'write_failed',
+      error: e instanceof Error ? e.message : String(e),
+    }
   }
 }
 
@@ -333,15 +427,32 @@ export type InstagramReplyOutcome =
 
 /** Everything the dispatch reaches outside itself, replaceable in tests. */
 export interface InstagramDispatchDeps {
-  loadTarget: (venueId: string, guestId: string) => Promise<InstagramSendTargetResult>
-  loadLastGuestActionAt: (venueId: string, guestId: string) => Promise<{ ok: true; value: Date | null } | { ok: false; error: string }>
+  loadTarget: (
+    venueId: string,
+    guestId: string,
+  ) => Promise<InstagramSendTargetResult>
+  loadLastGuestActionAt: (
+    venueId: string,
+    guestId: string,
+  ) => Promise<{ ok: true; value: Date | null } | { ok: false; error: string }>
   findReplyToInbound: (input: {
     venueId: string
     guestId: string
     inboundMessageId: string
-  }) => Promise<{ ok: true; value: { id: string } | null } | { ok: false; error: string }>
-  sendText: (input: { accountId: string; recipientId: string; token: string; text: string }) => Promise<InstagramSendResult>
-  saveMessage: (payload: MessageInsert) => Promise<{ ok: true; id: string; reconciled: boolean } | { ok: false; error: string }>
+  }) => Promise<
+    { ok: true; value: { id: string } | null } | { ok: false; error: string }
+  >
+  sendText: (input: {
+    accountId: string
+    recipientId: string
+    token: string
+    text: string
+  }) => Promise<InstagramSendResult>
+  saveMessage: (
+    payload: MessageInsert,
+  ) => Promise<
+    { ok: true; id: string; reconciled: boolean } | { ok: false; error: string }
+  >
   writeCard: typeof writeInstagramSendFailureCard
   materializeCommitment: typeof materializeInlineCommitment
   applyCancellation: typeof applyInlineCancellation
@@ -355,8 +466,10 @@ function defaultDeps(): InstagramDispatchDeps {
   let client: AdminSupabaseClient | null = null
   const supabase = (): AdminSupabaseClient => (client ??= createAdminClient())
   return {
-    loadTarget: (venueId, guestId) => loadInstagramSendTarget(supabase(), { venueId, guestId }),
-    loadLastGuestActionAt: (venueId, guestId) => loadLastGuestActionAt(supabase(), venueId, guestId),
+    loadTarget: (venueId, guestId) =>
+      loadInstagramSendTarget(supabase(), { venueId, guestId }),
+    loadLastGuestActionAt: (venueId, guestId) =>
+      loadLastGuestActionAt(supabase(), venueId, guestId),
     findReplyToInbound: (input) => findReplyToInbound(supabase(), input),
     sendText: (input) => sendInstagramText({ ...input, fetchImpl: fetch }),
     saveMessage: (payload) => insertOrReconcileEcho(supabase(), payload),
@@ -375,11 +488,17 @@ type Failure = {
   outcomeUnknown: boolean
 }
 
-function failure(reason: string, windowRemainingMs: number | null = null): Failure {
+function failure(
+  reason: string,
+  windowRemainingMs: number | null = null,
+): Failure {
   return { reason, windowRemainingMs, meta: null, outcomeUnknown: false }
 }
 
-function sendFailure(sent: Extract<InstagramSendResult, { ok: false }>, windowRemainingMs: number | null): Failure {
+function sendFailure(
+  sent: Extract<InstagramSendResult, { ok: false }>,
+  windowRemainingMs: number | null,
+): Failure {
   return {
     reason: sent.kind,
     windowRemainingMs,
@@ -396,7 +515,17 @@ export async function dispatchInstagramReply(
 ): Promise<InstagramReplyOutcome> {
   const deps: InstagramDispatchDeps = { ...defaultDeps(), ...injected }
   const reply = collapseToSingleMessage(generation.body)
-  const split = resolveDispatchBubbles(generation.body, options.rng ?? Math.random)
+  // TAC-554: same gate and same tail as the text arm, through the one shared
+  // helper so the two arms cannot disagree about when a question bubbles.
+  const intentionTail = intentionTailFor(
+    generation.intentionQuestion,
+    options.renderedIntentions?.length ?? 0,
+  )
+  const split = resolveDispatchBubbles(
+    generation.body,
+    options.rng ?? Math.random,
+    intentionTail,
+  )
 
   // Report and card what didn't go out. `sent` messages went out; everything
   // after them is `undelivered`.
@@ -411,7 +540,10 @@ export async function dispatchInstagramReply(
     if (options.onUndelivered === 'card' && undeliveredBody.trim() !== '') {
       card = await deps.writeCard({
         ctx,
-        generation: scope === 'whole_reply' ? generation : { ...generation, body: undeliveredBody },
+        generation:
+          scope === 'whole_reply'
+            ? generation
+            : { ...generation, body: undeliveredBody },
         carrier: scope === 'whole_reply',
         renderedIntentions: options.renderedIntentions,
       })
@@ -430,20 +562,32 @@ export async function dispatchInstagramReply(
       fbtraceId: why.meta?.reason === 'graph_error' ? why.meta.fbtraceId : null,
       outcomeUnknown: why.outcomeUnknown,
       cardId: card?.ok ? card.cardId : null,
-      cardSkipped: card === null ? (options.onUndelivered === 'none' ? 'not_carded_on_this_path' : 'empty') : card.ok ? null : card.skipped,
+      cardSkipped:
+        card === null
+          ? options.onUndelivered === 'none'
+            ? 'not_carded_on_this_path'
+            : 'empty'
+          : card.ok
+            ? null
+            : card.skipped,
       undeliveredBody,
     })
     return card
   }
 
-  const wholeReplyFailed = async (why: Failure, bubbleCount: number): Promise<InstagramReplyOutcome> => {
+  const wholeReplyFailed = async (
+    why: Failure,
+    bubbleCount: number,
+  ): Promise<InstagramReplyOutcome> => {
     const card = await report(why, 'whole_reply', reply, bubbleCount, 0)
-    return card?.ok ? { kind: 'carded', reason: why.reason, cardId: card.cardId } : { kind: 'not_sent', reason: why.reason }
+    return card?.ok
+      ? { kind: 'carded', reason: why.reason, cardId: card.cardId }
+      : { kind: 'not_sent', reason: why.reason }
   }
 
   if (split.length === 0) return wholeReplyFailed(failure('empty_body'), 0)
 
-  const fit = fitBubblesToInstagramCap(split, reply)
+  const fit = fitBubblesToInstagramCap(split, reply, intentionTail)
   if (!fit.ok) return wholeReplyFailed(failure(fit.reason), split.length)
   const bubbles = fit.bubbles
 
@@ -457,7 +601,7 @@ export async function dispatchInstagramReply(
       inboundMessageId: options.replyCheck.inboundMessageId,
     })
     if (!answered.ok) {
-      console.warn('[agent] instagram reply check unreadable; sending anyway', {
+      logger.warn('[agent] instagram reply check unreadable; sending anyway', {
         agentRunId: ctx.agentRunId,
         error: answered.error,
       })
@@ -474,17 +618,28 @@ export async function dispatchInstagramReply(
   }
 
   const target = await deps.loadTarget(ctx.venue.id, ctx.guest.id)
-  if (!target.ok) return wholeReplyFailed(failure(target.problem), bubbles.length)
+  if (!target.ok)
+    return wholeReplyFailed(failure(target.problem), bubbles.length)
 
-  const lastAction = await deps.loadLastGuestActionAt(ctx.venue.id, ctx.guest.id)
+  const lastAction = await deps.loadLastGuestActionAt(
+    ctx.venue.id,
+    ctx.guest.id,
+  )
   if (!lastAction.ok) {
-    console.warn('[agent] instagram window unreadable; sending and letting Meta decide', {
-      agentRunId: ctx.agentRunId,
-      error: lastAction.error,
-    })
+    logger.warn(
+      '[agent] instagram window unreadable; sending and letting Meta decide',
+      {
+        agentRunId: ctx.agentRunId,
+        error: lastAction.error,
+      },
+    )
   } else {
     const state = instagramWindowState(lastAction.value, deps.now())
-    if (!state.open) return wholeReplyFailed(failure('window_closed_by_gate', state.remainingMs), bubbles.length)
+    if (!state.open)
+      return wholeReplyFailed(
+        failure('window_closed_by_gate', state.remainingMs),
+        bubbles.length,
+      )
   }
 
   const generationId = randomUUID()
@@ -494,7 +649,8 @@ export async function dispatchInstagramReply(
   let stopped: Failure | null = null
 
   for (let index = 0; index < bubbles.length; index += 1) {
-    if (index > 0 && options.skipHumanFeelDelay !== true) await deps.sleep(INTER_BUBBLE_GAP_MS)
+    if (index > 0 && options.skipHumanFeelDelay !== true)
+      await deps.sleep(INTER_BUBBLE_GAP_MS)
 
     let remainingMs: number | null = null
     if (lastAction.ok) {
@@ -506,7 +662,10 @@ export async function dispatchInstagramReply(
       }
     }
 
-    const sent = await deps.sendText({ ...target.target, text: bubbles[index]! })
+    const sent = await deps.sendText({
+      ...target.target,
+      text: bubbles[index]!,
+    })
     if (!sent.ok) {
       stopped = sendFailure(sent, remainingMs)
       break
@@ -526,7 +685,9 @@ export async function dispatchInstagramReply(
         // See answersInboundId: the holding message names the question it is
         // holding, so it can't read as an answer to anything the guest sends
         // after it.
-        ...(options.answersInboundId !== undefined ? { reply_to_message_id: options.answersInboundId } : {}),
+        ...(options.answersInboundId !== undefined
+          ? { reply_to_message_id: options.answersInboundId }
+          : {}),
         // First row of the response only, as on the text arm (TAC-436).
         rendered_intentions:
           index === 0 && options.renderedIntentions !== undefined
@@ -545,7 +706,12 @@ export async function dispatchInstagramReply(
         kind: ctx.followupTrigger ? 'followup' : 'inbound',
         stage: 'persist',
         errorMessage: saved.error,
-        extra: { channel: 'instagram', generationId, bubbleIndex: index, bubbleCount: bubbles.length },
+        extra: {
+          channel: 'instagram',
+          generationId,
+          bubbleIndex: index,
+          bubbleCount: bubbles.length,
+        },
       })
       stopped = failure('persist_failed')
       break
@@ -553,7 +719,8 @@ export async function dispatchInstagramReply(
     persistedIds.push(saved.id)
   }
 
-  if (sentCount === 0) return wholeReplyFailed(stopped ?? failure('unknown'), bubbles.length)
+  if (sentCount === 0)
+    return wholeReplyFailed(stopped ?? failure('unknown'), bubbles.length)
 
   if (persistedIds.length > 0) {
     // Both, and in this order, exactly as the text arm does. TAC-513:
@@ -573,12 +740,22 @@ export async function dispatchInstagramReply(
   let undelivered: { reason: string; cardId: string | null } | null = null
   if (remainder.length > 0) {
     const why = stopped ?? failure('unknown')
-    const card = await report(why, 'remainder', remainder.join(' '), bubbles.length, sentCount)
+    const card = await report(
+      why,
+      'remainder',
+      remainder.join(' '),
+      bubbles.length,
+      sentCount,
+    )
     undelivered = { reason: why.reason, cardId: card?.ok ? card.cardId : null }
   }
 
   if (persistedIds.length === 0) {
-    return { kind: 'sent_unrecorded', providerMessageId: firstMid!, reason: stopped?.reason ?? 'persist_failed' }
+    return {
+      kind: 'sent_unrecorded',
+      providerMessageId: firstMid!,
+      reason: stopped?.reason ?? 'persist_failed',
+    }
   }
   return {
     kind: 'sent',

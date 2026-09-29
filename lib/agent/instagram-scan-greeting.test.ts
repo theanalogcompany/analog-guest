@@ -16,7 +16,8 @@ vi.mock('./handle-followup', () => ({
   handleFollowup: (...args: unknown[]) => handleFollowupMock(...args),
 }))
 vi.mock('./record-inbound-turn-outcome', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./record-inbound-turn-outcome')>()
+  const actual =
+    await importOriginal<typeof import('./record-inbound-turn-outcome')>()
   return {
     ...actual,
     insertInboundTurnOutcome: (...args: unknown[]) => insertLedgerMock(...args),
@@ -74,7 +75,9 @@ function arrival(over: Partial<ScanArrivalRow> = {}): ScanArrivalRow {
 function seed(over: Partial<ScanArrivalsSeed> = {}): ScanArrivalsSeed {
   return {
     arrivals: [arrival()],
-    venues: [{ id: VENUE_ID, timezone: 'America/Los_Angeles', status: 'active' }],
+    venues: [
+      { id: VENUE_ID, timezone: 'America/Los_Angeles', status: 'active' },
+    ],
     guests: [{ id: GUEST_ID, opted_out_at: null }],
     messages: [],
     venueInfo: OPEN_ALL_WEEK,
@@ -84,12 +87,17 @@ function seed(over: Partial<ScanArrivalsSeed> = {}): ScanArrivalsSeed {
 
 /** The ledger rows this run wrote, newest last. */
 function ledgerReasons(): Array<string | null> {
-  return insertLedgerMock.mock.calls.map((c) => (c[0] as { entry: { reason: string | null } }).entry.reason)
+  return insertLedgerMock.mock.calls.map(
+    (c) => (c[0] as { entry: { reason: string | null } }).entry.reason,
+  )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  handleFollowupMock.mockResolvedValue({ status: 'sent', outboundMessageId: 'out-1' })
+  handleFollowupMock.mockResolvedValue({
+    status: 'sent',
+    outboundMessageId: 'out-1',
+  })
 })
 
 describe('the greeting fires', () => {
@@ -103,7 +111,10 @@ describe('the greeting fires', () => {
       guestId: GUEST_ID,
       trigger: {
         reason: 'instagram_scan_arrival',
-        instagramScanArrival: { scanMessageId: 'scan-msg-1', hadPriorConversation: true },
+        instagramScanArrival: {
+          scanMessageId: 'scan-msg-1',
+          hadPriorConversation: true,
+        },
       },
     })
     expect(result.greeted).toBe(1)
@@ -116,8 +127,12 @@ describe('the greeting fires', () => {
     const db = createScanArrivalsFake(seed())
     await processDueScanGreetings(at(6 * MINUTE), db.client)
 
-    const passed = (handleFollowupMock.mock.calls[0]?.[0] as { agentRunId: string }).agentRunId
-    const recorded = (insertLedgerMock.mock.calls[0]?.[0] as { agentRunId: string }).agentRunId
+    const passed = (
+      handleFollowupMock.mock.calls[0]?.[0] as { agentRunId: string }
+    ).agentRunId
+    const recorded = (
+      insertLedgerMock.mock.calls[0]?.[0] as { agentRunId: string }
+    ).agentRunId
     expect(typeof passed).toBe('string')
     expect(recorded).toBe(passed)
   })
@@ -179,7 +194,11 @@ describe('the repeat guard', () => {
       'already_greeted_today',
       'already_greeted_today',
     ])
-    expect(ledgerReasons()).toEqual([null, 'already_greeted_today', 'already_greeted_today'])
+    expect(ledgerReasons()).toEqual([
+      null,
+      'already_greeted_today',
+      'already_greeted_today',
+    ])
   })
 
   // A suppressed scan leaves claimed_at null, so it is not in the index and
@@ -230,7 +249,10 @@ describe('the repeat guard', () => {
     )
 
     await processDueScanGreetings(at(6 * MINUTE), db.client)
-    await processDueScanGreetings(new Date(dayTwo.getTime() + 6 * MINUTE), db.client)
+    await processDueScanGreetings(
+      new Date(dayTwo.getTime() + 6 * MINUTE),
+      db.client,
+    )
 
     expect(handleFollowupMock).toHaveBeenCalledTimes(2)
     expect(db.arrivals.map((r) => r.outcome)).toEqual(['greeted', 'greeted'])
@@ -266,8 +288,14 @@ describe('the repeat guard', () => {
       }),
     )
 
-    await processDueScanGreetings(new Date(first.getTime() + 6 * MINUTE), db.client)
-    await processDueScanGreetings(new Date(second.getTime() + 6 * MINUTE), db.client)
+    await processDueScanGreetings(
+      new Date(first.getTime() + 6 * MINUTE),
+      db.client,
+    )
+    await processDueScanGreetings(
+      new Date(second.getTime() + 6 * MINUTE),
+      db.client,
+    )
 
     expect(handleFollowupMock).toHaveBeenCalledTimes(1)
     expect(db.arrivals[1]?.outcome).toBe('already_greeted_today')
@@ -296,7 +324,11 @@ describe('the suppressions, each re-checked at fire time', () => {
     ],
     [
       'a paused venue',
-      { venues: [{ id: VENUE_ID, timezone: 'America/Los_Angeles', status: 'paused' }] },
+      {
+        venues: [
+          { id: VENUE_ID, timezone: 'America/Los_Angeles', status: 'paused' },
+        ],
+      },
       6 * MINUTE,
       'venue_paused',
       'venue_paused',
@@ -310,21 +342,42 @@ describe('the suppressions, each re-checked at fire time', () => {
     ],
     [
       'a venue that is shut',
-      { venueInfo: { hours: { sunday: 'Closed', monday: 'Closed', tuesday: 'Closed', wednesday: 'Closed', thursday: 'Closed', friday: 'Closed', saturday: 'Closed' } } },
+      {
+        venueInfo: {
+          hours: {
+            sunday: 'Closed',
+            monday: 'Closed',
+            tuesday: 'Closed',
+            wednesday: 'Closed',
+            thursday: 'Closed',
+            friday: 'Closed',
+            saturday: 'Closed',
+          },
+        },
+      },
       6 * MINUTE,
       'venue_closed',
       'venue_closed',
     ],
-    ['a scan the cron got to too late', {}, 20 * MINUTE, 'too_stale', 'scan_too_stale'],
-  ])('suppresses for %s', async (_label, over, tickOffset, outcome, ledgerReason) => {
-    const db = createScanArrivalsFake(seed(over))
-    await processDueScanGreetings(at(tickOffset), db.client)
+    [
+      'a scan the cron got to too late',
+      {},
+      20 * MINUTE,
+      'too_stale',
+      'scan_too_stale',
+    ],
+  ])(
+    'suppresses for %s',
+    async (_label, over, tickOffset, outcome, ledgerReason) => {
+      const db = createScanArrivalsFake(seed(over))
+      await processDueScanGreetings(at(tickOffset), db.client)
 
-    expect(handleFollowupMock).not.toHaveBeenCalled()
-    expect(db.arrivals[0]?.outcome).toBe(outcome)
-    expect(db.arrivals[0]?.claimed_at).toBeNull()
-    expect(ledgerReasons()).toEqual([ledgerReason])
-  })
+      expect(handleFollowupMock).not.toHaveBeenCalled()
+      expect(db.arrivals[0]?.outcome).toBe(outcome)
+      expect(db.arrivals[0]?.claimed_at).toBeNull()
+      expect(ledgerReasons()).toEqual([ledgerReason])
+    },
+  )
 
   // A SECOND SCAN is not the guest writing. Without the provider_message_id
   // filter every repeat scanner would be silently suppressed instead of being

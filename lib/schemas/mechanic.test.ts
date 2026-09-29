@@ -3,9 +3,15 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { describe, expect, it } from 'vitest'
-import { MechanicCreateSchema, MechanicFullSchema, MechanicPatchSchema } from './mechanic'
+import {
+  MechanicCreateSchema,
+  MechanicFullSchema,
+  MechanicPatchSchema,
+} from './mechanic'
 
-function fullMechanic(overrides: Partial<Parameters<typeof MechanicFullSchema.parse>[0]> = {}) {
+function fullMechanic(
+  overrides: Partial<Parameters<typeof MechanicFullSchema.parse>[0]> = {},
+) {
   return {
     type: 'perk',
     name: 'The Joey',
@@ -36,7 +42,10 @@ describe('MechanicFullSchema — redemption pairing', () => {
 
   it('rejects renewable with a null window', () => {
     const result = MechanicFullSchema.safeParse(
-      fullMechanic({ redemptionPolicy: 'renewable', redemptionWindowDays: null }),
+      fullMechanic({
+        redemptionPolicy: 'renewable',
+        redemptionWindowDays: null,
+      }),
     )
     expect(result.success).toBe(false)
   })
@@ -49,17 +58,24 @@ describe('MechanicFullSchema — redemption pairing', () => {
   })
 
   it('rejects a non-canonical guest state', () => {
-    const result = MechanicFullSchema.safeParse(fullMechanic({ minState: 'vip' }))
+    const result = MechanicFullSchema.safeParse(
+      fullMechanic({ minState: 'vip' }),
+    )
     expect(result.success).toBe(false)
   })
 
   it('rejects a non-canonical trigger type', () => {
-    const result = MechanicFullSchema.safeParse(fullMechanic({ triggerType: 'owner_gifted' }))
+    const result = MechanicFullSchema.safeParse(
+      fullMechanic({ triggerType: 'owner_gifted' }),
+    )
     expect(result.success).toBe(false)
   })
 
   it('does not accept redemption as a field at all — not exposed per §2', () => {
-    const withRedemption = { ...fullMechanic(), redemption: { type: 'manual_owner_action_at_venue' } }
+    const withRedemption = {
+      ...fullMechanic(),
+      redemption: { type: 'manual_owner_action_at_venue' },
+    }
     const parsed = MechanicFullSchema.parse(withRedemption)
     expect(parsed).not.toHaveProperty('redemption')
   })
@@ -74,7 +90,9 @@ describe('MechanicPatchSchema — partial, no cross-field check', () => {
     // A tags-only-style partial patch shouldn't need to know about the
     // sibling field — cross-field validation happens after merge, against
     // MechanicFullSchema, not here.
-    const result = MechanicPatchSchema.safeParse({ redemptionPolicy: 'renewable' })
+    const result = MechanicPatchSchema.safeParse({
+      redemptionPolicy: 'renewable',
+    })
     expect(result.success).toBe(true)
   })
 

@@ -56,7 +56,9 @@ export async function loadIntentionRows(
     const [promptedResult, eligibleResult] = await Promise.all([
       supabase
         .from('guest_intention_prompts')
-        .select('intention_key, prompted_at, eligible_at, prompt_source, message_id')
+        .select(
+          'intention_key, prompted_at, eligible_at, prompt_source, message_id',
+        )
         .eq('venue_id', venueId)
         .eq('guest_id', guestId)
         .not('prompted_at', 'is', null),
@@ -96,10 +98,12 @@ export async function loadIntentionRows(
       })
     }
 
-    const eligible: EligibleIntentionRow[] = (eligibleResult.data ?? []).map((row) => ({
-      intentionKey: row.intention_key,
-      eligibleAt: row.eligible_at === null ? null : new Date(row.eligible_at),
-    }))
+    const eligible: EligibleIntentionRow[] = (eligibleResult.data ?? []).map(
+      (row) => ({
+        intentionKey: row.intention_key,
+        eligibleAt: row.eligible_at === null ? null : new Date(row.eligible_at),
+      }),
+    )
 
     return { prompted, eligible }
   } catch (e) {

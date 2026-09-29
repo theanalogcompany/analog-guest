@@ -28,7 +28,9 @@ describe('grounding failure set — fixture integrity', () => {
     // commit message. A gap means a case was deleted rather than marked, and
     // deleting a case silently loses the evidence it encoded.
     const numbers = ids.map((id) => Number(id.slice(3))).sort((a, b) => a - b)
-    expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => i + 1))
+    expect(numbers).toEqual(
+      Array.from({ length: numbers.length }, (_, i) => i + 1),
+    )
   })
 
   it('documents every shape it uses, and uses every shape it documents', () => {
@@ -53,7 +55,10 @@ describe('grounding failure set — the invariants that make it usable', () => {
     // sit in the set reporting a clean run forever and inflate confidence that
     // the generator had improved.
     for (const c of reproducibleCases(set)) {
-      expect(c.forbidden_claims.length, `${c.id} has no forbidden_claims`).toBeGreaterThan(0)
+      expect(
+        c.forbidden_claims.length,
+        `${c.id} has no forbidden_claims`,
+      ).toBeGreaterThan(0)
     }
   })
 
@@ -61,7 +66,10 @@ describe('grounding failure set — the invariants that make it usable', () => {
     // The inverse. A negative control asserts the reply was fine; a forbidden
     // claim on one would assert the opposite in the same object.
     for (const c of negativeControls(set)) {
-      expect(c.forbidden_claims, `${c.id} is a control but forbids something`).toEqual([])
+      expect(
+        c.forbidden_claims,
+        `${c.id} is a control but forbids something`,
+      ).toEqual([])
     }
   })
 
@@ -77,7 +85,9 @@ describe('grounding failure set — the invariants that make it usable', () => {
 
   it('marks every verifier_false_positive case as a control, and vice versa', () => {
     for (const c of set.cases) {
-      expect(c.verdict_expected === 'clean').toBe(c.shape === 'verifier_false_positive')
+      expect(c.verdict_expected === 'clean').toBe(
+        c.shape === 'verifier_false_positive',
+      )
     }
   })
 
@@ -85,7 +95,9 @@ describe('grounding failure set — the invariants that make it usable', () => {
     // TAC-501. If a refactor ever drops this case, the set has lost the
     // highest-harm shape it was built to hold — a guest can act on an invented
     // phone number in a way they cannot act on an invented superlative.
-    const fabrication = set.cases.filter((c) => c.shape === 'fabricated_contact_detail')
+    const fabrication = set.cases.filter(
+      (c) => c.shape === 'fabricated_contact_detail',
+    )
     expect(fabrication.length).toBeGreaterThan(0)
     expect(fabrication[0].note).toContain('TAC-501')
   })
@@ -124,11 +136,20 @@ describe('grounding failure set — public-repo constraint', () => {
     const digitRun = /\+?[\d][\d\s().-]{8,}[\d]/g
     for (const c of set.cases) {
       const haystack = stripKnownSafe(
-        [c.inbound, c.premise, c.observed_claim, c.expected_behavior, c.note ?? ''].join(' '),
+        [
+          c.inbound,
+          c.premise,
+          c.observed_claim,
+          c.expected_behavior,
+          c.note ?? '',
+        ].join(' '),
       )
       for (const match of haystack.match(digitRun) ?? []) {
         const digits = match.replace(/\D/g, '').length
-        expect(digits, `${c.id} contains a phone-number-shaped string: ${match}`).toBeLessThan(10)
+        expect(
+          digits,
+          `${c.id} contains a phone-number-shaped string: ${match}`,
+        ).toBeLessThan(10)
       }
     }
   })
@@ -137,7 +158,12 @@ describe('grounding failure set — public-repo constraint', () => {
     // Same reasoning for the link cases: gf-04 is about an inferred
     // purchasability claim, and needs no real domain to express it.
     for (const c of set.cases) {
-      const haystack = [c.inbound, c.premise, c.observed_claim, c.expected_behavior].join(' ')
+      const haystack = [
+        c.inbound,
+        c.premise,
+        c.observed_claim,
+        c.expected_behavior,
+      ].join(' ')
       expect(/https?:\/\//.test(haystack), `${c.id} contains a URL`).toBe(false)
     }
   })

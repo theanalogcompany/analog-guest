@@ -4,7 +4,8 @@
 // WHY THIS EXISTS: the APNs push path is fire-and-forget through waitUntil and
 // errors-as-values, so a broken configuration produces NO user-visible signal —
 // the agent runs normally, drafts queue normally, and the push simply never
-// arrives. CLAUDE.md → "Common gotchas → APNs env vars fail SILENTLY" documents
+// arrives. lib/notifications/CLAUDE.md, "Env vars fail SILENTLY, so the
+// validation is three-part", documents
 // the diagnostic chain that follows, which today starts with reading PostHog
 // minutes after the fact. This row makes the same information ambient.
 //
@@ -25,7 +26,9 @@ export interface CheckApnsRow {
 type EnvLike = Record<string, string | undefined>
 
 export function checkApns(env: EnvLike = process.env): CheckApnsRow {
-  const anySet = REQUIRED_APNS_VARS.some((name) => (env[name]?.trim() ?? '') !== '')
+  const anySet = REQUIRED_APNS_VARS.some(
+    (name) => (env[name]?.trim() ?? '') !== '',
+  )
 
   // 1. Not configured — no APNS_* var touched at all. Local dev / no-op;
   //    the push helpers return early with error='env_missing' and the agent
@@ -33,7 +36,8 @@ export function checkApns(env: EnvLike = process.env): CheckApnsRow {
   if (!anySet) {
     return {
       label: 'APNs push',
-      detail: 'Not configured (no APNS_* env vars set — local dev / no-op mode)',
+      detail:
+        'Not configured (no APNS_* env vars set — local dev / no-op mode)',
       tone: 'neutral',
     }
   }
@@ -53,8 +57,12 @@ export function checkApns(env: EnvLike = process.env): CheckApnsRow {
   // 3. Active. Show the host the env selects and the key/team ids — these are
   //    public identifiers, not secrets. The key body is never surfaced.
   const apnsEnv = env.APNS_ENV?.trim()
-  const host = apnsEnv === 'production' ? 'api.push.apple.com' : 'api.sandbox.push.apple.com'
-  const buildKind = apnsEnv === 'production' ? 'TestFlight / App Store' : 'Xcode dev'
+  const host =
+    apnsEnv === 'production'
+      ? 'api.push.apple.com'
+      : 'api.sandbox.push.apple.com'
+  const buildKind =
+    apnsEnv === 'production' ? 'TestFlight / App Store' : 'Xcode dev'
   return {
     label: 'APNs push',
     detail:

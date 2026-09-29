@@ -26,10 +26,7 @@ import {
   dedupeAndAppendAntiPatterns,
   upsertCorpusEdit,
 } from '@/lib/voice-training'
-import {
-  findPatternClusterForCritique,
-  persistCritique,
-} from '@/lib/voices'
+import { findPatternClusterForCritique, persistCritique } from '@/lib/voices'
 import { POST } from './route'
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
@@ -258,7 +255,10 @@ describe('POST /admin/voices/api/commit — error paths', () => {
   it('passes through auth helper response', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
 
     const res = await POST(

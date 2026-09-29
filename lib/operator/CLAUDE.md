@@ -27,6 +27,19 @@ arm, so passing a cookie scope into an operator helper would dispatch against an
 **What the guard does not catch:** a caller that length-tests `venueFilterIds`' *result*
 before applying the filter contains no `.ids`, typechecks, and restores the fleet grant.
 
+## Out of scope and non-existent are the same 404
+
+"No such message" and "a message at a venue outside this operator's allowlist" both return
+`{"error":"not_found"}`, byte-identical on the wire, so a client cannot probe for the
+existence of another venue's data. The helpers keep the two apart internally
+(`message_not_found` vs `out_of_allowlist`) for logging; the route flattens them. An invalid
+UUID is also a 404, not a 400 - the Contract enumerates no 400, and a non-UUID id does not
+exist by definition.
+
+This rule lived in the root `CLAUDE.md` section that the index restructure removed, and for a
+while its only written home was an unindexed planning document. It is a property of every
+route under `app/api/operator/*`, so it lives here.
+
 ## Queue projections are a cross-repo Contract
 
 `listPendingQueue`, `listHeadsUpQueue`, `listOperatorConversations`, `loadGuestThread`.
@@ -112,3 +125,8 @@ it never-sent in a prompt invites the model to say it again.
 
 `recent_context` deliberately has **no** `body <> ''` filter - a photo-only text is context
 the operator needs. A test asserts no body filter is ever added.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

@@ -22,7 +22,10 @@ const IGSID = '1000000000000001'
 const MID = 'aWdfZAG1faXRlbToxOklHTWVzc2FnZAUlEOjE3ODQxNDAwMDAwMDAwMDAx'
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 function fetchReturning(response: Response) {
@@ -30,7 +33,13 @@ function fetchReturning(response: Response) {
 }
 
 function send(text: string, fetchImpl: FetchLike) {
-  return sendInstagramText({ accountId: ACCOUNT_ID, recipientId: IGSID, text, token: TOKEN, fetchImpl })
+  return sendInstagramText({
+    accountId: ACCOUNT_ID,
+    recipientId: IGSID,
+    text,
+    token: TOKEN,
+    fetchImpl,
+  })
 }
 
 // One four-byte UTF-8 character that JavaScript counts as two code units.
@@ -45,7 +54,9 @@ describe('the 1000-byte cap', () => {
   })
 
   it('sends 250 four-byte emoji, which is exactly 1000 bytes', async () => {
-    const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID, message_id: MID }))
+    const fetchImpl = fetchReturning(
+      jsonResponse({ recipient_id: IGSID, message_id: MID }),
+    )
     const result = await send(FOUR_BYTE_EMOJI.repeat(250), fetchImpl)
     expect(result).toEqual({ ok: true, mid: MID })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
@@ -62,7 +73,10 @@ describe('the 1000-byte cap', () => {
     const fetchImpl = fetchReturning(jsonResponse({ message_id: MID }))
     expect(INSTAGRAM_MAX_TEXT_BYTES).toBe(1000)
     expect((await send('a'.repeat(1000), fetchImpl)).ok).toBe(true)
-    expect(await send('a'.repeat(1001), fetchImpl)).toMatchObject({ ok: false, kind: 'over_byte_cap' })
+    expect(await send('a'.repeat(1001), fetchImpl)).toMatchObject({
+      ok: false,
+      kind: 'over_byte_cap',
+    })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
@@ -77,7 +91,9 @@ describe('the 1000-byte cap', () => {
 
 describe('the request', () => {
   it('posts to the venue account, never to `me`, with the token only in the header', async () => {
-    const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID, message_id: MID }))
+    const fetchImpl = fetchReturning(
+      jsonResponse({ recipient_id: IGSID, message_id: MID }),
+    )
     await send('Open until 3', fetchImpl)
 
     const [url, init] = fetchImpl.mock.calls[0]!
@@ -103,20 +119,34 @@ describe('the request', () => {
 
   it('refuses empty or whitespace text before any network call', async () => {
     const fetchImpl = fetchReturning(jsonResponse({ message_id: MID }))
-    expect(await send('', fetchImpl)).toEqual({ ok: false, kind: 'empty_text', failure: null })
-    expect(await send('   ', fetchImpl)).toEqual({ ok: false, kind: 'empty_text', failure: null })
+    expect(await send('', fetchImpl)).toEqual({
+      ok: false,
+      kind: 'empty_text',
+      failure: null,
+    })
+    expect(await send('   ', fetchImpl)).toEqual({
+      ok: false,
+      kind: 'empty_text',
+      failure: null,
+    })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 })
 
 describe('the response', () => {
   it('returns the mid from message_id', async () => {
-    const result = await send('hi', fetchReturning(jsonResponse({ recipient_id: IGSID, message_id: MID })))
+    const result = await send(
+      'hi',
+      fetchReturning(jsonResponse({ recipient_id: IGSID, message_id: MID })),
+    )
     expect(result).toEqual({ ok: true, mid: MID })
   })
 
   it('treats a 200 with no message_id as a failure whose outcome is unknown', async () => {
-    const result = await send('hi', fetchReturning(jsonResponse({ recipient_id: IGSID })))
+    const result = await send(
+      'hi',
+      fetchReturning(jsonResponse({ recipient_id: IGSID })),
+    )
     expect(result).toMatchObject({ ok: false, kind: 'malformed_response' })
     expect(sendOutcomeUnknown('malformed_response')).toBe(true)
   })
@@ -173,12 +203,18 @@ describe('failure kinds', () => {
   })
 
   it('reports a timeout as a failure whose outcome is unknown', async () => {
-    const timeoutError = Object.assign(new Error('aborted'), { name: 'TimeoutError' })
+    const timeoutError = Object.assign(new Error('aborted'), {
+      name: 'TimeoutError',
+    })
     const fetchImpl = vi.fn<FetchLike>(async () => {
       throw timeoutError
     })
     const result = await send('hi', fetchImpl)
-    expect(result).toEqual({ ok: false, kind: 'timeout', failure: { reason: 'timeout' } })
+    expect(result).toEqual({
+      ok: false,
+      kind: 'timeout',
+      failure: { reason: 'timeout' },
+    })
     expect(sendOutcomeUnknown('timeout')).toBe(true)
   })
 
@@ -198,6 +234,12 @@ describe('failure kinds', () => {
   })
 
   it('classifies a network failure', () => {
-    expect(classifySendFailure({ reason: 'network', errorName: 'TypeError', causeCode: 'ECONNRESET' })).toBe('network')
+    expect(
+      classifySendFailure({
+        reason: 'network',
+        errorName: 'TypeError',
+        causeCode: 'ECONNRESET',
+      }),
+    ).toBe('network')
   })
 })

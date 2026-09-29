@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a change to analog-guest
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Internal work is tracked in Linear; issues filed here are triaged into it.
+        Check the product principles in CLAUDE.md first - recognition, not loyalty; messaging-only; per-venue isolation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't be done today, and who hits it (guest, operator, Analog-internal).
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Guest-facing copy changes must show the wording verbatim.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -63,14 +63,22 @@ export async function addMechanic(input: {
 
 export type EditMechanicResult =
   | { ok: true; mechanicId: string }
-  | { ok: false; error: string; errorCode: 'db_error' | 'not_found' | 'invalid_after_merge' | 'no_op' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'db_error' | 'not_found' | 'invalid_after_merge' | 'no_op'
+    }
 
 export async function editMechanic(input: {
   mechanicId: string
   patch: MechanicPatch
 }): Promise<EditMechanicResult> {
   if (Object.keys(input.patch).length === 0) {
-    return { ok: false, error: 'no_op: pass at least one field to change', errorCode: 'no_op' }
+    return {
+      ok: false,
+      error: 'no_op: pass at least one field to change',
+      errorCode: 'no_op',
+    }
   }
 
   const supabase = createAdminClient()
@@ -118,7 +126,9 @@ export async function editMechanic(input: {
   // Merge the new trigger type onto the raw jsonb rather than replacing it
   // wholesale — see the module comment.
   const currentRawTrigger =
-    typeof row.trigger === 'object' && row.trigger !== null && !Array.isArray(row.trigger)
+    typeof row.trigger === 'object' &&
+    row.trigger !== null &&
+    !Array.isArray(row.trigger)
       ? (row.trigger as Record<string, unknown>)
       : {}
   const newTrigger = { ...currentRawTrigger, type: m.triggerType }
@@ -140,7 +150,11 @@ export async function editMechanic(input: {
     })
     .eq('id', input.mechanicId)
   if (updateErr) {
-    return { ok: false, error: `update failed: ${updateErr.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `update failed: ${updateErr.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   return { ok: true, mechanicId: input.mechanicId }
@@ -172,7 +186,11 @@ export async function deactivateMechanic(
     return { ok: false, error: error.message, errorCode: 'db_error' }
   }
   if (!data) {
-    return { ok: false, error: `mechanic not found: ${mechanicId}`, errorCode: 'not_found' }
+    return {
+      ok: false,
+      error: `mechanic not found: ${mechanicId}`,
+      errorCode: 'not_found',
+    }
   }
   return { ok: true, mechanicId }
 }

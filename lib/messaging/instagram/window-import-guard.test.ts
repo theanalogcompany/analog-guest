@@ -94,7 +94,8 @@ function sourceFiles(): string[] {
         walk(path)
         continue
       }
-      if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue
+      if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name))
+        continue
       files.push(relative(ROOT, path))
     }
   }
@@ -103,19 +104,27 @@ function sourceFiles(): string[] {
 }
 
 function importsInstagramOutbound(file: string, source: string): boolean {
-  const inInstagramFolder = file.startsWith(join('lib', 'messaging', 'instagram') + '/')
+  const inInstagramFolder = file.startsWith(
+    join('lib', 'messaging', 'instagram') + '/',
+  )
   return INSTAGRAM_OUTBOUND_MODULES.some((name) => {
     const aliased = new RegExp(`from '@/lib/messaging/instagram/${name}'`)
     const relativeImport = new RegExp(`from '\\./${name}'`)
-    return aliased.test(source) || (inInstagramFolder && relativeImport.test(source))
+    return (
+      aliased.test(source) || (inInstagramFolder && relativeImport.test(source))
+    )
   })
 }
 
 describe('Instagram outbound stays on the Instagram side (TAC-469 rule 1)', () => {
   const files = sourceFiles()
   const importers = files
-    .filter((file) => importsInstagramOutbound(file, readFileSync(join(ROOT, file), 'utf8')))
-    .filter((file) => !file.startsWith(join('lib', 'messaging', 'instagram') + '/'))
+    .filter((file) =>
+      importsInstagramOutbound(file, readFileSync(join(ROOT, file), 'utf8')),
+    )
+    .filter(
+      (file) => !file.startsWith(join('lib', 'messaging', 'instagram') + '/'),
+    )
     .sort()
 
   it('is imported outside lib/messaging/instagram only by the Instagram arms', () => {
@@ -138,27 +147,46 @@ describe('Instagram outbound stays on the Instagram side (TAC-469 rule 1)', () =
       join('lib', 'messaging', 'venue-lookup.ts'),
       join('lib', 'messaging', 'index.ts'),
     ]) {
-      expect(readFileSync(join(ROOT, file), 'utf8'), file).not.toMatch(/from '[^']*instagram[^']*'/)
+      expect(readFileSync(join(ROOT, file), 'utf8'), file).not.toMatch(
+        /from '[^']*instagram[^']*'/,
+      )
     }
   })
 
   it('lets the routing switches reach Instagram only through their Instagram arms', () => {
-    const agent = readFileSync(join(ROOT, 'lib', 'agent', 'dispatch-reply.ts'), 'utf8')
-    expect(agent.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual(["from './dispatch-instagram-reply'"])
-    const operator = readFileSync(join(ROOT, 'lib', 'operator', 'dispatch-operator-outbound.ts'), 'utf8')
-    expect(operator.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual(["from './dispatch-instagram-outbound'"])
+    const agent = readFileSync(
+      join(ROOT, 'lib', 'agent', 'dispatch-reply.ts'),
+      'utf8',
+    )
+    expect(agent.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual([
+      "from './dispatch-instagram-reply'",
+    ])
+    const operator = readFileSync(
+      join(ROOT, 'lib', 'operator', 'dispatch-operator-outbound.ts'),
+      'utf8',
+    )
+    expect(operator.match(/from '[^']*instagram[^']*'/g) ?? []).toEqual([
+      "from './dispatch-instagram-outbound'",
+    ])
   })
 
   // An Instagram-only venue has no messaging_phone_number (TAC-469 pre-flight).
   // The Instagram arm must never reach the phone-number provider's transport,
   // its read receipts, or its number lookup, which fails closed without one.
-  it.each(ALLOWED_IMPORTERS)('keeps %s off the Sendblue transport and the phone-number lookup', (file) => {
-    // Applies to the smoke script too: it must exercise the Instagram path and
-    // nothing else, or it would prove the wrong thing.
-    const source = readFileSync(join(ROOT, file), 'utf8')
-    expect(source).not.toMatch(/from '@\/lib\/messaging'/)
-    expect(source).not.toMatch(/from '@\/lib\/messaging\/(send|expressions|venue-lookup|sendblue-client)'/)
-    expect(source).not.toContain('messaging_phone_number')
-    expect(source).not.toMatch(/\bmarkAsRead\b|\bsendTypingIndicator\b|\bsendMessage\b/)
-  })
+  it.each(ALLOWED_IMPORTERS)(
+    'keeps %s off the Sendblue transport and the phone-number lookup',
+    (file) => {
+      // Applies to the smoke script too: it must exercise the Instagram path and
+      // nothing else, or it would prove the wrong thing.
+      const source = readFileSync(join(ROOT, file), 'utf8')
+      expect(source).not.toMatch(/from '@\/lib\/messaging'/)
+      expect(source).not.toMatch(
+        /from '@\/lib\/messaging\/(send|expressions|venue-lookup|sendblue-client)'/,
+      )
+      expect(source).not.toContain('messaging_phone_number')
+      expect(source).not.toMatch(
+        /\bmarkAsRead\b|\bsendTypingIndicator\b|\bsendMessage\b/,
+      )
+    },
+  )
 })

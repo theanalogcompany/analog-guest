@@ -54,11 +54,13 @@ describe('instagram token crypto', () => {
   // A key of the wrong length must fail loudly here, not decrypt to garbage
   // that only surfaces when Meta rejects the token weeks later.
   it('names the defect when the key is missing or the wrong length', () => {
-    expect(() => encryptInstagramToken(TOKEN, {} as unknown as NodeJS.ProcessEnv)).toThrow(
-      new RegExp(`Missing env var: ${INSTAGRAM_TOKEN_ENC_KEY_VAR}`),
-    )
     expect(() =>
-      encryptInstagramToken(TOKEN, { INSTAGRAM_TOKEN_ENC_KEY: '   ' } as unknown as NodeJS.ProcessEnv),
+      encryptInstagramToken(TOKEN, {} as unknown as NodeJS.ProcessEnv),
+    ).toThrow(new RegExp(`Missing env var: ${INSTAGRAM_TOKEN_ENC_KEY_VAR}`))
+    expect(() =>
+      encryptInstagramToken(TOKEN, {
+        INSTAGRAM_TOKEN_ENC_KEY: '   ',
+      } as unknown as NodeJS.ProcessEnv),
     ).toThrow(/Missing env var/)
     expect(() =>
       encryptInstagramToken(TOKEN, {
@@ -72,7 +74,9 @@ describe('instagram token crypto', () => {
   it('never puts key material in a thrown message', () => {
     const secret = Buffer.alloc(16, 9).toString('base64')
     try {
-      encryptInstagramToken(TOKEN, { INSTAGRAM_TOKEN_ENC_KEY: secret } as unknown as NodeJS.ProcessEnv)
+      encryptInstagramToken(TOKEN, {
+        INSTAGRAM_TOKEN_ENC_KEY: secret,
+      } as unknown as NodeJS.ProcessEnv)
       throw new Error('expected a throw')
     } catch (err) {
       expect((err as Error).message).not.toContain(secret)
@@ -81,7 +85,11 @@ describe('instagram token crypto', () => {
 
   describe('checkInstagramTokenEncKey', () => {
     it('passes a well-formed key', () => {
-      expect(checkInstagramTokenEncKey({ INSTAGRAM_TOKEN_ENC_KEY: GOOD_KEY } as unknown as NodeJS.ProcessEnv)).toEqual({
+      expect(
+        checkInstagramTokenEncKey({
+          INSTAGRAM_TOKEN_ENC_KEY: GOOD_KEY,
+        } as unknown as NodeJS.ProcessEnv),
+      ).toEqual({
         ok: true,
       })
     })
@@ -89,12 +97,16 @@ describe('instagram token crypto', () => {
     // "missing" and "wrong length" have different fixes, so they are
     // different problems rather than one "bad key".
     it('distinguishes missing from wrong length', () => {
-      expect(checkInstagramTokenEncKey({} as unknown as NodeJS.ProcessEnv)).toMatchObject({
+      expect(
+        checkInstagramTokenEncKey({} as unknown as NodeJS.ProcessEnv),
+      ).toMatchObject({
         ok: false,
         problem: 'missing',
       })
       expect(
-        checkInstagramTokenEncKey({ INSTAGRAM_TOKEN_ENC_KEY: '' } as unknown as NodeJS.ProcessEnv),
+        checkInstagramTokenEncKey({
+          INSTAGRAM_TOKEN_ENC_KEY: '',
+        } as unknown as NodeJS.ProcessEnv),
       ).toMatchObject({ ok: false, problem: 'missing' })
       expect(
         checkInstagramTokenEncKey({

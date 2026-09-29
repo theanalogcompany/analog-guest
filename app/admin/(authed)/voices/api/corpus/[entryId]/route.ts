@@ -56,7 +56,11 @@ export async function PATCH(
   if (!result.ok) {
     const status = result.errorCode === 'embed_failed' ? 502 : 500
     return NextResponse.json(
-      { error: 'corpus edit failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'corpus edit failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }
@@ -79,7 +83,11 @@ export async function DELETE(
   if (!result.ok) {
     const status = result.errorCode === 'not_found' ? 404 : 500
     return NextResponse.json(
-      { error: 'corpus delete failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'corpus delete failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

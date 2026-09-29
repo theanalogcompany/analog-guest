@@ -46,12 +46,13 @@ function mockQueries(results: Result[]) {
         return builder
       })
     }
-    builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
+    builder.then = (resolve: (v: unknown) => unknown) =>
+      Promise.resolve(result).then(resolve)
     return builder
   })
-  vi.mocked(createAdminClient).mockReturnValue({ from } as unknown as ReturnType<
-    typeof createAdminClient
-  >)
+  vi.mocked(createAdminClient).mockReturnValue({
+    from,
+  } as unknown as ReturnType<typeof createAdminClient>)
   return { calls, from }
 }
 
@@ -74,7 +75,11 @@ const dbRow = (overrides: Record<string, unknown> = {}) => ({
   source_message_id: null,
   created_at: '2026-09-08T10:00:00.000Z',
   updated_at: '2026-09-08T10:00:00.000Z',
-  guest: { first_name: 'Liam', last_name: 'Chen', phone_number: '+15555550142' },
+  guest: {
+    first_name: 'Liam',
+    last_name: 'Chen',
+    phone_number: '+15555550142',
+  },
   ...overrides,
 })
 
@@ -87,7 +92,10 @@ describe('loadVenueCommitments', () => {
   // findScheduledOpenCommitments and cannot reach listHeadsUpQueue — this page
   // is the only place it is visible, so the projection is asserted whole.
   it('projects an untimed open comp, the case invisible everywhere else', async () => {
-    mockQueries([{ data: [dbRow()], error: null }, { data: [], error: null }])
+    mockQueries([
+      { data: [dbRow()], error: null },
+      { data: [], error: null },
+    ])
 
     const { open, closed, closedHasMore } = await loadVenueCommitments(VENUE_ID)
 
@@ -115,7 +123,10 @@ describe('loadVenueCommitments', () => {
 
   it('carries escalated_at through rather than dropping it', async () => {
     mockQueries([
-      { data: [dbRow({ escalated_at: '2026-09-15T09:00:00.000Z' })], error: null },
+      {
+        data: [dbRow({ escalated_at: '2026-09-15T09:00:00.000Z' })],
+        error: null,
+      },
       { data: [], error: null },
     ])
 
@@ -124,7 +135,10 @@ describe('loadVenueCommitments', () => {
   })
 
   it('returns empty lists for a venue with nothing open', async () => {
-    mockQueries([{ data: [], error: null }, { data: [], error: null }])
+    mockQueries([
+      { data: [], error: null },
+      { data: [], error: null },
+    ])
 
     await expect(loadVenueCommitments(VENUE_ID)).resolves.toEqual({
       open: [],
@@ -139,7 +153,13 @@ describe('loadVenueCommitments', () => {
     mockQueries([
       {
         data: [
-          dbRow({ guest: { first_name: null, last_name: null, phone_number: '+15555550142' } }),
+          dbRow({
+            guest: {
+              first_name: null,
+              last_name: null,
+              phone_number: '+15555550142',
+            },
+          }),
         ],
         error: null,
       },
@@ -155,7 +175,14 @@ describe('loadVenueCommitments', () => {
     mockQueries([
       {
         data: [
-          dbRow({ guest: { first_name: null, last_name: null, phone_number: null, instagram_username: 'maya.oakland' } }),
+          dbRow({
+            guest: {
+              first_name: null,
+              last_name: null,
+              phone_number: null,
+              instagram_username: 'maya.oakland',
+            },
+          }),
         ],
         error: null,
       },
@@ -180,7 +207,10 @@ describe('loadVenueCommitments', () => {
 
     expect(from).toHaveBeenCalledWith('guest_commitments')
     const openCalls = calls.filter((c) => c.query === 0)
-    expect(openCalls.find((c) => c.method === 'eq')?.args).toEqual(['venue_id', VENUE_ID])
+    expect(openCalls.find((c) => c.method === 'eq')?.args).toEqual([
+      'venue_id',
+      VENUE_ID,
+    ])
     expect(openCalls.find((c) => c.method === 'in')?.args).toEqual([
       'status',
       [...NON_TERMINAL_STATUSES],
@@ -191,8 +221,11 @@ describe('loadVenueCommitments', () => {
     ])
     // No cap on the open set: an uncapped obligation is the whole point.
     expect(openCalls.some((c) => c.method === 'limit')).toBe(false)
-    const select = openCalls.find((c) => c.method === 'select')?.args[0] as string
-    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number, instagram_username)')
+    const select = openCalls.find((c) => c.method === 'select')
+      ?.args[0] as string
+    expect(select).toContain(
+      'guest:guests!inner(first_name, last_name, phone_number, instagram_username)',
+    )
     expect(select).toContain('escalated_at')
   })
 
@@ -208,7 +241,10 @@ describe('loadVenueCommitments', () => {
     // Load-bearing: without this the closed query could lose its venue scope
     // and leak another venue's history onto the page with every test green.
     // Mutation-verified — removing the .eq() fails here and nowhere else.
-    expect(closedCalls.find((c) => c.method === 'eq')?.args).toEqual(['venue_id', VENUE_ID])
+    expect(closedCalls.find((c) => c.method === 'eq')?.args).toEqual([
+      'venue_id',
+      VENUE_ID,
+    ])
     expect(closedCalls.find((c) => c.method === 'in')?.args).toEqual([
       'status',
       [...TERMINAL_STATUSES],
@@ -230,16 +266,23 @@ describe('loadVenueCommitments', () => {
     const atCap = Array.from({ length: CLOSED_COMMITMENTS_LIMIT }, (_, i) =>
       dbRow({ id: `row-${i}`, status: 'expired' }),
     )
-    mockQueries([{ data: [], error: null }, { data: atCap, error: null }])
+    mockQueries([
+      { data: [], error: null },
+      { data: atCap, error: null },
+    ])
     const exact = await loadVenueCommitments(VENUE_ID)
     expect(exact.closed).toHaveLength(CLOSED_COMMITMENTS_LIMIT)
     expect(exact.closedHasMore).toBe(false)
 
     vi.clearAllMocks()
-    const overCap = Array.from({ length: CLOSED_COMMITMENTS_LIMIT + 1 }, (_, i) =>
-      dbRow({ id: `over-${i}`, status: 'expired' }),
+    const overCap = Array.from(
+      { length: CLOSED_COMMITMENTS_LIMIT + 1 },
+      (_, i) => dbRow({ id: `over-${i}`, status: 'expired' }),
     )
-    mockQueries([{ data: [], error: null }, { data: overCap, error: null }])
+    mockQueries([
+      { data: [], error: null },
+      { data: overCap, error: null },
+    ])
     const over = await loadVenueCommitments(VENUE_ID)
     expect(over.closedHasMore).toBe(true)
     // The extra row is a probe, never rendered.
@@ -250,7 +293,10 @@ describe('loadVenueCommitments', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockQueries([
       {
-        data: [dbRow({ id: 'good-1' }), dbRow({ id: 'bad-1', type: 'a_type_from_the_future' })],
+        data: [
+          dbRow({ id: 'good-1' }),
+          dbRow({ id: 'bad-1', type: 'a_type_from_the_future' }),
+        ],
         error: null,
       },
       { data: [], error: null },
@@ -288,7 +334,8 @@ describe('loadVenueCommitments', () => {
       { data: [], error: null },
     ])
 
-    const { openDegraded, closedDegraded } = await loadVenueCommitments(VENUE_ID)
+    const { openDegraded, closedDegraded } =
+      await loadVenueCommitments(VENUE_ID)
     expect(openDegraded).toBe(true)
     expect(closedDegraded).toBe(false)
     warn.mockRestore()
@@ -301,7 +348,8 @@ describe('loadVenueCommitments', () => {
       { data: null, error: { message: 'connection reset' } },
     ])
 
-    const { open, openDegraded, closedDegraded } = await loadVenueCommitments(VENUE_ID)
+    const { open, openDegraded, closedDegraded } =
+      await loadVenueCommitments(VENUE_ID)
     expect(open).toHaveLength(1)
     expect(openDegraded).toBe(false)
     expect(closedDegraded).toBe(true)
@@ -309,7 +357,10 @@ describe('loadVenueCommitments', () => {
   })
 
   it('reports neither degraded on a clean read', async () => {
-    mockQueries([{ data: [dbRow()], error: null }, { data: [], error: null }])
+    mockQueries([
+      { data: [dbRow()], error: null },
+      { data: [], error: null },
+    ])
     const r = await loadVenueCommitments(VENUE_ID)
     expect(r.openDegraded).toBe(false)
     expect(r.closedDegraded).toBe(false)

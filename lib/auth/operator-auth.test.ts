@@ -27,9 +27,13 @@ describe('withOperatorAuth', () => {
       operatorId: 'op-1',
       venueScope: grantedVenues(['venue-a', 'venue-b']),
     })
-    const handler: OperatorRouteHandler<{ id: string }> = vi.fn(async (_req, ctx) => {
-      return new Response(JSON.stringify({ ok: true, ...ctx }), { status: 200 })
-    })
+    const handler: OperatorRouteHandler<{ id: string }> = vi.fn(
+      async (_req, ctx) => {
+        return new Response(JSON.stringify({ ok: true, ...ctx }), {
+          status: 200,
+        })
+      },
+    )
     const wrapped = withOperatorAuth<{ id: string }>(handler)
     const res = await wrapped(emptyRequest(), {
       params: Promise.resolve({ id: 'msg-1' }),
@@ -55,7 +59,9 @@ describe('withOperatorAuth', () => {
       params: Promise.resolve({}),
     })
     expect(res.status).toBe(401)
-    await expect(res.json()).resolves.toEqual({ error: 'missing Authorization header' })
+    await expect(res.json()).resolves.toEqual({
+      error: 'missing Authorization header',
+    })
     expect(handler).not.toHaveBeenCalled()
   })
 

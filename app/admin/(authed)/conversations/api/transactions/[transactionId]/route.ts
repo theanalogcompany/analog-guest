@@ -21,7 +21,8 @@ import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 // check with the same "a fleet-wide scope ⇒ analog admin sees every
 // venue" convention.
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +52,10 @@ export async function DELETE(
   // ---- params ----
   const { transactionId } = await params
   if (!UUID_RE.test(transactionId)) {
-    return NextResponse.json({ error: 'invalid transactionId' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'invalid transactionId' },
+      { status: 400 },
+    )
   }
 
   // ---- lookup + venue allowlist + source restriction ----
@@ -68,7 +72,10 @@ export async function DELETE(
     )
   }
   if (!transaction) {
-    return NextResponse.json({ error: 'transaction not found' }, { status: 404 })
+    return NextResponse.json(
+      { error: 'transaction not found' },
+      { status: 404 },
+    )
   }
   // A fleet-wide scope means analog admin sees every venue (matches the
   // page-level allowlist treatment in conversations/page.tsx).
@@ -77,7 +84,10 @@ export async function DELETE(
   }
   if (transaction.source !== 'guest_reported') {
     return NextResponse.json(
-      { error: 'only guest-reported transactions can be deleted from this surface' },
+      {
+        error:
+          'only guest-reported transactions can be deleted from this surface',
+      },
       { status: 400 },
     )
   }

@@ -93,7 +93,10 @@ describe('PATCH /admin/voices/api/corpus/[entryId]', () => {
   it('passes through 404 from auth helper when entry not found', async () => {
     vi.mocked(requireCorpusEntryAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'corpus entry not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'corpus entry not found' },
+        { status: 404 },
+      ),
     })
     const res = await PATCH(
       buildRequest('PATCH', { content: 'x' }),
@@ -105,7 +108,10 @@ describe('PATCH /admin/voices/api/corpus/[entryId]', () => {
   it('passes through 403 from auth helper when entry venue is out of scope', async () => {
     vi.mocked(requireCorpusEntryAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await PATCH(
       buildRequest('PATCH', { content: 'x' }),
@@ -121,10 +127,7 @@ describe('DELETE /admin/voices/api/corpus/[entryId]', () => {
       ok: true,
       corpusId: ENTRY_ID,
     })
-    const res = await DELETE(
-      buildRequest('DELETE', {}),
-      buildParams(ENTRY_ID),
-    )
+    const res = await DELETE(buildRequest('DELETE', {}), buildParams(ENTRY_ID))
     expect(res.status).toBe(200)
   })
 
@@ -134,10 +137,7 @@ describe('DELETE /admin/voices/api/corpus/[entryId]', () => {
       error: 'not found',
       errorCode: 'not_found',
     })
-    const res = await DELETE(
-      buildRequest('DELETE', {}),
-      buildParams(ENTRY_ID),
-    )
+    const res = await DELETE(buildRequest('DELETE', {}), buildParams(ENTRY_ID))
     expect(res.status).toBe(404)
   })
 })

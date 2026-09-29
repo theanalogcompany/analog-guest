@@ -7,7 +7,8 @@ import type { GradedScenario, ReviewItem, TopicPassRate } from './scorecard'
  * section-title convention, not one strict table).
  */
 
-const fmtPct = (v: number | null): string => (v === null ? 'n/a' : `${(v * 100).toFixed(0)}%`)
+const fmtPct = (v: number | null): string =>
+  v === null ? 'n/a' : `${(v * 100).toFixed(0)}%`
 
 export function buildReportRows(input: {
   runDateIso: string
@@ -30,15 +31,33 @@ export function buildReportRows(input: {
   rows.push(['scenarios_graded', String(input.gradedCount)])
   rows.push(['scenarios_ungraded_cost_cap', String(input.ungraded)])
   rows.push(['run_time_seconds', input.runTimeSeconds.toFixed(1)])
-  rows.push(['estimated_cost_usd_classify_generate', input.estimatedCostUsd.toFixed(4)])
+  rows.push([
+    'estimated_cost_usd_classify_generate',
+    input.estimatedCostUsd.toFixed(4),
+  ])
   rows.push(['measured_cost_usd_grading', input.measuredCostUsd.toFixed(4)])
-  rows.push(['total_cost_usd', (input.estimatedCostUsd + input.measuredCostUsd).toFixed(4)])
+  rows.push([
+    'total_cost_usd',
+    (input.estimatedCostUsd + input.measuredCostUsd).toFixed(4),
+  ])
   rows.push([])
 
   rows.push(['Per-topic pass rates'])
-  rows.push(['topic', 'total', 'knowledge_pass_rate', 'voice_pass_rate', 'routing_pass_rate'])
+  rows.push([
+    'topic',
+    'total',
+    'knowledge_pass_rate',
+    'voice_pass_rate',
+    'routing_pass_rate',
+  ])
   for (const t of input.topicPassRates) {
-    rows.push([t.topic, String(t.total), fmtPct(t.knowledgePassRate), fmtPct(t.voicePassRate), fmtPct(t.routingPassRate)])
+    rows.push([
+      t.topic,
+      String(t.total),
+      fmtPct(t.knowledgePassRate),
+      fmtPct(t.voicePassRate),
+      fmtPct(t.routingPassRate),
+    ])
   }
   rows.push([])
 
@@ -52,12 +71,24 @@ export function buildReportRows(input: {
   rows.push(['Voice read sample'])
   rows.push(['sample_id', 'topic', 'guest_state', 'inbound_message', 'reply'])
   for (const g of input.voiceReadSample) {
-    rows.push([g.scenario.sample_id, g.scenario.topic, g.scenario.guest_state, g.scenario.inbound_message, g.result.replyBody ?? ''])
+    rows.push([
+      g.scenario.sample_id,
+      g.scenario.topic,
+      g.scenario.guest_state,
+      g.scenario.inbound_message,
+      g.result.replyBody ?? '',
+    ])
   }
   rows.push([])
 
   rows.push(['Grader spot-check sample (owner: confirm these grades by hand)'])
-  rows.push(['sample_id', 'knowledge_verdict', 'voice_verdict', 'reply', 'grader_reasoning'])
+  rows.push([
+    'sample_id',
+    'knowledge_verdict',
+    'voice_verdict',
+    'reply',
+    'grader_reasoning',
+  ])
   for (const g of input.graderSpotCheckSample) {
     rows.push([
       g.scenario.sample_id,

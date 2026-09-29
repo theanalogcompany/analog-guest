@@ -8,7 +8,11 @@ import { createAdminClient } from '@/lib/db/admin'
 import type { ThreadMessage } from '@/lib/schemas'
 
 import { fetchThreadMessagesForGuest } from './thread'
-import { bearerAllowsVenue, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  bearerAllowsVenue,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 export interface LoadGuestThreadByGuestIdInput {
   guestId: string
@@ -16,9 +20,7 @@ export interface LoadGuestThreadByGuestIdInput {
 }
 
 export type LoadGuestThreadByGuestIdErrorCode =
-  | 'guest_not_found'
-  | 'out_of_allowlist'
-  | 'db_error'
+  'guest_not_found' | 'out_of_allowlist' | 'db_error'
 
 export type LoadGuestThreadByGuestIdResult =
   | { ok: true; messages: ThreadMessage[] }
@@ -49,7 +51,11 @@ export async function loadGuestThreadByGuestId(
     return { ok: false, errorCode: 'out_of_allowlist' }
   }
 
-  const result = await fetchThreadMessagesForGuest(supabase, row.venue_id, input.guestId)
+  const result = await fetchThreadMessagesForGuest(
+    supabase,
+    row.venue_id,
+    input.guestId,
+  )
   if (!result.ok) {
     return { ok: false, errorCode: 'db_error', error: result.error }
   }

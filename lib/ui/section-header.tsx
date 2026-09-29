@@ -12,7 +12,11 @@ interface SectionHeaderProps {
   eyebrow?: ReactNode
 }
 
-export function SectionHeader({ title, subtitle, eyebrow }: SectionHeaderProps) {
+export function SectionHeader({
+  title,
+  subtitle,
+  eyebrow,
+}: SectionHeaderProps) {
   return (
     <header className="flex flex-col gap-2 pb-4 border-b border-stone-light/60">
       {eyebrow ? <div>{eyebrow}</div> : null}

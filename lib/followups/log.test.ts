@@ -25,7 +25,11 @@ interface InsertCall {
 }
 
 interface MockState {
-  insertedReturn: Array<{ id: string; reason: string; dedup_key: string }> | null
+  insertedReturn: Array<{
+    id: string
+    reason: string
+    dedup_key: string
+  }> | null
   insertError: { code?: string; message: string } | null
   insertCalls: InsertCall[]
   updatedReturn: Array<{ id: string }> | null
@@ -36,7 +40,12 @@ interface MockState {
   deleteCalls: string[][]
   weeklySelectReturn: Array<{ guest_id: string; created_at: string }> | null
   weeklySelectError: { message: string } | null
-  historySelectReturn: Array<{ guest_id: string; reason: string; dedup_key: string; created_at: string }> | null
+  historySelectReturn: Array<{
+    guest_id: string
+    reason: string
+    dedup_key: string
+    created_at: string
+  }> | null
   historySelectError: { message: string } | null
   selectCallTrace: Array<{ table: string; phase: string }>
 }
@@ -98,8 +107,7 @@ function makeSupabaseMock(state: MockState) {
       // The loadFollowupSnapshotsForVenue path uses .select().eq().in() and
       // .select().eq().in().gte() then .order(). Two distinct call chains;
       // we identify them by whether `.gte` was called.
-      select: (_cols: string) =>
-        new SelectChain(state, table, _cols),
+      select: (_cols: string) => new SelectChain(state, table, _cols),
     }),
   }
 }
@@ -126,9 +134,15 @@ class SelectChain {
     this.hasOrder = true
     this.state.selectCallTrace.push({ table: this.table, phase: 'history' })
     if (this.state.historySelectError) {
-      return Promise.resolve({ data: null, error: this.state.historySelectError })
+      return Promise.resolve({
+        data: null,
+        error: this.state.historySelectError,
+      })
     }
-    return Promise.resolve({ data: this.state.historySelectReturn, error: null })
+    return Promise.resolve({
+      data: this.state.historySelectReturn,
+      error: null,
+    })
   }
   then(
     onFulfilled?: (value: unknown) => unknown,
@@ -143,7 +157,10 @@ class SelectChain {
         : { data: this.state.weeklySelectReturn, error: null }
       return Promise.resolve(value).then(onFulfilled, onRejected)
     }
-    return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected)
+    return Promise.resolve({ data: null, error: null }).then(
+      onFulfilled,
+      onRejected,
+    )
   }
 }
 
@@ -155,7 +172,9 @@ describe('claimFollowupLogRows', () => {
   it('returns ok+empty on empty rows (no-op, no DB call)', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await claimFollowupLogRows([])
     expect(result).toEqual({ ok: true, claimed: [] })
@@ -164,10 +183,18 @@ describe('claimFollowupLogRows', () => {
 
   it('returns claimed ids on a clean insert', async () => {
     const state = newState({
-      insertedReturn: [{ id: 'log-1', reason: 'post_visit_day_7', dedup_key: 'day_7:2026-05-25' }],
+      insertedReturn: [
+        {
+          id: 'log-1',
+          reason: 'post_visit_day_7',
+          dedup_key: 'day_7:2026-05-25',
+        },
+      ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await claimFollowupLogRows([
       {
@@ -179,7 +206,13 @@ describe('claimFollowupLogRows', () => {
     ])
     expect(result).toEqual({
       ok: true,
-      claimed: [{ id: 'log-1', reason: 'post_visit_day_7', dedupKey: 'day_7:2026-05-25' }],
+      claimed: [
+        {
+          id: 'log-1',
+          reason: 'post_visit_day_7',
+          dedupKey: 'day_7:2026-05-25',
+        },
+      ],
     })
     expect(state.insertCalls).toHaveLength(1)
     expect(state.insertCalls[0].rows).toEqual([
@@ -197,7 +230,9 @@ describe('claimFollowupLogRows', () => {
       insertError: { code: '23505', message: 'duplicate key value' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await claimFollowupLogRows([
       {
@@ -215,7 +250,9 @@ describe('claimFollowupLogRows', () => {
       insertError: { code: '08006', message: 'connection failure' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await claimFollowupLogRows([
       {
@@ -237,7 +274,9 @@ describe('finalizeFollowupLogClaim', () => {
   it('no-op on empty ids', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await finalizeFollowupLogClaim([], MSG_ID)
     expect(result).toEqual({ ok: true, data: { updatedCount: 0 } })
@@ -245,9 +284,13 @@ describe('finalizeFollowupLogClaim', () => {
   })
 
   it('updates message_id and reports count', async () => {
-    const state = newState({ updatedReturn: [{ id: 'log-1' }, { id: 'log-2' }] })
+    const state = newState({
+      updatedReturn: [{ id: 'log-1' }, { id: 'log-2' }],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await finalizeFollowupLogClaim(['log-1', 'log-2'], MSG_ID)
     expect(result).toEqual({ ok: true, data: { updatedCount: 2 } })
@@ -258,7 +301,9 @@ describe('finalizeFollowupLogClaim', () => {
   it('returns error on DB failure', async () => {
     const state = newState({ updateError: { message: 'boom' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await finalizeFollowupLogClaim(['log-1'], MSG_ID)
     expect(result.ok).toBe(false)
@@ -269,7 +314,9 @@ describe('releaseFollowupLogClaim', () => {
   it('no-op on empty ids', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await releaseFollowupLogClaim([])
     expect(result).toEqual({ ok: true, data: { deletedCount: 0 } })
@@ -279,7 +326,9 @@ describe('releaseFollowupLogClaim', () => {
   it('deletes claim rows and reports count', async () => {
     const state = newState({ deletedReturn: [{ id: 'log-1' }] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await releaseFollowupLogClaim(['log-1'])
     expect(result).toEqual({ ok: true, data: { deletedCount: 1 } })
@@ -293,7 +342,9 @@ describe('loadFollowupSnapshotsForVenue', () => {
   it('returns empty map on empty guestIds (no DB calls)', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const result = await loadFollowupSnapshotsForVenue(VENUE_ID, [], NOW)
     expect(result.ok).toBe(true)
@@ -330,19 +381,31 @@ describe('loadFollowupSnapshotsForVenue', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    const result = await loadFollowupSnapshotsForVenue(VENUE_ID, [GUEST_ID_1, GUEST_ID_2], NOW)
+    const result = await loadFollowupSnapshotsForVenue(
+      VENUE_ID,
+      [GUEST_ID_1, GUEST_ID_2],
+      NOW,
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const g1 = result.data.get(GUEST_ID_1)
     expect(g1?.weeklyCount).toBe(2)
-    expect(g1?.lastByReason.post_visit_day_7).toEqual(new Date('2026-06-03T00:00:00Z'))
-    expect(g1?.lastByReason.perk_unlock).toEqual(new Date('2026-06-02T00:00:00Z'))
+    expect(g1?.lastByReason.post_visit_day_7).toEqual(
+      new Date('2026-06-03T00:00:00Z'),
+    )
+    expect(g1?.lastByReason.perk_unlock).toEqual(
+      new Date('2026-06-02T00:00:00Z'),
+    )
     expect(Array.from(g1?.announcedMechanicIds ?? [])).toEqual(['mech-abc'])
     const g2 = result.data.get(GUEST_ID_2)
     expect(g2?.weeklyCount).toBe(1)
-    expect(g2?.lastByReason.cold_lapsed).toEqual(new Date('2026-06-01T00:00:00Z'))
+    expect(g2?.lastByReason.cold_lapsed).toEqual(
+      new Date('2026-06-01T00:00:00Z'),
+    )
     expect(g2?.announcedMechanicIds.size).toBe(0)
   })
 
@@ -358,9 +421,15 @@ describe('loadFollowupSnapshotsForVenue', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    const result = await loadFollowupSnapshotsForVenue(VENUE_ID, [GUEST_ID_1], NOW)
+    const result = await loadFollowupSnapshotsForVenue(
+      VENUE_ID,
+      [GUEST_ID_1],
+      NOW,
+    )
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.data.get(GUEST_ID_1)?.announcedMechanicIds.size).toBe(0)
@@ -370,18 +439,30 @@ describe('loadFollowupSnapshotsForVenue', () => {
   it('returns error on weekly query failure', async () => {
     const state = newState({ weeklySelectError: { message: 'weekly fail' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    const result = await loadFollowupSnapshotsForVenue(VENUE_ID, [GUEST_ID_1], NOW)
+    const result = await loadFollowupSnapshotsForVenue(
+      VENUE_ID,
+      [GUEST_ID_1],
+      NOW,
+    )
     expect(result.ok).toBe(false)
   })
 
   it('returns error on history query failure', async () => {
     const state = newState({ historySelectError: { message: 'history fail' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    const result = await loadFollowupSnapshotsForVenue(VENUE_ID, [GUEST_ID_1], NOW)
+    const result = await loadFollowupSnapshotsForVenue(
+      VENUE_ID,
+      [GUEST_ID_1],
+      NOW,
+    )
     expect(result.ok).toBe(false)
   })
 })

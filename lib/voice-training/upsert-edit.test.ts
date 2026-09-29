@@ -97,15 +97,26 @@ describe('upsertCorpusEdit — skip-existing mode', () => {
   it('returns skipped_existing when row exists; no insert, no embed', async () => {
     const state = newState({ existingRow: { id: EXISTING_ID } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'skip-existing',
     )
 
-    expect(result).toEqual({ ok: true, corpusId: EXISTING_ID, outcome: 'skipped_existing' })
+    expect(result).toEqual({
+      ok: true,
+      corpusId: EXISTING_ID,
+      outcome: 'skipped_existing',
+    })
     expect(state.insertCalls).toBe(0)
     expect(state.deleteCalls).toEqual([])
     expect(ingestCorpusEntry).not.toHaveBeenCalled()
@@ -114,12 +125,22 @@ describe('upsertCorpusEdit — skip-existing mode', () => {
   it('inserts and embeds when no existing row', async () => {
     const state = newState({ existingRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    vi.mocked(ingestCorpusEntry).mockResolvedValue({ ok: true, data: { embeddedChunkCount: 1 } })
+    vi.mocked(ingestCorpusEntry).mockResolvedValue({
+      ok: true,
+      data: { embeddedChunkCount: 1 },
+    })
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'skip-existing',
     )
 
@@ -132,7 +153,9 @@ describe('upsertCorpusEdit — skip-existing mode', () => {
   it('rolls back the new row on embed failure (skip-existing path)', async () => {
     const state = newState({ existingRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: false,
@@ -141,7 +164,12 @@ describe('upsertCorpusEdit — skip-existing mode', () => {
     })
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'skip-existing',
     )
 
@@ -158,12 +186,22 @@ describe('upsertCorpusEdit — replace mode', () => {
   it('deletes existing row, inserts new, embeds', async () => {
     const state = newState({ existingRow: { id: EXISTING_ID } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    vi.mocked(ingestCorpusEntry).mockResolvedValue({ ok: true, data: { embeddedChunkCount: 1 } })
+    vi.mocked(ingestCorpusEntry).mockResolvedValue({
+      ok: true,
+      data: { embeddedChunkCount: 1 },
+    })
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'new', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'new',
+        tags: ['cc_review'],
+      },
       'replace',
     )
 
@@ -176,12 +214,22 @@ describe('upsertCorpusEdit — replace mode', () => {
   it('inserts when no existing row (replace falls through to insert path)', async () => {
     const state = newState({ existingRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
-    vi.mocked(ingestCorpusEntry).mockResolvedValue({ ok: true, data: { embeddedChunkCount: 1 } })
+    vi.mocked(ingestCorpusEntry).mockResolvedValue({
+      ok: true,
+      data: { embeddedChunkCount: 1 },
+    })
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'replace',
     )
 
@@ -192,7 +240,9 @@ describe('upsertCorpusEdit — replace mode', () => {
   it('rolls back the new row on embed failure (replace path)', async () => {
     const state = newState({ existingRow: { id: EXISTING_ID } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: false,
@@ -201,7 +251,12 @@ describe('upsertCorpusEdit — replace mode', () => {
     })
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'new', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'new',
+        tags: ['cc_review'],
+      },
       'replace',
     )
 
@@ -219,11 +274,18 @@ describe('upsertCorpusEdit — error paths', () => {
   it('returns db_error on lookup failure', async () => {
     const state = newState({ lookupError: { message: 'connection lost' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'replace',
     )
 
@@ -242,11 +304,18 @@ describe('upsertCorpusEdit — error paths', () => {
       insertError: { message: 'unique violation' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await upsertCorpusEdit(
-      { venueId: VENUE_ID, sourceRef: SOURCE_REF, editedMessage: 'edit', tags: ['cc_review'] },
+      {
+        venueId: VENUE_ID,
+        sourceRef: SOURCE_REF,
+        editedMessage: 'edit',
+        tags: ['cc_review'],
+      },
       'skip-existing',
     )
 

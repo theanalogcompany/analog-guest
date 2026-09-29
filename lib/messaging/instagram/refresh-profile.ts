@@ -106,10 +106,16 @@ const DEFAULT_DEPS: RefreshDeps = {
   resolveToken: resolveInstagramAccessToken,
 }
 
-export type ProfileRefreshStoreStage = 'guest_lookup' | 'venue_lookup' | 'claim' | 'write'
+export type ProfileRefreshStoreStage =
+  'guest_lookup' | 'venue_lookup' | 'claim' | 'write'
 
 export type ProfileRefreshOutcome =
-  | { status: 'refreshed'; hadProfile: boolean; usernameChanged: boolean; hasName: boolean }
+  | {
+      status: 'refreshed'
+      hadProfile: boolean
+      usernameChanged: boolean
+      hasName: boolean
+    }
   | { status: 'not_due' }
   /** Another delivery's refresh claimed this guest between our read and our claim. */
   | { status: 'claimed_elsewhere' }
@@ -123,12 +129,25 @@ export type ProfileRefreshOutcome =
    * one needs INSTAGRAM_TOKEN_ENC_KEY looked at.
    */
   | { status: 'token_unreadable'; error: string }
-  | { status: 'token_rejected'; step: 'token_account' | 'profile'; failure: GraphFailure }
+  | {
+      status: 'token_rejected'
+      step: 'token_account' | 'profile'
+      failure: GraphFailure
+    }
   /** The token belongs to a different Instagram account than this venue's. */
   | { status: 'wrong_account'; venueAccountMissing: boolean }
   /** Graph failed or refused for this guest: privacy, a block, a timeout, a bad response. */
-  | { status: 'fetch_failed'; step: 'token_account' | 'profile'; failure: GraphFailure }
-  | { status: 'store_failed'; stage: ProfileRefreshStoreStage; error: string; code: string | null }
+  | {
+      status: 'fetch_failed'
+      step: 'token_account' | 'profile'
+      failure: GraphFailure
+    }
+  | {
+      status: 'store_failed'
+      stage: ProfileRefreshStoreStage
+      error: string
+      code: string | null
+    }
   | { status: 'unexpected'; error: string }
 
 type ProfileTimes = { fetchedAt: string | null; attemptedAt: string | null }
@@ -146,7 +165,8 @@ function timeOf(value: string | null): number | null {
 export function isProfileRefreshDue(times: ProfileTimes, now: Date): boolean {
   const at = now.getTime()
   const attempted = timeOf(times.attemptedAt)
-  if (attempted !== null && at - attempted < INSTAGRAM_PROFILE_RETRY_AFTER_MS) return false
+  if (attempted !== null && at - attempted < INSTAGRAM_PROFILE_RETRY_AFTER_MS)
+    return false
   const fetched = timeOf(times.fetchedAt)
   return fetched === null || at - fetched >= INSTAGRAM_PROFILE_STALE_AFTER_MS
 }
@@ -157,13 +177,19 @@ export function isProfileRefreshDue(times: ProfileTimes, now: Date): boolean {
  * profile access, a duplicate was handled the first time, an echo is the
  * venue's, and a read receipt saves nothing.
  */
-export function profileRefreshTargetFor(outcome: InstagramEventOutcome): RefreshTarget | null {
+export function profileRefreshTargetFor(
+  outcome: InstagramEventOutcome,
+): RefreshTarget | null {
   if (outcome.status !== 'persisted') return null
   // TAC-536 added 'referral'. A scan can CREATE the guest, so it is the first
   // and sometimes only chance to learn their handle, and the Command Center
   // shows @handle where it would otherwise show nothing at all for an
   // Instagram guest. An echo and a read stay out: neither is the guest acting.
-  if (outcome.kind !== 'message' && outcome.kind !== 'postback' && outcome.kind !== 'referral') {
+  if (
+    outcome.kind !== 'message' &&
+    outcome.kind !== 'postback' &&
+    outcome.kind !== 'referral'
+  ) {
     return null
   }
   return { guestId: outcome.guestId, venueId: outcome.venueId }
@@ -175,10 +201,18 @@ function storeFailed(
   stage: ProfileRefreshStoreStage,
   error: { message: string; code?: string } | null,
 ): ProfileRefreshOutcome {
-  return { status: 'store_failed', stage, error: error?.message ?? 'no row returned', code: error?.code ?? null }
+  return {
+    status: 'store_failed',
+    stage,
+    error: error?.message ?? 'no row returned',
+    code: error?.code ?? null,
+  }
 }
 
-function graphFailed(step: 'token_account' | 'profile', failure: GraphFailure): ProfileRefreshOutcome {
+function graphFailed(
+  step: 'token_account' | 'profile',
+  failure: GraphFailure,
+): ProfileRefreshOutcome {
   return isTokenRejected(failure)
     ? { status: 'token_rejected', step, failure }
     : { status: 'fetch_failed', step, failure }
@@ -194,31 +228,47 @@ async function refresh(
   // 1
   const guest = await supabase
     .from('guests')
-    .select('instagram_scoped_id, instagram_username, instagram_profile_fetched_at, instagram_profile_attempted_at')
+    .select(
+      'instagram_scoped_id, instagram_username, instagram_profile_fetched_at, instagram_profile_attempted_at',
+    )
     .eq('id', guestId)
     .eq('venue_id', venueId)
     .maybeSingle()
-  if (guest.error || !guest.data) return storeFailed('guest_lookup', guest.error)
+  if (guest.error || !guest.data)
+    return storeFailed('guest_lookup', guest.error)
   const igsid = guest.data.instagram_scoped_id
   if (igsid === null) return { status: 'not_instagram' }
   const attemptedAt = guest.data.instagram_profile_attempted_at
-  const times = { fetchedAt: guest.data.instagram_profile_fetched_at, attemptedAt }
+  const times = {
+    fetchedAt: guest.data.instagram_profile_fetched_at,
+    attemptedAt,
+  }
   if (!isProfileRefreshDue(times, deps.now())) return { status: 'not_due' }
 
   // 2
   const tokenResult = await deps.resolveToken(supabase, venueId)
-  if (!tokenResult.ok) return { status: 'token_unreadable', error: tokenResult.error }
+  if (!tokenResult.ok)
+    return { status: 'token_unreadable', error: tokenResult.error }
   if (tokenResult.resolved === null) return { status: 'token_missing' }
   const token = tokenResult.resolved.token
 
   // 3
-  const venue = await supabase.from('venues').select('instagram_account_id').eq('id', venueId).maybeSingle()
-  if (venue.error || !venue.data) return storeFailed('venue_lookup', venue.error)
+  const venue = await supabase
+    .from('venues')
+    .select('instagram_account_id')
+    .eq('id', venueId)
+    .maybeSingle()
+  if (venue.error || !venue.data)
+    return storeFailed('venue_lookup', venue.error)
   const venueAccountId = venue.data.instagram_account_id
   const tokenAccount = await fetchTokenAccountId(token, deps.fetch)
-  if (!tokenAccount.ok) return graphFailed('token_account', tokenAccount.failure)
+  if (!tokenAccount.ok)
+    return graphFailed('token_account', tokenAccount.failure)
   if (venueAccountId === null || tokenAccount.value !== venueAccountId) {
-    return { status: 'wrong_account', venueAccountMissing: venueAccountId === null }
+    return {
+      status: 'wrong_account',
+      venueAccountMissing: venueAccountId === null,
+    }
   }
 
   // 4
@@ -227,12 +277,14 @@ async function refresh(
     .update({ instagram_profile_attempted_at: deps.now().toISOString() })
     .eq('id', guestId)
     .eq('venue_id', venueId)
-  const claimed = await (attemptedAt === null
-    ? claim.is('instagram_profile_attempted_at', null)
-    : claim.eq('instagram_profile_attempted_at', attemptedAt)
+  const claimed = await (
+    attemptedAt === null
+      ? claim.is('instagram_profile_attempted_at', null)
+      : claim.eq('instagram_profile_attempted_at', attemptedAt)
   ).select('id')
   if (claimed.error) return storeFailed('claim', claimed.error)
-  if (!claimed.data || claimed.data.length === 0) return { status: 'claimed_elsewhere' }
+  if (!claimed.data || claimed.data.length === 0)
+    return { status: 'claimed_elsewhere' }
 
   // 5
   const profile = await fetchInstagramProfile(igsid, token, deps.fetch)
@@ -264,7 +316,11 @@ function graphFields(failure: GraphFailure): Record<string, unknown> {
     case 'timeout':
       return { reason: 'timeout' }
     case 'network':
-      return { reason: 'network', errorName: failure.errorName, causeCode: failure.causeCode }
+      return {
+        reason: 'network',
+        errorName: failure.errorName,
+        causeCode: failure.causeCode,
+      }
     case 'malformed_response':
       return { reason: 'malformed_response', httpStatus: failure.httpStatus }
     case 'graph_error':
@@ -286,7 +342,10 @@ function graphFields(failure: GraphFailure): Record<string, unknown> {
  * so a missing token, an expired one and a token for the wrong account are
  * never mistaken for one another or for a guest's privacy settings.
  */
-export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefreshOutcome): void {
+export function logProfileRefresh(
+  target: RefreshTarget,
+  outcome: ProfileRefreshOutcome,
+): void {
   const ids = { venueId: target.venueId, guestId: target.guestId }
   switch (outcome.status) {
     case 'not_due':
@@ -302,27 +361,36 @@ export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefresh
       })
       return
     case 'not_instagram':
-      console.warn('instagram profile: guest has no scoped ID; nothing to fetch', {
-        event: 'instagram_profile_not_instagram',
-        ...ids,
-      })
+      console.warn(
+        'instagram profile: guest has no scoped ID; nothing to fetch',
+        {
+          event: 'instagram_profile_not_instagram',
+          ...ids,
+        },
+      )
       return
     case 'token_missing':
-      console.error('instagram profile: no venue credential and INSTAGRAM_ACCESS_TOKEN not set; no profile fetched', {
-        event: 'instagram_profile_token_missing',
-        ...ids,
-      })
+      console.error(
+        'instagram profile: no venue credential and INSTAGRAM_ACCESS_TOKEN not set; no profile fetched',
+        {
+          event: 'instagram_profile_token_missing',
+          ...ids,
+        },
+      )
       return
     // TAC-516. Its own event, not folded into token_missing: that one waits
     // for a venue to connect, this one means a credential EXISTS and could
     // not be read, which needs INSTAGRAM_TOKEN_ENC_KEY looked at. The error
     // names the failure kind and never the ciphertext or the key.
     case 'token_unreadable':
-      console.error('instagram profile: stored venue credential could not be read; no profile fetched', {
-        event: 'instagram_profile_token_unreadable',
-        ...ids,
-        error: outcome.error,
-      })
+      console.error(
+        'instagram profile: stored venue credential could not be read; no profile fetched',
+        {
+          event: 'instagram_profile_token_unreadable',
+          ...ids,
+          error: outcome.error,
+        },
+      )
       return
     case 'token_rejected':
       // Meta's code 190: the token is expired, revoked or invalid. It expires
@@ -338,11 +406,14 @@ export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefresh
       // The token is for another Instagram account than this venue's, so no
       // guest of this venue can be looked up with it. With one token for the
       // whole app, this is what the second venue to connect will log.
-      console.error("instagram profile: access token is not this venue's account; no profile fetched", {
-        event: 'instagram_profile_wrong_account',
-        ...ids,
-        venueAccountMissing: outcome.venueAccountMissing,
-      })
+      console.error(
+        "instagram profile: access token is not this venue's account; no profile fetched",
+        {
+          event: 'instagram_profile_wrong_account',
+          ...ids,
+          venueAccountMissing: outcome.venueAccountMissing,
+        },
+      )
       return
     case 'fetch_failed':
       console.warn('instagram profile: fetch failed; guest kept as is', {
@@ -353,13 +424,16 @@ export function logProfileRefresh(target: RefreshTarget, outcome: ProfileRefresh
       })
       return
     case 'store_failed':
-      console.warn('instagram profile: database step failed; guest kept as is', {
-        event: 'instagram_profile_store_failed',
-        ...ids,
-        stage: outcome.stage,
-        error: outcome.error,
-        code: outcome.code,
-      })
+      console.warn(
+        'instagram profile: database step failed; guest kept as is',
+        {
+          event: 'instagram_profile_store_failed',
+          ...ids,
+          stage: outcome.stage,
+          error: outcome.error,
+          code: outcome.code,
+        },
+      )
       return
     case 'unexpected':
       console.error('instagram profile: unexpected error; guest kept as is', {
@@ -392,7 +466,10 @@ export async function refreshInstagramProfile(
   } catch (e) {
     // A throw here is a code bug: Graph failures and database errors come back
     // as values and never reach this catch. Same treatment as the handler's.
-    outcome = { status: 'unexpected', error: e instanceof Error ? e.message : String(e) }
+    outcome = {
+      status: 'unexpected',
+      error: e instanceof Error ? e.message : String(e),
+    }
   }
   logProfileRefresh(target, outcome)
   return outcome

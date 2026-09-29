@@ -57,5 +57,4 @@ export type EmbedTextResult = {
 }
 
 export type RAGResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }

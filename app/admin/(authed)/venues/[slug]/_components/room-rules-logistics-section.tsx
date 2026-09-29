@@ -1,4 +1,7 @@
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
 import { SectionShell } from '@/app/admin/_components/section-shell'
 
 export function RoomRulesLogisticsSection({
@@ -9,7 +12,10 @@ export function RoomRulesLogisticsSection({
   entries: readonly KnowledgeEntryListRow[]
 }) {
   return (
-    <SectionShell title="The room, rules & logistics" subtitle="space, policies, logistics">
+    <SectionShell
+      title="The room, rules & logistics"
+      subtitle="space, policies, logistics"
+    >
       <KnowledgeEntryList
         venueId={venueId}
         entries={entries}

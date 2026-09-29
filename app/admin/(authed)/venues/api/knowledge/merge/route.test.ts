@@ -42,7 +42,10 @@ describe('POST /admin/venues/api/knowledge/merge', () => {
   })
 
   it('200 + newId on happy path, venueId + entryIds resolved from auth not trusted from the client', async () => {
-    vi.mocked(mergeKnowledgeEntries).mockResolvedValue({ ok: true, newId: NEW_ID })
+    vi.mocked(mergeKnowledgeEntries).mockResolvedValue({
+      ok: true,
+      newId: NEW_ID,
+    })
     const res = await POST(
       buildRequest({
         originalIds: [SOURCE_1, SOURCE_2],
@@ -61,7 +64,10 @@ describe('POST /admin/venues/api/knowledge/merge', () => {
       primaryTags: ['menu'],
       secondaryTags: [],
     })
-    expect(requireKnowledgeEntriesAdmin).toHaveBeenCalledWith([SOURCE_1, SOURCE_2])
+    expect(requireKnowledgeEntriesAdmin).toHaveBeenCalledWith([
+      SOURCE_1,
+      SOURCE_2,
+    ])
   })
 
   it('400 on fewer than 2 originalIds — auth helper never called', async () => {
@@ -111,7 +117,10 @@ describe('POST /admin/venues/api/knowledge/merge', () => {
   it('passes through 400 from auth helper when entries span more than one venue', async () => {
     vi.mocked(requireKnowledgeEntriesAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'entries span more than one venue' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'entries span more than one venue' },
+        { status: 400 },
+      ),
     })
     const res = await POST(
       buildRequest({

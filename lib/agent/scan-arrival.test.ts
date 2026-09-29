@@ -70,7 +70,11 @@ describe('isScanTooStale', () => {
 describe('scanCarryForwardAt', () => {
   it('returns nothing when the guest has never scanned', () => {
     expect(
-      scanCarryForwardAt({ lastScanAt: null, lastGreetingAt: null, inboundAt: at(MINUTE) }),
+      scanCarryForwardAt({
+        lastScanAt: null,
+        lastGreetingAt: null,
+        inboundAt: at(MINUTE),
+      }),
     ).toBeNull()
   })
 
@@ -84,7 +88,9 @@ describe('scanCarryForwardAt', () => {
       lastGreetingAt: null,
       inboundAt: at(offset),
     })
-    expect(result === null ? null : result.getTime()).toBe(carried ? SCAN.getTime() : null)
+    expect(result === null ? null : result.getTime()).toBe(
+      carried ? SCAN.getTime() : null,
+    )
   })
 
   // THE ACCEPTANCE CRITERION for the second anchor, and the scenario the
@@ -105,14 +111,19 @@ describe('scanCarryForwardAt', () => {
     ['a reply 29 minutes after the greeting', 5 * MINUTE, 34 * MINUTE, true],
     ['a reply exactly 30 minutes after', 5 * MINUTE, 35 * MINUTE, true],
     ['a reply 31 minutes after', 5 * MINUTE, 36 * MINUTE, false],
-  ])('the greeting anchor: %s', (_label, greetOffset, inboundOffset, carried) => {
-    const result = scanCarryForwardAt({
-      lastScanAt: SCAN,
-      lastGreetingAt: at(greetOffset),
-      inboundAt: at(inboundOffset),
-    })
-    expect(result === null ? null : result.getTime()).toBe(carried ? SCAN.getTime() : null)
-  })
+  ])(
+    'the greeting anchor: %s',
+    (_label, greetOffset, inboundOffset, carried) => {
+      const result = scanCarryForwardAt({
+        lastScanAt: SCAN,
+        lastGreetingAt: at(greetOffset),
+        inboundAt: at(inboundOffset),
+      })
+      expect(result === null ? null : result.getTime()).toBe(
+        carried ? SCAN.getTime() : null,
+      )
+    },
+  )
 
   // The anchor returned is the SCAN's time, never the greeting's:
   // visitConfirmedAt means when the visit was confirmed, and the scan is when

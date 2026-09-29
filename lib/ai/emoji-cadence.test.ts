@@ -85,9 +85,13 @@ describe('emoji detection (TAC-362)', () => {
   })
 
   it('detects the emoji from each live UAT message in the ticket', () => {
-    expect(containsEmoji('Hey, welcome! 👋 glad you found this number')).toBe(true)
+    expect(containsEmoji('Hey, welcome! 👋 glad you found this number')).toBe(
+      true,
+    )
     expect(containsEmoji('or Muni if you can swing it 🚌')).toBe(true)
-    expect(containsEmoji("it's the most work we put into any drink 🌸")).toBe(true)
+    expect(containsEmoji("it's the most work we put into any drink 🌸")).toBe(
+      true,
+    )
   })
 
   it('returns false for a body with no emoji', () => {
@@ -118,7 +122,14 @@ describe('emoji detection (TAC-362)', () => {
   // that property alone would grade "Analog®" as an emoji — and at a `never`
   // venue (grader limit 0) that is a finding on a clean reply.
   it('does not treat text-default pictographic symbols as emoji', () => {
-    for (const body of ['Analog® coffee', 'Le Mil™', '© 2026 Le Mils', 'see ℹ for info', '▶ play', '‼ urgent']) {
+    for (const body of [
+      'Analog® coffee',
+      'Le Mil™',
+      '© 2026 Le Mils',
+      'see ℹ for info',
+      '▶ play',
+      '‼ urgent',
+    ]) {
       expect(containsEmoji(body)).toBe(false)
     }
   })
@@ -167,11 +178,11 @@ describe('emoji detection (TAC-362)', () => {
   // what would catch a refactor that exported the regex instead.
   it('is stable across repeated calls with the same input', () => {
     const body = 'We close at 3 😊'
-    expect([containsEmoji(body), containsEmoji(body), containsEmoji(body)]).toEqual([
-      true,
-      true,
-      true,
-    ])
+    expect([
+      containsEmoji(body),
+      containsEmoji(body),
+      containsEmoji(body),
+    ]).toEqual([true, true, true])
     expect([countEmoji(body), countEmoji(body)]).toEqual([1, 1])
   })
 })

@@ -62,7 +62,9 @@ export type LoadInstagramCredentialResult =
  * (CI defines none of the Meta vars). Moved here from send-target.ts, which
  * re-exports it so its existing callers and tests are unchanged.
  */
-export function readInstagramAccessToken(env: NodeJS.ProcessEnv = process.env): string | null {
+export function readInstagramAccessToken(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
   const token = env.INSTAGRAM_ACCESS_TOKEN
   return typeof token === 'string' && token.trim() !== '' ? token.trim() : null
 }
@@ -101,14 +103,20 @@ export async function loadInstagramCredential(
   // is corrupt rather than merely absent. Refusing beats guessing a date that
   // would put the credential in or out of the refresh window by accident.
   if (!tokenExpiresAt || !connectedAt) {
-    return { ok: false, error: 'instagram_credentials row has an unreadable timestamp' }
+    return {
+      ok: false,
+      error: 'instagram_credentials row has an unreadable timestamp',
+    }
   }
 
   return {
     ok: true,
     credential: {
       venueId: String(row.venue_id),
-      instagramUsername: typeof row.instagram_username === 'string' ? row.instagram_username : null,
+      instagramUsername:
+        typeof row.instagram_username === 'string'
+          ? row.instagram_username
+          : null,
       accessTokenEnc: String(row.access_token_enc),
       tokenExpiresAt,
       connectedAt,
@@ -171,12 +179,22 @@ export async function resolveInstagramAccessToken(
         error: `could not decrypt the stored Instagram token: ${err instanceof Error ? err.message : 'unknown error'}`,
       }
     }
-    return { ok: true, resolved: { token, source: 'venue', expiresAt: credential.tokenExpiresAt } }
+    return {
+      ok: true,
+      resolved: {
+        token,
+        source: 'venue',
+        expiresAt: credential.tokenExpiresAt,
+      },
+    }
   }
 
   const envToken = readEnvToken()
   if (envToken === null) return { ok: true, resolved: null }
-  return { ok: true, resolved: { token: envToken, source: 'env', expiresAt: null } }
+  return {
+    ok: true,
+    resolved: { token: envToken, source: 'env', expiresAt: null },
+  }
 }
 
 export type UpsertInstagramCredentialInput = {
@@ -188,7 +206,8 @@ export type UpsertInstagramCredentialInput = {
   now: Date
 }
 
-export type UpsertInstagramCredentialResult = { ok: true } | { ok: false; error: string }
+export type UpsertInstagramCredentialResult =
+  { ok: true } | { ok: false; error: string }
 
 /**
  * Store (or replace) a venue's credential. One row per venue, so a reconnect
@@ -235,8 +254,7 @@ export async function upsertInstagramCredential(
 }
 
 export type DeauthorizeResult =
-  | { ok: true; venueId: string | null }
-  | { ok: false; error: string }
+  { ok: true; venueId: string | null } | { ok: false; error: string }
 
 /**
  * Meta says this account revoked our access, or a venue disconnected.

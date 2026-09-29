@@ -30,7 +30,11 @@ import { TeamSection } from './_components/team-section'
 import { TheStorySection } from './_components/the-story-section'
 import { VenueFactsSection } from './_components/venue-facts-section'
 import { VoiceLinkSection } from './_components/voice-link-section'
-import { allowsVenue, grantedVenues, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  allowsVenue,
+  grantedVenues,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 // TAC-343: /admin/venues/[slug] — the per-venue page. This component itself
 // stays a server component that only loads and computes; all editing lives
@@ -97,7 +101,9 @@ export default async function VenueDetailPage({ params }: PageProps) {
   const { bySection, unclaimed: unclaimedKnowledge } = groupKnowledgeByTag(
     data.knowledgeEntries,
   )
-  const unclaimedVenueInfoFields = computeUnclaimedVenueInfoFields(data.venueInfo)
+  const unclaimedVenueInfoFields = computeUnclaimedVenueInfoFields(
+    data.venueInfo,
+  )
   const unclaimedMechanicColumnsPerRow = data.mechanics.map((m) => ({
     id: m.id,
     name: m.name,
@@ -166,7 +172,10 @@ export default async function VenueDetailPage({ params }: PageProps) {
       <VenueFactsSection venueId={data.venue.id} venueInfo={data.venueInfo} />
       <TheStorySection venueId={data.venue.id} entries={bySection.the_story} />
       <MenuRosterSection venueId={data.venue.id} venueInfo={data.venueInfo} />
-      <MenuKnowledgeSection venueId={data.venue.id} entries={bySection.menu_knowledge} />
+      <MenuKnowledgeSection
+        venueId={data.venue.id}
+        entries={bySection.menu_knowledge}
+      />
       <TeamSection
         venueId={data.venue.id}
         staff={data.venueInfo.staff}

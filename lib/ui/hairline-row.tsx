@@ -18,10 +18,7 @@ export function HairlineRow({
 }: HairlineRowProps) {
   const border = last ? '' : 'border-b border-stone-light/60'
   return (
-    <div
-      {...rest}
-      className={`py-3 ${border} ${className}`}
-    >
+    <div {...rest} className={`py-3 ${border} ${className}`}>
       {children}
     </div>
   )

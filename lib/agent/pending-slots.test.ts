@@ -32,7 +32,8 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => mockAdmin.client,
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  capturePendingSlotInvariantBroken: (...args: unknown[]) => captureInvariantBrokenMock(...args),
+  capturePendingSlotInvariantBroken: (...args: unknown[]) =>
+    captureInvariantBrokenMock(...args),
 }))
 
 import { OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
@@ -70,9 +71,16 @@ const compA = {
   code: '7K2P',
   expiresAt: null,
 }
-const compB = { type: 'comp', description: 'a free croissant', code: 'Q4X9', expiresAt: null }
+const compB = {
+  type: 'comp',
+  description: 'a free croissant',
+  code: 'Q4X9',
+  expiresAt: null,
+}
 
-function pendingRow(over: Partial<PendingSlotRow> & { id: string }): PendingSlotRow {
+function pendingRow(
+  over: Partial<PendingSlotRow> & { id: string },
+): PendingSlotRow {
   return {
     body: 'a draft',
     pending_until: null,
@@ -115,7 +123,9 @@ describe('pendingSlotOf', () => {
     ['discount', 'obligation'],
     ['recommendation', 'conversation'],
   ])('puts a %s carrier in the %s slot', (type, slot) => {
-    expect(pendingSlotOf({ type, description: 'x', code: null, expiresAt: null })).toBe(slot)
+    expect(
+      pendingSlotOf({ type, description: 'x', code: null, expiresAt: null }),
+    ).toBe(slot)
   })
 
   // Each of these is what `coalesce(pending_commitment->>'type', '')` makes
@@ -158,7 +168,9 @@ describe('isSameCommitment ("the same commitment", ruled 2026-09-14)', () => {
   })
 
   it('is NOT a different type for the same item', () => {
-    expect(isSameCommitment(identity(compA), { ...identity(compA), type: 'hold' })).toBe(false)
+    expect(
+      isSameCommitment(identity(compA), { ...identity(compA), type: 'hold' }),
+    ).toBe(false)
   })
 
   it('ignores the verification code', () => {
@@ -176,23 +188,38 @@ describe('isSameCommitment ("the same commitment", ruled 2026-09-14)', () => {
 describe('draftCommitmentIdentity', () => {
   it('reads the emission the draft will persist, trimmed', () => {
     expect(
-      draftCommitmentIdentity({ type: 'comp', description: '  a free croissant ', code: 'Q4X9' }, false),
+      draftCommitmentIdentity(
+        { type: 'comp', description: '  a free croissant ', code: 'Q4X9' },
+        false,
+      ),
     ).toEqual({ type: 'comp', description: 'a free croissant', code: 'Q4X9' })
   })
 
   // A blanked body nulls the carrier (TAC-309), which is how a draft gives up
   // its obligation.
   it('is null when the body is blanked', () => {
-    expect(draftCommitmentIdentity({ type: 'comp', description: 'a free croissant' }, true)).toBeNull()
+    expect(
+      draftCommitmentIdentity(
+        { type: 'comp', description: 'a free croissant' },
+        true,
+      ),
+    ).toBeNull()
   })
 
   it('is null for the no-op emission', () => {
     expect(draftCommitmentIdentity({}, false)).toBeNull()
-    expect(draftCommitmentIdentity({ type: 'comp', description: '   ' }, false)).toBeNull()
+    expect(
+      draftCommitmentIdentity({ type: 'comp', description: '   ' }, false),
+    ).toBeNull()
   })
 
   it('never mints a code (a minted code would never match the one written)', () => {
-    expect(draftCommitmentIdentity({ type: 'comp', description: 'a free croissant' }, false)?.code).toBeNull()
+    expect(
+      draftCommitmentIdentity(
+        { type: 'comp', description: 'a free croissant' },
+        false,
+      )?.code,
+    ).toBeNull()
   })
 })
 
@@ -246,7 +273,12 @@ describe('loadPendingRowsBySlot', () => {
 
   it('returns the comp card when it is the only pending card', async () => {
     const fake = createPendingRowsFake('041')
-    fake.seed({ id: 'sent-1', venue_id: VENUE, guest_id: GUEST, review_state: 'auto_sent' })
+    fake.seed({
+      id: 'sent-1',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'auto_sent',
+    })
     fake.seed({
       id: 'card-a',
       venue_id: VENUE,
@@ -264,13 +296,36 @@ describe('loadPendingRowsBySlot', () => {
 
   it('ignores other guests, other venues, inbound rows and rows that are not pending', async () => {
     const fake = createPendingRowsFake('none')
-    fake.seed({ id: 'other-guest', venue_id: VENUE, guest_id: 'guest-2', review_state: 'pending' })
-    fake.seed({ id: 'other-venue', venue_id: 'venue-2', guest_id: GUEST, review_state: 'pending' })
-    fake.seed({ id: 'inbound', venue_id: VENUE, guest_id: GUEST, direction: 'inbound', review_state: 'pending' })
-    fake.seed({ id: 'approved', venue_id: VENUE, guest_id: GUEST, review_state: 'approved' })
+    fake.seed({
+      id: 'other-guest',
+      venue_id: VENUE,
+      guest_id: 'guest-2',
+      review_state: 'pending',
+    })
+    fake.seed({
+      id: 'other-venue',
+      venue_id: 'venue-2',
+      guest_id: GUEST,
+      review_state: 'pending',
+    })
+    fake.seed({
+      id: 'inbound',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      direction: 'inbound',
+      review_state: 'pending',
+    })
+    fake.seed({
+      id: 'approved',
+      venue_id: VENUE,
+      guest_id: GUEST,
+      review_state: 'approved',
+    })
     mockAdmin.client = fake.client
 
-    expect(await loadPendingRowsBySlot(VENUE, GUEST)).toEqual(EMPTY_PENDING_ROWS)
+    expect(await loadPendingRowsBySlot(VENUE, GUEST)).toEqual(
+      EMPTY_PENDING_ROWS,
+    )
   })
 
   // TAC-397 REWRITES this test rather than deleting it, and the rewrite is the
@@ -328,14 +383,24 @@ describe('loadPendingRowsBySlot', () => {
       ['second', '2026-09-14T17:00:00.000Z'],
       ['third', '2026-09-14T18:00:00.000Z'],
     ] as const) {
-      fake.seed({ id, venue_id: VENUE, guest_id: GUEST, review_state: 'pending', created_at: at })
+      fake.seed({
+        id,
+        venue_id: VENUE,
+        guest_id: GUEST,
+        review_state: 'pending',
+        created_at: at,
+      })
     }
     mockAdmin.client = fake.client
 
     const rows = await loadPendingRowsBySlot(VENUE, GUEST)
 
     // Oldest first, so at(-1) is the most recently opened.
-    expect(rows?.conversation.map((r) => r.id)).toEqual(['first', 'second', 'third'])
+    expect(rows?.conversation.map((r) => r.id)).toEqual([
+      'first',
+      'second',
+      'third',
+    ])
     expect(errorSpy).not.toHaveBeenCalled()
     expect(captureInvariantBrokenMock).not.toHaveBeenCalled()
   })
@@ -411,7 +476,10 @@ describe('loadPendingRowsBySlot', () => {
       select: () => chain,
       eq: () => chain,
       order: () => chain,
-      limit: async () => ({ data: null, error: { message: 'connection reset' } }),
+      limit: async () => ({
+        data: null,
+        error: { message: 'connection reset' },
+      }),
     }
     mockAdmin.client = { from: () => chain }
     expect(await loadPendingRowsBySlot(VENUE, GUEST)).toBeNull()
@@ -450,7 +518,9 @@ describe('loadPendingRowsBySlot', () => {
       pending_commitment: compB,
     })
     mockAdmin.client = fake.client
-    expect((await loadPendingRowsBySlot(VENUE, GUEST))?.obligation?.id).toBe('a')
+    expect((await loadPendingRowsBySlot(VENUE, GUEST))?.obligation?.id).toBe(
+      'a',
+    )
   })
 })
 
@@ -478,11 +548,18 @@ describe('resolveConversationDisposition', () => {
   it('is own_card whenever nothing is pending, whatever the message looks like', () => {
     for (const over of [
       { category: 'acknowledgment' as const, inboundBody: 'haha' },
-      { correctsPendingReply: true, inboundBody: 'actually make that oat milk' },
+      {
+        correctsPendingReply: true,
+        inboundBody: 'actually make that oat milk',
+      },
       { category: 'casual_chatter' as const, inboundBody: 'nice day' },
     ]) {
       expect(
-        resolveConversationDisposition({ ...base, ...over, hasConversationOccupant: false }),
+        resolveConversationDisposition({
+          ...base,
+          ...over,
+          hasConversationOccupant: false,
+        }),
       ).toBe('own_card')
     }
   })
@@ -515,7 +592,11 @@ describe('resolveConversationDisposition', () => {
     'is no_answer for %s with no question in it',
     (category) => {
       expect(
-        resolveConversationDisposition({ ...base, category, inboundBody: 'haha' }),
+        resolveConversationDisposition({
+          ...base,
+          category,
+          inboundBody: 'haha',
+        }),
       ).toBe('no_answer')
     },
   )
@@ -562,13 +643,21 @@ describe('resolveConversationDisposition', () => {
     'opt_out',
   ] as const)('is own_card for %s', (category) => {
     expect(
-      resolveConversationDisposition({ ...base, category, inboundBody: 'anything at all' }),
+      resolveConversationDisposition({
+        ...base,
+        category,
+        inboundBody: 'anything at all',
+      }),
     ).toBe('own_card')
   })
 
   it('is own_card when there is no category at all (a run with no inbound)', () => {
     expect(
-      resolveConversationDisposition({ ...base, category: null, inboundBody: null }),
+      resolveConversationDisposition({
+        ...base,
+        category: null,
+        inboundBody: null,
+      }),
     ).toBe('own_card')
   })
 })
@@ -589,7 +678,9 @@ describe('silencesConversationTurn', () => {
   // never silenced by a judgement about conversational chatter. If the model
   // answered "haha" with a comp, that is a comp and an operator sees it.
   it('never silences an obligation draft', () => {
-    expect(silencesConversationTurn({ ...base, slot: 'obligation' })).toBe(false)
+    expect(silencesConversationTurn({ ...base, slot: 'obligation' })).toBe(
+      false,
+    )
   })
 
   it.each(['never_regen', 'regen_always', 'regen_gap_card_only'] as const)(
@@ -600,7 +691,9 @@ describe('silencesConversationTurn', () => {
   )
 
   it('never silences with nothing pending', () => {
-    expect(silencesConversationTurn({ ...base, hasOccupant: false })).toBe(false)
+    expect(silencesConversationTurn({ ...base, hasOccupant: false })).toBe(
+      false,
+    )
   })
 
   it.each(['own_card', 'correction', null] as const)(
@@ -638,17 +731,27 @@ describe('anyKnowledgeGapCard', () => {
   })
 
   it('is false when the guest holds only ordinary cards', () => {
-    expect(anyKnowledgeGapCard(rowsOf(ordinary, pendingRow({ id: 'other' })))).toBe(false)
+    expect(
+      anyKnowledgeGapCard(rowsOf(ordinary, pendingRow({ id: 'other' }))),
+    ).toBe(false)
     expect(anyKnowledgeGapCard(EMPTY_PENDING_ROWS)).toBe(false)
   })
 })
 
 describe('mostRecentlyOpenedConversationCard / occupantOfSlot', () => {
-  const older = pendingRow({ id: 'older', created_at: '2026-09-14T16:00:00.000Z' })
-  const newer = pendingRow({ id: 'newer', created_at: '2026-09-14T18:00:00.000Z' })
+  const older = pendingRow({
+    id: 'older',
+    created_at: '2026-09-14T16:00:00.000Z',
+  })
+  const newer = pendingRow({
+    id: 'newer',
+    created_at: '2026-09-14T18:00:00.000Z',
+  })
 
   it('returns the newest conversation card, the only one a correction may target', () => {
-    expect(mostRecentlyOpenedConversationCard(rowsOf(older, newer))?.id).toBe('newer')
+    expect(mostRecentlyOpenedConversationCard(rowsOf(older, newer))?.id).toBe(
+      'newer',
+    )
   })
 
   it('returns null when the guest holds no conversation card', () => {
@@ -656,15 +759,26 @@ describe('mostRecentlyOpenedConversationCard / occupantOfSlot', () => {
   })
 
   it('occupantOfSlot reads the obligation row and the newest conversation card', () => {
-    const rows = rowsOf(older, newer, pendingRow({ id: 'comp', pending_commitment: compA }))
+    const rows = rowsOf(
+      older,
+      newer,
+      pendingRow({ id: 'comp', pending_commitment: compA }),
+    )
     expect(occupantOfSlot(rows, 'obligation')?.id).toBe('comp')
     expect(occupantOfSlot(rows, 'conversation')?.id).toBe('newer')
   })
 })
 
 describe('decideSlotAction', () => {
-  const compCardA = pendingRow({ id: 'card-a', review_reason: 'commitment_type_gated', pending_commitment: compA })
-  const conversationCard = pendingRow({ id: 'card-conv', review_reason: 'category_requires_approval' })
+  const compCardA = pendingRow({
+    id: 'card-a',
+    review_reason: 'commitment_type_gated',
+    pending_commitment: compA,
+  })
+  const conversationCard = pendingRow({
+    id: 'card-conv',
+    review_reason: 'category_requires_approval',
+  })
   const gapCard = pendingRow({
     id: 'gap-card',
     body: '',
@@ -709,9 +823,18 @@ describe('decideSlotAction', () => {
       decideSlotAction({
         ...base,
         rows: rowsOf(compCardA),
-        draftCommitment: { type: 'comp', description: '  A Free Cortado on your next visit ', code: 'ZZ99' },
+        draftCommitment: {
+          type: 'comp',
+          description: '  A Free Cortado on your next visit ',
+          code: 'ZZ99',
+        },
       }),
-    ).toEqual({ action: 'regen', slot: 'obligation', draftId: 'card-a' , captureReplacedDraft: false })
+    ).toEqual({
+      action: 'regen',
+      slot: 'obligation',
+      draftId: 'card-a',
+      captureReplacedDraft: false,
+    })
   })
 
   it('control: a hold for the same item is dropped', () => {
@@ -729,31 +852,53 @@ describe('decideSlotAction', () => {
       decideSlotAction({
         ...base,
         rows: rowsOf(compCardA),
-        draftCommitment: draftCommitmentIdentity({ type: 'comp', description: 'a free croissant' }, true),
+        draftCommitment: draftCommitmentIdentity(
+          { type: 'comp', description: 'a free croissant' },
+          true,
+        ),
       }),
     ).toEqual({ action: 'insert', slot: 'conversation' })
   })
 
   it('inserts an obligation card when the obligation slot is empty, even with a conversation card pending', () => {
     expect(
-      decideSlotAction({ ...base, rows: rowsOf(conversationCard), draftCommitment: identity(compB) }),
+      decideSlotAction({
+        ...base,
+        rows: rowsOf(conversationCard),
+        draftCommitment: identity(compB),
+      }),
     ).toEqual({ action: 'insert', slot: 'obligation' })
   })
 
   it('regenerates the conversation card for a conversation draft, never the comp card listed first', () => {
     expect(
-      decideSlotAction({ ...base, rows: rowsOf(compCardA, conversationCard), draftCommitment: null }),
-    ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'card-conv' , captureReplacedDraft: true })
+      decideSlotAction({
+        ...base,
+        rows: rowsOf(compCardA, conversationCard),
+        draftCommitment: null,
+      }),
+    ).toEqual({
+      action: 'regen',
+      slot: 'conversation',
+      draftId: 'card-conv',
+      captureReplacedDraft: true,
+    })
   })
 
   it('an obligation card with an unreadable carrier keeps its slot', () => {
     expect(
       decideSlotAction({
         ...base,
-        rows: rowsOf(pendingRow({ id: 'broken', pending_commitment: { type: 'comp' } })),
+        rows: rowsOf(
+          pendingRow({ id: 'broken', pending_commitment: { type: 'comp' } }),
+        ),
         draftCommitment: identity(compB),
       }),
-    ).toMatchObject({ action: 'drop', reason: 'obligation_slot_taken', protectedDraftId: 'broken' })
+    ).toMatchObject({
+      action: 'drop',
+      reason: 'obligation_slot_taken',
+      protectedDraftId: 'broken',
+    })
   })
 
   describe("'regen' (the gate's callers)", () => {
@@ -844,8 +989,14 @@ describe('decideSlotAction', () => {
     // never the target, which is what stops a correction landing on a
     // question the guest stopped talking about two messages ago.
     it('a correction targets the MOST RECENTLY OPENED card, never an older one', () => {
-      const older = pendingRow({ id: 'older', created_at: '2026-09-14T16:00:00.000Z' })
-      const newer = pendingRow({ id: 'newer', created_at: '2026-09-14T18:00:00.000Z' })
+      const older = pendingRow({
+        id: 'older',
+        created_at: '2026-09-14T16:00:00.000Z',
+      })
+      const newer = pendingRow({
+        id: 'newer',
+        created_at: '2026-09-14T18:00:00.000Z',
+      })
       expect(
         decideSlotAction({
           ...base,
@@ -923,7 +1074,11 @@ describe('decideSlotAction', () => {
         pending_commitment: compA,
       })
       expect(
-        decideSlotAction({ ...base, rows: rowsOf(gapComp), draftCommitment: identity(compA) }),
+        decideSlotAction({
+          ...base,
+          rows: rowsOf(gapComp),
+          draftCommitment: identity(compA),
+        }),
       ).toEqual({
         action: 'drop',
         slot: 'obligation',
@@ -985,7 +1140,12 @@ describe('decideSlotAction', () => {
 
     it('inserts into an empty slot', () => {
       expect(
-        decideSlotAction({ ...base, callerPolicy: 'never_regen', rows: rowsOf(compCardA), draftCommitment: null }),
+        decideSlotAction({
+          ...base,
+          callerPolicy: 'never_regen',
+          rows: rowsOf(compCardA),
+          draftCommitment: null,
+        }),
       ).toEqual({ action: 'insert', slot: 'conversation' })
     })
   })
@@ -999,7 +1159,12 @@ describe('decideSlotAction', () => {
           rows: rowsOf(compCardA, gapCard),
           draftCommitment: null,
         }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' , captureReplacedDraft: false })
+      ).toEqual({
+        action: 'regen',
+        slot: 'conversation',
+        draftId: 'gap-card',
+        captureReplacedDraft: false,
+      })
     })
 
     // No path overwrites one obligation with another, the decline included.
@@ -1024,7 +1189,12 @@ describe('decideSlotAction', () => {
           rows: rowsOf(gapCard),
           draftCommitment: null,
         }),
-      ).toEqual({ action: 'regen', slot: 'conversation', draftId: 'gap-card' , captureReplacedDraft: false })
+      ).toEqual({
+        action: 'regen',
+        slot: 'conversation',
+        draftId: 'gap-card',
+        captureReplacedDraft: false,
+      })
     })
 
     it('never overwrites an ordinary card', () => {
@@ -1035,7 +1205,11 @@ describe('decideSlotAction', () => {
           rows: rowsOf(conversationCard),
           draftCommitment: null,
         }),
-      ).toMatchObject({ action: 'drop', reason: 'slot_occupied', protectedDraftId: 'card-conv' })
+      ).toMatchObject({
+        action: 'drop',
+        reason: 'slot_occupied',
+        protectedDraftId: 'card-conv',
+      })
     })
   })
 })
@@ -1076,7 +1250,9 @@ describe('migration 041 mirrors pendingSlotOf (TAC-394, superseded by 054)', () 
 
   it('lists exactly OBLIGATION_SLOT_TYPES in both index predicates, one `in` and one `not in`', () => {
     const predicates = [
-      ...sql.matchAll(/coalesce\(pending_commitment->>'type', ''\)\s+(not\s+)?in\s+\(([^)]*)\)/g),
+      ...sql.matchAll(
+        /coalesce\(pending_commitment->>'type', ''\)\s+(not\s+)?in\s+\(([^)]*)\)/g,
+      ),
     ]
     expect(predicates).toHaveLength(2)
     expect(predicates.map((m) => Boolean(m[1]))).toEqual([false, true])
@@ -1091,7 +1267,9 @@ describe('migration 041 mirrors pendingSlotOf (TAC-394, superseded by 054)', () 
 
   it('keys both indexes on pending rows per venue and guest', () => {
     expect(
-      sql.match(/on messages \(venue_id, guest_id\)\s+where review_state = 'pending'/g),
+      sql.match(
+        /on messages \(venue_id, guest_id\)\s+where review_state = 'pending'/g,
+      ),
     ).toHaveLength(2)
   })
 
@@ -1108,7 +1286,13 @@ describe('migration 041 mirrors pendingSlotOf (TAC-394, superseded by 054)', () 
     )
     const drop = sql.indexOf('drop index idx_messages_one_pending_per_guest;')
     const commit = sql.indexOf('commit;')
-    for (const position of [begin, createObligation, createConversation, drop, commit]) {
+    for (const position of [
+      begin,
+      createObligation,
+      createConversation,
+      drop,
+      commit,
+    ]) {
       expect(position).toBeGreaterThanOrEqual(0)
     }
     expect(begin).toBeLessThan(createObligation)
@@ -1124,7 +1308,9 @@ describe('migration 042: list_operator_queue (TAC-394)', () => {
 
   it('drops and recreates the function inside one transaction', () => {
     const begin = sql.indexOf('begin;')
-    const drop = sql.indexOf('drop function if exists public.list_operator_queue(uuid[]);')
+    const drop = sql.indexOf(
+      'drop function if exists public.list_operator_queue(uuid[]);',
+    )
     const create = sql.indexOf('create function public.list_operator_queue(')
     const commit = sql.indexOf('commit;')
     expect(begin).toBeGreaterThanOrEqual(0)
@@ -1139,7 +1325,10 @@ describe('migration 042: list_operator_queue (TAC-394)', () => {
   })
 
   it('counts the OTHER pending cards for the same venue and guest', () => {
-    const lateral = sql.slice(sql.indexOf('as other_pending_for_guest'), sql.indexOf(') other on true'))
+    const lateral = sql.slice(
+      sql.indexOf('as other_pending_for_guest'),
+      sql.indexOf(') other on true'),
+    )
     expect(lateral).toContain('o.venue_id = m.venue_id')
     expect(lateral).toContain('o.guest_id = m.guest_id')
     expect(lateral).toContain("o.review_state = 'pending'")
@@ -1148,98 +1337,111 @@ describe('migration 042: list_operator_queue (TAC-394)', () => {
 
   // Contract: recentContext no longer includes pending drafts.
   it('excludes every pending row from recent_context, not only the card itself', () => {
-    const ctx = sql.slice(sql.indexOf('jsonb_agg('), sql.indexOf(') ctx on true'))
+    const ctx = sql.slice(
+      sql.indexOf('jsonb_agg('),
+      sql.indexOf(') ctx on true'),
+    )
     expect(ctx).toContain("and review_state is distinct from 'pending'")
     expect(ctx).toContain('and id <> m.id')
   })
 
-describe('migration 054 mirrors the per-inbound conversation slot (TAC-397)', () => {
-  const sql = readSql('054_conversation_cards_per_reply.sql')
+  describe('migration 054 mirrors the per-inbound conversation slot (TAC-397)', () => {
+    const sql = readSql('054_conversation_cards_per_reply.sql')
 
-  // The type list lives in SQL and in OBLIGATION_TYPES, and the SQL cannot
-  // import the constant. 041's block above pins its own copy; this pins 054's,
-  // which is the one that is LIVE. Without this, adding a fourth obligation
-  // type would keep 041's test green (its file is frozen) while 054's index
-  // silently disagreed with pendingSlotOf.
-  it('lists exactly OBLIGATION_SLOT_TYPES in the conversation predicate, as `not in`', () => {
-    const predicates = [
-      ...sql.matchAll(/coalesce\(pending_commitment->>'type', ''\)\s+(not\s+)?in\s+\(([^)]*)\)/g),
-    ]
-    expect(predicates).toHaveLength(1)
-    expect(Boolean(predicates[0]![1])).toBe(true)
-    const types = predicates[0]![2]!
-      .split(',')
-      .map((t) => t.trim().replace(/^'|'$/g, ''))
-      .sort()
-    expect(types).toEqual([...OBLIGATION_SLOT_TYPES])
-  })
+    // The type list lives in SQL and in OBLIGATION_TYPES, and the SQL cannot
+    // import the constant. 041's block above pins its own copy; this pins 054's,
+    // which is the one that is LIVE. Without this, adding a fourth obligation
+    // type would keep 041's test green (its file is frozen) while 054's index
+    // silently disagreed with pendingSlotOf.
+    it('lists exactly OBLIGATION_SLOT_TYPES in the conversation predicate, as `not in`', () => {
+      const predicates = [
+        ...sql.matchAll(
+          /coalesce\(pending_commitment->>'type', ''\)\s+(not\s+)?in\s+\(([^)]*)\)/g,
+        ),
+      ]
+      expect(predicates).toHaveLength(1)
+      expect(Boolean(predicates[0]![1])).toBe(true)
+      const types = predicates[0]![2]!
+        .split(',')
+        .map((t) => t.trim().replace(/^'|'$/g, ''))
+        .sort()
+      expect(types).toEqual([...OBLIGATION_SLOT_TYPES])
+    })
 
-  // THE load-bearing line of this migration. NULLs are distinct in a unique
-  // index, so a bare `reply_to_message_id` would give proactive conversation
-  // cards (manual followups, the decline, the crash card) NO uniqueness at
-  // all — protection migration 041 provides today. Folding NULL onto a fixed
-  // sentinel is what keeps "at most one proactive conversation card per
-  // guest" true. Pinned as one contiguous expression rather than as separate
-  // substrings: the parts are individually unremarkable and only mean
-  // something together.
-  it('keys the conversation index on venue, guest and the inbound, folding NULL onto a sentinel', () => {
-    expect(sql).toMatch(
-      /on messages \(\s*venue_id,\s*guest_id,\s*coalesce\(reply_to_message_id, '00000000-0000-0000-0000-000000000000'::uuid\)\s*\)\s*where review_state = 'pending'/,
-    )
-  })
+    // THE load-bearing line of this migration. NULLs are distinct in a unique
+    // index, so a bare `reply_to_message_id` would give proactive conversation
+    // cards (manual followups, the decline, the crash card) NO uniqueness at
+    // all — protection migration 041 provides today. Folding NULL onto a fixed
+    // sentinel is what keeps "at most one proactive conversation card per
+    // guest" true. Pinned as one contiguous expression rather than as separate
+    // substrings: the parts are individually unremarkable and only mean
+    // something together.
+    it('keys the conversation index on venue, guest and the inbound, folding NULL onto a sentinel', () => {
+      expect(sql).toMatch(
+        /on messages \(\s*venue_id,\s*guest_id,\s*coalesce\(reply_to_message_id, '00000000-0000-0000-0000-000000000000'::uuid\)\s*\)\s*where review_state = 'pending'/,
+      )
+    })
 
-  it('creates the new conversation index before dropping 041’s, in one transaction', () => {
-    const begin = sql.indexOf('begin;')
-    const create = sql.indexOf(
-      'create unique index idx_messages_one_pending_conversation_per_guest_reply',
-    )
-    const drop = sql.indexOf('drop index idx_messages_one_pending_conversation_per_guest;')
-    const commit = sql.indexOf('commit;')
-    for (const position of [begin, create, drop, commit]) {
-      expect(position).toBeGreaterThanOrEqual(0)
-    }
-    expect(begin).toBeLessThan(create)
-    expect(create).toBeLessThan(drop)
-    expect(drop).toBeLessThan(commit)
-    expect(sql).not.toMatch(/concurrently/i)
-  })
+    it('creates the new conversation index before dropping 041’s, in one transaction', () => {
+      const begin = sql.indexOf('begin;')
+      const create = sql.indexOf(
+        'create unique index idx_messages_one_pending_conversation_per_guest_reply',
+      )
+      const drop = sql.indexOf(
+        'drop index idx_messages_one_pending_conversation_per_guest;',
+      )
+      const commit = sql.indexOf('commit;')
+      for (const position of [begin, create, drop, commit]) {
+        expect(position).toBeGreaterThanOrEqual(0)
+      }
+      expect(begin).toBeLessThan(create)
+      expect(create).toBeLessThan(drop)
+      expect(drop).toBeLessThan(commit)
+      expect(sql).not.toMatch(/concurrently/i)
+    })
 
-  // TAC-394's obligation protection is explicitly out of scope. A migration
-  // that touched it would be changing what this ticket said it would not.
-  it('leaves the obligation index alone', () => {
-    expect(sql).not.toContain('idx_messages_one_pending_obligation_per_guest')
-  })
+    // TAC-394's obligation protection is explicitly out of scope. A migration
+    // that touched it would be changing what this ticket said it would not.
+    it('leaves the obligation index alone', () => {
+      expect(sql).not.toContain('idx_messages_one_pending_obligation_per_guest')
+    })
 
-  it('adds both replaced-draft columns, nullable and with no default', () => {
-    expect(sql).toMatch(
-      /alter table messages\s+add column replaced_draft_body text,\s+add column replaced_draft_at timestamptz;/,
-    )
-    expect(sql).not.toMatch(/replaced_draft_\w+[^;]*\bdefault\b/)
-    expect(sql).not.toMatch(/replaced_draft_\w+[^;]*not null/i)
-  })
+    it('adds both replaced-draft columns, nullable and with no default', () => {
+      expect(sql).toMatch(
+        /alter table messages\s+add column replaced_draft_body text,\s+add column replaced_draft_at timestamptz;/,
+      )
+      expect(sql).not.toMatch(/replaced_draft_\w+[^;]*\bdefault\b/)
+      expect(sql).not.toMatch(/replaced_draft_\w+[^;]*not null/i)
+    })
 
-  // Adding a return column is a signature change; `create or replace` refuses
-  // it (migration 039's rule). One transaction so no reader sees it missing.
-  it('drops and recreates list_operator_queue inside one transaction', () => {
-    const begin = sql.indexOf('begin;')
-    const drop = sql.indexOf('drop function if exists public.list_operator_queue(uuid[]);')
-    const create = sql.indexOf('create function public.list_operator_queue(')
-    const commit = sql.indexOf('commit;')
-    for (const position of [begin, drop, create, commit]) {
-      expect(position).toBeGreaterThanOrEqual(0)
-    }
-    expect(begin).toBeLessThan(drop)
-    expect(drop).toBeLessThan(create)
-    expect(create).toBeLessThan(commit)
-    expect(sql).not.toMatch(/create or replace function public\.list_operator_queue/)
-  })
+    // Adding a return column is a signature change; `create or replace` refuses
+    // it (migration 039's rule). One transaction so no reader sees it missing.
+    it('drops and recreates list_operator_queue inside one transaction', () => {
+      const begin = sql.indexOf('begin;')
+      const drop = sql.indexOf(
+        'drop function if exists public.list_operator_queue(uuid[]);',
+      )
+      const create = sql.indexOf('create function public.list_operator_queue(')
+      const commit = sql.indexOf('commit;')
+      for (const position of [begin, drop, create, commit]) {
+        expect(position).toBeGreaterThanOrEqual(0)
+      }
+      expect(begin).toBeLessThan(drop)
+      expect(drop).toBeLessThan(create)
+      expect(create).toBeLessThan(commit)
+      expect(sql).not.toMatch(
+        /create or replace function public\.list_operator_queue/,
+      )
+    })
 
-  it('returns and selects both replaced-draft columns', () => {
-    expect(sql).toMatch(/replaced_draft_body text,\s*\n\s*replaced_draft_at timestamptz\s*\n\)/)
-    expect(sql).toContain('m.replaced_draft_body')
-    expect(sql).toContain('m.replaced_draft_at')
+    it('returns and selects both replaced-draft columns', () => {
+      expect(sql).toMatch(
+        /replaced_draft_body text,\s*\n\s*replaced_draft_at timestamptz\s*\n\)/,
+      )
+      expect(sql).toContain('m.replaced_draft_body')
+      expect(sql).toContain('m.replaced_draft_at')
+    })
   })
-})
 })
 
 // ---------------------------------------------------------------------------
@@ -1250,7 +1452,8 @@ const MESSAGES_FROM = /\.from\(\s*['"`]messages['"`]\s*\)/g
 const PENDING_FILTER =
   /review_state['"`]?\s*[,:]\s*['"`]pending['"`]|['"`]review_state['"`]\s*,\s*['"`]eq['"`]\s*,\s*['"`]pending['"`]|review_state\.eq\.pending|['"`]review_state['"`]\s*,\s*\[[^\]]*['"`]pending['"`][^\]]*\]/
 const GUEST_FILTER = /guest_id/
-const SINGLE_ROW = /\.maybeSingle\(|\.single\(|\.limit\(\s*1\s*\)|\.range\(\s*0\s*,\s*0\s*\)/
+const SINGLE_ROW =
+  /\.maybeSingle\(|\.single\(|\.limit\(\s*1\s*\)|\.range\(\s*0\s*,\s*0\s*\)/
 
 /**
  * The text of the query chain starting at `.from(`, up to where the chain ends:
@@ -1269,7 +1472,9 @@ function chainAt(source: string, start: number): string {
       let j = i + 1
       for (;;) {
         const lineEnd = source.indexOf('\n', j)
-        const line = source.slice(j, lineEnd === -1 ? undefined : lineEnd).trim()
+        const line = source
+          .slice(j, lineEnd === -1 ? undefined : lineEnd)
+          .trim()
         if ((line === '' || line.startsWith('//')) && lineEnd !== -1) {
           j = lineEnd + 1
           continue
@@ -1287,7 +1492,11 @@ function perGuestSingleRowPendingReads(source: string): string[] {
   const found: string[] = []
   for (const match of source.matchAll(MESSAGES_FROM)) {
     const chain = chainAt(source, match.index!)
-    if (PENDING_FILTER.test(chain) && GUEST_FILTER.test(chain) && SINGLE_ROW.test(chain)) {
+    if (
+      PENDING_FILTER.test(chain) &&
+      GUEST_FILTER.test(chain) &&
+      SINGLE_ROW.test(chain)
+    ) {
       found.push(chain)
     }
   }
@@ -1324,15 +1533,19 @@ describe('source guard: every per-guest single-row pending read names its order 
 
   const hits = ['lib', 'app', 'scripts'].flatMap((root) =>
     sourceFiles(join(REPO_ROOT, root)).flatMap((file) =>
-      perGuestSingleRowPendingReads(readFileSync(file, 'utf8')).map((chain) => ({
-        file: relative(REPO_ROOT, file),
-        chain,
-      })),
+      perGuestSingleRowPendingReads(readFileSync(file, 'utf8')).map(
+        (chain) => ({
+          file: relative(REPO_ROOT, file),
+          chain,
+        }),
+      ),
     ),
   )
 
   it('finds no such read outside pending-question.ts', () => {
-    expect(hits.filter((h) => !ALLOWED.has(h.file)).map((h) => h.file)).toEqual([])
+    expect(hits.filter((h) => !ALLOWED.has(h.file)).map((h) => h.file)).toEqual(
+      [],
+    )
   })
 
   // Guards the guard: the scan has to find the real reads it is supposed to
@@ -1345,7 +1558,9 @@ describe('source guard: every per-guest single-row pending read names its order 
   it('finds every allowed read, and each one orders by created_at', () => {
     expect(hits.filter((h) => ALLOWED.has(h.file))).toHaveLength(ALLOWED.size)
     for (const hit of hits.filter((h) => ALLOWED.has(h.file))) {
-      expect(hit.chain, hit.file).toContain(".order('created_at', { ascending: true })")
+      expect(hit.chain, hit.file).toContain(
+        ".order('created_at', { ascending: true })",
+      )
     }
   })
 
@@ -1378,9 +1593,12 @@ describe('source guard: every per-guest single-row pending read names its order 
       'an in() list with more than one state',
       `supabase.from('messages').select('id').eq('guest_id', g).in('review_state', ['approved', 'pending', 'edited']).maybeSingle()`,
     ],
-  ])('detects a per-guest single-row pending read written as %s', (_label, source) => {
-    expect(perGuestSingleRowPendingReads(source)).toHaveLength(1)
-  })
+  ])(
+    'detects a per-guest single-row pending read written as %s',
+    (_label, source) => {
+      expect(perGuestSingleRowPendingReads(source)).toHaveLength(1)
+    },
+  )
 
   it.each([
     [
@@ -1403,7 +1621,6 @@ describe('source guard: every per-guest single-row pending read names its order 
     expect(perGuestSingleRowPendingReads(source)).toEqual([])
   })
 })
-
 
 describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
   const promised = {
@@ -1429,7 +1646,10 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
   // comp the venue now owes goes untracked. Keeping it caught the promise and
   // then recorded a drink suggestion for it.
   it('replaces a recommendation generation carried with the obligation the check found', () => {
-    const emission = { type: 'recommendation' as const, description: 'the cortado' }
+    const emission = {
+      type: 'recommendation' as const,
+      description: 'the cortado',
+    }
 
     const carrier = resolveDraftCarrier(emission, promised, false)
     expect(carrier?.type).toBe('comp')
@@ -1450,18 +1670,29 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
     const carrier = resolveDraftCarrier(emission, promised, false)
     expect(carrier?.type).toBe('comp')
     expect(carrier?.description).toBe('oat latte')
-    expect(resolveDraftCarrierIdentity(emission, promised, false)?.description).toBe('oat latte')
+    expect(
+      resolveDraftCarrierIdentity(emission, promised, false)?.description,
+    ).toBe('oat latte')
 
     const hold = { type: 'hold' as const, description: 'a bag of the Budan' }
-    expect(resolveDraftCarrier(hold, promised, false)?.description).toBe('a bag of the Budan')
+    expect(resolveDraftCarrier(hold, promised, false)?.description).toBe(
+      'a bag of the Budan',
+    )
   })
 
   // A recommendation with nothing to replace it stays. Dropping it would lose
   // a record for no gain.
   it('keeps a recommendation when the check named nothing usable', () => {
-    const emission = { type: 'recommendation' as const, description: 'the cortado' }
-    expect(resolveDraftCarrier(emission, null, false)?.type).toBe('recommendation')
-    expect(resolveDraftCarrierIdentity(emission, null, false)?.type).toBe('recommendation')
+    const emission = {
+      type: 'recommendation' as const,
+      description: 'the cortado',
+    }
+    expect(resolveDraftCarrier(emission, null, false)?.type).toBe(
+      'recommendation',
+    )
+    expect(resolveDraftCarrierIdentity(emission, null, false)?.type).toBe(
+      'recommendation',
+    )
   })
 
   // TAC-309 unchanged: a blank card carries no commitment, and a promise the
@@ -1470,7 +1701,11 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
     expect(resolveDraftCarrier({}, promised, true)).toBeNull()
     expect(resolveDraftCarrierIdentity({}, promised, true)).toBeNull()
     expect(
-      resolveDraftCarrier({ type: 'comp', description: 'oat latte' }, promised, true),
+      resolveDraftCarrier(
+        { type: 'comp', description: 'oat latte' },
+        promised,
+        true,
+      ),
     ).toBeNull()
   })
 
@@ -1483,7 +1718,13 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
   // edited separately; nothing but this notices when one of them stops
   // agreeing with the other.
   it('the identity always describes the carrier the same inputs produce', () => {
-    const cases: Array<[Parameters<typeof resolveDraftCarrier>[0], typeof promised | null, boolean]> = [
+    const cases: Array<
+      [
+        Parameters<typeof resolveDraftCarrier>[0],
+        typeof promised | null,
+        boolean,
+      ]
+    > = [
       [{}, promised, false],
       [{}, null, false],
       [{ type: 'recommendation', description: 'the cortado' }, promised, false],
@@ -1515,7 +1756,9 @@ describe('resolveDraftCarrier / resolveDraftCarrierIdentity (TAC-401)', () => {
     expect(resolveDraftCarrierIdentity(emission, null, false)?.code).toBeNull()
     // The carrier path DOES mint one, which is the asymmetry the two
     // functions exist to keep.
-    expect(resolveDraftCarrier(emission, null, false)?.code).toMatch(/^[A-Z0-9]{4}$/)
+    expect(resolveDraftCarrier(emission, null, false)?.code).toMatch(
+      /^[A-Z0-9]{4}$/,
+    )
   })
 
   // A promised carrier already carries its code, minted once in the stage.

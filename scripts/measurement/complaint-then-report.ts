@@ -159,52 +159,144 @@ interface Scenario {
  * Re-point these if the run moves to another venue.
  */
 const SCENARIOS: Scenario[] = [
-  { id: 'incident-verbatim', population: 'report', itemA: 'Cortado', itemB: 'Blossom Tonic', itemBWords: ['blossom', 'tonic'],
+  {
+    id: 'incident-verbatim',
+    population: 'report',
+    itemA: 'Cortado',
+    itemB: 'Blossom Tonic',
+    itemBWords: ['blossom', 'tonic'],
     complaint: 'came by earlier today and got the cortado, but it was cold',
-    report: 'i also got the blossom tonic' },
-  { id: 'got-one-too', population: 'report', itemA: 'Flat White', itemB: 'Gulab Jamun Cake', itemBWords: ['gulab', 'jamun'],
+    report: 'i also got the blossom tonic',
+  },
+  {
+    id: 'got-one-too',
+    population: 'report',
+    itemA: 'Flat White',
+    itemB: 'Gulab Jamun Cake',
+    itemBWords: ['gulab', 'jamun'],
     complaint: 'the flat white I picked up this morning was really bitter',
-    report: 'got a gulab jamun cake too' },
-  { id: 'bare-and', population: 'report', itemA: 'Latte', itemB: 'Pink Panther', itemBWords: ['pink', 'panther'],
+    report: 'got a gulab jamun cake too',
+  },
+  {
+    id: 'bare-and',
+    population: 'report',
+    itemA: 'Latte',
+    itemB: 'Pink Panther',
+    itemBWords: ['pink', 'panther'],
     complaint: 'my latte was lukewarm when I got it today',
-    report: 'and the pink panther' },
-  { id: 'oh-and', population: 'report', itemA: 'Spiced Cold Brew', itemB: 'Mango Lassi', itemBWords: ['mango lassi', 'lassi'],
+    report: 'and the pink panther',
+  },
+  {
+    id: 'oh-and',
+    population: 'report',
+    itemA: 'Spiced Cold Brew',
+    itemB: 'Mango Lassi',
+    itemBWords: ['mango lassi', 'lassi'],
     complaint: 'the spiced cold brew tasted off today, kind of sour',
-    report: 'oh and I had a mango lassi' },
-  { id: 'we-also-had', population: 'report', itemA: 'Cappuccino', itemB: 'Rose Pistachio Barfi', itemBWords: ['rose', 'pistachio'],
-    complaint: 'cappuccino this morning was pretty much cold by the time I sat down',
-    report: 'we also had a rose pistachio barfi' },
-  { id: 'neutral-adjective', population: 'report', itemA: 'Espresso', itemB: 'Mango Cardamom Barfi', itemBWords: ['cardamom', 'mango cardamom'],
+    report: 'oh and I had a mango lassi',
+  },
+  {
+    id: 'we-also-had',
+    population: 'report',
+    itemA: 'Cappuccino',
+    itemB: 'Rose Pistachio Barfi',
+    itemBWords: ['rose', 'pistachio'],
+    complaint:
+      'cappuccino this morning was pretty much cold by the time I sat down',
+    report: 'we also had a rose pistachio barfi',
+  },
+  {
+    id: 'neutral-adjective',
+    population: 'report',
+    itemA: 'Espresso',
+    itemB: 'Mango Cardamom Barfi',
+    itemBWords: ['cardamom', 'mango cardamom'],
     complaint: 'the espresso I got was burnt tasting',
-    report: 'I got one of the big mango cardamom barfis as well' },
-  { id: 'question-shaped', population: 'report', itemA: 'Americano', itemB: 'SoFi', itemBWords: ['sofi'],
+    report: 'I got one of the big mango cardamom barfis as well',
+  },
+  {
+    id: 'question-shaped',
+    population: 'report',
+    itemA: 'Americano',
+    itemB: 'SoFi',
+    itemBWords: ['sofi'],
     complaint: 'americano was watery today, not what I usually get',
-    report: 'do you still do the SoFi? I got one of those today' },
-  { id: 'my-friend-had', population: 'report', itemA: 'Almost Latte', itemB: 'Pour Over', itemBWords: ['pour over', 'pour-over'],
+    report: 'do you still do the SoFi? I got one of those today',
+  },
+  {
+    id: 'my-friend-had',
+    population: 'report',
+    itemA: 'Almost Latte',
+    itemB: 'Pour Over',
+    itemBWords: ['pour over', 'pour-over'],
     complaint: 'almost latte was cold when I got to the office',
-    report: 'my friend had a pour over' },
-  { id: 'plus-the', population: 'report', itemA: 'Latte', itemB: 'Blossom Tonic', itemBWords: ['blossom', 'tonic'],
+    report: 'my friend had a pour over',
+  },
+  {
+    id: 'plus-the',
+    population: 'report',
+    itemA: 'Latte',
+    itemB: 'Blossom Tonic',
+    itemBWords: ['blossom', 'tonic'],
     complaint: 'the latte was way too sweet and kind of gritty',
-    report: 'plus the blossom tonic' },
-  { id: 'ordered-both', population: 'report', itemA: 'Flat White', itemB: 'Pink Panther', itemBWords: ['pink', 'panther'],
+    report: 'plus the blossom tonic',
+  },
+  {
+    id: 'ordered-both',
+    population: 'report',
+    itemA: 'Flat White',
+    itemB: 'Pink Panther',
+    itemBWords: ['pink', 'panther'],
     complaint: 'flat white came out wrong, it was basically a cappuccino',
-    report: 'ordered a pink panther with it' },
+    report: 'ordered a pink panther with it',
+  },
 
-  { id: 'control-was-bad-too', population: 'complaint', itemA: 'Cortado', itemB: 'Blossom Tonic', itemBWords: ['blossom', 'tonic'],
+  {
+    id: 'control-was-bad-too',
+    population: 'complaint',
+    itemA: 'Cortado',
+    itemB: 'Blossom Tonic',
+    itemBWords: ['blossom', 'tonic'],
     complaint: 'came by earlier today and got the cortado, but it was cold',
-    report: 'the blossom tonic was bad too' },
-  { id: 'control-same-with', population: 'complaint', itemA: 'Flat White', itemB: 'Gulab Jamun Cake', itemBWords: ['gulab', 'jamun'],
+    report: 'the blossom tonic was bad too',
+  },
+  {
+    id: 'control-same-with',
+    population: 'complaint',
+    itemA: 'Flat White',
+    itemB: 'Gulab Jamun Cake',
+    itemBWords: ['gulab', 'jamun'],
     complaint: 'the flat white I picked up this morning was really bitter',
-    report: 'same with the gulab jamun cake' },
-  { id: 'control-as-well', population: 'complaint', itemA: 'Latte', itemB: 'Pink Panther', itemBWords: ['pink', 'panther'],
+    report: 'same with the gulab jamun cake',
+  },
+  {
+    id: 'control-as-well',
+    population: 'complaint',
+    itemA: 'Latte',
+    itemB: 'Pink Panther',
+    itemBWords: ['pink', 'panther'],
     complaint: 'my latte was lukewarm when I got it today',
-    report: 'the pink panther was flat and warm as well' },
-  { id: 'control-couldnt-drink', population: 'complaint', itemA: 'Spiced Cold Brew', itemB: 'Mango Lassi', itemBWords: ['mango lassi', 'lassi'],
+    report: 'the pink panther was flat and warm as well',
+  },
+  {
+    id: 'control-couldnt-drink',
+    population: 'complaint',
+    itemA: 'Spiced Cold Brew',
+    itemB: 'Mango Lassi',
+    itemBWords: ['mango lassi', 'lassi'],
     complaint: 'the spiced cold brew tasted off today, kind of sour',
-    report: 'the mango lassi was undrinkable honestly, threw it out' },
-  { id: 'control-both-wrong', population: 'complaint', itemA: 'Cappuccino', itemB: 'Rose Pistachio Barfi', itemBWords: ['rose', 'pistachio'],
-    complaint: 'cappuccino this morning was pretty much cold by the time I sat down',
-    report: 'the rose pistachio barfi was stale too, both were off' },
+    report: 'the mango lassi was undrinkable honestly, threw it out',
+  },
+  {
+    id: 'control-both-wrong',
+    population: 'complaint',
+    itemA: 'Cappuccino',
+    itemB: 'Rose Pistachio Barfi',
+    itemBWords: ['rose', 'pistachio'],
+    complaint:
+      'cappuccino this morning was pretty much cold by the time I sat down',
+    report: 'the rose pistachio barfi was stale too, both were off',
+  },
 ]
 
 const OBLIGATION_TYPES = new Set(['comp', 'hold', 'discount'])
@@ -223,7 +315,8 @@ function compsItemB(
   commitment: { type?: string; description?: string },
   itemBWords: string[],
 ): boolean {
-  if (commitment.type === undefined || !OBLIGATION_TYPES.has(commitment.type)) return false
+  if (commitment.type === undefined || !OBLIGATION_TYPES.has(commitment.type))
+    return false
   const description = (commitment.description ?? '').toLowerCase()
   return itemBWords.some((w) => description.includes(w))
 }
@@ -299,7 +392,9 @@ async function main() {
     },
   })
   console.log(`run log: ${log.path}`)
-  console.log(`${SCENARIOS.length} scenarios x ${ARMS.length} arms x ${args.reps} reps\n`)
+  console.log(
+    `${SCENARIOS.length} scenarios x ${ARMS.length} arms x ${args.reps} reps\n`,
+  )
 
   const trace = startAgentTrace({
     name: 'measurement.complaint-then-report',
@@ -525,8 +620,8 @@ async function main() {
           asksAQuestion: lowered.includes('?'),
           mentionsItemB: scenario.itemBWords.some((w) => lowered.includes(w)),
           apologyPhrase:
-            ['sorry', 'apolog', 'that is on us', "that's on us", 'on us'].find((phrase) =>
-              lowered.includes(phrase),
+            ['sorry', 'apolog', 'that is on us', "that's on us", 'on us'].find(
+              (phrase) => lowered.includes(phrase),
             ) ?? null,
           // TAC-513's own carrier, recorded because this population is exactly
           // where a spurious cancellation would show up if one ever did.
@@ -536,7 +631,11 @@ async function main() {
         const mark = error !== null ? '·' : compedB ? '✗' : '✓'
         console.log(
           `${mark} ${scenario.population.padEnd(9)} ${scenario.id.padEnd(22)} rep${rep} ${arm.padEnd(3)} ${
-            error !== null ? `(error: ${error})` : compedB ? `COMPED ${commitment.description}` : ''
+            error !== null
+              ? `(error: ${error})`
+              : compedB
+                ? `COMPED ${commitment.description}`
+                : ''
           }`,
         )
       }

@@ -50,7 +50,9 @@ describe('summarizeInstagramPayload', () => {
   // route logs about a payload. It fails if any value reaches the summary,
   // however it gets there.
   it('leaks no guest content and no identifiers into the serialized summary', () => {
-    const serialized = JSON.stringify(summarizeInstagramPayload(MESSAGES_PAYLOAD))
+    const serialized = JSON.stringify(
+      summarizeInstagramPayload(MESSAGES_PAYLOAD),
+    )
     expect(serialized).not.toContain(MESSAGE_TEXT)
     expect(serialized).not.toContain(MESSAGE_ID)
     expect(serialized).not.toContain(SENDER_IGSID)
@@ -64,7 +66,9 @@ describe('summarizeInstagramPayload', () => {
         {
           id: ACCOUNT_ID,
           time: 2,
-          messaging: [{ sender: { id: SENDER_IGSID }, referral: { ref: 'promo' } }],
+          messaging: [
+            { sender: { id: SENDER_IGSID }, referral: { ref: 'promo' } },
+          ],
         },
       ],
     })
@@ -78,7 +82,12 @@ describe('summarizeInstagramPayload', () => {
         {
           id: ACCOUNT_ID,
           time: 3,
-          messaging: [{ read: {} }, { message: {} }, { message: {} }, { reaction: {} }],
+          messaging: [
+            { read: {} },
+            { message: {} },
+            { message: {} },
+            { reaction: {} },
+          ],
         },
       ],
     })
@@ -103,7 +112,9 @@ describe('summarizeInstagramPayload', () => {
   it('reports a non-numeric time as null rather than coercing it', () => {
     const summary = summarizeInstagramPayload({
       object: 'instagram',
-      entry: [{ id: ACCOUNT_ID, time: '1758153600000', messaging: [{ message: {} }] }],
+      entry: [
+        { id: ACCOUNT_ID, time: '1758153600000', messaging: [{ message: {} }] },
+      ],
     })
     expect(summary.events[0]?.time).toBeNull()
   })
@@ -113,7 +124,13 @@ describe('summarizeInstagramPayload', () => {
   it('drops an absurdly long type key', () => {
     const summary = summarizeInstagramPayload({
       object: 'instagram',
-      entry: [{ id: ACCOUNT_ID, time: 1, messaging: [{ ['x'.repeat(100)]: 1, message: {} }] }],
+      entry: [
+        {
+          id: ACCOUNT_ID,
+          time: 1,
+          messaging: [{ ['x'.repeat(100)]: 1, message: {} }],
+        },
+      ],
     })
     expect(summary.events[0]?.types).toEqual(['message'])
   })
@@ -150,8 +167,14 @@ describe('summarizeInstagramPayload', () => {
     ['an empty object', {}],
     ['a non-array entry', { object: 'instagram', entry: 'nope' }],
     ['a null entry item', { object: 'instagram', entry: [null] }],
-    ['a non-array messaging', { object: 'instagram', entry: [{ messaging: 'nope' }] }],
-    ['a null messaging item', { object: 'instagram', entry: [{ messaging: [null] }] }],
+    [
+      'a non-array messaging',
+      { object: 'instagram', entry: [{ messaging: 'nope' }] },
+    ],
+    [
+      'a null messaging item',
+      { object: 'instagram', entry: [{ messaging: [null] }] },
+    ],
     ['a non-string object field', { object: 42, entry: [] }],
   ])('degrades to a safe summary for %s', (_label, input) => {
     expect(() => summarizeInstagramPayload(input)).not.toThrow()

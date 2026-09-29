@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { computeMessageStats, type MessageStatRow } from './compute-message-stats'
+import {
+  computeMessageStats,
+  type MessageStatRow,
+} from './compute-message-stats'
 
 const HOUR_MS = 60 * 60 * 1000
 const ZERO = new Date('2026-05-01T08:00:00Z')
 
-function at(offsetHours: number, direction: 'inbound' | 'outbound'): MessageStatRow {
-  return { direction, createdAt: new Date(ZERO.getTime() + offsetHours * HOUR_MS) }
+function at(
+  offsetHours: number,
+  direction: 'inbound' | 'outbound',
+): MessageStatRow {
+  return {
+    direction,
+    createdAt: new Date(ZERO.getTime() + offsetHours * HOUR_MS),
+  }
 }
 
 describe('computeMessageStats — counts', () => {
@@ -22,7 +31,11 @@ describe('computeMessageStats — counts', () => {
   })
 
   it('counts inbound + outbound separately', () => {
-    const r = computeMessageStats([at(0, 'outbound'), at(1, 'inbound'), at(2, 'outbound')])
+    const r = computeMessageStats([
+      at(0, 'outbound'),
+      at(1, 'inbound'),
+      at(2, 'outbound'),
+    ])
     expect(r.outboundCount).toBe(2)
     expect(r.inboundCount).toBe(1)
     expect(r.totalMessages).toBe(3)

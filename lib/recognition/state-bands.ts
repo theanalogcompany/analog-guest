@@ -18,7 +18,9 @@ export function isStateAtLeast(
   if (!min) return true
   const minRank = STATE_RANK[min as GuestState]
   if (minRank === undefined) {
-    console.warn(`[state-bands] unknown min_state "${min}" — treating as ineligible`)
+    console.warn(
+      `[state-bands] unknown min_state "${min}" — treating as ineligible`,
+    )
     return false
   }
   return STATE_RANK[current] >= minRank

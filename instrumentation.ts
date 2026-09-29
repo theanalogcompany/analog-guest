@@ -23,7 +23,8 @@ export async function register(): Promise<void> {
 
   try {
     const { registerOTel } = await import('@vercel/otel')
-    const { getLangfuseSpanProcessor } = await import('./lib/observability/span-processor')
+    const { getLangfuseSpanProcessor } =
+      await import('./lib/observability/span-processor')
 
     const processor = getLangfuseSpanProcessor()
     // null means observability is deliberately off — no keys, LANGFUSE_ENABLED

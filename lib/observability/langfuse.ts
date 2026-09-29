@@ -1,6 +1,9 @@
 import { LangfuseClient } from '@langfuse/client'
 import { LangfuseOtelSpanAttributes } from '@langfuse/core'
-import { type LangfuseSpan as SdkObservation, startObservation } from '@langfuse/tracing'
+import {
+  type LangfuseSpan as SdkObservation,
+  startObservation,
+} from '@langfuse/tracing'
 
 import {
   _resetSpanProcessorForTest,
@@ -165,7 +168,9 @@ export function toAgentUsage(input: {
 }): AgentUsage {
   const cacheRead = input.cachedInputTokens ?? 0
   const cacheWrite =
-    input.inputTokenDetails?.cacheWriteTokens ?? input.cacheCreationInputTokens ?? 0
+    input.inputTokenDetails?.cacheWriteTokens ??
+    input.cacheCreationInputTokens ??
+    0
 
   // Prefer the SDK's own breakdown. The subtraction is a fallback for a provider
   // that reports no details, and is clamped at 0 because a provider disagreeing
@@ -173,7 +178,9 @@ export function toAgentUsage(input: {
   // price - better to under-report input than to emit a nonsense figure.
   const uncachedInput =
     input.inputTokenDetails?.noCacheTokens ??
-    (input.inputTokens != null ? Math.max(0, input.inputTokens - cacheRead - cacheWrite) : null)
+    (input.inputTokens != null
+      ? Math.max(0, input.inputTokens - cacheRead - cacheWrite)
+      : null)
 
   const usage: AgentUsage = {}
   if (uncachedInput) usage.input = uncachedInput
@@ -229,7 +236,11 @@ function readCaptureContent(): boolean {
 // (when provided) is folded into the input object under a `content` key so it
 // renders next to the metadata input in the Langfuse UI. When off, content is
 // dropped.
-function buildSpanInput(input: unknown, content: unknown, captureContent: boolean): unknown {
+function buildSpanInput(
+  input: unknown,
+  content: unknown,
+  captureContent: boolean,
+): unknown {
   if (!captureContent || content === undefined) return input
   if (input === undefined) return { content }
   if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
@@ -271,7 +282,10 @@ function buildUpdateBody(
   return built
 }
 
-function wrapSpan(observation: SdkObservation, captureContent: boolean): AgentSpan {
+function wrapSpan(
+  observation: SdkObservation,
+  captureContent: boolean,
+): AgentSpan {
   return {
     get id() {
       return observation.id
@@ -285,7 +299,10 @@ function wrapSpan(observation: SdkObservation, captureContent: boolean): AgentSp
           captureContent,
         )
       } catch (e) {
-        console.warn('[observability] span.span failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.span failed',
+          e instanceof Error ? e.message : e,
+        )
         return NOOP_SPAN
       }
     },
@@ -314,7 +331,10 @@ function wrapSpan(observation: SdkObservation, captureContent: boolean): AgentSp
       try {
         observation.update(buildUpdateBody(body, captureContent))
       } catch (e) {
-        console.warn('[observability] span.update failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.update failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
     end(body) {
@@ -325,7 +345,10 @@ function wrapSpan(observation: SdkObservation, captureContent: boolean): AgentSp
         if (body) observation.update(buildUpdateBody(body, captureContent))
         observation.end()
       } catch (e) {
-        console.warn('[observability] span.end failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.end failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
   }
@@ -388,7 +411,9 @@ export function _resetLangfuseClientForTest(): void {
  * "trace unavailable" UI on null. No retry — the API route handler issues
  * fresh fetches per click, so transient failures self-heal on user retry.
  */
-export async function fetchTrace(traceId: string): Promise<TraceWithFullDetails | null> {
+export async function fetchTrace(
+  traceId: string,
+): Promise<TraceWithFullDetails | null> {
   const trimmed = traceId.trim()
   if (!trimmed) return null
   const client = getReadClient()
@@ -428,7 +453,10 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
     // callback-scoped, and this API hands a trace object back to straight-line
     // code across ~20 call sites. Setting the attribute directly is what keeps
     // the interface unchanged.
-    root.otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_SESSION_ID, opts.agentRunId)
+    root.otelSpan.setAttribute(
+      LangfuseOtelSpanAttributes.TRACE_SESSION_ID,
+      opts.agentRunId,
+    )
     root.otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_NAME, opts.name)
   } catch (e) {
     console.warn(
@@ -462,7 +490,10 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
           captureContent,
         )
       } catch (e) {
-        console.warn('[observability] trace.span failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] trace.span failed',
+          e instanceof Error ? e.message : e,
+        )
         return NOOP_SPAN
       }
     },
@@ -490,7 +521,10 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
       try {
         root.update(buildUpdateBody(body, captureContent))
       } catch (e) {
-        console.warn('[observability] trace.update failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] trace.update failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
     async flushAsync() {
@@ -501,7 +535,10 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
         }
         await processor.forceFlush()
       } catch (e) {
-        console.warn('[observability] flushAsync failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] flushAsync failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
   }

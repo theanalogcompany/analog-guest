@@ -47,15 +47,25 @@ import {
   type InstagramSendTarget,
   type ResolveInstagramTokenFn,
 } from '@/lib/messaging/instagram/send-target'
-import { instagramWindowState, loadLastGuestActionAt } from '@/lib/messaging/instagram/window'
+import {
+  instagramWindowState,
+  loadLastGuestActionAt,
+} from '@/lib/messaging/instagram/window'
+import { logger } from '@/lib/observability/logger'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
 /** Migration 006's unique constraint on messages.provider_message_id. */
-const PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT = 'messages_provider_message_id_unique'
+const PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT =
+  'messages_provider_message_id_unique'
 
 export type InstagramOperatorRefusal = {
-  errorCode: 'no_instagram_id' | 'over_byte_cap' | 'instagram_window_closed' | 'venue_misconfigured' | 'db_error'
+  errorCode:
+    | 'no_instagram_id'
+    | 'over_byte_cap'
+    | 'instagram_window_closed'
+    | 'venue_misconfigured'
+    | 'db_error'
   error: string
 }
 
@@ -68,7 +78,10 @@ export async function prepareInstagramOperatorSend(
   supabase: AdminSupabaseClient,
   input: { venueId: string; guestId: string; body: string; now: Date },
   resolveToken?: ResolveInstagramTokenFn,
-): Promise<{ ok: true; target: InstagramSendTarget } | ({ ok: false } & InstagramOperatorRefusal)> {
+): Promise<
+  | { ok: true; target: InstagramSendTarget }
+  | ({ ok: false } & InstagramOperatorRefusal)
+> {
   if (!fitsInstagramTextCap(input.body)) {
     return {
       ok: false,
@@ -85,11 +98,23 @@ export async function prepareInstagramOperatorSend(
   if (!target.ok) {
     switch (target.problem) {
       case 'guest_has_no_instagram_id':
-        return { ok: false, errorCode: 'no_instagram_id', error: 'This guest has no Instagram account on file.' }
+        return {
+          ok: false,
+          errorCode: 'no_instagram_id',
+          error: 'This guest has no Instagram account on file.',
+        }
       case 'venue_has_no_instagram_account':
-        return { ok: false, errorCode: 'venue_misconfigured', error: 'This venue has no Instagram account connected.' }
+        return {
+          ok: false,
+          errorCode: 'venue_misconfigured',
+          error: 'This venue has no Instagram account connected.',
+        }
       case 'token_missing':
-        return { ok: false, errorCode: 'venue_misconfigured', error: 'The Instagram access token is not set.' }
+        return {
+          ok: false,
+          errorCode: 'venue_misconfigured',
+          error: 'The Instagram access token is not set.',
+        }
       // The venue IS connected but its stored token could not be decrypted,
       // which is an encryption-key problem on our side rather than anything
       // the operator did wrong. Reconnecting replaces the stored credential
@@ -99,15 +124,27 @@ export async function prepareInstagramOperatorSend(
         return {
           ok: false,
           errorCode: 'venue_misconfigured',
-          error: "This venue's stored Instagram credential could not be read. Reconnecting Instagram replaces it.",
+          error:
+            "This venue's stored Instagram credential could not be read. Reconnecting Instagram replaces it.",
         }
       case 'lookup_failed':
-        return { ok: false, errorCode: 'db_error', error: target.error ?? 'Instagram send target lookup failed' }
+        return {
+          ok: false,
+          errorCode: 'db_error',
+          error: target.error ?? 'Instagram send target lookup failed',
+        }
     }
   }
 
-  const lastAction = await loadLastGuestActionAt(supabase, input.venueId, input.guestId)
-  if (lastAction.ok && !instagramWindowState(lastAction.value, input.now).open) {
+  const lastAction = await loadLastGuestActionAt(
+    supabase,
+    input.venueId,
+    input.guestId,
+  )
+  if (
+    lastAction.ok &&
+    !instagramWindowState(lastAction.value, input.now).open
+  ) {
     return {
       ok: false,
       errorCode: 'instagram_window_closed',
@@ -116,12 +153,18 @@ export async function prepareInstagramOperatorSend(
     }
   }
   if (!lastAction.ok) {
-    console.warn('[operator] instagram window unreadable; sending and letting Meta decide', { error: lastAction.error })
+    logger.warn(
+      '[operator] instagram window unreadable; sending and letting Meta decide',
+      { error: lastAction.error },
+    )
   }
   return { ok: true, target: target.target }
 }
 
-export function sendInstagramOperatorText(target: InstagramSendTarget, text: string): Promise<InstagramSendResult> {
+export function sendInstagramOperatorText(
+  target: InstagramSendTarget,
+  text: string,
+): Promise<InstagramSendResult> {
   return sendInstagramText({ ...target, text, fetchImpl: fetch })
 }
 
@@ -142,10 +185,13 @@ export async function restoreCardAfterRefusedSend(
     .is('provider_message_id', null)
     .select('id')
   if (error || !data || data.length !== 1) {
-    console.error('[operator] could not put the Instagram card back in the queue after a refused send', {
-      messageId: input.messageId,
-      error: error?.message ?? `matched ${data?.length ?? 0}`,
-    })
+    logger.error(
+      '[operator] could not put the Instagram card back in the queue after a refused send',
+      {
+        messageId: input.messageId,
+        error: error?.message ?? `matched ${data?.length ?? 0}`,
+      },
+    )
     return false
   }
   return true
@@ -159,14 +205,22 @@ export async function restoreCardAfterRefusedSend(
  */
 export async function settleFailedInstagramOperatorSend(
   supabase: AdminSupabaseClient,
-  input: { messageId: string; flippedTo: string; sent: Extract<InstagramSendResult, { ok: false }> },
+  input: {
+    messageId: string
+    flippedTo: string
+    sent: Extract<InstagramSendResult, { ok: false }>
+  },
 ): Promise<string> {
   const { kind } = input.sent
   if (sendResultOutcomeUnknown(input.sent)) {
     return `Instagram didn't confirm this send (${kind}). Check the thread before sending again.`
   }
-  const restored = await restoreCardAfterRefusedSend(supabase, { messageId: input.messageId, flippedTo: input.flippedTo })
-  if (restored) return `Instagram refused this send (${kind}). The card is back in the queue.`
+  const restored = await restoreCardAfterRefusedSend(supabase, {
+    messageId: input.messageId,
+    flippedTo: input.flippedTo,
+  })
+  if (restored)
+    return `Instagram refused this send (${kind}). The card is back in the queue.`
   // The likeliest reason the card can't go back is migration 041: a message
   // the guest sent while this was in flight queued a card into the same slot.
   // The operator's text is out of the queue, so say what to do about it.
@@ -180,17 +234,30 @@ export async function settleFailedInstagramOperatorSend(
  */
 export async function stampInstagramOperatorSend(
   supabase: AdminSupabaseClient,
-  input: { messageId: string; venueId: string; guestId: string; mid: string; sentAt: string },
+  input: {
+    messageId: string
+    venueId: string
+    guestId: string
+    mid: string
+    sentAt: string
+  },
 ): Promise<{ ok: true; folded: boolean } | { ok: false; error: string }> {
   const stamp = () =>
     supabase
       .from('messages')
-      .update({ status: 'sent', sent_at: input.sentAt, provider_message_id: input.mid })
+      .update({
+        status: 'sent',
+        sent_at: input.sentAt,
+        provider_message_id: input.mid,
+      })
       .eq('id', input.messageId)
 
   const first = await stamp()
   if (!first.error) return { ok: true, folded: false }
-  if (first.error.code !== '23505' || !first.error.message.includes(PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT)) {
+  if (
+    first.error.code !== '23505' ||
+    !first.error.message.includes(PROVIDER_MESSAGE_ID_UNIQUE_CONSTRAINT)
+  ) {
     return { ok: false, error: first.error.message }
   }
 
@@ -205,7 +272,11 @@ export async function stampInstagramOperatorSend(
     .neq('id', input.messageId)
     .maybeSingle()
   if (echoError) return { ok: false, error: echoError.message }
-  if (!echo) return { ok: false, error: 'provider_message_id collided with no echo row to fold in' }
+  if (!echo)
+    return {
+      ok: false,
+      error: 'provider_message_id collided with no echo row to fold in',
+    }
 
   // Copy first, so the delete loses nothing the reply check reads.
   if (echo.provider_sent_at !== null) {
@@ -213,7 +284,11 @@ export async function stampInstagramOperatorSend(
       .from('messages')
       .update({ provider_sent_at: echo.provider_sent_at })
       .eq('id', input.messageId)
-    if (copyError) return { ok: false, error: `copying the echo's provider_sent_at failed: ${copyError.message}` }
+    if (copyError)
+      return {
+        ok: false,
+        error: `copying the echo's provider_sent_at failed: ${copyError.message}`,
+      }
   }
   const { error: deleteError } = await supabase
     .from('messages')
@@ -221,7 +296,11 @@ export async function stampInstagramOperatorSend(
     .eq('id', echo.id)
     .eq('provider_message_id', input.mid)
     .is('generated_by', null)
-  if (deleteError) return { ok: false, error: `deleting the echo row failed: ${deleteError.message}` }
+  if (deleteError)
+    return {
+      ok: false,
+      error: `deleting the echo row failed: ${deleteError.message}`,
+    }
 
   const second = await stamp()
   if (second.error) return { ok: false, error: second.error.message }

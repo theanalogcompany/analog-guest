@@ -5,7 +5,10 @@ import { formatWithOptions } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createInstagramDbFake, type FakeRow } from '@/lib/messaging/instagram/testing/db-fake'
+import {
+  createInstagramDbFake,
+  type FakeRow,
+} from '@/lib/messaging/instagram/testing/db-fake'
 
 import { GET, POST } from './route'
 
@@ -22,7 +25,9 @@ const mocks = vi.hoisted(() => ({
   scheduleScanArrival: vi.fn(),
   markInboundSeen: vi.fn(),
 }))
-vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: mocks.createAdminClient,
+}))
 vi.mock('@/lib/agent', () => ({ handleInbound: mocks.handleInbound }))
 vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
 // TAC-479. The refresh itself is replaced by a spy, so these tests see what
@@ -33,11 +38,18 @@ vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }))
 // emit is a spy, so a route that stopped asking, or asked with the wrong
 // fields, fails here. Partial, so nothing else this module exports is stubbed.
 vi.mock('@/lib/analytics/posthog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/analytics/posthog')>()
-  return { ...actual, captureInstagramScanUnattributed: mocks.captureScanUnattributed }
+  const actual =
+    await importOriginal<typeof import('@/lib/analytics/posthog')>()
+  return {
+    ...actual,
+    captureInstagramScanUnattributed: mocks.captureScanUnattributed,
+  }
 })
 vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/refresh-profile')>()
+  const actual =
+    await importOriginal<
+      typeof import('@/lib/messaging/instagram/refresh-profile')
+    >()
   return { ...actual, refreshInstagramProfile: mocks.refreshInstagramProfile }
 })
 // TAC-536: the write is a spy, so a test sees exactly what the route schedules
@@ -50,11 +62,13 @@ vi.mock('@/lib/messaging/instagram/refresh-profile', async (importOriginal) => {
 // bare scan or a shut gate fails here rather than in mark-seen's own tests —
 // which cannot see the route's branching at all.
 vi.mock('@/lib/messaging/instagram/mark-seen', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/mark-seen')>()
+  const actual =
+    await importOriginal<typeof import('@/lib/messaging/instagram/mark-seen')>()
   return { ...actual, markInboundSeen: mocks.markInboundSeen }
 })
 vi.mock('@/lib/agent/scan-arrival-store', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/agent/scan-arrival-store')>()
+  const actual =
+    await importOriginal<typeof import('@/lib/agent/scan-arrival-store')>()
   return { ...actual, scheduleScanArrival: mocks.scheduleScanArrival }
 })
 
@@ -70,7 +84,10 @@ vi.mock('@/lib/agent/scan-arrival-store', async (importOriginal) => {
 // the shut-gate coverage at exactly the moment it started mattering.
 const gate = vi.hoisted(() => ({ open: null as boolean | null }))
 vi.mock('@/lib/messaging/instagram/agent-gate', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/messaging/instagram/agent-gate')>()
+  const actual =
+    await importOriginal<
+      typeof import('@/lib/messaging/instagram/agent-gate')
+    >()
   return {
     ...actual,
     resolveAgentHandoff: (
@@ -144,7 +161,12 @@ function loggedText(): string {
   return logged
     .map((args) =>
       formatWithOptions(
-        { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity },
+        {
+          depth: Infinity,
+          maxArrayLength: Infinity,
+          maxStringLength: Infinity,
+          breakLength: Infinity,
+        },
         ...args,
       ),
     )
@@ -164,16 +186,22 @@ function findEntry(event: string): Record<string, unknown> | undefined {
 
 function getRequest(params: Record<string, string>): Request {
   const url = new URL(ROUTE_URL)
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+  for (const [key, value] of Object.entries(params))
+    url.searchParams.set(key, value)
   return new Request(url)
 }
 
-function postRequest(body: string, headers: Record<string, string> = {}): Request {
+function postRequest(
+  body: string,
+  headers: Record<string, string> = {},
+): Request {
   return new Request(ROUTE_URL, { method: 'POST', body, headers })
 }
 
 function signed(body: string, secret = APP_SECRET): Record<string, string> {
-  return { 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}` }
+  return {
+    'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`,
+  }
 }
 
 function restore(name: string, original: string | undefined): void {
@@ -193,7 +221,10 @@ beforeEach(() => {
   mocks.createAdminClient.mockReset()
   mocks.handleInbound.mockReset()
   mocks.scheduleScanArrival.mockReset()
-  mocks.scheduleScanArrival.mockResolvedValue({ ok: true, data: 'scan-arrival-1' })
+  mocks.scheduleScanArrival.mockResolvedValue({
+    ok: true,
+    data: 'scan-arrival-1',
+  })
   mocks.waitUntil.mockReset()
   mocks.refreshInstagramProfile.mockReset()
   mocks.refreshInstagramProfile.mockResolvedValue({ status: 'not_due' })
@@ -217,7 +248,11 @@ describe('GET /api/webhooks/instagram', () => {
   it('returns the challenge verbatim as plain text', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
     const res = await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '1158201444' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': TOKEN,
+        'hub.challenge': '1158201444',
+      }),
     )
     expect(res.status).toBe(200)
     // toBe, never toContain: a JSON wrapper, surrounding quotes or a trailing
@@ -229,7 +264,11 @@ describe('GET /api/webhooks/instagram', () => {
   it('refuses a wrong verify token with an empty body', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
     const res = await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': WRONG_TOKEN, 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': WRONG_TOKEN,
+        'hub.challenge': 'abc',
+      }),
     )
     expect(res.status).toBe(403)
     expect(await res.text()).toBe('')
@@ -237,20 +276,28 @@ describe('GET /api/webhooks/instagram', () => {
 
   it('refuses a missing verify token', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
-    const res = await GET(getRequest({ 'hub.mode': 'subscribe', 'hub.challenge': 'abc' }))
+    const res = await GET(
+      getRequest({ 'hub.mode': 'subscribe', 'hub.challenge': 'abc' }),
+    )
     expect(res.status).toBe(403)
   })
 
   it('refuses a missing hub.mode', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
-    const res = await GET(getRequest({ 'hub.verify_token': TOKEN, 'hub.challenge': 'abc' }))
+    const res = await GET(
+      getRequest({ 'hub.verify_token': TOKEN, 'hub.challenge': 'abc' }),
+    )
     expect(res.status).toBe(403)
   })
 
   it('refuses a hub.mode that is not subscribe', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
     const res = await GET(
-      getRequest({ 'hub.mode': 'unsubscribe', 'hub.verify_token': TOKEN, 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'unsubscribe',
+        'hub.verify_token': TOKEN,
+        'hub.challenge': 'abc',
+      }),
     )
     expect(res.status).toBe(403)
   })
@@ -258,7 +305,11 @@ describe('GET /api/webhooks/instagram', () => {
   it('refuses an empty challenge', async () => {
     process.env.META_VERIFY_TOKEN = TOKEN
     const res = await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': '' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': TOKEN,
+        'hub.challenge': '',
+      }),
     )
     expect(res.status).toBe(403)
   })
@@ -268,12 +319,20 @@ describe('GET /api/webhooks/instagram', () => {
   it('refuses every handshake when META_VERIFY_TOKEN is unset', async () => {
     delete process.env.META_VERIFY_TOKEN
     const withEmpty = await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': '', 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': '',
+        'hub.challenge': 'abc',
+      }),
     )
     expect(withEmpty.status).toBe(403)
 
     const withGuess = await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': TOKEN,
+        'hub.challenge': 'abc',
+      }),
     )
     expect(withGuess.status).toBe(403)
     expect(findEntry('instagram_verify_misconfigured')).toBeDefined()
@@ -286,13 +345,21 @@ describe('GET /api/webhooks/instagram', () => {
     process.env.META_VERIFY_TOKEN = TOKEN
 
     await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': TOKEN, 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': TOKEN,
+        'hub.challenge': 'abc',
+      }),
     )
     expect(loggedText()).not.toContain(TOKEN)
 
     logged = []
     await GET(
-      getRequest({ 'hub.mode': 'subscribe', 'hub.verify_token': WRONG_TOKEN, 'hub.challenge': 'abc' }),
+      getRequest({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': WRONG_TOKEN,
+        'hub.challenge': 'abc',
+      }),
     )
     expect(loggedText()).not.toContain(WRONG_TOKEN)
     expect(loggedText()).not.toContain(TOKEN)
@@ -325,7 +392,10 @@ describe('POST /api/webhooks/instagram', () => {
     const body = JSON.stringify(PAYLOAD, null, 2)
     const res = await POST(postRequest(body, signed(body)))
     expect(res.status).toBe(200)
-    expect(findEntry('instagram_event')).toMatchObject({ object: 'instagram', entryCount: 1 })
+    expect(findEntry('instagram_event')).toMatchObject({
+      object: 'instagram',
+      entryCount: 1,
+    })
   })
 
   // AC 2. "Not processed" means nothing derived from the body reaches a log
@@ -337,7 +407,9 @@ describe('POST /api/webhooks/instagram', () => {
     const res = await POST(postRequest(`${body} `, signed(body)))
     expect(res.status).toBe(403)
     expect(await res.text()).toBe('')
-    expect(findEntry('instagram_signature_rejected')).toMatchObject({ reason: 'mismatch' })
+    expect(findEntry('instagram_signature_rejected')).toMatchObject({
+      reason: 'mismatch',
+    })
     expect(findEntry('instagram_event')).toBeUndefined()
     expect(findEntry('instagram_invalid_json')).toBeUndefined()
     // Handles nothing includes saving nothing: the store is never opened.
@@ -352,7 +424,9 @@ describe('POST /api/webhooks/instagram', () => {
   // the parse-failure path's 200.
   it('refuses a bad signature on a body that would not parse', async () => {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
-    const res = await POST(postRequest('{not json', signed('{"object":"instagram"}')))
+    const res = await POST(
+      postRequest('{not json', signed('{"object":"instagram"}')),
+    )
     expect(res.status).toBe(403)
     expect(findEntry('instagram_invalid_json')).toBeUndefined()
   })
@@ -363,7 +437,9 @@ describe('POST /api/webhooks/instagram', () => {
     const res = await POST(postRequest(JSON.stringify(PAYLOAD)))
     expect(res.status).toBe(403)
     expect(await res.text()).toBe('')
-    expect(findEntry('instagram_signature_rejected')).toMatchObject({ reason: 'missing_header' })
+    expect(findEntry('instagram_signature_rejected')).toMatchObject({
+      reason: 'missing_header',
+    })
     expect(findEntry('instagram_event')).toBeUndefined()
   })
 
@@ -373,7 +449,9 @@ describe('POST /api/webhooks/instagram', () => {
     const bare = createHmac('sha256', APP_SECRET).update(body).digest('hex')
     const res = await POST(postRequest(body, { 'x-hub-signature-256': bare }))
     expect(res.status).toBe(403)
-    expect(findEntry('instagram_signature_rejected')).toMatchObject({ reason: 'malformed_header' })
+    expect(findEntry('instagram_signature_rejected')).toMatchObject({
+      reason: 'malformed_header',
+    })
   })
 
   // AC 4, the trap. HMAC accepts an empty key and anyone can compute a
@@ -382,16 +460,19 @@ describe('POST /api/webhooks/instagram', () => {
   it.each([
     ['unset', undefined],
     ['empty', ''],
-  ])('refuses every delivery when INSTAGRAM_APP_SECRET is %s, even one signed with an empty key', async (_, value) => {
-    if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
-    else process.env.INSTAGRAM_APP_SECRET = value
-    const body = JSON.stringify(PAYLOAD)
+  ])(
+    'refuses every delivery when INSTAGRAM_APP_SECRET is %s, even one signed with an empty key',
+    async (_, value) => {
+      if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
+      else process.env.INSTAGRAM_APP_SECRET = value
+      const body = JSON.stringify(PAYLOAD)
 
-    const res = await POST(postRequest(body, signed(body, '')))
-    expect(res.status).toBe(403)
-    expect(await res.text()).toBe('')
-    expect(findEntry('instagram_event')).toBeUndefined()
-  })
+      const res = await POST(postRequest(body, signed(body, '')))
+      expect(res.status).toBe(403)
+      expect(await res.text()).toBe('')
+      expect(findEntry('instagram_event')).toBeUndefined()
+    },
+  )
 
   // The route's own guard, distinct from the verifier's. The verifier would
   // refuse an empty secret anyway; the route's job is to say it LOUDLY, at
@@ -407,34 +488,43 @@ describe('POST /api/webhooks/instagram', () => {
   it.each([
     ['unset', undefined],
     ['empty', ''],
-  ])('reports a %s secret as misconfiguration, at error level, not as a rejection', async (_, value) => {
-    if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
-    else process.env.INSTAGRAM_APP_SECRET = value
-    const body = JSON.stringify(PAYLOAD)
-    await POST(postRequest(body, signed(body)))
+  ])(
+    'reports a %s secret as misconfiguration, at error level, not as a rejection',
+    async (_, value) => {
+      if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
+      else process.env.INSTAGRAM_APP_SECRET = value
+      const body = JSON.stringify(PAYLOAD)
+      await POST(postRequest(body, signed(body)))
 
-    expect(console.error).toHaveBeenCalledWith(
-      expect.any(String),
-      { event: 'instagram_signature_misconfigured' },
-    )
-    expect(findEntry('instagram_signature_rejected')).toBeUndefined()
-  })
+      expect(console.error).toHaveBeenCalledWith(expect.any(String), {
+        event: 'instagram_signature_misconfigured',
+      })
+      expect(findEntry('instagram_signature_rejected')).toBeUndefined()
+    },
+  )
 
   // Decided before the body is touched. A request whose body cannot even be
   // read is refused rather than reaching the read-failure path's 200.
   it.each([
     ['unset', undefined],
     ['empty', ''],
-  ])('refuses without reading the body when the secret is %s', async (_, value) => {
-    if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
-    else process.env.INSTAGRAM_APP_SECRET = value
-    const text = vi.fn(() => Promise.reject(new Error('stream aborted')))
-    const unread = { url: ROUTE_URL, headers: new Headers(), text } as unknown as Request
+  ])(
+    'refuses without reading the body when the secret is %s',
+    async (_, value) => {
+      if (value === undefined) delete process.env.INSTAGRAM_APP_SECRET
+      else process.env.INSTAGRAM_APP_SECRET = value
+      const text = vi.fn(() => Promise.reject(new Error('stream aborted')))
+      const unread = {
+        url: ROUTE_URL,
+        headers: new Headers(),
+        text,
+      } as unknown as Request
 
-    const res = await POST(unread)
-    expect(res.status).toBe(403)
-    expect(text).not.toHaveBeenCalled()
-  })
+      const res = await POST(unread)
+      expect(res.status).toBe(403)
+      expect(text).not.toHaveBeenCalled()
+    },
+  )
 
   // Once the signature is trusted, our digest of a stranger's body IS a valid
   // signature for that body. Neither it nor the digest the caller sent may
@@ -443,9 +533,15 @@ describe('POST /api/webhooks/instagram', () => {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
     const forgedBody = JSON.stringify({ object: 'instagram', entry: [] })
     const sentDigest = 'ab'.repeat(32)
-    const ourDigest = createHmac('sha256', APP_SECRET).update(forgedBody).digest('hex')
+    const ourDigest = createHmac('sha256', APP_SECRET)
+      .update(forgedBody)
+      .digest('hex')
 
-    await POST(postRequest(forgedBody, { 'x-hub-signature-256': `sha256=${sentDigest}` }))
+    await POST(
+      postRequest(forgedBody, {
+        'x-hub-signature-256': `sha256=${sentDigest}`,
+      }),
+    )
     expect(findEntry('instagram_signature_rejected')).toBeDefined()
     expect(loggedText()).not.toContain(ourDigest)
     expect(loggedText()).not.toContain(sentDigest)
@@ -466,7 +562,12 @@ describe('POST /api/webhooks/instagram', () => {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
     const body = JSON.stringify(PAYLOAD)
 
-    await POST(postRequest(`${body} `, { ...signed(body), 'user-agent': 'test-agent/1.0' }))
+    await POST(
+      postRequest(`${body} `, {
+        ...signed(body),
+        'user-agent': 'test-agent/1.0',
+      }),
+    )
     expect(findEntry('instagram_signature_rejected')).toEqual({
       event: 'instagram_signature_rejected',
       reason: 'mismatch',
@@ -474,8 +575,15 @@ describe('POST /api/webhooks/instagram', () => {
     })
 
     logged = []
-    await POST(postRequest(`${body} `, { ...signed(body), 'user-agent': 'x'.repeat(5000) }))
-    expect(findEntry('instagram_signature_rejected')?.userAgent).toBe('x'.repeat(128))
+    await POST(
+      postRequest(`${body} `, {
+        ...signed(body),
+        'user-agent': 'x'.repeat(5000),
+      }),
+    )
+    expect(findEntry('instagram_signature_rejected')?.userAgent).toBe(
+      'x'.repeat(128),
+    )
 
     logged = []
     await POST(postRequest(`${body} `, signed(body)))
@@ -500,7 +608,8 @@ describe('POST /api/webhooks/instagram', () => {
     expect(findEntry('instagram_raw_inbound')).toBeUndefined()
     for (const args of logged) {
       const payload = args[1]
-      if (typeof payload === 'object' && payload !== null) expect(payload).not.toHaveProperty('raw')
+      if (typeof payload === 'object' && payload !== null)
+        expect(payload).not.toHaveProperty('raw')
     }
     const text = loggedText()
     expect(text).not.toContain(MESSAGE_TEXT)
@@ -591,28 +700,42 @@ const FIXTURES = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
 // The replacement IDs in the fixtures (fixtures/README.md).
 const FIXTURE_ACCOUNT_ID = '17841400000000001'
 const FIXTURE_GUEST_IGSID = '1000000000000001'
-const FIXTURE_VENUE: FakeRow = { id: 'venue-1', instagram_account_id: FIXTURE_ACCOUNT_ID }
-const FIXTURE_GUEST: FakeRow = { id: 'guest-1', venue_id: 'venue-1', instagram_scoped_id: FIXTURE_GUEST_IGSID }
+const FIXTURE_VENUE: FakeRow = {
+  id: 'venue-1',
+  instagram_account_id: FIXTURE_ACCOUNT_ID,
+}
+const FIXTURE_GUEST: FakeRow = {
+  id: 'guest-1',
+  venue_id: 'venue-1',
+  instagram_scoped_id: FIXTURE_GUEST_IGSID,
+}
 
 describe('POST /api/webhooks/instagram with recorded Meta payloads', () => {
-
   // Venue mapped and guest known, so each delivery goes all the way through
   // its save path and logs its outcome line: the lines the leak check must
   // cover as well as the shape line.
-  it.each(['message', 'echo', 'read', 'postback-referral'])('verifies and acknowledges the recorded %s delivery', async (name) => {
-    process.env.INSTAGRAM_APP_SECRET = APP_SECRET
-    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
-    const body = readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
+  it.each(['message', 'echo', 'read', 'postback-referral'])(
+    'verifies and acknowledges the recorded %s delivery',
+    async (name) => {
+      process.env.INSTAGRAM_APP_SECRET = APP_SECRET
+      useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+      const body = readFileSync(join(FIXTURES, `${name}.json`), 'utf8')
 
-    const res = await POST(postRequest(body, signed(body)))
-    expect(res.status).toBe(200)
-    expect(findEntry('instagram_event')).toMatchObject({ object: 'instagram', entryCount: 1 })
+      const res = await POST(postRequest(body, signed(body)))
+      expect(res.status).toBe(200)
+      expect(findEntry('instagram_event')).toMatchObject({
+        object: 'instagram',
+        entryCount: 1,
+      })
 
-    const values = [...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g)].map((m) => m[1] ?? '')
-    expect(values.length).toBeGreaterThan(0)
-    const text = loggedText()
-    for (const value of values) expect(text).not.toContain(value)
-  })
+      const values = [
+        ...body.matchAll(/"(?:id|mid|text|ref|title|payload)":"([^"]+)"/g),
+      ].map((m) => m[1] ?? '')
+      expect(values.length).toBeGreaterThan(0)
+      const text = loggedText()
+      for (const value of values) expect(text).not.toContain(value)
+    },
+  )
 })
 
 // TAC-468. The handler's own tests cover what each kind writes; these cover
@@ -643,8 +766,12 @@ describe('POST /api/webhooks/instagram saving events', () => {
       const res = await post(recorded(name))
 
       expect(res.status).toBe(200)
-      expect(db.inserts('messages')).toMatchObject([{ channel: 'instagram', direction: 'inbound' }])
-      expect(findEntry('instagram_event_persisted')).toMatchObject({ guestCreated: true })
+      expect(db.inserts('messages')).toMatchObject([
+        { channel: 'instagram', direction: 'inbound' },
+      ])
+      expect(findEntry('instagram_event_persisted')).toMatchObject({
+        guestCreated: true,
+      })
       expect(mocks.handleInbound).not.toHaveBeenCalled()
       // TAC-479's profile refresh, plus TAC-523's ledger write. Both are
       // background work and neither is behind the agent gate.
@@ -670,10 +797,13 @@ describe('POST /api/webhooks/instagram saving events', () => {
       // Tied to the inbound it is about; without that the count is a number
       // with nothing behind it. Cross-checked against the id the handler's own
       // saved-event line reported, rather than against the fake's internals.
-      const savedMessageId = (findEntry('instagram_event_persisted') as { messageId: string })
-        .messageId
+      const savedMessageId = (
+        findEntry('instagram_event_persisted') as { messageId: string }
+      ).messageId
       expect(savedMessageId).toBeTruthy()
-      expect(db.inserts('inbound_turn_outcomes')[0].inbound_message_id).toBe(savedMessageId)
+      expect(db.inserts('inbound_turn_outcomes')[0].inbound_message_id).toBe(
+        savedMessageId,
+      )
     },
   )
 
@@ -700,7 +830,13 @@ describe('POST /api/webhooks/instagram saving events', () => {
   it('logs an unhandled field and acknowledges it', async () => {
     const body = JSON.stringify({
       object: 'instagram',
-      entry: [{ id: FIXTURE_ACCOUNT_ID, time: 1, changes: [{ field: 'comments', value: { text: 'nice spot' } }] }],
+      entry: [
+        {
+          id: FIXTURE_ACCOUNT_ID,
+          time: 1,
+          changes: [{ field: 'comments', value: { text: 'nice spot' } }],
+        },
+      ],
     })
     const res = await post(body)
 
@@ -715,11 +851,17 @@ describe('POST /api/webhooks/instagram saving events', () => {
 
   it('acknowledges a delivery whose save fails', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
-    db.failNext('messages', 'insert', { code: '08006', message: 'connection failure' })
+    db.failNext('messages', 'insert', {
+      code: '08006',
+      message: 'connection failure',
+    })
     const res = await post(recorded('message'))
 
     expect(res.status).toBe(200)
-    expect(findEntry('instagram_event_persist_failed')).toMatchObject({ stage: 'message_insert', code: '08006' })
+    expect(findEntry('instagram_event_persist_failed')).toMatchObject({
+      stage: 'message_insert',
+      code: '08006',
+    })
 
     // TAC-523: a guest's real message reached us and was not filed. That is the
     // single most important row this table holds, and before the ledger it was
@@ -727,7 +869,12 @@ describe('POST /api/webhooks/instagram saving events', () => {
     // assertion and this one did not; code review caught the asymmetry.
     await flushMicrotasks()
     expect(db.inserts('inbound_turn_outcomes')).toMatchObject([
-      { layer: 'webhook', outcome: 'not_run', reason: 'event_not_persisted', channel: 'instagram' },
+      {
+        layer: 'webhook',
+        outcome: 'not_run',
+        reason: 'event_not_persisted',
+        channel: 'instagram',
+      },
     ])
   })
 
@@ -791,15 +938,26 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
     },
   )
 
-  it.each(['echo', 'read'])('never hands the recorded %s to the agent', async (name) => {
-    gate.open = true
-    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
-    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: name === 'read' ? [echoRow] : [] })
+  it.each(['echo', 'read'])(
+    'never hands the recorded %s to the agent',
+    async (name) => {
+      gate.open = true
+      const echoRow: FakeRow = {
+        id: 'msg-echo',
+        venue_id: 'venue-1',
+        guest_id: 'guest-1',
+      }
+      useDb({
+        venues: [FIXTURE_VENUE],
+        guests: [FIXTURE_GUEST],
+        messages: name === 'read' ? [echoRow] : [],
+      })
 
-    await post(recorded(name))
+      await post(recorded(name))
 
-    expect(mocks.handleInbound).not.toHaveBeenCalled()
-  })
+      expect(mocks.handleInbound).not.toHaveBeenCalled()
+    },
+  )
 
   // TAC-473 changed what an echo costs: it is still never handed to the agent
   // and still never refreshes a profile, but it now hands ONE job to
@@ -819,8 +977,16 @@ describe('POST /api/webhooks/instagram with the agent gate open', () => {
 
   it('hands a read receipt no jobs at all', async () => {
     gate.open = true
-    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
-    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: [echoRow] })
+    const echoRow: FakeRow = {
+      id: 'msg-echo',
+      venue_id: 'venue-1',
+      guest_id: 'guest-1',
+    }
+    useDb({
+      venues: [FIXTURE_VENUE],
+      guests: [FIXTURE_GUEST],
+      messages: [echoRow],
+    })
 
     await post(recorded('read'))
 
@@ -887,24 +1053,38 @@ describe('POST /api/webhooks/instagram refreshing the guest profile', () => {
       expect(res.status).toBe(200)
       const [guest] = db.tables.guests
       expect(mocks.refreshInstagramProfile).toHaveBeenCalledTimes(1)
-      expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, { guestId: guest?.id, venueId: 'venue-1' })
+      expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, {
+        guestId: guest?.id,
+        venueId: 'venue-1',
+      })
       expect(mocks.waitUntil).toHaveBeenCalledWith(neverFinishes)
     },
     2000,
   )
 
-  it.each(['echo', 'read'])('does not refresh anyone for a recorded %s', async (name) => {
-    const echoRow: FakeRow = { id: 'msg-echo', venue_id: 'venue-1', guest_id: 'guest-1' }
-    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST], messages: name === 'read' ? [echoRow] : [] })
+  it.each(['echo', 'read'])(
+    'does not refresh anyone for a recorded %s',
+    async (name) => {
+      const echoRow: FakeRow = {
+        id: 'msg-echo',
+        venue_id: 'venue-1',
+        guest_id: 'guest-1',
+      }
+      useDb({
+        venues: [FIXTURE_VENUE],
+        guests: [FIXTURE_GUEST],
+        messages: name === 'read' ? [echoRow] : [],
+      })
 
-    await post(recorded(name))
+      await post(recorded(name))
 
-    // TAC-473: an echo now hands ONE job to waitUntil (external-card
-    // resolution), so a blanket `waitUntil` assertion here would be about that
-    // job rather than about the refresh. The refresh mock is what this test is
-    // named for and is the only thing it should speak to.
-    expect(mocks.refreshInstagramProfile).not.toHaveBeenCalled()
-  })
+      // TAC-473: an echo now hands ONE job to waitUntil (external-card
+      // resolution), so a blanket `waitUntil` assertion here would be about that
+      // job rather than about the refresh. The refresh mock is what this test is
+      // named for and is the only thing it should speak to.
+      expect(mocks.refreshInstagramProfile).not.toHaveBeenCalled()
+    },
+  )
 
   it('does not refresh again for a redelivered message', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
@@ -919,34 +1099,53 @@ describe('POST /api/webhooks/instagram refreshing the guest profile', () => {
   it('refreshes a guest once however many of their messages a delivery carries', async () => {
     useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
 
-    await post(messages([FIXTURE_GUEST_IGSID, 'm-1'], [FIXTURE_GUEST_IGSID, 'm-2'], [FIXTURE_GUEST_IGSID, 'm-3']))
+    await post(
+      messages(
+        [FIXTURE_GUEST_IGSID, 'm-1'],
+        [FIXTURE_GUEST_IGSID, 'm-2'],
+        [FIXTURE_GUEST_IGSID, 'm-3'],
+      ),
+    )
 
     expect(db.inserts('messages')).toHaveLength(3)
     expect(mocks.refreshInstagramProfile).toHaveBeenCalledTimes(1)
-    expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, { guestId: 'guest-1', venueId: 'venue-1' })
+    expect(mocks.refreshInstagramProfile).toHaveBeenCalledWith(db.client, {
+      guestId: 'guest-1',
+      venueId: 'venue-1',
+    })
   })
 
   // 15 and 16 digits have both been seen. Nothing here may assume a width.
   it('refreshes each guest in a delivery, whatever the length of their scoped ID', async () => {
-    const shortIdGuest: FakeRow = { id: 'guest-2', venue_id: 'venue-1', instagram_scoped_id: '100000000000002' }
+    const shortIdGuest: FakeRow = {
+      id: 'guest-2',
+      venue_id: 'venue-1',
+      instagram_scoped_id: '100000000000002',
+    }
     useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST, shortIdGuest] })
 
-    await post(messages([FIXTURE_GUEST_IGSID, 'm-1'], ['100000000000002', 'm-2']))
+    await post(
+      messages([FIXTURE_GUEST_IGSID, 'm-1'], ['100000000000002', 'm-2']),
+    )
 
-    expect(mocks.refreshInstagramProfile.mock.calls.map((call) => call[1])).toEqual([
+    expect(
+      mocks.refreshInstagramProfile.mock.calls.map((call) => call[1]),
+    ).toEqual([
       { guestId: 'guest-1', venueId: 'venue-1' },
       { guestId: 'guest-2', venueId: 'venue-1' },
     ])
   })
 })
 
-
 // TAC-518. An inbound that looks like it came from the venue's link and carries
 // nothing to prove it. This is the signal that tells us whether the returning-
 // guest case delivers a referral at all, so it is wired end to end rather than
 // left to the pure test in handle-events.test.ts.
 describe('POST /api/webhooks/instagram reporting an unattributable scan', () => {
-  const FIXTURES_DIR = join(__dirname, '../../../../lib/messaging/instagram/fixtures')
+  const FIXTURES_DIR = join(
+    __dirname,
+    '../../../../lib/messaging/instagram/fixtures',
+  )
 
   function post(body: string): Promise<Response> {
     process.env.INSTAGRAM_APP_SECRET = APP_SECRET
@@ -955,7 +1154,9 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
 
   /** The recorded icebreaker tap with its referral removed: a returning guest's scan, if Meta drops it. */
   function postbackWithoutReferral(): string {
-    const payload = JSON.parse(readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'))
+    const payload = JSON.parse(
+      readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'),
+    )
     for (const entry of payload.entry) {
       for (const item of entry.messaging) {
         delete item.referral
@@ -967,7 +1168,9 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
 
   it('reports an icebreaker tap that carries no referral', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
     const emitted = Promise.resolve()
     mocks.captureScanUnattributed.mockReturnValue(emitted)
 
@@ -993,7 +1196,9 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
     // equal — the first version of this line used toHaveBeenCalledWith and an
     // `await` in place of waitUntil passed it, because the profile refresh's
     // promise compared equal to the emit's.
-    expect(mocks.waitUntil.mock.calls.some(([arg]) => arg === emitted)).toBe(true)
+    expect(mocks.waitUntil.mock.calls.some(([arg]) => arg === emitted)).toBe(
+      true,
+    )
     // And it logs, per the ruling's "logs AND PostHog".
     expect(findEntry('instagram_scan_unattributed')).toMatchObject({
       reason: 'postback_without_referral',
@@ -1006,9 +1211,13 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
   // that reported every postback.
   it('reports nothing for the recorded tap that does carry its referral', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
-    const res = await post(readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'))
+    const res = await post(
+      readFileSync(join(FIXTURES_DIR, 'postback-referral.json'), 'utf8'),
+    )
 
     expect(res.status).toBe(200)
     expect(mocks.captureScanUnattributed).not.toHaveBeenCalled()
@@ -1017,9 +1226,13 @@ describe('POST /api/webhooks/instagram reporting an unattributable scan', () => 
   // An ordinary DM. If this fired, the signal would mean nothing.
   it('reports nothing for an ordinary message with no referral', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
-    const res = await post(readFileSync(join(FIXTURES_DIR, 'message.json'), 'utf8'))
+    const res = await post(
+      readFileSync(join(FIXTURES_DIR, 'message.json'), 'utf8'),
+    )
 
     expect(res.status).toBe(200)
     expect(mocks.captureScanUnattributed).not.toHaveBeenCalled()
@@ -1076,15 +1289,18 @@ describe('POST /api/webhooks/instagram marking the thread seen (TAC-540)', () =>
     expect(mocks.waitUntil).toHaveBeenCalledWith(seen)
   })
 
-  it.each(['echo', 'read'])('does not mark the recorded %s seen', async (name) => {
-    gate.open = true
-    useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
+  it.each(['echo', 'read'])(
+    'does not mark the recorded %s seen',
+    async (name) => {
+      gate.open = true
+      useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
 
-    const res = await post(recorded(name))
+      const res = await post(recorded(name))
 
-    expect(res.status).toBe(200)
-    expect(mocks.markInboundSeen).not.toHaveBeenCalled()
-  })
+      expect(res.status).toBe(200)
+      expect(mocks.markInboundSeen).not.toHaveBeenCalled()
+    },
+  )
 
   /**
    * A bare scan resolves to `schedule_arrival`, not `run`: nothing is
@@ -1096,7 +1312,9 @@ describe('POST /api/webhooks/instagram marking the thread seen (TAC-540)', () =>
     useDb({
       venues: [FIXTURE_VENUE],
       guests: [FIXTURE_GUEST],
-      messages: [{ id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' }],
+      messages: [
+        { id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' },
+      ],
     })
     const body = JSON.stringify({
       object: 'instagram',
@@ -1109,7 +1327,11 @@ describe('POST /api/webhooks/instagram marking the thread seen (TAC-540)', () =>
               sender: { id: FIXTURE_GUEST_IGSID },
               recipient: { id: FIXTURE_ACCOUNT_ID },
               timestamp: 1789935488000,
-              referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+              referral: {
+                ref: 'QR1',
+                source: 'SHORTLINK',
+                type: 'OPEN_THREAD',
+              },
             },
           ],
         },
@@ -1202,7 +1424,11 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
               sender: { id: FIXTURE_GUEST_IGSID },
               recipient: { id: FIXTURE_ACCOUNT_ID },
               timestamp: SCAN_MS,
-              referral: { ref: 'QR1', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+              referral: {
+                ref: 'QR1',
+                source: 'SHORTLINK',
+                type: 'OPEN_THREAD',
+              },
             },
           ],
         },
@@ -1214,9 +1440,13 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
     useDb({
       venues: [FIXTURE_VENUE],
       guests: [FIXTURE_GUEST],
-      messages: [{ id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' }],
+      messages: [
+        { id: 'old-1', venue_id: 'venue-1', guest_id: 'guest-1', body: 'hey' },
+      ],
     })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
     const res = await post(scanDelivery())
     await flushMicrotasks()
@@ -1248,7 +1478,9 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
   // outcome nothing has decided yet.
   it('writes no ledger row at the webhook', async () => {
     useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
     await post(scanDelivery())
     await flushMicrotasks()
@@ -1260,13 +1492,17 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
   // scan from an IGSID with no row was skipped and vanished.
   it('creates a guest it has never seen and still schedules', async () => {
     useDb({ venues: [FIXTURE_VENUE] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
     await post(scanDelivery())
     await flushMicrotasks()
 
     expect(db.tables.guests).toHaveLength(1)
-    expect((db.tables.guests as FakeRow[])[0]).toMatchObject({ created_via: 'qr_scan' })
+    expect((db.tables.guests as FakeRow[])[0]).toMatchObject({
+      created_via: 'qr_scan',
+    })
     expect(mocks.scheduleScanArrival).toHaveBeenCalledWith(
       db.client,
       expect.objectContaining({ hadPriorConversation: false }),
@@ -1278,7 +1514,9 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
   it('schedules nothing while the agent gate is shut', async () => {
     gate.open = false
     useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
 
     await post(scanDelivery())
     await flushMicrotasks()
@@ -1293,7 +1531,9 @@ describe('POST /api/webhooks/instagram with a standalone referral (TAC-536)', ()
   // after repeated non-2xx, and the scan itself is already saved.
   it('still acknowledges when the greeting cannot be scheduled', async () => {
     useDb({ venues: [FIXTURE_VENUE], guests: [FIXTURE_GUEST] })
-    mocks.refreshInstagramProfile.mockReturnValue(Promise.resolve({ status: 'not_due' }))
+    mocks.refreshInstagramProfile.mockReturnValue(
+      Promise.resolve({ status: 'not_due' }),
+    )
     mocks.scheduleScanArrival.mockResolvedValue({ ok: false, error: 'boom' })
 
     const res = await post(scanDelivery())

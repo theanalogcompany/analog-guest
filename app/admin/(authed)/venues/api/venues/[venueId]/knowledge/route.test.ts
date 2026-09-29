@@ -83,7 +83,11 @@ describe('POST /admin/venues/api/venues/[venueId]/knowledge', () => {
 
   it('400 on a non-canonical primary tag', async () => {
     const res = await POST(
-      buildRequest({ content: 'x', primaryTags: ['personality'], secondaryTags: [] }),
+      buildRequest({
+        content: 'x',
+        primaryTags: ['personality'],
+        secondaryTags: [],
+      }),
       buildParams(VENUE_ID),
     )
     expect(res.status).toBe(400)
@@ -111,7 +115,10 @@ describe('POST /admin/venues/api/venues/[venueId]/knowledge — auth pass-throug
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await POST(
       buildRequest({ content: 'x', primaryTags: ['other'], secondaryTags: [] }),

@@ -106,7 +106,11 @@ const ENTRY_CORPUS_ID = 'ebb4a82f-2b33-45c0-9048-b9835bc3f6f3'
  * compose — and "removing the entry fixes it" is exactly the answer a broken
  * arm produces.
  */
-const REPLAY: ReadonlyArray<{ scenarioId: string; rep: number; kind: 'suspect' | 'control' }> = [
+const REPLAY: ReadonlyArray<{
+  scenarioId: string
+  rep: number
+  kind: 'suspect' | 'control'
+}> = [
   { scenarioId: 'heads-up-how', rep: 0, kind: 'suspect' },
   { scenarioId: 'heads-up-how', rep: 1, kind: 'suspect' },
   { scenarioId: 'heads-up-how', rep: 2, kind: 'suspect' },
@@ -125,7 +129,9 @@ function parseArgs(argv: readonly string[]): {
   from?: string
   reps: number
 } {
-  const out: { venue?: string; guest?: string; from?: string; reps: number } = { reps: 5 }
+  const out: { venue?: string; guest?: string; from?: string; reps: number } = {
+    reps: 5,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--venue') out.venue = argv[++i]
     else if (argv[i] === '--guest') out.guest = argv[++i]
@@ -137,7 +143,13 @@ function parseArgs(argv: readonly string[]): {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
-  if (!args.venue || !args.guest || !args.from || !Number.isInteger(args.reps) || args.reps < 1) {
+  if (
+    !args.venue ||
+    !args.guest ||
+    !args.from ||
+    !Number.isInteger(args.reps) ||
+    args.reps < 1
+  ) {
     console.error(
       '✗ usage: tsx scripts/measurement/grounding-entry-replay.ts --venue <slug> --guest <uuid> --from <round5.jsonl> [--reps N]',
     )
@@ -151,16 +163,29 @@ async function main(): Promise<void> {
     source.units.find(
       (u) => u.scenarioId === scenarioId && u.rep === rep && u.arm === 'text',
     ) as
-      | { scenarioId: string; rep: number; inbound: string; body: string; groundingStatus: string }
+      | {
+          scenarioId: string
+          rep: number
+          inbound: string
+          body: string
+          groundingStatus: string
+        }
       | undefined
 
   const targets = REPLAY.map((t) => {
     const unit = findUnit(t.scenarioId, t.rep)
     if (!unit || typeof unit.body !== 'string' || unit.body.length === 0) {
-      console.error(`✗ ${args.from} has no text-arm body for ${t.scenarioId} rep${t.rep}`)
+      console.error(
+        `✗ ${args.from} has no text-arm body for ${t.scenarioId} rep${t.rep}`,
+      )
       process.exit(1)
     }
-    return { ...t, inbound: unit.inbound, body: unit.body, roundFiveStatus: unit.groundingStatus }
+    return {
+      ...t,
+      inbound: unit.inbound,
+      body: unit.body,
+      roundFiveStatus: unit.groundingStatus,
+    }
   })
 
   const supabase = createAdminClient()
@@ -189,13 +214,16 @@ async function main(): Promise<void> {
     )
     process.exit(1)
   }
-  console.log(`entry ${ENTRY_CORPUS_ID.slice(0, 8)} has ${entryChunkCount} embedding chunk(s)\n`)
+  console.log(
+    `entry ${ENTRY_CORPUS_ID.slice(0, 8)} has ${entryChunkCount} embedding chunk(s)\n`,
+  )
 
   const log = createRunLog({
     name: 'tac500-grounding-entry-replay',
     meta: {
       arm: 'both',
-      question: 'does the no-public-phone-number knowledge entry cause the SMS false positives?',
+      question:
+        'does the no-public-phone-number knowledge entry cause the SMS false positives?',
       verifierPromptVersion: VERIFY_GROUNDING_PROMPT_VERSION,
       venue: venue.slug,
       guestId: args.guest,
@@ -206,7 +234,9 @@ async function main(): Promise<void> {
     },
   })
   console.log(`run log: ${log.path}`)
-  console.log(`${targets.length} bodies x ${ARMS.length} arms x ${args.reps} reps\n`)
+  console.log(
+    `${targets.length} bodies x ${ARMS.length} arms x ${args.reps} reps\n`,
+  )
 
   const trace = startAgentTrace({
     name: 'measurement.grounding-entry-replay',
@@ -237,12 +267,18 @@ async function main(): Promise<void> {
     const classification = await classifyStage(ctx)
     ctx.classification = classification
     ctx.corpus = await retrieveCorpusStage(ctx)
-    const retrieved = await retrieveKnowledgeStage(ctx, classification.category, target.inbound)
+    const retrieved = await retrieveKnowledgeStage(
+      ctx,
+      classification.category,
+      target.inbound,
+    )
 
     // THE PRECONDITION. If the entry was never retrieved for this scenario it
     // cannot be what the verifier read, whatever its reasoning quoted, and the
     // two arms are the same run twice.
-    const entryPresent = retrieved.some((c) => c.knowledgeCorpusId === ENTRY_CORPUS_ID)
+    const entryPresent = retrieved.some(
+      (c) => c.knowledgeCorpusId === ENTRY_CORPUS_ID,
+    )
 
     for (const arm of ARMS) {
       const chunks =
@@ -285,7 +321,9 @@ async function main(): Promise<void> {
       // and the first version of this assertion was reading a string that could
       // never contain the entry. It reported "0 violations" on a run where the
       // entry was present in every cell.
-      const entryInSourceMaterial = chunks.some((c) => /no public phone number/i.test(c.text))
+      const entryInSourceMaterial = chunks.some((c) =>
+        /no public phone number/i.test(c.text),
+      )
 
       for (let rep = 0; rep < args.reps; rep += 1) {
         const r = await verifyGroundingStage(ctx, {
@@ -305,7 +343,7 @@ async function main(): Promise<void> {
           roundFiveStatus: target.roundFiveStatus,
           entryRetrieved: entryPresent,
           chunkIds: chunks.map((c) => c.id),
-  
+
           entryInSourceMaterial,
           chunkEmbeddingIds: chunks.map((c) => c.id),
           chunkCorpusIds: chunks.map((c) => c.knowledgeCorpusId),
@@ -324,8 +362,12 @@ async function main(): Promise<void> {
 
   await trace.flushAsync()
   console.log(`\nDone: ${log.path}`)
-  console.log('Read the suspect rows first: a drop from flagged to clean between')
-  console.log('arms is the entry doing it. The controls must stay flagged in both.')
+  console.log(
+    'Read the suspect rows first: a drop from flagged to clean between',
+  )
+  console.log(
+    'arms is the entry doing it. The controls must stay flagged in both.',
+  )
 }
 
 main().catch((e: unknown) => {

@@ -39,7 +39,9 @@ export function SendDetail({ stage }: { stage: TraceStage }) {
         {providerMessageId !== null ? (
           <KvRow label="providerMessageId" value={providerMessageId} truncate />
         ) : null}
-        {bodyLength !== null ? <KvRow label="bodyLength" value={bodyLength} /> : null}
+        {bodyLength !== null ? (
+          <KvRow label="bodyLength" value={bodyLength} />
+        ) : null}
       </KvList>
 
       {body !== null ? (

@@ -52,17 +52,20 @@ describe('the request we build', () => {
    * passes while a `message` key rides along, which is the exact thing the
    * documented limitation forbids.
    */
-  it.each(INSTAGRAM_SENDER_ACTIONS)('sends %s with recipient and sender_action and NOTHING else', async (action) => {
-    const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
-    const result = await send(action, fetchImpl)
+  it.each(INSTAGRAM_SENDER_ACTIONS)(
+    'sends %s with recipient and sender_action and NOTHING else',
+    async (action) => {
+      const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
+      const result = await send(action, fetchImpl)
 
-    expect(result).toEqual({ ok: true })
-    const [, init] = fetchImpl.mock.calls[0]!
-    expect(JSON.parse(init.body as string)).toEqual({
-      recipient: { id: IGSID },
-      sender_action: action,
-    })
-  })
+      expect(result).toEqual({ ok: true })
+      const [, init] = fetchImpl.mock.calls[0]!
+      expect(JSON.parse(init.body as string)).toEqual({
+        recipient: { id: IGSID },
+        sender_action: action,
+      })
+    },
+  )
 
   it('posts to the venue account on graph.instagram.com, the same path a text send uses', async () => {
     const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
@@ -86,7 +89,9 @@ describe('the request we build', () => {
 
     const [url, init] = fetchImpl.mock.calls[0]!
     expect(url).not.toContain(TOKEN)
-    expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${TOKEN}`)
+    expect((init.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${TOKEN}`,
+    )
   })
 
   /**
@@ -102,12 +107,16 @@ describe('the request we build', () => {
    */
   it('passes its own timeout to graphRequest, shorter than a send', async () => {
     expect(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS).toBe(5_000)
-    expect(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS).toBeLessThan(INSTAGRAM_SEND_TIMEOUT_MS)
+    expect(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS).toBeLessThan(
+      INSTAGRAM_SEND_TIMEOUT_MS,
+    )
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
     try {
       const fetchImpl = fetchReturning(jsonResponse({ recipient_id: IGSID }))
       await send('mark_seen', fetchImpl)
-      expect(timeoutSpy).toHaveBeenCalledWith(INSTAGRAM_SENDER_ACTION_TIMEOUT_MS)
+      expect(timeoutSpy).toHaveBeenCalledWith(
+        INSTAGRAM_SENDER_ACTION_TIMEOUT_MS,
+      )
       expect(fetchImpl.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal)
     } finally {
       timeoutSpy.mockRestore()
@@ -117,18 +126,36 @@ describe('the request we build', () => {
 
 describe('failures are values, never throws', () => {
   it('classifies a rejected token, so a log line can name the cause', async () => {
-    const fetchImpl = fetchReturning(jsonResponse({ error: { code: 190, message: 'expired' } }, 401))
+    const fetchImpl = fetchReturning(
+      jsonResponse({ error: { code: 190, message: 'expired' } }, 401),
+    )
     const result = await send('typing_on', fetchImpl)
     expect(result).toEqual({
       ok: false,
       kind: 'token_rejected',
-      failure: { reason: 'graph_error', httpStatus: 401, code: 190, subcode: null, type: null, fbtraceId: null },
+      failure: {
+        reason: 'graph_error',
+        httpStatus: 401,
+        code: 190,
+        subcode: null,
+        type: null,
+        fbtraceId: null,
+      },
     })
   })
 
   it('classifies a closed window', async () => {
     const fetchImpl = fetchReturning(
-      jsonResponse({ error: { code: 10, error_subcode: 2534022, message: 'outside window' } }, 400),
+      jsonResponse(
+        {
+          error: {
+            code: 10,
+            error_subcode: 2534022,
+            message: 'outside window',
+          },
+        },
+        400,
+      ),
     )
     const result = await send('typing_on', fetchImpl)
     expect(result.ok).toBe(false)
@@ -164,7 +191,13 @@ describe('failures are values, never throws', () => {
   it("never carries Meta's error message out, because it quotes the scoped ID", async () => {
     const fetchImpl = fetchReturning(
       jsonResponse(
-        { error: { code: 100, message: `Object with ID '${IGSID}' does not exist`, fbtrace_id: 'Ax1' } },
+        {
+          error: {
+            code: 100,
+            message: `Object with ID '${IGSID}' does not exist`,
+            fbtrace_id: 'Ax1',
+          },
+        },
         400,
       ),
     )

@@ -65,7 +65,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // voice sample, and should never be mistaken for one or fed back as a
     // corpus exemplar."
     voiceFidelity: 0,
-    reasoning: 'TAC-348: crisis-safety signal detected; fixed reply, not generated',
+    reasoning:
+      'TAC-348: crisis-safety signal detected; fixed reply, not generated',
     // TAC-509: the fixed crisis body is a hardcoded constant with no link in
     // it, so there is nothing to verify. Never derived here, because this
     // path deliberately never generates.
@@ -78,13 +79,20 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the crisis reply is fixed text with no generation behind it, so
+    // there is no getting-to-know-you question and dispatch bubbles nothing
+    // extra. Stated rather than omitted — the field is required for exactly
+    // this reason.
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0],
     attemptHistory: [
       {
         body: CRISIS_SAFETY_REPLY_BODY,
         voiceFidelity: 0,
-        reasoning: 'TAC-348: crisis-safety signal detected; fixed reply, not generated',
+        reasoning:
+          'TAC-348: crisis-safety signal detected; fixed reply, not generated',
         requiresOperatorApproval: false,
         approvalReason: '',
         complaintIntent: 'none',
@@ -93,6 +101,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
+        intentionQuestion: '',
       },
     ],
     systemPrompt: '',

@@ -40,13 +40,17 @@ export type GraphFailure =
     }
   | { reason: 'malformed_response'; httpStatus: number }
 
-export type GraphResult<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure }
+export type GraphResult<T> =
+  { ok: true; value: T } | { ok: false; failure: GraphFailure }
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
 /** True when Meta refused the token itself: expired, revoked or invalid. */
 export function isTokenRejected(failure: GraphFailure): boolean {
-  return failure.reason === 'graph_error' && failure.code === GRAPH_CODE_TOKEN_REJECTED
+  return (
+    failure.reason === 'graph_error' &&
+    failure.code === GRAPH_CODE_TOKEN_REJECTED
+  )
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,9 +80,14 @@ function graphErrorFrom(httpStatus: number, body: unknown): GraphFailure {
 
 function networkFailure(e: unknown): GraphFailure {
   const name = e instanceof Error ? e.name : typeof e
-  if (name === 'TimeoutError' || name === 'AbortError') return { reason: 'timeout' }
+  if (name === 'TimeoutError' || name === 'AbortError')
+    return { reason: 'timeout' }
   const cause = e instanceof Error && isRecord(e.cause) ? e.cause : null
-  return { reason: 'network', errorName: name, causeCode: cause ? stringOrNull(cause.code) : null }
+  return {
+    reason: 'network',
+    errorName: name,
+    causeCode: cause ? stringOrNull(cause.code) : null,
+  }
 }
 
 /**
@@ -100,8 +109,12 @@ export async function graphRequest(
     response = await fetchImpl(`${INSTAGRAM_GRAPH_BASE_URL}${path}`, {
       method,
       headers,
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
-      signal: AbortSignal.timeout(options.timeoutMs ?? INSTAGRAM_GRAPH_TIMEOUT_MS),
+      ...(options.body !== undefined
+        ? { body: JSON.stringify(options.body) }
+        : {}),
+      signal: AbortSignal.timeout(
+        options.timeoutMs ?? INSTAGRAM_GRAPH_TIMEOUT_MS,
+      ),
     })
   } catch (e) {
     return { ok: false, failure: networkFailure(e) }
@@ -114,7 +127,10 @@ export async function graphRequest(
     // The body can time out mid-read as well as fail to parse.
     const failure = networkFailure(e)
     if (failure.reason === 'timeout') return { ok: false, failure }
-    return { ok: false, failure: { reason: 'malformed_response', httpStatus: response.status } }
+    return {
+      ok: false,
+      failure: { reason: 'malformed_response', httpStatus: response.status },
+    }
   }
 
   if (!response.ok || (isRecord(body) && body.error !== undefined)) {

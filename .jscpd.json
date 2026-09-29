@@ -1,0 +1,8 @@
+{
+  "threshold": 6,
+  "path": ["lib", "app", "scripts"],
+  "ignore": ["**/*.test.ts", "**/node_modules/**"],
+  "reporters": ["console"],
+  "gitignore": true,
+  "absolute": false
+}
