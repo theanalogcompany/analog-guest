@@ -17,8 +17,8 @@
 // the operator's allowlist" return 404 with `{"error":"not_found"}` —
 // uniform, indistinguishable to the client. The helper distinguishes the
 // two internally for logging/observability; the route flattens. Matches
-// CLAUDE.md → Auth boundary ("don't leak existence") and the rest of
-// `app/api/operator/*`.
+// lib/operator/CLAUDE.md, "Out of scope and non-existent are the same 404",
+// and the rest of `app/api/operator/*`.
 //
 // Invalid UUID returns 404 (not 400). The Contract doesn't enumerate 400,
 // and a non-UUID `messageId` "doesn't exist" by definition — collapsing

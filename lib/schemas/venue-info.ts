@@ -195,7 +195,9 @@ export const VenueInfoSchema = z.object({
   // renders no services section at all.
   //
   // `.catch(undefined)` is the repo's permissive-at-the-LIVE-boundary rule
-  // (see CLAUDE.md → Common gotchas). This field has no write path yet, so it
+  // (see
+  // .claude/rules/errors-as-values.md, "Every failure path picks a direction").
+  // This field has no write path yet, so it
   // is hand-edited in Studio, and `buildRuntimeContext` THROWS on a venue_info
   // parse failure — meaning `"holds": "false"` (a string, the natural Studio
   // typo) would take down every agent run for that venue rather than just

@@ -150,7 +150,8 @@ export async function getGuestContext(
  *   5. One UPDATE: SET context = ?, [first_name = ?,] [last_name = ?] WHERE id = ?.
  *
  * Concurrency posture: LAST-WRITE-WINS for v1 (TAC-296 architectural call #6,
- * documented in CLAUDE.md "Common gotchas"). Two near-simultaneous inbounds
+ * documented in lib/guests/CLAUDE.md, "Writes are last-write-wins"). Two
+ * near-simultaneous inbounds
  * from the same guest deep-merge against the same baseline and one will
  * clobber the other on UPDATE. Acceptable for pilot scale; revisit with
  * optimistic locking (updated_at precondition + retry) if pilot data shows

@@ -2,7 +2,8 @@
 // (lib/pos/types.ts). Permissive Zod at the boundary — a payload that doesn't
 // parse yields null/[] rather than throwing, so a single malformed delivery
 // degrades to "skip" instead of crashing the webhook handler (the runtime-side
-// of the permissive-schema rule in CLAUDE.md §"Common gotchas").
+// of the permissive-schema rule in
+// .claude/rules/errors-as-values.md, "Every failure path picks a direction").
 
 import { z } from 'zod'
 

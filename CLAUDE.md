@@ -19,7 +19,7 @@ This file holds what **every** task needs. Everything else is routed:
 | a rule that follows a file pattern | `.claude/rules/` |
 | why a decision was made | that source file's header comment |
 | an incident, a measurement run, mutation results | the PR body |
-| a cross-cutting decision people re-litigate | `docs/decisions/` |
+| a cross-cutting decision people re-litigate | `docs/decisions/README.md` indexes them |
 | per-ticket narrative, test-count deltas | nowhere. Git has it. |
 
 **Do not append subsystem detail here.** This file was 1.34 MB and 376k tokens, which
@@ -277,7 +277,10 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 7045 tests across 304 files (2026-09-28).** Measure it, never estimate:
+Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
+never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
+with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
+precise is read as authoritative:
 
 ```
 git worktree add .worktrees/baseline origin/main

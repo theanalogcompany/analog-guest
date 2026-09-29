@@ -393,7 +393,8 @@ function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThreshol
  * is queued, never sent.
  *
  * Slack-relays. A gate whose true-positive history cannot be produced on
- * demand is an unproven gate (CLAUDE.md, Common gotchas — `comp_regex_backstop`
+ * demand is an unproven gate (CLAUDE.md, "Gotchas worth carrying everywhere" —
+ * `comp_regex_backstop`
  * read as a working comp backstop for two months on a single hit that was a
  * false positive). This one is expected to be quiet, which is exactly why each
  * firing should be visible rather than sitting in a PostHog count nobody

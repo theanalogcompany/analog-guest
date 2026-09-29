@@ -79,7 +79,7 @@ export async function POST(
 
   // ---- configuration ----
   // Read at call time, never at module load: CI defines none of the Meta vars
-  // (CLAUDE.md, "Module-load vs first-call").
+  // (CLAUDE.md, "Environment variables").
   const appId = process.env.INSTAGRAM_APP_ID
   const redirectUri = process.env.INSTAGRAM_OAUTH_REDIRECT_URL
   const encryptionKey = process.env.INSTAGRAM_TOKEN_ENC_KEY

@@ -22,7 +22,7 @@ import type { GuestState } from '@/lib/recognition/types'
 
 // Commitment types. Gate routing: comp/hold/discount → routes through the
 // TAC-212 approval gate (COMMITMENT_TYPE_GATED trigger in stages.ts);
-// recommendation does NOT gate. See "Approval policy gates" in CLAUDE.md.
+// recommendation does NOT gate. See "Approval gates" in lib/agent/CLAUDE.md.
 export const CommitmentTypeSchema = z.enum([
   'recommendation',
   'hold',
