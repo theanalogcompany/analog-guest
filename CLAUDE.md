@@ -280,7 +280,7 @@ Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
 never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
 with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
-precise is read as authoritative. It also went stale three times in one afternoon:
+precise is read as authoritative:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -293,17 +293,6 @@ The worktree must live inside the checkout or Node cannot reach `node_modules`. 
 before the after-count, or the run collects both copies and per-file figures come back
 doubled. Every other testing rule is in `.claude/rules/testing-discipline.md`, which loads
 when you open a test file.
-
-**To find which test covers something, grep - do not read a doc.**
-`grep -rn "^describe(" <area> --include="*.test.ts"` lists every test file in a directory with
-what it covers, live and scoped. A control-arm experiment found no index beats it.
-
-`docs/testing/README.md` is for the question grep cannot answer: **what is not tested
-anywhere**, including three gaps confirmed by mutation. Generated; regenerate with
-`npm run test-map` when you add or remove a test file, or `npx vitest run` fails.
-
-It is a directory, not evidence - a summary marked `names` came from `describe` names, which
-have lied here before. Use it to pick what to read, then read the assertion.
 
 ## AI agent runtime contract
 

@@ -9,24 +9,37 @@ stops anyone looking. Your job is coverage that could catch a real defect, not a
 
 # Phase 1 — Find what already exists. Do this first, always.
 
-Start with the code, not with documentation. Two greps answer most of it:
+Grep. Do not go looking for a document that summarises the suite - an index of one was built
+and deleted, because measured against a control arm over six subagent runs it was opened in 3
+of 6, never first, and never beat these two commands:
 
 1. `grep -rn "^describe(" <area> --include="*.test.ts"` - every test file in that directory
    with what it covers, generated live and scoped to the one directory you care about.
 2. `grep -rn "<literal>" --include="*.test.ts"` when the behaviour has an obvious string. An
-   exact literal is exhaustive by construction; no index beats it.
+   exact literal is exhaustive by construction.
 3. Open the test files that look related and read their assertions.
-
-**Open `docs/testing/README.md` for one thing only: absence.** It lists what the suite does not
-cover anywhere - no rendered-component tests, no E2E tier in vitest - plus three gaps confirmed
-by mutation, and the per-area header ratios. You cannot grep for a test that does not exist.
-
-Nothing else there is worth a read. A per-file index used to exist and was deleted: measured
-against a control arm across six subagent runs it was opened in 3 of 6, never first, and never
-produced a better answer than the `^describe(` grep above.
 
 When step 1 returns a bare function name and nothing else, open the file - if it has a header
 it is the first thing you will see, and if it does not, it has earned one.
+
+**What no grep will tell you is what is absent.** Carry these:
+
+- There is no `.test.tsx` anywhere. No component is ever rendered in a test; the Command Center
+  UI is verified through its loaders and by eye.
+- There is no end-to-end tier in `vitest`. `scripts/measurement/*` make real model calls, cost
+  money, and are run by hand. CI runs none of them.
+- DB-touching code generally has no unit test by convention, and neither does the non-`-pure.ts`
+  half of a module split. A source file with no sibling test is often deliberate.
+
+Three gaps that are **not** deliberate, each confirmed by mutating the source and watching the
+whole suite stay green:
+
+- `app/api/webhooks/square/route.ts` has no test, though its own header flags it high-stakes
+  and payment-adjacent and both sibling webhook routes have large ones.
+- `lib/recognition/evaluate-state.ts` and `normalize-signals.ts` have none. `MONEY_MAX_DOLLARS`
+  300 to 37 passes; inverting `normalizeRecency` passes. These feed the score gating auto-send.
+- `lib/auth/require-admin.ts` has none. Deleting the cross-venue span check in
+  `requireKnowledgeEntriesAdmin` passes - on a hard-stop surface, defeating venue isolation.
 
 This phase is not optional. The failure that costs real money is writing a second test for
 behaviour `two-pending-slots.test.ts` has covered since TAC-394, or reporting a gap that is
@@ -66,9 +79,7 @@ not that the code is fine.
 # Phase 4 — Verify the suite
 
 1. `npx tsc --noEmit` - directly, never through a pipe.
-2. `npm run test-map` if you added or removed a test file. `npx vitest run` fails otherwise,
-   because `docs/testing/README.md` is asserted to equal the generator's output.
-3. `npx vitest run` - full suite. Read `Test Files N failed` and the per-file count, not just
+2. `npx vitest run` - full suite. Read `Test Files N failed` and the per-file count, not just
    `Tests N passed`.
 
 # Output format
@@ -87,7 +98,6 @@ not that the code is fine.
 
 ### Suite
 - tsc: pass / fail
-- test-map regenerated: yes / not needed
 - vitest: NNN passed across MMM files (was NNN/MMM, delta +K)
 ```
 

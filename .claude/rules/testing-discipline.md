@@ -154,24 +154,3 @@ already answered wrongly in the same keystroke that wrote the fixture.
   shortcut here has been wrong so far.
 - **Check `tsc`'s exit code directly, not through a pipe.** `$?` after a pipe reports the
   pipe, which has already misread a failing typecheck as clean.
-
-## Finding the right test file
-
-**Grep, do not read a doc.** `grep -rn "^describe(" <area> --include="*.test.ts"` lists every
-test file in a directory with what it covers, generated live and scoped to that directory. For
-a behaviour with an obvious literal, `grep -rn "<literal>" --include="*.test.ts"` is exhaustive
-by construction.
-
-This is measured, not assumed. An index of one line per test file was built, then tested
-against a control arm on six subagent runs: it was opened in 3 of 6, never first, never
-produced a better answer, and both agents on an area-survey question independently ran the
-`^describe(` grep above. The 26 per-area files were deleted as a cached copy of it.
-
-`docs/testing/README.md` survives for the one question grep cannot answer: **what is not
-tested anywhere.** You cannot grep for a test that does not exist.
-
-A file whose `describe` names say nothing (`verifyProsePromise`, and little else) has earned a
-header: a leading comment giving the subject, the fixture strategy, and what it pins. **Scope
-and strategy only** - those rot loudly when the module or the fake changes. Never a guarantee
-like "ensures X is safe" or "covers all cases", because nothing can contradict those and they
-are what stops the next person looking.
