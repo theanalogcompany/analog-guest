@@ -15,8 +15,8 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 1. CLAUDE.md in full.
 2. Files modified in the last 7 days: `git log --since="7 days ago" --name-only --pretty=format:"" | sort -u | grep -v "^$"`.
 3. The full file tree of `lib/` and `app/` (for cross-file checks — duplicates, abandoned modules).
-4. The migration log section in CLAUDE.md, cross-referenced against `db/migrations/` directory listing.
-5. The PRs merged in the last 7 days: `gh pr list --state merged --search "merged:>$(date -v-7d +%Y-%m-%d)"`. For each, check whether the PR description's CLAUDE.md note (per /work-ticket Phase 3 step 13) matches what actually landed.
+4. `db/migrations/CLAUDE.md`, cross-referenced against the `db/migrations/` directory listing.
+5. The PRs merged in the last 7 days: `gh pr list --state merged --search "merged:>$(date -v-7d +%Y-%m-%d)"`. For each, check whether the PR description's documentation-routing note (per /work-ticket Phase 3 step 19) matches what actually landed.
 
 # What to check
 
@@ -27,14 +27,13 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 
 ## CLAUDE.md staleness (entries that shouldn't exist anymore, or entries that should)
 - Entries that reference files, functions, or patterns that no longer exist (renamed, deleted, moved).
-- Migration log entries missing for migrations that exist on disk.
-- Migrations on disk that aren't in the migration log.
+- Migrations on disk whose own header does not say why they exist. There is no migration log; the numbered files are the record.
 - Gotchas that have been resolved by code changes and could be removed.
 - Conventions or patterns referenced in code in 3+ places that aren't documented in CLAUDE.md (promote to documented convention).
 - "Module split for testability" exceptions or other workarounds — list anywhere this pattern is in use, flag if any have been resolved (e.g., the gotcha is no longer needed).
 
-## CLAUDE.md hygiene from past week's PRs
-- For each PR merged in last 7 days, the PR description should include "CLAUDE.md update considered: ..." per /work-ticket Phase 3 step 13. List PRs that skipped this note. List PRs that included a note but landed code that arguably should have prompted a CLAUDE.md update.
+## Documentation routing from past week's PRs
+- For each PR merged in last 7 days, the PR description should include "Documentation routing considered: ..." per /work-ticket Phase 3 step 19. List PRs that skipped this note. List PRs that included a note but landed code that should have been written down somewhere. Check it landed in the place CLAUDE.md's "Where things are written down" table names — subsystem detail appended to the root file is itself a finding.
 
 ## Dead code
 - Exports not imported anywhere (grep `^export` against import statements).
@@ -50,7 +49,7 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 - Type definitions in `db/types.ts` patches that should have been overwritten by `db:types` regeneration (per CLAUDE.md migration workflow).
 
 ## Tests and coverage
-- Test count vs baseline in CLAUDE.md (currently ~580). Is it growing in proportion to functional code?
+- Test count. Measure it with `npx vitest run`; do not quote a remembered figure, and do not record one here - this line said "~580" for long enough that the real count passed 7,000 underneath it. Is it growing in proportion to functional code?
 - Files with new functional code that don't have corresponding test files.
 - Test files that have been around for 30+ days with 0 tests inside.
 
