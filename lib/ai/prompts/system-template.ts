@@ -1622,7 +1622,99 @@ import {
 // brew the bhadra" answered pour over in both arms. Both are retrieval, which
 // is TAC-547's subject, not generation. A rule cannot use a specific that is
 // not in the context.
-export const PROMPT_VERSION = 'v1.70.0'
+// v1.71.0 (TAC-543): NO RULE CHANGE. The ## Visit history block gains one line
+// after the timestamped bullets, naming every distinct item the guest has
+// ordered with a count. Derived from the same Visit[] the bullets render, so
+// the two can never disagree. formatOrderSummary in serializers.ts.
+//
+// AS PRODUCTION RENDERS IT, lowercase, because extractRecentVisits lowercases
+// every line-item name:
+//   Across the visits above: cortado (4x), pink panther (3x), gulab jamun cake
+//   (2x), sofi (once), blossom tonic (once).
+// The preamble is "Across the visits above", NOT "Everything they've ordered
+// here" (ruled 2026-09-29). The absolute form asserted a falsehood about any
+// guest with orders outside the 90-day window or the 20-transaction cap, which
+// is this ticket's own defect one boundary out; this form is true by
+// construction. All-time counts are a known follow-up, not in scope here.
+// An earlier draft of this entry showed it capitalised, which is a string
+// production never produces; the measurement injected visits directly and so
+// measured that capitalised form too. The arm comparison is unaffected (both
+// arms were mis-cased identically and differ only in the line's presence), but
+// the exact bytes measured were not the shipped ones. Guest-facing casing, if
+// it matters, is extractItemNames's to fix.
+//
+// WHY, and it is a fact about how the model reads the bullets rather than about
+// the data being absent. The bullets already carried every one of those items.
+// The model reads them as what a guest HABITUALLY orders, so an item ordered
+// ONCE did not register as being in the history at all: a guest who had had the
+// Blossom Tonic five days earlier was told "the Blossom Tonic is the one you
+// haven't touched yet". Naming the counts flatly is what closed it.
+//
+// MEASURED, 20 history questions per arm against Le Mil's live config, control
+// = this block without the line, removed from the composed prompt by exact-once
+// replacement so the arms differ in that one string. The harness builds its
+// visits THROUGH extractRecentVisits and refuses to run unless they come back
+// lowercase, so this is the prompt production actually composes.
+//
+//   contradicts the guest's history   control 3/20   change 1/20
+//   false "the only one" claim        control 1/20   change 0/20
+//   answers the question              control 20/20  change 20/20
+//   "what do i usually get" leads
+//     with the genuine 4x item        control 1/4    change 4/4
+//
+// THE PRE-REGISTERED BAR WAS 0 CONTRADICTIONS AND THIS SHIPS AT 1/20. Ruled
+// 2026-09-29: the change beats main on every axis measured and the remaining
+// failure is one main produces too, so holding it would ship the worse
+// behaviour. The failing body, verbatim, judge 3 of 3:
+//
+//   "The Blossom Tonic and the Spiced Cold Brew, from what we can see. The
+//    Blossom Tonic is espresso with floral syrup and tonic under a thick foam
+//    you can eat like ice cream, finished with beet powder and crushed rose.
+//    Worth trying."
+//
+// The guest had the blossom tonic five days ago. The control produced a
+// near-identical sentence, so this is a shared failure the line reduces rather
+// than removes. It is always the same shape - the "what haven't I tried"
+// question, answered about the ONCE-ordered item - and it is the complement
+// problem: this line says what a guest HAS had, and that question is about what
+// they have not. TAC-559 owns it.
+//
+// THE RANKING IS THE MOST ROBUST GAIN and is what the counts actually buy:
+// 4/4 against 1/4, with replies naming the frequency outright ("cortado most
+// often, with the pink panther a close second"). The control leads with the 3x
+// item instead.
+//
+// AN EARLIER RUN REPORTED 1/20 AND 0/20 AND IS SUPERSEDED. It injected
+// ctx.recentVisits directly with menu casing, so it measured a capitalised
+// string production never renders; on the production-shaped prompt BOTH arms
+// are worse. Do not quote those numbers. A "says once" gain that run reported
+// (2/4) did not survive the re-run (0/4 in both arms) and was noise at n=4.
+//
+// Recommendation turns 3/10 to 2/10 on presenting a history item as new: no
+// regression, and no improvement worth claiming at that n. That figure is from
+// the earlier run and was not re-measured on the new wording.
+//
+// TWO COLLECTED METRICS, both reported including the unflattering one.
+// "Answers the question" held 20/20 in both arms. "Names an ordered item" was
+// 19/20 against 18/20, inside noise.
+//
+// TWO THINGS THIS DOES NOT FIX, both recorded rather than left to be found.
+// The DEPTH HEDGE survives it ("you've had it once but it's worth a proper sit
+// with it" states the count correctly and hedges anyway), which is TAC-543's
+// own parked finding and wants a deterministic check rather than prose. And a
+// FALSE EXCLUSIVITY claim about what is UNTRIED ("the two you haven't had",
+// when 9 untried drinks are on the menu) is live on main at 3/20, unmoved by
+// this line at 4/20, and out of reach of it: this line says what a guest HAS
+// had, and that question is about the complement. Separate follow-up.
+//
+// A CATEGORY-INSTRUCTION CLAUSE WAS TRIED FIRST AND DROPPED. Three wordings on
+// RECOMMENDATION_REQUEST_INSTRUCTIONS, measured at n=20 each, ranged 7-17 of 20
+// and none reached 0; one cost the TAC-417 acknowledgement (19/20 to 16/20)
+// because the model resolved "ask how they liked it" against "keep it to one
+// question" by asking nothing. Ruled out 2026-09-29. Do not re-add one without
+// measuring it: the prompt already tells this category to answer from the
+// block, and that sentence was in front of the model on every failure above.
+export const PROMPT_VERSION = 'v1.71.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

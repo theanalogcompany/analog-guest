@@ -28,7 +28,7 @@ boolean or string is free.
 
 ## Prompt versions are independent by design
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.70.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.71.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
