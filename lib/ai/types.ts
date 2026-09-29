@@ -635,6 +635,14 @@ export type GenerateMessageResult = {
   // is expiring before the next message arrives.
   cacheReadTokens: number
   cacheWriteTokens: number
+  /** The model the provider actually served. Absent if it reported none. */
+  modelId?: string
+  /**
+   * Token usage SUMMED across every attempt in this call, for pricing the
+   * Langfuse `generate` generation. Redundant with cacheReadTokens/
+   * cacheWriteTokens above by construction and must agree with them.
+   */
+  usage?: ModelCallUsage
   // True when the final shipped body still contains an em dash (—) or en dash
   // (–) after MAX_ATTEMPTS regenerations — the dash regex check (THE-225) was
   // unable to coax a clean reply but we ship anyway rather than refuse. The
@@ -682,11 +690,49 @@ export type ClassifyMessageInput = {
   guestState?: GuestState
 }
 
+/**
+ * Token usage from a model call, as the Vercel AI SDK reports it.
+ *
+ * Mirrors the SDK's flattened `usage` shape so a call site can pass `usage`
+ * straight through without picking fields apart. `toAgentUsage()` in
+ * lib/observability converts it to Langfuse's native keys - use that, never a
+ * hand-rolled mapping, because `inputTokens` is the TOTAL including both cache
+ * buckets while Langfuse's buckets are disjoint and summed.
+ *
+ * Every field optional because a provider need not report it, and absent is
+ * honestly different from zero - do not default these to 0.
+ */
+export type ModelCallUsage = {
+  /** `noCache + cacheRead + cacheWrite`, not the uncached portion. */
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  /** Prompt-cache read (a hit). */
+  cachedInputTokens?: number
+  /** The SDK's provider-independent input breakdown. */
+  inputTokenDetails?: {
+    noCacheTokens?: number
+    cacheWriteTokens?: number
+  }
+}
+
 export type ClassifyMessageResult = {
   category: MessageCategory
   classifierConfidence: number
   reasoning: string
   promptVersion: string
+  // Model id and token usage for this call, so the orchestrator can put them on
+  // the Langfuse `classify` generation in Langfuse's NATIVE usage fields.
+  //
+  // Why it matters: measured 2026-09-29, Langfuse reported $0.0003 of total cost
+  // across 1,448 traces, because every model call was recorded as a plain span
+  // with no model and no usage. Cost and token dashboards were empty. Usage has
+  // to travel back from the AI layer for them to work at all.
+  //
+  // Optional because a provider need not report every field; absent is honestly
+  // different from zero, so do not default these to 0.
+  modelId?: string
+  usage?: ModelCallUsage
   // TAC-348: independent of category. True when the guest's message expresses
   // self-harm/suicidal ideation or an immediate medical emergency. Consumed
   // by the orchestrator to short-circuit into a fixed, non-generated safety

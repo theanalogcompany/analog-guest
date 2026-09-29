@@ -40,6 +40,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `lib/operator/CLAUDE.md` | venue scope, queue Contract fields, card copy, dispatch |
 | `lib/guests/CLAUDE.md` | commitment CAS and dedup, guest context, visit precision |
 | `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
+| `lib/observability/CLAUDE.md` | the Langfuse wrapper, the span tree, and **where the latency and prompt-cache numbers already live** - read before answering any latency question |
 | `app/admin/CLAUDE.md` | route paths, loaders, write routes, brand tokens |
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 | `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
@@ -121,9 +122,9 @@ a new top-level directory without asking.
 
 ## Workflow
 
-**Linear-first.** All work starts from a ticket. No ticket ID means ask for one before
-planning. Cross-repo work is two tickets, one per repo, linked - never one ticket carrying both
-repo labels.
+**Tickets are optional.** A ticket is not a precondition for planning or building; work can
+start without one. When one does exist, cross-repo work is two tickets, one per repo, linked -
+never one ticket carrying both repo labels.
 
 **Plan, review, build, review, commit.** Output a written plan first (scope, file paths,
 decomposition, sequence, patterns to reuse, edge cases, what you chose *not* to do, open
@@ -153,12 +154,12 @@ distinguisher. A clarifying question is `[NEEDS-INPUT]`, numbered, plus the `Nee
 label, status unchanged, then stop. Post flat, never threaded. `.claude/process.md` is
 canonical.
 
-**Claim a ticket before writing anything else.** Post `[CLAIM]`, edit it to `released` when
-handing back. Two sessions on one ticket has happened and a human cancelling the run was all
-that stopped it. A second local session works in its own `git worktree`, pushes by explicit
-refspec (`git push origin <branch>:<branch>`), and runs `git branch --show-current`
-immediately before its first commit - two sessions in one checkout share one HEAD, and commits
-have landed on the wrong branch that way.
+**Claim a ticket you are working from.** Post `[CLAIM]`, edit it to `released` when handing
+back. Not a gate on starting work - but two sessions on one ticket has happened, and a human
+cancelling the run was all that stopped it. A second local session works in its own
+`git worktree`, pushes by explicit refspec (`git push origin <branch>:<branch>`), and runs
+`git branch --show-current` immediately before its first commit - two sessions in one checkout
+share one HEAD, and commits have landed on the wrong branch that way.
 
 **Never just acknowledge.** If asked to remember or forget something, update memory. Do not
 reply "I'll remember that" without doing it.

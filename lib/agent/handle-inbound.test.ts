@@ -256,7 +256,11 @@ vi.mock('@/lib/guests/context', () => ({
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) =>
@@ -343,29 +347,45 @@ const traceControl = vi.hoisted(() => ({ flushThrows: false }))
 const spanLog = vi.hoisted(() => ({
   events: [] as Array<{ name: string; phase: 'open' | 'close' }>,
 }))
-vi.mock('@/lib/observability', () => ({
-  startAgentTrace: () => ({
-    id: '',
-    captureContent: false,
-    span: (name: string) => {
-      spanLog.events.push({ name, phase: 'open' })
-      return {
-        span: () => ({ end: () => undefined }),
-        end: () => {
-          spanLog.events.push({ name, phase: 'close' })
-        },
-        update: () => undefined,
-      }
-    },
-    update: () => undefined,
-    // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
-    // which is the only way the orchestrator can throw past its own top-level
-    // catch — and therefore the only way to reach the wrapper's catch.
-    flushAsync: async () => {
-      if (traceControl.flushThrows) throw new Error('flush failed')
-    },
-  }),
-}))
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` must log IDENTICALLY. In production they differ only
+  // in the recorded observation type, never in position in the tree, so a fake
+  // where only one of them logs would silently drop a stage from spanLog — and
+  // the stage-ordering assertions below would then be asserting over a pipeline
+  // missing `classify`, and still pass.
+  const open = (name: string) => {
+    spanLog.events.push({ name, phase: 'open' })
+    return {
+      span: () => ({ end: () => undefined }),
+      generation: () => ({ end: () => undefined }),
+      end: () => {
+        spanLog.events.push({ name, phase: 'close' })
+      },
+      update: () => undefined,
+    }
+  }
+  return {
+    // Present only because the orchestrator calls it. NOTHING in this file asserts
+    // on the result, so this must NOT reimplement the mapping: an earlier version
+    // did, and that copy still carried the input/cached double-billing the real
+    // function was fixed for - a mock drifting from production while looking like
+    // coverage. The mapping is covered in langfuse.test.ts, with mutants.
+    toAgentUsage: () => ({}),
+    startAgentTrace: () => ({
+      id: '',
+      captureContent: false,
+      span: open,
+      generation: open,
+      update: () => undefined,
+      // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
+      // which is the only way the orchestrator can throw past its own top-level
+      // catch — and therefore the only way to reach the wrapper's catch.
+      flushAsync: async () => {
+        if (traceControl.flushThrows) throw new Error('flush failed')
+      },
+    }),
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),
@@ -3490,10 +3510,7 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     [
       'failed in generation, with no card',
       () => {
-        generateStageMock.mockResolvedValue({
-          status: 'failed',
-          error: 'boom',
-        })
+        generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
         loadPendingRowsBySlotMock.mockRejectedValue(
           new Error('no card for you'),
         )

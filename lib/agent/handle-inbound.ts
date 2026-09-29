@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { waitUntil } from '@vercel/functions'
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureCrisisSafetyReplySent,
   captureDraftDropped,
@@ -17,7 +17,11 @@ import {
   sendDraftFlaggedPush,
   shouldSendDraftFlaggedPush,
 } from '@/lib/notifications/send'
-import { startAgentTrace, type AgentSpanUpdate } from '@/lib/observability'
+import {
+  startAgentTrace,
+  toAgentUsage,
+  type AgentSpanUpdate,
+} from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -1213,7 +1217,11 @@ async function runInboundTurn(
     )
 
     // Classify
-    const classifySpan = trace.span(
+    // `generation()`, not `span()`: Langfuse only prices an observation of type
+    // GENERATION, so a plain span records a model call at $0 however many tokens
+    // it reports. The span NAME is unchanged, which is what select-trace-stages.ts
+    // and the latency queries key on — neither reads the observation type.
+    const classifySpan = trace.generation(
       'classify',
       { inboundLength: ctx.currentMessage?.body.length ?? 0 },
       { inboundBody: ctx.currentMessage?.body ?? null },
@@ -1226,6 +1234,8 @@ async function runInboundTurn(
           classifierConfidence: ctx.classification.classifierConfidence,
         },
         content: { reasoning: ctx.classification.reasoning },
+        model: ctx.classification.modelId,
+        usage: toAgentUsage(ctx.classification.usage ?? {}),
       })
       console.log('[agent] inbound classified', {
         agentRunId,
@@ -1533,7 +1543,10 @@ async function runInboundTurn(
     }
 
     // Generate
-    const generateSpan = trace.span('generate', {
+    // A GENERATION, not a span: this is the most expensive model call in the turn
+    // and Langfuse prices only GENERATION observations. Recorded as a plain span
+    // it reported $0 however many tokens it burned.
+    const generateSpan = trace.generation('generate', {
       category: ctx.classification.category,
     })
     let gen = await generateStage(ctx, ctx.classification.category)
@@ -1668,6 +1681,11 @@ async function runInboundTurn(
       content: trace.captureContent
         ? buildGenerateContent(gen.result)
         : undefined,
+      // Native pricing, summed over every attempt. Separate from the output
+      // fields above on purpose: these two are what the metrics API can
+      // aggregate, the output object can only be scraped per observation.
+      model: gen.result.modelId,
+      usage: toAgentUsage(gen.result.usage ?? {}),
     })
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
@@ -2848,7 +2866,7 @@ async function runInboundTurn(
     // settle and every extension, which is the number worth having.
     if (!skipLatencyEmit && entryExtensionDepth === 0) {
       const totalElapsedMs = Date.now() - start
-      if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+      if (isAgentLatencyHigh('inbound', totalElapsedMs)) {
         await captureAgentLatencyHigh({
           agentRunId,
           venueId: ctx?.venue.id ?? knownVenueId ?? 'unknown',

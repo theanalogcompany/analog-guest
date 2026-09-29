@@ -32,7 +32,7 @@
 import { randomUUID } from 'node:crypto'
 
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureDraftDropped,
   captureDraftQueued,
@@ -623,7 +623,7 @@ export async function handleOperatorDecline(input: {
     return { status: 'failed', stage: 'context_build', error: errMsg }
   } finally {
     const totalElapsedMs = Date.now() - start
-    if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+    if (isAgentLatencyHigh('followup', totalElapsedMs)) {
       await captureAgentLatencyHigh({
         agentRunId,
         venueId: ctx?.venue.id ?? input.venueId,

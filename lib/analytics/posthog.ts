@@ -118,6 +118,7 @@
 
 import { PostHog } from 'posthog-node'
 import { logger } from '@/lib/observability/logger'
+
 import { postToSlack, truncate } from './slack'
 
 const SLACK_FIELD_TRUNCATE_CHARS = 300
@@ -169,8 +170,55 @@ export const CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD = 0.7
 // on the PostHog event payload for triage. Sits below the 0.7 LOW threshold.
 export const CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD = 0.3
 export const CORPUS_TOP_SIMILARITY_LOW_THRESHOLD = 0.5
-export const AGENT_LATENCY_HIGH_THRESHOLD_MS = 10_000
 export const WEBHOOK_SILENCE_THRESHOLD_HOURS = 24
+
+/**
+ * Per-kind latency thresholds for the `agent_latency_high` event.
+ *
+ * PER-KIND BECAUSE ONE NUMBER CANNOT SERVE BOTH. Measured over 30 days to
+ * 2026-09-29, from the Langfuse traces endpoint:
+ *
+ *   agent.inbound    n=276  p50 18.0s  p90 28.0s  p95 31.5s  p99 40.7s  max 68.5s
+ *   agent.followup   n=132  p50  0.2s  p90  0.7s  p95  1.0s  p99 20.8s  max 21.9s
+ *
+ * They differ by ~90x at p50, because most followups never reach a model call.
+ * The single shared 10_000 that used to live here fired on **99.3% of inbound
+ * turns** (274/276) and relayed every one to Slack, which is how an alert
+ * channel gets trained into background noise.
+ *
+ * Chosen to sit in the genuine tail rather than on the body of the
+ * distribution, and deliberately NOT so high that the alarm can never fire —
+ * a gate whose true-positive history you cannot produce is not a gate:
+ *
+ *   inbound  35_000 -> fired on 7/276 = 2.5% of the measured window (above p95)
+ *   followup 20_000 -> fired on 2/132 = 1.5% (followup max is 21.9s, so this
+ *                      is reachable; 25_000 would have made it dead)
+ *
+ * Re-derive from the same source if the pipeline's shape changes, and check BOTH
+ * numbers still fire in the low single-digit percents. The query is in
+ * `lib/observability/CLAUDE.md`.
+ */
+export const AGENT_LATENCY_HIGH_THRESHOLD_MS = {
+  inbound: 35_000,
+  followup: 20_000,
+  // `satisfies`, not `:` — a `Record<AgentLatencyKind, number>` annotation would
+  // also accept a missing key via widening in some positions, and this must fail
+  // `tsc` if a third kind is added without a measured threshold.
+} satisfies Record<AgentLatencyKind, number>
+
+/**
+ * Whether a run's elapsed time clears the bar for its kind.
+ *
+ * A helper rather than exposing the record to call sites: three orchestrators
+ * compare against this, and an indexing expression at each is three chances to
+ * index with the wrong kind.
+ */
+export function isAgentLatencyHigh(
+  kind: AgentLatencyKind,
+  totalElapsedMs: number,
+): boolean {
+  return totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS[kind]
+}
 
 // ---------------------------------------------------------------------------
 // Named-event helpers
@@ -432,8 +480,7 @@ function formatCorpusRetrievalBelowThreshold(
  * is queued, never sent.
  *
  * Slack-relays. A gate whose true-positive history cannot be produced on
- * demand is an unproven gate (CLAUDE.md, "Gotchas worth carrying everywhere" —
- * `comp_regex_backstop`
+ * demand is an unproven gate (CLAUDE.md, Common gotchas — `comp_regex_backstop`
  * read as a working comp backstop for two months on a single hit that was a
  * false positive). This one is expected to be quiet, which is exactly why each
  * firing should be visible rather than sitting in a PostHog count nobody
@@ -812,9 +859,7 @@ export interface ProsePromiseCaughtProps {
 export async function captureProsePromiseCaught(
   props: ProsePromiseCaughtProps,
 ): Promise<void> {
-  await capturePostHogEvent('prose_promise_caught', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('prose_promise_caught', props.guestId, { ...props })
   await postToSlack(formatProsePromiseCaught(props))
 }
 
@@ -1000,9 +1045,7 @@ export interface CommitmentCancelledProps {
 export async function captureCommitmentCancelled(
   props: CommitmentCancelledProps,
 ): Promise<void> {
-  await capturePostHogEvent('commitment_cancelled', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('commitment_cancelled', props.guestId, { ...props })
   await postToSlack(formatCommitmentCancelled(props))
 }
 
@@ -1137,12 +1180,18 @@ function formatMechanicOfferBackstopCaught(
   return lines.join('\n')
 }
 
+/**
+ * Which orchestrator measured the run. `handle-operator-decline` reports
+ * `followup` too — its shape and latency profile match the followup path.
+ */
+export type AgentLatencyKind = 'inbound' | 'followup'
+
 export interface AgentLatencyHighProps {
   agentRunId: string
   venueId: string
   guestId: string
   totalElapsedMs: number
-  kind: 'inbound' | 'followup'
+  kind: AgentLatencyKind
   // Threaded through from the orchestrator's success path. inboundBody is
   // null for followups (no inbound). generatedBody is null on failure paths
   // that didn't reach a successful generation.
@@ -1150,32 +1199,29 @@ export interface AgentLatencyHighProps {
   generatedBody: string | null
 }
 
+/**
+ * POSTHOG ONLY — NO SLACK RELAY, DELIBERATELY.
+ *
+ * Latency is a *distribution*, and a per-run threshold is the wrong instrument
+ * for it: any single number either fires constantly (the old 10_000 hit 99.3% of
+ * inbound turns and Slacked every one) or sits so high it never fires at all.
+ * Neither tells you latency got worse.
+ *
+ * The aggregate question — "did p95 move?" — belongs to a Langfuse threshold
+ * alert over a rolling window, which is configured in the Langfuse console, not
+ * here. See `lib/observability/CLAUDE.md`.
+ *
+ * What this event is still good for: per-run forensics. When the aggregate alert
+ * fires, this is how you find which runs and which venues. That is worth a
+ * PostHog event and is worth nobody's attention in real time.
+ *
+ * Do not re-add `postToSlack` here without also changing the threshold model.
+ * `lib/analytics/posthog.test.ts` pins the absence.
+ */
 export async function captureAgentLatencyHigh(
   props: AgentLatencyHighProps,
 ): Promise<void> {
   await capturePostHogEvent('agent_latency_high', props.guestId, { ...props })
-  await postToSlack(formatAgentLatencyHigh(props))
-}
-
-function formatAgentLatencyHigh(props: AgentLatencyHighProps): string {
-  const seconds = (props.totalElapsedMs / 1000).toFixed(1)
-  const lines = [
-    `*Agent latency high* — ${seconds}s (${props.kind})`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-  ]
-  if (props.inboundBody) {
-    lines.push(
-      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  if (props.generatedBody) {
-    lines.push(
-      `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  return lines.join('\n')
 }
 
 // TAC-212: emitted from the inbound + followup orchestrators when the
@@ -2255,9 +2301,7 @@ export interface CommitmentEscalatedProps {
 export async function captureCommitmentEscalated(
   props: CommitmentEscalatedProps,
 ): Promise<void> {
-  await capturePostHogEvent('commitment_escalated', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('commitment_escalated', props.guestId, { ...props })
   const detail: Record<CommitmentEscalationReason, string> = {
     aging_obligation: `open for ${props.ageDays} days with no resolution`,
     hold_nearing_close: 'still unclaimed and the venue closes soon',

@@ -97,15 +97,27 @@ export interface Tunable {
 
 export const TUNABLES = [
   // ---------------------------------------------------------------------------
-  // agent_runtime (10)
+  // agent_runtime (11)
   // ---------------------------------------------------------------------------
   {
-    name: 'agent_latency_high_threshold_ms',
-    value: AGENT_LATENCY_HIGH_THRESHOLD_MS,
+    name: 'agent_latency_high_threshold_ms_inbound',
+    value: AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound,
     type: 'number',
     category: 'agent_runtime',
     source: 'lib/analytics/posthog.ts',
-    description: 'Latency above which a slow-agent-run alert fires.',
+    description:
+      'Inbound-turn latency above which the agent_latency_high PostHog event fires. ' +
+      'Above measured p95 (31.5s); fired on 2.5% of turns in the 30d window to 2026-09-29.',
+  },
+  {
+    name: 'agent_latency_high_threshold_ms_followup',
+    value: AGENT_LATENCY_HIGH_THRESHOLD_MS.followup,
+    type: 'number',
+    category: 'agent_runtime',
+    source: 'lib/analytics/posthog.ts',
+    description:
+      'Followup latency above which the agent_latency_high PostHog event fires. ' +
+      'Separate from inbound because followup p50 is 0.2s against inbound 18.0s.',
   },
   {
     name: 'corpus_top_similarity_low_threshold',

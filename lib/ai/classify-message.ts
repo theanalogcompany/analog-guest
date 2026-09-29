@@ -189,7 +189,7 @@ export async function classifyMessage(
   const userPrompt = userPromptParts.join('\n\n')
 
   try {
-    const { object } = await generateObject({
+    const { object, usage, response } = await generateObject({
       model: getClassificationModel(),
       system: CLASSIFY_SYSTEM_PROMPT,
       prompt: userPrompt,
@@ -209,6 +209,21 @@ export async function classifyMessage(
         promptVersion: PROMPT_VERSION,
         crisisSafety: object.crisisSafety,
         correctsPendingReply: object.correctsPendingReply,
+        // Returned so the orchestrator can price this call on the Langfuse
+        // `classify` generation. Read from the SDK result rather than from the
+        // model factory, because `response.modelId` is what the provider
+        // actually served — a factory default can drift from it silently.
+        modelId: response?.modelId,
+        // Passed through WHOLE, including inputTokenDetails: toAgentUsage needs
+        // the breakdown to separate uncached input from the two cache buckets,
+        // and picking fields apart here is how that gets silently dropped.
+        usage: {
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          totalTokens: usage?.totalTokens,
+          cachedInputTokens: usage?.cachedInputTokens,
+          inputTokenDetails: usage?.inputTokenDetails,
+        },
       },
     }
   } catch (e) {

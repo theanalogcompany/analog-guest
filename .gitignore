@@ -64,6 +64,7 @@ next-env.d.ts
 /scripts/data
 /scripts/output
 .worktrees/
+.claude/worktrees/
 .claude/scheduled_tasks.lock
 supabase/.temp/
 

@@ -828,6 +828,11 @@ export async function classifyStage(
     // A correction is a fact about what the guest wrote, not about how
     // confident the category call was.
     correctsPendingReply: r.data.correctsPendingReply,
+    // Passed through unmodified so the orchestrator can price the `classify`
+    // generation in Langfuse. These describe the call that was made, so the
+    // confidence reroute above must not touch them.
+    modelId: r.data.modelId,
+    usage: r.data.usage,
   }
 }
 
