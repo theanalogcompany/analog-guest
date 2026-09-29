@@ -108,6 +108,14 @@ Then, on whatever reports the run:
    ceiling and never evaluated it while printing PASS.
 9. **State up front when an arm cannot differ from its control**, verify it by string
    comparison, and void the run rather than reading the rate delta.
+10. **A variable you hold fixed is an instrument too - check its distribution before
+   trusting a run.** TAC-554 seeded `resolveDispatchBubbles`' coin from the scenario id so
+   both arms saw the same flip. Bare FNV-1a over eighteen near-identical short ids clustered
+   into two tight bands (0.52-0.58 and 0.065-0.085, nothing between), so the "fair" coin was
+   effectively constant per band and could not represent the 50/50 that decided the ticket's
+   own incident. A murmur3 finalizer fixed it; the tell was reading the per-unit values in
+   the output rather than any number in the summary. Same family as 7, one layer out: there
+   the detector flattered an arm, here the controlled variable did.
 
 **An author's own mutation pass verifies the mutants they already thought of.** It proves the
 tests catch the failures they imagined. The survivors are usually a different question: not

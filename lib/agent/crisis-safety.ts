@@ -79,6 +79,12 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the crisis reply is fixed text with no generation behind it, so
+    // there is no getting-to-know-you question and dispatch bubbles nothing
+    // extra. Stated rather than omitted — the field is required for exactly
+    // this reason.
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0],
     attemptHistory: [
@@ -95,6 +101,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
+        intentionQuestion: '',
       },
     ],
     systemPrompt: '',

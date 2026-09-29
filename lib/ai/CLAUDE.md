@@ -28,7 +28,7 @@ boolean or string is free.
 
 ## Prompt versions are independent by design
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.70.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.72.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -115,9 +115,25 @@ unverified link. **Constraints are sticky for the whole call** and worded as sta
 instructions, not as reports on the previous attempt - a sticky directive phrased as
 feedback becomes false the moment it outlives the attempt it describes.
 
-Nothing mutates the body after generation. There is no strip, no rewrite: a persistent
-violation ships and fires an observation event. Do not read the dash loop as precedent for
-adding a mutation.
+**No check result mutates the body.** A persistent dash, self-talk or unverified link ships
+and fires an observation event; there is no strip and no rewrite to make a check pass. Do
+not read the dash loop as precedent for adding one.
+
+Two transformations DO run at the `replaceDashes` seam, and both are normalizations rather
+than check outcomes:
+
+- `replaceDashes` substitutes dashes for the punctuation the constraint text asks for
+  anyway. It REFUSES a substitution that would empty a non-empty body.
+- `composeReplyWithIntention` (TAC-554) joins `body` and `intentionQuestion` into the one
+  complete reply, and strips a question the model duplicated at the end of the answer. That
+  strip is the only place model text is REMOVED; it only ever removes a trailing duplicate,
+  and it reports itself on `intentionQuestionDuplicateStripped` because a guard editing
+  guest-facing text has to be countable.
+
+`intentionQuestion` is a bare REQUIRED string, which costs zero against Anthropic's
+24-optional cap. `body` remains the complete reply, so every backstop still reads the
+question; the field rides along as its exact tail for dispatch to peel off. See
+`lib/agent/CLAUDE.md` and `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
 
 Known limit: the loop returns the **last** attempt, not the best one.
 

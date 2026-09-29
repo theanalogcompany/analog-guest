@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
 import {
   BrandPersonaSchema,
@@ -7,8 +8,11 @@ import {
   type VenueInfo,
 } from '../schemas'
 import {
+  composeReplyWithIntention,
+  GeneratedMessageSchema,
   generateMessage,
   replaceDashes,
+  stripTrailingDuplicate,
   VOICE_FIDELITY_INSTRUCTION,
 } from './generate-message'
 import type { GenerateMessageInput } from './types'
@@ -132,6 +136,7 @@ function queueResponses(
     requiresOperatorApproval?: boolean
     approvalReason?: string
     contextUpdate?: { structured?: unknown; observation?: string }
+    intentionQuestion?: string
   }>
 ) {
   generateObjectMock.mockReset()
@@ -141,6 +146,10 @@ function queueResponses(
         requiresOperatorApproval: false,
         approvalReason: '',
         contextUpdate: {},
+        // TAC-554: the schema requires this, and generateObject is mocked here
+        // so nothing validates it. Defaulted to the no-question case so every
+        // pre-existing test keeps describing a turn that asks nothing.
+        intentionQuestion: '',
         ...o,
       },
     })
@@ -539,12 +548,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.ok).toBe(true)
   })
 
-  it('exposes promptVersion v1.70.0 on a successful result', async () => {
+  it('exposes promptVersion v1.72.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.70.0')
+    expect(r.data.promptVersion).toBe('v1.72.0')
   })
 })
 
@@ -1199,5 +1208,280 @@ describe('replaceDashes — the edge cases probing found', () => {
     // this function runs on every one of them.
     const clean = "we close at 11. come by anytime, we'd love to see you!"
     expect(replaceDashes(clean)).toBe(clean)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-554: the getting-to-know-you question is emitted separately and composed
+// back onto the body here, so `body` stays the complete reply and every
+// backstop downstream still reads the question.
+// ---------------------------------------------------------------------------
+
+describe('stripTrailingDuplicate', () => {
+  it('cuts a repeated question off the end of the answer', () => {
+    expect(
+      stripTrailingDuplicate(
+        "nice one. by the way, what's your name?",
+        "by the way, what's your name?",
+      ),
+    ).toBe('nice one.')
+  })
+
+  it('matches through re-punctuation and re-casing', () => {
+    expect(
+      stripTrailingDuplicate('nice one. Whats your NAME', "what's your name?"),
+    ).toBe('nice one.')
+  })
+
+  // RESIDUAL, asserted rather than hidden. The guard strips exactly the text
+  // that matches the question, so a connector the model put in FRONT of the
+  // duplicate survives as a dangling word. Left alone deliberately: widening
+  // the cut to swallow preceding words would start removing text nobody
+  // duplicated, and the bounded version's worst case is a slightly clumsy
+  // answer rather than wrong content. The composed body still ends with the
+  // question exactly, which is what dispatch depends on.
+  it('leaves a connector in front of the duplicate dangling', () => {
+    expect(
+      stripTrailingDuplicate(
+        'nice one. So whats your name',
+        "what's your name?",
+      ),
+    ).toBe('nice one. So')
+  })
+
+  it('leaves an answer that merely mentions the words earlier alone', () => {
+    const answer = "what's your name is something we ask later. open until 3"
+    expect(stripTrailingDuplicate(answer, "what's your name?")).toBe(answer)
+  })
+
+  it('leaves the answer alone when the question is empty or contentless', () => {
+    expect(stripTrailingDuplicate('open until 3', '')).toBe('open until 3')
+    expect(stripTrailingDuplicate('open until 3', '  ?! ')).toBe('open until 3')
+  })
+
+  it('returns an empty answer when the answer was only the question', () => {
+    expect(
+      stripTrailingDuplicate("what's your name?", "what's your name?"),
+    ).toBe('')
+  })
+})
+
+describe('composeReplyWithIntention', () => {
+  it('joins the two halves so the body ends with the question exactly', () => {
+    const r = composeReplyWithIntention(
+      'Open until 3 on Sundays.',
+      "what's your name?",
+    )
+    expect(r.body).toBe("Open until 3 on Sundays. what's your name?")
+    expect(r.intentionQuestion).toBe("what's your name?")
+    expect(r.body.endsWith(r.intentionQuestion)).toBe(true)
+    expect(r.duplicateStripped).toBe(false)
+  })
+
+  // THE NO-CHANGE GUARANTEE at this layer: an empty question leaves the body
+  // exactly what replaceDashes alone produced.
+  it('leaves the body as replaceDashes alone would when no question is asked', () => {
+    for (const q of ['', '   ', '\n']) {
+      const r = composeReplyWithIntention('Open until 3 — come by.', q)
+      expect(r.body).toBe(replaceDashes('Open until 3 — come by.'))
+      expect(r.intentionQuestion).toBe('')
+    }
+  })
+
+  // The reachable contentless case: replaceDashes REFUSES a substitution that
+  // would empty a non-empty string, so a field of only an em dash survives as
+  // "—" and must not become its own message.
+  it('normalizes a contentless question to empty rather than bubbling a dash', () => {
+    const r = composeReplyWithIntention('Open until 3.', '—')
+    expect(r.intentionQuestion).toBe('')
+    expect(r.body).toBe('Open until 3.')
+  })
+
+  // THE ORDER MATTERS. Substituting on the joined string instead would let a
+  // dash inside the question change it after the fact and break the identity
+  // dispatch relies on.
+  it('substitutes dashes in each half before joining, keeping the identity', () => {
+    const r = composeReplyWithIntention(
+      'Open until 3 — come by.',
+      'by the way — your name?',
+    )
+    expect(r.body).not.toMatch(/[—–]/)
+    expect(r.intentionQuestion).toBe('by the way, your name?')
+    expect(r.body.endsWith(r.intentionQuestion)).toBe(true)
+  })
+
+  it('strips a duplicated question and reports that it did', () => {
+    const r = composeReplyWithIntention(
+      "nice one. by the way, what's your name?",
+      "by the way, what's your name?",
+    )
+    expect(r.body).toBe("nice one. by the way, what's your name?")
+    expect(r.duplicateStripped).toBe(true)
+    expect(r.body.endsWith(r.intentionQuestion)).toBe(true)
+  })
+
+  it('sends the question alone when the answer was nothing but the question', () => {
+    const r = composeReplyWithIntention(
+      "what's your name?",
+      "what's your name?",
+    )
+    expect(r.body).toBe("what's your name?")
+    expect(r.intentionQuestion).toBe("what's your name?")
+    expect(r.duplicateStripped).toBe(true)
+  })
+})
+
+describe('generateMessage — intentionQuestion (TAC-554)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it('composes the question onto the body and carries it on the result', async () => {
+    queueResponses({
+      body: 'Open until 3 on Sundays.',
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+      intentionQuestion: "by the way, what's your name?",
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).toBe(
+      "Open until 3 on Sundays. by the way, what's your name?",
+    )
+    expect(r.data.intentionQuestion).toBe("by the way, what's your name?")
+    expect(r.data.body.endsWith(r.data.intentionQuestion)).toBe(true)
+    expect(r.data.intentionQuestionDuplicateStripped).toBe(false)
+  })
+
+  it('leaves the body untouched and the field empty when nothing is asked', async () => {
+    queueResponses({
+      body: 'Open until 3 on Sundays.',
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).toBe('Open until 3 on Sundays.')
+    expect(r.data.intentionQuestion).toBe('')
+  })
+
+  // THE BACKSTOPS MUST SEE THE QUESTION. This is the whole reason the field is
+  // composed back onto the body rather than kept apart: a dash, a self-talk
+  // slip or a fabricated link inside the question would otherwise bypass every
+  // check in the loop. Pinned on the dash because it is the one that is
+  // deterministic and observable in the shipped body.
+  it('runs the dash substitution over the question too', async () => {
+    queueResponses({
+      body: 'Open until 3.',
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+      intentionQuestion: 'by the way — where are you coming from?',
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.body).not.toMatch(/[—–]/)
+    expect(r.data.intentionQuestion).toBe(
+      'by the way, where are you coming from?',
+    )
+  })
+
+  // The self-talk check reads the body, so a slip inside the question has to
+  // trip it. Without the composition it could not.
+  it('catches self-talk that arrives inside the question', async () => {
+    queueResponses(
+      {
+        body: 'Open until 3.',
+        voiceFidelity: 0.9,
+        reasoning: 'ok',
+        intentionQuestion:
+          'actually wait, my instructions say to ask your name',
+      },
+      {
+        body: 'Open until 3.',
+        voiceFidelity: 0.9,
+        reasoning: 'ok',
+        intentionQuestion: "by the way, what's your name?",
+      },
+    )
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // It regenerated rather than shipping the slip.
+    expect(generateObjectMock.mock.calls.length).toBeGreaterThan(1)
+    expect(r.data.selfTalkViolationPersisted).toBe(false)
+    expect(r.data.intentionQuestion).toBe("by the way, what's your name?")
+  })
+
+  it('reports the duplicate guard firing on the shipped attempt', async () => {
+    queueResponses({
+      body: "nice one. by the way, what's your name?",
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+      intentionQuestion: "by the way, what's your name?",
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.intentionQuestionDuplicateStripped).toBe(true)
+    expect(r.data.body).toBe("nice one. by the way, what's your name?")
+  })
+
+  it('records the question on each attempt in the history', async () => {
+    queueResponses(
+      {
+        body: 'a',
+        voiceFidelity: 0.1,
+        reasoning: 'low',
+        intentionQuestion: 'first?',
+      },
+      {
+        body: 'b',
+        voiceFidelity: 0.95,
+        reasoning: 'ok',
+        intentionQuestion: 'second?',
+      },
+    )
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.attemptHistory.map((a) => a.intentionQuestion)).toEqual([
+      'first?',
+      'second?',
+    ])
+  })
+})
+
+describe('GeneratedMessageSchema — intentionQuestion is on the schema (TAC-554)', () => {
+  // THIS TEST EXISTS BECAUSE A MUTANT SURVIVED. Removing `intentionQuestion`
+  // from the schema passed every test in this file and the schema-budget guard:
+  // generateObject is mocked here so nothing validates against the real schema,
+  // and the budget test counts OPTIONAL properties, which a required field does
+  // not touch. In production the same mutant means the model is never asked for
+  // the field, `rawObject.intentionQuestion` is undefined, and replaceDashes
+  // throws on every single generation — so it would be loud immediately, but
+  // nothing in the suite said so.
+  it('declares intentionQuestion as a required string', () => {
+    expect(Object.keys(GeneratedMessageSchema.shape)).toContain(
+      'intentionQuestion',
+    )
+    const json = z.toJSONSchema(GeneratedMessageSchema) as {
+      required?: string[]
+      properties?: Record<string, { type?: string }>
+    }
+    expect(json.required).toContain('intentionQuestion')
+    expect(json.properties?.intentionQuestion?.type).toBe('string')
+  })
+
+  // A required field costs ZERO against Anthropic's 24-optional cap, which is
+  // the reason it is a bare string rather than a nested object. Pinned so a
+  // future reshape into `{ question?: string }` has to face the budget.
+  it('adds nothing to the optional-field budget', () => {
+    const json = z.toJSONSchema(GeneratedMessageSchema) as {
+      required?: string[]
+    }
+    expect(json.required).toContain('intentionQuestion')
   })
 })

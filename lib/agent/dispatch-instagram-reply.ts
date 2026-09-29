@@ -58,6 +58,7 @@ import {
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { findReplyToInbound } from '@/lib/messaging/instagram/reply-check'
+import { logger } from '@/lib/observability/logger'
 import {
   fitsInstagramTextCap,
   sendInstagramText,
@@ -73,7 +74,6 @@ import {
   loadLastGuestActionAt,
 } from '@/lib/messaging/instagram/window'
 import type { GraphFailure } from '@/lib/messaging/instagram/graph'
-import { logger } from '@/lib/observability/logger'
 import { fireRedAlert } from './alerts'
 import type { OpenIntention } from './intentions/derive'
 import { buildRenderedIntentionsPayload } from './intentions/rendered'
@@ -89,7 +89,11 @@ import {
   materializeInlineCommitment,
   persistOrRegenQueuedDraft,
 } from './schedule-and-send'
-import { resolveDispatchBubbles, splitIntoSentences } from './sentence-split'
+import {
+  intentionTailFor,
+  resolveDispatchBubbles,
+  splitIntoSentences,
+} from './sentence-split'
 import {
   collapseToSingleMessage,
   INTER_BUBBLE_GAP_MS,
@@ -135,11 +139,34 @@ export type FitResult =
 export function fitBubblesToInstagramCap(
   bubbles: readonly string[],
   reply: string,
+  // TAC-554: the getting-to-know-you question, '' when this turn asks none.
+  //
+  // REQUIRED, because without it this function is the one place that can
+  // silently undo the whole ticket. The repack below throws the bubble
+  // structure away and re-packs the WHOLE reply greedily, so a question that
+  // dispatch had just separated gets merged straight back into the message in
+  // front of it — and only when a bubble happens to be over 1000 bytes, which
+  // is exactly the kind of conditional regression nothing would notice.
+  intentionTail: string,
 ): FitResult {
   if (bubbles.every(fitsInstagramTextCap))
     return { ok: true, bubbles: [...bubbles] }
 
-  const sentences = splitIntoSentences(reply)
+  // Hold the question out of the packing entirely. The endsWith check is the
+  // same belt resolveDispatchBubbles applies: if the two ever disagree, pack
+  // the whole reply as before rather than slice at a meaningless offset.
+  const tail =
+    intentionTail !== '' && reply.endsWith(intentionTail) ? intentionTail : ''
+  // A question alone over the cap cannot be sent this way. In practice a
+  // getting-to-know-you question is a dozen words, so this is unreachable
+  // today; it is checked rather than assumed because the caller cards an
+  // over-cap reply rather than cutting it, and that must stay true.
+  if (tail !== '' && !fitsInstagramTextCap(tail))
+    return { ok: false, reason: 'sentence_over_cap' }
+  const answer =
+    tail === '' ? reply : reply.slice(0, reply.length - tail.length).trim()
+
+  const sentences = splitIntoSentences(answer)
   if (sentences.some((sentence) => !fitsInstagramTextCap(sentence))) {
     return { ok: false, reason: 'sentence_over_cap' }
   }
@@ -155,9 +182,12 @@ export function fitBubblesToInstagramCap(
     }
   }
   if (current !== '') packed.push(current)
-  if (packed.length > MAX_BUBBLES_PER_RESPONSE)
+  // The question counts toward the cap, so an answer that needs all three
+  // slots still cards rather than sending four messages.
+  const withTail = tail === '' ? packed : [...packed, tail]
+  if (withTail.length > MAX_BUBBLES_PER_RESPONSE)
     return { ok: false, reason: 'too_many_messages' }
-  return { ok: true, bubbles: packed }
+  return { ok: true, bubbles: withTail }
 }
 
 // ---------------------------------------------------------------------------
@@ -485,9 +515,16 @@ export async function dispatchInstagramReply(
 ): Promise<InstagramReplyOutcome> {
   const deps: InstagramDispatchDeps = { ...defaultDeps(), ...injected }
   const reply = collapseToSingleMessage(generation.body)
+  // TAC-554: same gate and same tail as the text arm, through the one shared
+  // helper so the two arms cannot disagree about when a question bubbles.
+  const intentionTail = intentionTailFor(
+    generation.intentionQuestion,
+    options.renderedIntentions?.length ?? 0,
+  )
   const split = resolveDispatchBubbles(
     generation.body,
     options.rng ?? Math.random,
+    intentionTail,
   )
 
   // Report and card what didn't go out. `sent` messages went out; everything
@@ -550,7 +587,7 @@ export async function dispatchInstagramReply(
 
   if (split.length === 0) return wholeReplyFailed(failure('empty_body'), 0)
 
-  const fit = fitBubblesToInstagramCap(split, reply)
+  const fit = fitBubblesToInstagramCap(split, reply, intentionTail)
   if (!fit.ok) return wholeReplyFailed(failure(fit.reason), split.length)
   const bubbles = fit.bubbles
 

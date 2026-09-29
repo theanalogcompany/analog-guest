@@ -687,6 +687,10 @@ function buildFallbackGeneration(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the fixed fallback holding line, with no generation behind
+    // it, so there is no getting-to-know-you question to bubble.
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

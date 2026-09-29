@@ -29,8 +29,15 @@ means bumping it, and the bump touches files in several directories.
 ## Grep. Never read a list, including this one.
 
 ```
-grep -rn "v1\.<old>\.<new>" --include='*.ts' .
+grep -rn "v1\.<old>\.<new>" --include='*.ts' --include='*.md' .
 ```
+
+**`--include='*.md'` is not optional, and it was missing here until TAC-554.** Two sites live
+in prose rather than code - the constants table in the root `CLAUDE.md` and the
+`PROMPT_VERSION` sentence in `lib/ai/CLAUDE.md` - so a `*.ts`-only sweep cannot see either,
+and this file was telling people to run exactly that. What caught them was
+`scripts/lib/claude-md-claims.test.ts`, which compares both against the live constant. That
+guard works; the instruction above did not.
 
 **A carried count is worse than no count - no count makes you grep, a stale one tells you
 that you already did.** The site list has grown on essentially every bump, because every new
