@@ -770,6 +770,82 @@ function formatFollowupContext(
 // time-delta matches the ## Recent conversation block style. The intro
 // line tells Sonnet how to use the data — pattern recognition for
 // recommendations, NOT reciting it back at the guest (R11 reinforces).
+/**
+ * TAC-543: one line naming each distinct item in the visits above, with a
+ * count, rendered AFTER the timestamped visits and never replacing them.
+ *
+ * "ACROSS THE VISITS ABOVE", NOT "EVERYTHING THEY'VE ORDERED HERE" (ruled
+ * 2026-09-29). The first wording shipped for one commit and was wrong in the
+ * direction that matters: `visits` is bounded by MAX_VISIT_HISTORY_DAYS (90),
+ * by MAX_VISIT_HISTORY_TRANSACTIONS (20, newest-first so the OLDEST drop), and
+ * by extractRecentVisits dropping any transaction with no parseable item name.
+ * An absolute claim over that subset made the model assert a falsehood about a
+ * guest with older orders - "cortado (once)" as EVERYTHING, for a guest who had
+ * a blossom tonic 100 days ago - which is this ticket's own device defect at a
+ * different boundary, and the line exists precisely to make the model assert
+ * from this list rather than hedge. It also contradicted the block's own intro,
+ * which says "Recent transactions".
+ *
+ * The shipped wording is true BY CONSTRUCTION: the line is derived from exactly
+ * the visits rendered above it, so it claims nothing about what is outside
+ * them. All-time counts beyond the window are a known follow-up, not this line.
+ * A wording naming the window ("in the last 90 days") was considered and
+ * rejected: it would still be false if the 20-cap bit, and it puts a number in
+ * prompt copy that actually lives in a constant.
+ *
+ * WHY IT EXISTS, measured rather than assumed. The timestamped bullets carry
+ * the same facts, and two wordings of a category-instruction clause failed to
+ * make the model use them: it reads the block as what a guest HABITUALLY
+ * orders, so an item ordered once did not register as being in their history
+ * at all. Every defect in both measured runs landed on one of the two items
+ * ordered exactly once, and none ever landed on the items ordered four and
+ * three times. Naming the counts flatly is what closed it.
+ *
+ * DERIVED FROM THE SAME `visits` THE BULLETS RENDER, so the summary and the
+ * bullets can never disagree about what the guest has had. It is deliberately
+ * not a second query.
+ *
+ * CASE IS WHATEVER extractRecentVisits GAVE US, WHICH IS LOWERCASE. That
+ * function lowercases every line-item name (`seen.set(lower, lower)`) and its
+ * own Visit doc comment says so, so production renders "cortado (4x), pink
+ * panther (3x), ... blossom tonic (once)". This function does not change case
+ * in either direction: normalising here would be a second opinion about a
+ * decision made upstream, and capitalising would mean inventing a spelling.
+ *
+ * An earlier version of this comment claimed case was PRESERVED so a menu name
+ * could never be handed back mis-cased. That was false in the direction that
+ * matters: the mis-casing happens at extraction, before this function sees the
+ * name, and seven tests pinned it only because their fixtures were capitalised
+ * in a way production cannot produce. If guest-facing casing is worth fixing it
+ * is `extractItemNames`'s to fix, not this line's.
+ *
+ * The lowercase dedupe KEY below is therefore inert on production input and is
+ * kept for the exported contract: this is a pure exported function and the
+ * measurement harnesses call it with menu-cased names directly.
+ */
+export function formatOrderSummary(visits: readonly Visit[]): string {
+  const counts = new Map<string, number>()
+  const order: string[] = []
+  for (const v of visits) {
+    for (const raw of v.items) {
+      const name = raw.trim()
+      if (name === '') continue
+      const key = name.toLowerCase()
+      if (!counts.has(key)) {
+        counts.set(key, 0)
+        order.push(name)
+      }
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  if (order.length === 0) return ''
+  const parts = order
+    .map((name, i) => ({ name, n: counts.get(name.toLowerCase()) ?? 0, i }))
+    .sort((a, b) => b.n - a.n || a.i - b.i)
+    .map(({ name, n }) => `${name} (${n === 1 ? 'once' : `${n}\u00d7`})`)
+  return `Across the visits above: ${parts.join(', ')}.`
+}
+
 function formatVisitHistory(
   visits: readonly Visit[],
   now: Date,
@@ -780,11 +856,17 @@ function formatVisitHistory(
     const items = v.items.join(', ')
     return `- [${delta}] ${items}`
   })
+  // The summary line sits INSIDE this function, after the bullets, so it can
+  // never render without them: the empty-visits guard above is the only exit.
+  const summary = formatOrderSummary(visits)
   return [
     '## Visit history',
     "Recent transactions, most recent first. Use this to recognize patterns and offer relevant suggestions — don't recite history back at the guest.",
     lines.join('\n'),
-  ].join('\n')
+    summary,
+  ]
+    .filter((part) => part !== '')
+    .join('\n')
 }
 
 // Category gate for the Visit History block. Welcome is the first-contact
