@@ -277,7 +277,10 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-**Recorded baseline: 7068 tests across 305 files (2026-09-29).** Measure it, never estimate:
+**Never quote a test count you did not just measure.** There is deliberately no baseline
+recorded here - the one that used to sit on this line went stale three times within a single
+branch, and a stale baseline is worse than none because it manufactures a delta that never
+happened. Measure both ends in one sitting:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -290,10 +293,6 @@ The worktree must live inside the checkout or Node cannot reach `node_modules`. 
 before the after-count, or the run collects both copies and per-file figures come back
 doubled. Every other testing rule is in `.claude/rules/testing-discipline.md`, which loads
 when you open a test file.
-
-That number is hand-stamped and nothing enforces it, so it goes stale the moment a PR adds a
-test - it already did once, in the PR that added the line below. The per-area breakdown is
-generated and CI-checked; only the runtime total has to come from a run.
 
 **To find which test covers something, grep - do not read a doc.**
 `grep -rn "^describe(" <area> --include="*.test.ts"` lists every test file in a directory with
